@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.89";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 42;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.90";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 43;
+const V088_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.89";
+const V088_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 42;
 const V087_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.83";
 const V087_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 41;
 const V086_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.80";
@@ -93,6 +95,7 @@ struct CurrentMigrationState {
     v85: bool,
     v86: bool,
     v87: bool,
+    v88: bool,
 }
 
 impl CurrentMigrationState {
@@ -102,6 +105,28 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88;
+        }
+        if self.v88 {
+            return false;
+        }
+        if contract == V088_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V088_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -392,7 +417,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 84),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 85),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 86),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 87)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 87),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 88)
         "#,
         [],
         |row| {
@@ -415,6 +441,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v85: row.get(15)?,
                 v86: row.get(16)?,
                 v87: row.get(17)?,
+                v88: row.get(18)?,
             })
         },
     );
@@ -1526,6 +1553,9 @@ impl Database {
             if !self.schema_migration_applied(87)? {
                 self.migrate_durable_gather_v87()?;
             }
+            if !self.schema_migration_applied(88)? {
+                self.migrate_gather_continuation_v88()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1836,6 +1866,9 @@ impl Database {
         }
         if !self.schema_migration_applied(87)? {
             self.migrate_durable_gather_v87()?;
+        }
+        if !self.schema_migration_applied(88)? {
+            self.migrate_gather_continuation_v88()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -10045,6 +10078,102 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_gather_continuation_v88(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            // Formatter v16 adds the Gather member-result notice and the
+            // self-contained Gather Completion v2 input. Immutable v14/v15
+            // manifests remain admissible for exact recovery.
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let mut create_context_manifest_v88 = create_context_manifest.replacen(
+                "CREATE TABLE context_manifest",
+                "CREATE TABLE context_manifest_v88",
+                1,
+            );
+            if create_context_manifest_v88 == create_context_manifest {
+                create_context_manifest_v88 = create_context_manifest.replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v88",
+                    1,
+                );
+            }
+            create_context_manifest_v88 = create_context_manifest_v88.replacen(
+                "CHECK(formatter_version IN (14, 15))",
+                "CHECK(formatter_version IN (14, 15, 16))",
+                1,
+            );
+            if !create_context_manifest_v88.contains("formatter_version IN (14, 15, 16)") {
+                anyhow::bail!("v88 could not extend the ContextManifest formatter constraint");
+            }
+            let context_manifest_columns = {
+                let mut statement = transaction.prepare("PRAGMA table_info(context_manifest)")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let quoted_context_manifest_columns = context_manifest_columns
+                .iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            transaction.execute_batch(&create_context_manifest_v88)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO context_manifest_v88({quoted_context_manifest_columns}) SELECT {quoted_context_manifest_columns} FROM context_manifest"
+            ))?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v88 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                CREATE INDEX message_delivery_gather_capture_source_idx
+                    ON message_delivery(
+                        gather_dispatch_delivery_id, source_agent_run_id,
+                        status, created_at
+                    )
+                    WHERE dispatch_disposition = 'gather_captured';
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.90', projection_schema_version = 43,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (88, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v88 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -14464,6 +14593,22 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
+                SET contract_version = 'v0.89', projection_schema_version = 42
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 88;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.89/schema-42 marker without migration 88 is an upgrade source"
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
                 SET contract_version = 'v0.83', projection_schema_version = 41
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 87;
@@ -15135,7 +15280,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version IN (14, 15)"));
+        assert!(manifest_schema.contains("formatter_version IN (14, 15, 16)"));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v79 database should reopen");
@@ -18984,9 +19129,27 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version IN (14, 15)"));
+        assert!(manifest_schema.contains("formatter_version IN (14, 15, 16)"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
+        let v88_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 88",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(v88_applied, 1);
+        let capture_index_exists: bool = database
+            .connection()
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'message_delivery_gather_capture_source_idx')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(capture_index_exists);
         let delivery_schema: String = database
             .connection()
             .query_row(

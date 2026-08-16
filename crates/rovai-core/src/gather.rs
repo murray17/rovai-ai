@@ -10,8 +10,10 @@ use crate::{
 };
 
 pub const GATHER_TOOL_NAME: &str = "team.gather";
-pub const GATHER_COMPLETION_INPUT_SCHEMA_VERSION: i64 = 1;
-pub const GATHER_COMPLETION_INPUT_MAX_BYTES: usize = 48 * 1024;
+pub const GATHER_COMPLETION_INPUT_SCHEMA_VERSION: i64 = 2;
+pub const GATHER_COMPLETION_INPUT_MAX_BYTES: usize = 512 * 1024;
+pub const GATHER_COMPLETION_CONTEXT_MAX_BYTES: usize = 640 * 1024;
+pub const GATHER_CAPTURED_MESSAGES_MAX_PER_ITEM_GENERATION: i64 = 16;
 pub const GATHER_CAPTURED_BODY_EXCERPT_MAX_BYTES: usize = 1024;
 pub const GATHER_FALLBACK_SUMMARY_MAX_BYTES: usize = 2 * 1024;
 
@@ -355,6 +357,7 @@ pub(crate) fn settle_item_from_agent_run_terminal(
               AND captured.dispatch_disposition = 'gather_captured'
               AND captured.status = 'settled'
               AND captured.source_agent_run_id = ?2
+              AND source_run.trigger_message_delivery_id = ?1
               AND source_run.trigger_delivery_generation = ?3
         )
         "#,
@@ -824,10 +827,15 @@ fn run_barrier(
     let gather = transaction
         .query_row(
             r#"
-            SELECT camp_id, camp_turn_id, request_message_id,
+            SELECT gather.camp_id, gather.camp_turn_id, gather.request_message_id,
                    initiator_agent_id, initiator_agent_run_id,
-                   initiator_conversation_id, command_id, status
-            FROM gather_record WHERE id = ?1
+                   initiator_conversation_id, command_id, gather.status,
+                   request.body, request.content_digest
+            FROM gather_record AS gather
+            JOIN camp_message AS request
+              ON request.id = gather.request_message_id
+             AND request.camp_id = gather.camp_id
+            WHERE gather.id = ?1
             "#,
             [gather_id],
             |row| {
@@ -840,6 +848,8 @@ fn run_barrier(
                     initiator_conversation_id: row.get(5)?,
                     command_id: row.get(6)?,
                     status: row.get(7)?,
+                    request_body: row.get(8)?,
+                    request_content_digest: row.get(9)?,
                 })
             },
         )
@@ -1044,7 +1054,8 @@ fn build_completion_input(
         let mut statement = transaction.prepare(
             r#"
             SELECT dispatch_delivery_id, recipient_agent_id,
-                   target_agent_run_id, status, terminal_source,
+                   active_retry_generation, target_agent_run_id,
+                   status, terminal_source,
                    fallback_summary, fallback_summary_digest,
                    fallback_summary_original_bytes, fallback_summary_truncated,
                    error_code, terminal_resolution_source, terminal_reason_code
@@ -1058,16 +1069,17 @@ fn build_completion_input(
                 Ok(BarrierItem {
                     dispatch_delivery_id: row.get(0)?,
                     recipient_agent_id: row.get(1)?,
-                    target_agent_run_id: row.get(2)?,
-                    status: row.get(3)?,
-                    terminal_source: row.get(4)?,
-                    fallback_summary: row.get(5)?,
-                    fallback_summary_digest: row.get(6)?,
-                    fallback_summary_original_bytes: row.get(7)?,
-                    fallback_summary_truncated: row.get::<_, i64>(8)? != 0,
-                    error_code: row.get(9)?,
-                    terminal_resolution_source: row.get(10)?,
-                    terminal_reason_code: row.get(11)?,
+                    active_retry_generation: row.get(2)?,
+                    target_agent_run_id: row.get(3)?,
+                    status: row.get(4)?,
+                    terminal_source: row.get(5)?,
+                    fallback_summary: row.get(6)?,
+                    fallback_summary_digest: row.get(7)?,
+                    fallback_summary_original_bytes: row.get(8)?,
+                    fallback_summary_truncated: row.get::<_, i64>(9)? != 0,
+                    error_code: row.get(10)?,
+                    terminal_resolution_source: row.get(11)?,
+                    terminal_reason_code: row.get(12)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?
@@ -1077,9 +1089,11 @@ fn build_completion_input(
     }
     let mut projected_items = Vec::with_capacity(items.len());
     for item in items {
-        let captured = load_captured_messages(
+        let captured = load_current_captured_message(
             transaction,
             &item.dispatch_delivery_id,
+            item.target_agent_run_id.as_deref(),
+            item.active_retry_generation,
             &gather.camp_id,
             camp_boundary,
         )?;
@@ -1108,6 +1122,7 @@ fn build_completion_input(
         projected_items.push(json!({
             "recipientAgentId": item.recipient_agent_id,
             "dispatchDeliveryId": item.dispatch_delivery_id,
+            "activeRetryGeneration": item.active_retry_generation,
             "targetAgentRunId": item.target_agent_run_id,
             "status": item.status,
             "terminalSource": item.terminal_source,
@@ -1117,20 +1132,31 @@ fn build_completion_input(
         }));
     }
     Ok(json!({
+        "schemaVersion": GATHER_COMPLETION_INPUT_SCHEMA_VERSION,
         "source": { "type": "gather_completed" },
         "gatherId": gather_id,
         "commandId": gather.command_id,
         "requestMessageId": gather.request_message_id,
+        "request": {
+            "messageId": gather.request_message_id,
+            "body": gather.request_body,
+            "contentDigest": gather.request_content_digest,
+        },
         "items": projected_items,
     }))
 }
 
-fn load_captured_messages(
+fn load_current_captured_message(
     transaction: &Transaction<'_>,
     dispatch_delivery_id: &str,
+    target_agent_run_id: Option<&str>,
+    active_retry_generation: i64,
     camp_id: &str,
     camp_boundary: i64,
 ) -> Result<Vec<Value>> {
+    let Some(target_agent_run_id) = target_agent_run_id else {
+        return Ok(Vec::new());
+    };
     let messages = {
         let mut statement = transaction.prepare(
             r#"
@@ -1144,13 +1170,23 @@ fn load_captured_messages(
               AND captured.dispatch_disposition = 'gather_captured'
               AND captured.status = 'settled'
               AND captured.camp_id = ?2
-              AND message.sequence <= ?3
-            ORDER BY message.sequence, message.id
+              AND captured.source_agent_run_id = ?3
+              AND source_run.trigger_message_delivery_id = ?1
+              AND source_run.trigger_delivery_generation = ?4
+              AND message.sequence <= ?5
+            ORDER BY message.sequence DESC, message.id DESC
+            LIMIT 1
             "#,
         )?;
         statement
             .query_map(
-                params![dispatch_delivery_id, camp_id, camp_boundary],
+                params![
+                    dispatch_delivery_id,
+                    camp_id,
+                    target_agent_run_id,
+                    active_retry_generation,
+                    camp_boundary
+                ],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
@@ -1201,12 +1237,15 @@ struct BarrierGather {
     initiator_conversation_id: String,
     command_id: String,
     status: String,
+    request_body: String,
+    request_content_digest: String,
 }
 
 #[derive(Debug)]
 struct BarrierItem {
     dispatch_delivery_id: String,
     recipient_agent_id: String,
+    active_retry_generation: i64,
     target_agent_run_id: Option<String>,
     status: String,
     terminal_source: Option<String>,

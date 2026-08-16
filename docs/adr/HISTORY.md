@@ -206,4 +206,6 @@ generated_from: docs/adr-front-matter
 | [ADR-0192](0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md) | Purpose-Scoped Runtime Launch and Execution-Deferred Verification | `accepted` | `cross-version` | [v0.87](../versions/v0.87/README.md) | — |
 | [ADR-0193](0193-durable-gather-barrier-over-unified-message-delivery.md) | Durable Gather Barrier over Unified Message Delivery | `accepted` | `cross-version` | [v0.89](../versions/v0.89/README.md) | — |
 | [ADR-0194](0194-mandatory-typed-gather-completion-current-input.md) | Mandatory Typed Gather Completion Current Input | `accepted` | `cross-version` | [v0.89](../versions/v0.89/README.md) | — |
+| [ADR-0195](0195-generation-scoped-last-gather-return.md) | Generation-Scoped Last Gather Return with Independent Bound | `accepted` | `cross-version` | [v0.90](../versions/v0.90/README.md) | — |
+| [ADR-0196](0196-self-contained-gather-completion-request.md) | Self-Contained Gather Request in Mandatory Completion Input | `accepted` | `cross-version` | [v0.90](../versions/v0.90/README.md) | — |
 <!-- adr-history:end -->

@@ -1,5 +1,5 @@
 {
-  "catalogVersion": "1.4.0",
+  "catalogVersion": "1.5.0",
   "hashAlgorithm": "sha256",
   "digestInput": "raw_file_bytes",
   "schemas": [
@@ -8,6 +8,12 @@
       "schemaUri": "https://schemas.rovai.invalid/contracts/gather-completion-input-v1.schema.json",
       "schemaVersion": "1.0.0",
       "digest": "sha256:988092c66f8748bb42dc5b2b46098323eda5657a7d69f20db82b5348f4ddcd65"
+    },
+    {
+      "file": "gather-completion-input-v2.schema.json",
+      "schemaUri": "https://schemas.rovai.invalid/contracts/gather-completion-input-v2.schema.json",
+      "schemaVersion": "2.0.0",
+      "digest": "sha256:3ed231211b92ab919ac6e91febb1dbd688d10e0d8c37158da4d02ec24162276e"
     },
     {
       "file": "semantic-judge-view-suite-v1.schema.json",

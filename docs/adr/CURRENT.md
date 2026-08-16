@@ -77,7 +77,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v7](../contracts/camp-message-send-v7.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Message Delivery v2](../contracts/message-delivery-v2.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v9](../contracts/camp-message-send-v9.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Gather v2](../contracts/gather-v2.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -101,6 +101,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 | [ADR-0182](0182-core-resolved-current-camp-display-name-inline-addressing-alias.md) | Core-Resolved Current-Camp Display-Name Inline Addressing Alias |
 | [ADR-0184](0184-line-leading-display-name-inline-addressing-alias.md) | Line-Leading Display-Name Inline Addressing Alias |
 | [ADR-0193](0193-durable-gather-barrier-over-unified-message-delivery.md) | Durable Gather Barrier over Unified Message Delivery |
+| [ADR-0195](0195-generation-scoped-last-gather-return.md) | Generation-Scoped Last Gather Return with Independent Bound |
 <!-- adr-current-primary:end -->
 
 Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。
@@ -139,7 +140,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v13](../contracts/context-manifest-evidence-v13.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v14](../contracts/context-manifest-evidence-v14.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -161,6 +162,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 | [ADR-0152](0152-lead-owned-task-responsibility-and-self-active-task-awareness.md) | Lead-Owned Task Responsibility and Self-Active Task Awareness |
 | [ADR-0153](0153-explicit-empty-self-active-task-snapshot.md) | Explicit Empty Self-Active Task Snapshot |
 | [ADR-0194](0194-mandatory-typed-gather-completion-current-input.md) | Mandatory Typed Gather Completion Current Input |
+| [ADR-0196](0196-self-contained-gather-completion-request.md) | Self-Contained Gather Request in Mandatory Completion Input |
 <!-- adr-current-primary:end -->
 
 Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍从各自 primary 主题进入。

@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v15.json'
+import fixture from '../fixtures/agent-run-context-v16.json'
 import type { ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v15 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 15
+  it('uses the shared frozen v16 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 16
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(3)
-    expect(fixture.contextManifestVersion).toBe(13)
+    expect(fixture.contextManifestVersion).toBe(14)
     expect(fixture.modelCampMessageFields).toEqual(['body', 'mentionsCurrentUser'])
     expect(fixture.selfActiveTaskProjection).toMatchObject({
       section: 'SELF_ACTIVE_TASKS',
@@ -25,10 +25,16 @@ describe('AgentRun context contract', () => {
         senderName: 'Source Agent',
       },
       gatherCompletion: {
-        type: 'gather_completed',
+        schemaVersion: 2,
+        source: { type: 'gather_completed' },
         gatherId: 'gather-id',
         commandId: 'command-id',
         requestMessageId: 'message-id',
+        request: {
+          messageId: 'message-id',
+          body: 'Original Gather request',
+          contentDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        },
         items: [],
       },
     })

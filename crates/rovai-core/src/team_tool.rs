@@ -2777,19 +2777,106 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let member_frozen_snapshot: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",
+                [&dispatch_delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(member_frozen_snapshot.contains("gather_member_result_protocol"));
+        assert!(member_frozen_snapshot.contains("last accepted return"));
         let (member_epoch, member_credential) =
             fixture.claim_bind_and_issue(&member_run_id, "native-gather-member");
-        let return_invocation = fixture.public_send_invocation_for(
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_turn
+                SET accepted_a2a_allocated = 16,
+                    a2a_run_slots_allocated = 16
+                WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)
+                "#,
+                [&member_run_id],
+            )
+            .unwrap();
+        let budget_before_returns: (i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT accepted_a2a_allocated,
+                       agent_run_responsibilities_allocated,
+                       a2a_run_slots_allocated
+                FROM camp_turn
+                WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)
+                "#,
+                [&member_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let mut captured_delivery_id = String::new();
+        let mut last_return_body = String::new();
+        for ordinal in 0..crate::gather::GATHER_CAPTURED_MESSAGES_MAX_PER_ITEM_GENERATION {
+            let body =
+                if ordinal + 1 == crate::gather::GATHER_CAPTURED_MESSAGES_MAX_PER_ITEM_GENERATION {
+                    "@agent_1 最后一条完整公开结论".to_string()
+                } else {
+                    format!("@agent_1 处理中，第 {} 条阶段回传", ordinal + 1)
+                };
+            let return_invocation = fixture.public_send_invocation_for(
+                &member_credential,
+                &format!("gather-member-return-{ordinal}"),
+                &body,
+                &["agent_1"],
+            );
+            let returned = service
+                .send_public_message(&mut fixture.database, &return_invocation)
+                .unwrap();
+            assert_eq!(returned.result.status, CommandResultStatus::Accepted);
+            if ordinal == 0 {
+                captured_delivery_id = returned.result.payload["deliveryIds"][0]
+                    .as_str()
+                    .unwrap()
+                    .to_string();
+            }
+            last_return_body = body;
+        }
+        let budget_after_returns: (i64, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT accepted_a2a_allocated,
+                       agent_run_responsibilities_allocated,
+                       a2a_run_slots_allocated
+                FROM camp_turn
+                WHERE id = (SELECT camp_turn_id FROM agent_run WHERE id = ?1)
+                "#,
+                [&member_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(budget_after_returns, budget_before_returns);
+
+        let over_limit_invocation = fixture.public_send_invocation_for(
             &member_credential,
-            "gather-member-return",
-            "@agent_1 成员的公开结论",
+            "gather-member-return-over-limit",
+            "@agent_1 超出当前 Gather Item generation 的额外回传",
             &["agent_1"],
         );
-        let returned = service
-            .send_public_message(&mut fixture.database, &return_invocation)
+        let over_limit = service
+            .send_public_message(&mut fixture.database, &over_limit_invocation)
             .unwrap();
-        assert_eq!(returned.result.status, CommandResultStatus::Accepted);
-        let captured_delivery_id = returned.result.payload["deliveryIds"][0].as_str().unwrap();
+        assert_eq!(over_limit.result.status, CommandResultStatus::Rejected);
+        assert_eq!(over_limit.result.code, "message.execution_budget_exceeded");
+        assert_eq!(
+            over_limit.result.payload["details"]["limitScope"],
+            "gather_captured_messages_per_item_generation"
+        );
         let captured: (String, String, Option<String>, String, String) = fixture
             .database
             .connection()
@@ -2799,7 +2886,7 @@ mod tests {
                        gather_id, gather_dispatch_delivery_id
                 FROM message_delivery WHERE id = ?1
                 "#,
-                [captured_delivery_id],
+                [&captured_delivery_id],
                 |row| {
                     Ok((
                         row.get(0)?,
@@ -2827,7 +2914,7 @@ mod tests {
                 .connection()
                 .query_row(
                     "SELECT COUNT(*) FROM agent_run WHERE trigger_message_delivery_id = ?1",
-                    [captured_delivery_id],
+                    [&captured_delivery_id],
                     |row| row.get::<_, i64>(0),
                 )
                 .unwrap(),
@@ -2835,6 +2922,34 @@ mod tests {
         );
 
         fixture.succeed_run(&member_run_id, member_epoch, "不会覆盖公开回传的 fallback");
+        let completion_input: Value = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT completion_input_json FROM gather_record WHERE id = ?1",
+                [&gather_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|value| serde_json::from_str(&value).unwrap())
+            .unwrap();
+        assert_eq!(completion_input["schemaVersion"], 2);
+        assert_eq!(completion_input["request"]["body"], "请分析并公开回复队长");
+        assert_eq!(completion_input["items"][0]["activeRetryGeneration"], 0);
+        assert_eq!(
+            completion_input["items"][0]["capturedMessages"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(last_return_body.ends_with("最后一条完整公开结论"));
+        assert!(
+            completion_input["items"][0]["capturedMessages"][0]["bodyExcerpt"]
+                .as_str()
+                .unwrap()
+                .ends_with("最后一条完整公开结论")
+        );
+        assert!(completion_input["items"][0]["fallbackSummary"].is_null());
         let ready: (String, String, String) = fixture
             .database
             .connection()
@@ -2892,7 +3007,8 @@ mod tests {
         let frozen: Value = serde_json::from_str(&completion.4).unwrap();
         let rendered = frozen["frozenContext"]["renderedPayload"].as_str().unwrap();
         assert!(rendered.contains("\"type\":\"gather_completed\""));
-        assert!(rendered.contains("成员的公开结论"));
+        assert!(rendered.contains("最后一条完整公开结论"));
+        assert!(rendered.contains("请分析并公开回复队长"));
         assert_eq!(
             fixture
                 .database
@@ -2997,17 +3113,20 @@ mod tests {
         assert!(truncated);
         assert_eq!(digest.len(), "sha256:".len() + 64);
 
-        let (recipient_agent_id, target_conversation_id, completion_input): (
-            String,
-            String,
-            String,
-        ) = fixture
+        let (
+            recipient_agent_id,
+            target_conversation_id,
+            completion_delivery_id,
+            completion_frozen_snapshot,
+            completion_input,
+        ): (String, String, String, String, String) = fixture
             .database
             .connection()
             .query_row(
                 r#"
                 SELECT completion.recipient_agent_id,
                        completion.target_conversation_id,
+                       completion.id, completion.frozen_snapshot_json,
                        gather.completion_input_json
                 FROM gather_record AS gather
                 JOIN message_delivery AS completion
@@ -3015,17 +3134,110 @@ mod tests {
                 WHERE gather.id = ?1
                 "#,
                 [&gather_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(recipient_agent_id, "agent_1");
         assert_eq!(target_conversation_id, original_conversation_id);
         let completion_input: Value = serde_json::from_str(&completion_input).unwrap();
+        assert_eq!(completion_input["schemaVersion"], 2);
+        assert_eq!(
+            completion_input["request"]["body"],
+            "请分析；无需另发消息，最终输出即可"
+        );
         assert_eq!(completion_input["items"][0]["capturedMessages"], json!([]));
         assert_eq!(
             completion_input["items"][0]["fallbackSummary"]["body"],
             fallback
         );
+
+        // Upgrade compatibility owner: an already-ready v1 completion remains
+        // exact input after v2 becomes current instead of being rebuilt.
+        let mut legacy_input = completion_input;
+        legacy_input
+            .as_object_mut()
+            .unwrap()
+            .remove("schemaVersion");
+        legacy_input.as_object_mut().unwrap().remove("request");
+        for item in legacy_input["items"].as_array_mut().unwrap() {
+            item.as_object_mut()
+                .unwrap()
+                .remove("activeRetryGeneration");
+        }
+        let legacy_input_json = serde_json::to_string(&legacy_input).unwrap();
+        let legacy_input_digest =
+            format!("sha256:{:x}", Sha256::digest(legacy_input_json.as_bytes()));
+        let mut legacy_frozen: Value = serde_json::from_str(&completion_frozen_snapshot).unwrap();
+        let legacy_frozen_object = legacy_frozen.as_object_mut().unwrap();
+        legacy_frozen_object.insert("completionInputSchemaVersion".into(), json!(1));
+        legacy_frozen_object.insert("completionInputDigest".into(), json!(legacy_input_digest));
+        legacy_frozen_object.insert(
+            "completionInputByteLength".into(),
+            json!(legacy_input_json.len()),
+        );
+        legacy_frozen_object.remove("frozenContext");
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE gather_record
+                SET completion_input_schema_version = 1,
+                    completion_input_json = ?2,
+                    completion_input_digest = ?3
+                WHERE id = ?1;
+                "#,
+                params![gather_id, legacy_input_json, legacy_input_digest],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE message_delivery SET frozen_snapshot_json = ?2 WHERE id = ?1",
+                params![
+                    completion_delivery_id,
+                    serde_json::to_string(&legacy_frozen).unwrap()
+                ],
+            )
+            .unwrap();
+        let source_run_id = fixture.source_run_id.clone();
+        fixture.succeed_run(
+            &source_run_id,
+            fixture.source_epoch,
+            "Lead 结束等待 legacy completion",
+        );
+        let legacy_completion_context: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",
+                [&completion_delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let legacy_completion_context: Value =
+            serde_json::from_str(&legacy_completion_context).unwrap();
+        let rendered = legacy_completion_context["frozenContext"]["renderedPayload"]
+            .as_str()
+            .unwrap();
+        let current_input_json = rendered
+            .rsplit_once("[CURRENT_INPUT]\n")
+            .and_then(|(_, suffix)| suffix.split_once("\n[/CURRENT_INPUT]"))
+            .map(|(value, _)| value)
+            .unwrap();
+        let recovered_legacy_input: Value = serde_json::from_str(current_input_json).unwrap();
+        assert_eq!(recovered_legacy_input, legacy_input);
+        assert!(recovered_legacy_input.get("schemaVersion").is_none());
+        assert!(recovered_legacy_input.get("request").is_none());
     }
 
     /// Cancellation owner: cancelling a waiting Completion Delivery must also
@@ -3661,12 +3873,21 @@ mod tests {
                     .unwrap()
             })
             .collect::<Vec<_>>();
-        let first_epoch = fixture
-            .claim_bind_and_issue(&member_runs[0], "native-gather-retry-first")
-            .0;
+        let (first_epoch, first_credential) =
+            fixture.claim_bind_and_issue(&member_runs[0], "native-gather-retry-first");
         let second_epoch = fixture
             .claim_bind_and_issue(&member_runs[1], "native-gather-retry-second")
             .0;
+        let old_return = fixture.public_send_invocation_for(
+            &first_credential,
+            "gather-retry-generation-zero-return",
+            "@agent_1 旧 generation 结论 A",
+            &["agent_1"],
+        );
+        let old_returned = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &old_return)
+            .unwrap();
+        assert_eq!(old_returned.result.status, CommandResultStatus::Accepted);
         fixture.fail_run(&member_runs[0], first_epoch, "member_attempt_one_failed");
         let failed_version: i64 = fixture
             .database
@@ -3708,11 +3929,58 @@ mod tests {
             .unwrap();
         assert_ne!(retry_run_id, member_runs[0]);
         assert_eq!((item_generation, item_status.as_str()), (1, "running"));
-        let retry_epoch = fixture
-            .claim_bind_and_issue(&retry_run_id, "native-gather-retry-generation-one")
-            .0;
+        let (retry_epoch, retry_credential) =
+            fixture.claim_bind_and_issue(&retry_run_id, "native-gather-retry-generation-one");
+        let current_return = fixture.public_send_invocation_for(
+            &retry_credential,
+            "gather-retry-generation-one-return",
+            "@agent_1 当前 generation 结论 B",
+            &["agent_1"],
+        );
+        let current_returned = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &current_return)
+            .unwrap();
+        assert_eq!(
+            current_returned.result.status,
+            CommandResultStatus::Accepted
+        );
         fixture.fail_run(&retry_run_id, retry_epoch, "member_attempt_two_failed");
         fixture.succeed_run(&member_runs[1], second_epoch, "另一成员完成");
+
+        let completion_input: Value = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT completion_input_json FROM gather_record WHERE id = ?1",
+                [&gather_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|value| serde_json::from_str(&value).unwrap())
+            .unwrap();
+        let retried_item = completion_input["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["dispatchDeliveryId"] == delivery_ids[0])
+            .unwrap();
+        assert_eq!(retried_item["activeRetryGeneration"], 1);
+        assert_eq!(retried_item["targetAgentRunId"], retry_run_id);
+        assert_eq!(
+            retried_item["capturedMessages"].as_array().unwrap().len(),
+            1
+        );
+        assert_eq!(retried_item["capturedMessages"][0]["retryGeneration"], 1);
+        assert!(
+            retried_item["capturedMessages"][0]["bodyExcerpt"]
+                .as_str()
+                .unwrap()
+                .ends_with("当前 generation 结论 B")
+        );
+        assert!(
+            !completion_input
+                .to_string()
+                .contains("旧 generation 结论 A")
+        );
 
         let ready_failed_version: i64 = fixture
             .database
@@ -3915,6 +4183,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(after, before);
+
+        // The Gather-capture deadline gate must not broaden into a new gate for
+        // recipient-free public narration, which historically consumes no
+        // execution-budget unit.
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp_turn SET execution_budget_deadline_at = '2000-01-01T00:00:00Z'",
+                [],
+            )
+            .unwrap();
+        let after_deadline = fixture.public_send_invocation(
+            "public-only-send-after-deadline",
+            "A later recipient-free public fact.",
+            &[],
+        );
+        let after_deadline = service
+            .send_public_message(&mut fixture.database, &after_deadline)
+            .unwrap();
+        assert_eq!(after_deadline.result.status, CommandResultStatus::Accepted);
+        assert_eq!(after_deadline.result.payload["deliveryIds"], json!([]));
     }
 
     #[test]

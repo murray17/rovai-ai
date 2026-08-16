@@ -44,7 +44,8 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Built-in Tool Transport v7 (historical)](builtin-tool-transport-v7.md) | v0.67 的 Camp Message Send v4、exact Camp read addressing 与初版渐进式 CLI 教学；不作为 v0.73 CLI context/catalog 入口 |
 | [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md) | 历史 v7 locator-present recovery 勘误；其 self-write exact-read 语义已由 v8/v9 继承 |
 | [Durable Task v3（当前）](durable-task-v3.md) | User/Lead 责任定义、Assignee execution-state update、Camp-wide read、explicit owner、unassigned holding 与 advisory actions |
-| [Camp Message Send v8（当前）](camp-message-send-v8.md) | v7 canonical send 加精确 Gather return capture、混合 recipient 原子性与 accepted-A2A/Run-responsibility 分账 |
+| [Camp Message Send v9（当前）](camp-message-send-v9.md) | v8 精确 Gather capture 加独立每 Item/generation 回传限额与普通 A2A ledger 豁免 |
+| [Camp Message Send v8（历史）](camp-message-send-v8.md) | 精确 Gather return capture、混合 recipient 原子性与旧 accepted-A2A 分账 |
 | [Camp Message Send v7 (historical)](camp-message-send-v7.md) | v6 canonical freeze 不变；显示名 alias 只在 logical line 的首个非空白 token 寻址，普通 mid-line prose 不唤醒 |
 | [Camp Message Send v6 (historical)](camp-message-send-v6.md) | v5 closed input 与投递链不变；新增当前 Camp 有效成员显示名 alias，但允许任意 parseable body position |
 | [Camp Message Send v5 (historical)](camp-message-send-v5.md) | v4 Core 效果与 wire 不变；收窄 `mentionUser` / `--to-user` 的消息局部使用边界，但正文不解析显示名 alias |
@@ -74,11 +75,14 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Camp Message Send v1 (historical)](camp-message-send-v1.md) | v0.45 `camp.message.send` / `rovai send`、Addressing Token、recipient resolution、fanout、lineage 与错误 |
 | [Camp Message Send v2 (historical)](camp-message-send-v2.md) | v0.46 隐式 Camp 与 Agent 输入 reply default target；不作为 v0.62 send 入口 |
 | [Camp Message Send v3 (historical)](camp-message-send-v3.md) | v0.62 caller return 与 Core-managed reply reference；不含 v0.65 Current User Attention |
-| [Gather v1（当前）](gather-v1.md) | GatherRecord/Item、Default Lead 接受、持久 capture/Barrier、completion snapshot/FIFO、retry、取消与预算 |
-| [Message Delivery v3（当前）](message-delivery-v3.md) | public/captured/completion 判别联合、Delivery-level completion role、generation-aware materialization 与 Gather settlement |
+| [Gather v2（当前）](gather-v2.md) | v1 lifecycle 加当前代最后 captured result、独立回传限额、完整 request 与 completion input v2 |
+| [Gather v1（历史）](gather-v1.md) | GatherRecord/Item、Default Lead 接受、持久 capture/Barrier、completion snapshot/FIFO 与旧 capture budget/input v1 |
+| [Message Delivery v4（当前）](message-delivery-v4.md) | v3 判别联合加 generation-strict last capture projection 与独立 captured-return allowance |
+| [Message Delivery v3（历史）](message-delivery-v3.md) | public/captured/completion 判别联合、Delivery-level completion role 与初版 Gather settlement |
 | [Message Delivery v2 (historical)](message-delivery-v2.md) | `forward | return` 冻结边、target lineage、caller continuation，以及 v1 queue/attempt/recovery/settlement |
 | [Message Delivery v1 (historical)](message-delivery-v1.md) | 无 caller-return 分类的 recipient queue、dispatch attempt、waitCondition、retry/cancel 与 settlement |
-| [ContextManifest Evidence v13（当前）](context-manifest-evidence-v13.md) | Formatter v15、`gather_completion`、mandatory frozen completion input refs/digest/bytes 与 exact recovery |
+| [ContextManifest Evidence v14（当前）](context-manifest-evidence-v14.md) | Formatter v16、Gather result notice、完整 request/current generation evidence 与 v1/v15 exact recovery |
+| [ContextManifest Evidence v13（历史）](context-manifest-evidence-v13.md) | Formatter v15、`gather_completion` 与 completion input v1 frozen evidence |
 | [ContextManifest Evidence v12 (historical)](context-manifest-evidence-v12.md) | v11 self-active semantics 加 Formatter v14 的 `mentionsCurrentUser`、Structured Content/projected body evidence 与 frozen recovery |
 | [Context Delivery Profile v3（当前）](context-delivery-profile-v3.md) | v2 public context 加 self-active Task selection/order/max 8 与 public-history-first budget priority |
 | [ContextManifest Evidence v11 (historical)](context-manifest-evidence-v11.md) | Formatter v13 与 self-active empty/omission 语义；不含 Current User Mention metadata |

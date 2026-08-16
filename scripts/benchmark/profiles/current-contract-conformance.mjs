@@ -30,10 +30,10 @@ const criteria = [
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 12', [
+  criterion('CCC-010', 'ContextManifest version is 14', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v0.83 with projection schema 41', [
+  criterion('CCC-011', 'Data Contract is v0.90 with projection schema 43', [
     test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_upgrade_sources'),
     test('crates/rovai-core/src/db.rs', 'v86_preserves_runtime_bindings_and_admits_only_the_new_trae_kind'),
     test('crates/rovai-core/src/db.rs', 'v83_preserves_existing_composer_drafts_and_installs_null_reply_state'),
@@ -46,7 +46,7 @@ const criteria = [
   criterion('CCC-012', 'CampSnapshot schema is 29', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
-  criterion('CCC-013', 'The migration chain admits only exact v0.80/v0.78/v0.77/v0.73/v0.71/v0.67/v0.66/v0.62/v0.54/v0.52 upgrade sources', [
+  criterion('CCC-013', 'The migration chain admits only exact v0.89/v0.83/v0.80/v0.78/v0.77/v0.73/v0.71/v0.67/v0.66/v0.62/v0.54/v0.52 upgrade sources', [
     test('crates/rovai-core/src/db.rs', 'current_data_contract_accepts_current_and_exact_upgrade_sources')
   ]),
   criterion('CCC-014', 'Migration preserves completed Camp, Message, Task, and terminal Run/Turn history', [

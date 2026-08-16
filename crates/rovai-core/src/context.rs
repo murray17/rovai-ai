@@ -2570,6 +2570,32 @@ fn build_run_notices<R: ContextReadConnection>(
     a2a_run_count: i64,
 ) -> Result<Vec<RunNotice>> {
     let mut notices = Vec::new();
+    let is_gather_member_run = if snapshot.invocation_kind == "a2a" {
+        match snapshot.trigger_message_delivery_id.as_deref() {
+            Some(delivery_id) => database.context_connection().query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1
+                    FROM message_delivery AS delivery
+                    JOIN gather_item AS item
+                      ON item.dispatch_delivery_id = delivery.id
+                     AND item.gather_id = delivery.gather_id
+                    WHERE delivery.id = ?1
+                      AND delivery.delivery_kind = 'public_a2a'
+                      AND delivery.dispatch_disposition = 'dispatch'
+                      AND delivery.completion_role = 'optional'
+                      AND delivery.edge_kind = 'forward'
+                      AND item.active_retry_generation = delivery.retry_generation
+                )
+                "#,
+                [delivery_id],
+                |row| row.get::<_, bool>(0),
+            )?,
+            None => false,
+        }
+    } else {
+        false
+    };
     if let Some(notice) =
         a2a_task_context_notice(&snapshot.invocation_kind, snapshot.task_id.as_deref())
     {
@@ -2604,13 +2630,26 @@ fn build_run_notices<R: ContextReadConnection>(
                     .to_string(),
         });
     }
+    if is_gather_member_run {
+        notices.push(RunNotice {
+            code: "gather_member_result_protocol".to_string(),
+            task_id: None,
+            message:
+                "This Run is a Gather member assignment. Public returns to the frozen initiator are captured without waking that initiator. The last accepted return from this Run and retry generation is authoritative, so make the final rovai send or public @Lead return contain your complete conclusion. If you send no captured return, only this Run's normal final output is used as the fallback summary."
+                    .to_string(),
+        });
+    }
     if snapshot.a2a_depth >= 5 || a2a_run_count >= 16 {
         notices.push(RunNotice {
             code: "a2a_delegation_budget_exhausted".to_string(),
             task_id: None,
-            message:
+            message: if is_gather_member_run {
+                "Further A2A work dispatch is unavailable for this collaboration chain. You may still send the bounded captured final return to the frozen Gather initiator; do not delegate or contact other members."
+                    .to_string()
+            } else {
                 "Further A2A delegation is unavailable for this collaboration chain. Complete the current work through this Run's normal final output; do not attempt additional member contact."
-                    .to_string(),
+                    .to_string()
+            },
         });
     }
     Ok(notices)
@@ -3697,6 +3736,11 @@ fn gather_completion_manifest_evidence(
     if snapshot.invocation_kind != "gather_completion" {
         return Ok(None);
     }
+    let completion_input_schema_version = current_input
+        .payload
+        .get("schemaVersion")
+        .and_then(Value::as_i64)
+        .unwrap_or(1);
     let items = current_input
         .payload
         .get("items")
@@ -3723,6 +3767,7 @@ fn gather_completion_manifest_evidence(
             Ok(json!({
                 "recipientAgentId": item.get("recipientAgentId").and_then(Value::as_str).context("Gather Item recipientAgentId missing")?,
                 "dispatchDeliveryId": item.get("dispatchDeliveryId").and_then(Value::as_str).context("Gather Item dispatchDeliveryId missing")?,
+                "activeRetryGeneration": item.get("activeRetryGeneration"),
                 "targetAgentRunId": item.get("targetAgentRunId"),
                 "status": item.get("status").and_then(Value::as_str).context("Gather Item status missing")?,
                 "capturedMessageRefs": captured_message_refs,
@@ -3734,7 +3779,9 @@ fn gather_completion_manifest_evidence(
         "gatherId": current_input.payload.get("gatherId"),
         "completionDeliveryId": snapshot.trigger_message_delivery_id,
         "requestMessageId": current_input.payload.get("requestMessageId"),
-        "completionInputSchemaVersion": crate::gather::GATHER_COMPLETION_INPUT_SCHEMA_VERSION,
+        "requestContentDigest": current_input.payload.pointer("/request/contentDigest"),
+        "requestBodyByteLength": current_input.payload.pointer("/request/body").and_then(Value::as_str).map(str::len),
+        "completionInputSchemaVersion": completion_input_schema_version,
         "completionInputDigest": current_input.source_content_digest,
         "completionInputByteLength": serde_json::to_vec(&current_input.payload)?.len(),
         "gatherSnapshotDigest": current_input.source_content_digest,
@@ -3947,7 +3994,8 @@ fn load_current_input<R: ContextReadConnection>(
                        gather.completion_input_schema_version,
                        gather.completion_input_json,
                        gather.completion_input_digest,
-                       delivery.camp_message_boundary_sequence
+                       delivery.camp_message_boundary_sequence,
+                       request.body, request.content_digest
                 FROM message_delivery AS delivery
                 JOIN gather_record AS gather ON gather.id = delivery.gather_id
                 JOIN camp_message AS request ON request.id = gather.request_message_id
@@ -3990,13 +4038,17 @@ fn load_current_input<R: ContextReadConnection>(
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
                         row.get::<_, i64>(6)?,
+                        row.get::<_, String>(7)?,
+                        row.get::<_, String>(8)?,
                     ))
                 },
             )
             .optional()?
             .context("Gather Completion input binding is invalid")?;
-        if row.3 != crate::gather::GATHER_COMPLETION_INPUT_SCHEMA_VERSION
-            || row.6 != snapshot.camp_message_boundary_sequence
+        if !matches!(
+            row.3,
+            1 | crate::gather::GATHER_COMPLETION_INPUT_SCHEMA_VERSION
+        ) || row.6 != snapshot.camp_message_boundary_sequence
             || sha256_text(&row.4) != row.5
         {
             anyhow::bail!("Gather Completion input evidence is inconsistent");
@@ -4010,6 +4062,23 @@ fn load_current_input<R: ContextReadConnection>(
             || !payload.get("items").is_some_and(Value::is_array)
         {
             anyhow::bail!("Gather Completion Current Input shape is inconsistent");
+        }
+        if row.3 == crate::gather::GATHER_COMPLETION_INPUT_SCHEMA_VERSION
+            && (payload.get("schemaVersion").and_then(Value::as_i64) != Some(row.3)
+                || payload
+                    .pointer("/request/messageId")
+                    .and_then(Value::as_str)
+                    != Some(row.2.as_str())
+                || payload.pointer("/request/body").and_then(Value::as_str) != Some(row.7.as_str())
+                || payload
+                    .pointer("/request/contentDigest")
+                    .and_then(Value::as_str)
+                    != Some(row.8.as_str()))
+        {
+            anyhow::bail!("Gather Completion request evidence is inconsistent");
+        }
+        if row.3 == 1 && payload.get("schemaVersion").is_some() {
+            anyhow::bail!("Legacy Gather Completion input declares an unsupported schemaVersion");
         }
         return Ok(CurrentInput {
             id: row.0,
@@ -4484,11 +4553,11 @@ fn load_existing_manifest(
     if row.2 != snapshot.camp_message_boundary_sequence {
         anyhow::bail!("Stored ContextManifest no longer matches its frozen AgentRun input");
     }
-    if row.15 != CONTEXT_FORMATTER_VERSION && row.15 != 14 {
+    if !matches!(row.15, 14 | 15 | CONTEXT_FORMATTER_VERSION) {
         anyhow::bail!("Stored ContextManifest uses an obsolete context formatter");
     }
-    if snapshot.invocation_kind == "gather_completion" && row.15 != CONTEXT_FORMATTER_VERSION {
-        anyhow::bail!("Gather completion requires the current context formatter");
+    if snapshot.invocation_kind == "gather_completion" && !matches!(row.15, 15 | 16) {
+        anyhow::bail!("Gather completion requires a Gather-capable context formatter");
     }
     let shared_message_evidence: Value = serde_json::from_str(&row.21)
         .context("Stored ContextManifest Shared Message evidence is invalid")?;
@@ -10023,6 +10092,7 @@ mod tests {
         assert!(charter.contains("`rovai send`"));
         assert!(charter.contains("`rovai gather`"));
         assert!(charter.contains("Acceptance is asynchronous: end the Lead Run"));
+        assert!(charter.contains("last accepted return from the current Run/retry generation"));
         assert!(charter.contains(
             "Runtime narration and the Runtime final response are private execution evidence, not Camp messages;"
         ));

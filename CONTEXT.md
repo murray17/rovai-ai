@@ -19,7 +19,8 @@ _Avoid_: recipient text, message ID responsibility, mention-derived state, early
 **Gather-Captured Delivery**:
 An exact public return from the current GatherItem target Run and retry generation to the frozen initiator. Its
 CampMessage, Structured Mention and reply remain public, while the Delivery settles without an attempt or Lead AgentRun.
-_Avoid_: hidden message, parsed-body capture, suppress-wake flag, free accepted A2A
+It uses an independent per-Item/current-generation bound instead of the ordinary accepted-A2A ledger.
+_Avoid_: hidden message, parsed-body capture, suppress-wake flag, unbounded capture
 
 **Gather Barrier**:
 The transaction boundary that observes the last terminal Item, freezes mandatory completion input, CAS-marks the Gather
@@ -32,8 +33,9 @@ to the Gather request but is not an Effective Recipient of that public CampMessa
 _Avoid_: public recipient, private message, Default-Lead reroute, Session-ID route authority
 
 **Gather-Completed Current Input**:
-The mandatory typed input for a `gather_completion` Run, containing every Item, captured reference, bounded fallback and
-safe error. Optional public history may duplicate it but cannot replace or partially omit it.
+The mandatory typed input for a `gather_completion` Run, containing the complete accepted Gather request, every Item,
+the last current-generation captured result, bounded fallback and safe error. Optional public history may duplicate it
+but cannot replace or partially omit it.
 _Avoid_: recent-history inference, live Gather reconstruction, partial item list
 
 **Camp**:

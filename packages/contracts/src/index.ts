@@ -1040,7 +1040,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 15
+  formatterVersion: 16
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

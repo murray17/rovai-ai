@@ -9,9 +9,9 @@ last_updated: 2026-08-16
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v8](../contracts/camp-message-send-v8.md)、
+分别见 [Camp Message Send v9](../contracts/camp-message-send-v9.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
-[Message Delivery v3](../contracts/message-delivery-v3.md) 与
+[Message Delivery v4](../contracts/message-delivery-v4.md) 与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
 [ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)，显式 caller return 与 Core 管理
@@ -91,7 +91,7 @@ Message Delivery Dispatch Pump 是投递、排队和物化的唯一权威。它�
 recipient、message、Task、`forward | return` edge、target lineage 和 presentation snapshot，不重新
 解析正文或扩大目标。
 
-Message Delivery v3 以 `deliveryKind`、`dispatchDisposition` 和 `completionRole` 形成 closed union。普通
+Message Delivery v4 以 `deliveryKind`、`dispatchDisposition` 和 `completionRole` 形成 closed union。普通
 public A2A 继续拥有 message/edge/lineage；Gather 的精确 return 可以作为 `gather_captured` 直接 settled，
 但其 CampMessage 始终公开；Barrier 创建的 `gather_completion` 没有公开 recipient/edge lineage，却继续进入
 同一 recipient FIFO 与 Dispatch Pump。Delivery-level completionRole 让 pre-run terminal 也能被 CampTurn
@@ -100,10 +100,11 @@ public A2A 继续拥有 message/edge/lineage；Gather 的精确 return 可以作
 retry generation 是 Delivery 当前物化责任的一部分。Delivery 只保存 current target pointer；历史 attempt 与
 AgentRun 以 `(triggerMessageDeliveryId, triggerDeliveryGeneration)` 保留，retry 不改写旧 Run。
 
-Forward Delivery 把 source Run 作为 target parent 并将 depth 加一。Return Delivery 保留 source Run
+Forward Delivery 把 source Run 作为 target parent 并将 depth 加一。普通 dispatch Return Delivery 保留 source Run
 作为因果作者，但把 target parent/root/depth 恢复为 Immediate Caller 原先的调用 lineage；它仍进入
 同一个 recipient queue、消耗一个 A2A slot，并创建新的 caller continuation AgentRun。非直属祖先
-继续被 lineage guard 拒绝。
+继续被 lineage guard 拒绝。`gather_captured` return 不进入 queue、不物化 Run，也不消耗普通 A2A slot；
+它受独立的 Item/current-generation 上限约束。
 
 ```text
 accepted/pending (no attempt)

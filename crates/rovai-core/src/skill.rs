@@ -3671,6 +3671,9 @@ mod tests {
         assert!(gather_reference.contains("接受后结束"));
         assert!(gather_reference.contains("不要轮询"));
         assert!(gather_reference.contains("不会立即物化 Lead Run"));
+        assert!(gather_reference.contains("只有最后一条成功接受的回传"));
+        assert!(gather_reference.contains("不占普通 A2A 配额"));
+        assert!(gather_reference.contains("完整原始 Gather 请求"));
         assert!(gather_reference.contains("mandatory Current Input"));
         assert!(gather_reference.contains("原 initiator Conversation"));
         let cli_openai =

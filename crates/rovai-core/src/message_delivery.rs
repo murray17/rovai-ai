@@ -26,6 +26,7 @@ use crate::{
     db::Database,
     execution_budget::{PRODUCT_MAX_ACCEPTED_A2A, camp_turn_execution_budget_now},
     gather::{
+        GATHER_CAPTURED_MESSAGES_MAX_PER_ITEM_GENERATION, GATHER_COMPLETION_CONTEXT_MAX_BYTES,
         GatherAcceptance, GatherCapture, cancel_gather_for_delivery, cancel_gathers_for_turn,
         completion_delivery_for_item, mark_completion_materialized, mark_item_materialized,
         persist_gather_item, persist_gather_record, reopen_item_for_retry, resolve_gather_capture,
@@ -767,6 +768,41 @@ pub fn persist_public_a2a_message(
         })
         .collect::<Result<Vec<Option<GatherCapture>>>>()?;
     let captured_return_count = captures.iter().filter(|capture| capture.is_some()).count() as i64;
+    for capture in captures.iter().flatten() {
+        let captured_count: i64 = transaction.query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM message_delivery AS captured
+            JOIN agent_run AS source_run ON source_run.id = captured.source_agent_run_id
+            WHERE captured.gather_dispatch_delivery_id = ?1
+              AND captured.delivery_kind = 'public_a2a'
+              AND captured.dispatch_disposition = 'gather_captured'
+              AND captured.status = 'settled'
+              AND captured.source_agent_run_id = ?2
+              AND source_run.trigger_message_delivery_id = ?1
+              AND source_run.trigger_delivery_generation = ?3
+            "#,
+            params![
+                capture.dispatch_delivery_id,
+                request.source_agent_run_id,
+                capture.source_retry_generation,
+            ],
+            |row| row.get(0),
+        )?;
+        if captured_count >= GATHER_CAPTURED_MESSAGES_MAX_PER_ITEM_GENERATION {
+            return Ok(rejected_with_details(
+                "message.execution_budget_exceeded",
+                "This Gather Item retry generation has reached its captured-return limit",
+                json!({
+                    "limitScope": "gather_captured_messages_per_item_generation",
+                    "dispatchDeliveryId": capture.dispatch_delivery_id,
+                    "retryGeneration": capture.source_retry_generation,
+                    "maxCapturedMessages": GATHER_CAPTURED_MESSAGES_MAX_PER_ITEM_GENERATION,
+                    "newRequestIdRequired": true,
+                }),
+            ));
+        }
+    }
 
     let now_instant = camp_turn_execution_budget_now();
     let now = now_instant.to_rfc3339();
@@ -834,9 +870,11 @@ pub fn persist_public_a2a_message(
         ));
     }
 
-    let requested_accepted_a2a = effective_recipients.len() as i64;
-    let requested_run_responsibilities =
-        requested_accepted_a2a - captured_return_count + i64::from(is_gather);
+    // A durable Gather return settles without materializing a new AgentRun. It has
+    // an independent per-Item/per-generation bound above and therefore consumes
+    // neither the ordinary accepted-A2A allowance nor a Run responsibility.
+    let requested_accepted_a2a = effective_recipients.len() as i64 - captured_return_count;
+    let requested_run_responsibilities = requested_accepted_a2a + i64::from(is_gather);
     let next_accepted_a2a = allocated_accepted_a2a + requested_accepted_a2a;
     let next_allocated_run_responsibilities =
         allocated_run_responsibilities + requested_run_responsibilities;
@@ -845,9 +883,26 @@ pub fn persist_public_a2a_message(
     let deadline = chrono::DateTime::parse_from_rfc3339(&deadline_at)
         .context("CampTurn Execution Budget deadline is invalid")?
         .with_timezone(&chrono::Utc);
+    // Preserve recipient-free public narration after the execution deadline,
+    // while keeping both ordinary dispatch and the independently-budgeted
+    // Gather capture inside the frozen CampTurn deadline.
+    if now_instant >= deadline && (requested_accepted_a2a > 0 || captured_return_count > 0) {
+        return Ok(rejected_with_details(
+            if is_gather {
+                "gather.execution_budget_exceeded"
+            } else {
+                "message.execution_budget_exceeded"
+            },
+            "The frozen CampTurn execution deadline has elapsed",
+            json!({
+                "requestedRecipients": effective_recipients.len(),
+                "requestedAcceptedA2a": requested_accepted_a2a,
+                "newRequestIdRequired": true,
+            }),
+        ));
+    }
     if requested_accepted_a2a > 0
-        && (now_instant >= deadline
-            || next_accepted_a2a > max_accepted_a2a
+        && (next_accepted_a2a > max_accepted_a2a
             || next_accepted_a2a > PRODUCT_MAX_ACCEPTED_A2A
             || next_responsibilities > max_agent_run_responsibilities)
     {
@@ -859,7 +914,8 @@ pub fn persist_public_a2a_message(
             },
             "The effective recipient set does not fit the remaining frozen CampTurn budget",
             json!({
-                "requestedRecipients": requested_accepted_a2a,
+                "requestedRecipients": effective_recipients.len(),
+                "requestedAcceptedA2a": requested_accepted_a2a,
                 "requestedAgentRunResponsibilities": requested_run_responsibilities,
                 "remainingAcceptedA2a": (max_accepted_a2a - allocated_accepted_a2a).max(0),
                 "remainingAgentRunResponsibilities":
@@ -2144,7 +2200,11 @@ fn process_dispatch_attempt(
         runtime_installation_id: Some(runtime.installation_id.as_str()),
         runtime_binding_compatibility_digest: Some(runtime.binding_compatibility_digest.as_str()),
         charter_delivery_mode,
-        max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+        max_payload_bytes: if delivery.delivery_kind == "gather_completion" {
+            GATHER_COMPLETION_CONTEXT_MAX_BYTES
+        } else {
+            DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES
+        },
     };
     let frozen_context = if let Some(context) = frozen_snapshot_value.get("frozenContext") {
         serde_json::from_value::<FrozenDeliveryContext>(context.clone())

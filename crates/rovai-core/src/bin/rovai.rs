@@ -729,7 +729,7 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
     if description.name == "team.gather" {
         writeln!(
             output,
-            "\nGather is asynchronous. After acceptance, end the current Lead Run. Do not poll, repeat Gather, or wait synchronously; Rovai delivers one FIFO completion after every member Run is terminal."
+            "\nGather is asynchronous. After acceptance, end the current Lead Run. Do not poll, repeat Gather, or wait synchronously; Rovai delivers one FIFO completion after every member Run is terminal. Member progress returns stay public, but only the last accepted return from each current Run/retry generation is included as its captured result, so the member's final send must contain the complete conclusion. Captured returns do not consume the ordinary A2A allowance and are limited to 16 per Item/retry generation."
         )
         .expect("writing help to a String cannot fail");
     }
@@ -912,6 +912,10 @@ mod tests {
         let help = operation_help_text(&view);
         assert!(help.contains("One of: hearth, companion, relationship."));
         assert!(help.contains("Required only when --scope relationship"));
+        let gather = builtin_tool_description("team.gather").unwrap();
+        let gather_help = operation_help_text(&gather);
+        assert!(gather_help.contains("only the last accepted return"));
+        assert!(gather_help.contains("limited to 16 per Item/retry generation"));
     }
 
     #[test]
