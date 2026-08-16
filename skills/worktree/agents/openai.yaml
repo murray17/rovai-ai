@@ -1,4 +1,4 @@
 interface:
-  display_name: "隔离 Worktree"
-  short_description: "为持续实现任务创建或复用隔离 Git worktree"
-  default_prompt: "Use $worktree to create or reuse an isolated Git worktree for this implementation task."
+  display_name: "Git Worktree"
+  short_description: "为独立开发工作创建、复用、交接和安全清理 Git worktree"
+  default_prompt: "Use $worktree to create or reuse an isolated Git worktree for this development task."

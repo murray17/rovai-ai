@@ -1,13 +1,14 @@
 ---
 document_type: development-guide
 authority: local-worktree-lifecycle
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Git Worktree 生命周期与清理
 
-本文规定 Rovai-ai 开发用 Git worktree 的创建、复用、交接和收口纪律。它适用于人类开发者和
-AI Agent。具体创建步骤继续以仓库内 [`worktree` Skill](../../skills/worktree/SKILL.md) 为准；
+本文规定 Rovai-ai 开发用 Git worktree 的创建、复用、交接和收口纪律。一个逻辑开发工作对应一个
+worktree；仓库使用 Task 或 Issue 时，可以把它作为该工作的稳定记录，但不是使用 worktree 的前提。
+本文适用于人类开发者和 AI Agent。具体创建步骤继续以仓库内 [`worktree` Skill](../../skills/worktree/SKILL.md) 为准；
 本文补充本仓库构建体积较大时必须遵守的磁盘和生命周期边界。
 
 ## 为什么必须及时收口
@@ -23,17 +24,17 @@ Git worktree 共享 Git object database，但不共享工作目录里的生成�
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | `.app` 与 DMG 打包结果 |
 
-一次 Rust workspace 构建就可能产生数 GiB；多个已完成 worktree 长期共存时，磁盘占用会按任务
+一次 Rust workspace 构建就可能产生数 GiB；多个已完成 worktree 长期共存时，磁盘占用会按工作
 累积。`du` 显示的是目录视角，APFS clone、hard link 和可回收空间会影响实际值，最终空闲空间以
 `df` 为准。
 
-因此，**Task 已合入或明确放弃后，worktree 清理属于同一次任务收口，不是以后再做的可选维护。**
-一次 AgentRun 结束并不代表 Task 完成；仍在实现、等待 review、等待 CI 或准备继续修订的 Task
+因此，**开发工作已合入或明确放弃后，worktree 清理属于同一次工作收口，不是以后再做的可选维护。**
+一次会话或 AgentRun 结束并不代表工作完成；仍在实现、等待 review、等待 CI 或准备继续修订的工作
 必须保留原 worktree。
 
 ## 生命周期规则
 
-| Task 状态 | Worktree 处理 |
+| 工作状态 | Worktree 处理 |
 | --- | --- |
 | `active` | 保留并在后续 AgentRun 复用；不得因暂时空闲另建 `-2`、`-3` 目录 |
 | `ready` / review 或 CI 中 | 保留；代码写完但尚未合入不算完成 |
@@ -42,7 +43,7 @@ Git worktree 共享 Git object database，但不共享工作目录里的生成�
 | 有未提交或未跟踪内容 | 不自动删除；报告文件、分支、体积和下一步，由用户明确决定如何保存或丢弃 |
 
 工作目录不是长期成果或证据。需要在 worktree 删除后继续保留的代码，必须进入可达 Commit，
-并按任务流程合入或推送；普通 Patch、聊天摘要和“目录还在”都不能替代这一点。
+并按项目流程合入或推送；普通 Patch、聊天摘要和“目录还在”都不能替代这一点。
 
 ## 创建与复用
 
@@ -53,22 +54,39 @@ git worktree list --porcelain
 git branch --list
 ```
 
-一个 durable Task 只对应一个 worktree，并跨 AgentRun 复用。创建后应在 Task 交接中记录：
+一个逻辑开发工作只对应一个 worktree，并跨会话或 AgentRun 复用。创建后应在项目实际使用的 Task、
+Issue、交接记录或最终回复中记录：
 
 ```text
-Task: <task id or title>
+Work item: <task, issue or title>
 Worktree: <absolute path>
 Branch: <branch>
 Base: <base ref and commit>
+Governance: <mainline governance commit | none>
 Status: active | ready | merged | abandoned
 Validation: <commands and results>
 Next: <next concrete step>
 ```
 
 默认让每个 worktree 自己拥有 `target/`。不要静默创建指向其他 worktree 的 `target` symlink，
-也不要把全局 `CARGO_TARGET_DIR` 指向另一个活跃任务：这会引入 Cargo 锁竞争、跨分支旧指纹和
+也不要把全局 `CARGO_TARGET_DIR` 指向另一个活跃 worktree：这会引入 Cargo 锁竞争、跨分支旧指纹和
 清理所有权不清。若开发者显式选择共享缓存，交接中必须记录真实目录，并且不能把“删除 worktree”
 误报为已经释放共享缓存。
+
+## 主线治理文档先行
+
+如果仓库规则或用户要求 version、ADR、implementation plan、contract、changelog 等治理文档先进入
+主线，则在创建编码 worktree 前完成：
+
+1. 在干净的主 checkout 确认并按仓库规则同步 `main`；不覆盖其它未提交工作；
+2. 只更新本次工作需要的治理文档并运行对应文档门禁；
+3. 把治理文档作为独立提交提交到 `main`，按当前工作要求推送；
+4. 记录该提交的不可变 SHA，并从它创建或更新编码 worktree；
+5. 在交接的 `Governance` 字段记录该 SHA。
+
+编码 worktree 已创建但尚未编码时，先快进或按仓库规则更新到该治理提交。已有代码提交或未提交改动时，
+不得自动 reset、rebase 或强制移动分支；应按仓库规则合入治理提交。无权提交主线或主 checkout 无法安全
+使用时停止编码并报告，不把要求主线先行的文档只留在功能分支。
 
 ## 活跃期间的磁盘管理
 
@@ -82,11 +100,11 @@ du -sh "$WORKTREE_PATH/target/debug/deps"
 du -sh "$WORKTREE_PATH/target/debug/incremental"
 ```
 
-选择性清理规则见[常见问题排查](troubleshooting.md#target-占用异常增长或磁盘不足)。如果 Task
+选择性清理规则见[常见问题排查](troubleshooting.md#target-占用异常增长或磁盘不足)。如果工作
 已经满足收口条件，应删除整个 worktree，而不是逐个清理 `target/`、`node_modules/`、`out/`
 和 `dist/` 后继续保留空壳目录。
 
-## 任务收口与安全清理
+## 工作收口与安全清理
 
 ### 1. 确认精确目标
 
@@ -108,7 +126,7 @@ du -sh "$WORKTREE_PATH"
 
 ### 3. 确认内容已安全收口
 
-已合入 Task 需要同时满足：
+已合入工作需要同时满足：
 
 ```bash
 git -C "$PRIMARY_ROOT" fetch origin main
@@ -116,11 +134,11 @@ git -C "$WORKTREE_PATH" status --porcelain
 git -C "$PRIMARY_ROOT" merge-base --is-ancestor "$BRANCH" origin/main
 ```
 
-后两条成功时都不输出内容并以状态码 `0` 结束。若目标不是 `origin/main`，使用任务实际目标分支。
-发现未提交、未跟踪、未合入或未推送内容时停止清理并报告，不能仅凭 Task 标题或“看起来做完了”
+后两条成功时都不输出内容并以状态码 `0` 结束。若目标不是 `origin/main`，使用工作实际目标分支。
+发现未提交、未跟踪、未合入或未推送内容时停止清理并报告，不能仅凭工作标题或“看起来做完了”
 推断内容已保存。
 
-明确放弃的 Task 仍须先检查 `status --porcelain`。普通自动清理只处理干净 worktree；丢弃未提交
+明确放弃的工作仍须先检查 `status --porcelain`。普通自动清理只处理干净 worktree；丢弃未提交
 内容或强删未合入分支是独立的破坏性决定，不属于默认完成流程。
 
 ### 4. 使用 Git 正常移除
@@ -157,11 +175,11 @@ df -h "$PRIMARY_ROOT"
 
 ## 定期审计是兜底，不是主要流程
 
-任务收口时及时删除是主要机制。磁盘巡检只用于发现遗漏：
+工作收口时及时删除是主要机制。磁盘巡检只用于发现遗漏：
 
 ```bash
 git worktree list --porcelain
 ```
 
-对每个非主 worktree 分别检查 Task 状态、Git 状态、分支合入情况、进程占用和目录体积。不能仅凭
+对每个非主 worktree 分别检查工作状态、Git 状态、分支合入情况、进程占用和目录体积。不能仅凭
 创建时间、目录大小或分支落后提交数批量删除；无法确认归属时保留并报告候选清单。

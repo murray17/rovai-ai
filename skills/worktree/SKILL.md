@@ -1,133 +1,116 @@
 ---
 name: worktree
-description: 为 ROVAI Camp 中的非 trivial 实现工作创建或复用隔离 Git worktree。开始代码、schema、migration、script、API、UI、runtime 或跨文件修改前使用；一个 durable Task 对应一个 worktree，并跨 AgentRun 复用。
+description: 当用户明确要求使用 Git worktree，或需要为一项独立开发工作创建、查找、复用、交接或清理隔离工作目录时使用。普通只读任务、非 Git 仓库，以及当前工作无需独立分支或工作目录时不使用。
 ---
 
-# ROVAI Worktree
+# Git Worktree
 
-为实现工作准备一个可持续复用的 Git worktree，避免在主 checkout 中直接开发，也避免同一任务在不同 AgentRun 中重复创建分支和目录。
+为一个逻辑改动准备独立、可复用的 Git worktree，使它与主工作目录和其它并行改动彼此隔离。
 
-## 核心不变量
+## 原则
 
-- **Worktree 属于 durable Task，不属于 Agent、Camp 或 AgentRun。**
-- 同一 Task 后续产生的新 AgentRun 必须优先复用已有 worktree。
-- 一个 Camp 可以有多个独立 Task，因此也可以有多个 worktree。
-- 实现工作不直接修改主 checkout；主 checkout 主要用于同步、发现和管理 worktree。
-- 仓库自己的 `AGENTS.md`、`CLAUDE.md`、README、分支命名和开发说明始终优先于本 Skill。
-- 不执行隐式 stash、`reset --hard`、`clean -fd`、强制删分支或强制删 worktree。
+- 一个逻辑改动使用一个分支和一个 worktree。
+- 创建前先查找并复用已有 worktree 或分支。
+- 仓库自己的开发说明、分支规则和目录约定始终优先。
+- 需要先落地主线的版本、ADR 等治理文档时，先提交文档，再建立编码基线。
+- 不自动 stash、移动未提交改动或执行破坏性清理。
+- 不覆盖已有目录，不强制删除分支或 worktree。
+- 后续命令和文件修改都在选定的 worktree 中执行。
 
-## 何时使用
+## 1. 检查现状
 
-在以下工作开始前使用：
-
-- 修改代码、API、schema、migration、脚本、构建配置或运行时行为；
-- 修改 UI、桌面端、Gateway、Daemon 或 Core；
-- 跨多个文件或可能与其他任务并行的改动；
-- 需要持续多个 AgentRun 才能完成的实现任务。
-
-以下情况通常不需要新建 worktree：
-
-- 只读调查、代码搜索或方案讨论；
-- 仓库规则允许的低风险纯文档修订；
-- 当前工作目录已经是该 durable Task 的正确 worktree。
-
-## 工作流
-
-### 1. 确认仓库与任务身份
-
-先定位仓库根目录：
+确认当前目录属于 Git 仓库，并查看现有工作区：
 
 ```bash
 git rev-parse --show-toplevel
-```
-
-读取仓库指令，至少检查存在的：
-
-```text
-AGENTS.md
-CLAUDE.md
-README.md
-docs/README.md
-```
-
-确定本次 durable Task 的稳定身份，优先使用：
-
-1. Task ID；
-2. 已记录的分支名或 worktree 路径；
-3. Task 标题生成的简短 slug。
-
-不要把一次 AgentRun 的 ID 当作 worktree 身份。
-
-### 2. 先查是否已有 worktree
-
-```bash
+git status --short --branch
 git worktree list --porcelain
-```
-
-同时检查本地分支：
-
-```bash
 git branch --list
 ```
 
-复用规则：
+读取实际存在的仓库说明，例如 `AGENTS.md`、`CONTRIBUTING.md`、`CLAUDE.md`、`README.md` 或相关 `docs/`。
 
-- Task 已记录 worktree 路径且仍有效：直接复用；
-- 对应分支已在某个 worktree 中 checkout：复用那个目录；
-- 对应分支存在但尚未 checkout：把它加入新的 worktree；
-- 只有确认没有对应 worktree 和分支时，才创建新分支。
+先判断：
 
-如果出现多个可能匹配的 worktree，不要猜。报告候选路径和分支，让上层任务状态先统一。
+- 当前目录是否已经是这项改动的正确 worktree；
+- 目标分支是否已在其它 worktree 中；
+- 是否存在可复用的分支或目录；
+- 当前工作是否依赖未提交改动；
+- 本次改动是否要求先新增或更新 version、ADR、implementation plan、contract、changelog 等治理文档。
 
-### 3. 选择分支名和目录
+若需要携带未提交改动，不要静默 stash、复制或移动；先让用户选择提交、生成 patch，或留在当前工作区。
 
-分支名优先遵循仓库约定。没有约定时使用：
+## 2. 先处理主线治理文档
 
-```text
-feat/<task-slug>
-fix/<task-slug>
-docs/<task-slug>
-chore/<task-slug>
-```
+如果仓库规则或用户要求本次改动先新增或更新版本、ADR 等治理文档，并要求这些文档先进入主线，则在开始编码前完成：
 
-`task-slug` 使用小写 ASCII、数字和连字符；有 Task ID 时可加入简短 ID，避免同名冲突。
-
-目录位置优先级：
-
-1. 仓库文档指定的位置；
-2. 主 checkout 的同级目录，例如 `<repo>-wt-<task-slug>`；
-3. 如果运行环境无法访问同级目录，使用仓库内的 `.worktrees/<task-slug>`。
-
-使用仓库内 `.worktrees/` 时，只加入本地 exclude，不修改项目 `.gitignore`：
+1. 确认仓库的主线分支；在以 `main` 为主线的仓库中使用 `main`。
+2. 使用当前已经检出该主线分支的干净工作目录，按仓库规则同步它，不覆盖其它未提交工作。
+3. 只创建或更新本次改动所需的治理文档。
+4. 运行仓库规定的文档检查。
+5. 把治理文档作为独立提交提交到主线。
+6. 记录该提交的不可变 SHA，并将它作为编码 worktree 的基线。
 
 ```bash
-GIT_COMMON_DIR=$(git rev-parse --git-common-dir)
-mkdir -p "$GIT_COMMON_DIR/info"
-grep -qxF '.worktrees/' "$GIT_COMMON_DIR/info/exclude" 2>/dev/null \
-  || printf '%s\n' '.worktrees/' >> "$GIT_COMMON_DIR/info/exclude"
+git rev-parse HEAD
 ```
 
-### 4. 确定基线
+完成主线文档提交后，才创建新的编码 worktree。这样编码分支从一开始就包含已经落地的版本范围和架构决定，不需要在编码开始后再补合并。
 
-优先从远端默认分支创建：
+如果编码 worktree 已经创建但尚未产生代码改动，先把其分支快进或按仓库规则更新到治理文档提交，再开始编码。
 
-```bash
-BASE_REF=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)
-```
+如果编码 worktree 已经存在代码提交或未提交改动，不要自动重写历史或强制移动分支。先按仓库规则把主线治理文档提交合入该分支，确认工作区和基线正确后再继续。
 
-如果为空，依次检查：
+如果当前没有权限提交主线，或主线工作目录不干净且不能安全处理，停止编码并明确报告阻塞，不要把要求主线先行的治理文档只留在功能分支中。
+
+## 3. 确定分支、基线和目录
+
+名称优先使用用户指定值、Issue/PR/任务编号，或由改动目标生成的简短 slug。
+
+分支名遵循仓库约定。没有约定时使用合适的：
 
 ```text
-origin/main
-origin/master
-HEAD
+feat/<slug>
+fix/<slug>
+docs/<slug>
+chore/<slug>
+work/<slug>
 ```
 
-远端可用时先获取默认分支的最新状态；获取失败时明确说明使用了本地 ref，不要假装已经同步。
+基线优先级：
 
-### 5. 创建或复用
+1. 已提交的主线治理文档提交；
+2. 用户明确指定的 commit、tag 或分支；
+3. 仓库说明指定的基线；
+4. 与当前工作直接相关的当前分支或提交；
+5. 当前 `HEAD`。
 
-已有分支但未被其他 worktree 使用：
+不要默认假设 `main`、`master` 或远端默认分支就是正确基线。不同选择会改变结果时，先向用户确认。
+
+记录不可变基线：
+
+```bash
+git rev-parse <base-ref>
+```
+
+目录优先使用仓库或用户指定位置；否则优先放在主工作目录旁边，例如：
+
+```text
+<repository-name>-<slug>
+```
+
+只有仓库已经约定并忽略内部目录时，才使用 `.worktrees/<slug>`。不要擅自修改项目 `.gitignore`。
+
+## 4. 复用或创建
+
+按以下顺序处理：
+
+- 当前目录就是目标 worktree：直接使用；
+- 目标分支已在某个 worktree 中：使用该路径；
+- 目标分支存在但未被其它 worktree 使用：为它添加 worktree；
+- 没有对应分支和 worktree：创建新分支和 worktree。
+
+复用已有分支：
 
 ```bash
 git worktree add "$WORKTREE_PATH" "$BRANCH"
@@ -136,80 +119,54 @@ git worktree add "$WORKTREE_PATH" "$BRANCH"
 创建新分支：
 
 ```bash
-git worktree add -b "$BRANCH" "$WORKTREE_PATH" "$BASE_REF"
+git worktree add -b "$BRANCH" "$WORKTREE_PATH" "$BASE_COMMIT"
 ```
 
-如果目标目录已经存在但不是已登记的 Git worktree，停止并报告；不要覆盖或删除该目录。
+目标路径已存在但不是登记过的 Git worktree 时停止，不覆盖或删除。出现多个合理候选时列出它们，让用户选择。
 
-### 6. 切换到 worktree 工作
+只有用户要求最新远端状态或仓库规则要求同步时才 fetch；无法联网时明确说明使用本地基线。
 
-创建或复用后验证：
+## 5. 验证并使用
 
 ```bash
+git -C "$WORKTREE_PATH" rev-parse --show-toplevel
 git -C "$WORKTREE_PATH" branch --show-current
-git -C "$WORKTREE_PATH" status --short
+git -C "$WORKTREE_PATH" rev-parse HEAD
+git -C "$WORKTREE_PATH" status --short --branch
 ```
 
-此后把该绝对路径作为所有 Shell、文件读写和构建命令的 `workdir`。不要依赖一次 `cd` 会自动影响后续工具调用。
+确认路径、分支和基线符合预期。若本次存在主线治理文档提交，还要确认该提交已经包含在 worktree 的历史中。
 
-依赖安装和环境配置遵循仓库文档。默认不要复制：
+此后的命令、文件读写、依赖安装、构建和测试都使用该 worktree 作为工作目录。环境准备与校验命令遵循仓库说明，不从其它工作目录自动复制 secrets、运行时状态、缓存或未提交文件。
 
-- `.env` 或其他 secrets；
-- 数据库、上传文件和 Runtime 状态；
-- 构建缓存或用户目录；
-- 其他 worktree 的未提交文件。
+## 6. 交接
 
-确实需要共享配置时，只复制仓库明确允许的模板或重新生成本地配置。
-
-## ROVAI 仓库校验
-
-在 `rovai-ai` 仓库中：
-
-- 从根目录 `AGENTS.md` 和 `docs/README.md` 路由到相关开发文档；
-- TypeScript、桌面端或 UI 改动使用适用的：
-
-```bash
-pnpm install
-pnpm typecheck
-pnpm test
-```
-
-- Rust 改动在迭代时优先运行受影响 crate 的定向测试；跨 crate、Core、Daemon、Gateway 或 Runtime 改动在交付前运行：
-
-```bash
-cargo test --workspace
-```
-
-- 跨 TypeScript 与 Rust 的改动运行两侧适用校验。
-- 不要机械运行无关命令；校验范围应覆盖实际改动和受影响边界。
-
-## 跨 AgentRun 交接
-
-在结束当前 AgentRun 前，把以下信息写入 durable Task 状态或 Camp 交接消息：
+需要后续会话或协作者继续时，记录：
 
 ```text
-Task: <task id or title>
 Worktree: <absolute path>
 Branch: <branch>
-Base: <base ref and commit>
+Base: <base commit>
+Governance: <主线文档提交；没有则写“无”>
 Status: active | ready | merged | abandoned
-Validation: <commands and results>
-Next: <next concrete step>
+Changes: <简短摘要>
+Validation: <已运行的检查和结果>
+Next: <下一步>
 ```
 
-后续 AgentRun 先读取这些信息并复用现有 worktree。不要因为启动了新 Run 就创建新的 `-2`、`-3` 分支或目录。
+把信息写入项目实际使用的任务、Issue、交接记录或最终回复。后续工作先复用该路径，不因更换会话或执行者而创建重复分支和目录。
 
-## 清理
+## 7. 清理
 
-一个 AgentRun 结束时**不要自动清理**。只有 Task 已合入或明确放弃时才处理。
+一次会话结束本身不是清理条件。改动已合入或明确放弃后，按仓库规则完成同次收口；仓库没有更严格规则时，只在用户要求清理时执行。
 
-先确认 worktree 干净：
+先确认工作区干净：
 
 ```bash
 git -C "$WORKTREE_PATH" status --porcelain
 ```
 
-合入后可执行：
+然后可以执行：
 
 ```bash
 git -C "$PRIMARY_ROOT" worktree remove "$WORKTREE_PATH"
@@ -217,13 +174,8 @@ git -C "$PRIMARY_ROOT" branch -d "$BRANCH"
 git -C "$PRIMARY_ROOT" worktree prune
 ```
 
-如果分支未合入、存在未提交内容或清理意图不明确，保留现场并报告，不使用 `--force`。
+分支未合入、存在未提交内容或清理意图不明确时，保留现场并说明原因。未经明确授权不使用 `--force`。
 
-## 完成标准
+## 完成
 
-本 Skill 完成时应得到：
-
-- 一个已复用或新建的隔离 worktree；
-- 明确的绝对路径、分支和基线；
-- 后续工具调用使用该 worktree 作为工作目录；
-- durable Task 中记录了可供下一 AgentRun 继续工作的交接信息。
+向用户报告 worktree 的绝对路径、分支、基线提交、主线治理文档提交、当前状态和下一步。

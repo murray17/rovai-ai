@@ -435,8 +435,8 @@ The system-required official Rovai Skill `memory-stewardship` (“共同记忆�
 _Avoid_: permission grant, per-Scope Skill, Memory authority, mandatory System Prompt, unsupported-Runtime emulation
 
 **Worktree Skill**:
-The official Rovai Skill `worktree` (“隔离 Worktree”) that makes one isolated Git worktree durable to a Task, reuses it across AgentRuns, and keeps implementation changes out of the primary checkout. It is enabled and assigned to every Skill Delivery Group by default, does not create a worktree until invoked in an authorized implementation task, and never grants filesystem or Git authority.
-_Avoid_: per-AgentRun worktree, Camp-wide worktree, implicit implementation permission, automatic cleanup, primary-checkout mutation
+The official Rovai Skill `worktree` (“Git Worktree”) that creates or reuses one isolated Git worktree for one logical development change, keeps its branch and immutable base explicit across handoffs, and can make a mainline governance-document commit the coding baseline when repository rules require it. It is enabled and assigned to every Skill Delivery Group by default, does not create or clean a worktree until the current request and repository rules authorize that lifecycle step, and never grants filesystem or Git authority.
+_Avoid_: duplicate worktree per session, implicit implementation permission, hidden stash or history rewrite, forced cleanup, unsafe primary-checkout mutation
 
 **Agent Codebase Analysis Skill**:
 The self-contained official Rovai Skill `analyze-agent-codebase` (“Agent 代码库分析”) that reconstructs Coding Agent and multi-Agent repository behavior from entrypoints, call chains, state transitions, persistence, and tests; separates confirmed facts, inferences, unknowns, and documentation drift; and optionally produces one indexed topic dossier when the user requests files. It is enabled and assigned to every Skill Delivery Group by default, remains read-only by default, and grants no filesystem, documentation, collaboration, Tool, or permission authority.

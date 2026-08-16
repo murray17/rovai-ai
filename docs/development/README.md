@@ -139,8 +139,8 @@ pnpm build:desktop
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | macOS App 和 DMG |
 
-不同 worktree 默认各自拥有这些生成目录。Task 已完成时，应按
-[Worktree 清理流程](worktrees.md#任务收口与安全清理)删除整个 worktree；仍在开发的 worktree
+不同 worktree 默认各自拥有这些生成目录。开发工作已完成时，应按
+[Worktree 清理流程](worktrees.md#工作收口与安全清理)删除整个 worktree；仍在开发的 worktree
 若只需处理 Rust 缓存异常，则按[常见问题排查](troubleshooting.md#target-占用异常增长或磁盘不足)
 选择性清理，不把每日 `cargo clean` 当作常规维护。
 
