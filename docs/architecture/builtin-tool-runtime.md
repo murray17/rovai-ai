@@ -30,7 +30,9 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；whole-history
 omission 的 bounded aggregate 边界见
 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
-[ContextManifest Evidence v14](../contracts/context-manifest-evidence-v14.md)。Task authority 与
+[ADR-0200](../adr/0200-compact-context-projection-and-structured-run-facts.md)、
+[ContextManifest Evidence v15](../contracts/context-manifest-evidence-v15.md)及
+[Run Facts v1](../contracts/run-facts-v1.md)。Task authority 与
 self-active awareness 见
 [ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)；真实空集合
 的显式 clearing snapshot 见
@@ -297,8 +299,8 @@ executable integrity 校验。每个 Run 最多自动 rebind 一次；第二次�
 
 ## Bootstrap 与 Dynamic Context
 
-> 本节的 compact projection、Charter 补充规则和 canonical continuation 已由 v0.50 实现；实施状态见
-> [v0.50 概览](../versions/v0.50/README.md)。
+> 当前 compact history、Charter 与 Run Facts 边界由 ADR-0200 和 v0.94 实现；历史 v0.50 的完整
+> continuation/Run Notice shape 不再是当前合同。
 
 Session Charter 只说明：
 
@@ -314,9 +316,12 @@ Session Charter 只说明：
   保证完整最终结论公开，也不应被 Agent 当作省略 `rovai send` 的正常路径；
 - Task responsibility definition belongs to the User or current Camp Default Lead；
 - Public Message、Message Delivery、Memory 和 read 工具保持各自稳定业务原则；
-- Dynamic Context 可能截断或省略：单条正文只使用可直接提交给 canonical operation schema 的
-  executable continuation；整条历史的 sequence envelope 只是 navigation hint；公共 A2A 遵循
-  Profile v3 的 bounded reference closure 与 self-active Task selection。
+- Core 在每次 invocation 重做授权，任何模型可见 ID/fact 都不是 authorization token；
+- Dynamic Context 可能截断或省略：`SHARED_CONVERSATION.campId` 适用于全部投影消息，截断消息只以
+  Unicode-scalar `nextBodyOffset` 对齐 `camp.read item.bodyOffset`；遗漏 sequence envelope 可有空洞且
+  不可执行；公共 A2A 继续遵循 Profile v3 的 bounded reference closure 与 self-active Task selection；
+- `RUN_FACTS` 字段化表达冻结 Task reference、Session continuity、external effect、Gather member 与
+  delegation budget；命令特定教学不回填 Charter。
 
 Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local planning/A2A、wake/send、Memory
 治理或 polling 操作指导。普通 flags 属于精确 operation help；命令族选择、message→Task、多操作协调
@@ -326,9 +331,9 @@ Charter 不承载 Task 创建克制、字段权限、Camp-wide read、local plan
 Task；Core 不做语义去重。
 
 Bootstrap 不含完整 Schema、Envelope、receipt、catalog digest、socket、process token、lease、
-AgentRun ID、epoch、Camp ID 或 Native Binding ID。只有无损映射到当前 schema 的完整 operation/input
-对象才是 Executable Retrieval Locator；非可执行 navigation hint 不伪装成 tool input，也不重复
-transport 细节。
+AgentRun ID、epoch、Camp ID 或 Native Binding ID。完整 operation/input 对象仍是 Executable Retrieval
+Locator；Shared Conversation 的 compact offset 则与同一对象内的顶层 Camp 和 message ID 组合，且只在
+实际调用时成为输入。遗漏 envelope 不伪装成 tool input，也不重复 transport 细节。
 
 `cli-operations` 和 `memory-stewardship` 都沿用 official Skill Library，但 management policy 为
 `system_required`：Core 始终保持 enabled 与九个 Runtime Group Assignment，拒绝相关修改命令，并在
@@ -391,22 +396,20 @@ failure 或 `delivery_unknown` 都不能替代它。各层不得通过复制完�
 ### Self Identity 与 Peer Routing Identity
 
 Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memory Entrypoint。Charter
-文案变化本身不参与 Native Binding compatibility digest，也不主动轮换全部既有 Native Session；既有
-Run 与 Bootstrap Evidence 不回写，新建 Native Session 使用当前内置 Charter。Built-in Transport v13
-另外改变 catalog digest；Antigravity 的既有 binding compatibility 已包含 Built-in contract version 与
-catalog digest，因此会建立 replacement Session。其他 Runtime 的续接进程直接使用当前 v13 CLI、精确 help
-与 official Skill Revision，不因 Charter copy 单独丢弃 Native Session。
+文案变化由 Bootstrap Evidence 的精确 bytes/digest 证明，不单独创建 Bootstrap v4。v0.94 同时改变
+AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break 全部旧 Binding/Session 技术
+状态，因此 replacement Session 原子获得新 Charter；既有 Evidence 不回写。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
-Context Formatter v16 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+Context Formatter v17 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
 CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v14 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v15 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
@@ -415,19 +418,33 @@ digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 s
 ### Self Active Task Projection
 
 Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
-八项。Formatter v16 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
+八项。Formatter v17 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
 `SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
 `{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
 将所有 Task entry 淘汰时才省略整个 section。Default Lead 不获得其他成员 Task 的隐式 projection。
 公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
 selection/budget omission。
 
-ContextManifest v14 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+ContextManifest v15 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
 与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
 全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
 materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只
 复用冻结 bytes。完整共享面板通过 Camp-wide `task list/get` 按需读取，所有 mutation 继续读取 live
 Task 并由 Core 重授权。
+
+### Shared Conversation 与 Run Facts
+
+Formatter v17 按 `COLLABORATION_STATE? → SELF_ACTIVE_TASKS? → SHARED_CONVERSATION? → RUN_FACTS? →
+CURRENT_INPUT` 输出，`CURRENT_INPUT` 始终完整且最后。Shared Conversation 顶层 `campId` 必须等于冻结
+Run Camp，origin/reference/recent 三类消息不得跨 Camp。单消息保留 identity/reply/attachment/body，
+`mentionsCurrentUser` 仅在完整 Structured Content 为 true 时出现；即使 mention 位于截断 prefix 之外也
+不能丢失。截断只投影 `nextBodyOffset`，omitted aggregate 只投影 count 与最小/最大 sequence envelope。
+
+ContextManifest v15 仍冻结真实 Camp/source refs、完整 body length、truncation/offset、source/projected
+digests、attachment identity/digest 和 omission evidence。Run Facts v1 无事实时整段省略，单项缺失时省略
+字段；Manifest 独立保存 typed refs、exact compact JSON text 与 digest。Gather fallback 只承认当前 target
+Run/active retry generation 在无 captured return 时的 successful Runtime final output；delegation budget 中
+的 captured-return `false` 不代表其他 admission 已获授权。
 
 ### Context compaction redelivery accounting
 

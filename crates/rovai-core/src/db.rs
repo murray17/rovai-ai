@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.90";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 43;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.94";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 44;
+const V089_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.90";
+const V089_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 43;
 const V088_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.89";
 const V088_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 42;
 const V087_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.83";
@@ -96,6 +98,7 @@ struct CurrentMigrationState {
     v86: bool,
     v87: bool,
     v88: bool,
+    v89: bool,
 }
 
 impl CurrentMigrationState {
@@ -105,6 +108,29 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89;
+        }
+        if self.v89 {
+            return false;
+        }
+        if contract == V089_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V089_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -418,7 +444,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 85),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 86),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 87),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 88)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 88),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 89)
         "#,
         [],
         |row| {
@@ -442,6 +469,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v86: row.get(16)?,
                 v87: row.get(17)?,
                 v88: row.get(18)?,
+                v89: row.get(19)?,
             })
         },
     );
@@ -1556,6 +1584,9 @@ impl Database {
             if !self.schema_migration_applied(88)? {
                 self.migrate_gather_continuation_v88()?;
             }
+            if !self.schema_migration_applied(89)? {
+                self.migrate_compact_context_run_facts_v89()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1869,6 +1900,9 @@ impl Database {
         }
         if !self.schema_migration_applied(88)? {
             self.migrate_gather_continuation_v88()?;
+        }
+        if !self.schema_migration_applied(89)? {
+            self.migrate_compact_context_run_facts_v89()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -10174,6 +10208,218 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_compact_context_run_facts_v89(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let create_context_manifest_v89 = create_context_manifest
+                .replacen(
+                    "CREATE TABLE context_manifest",
+                    "CREATE TABLE context_manifest_v89",
+                    1,
+                )
+                .replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v89",
+                    1,
+                )
+                .replace("run_notice_refs_json", "run_fact_refs_json")
+                .replace("run_notice_payload_json", "run_fact_payload_json")
+                .replace("run_notice_digest", "run_fact_digest")
+                .replacen(
+                    "CHECK(formatter_version IN (14, 15, 16))",
+                    "CHECK(formatter_version = 17)",
+                    1,
+                );
+            if create_context_manifest_v89 == create_context_manifest
+                || !create_context_manifest_v89.contains("CREATE TABLE context_manifest_v89")
+                || !create_context_manifest_v89.contains("run_fact_refs_json")
+                || !create_context_manifest_v89.contains("run_fact_payload_json")
+                || !create_context_manifest_v89.contains("run_fact_digest")
+                || create_context_manifest_v89.contains("run_notice_")
+                || !create_context_manifest_v89.contains("formatter_version = 17")
+            {
+                anyhow::bail!("v89 could not rebuild the ContextManifest v15 schema");
+            }
+
+            transaction.execute(
+                r#"
+                UPDATE gather_item
+                SET status = 'cancelled', terminal_source = 'delivery',
+                    error_code = 'context_formatter_v17_required',
+                    terminal_resolution_source = 'migration',
+                    terminal_reason_code = 'compact_context_run_facts_clean_break',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE gather_record
+                SET status = 'cancelled',
+                    cancellation_reason_code = 'context_formatter_v17_required',
+                    version = version + 1, cancelled_at = ?1, updated_at = ?1
+                WHERE status IN ('collecting', 'ready', 'completing')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    context_manifest_id = NULL,
+                    failure_code = 'context_formatter_v17_required',
+                    failure_detail_json = '{"reason":"compact_context_run_facts_clean_break"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0
+                        THEN 'interrupted_before_dispatch'
+                        ELSE 'failed'
+                    END,
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    manual_intervention_required = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                        ELSE 0
+                    END,
+                    failure_code = 'context_formatter_v17_required',
+                    failure_detail_json = '{"reason":"compact_context_run_facts_clean_break"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET frozen_snapshot_json = CASE
+                        WHEN json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                        THEN json_remove(frozen_snapshot_json, '$.frozenContext')
+                        ELSE frozen_snapshot_json
+                    END,
+                    context_manifest_id = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE context_manifest_id IS NOT NULL
+                   OR json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                "UPDATE message_delivery_attempt SET context_manifest_id = NULL WHERE context_manifest_id IS NOT NULL",
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_formatter_v17_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DELETE FROM bootstrap_redelivery_requirement;
+                DELETE FROM native_session_compaction_observation;
+                DELETE FROM native_session_compaction_observer_lease;
+                DELETE FROM native_session_resume_attempt;
+                DELETE FROM runtime_input_delivery;
+                DELETE FROM context_manifest_history_camp;
+                DELETE FROM context_manifest;
+                DELETE FROM native_session_bootstrap_evidence;
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1, updated_at = ?1
+                "#,
+                [&now],
+            )?;
+
+            transaction.execute_batch(&create_context_manifest_v89)?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v89 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.94', projection_schema_version = 44,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (89, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v89 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -14593,6 +14839,22 @@ mod tests {
             .execute_batch(
                 r#"
                 UPDATE rovai_data_contract
+                SET contract_version = 'v0.90', projection_schema_version = 43
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 89;
+                "#,
+            )
+            .unwrap();
+        assert!(
+            has_current_data_contract(&path),
+            "the exact v0.90/schema-43 marker without migration 89 is an upgrade source"
+        );
+
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                UPDATE rovai_data_contract
                 SET contract_version = 'v0.89', projection_schema_version = 42
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 88;
@@ -15280,7 +15542,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version IN (14, 15, 16)"));
+        assert!(manifest_schema.contains("formatter_version = 17"));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v79 database should reopen");
@@ -15591,7 +15853,8 @@ mod tests {
             .collect::<rusqlite::Result<Vec<_>>>()
             .unwrap();
         assert!(context_columns.contains(&"bootstrap_evidence_id".to_string()));
-        assert!(context_columns.contains(&"run_notice_refs_json".to_string()));
+        assert!(context_columns.contains(&"run_fact_refs_json".to_string()));
+        assert!(!context_columns.contains(&"run_notice_refs_json".to_string()));
         assert!(context_columns.contains(&"attachment_refs_json".to_string()));
         assert!(context_columns.contains(&"attachment_digest".to_string()));
         assert!(!context_columns.contains(&"memory_guide_json".to_string()));
@@ -19112,7 +19375,9 @@ mod tests {
             "omitted_message_sequence_end",
             "shared_message_evidence_json",
             "shared_message_evidence_digest",
-            "run_notice_payload_json",
+            "run_fact_payload_json",
+            "run_fact_refs_json",
+            "run_fact_digest",
         ] {
             assert!(
                 manifest_columns.contains(&required.to_string()),
@@ -19129,7 +19394,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version IN (14, 15, 16)"));
+        assert!(manifest_schema.contains("formatter_version = 17"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
         let v88_applied: i64 = database
@@ -19141,6 +19406,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(v88_applied, 1);
+        let v89_applied: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 89",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(v89_applied, 1);
         let capture_index_exists: bool = database
             .connection()
             .query_row(

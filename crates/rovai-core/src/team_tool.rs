@@ -2786,8 +2786,18 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(member_frozen_snapshot.contains("gather_member_result_protocol"));
-        assert!(member_frozen_snapshot.contains("last accepted return"));
+        let member_frozen_snapshot: Value = serde_json::from_str(&member_frozen_snapshot).unwrap();
+        let member_run_facts: Value = serde_json::from_str(
+            member_frozen_snapshot["frozenContext"]["manifestSelection"]["runFactPayload"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(member_run_facts["gather"]["role"], "member");
+        assert_eq!(
+            member_run_facts["gather"]["authoritativeResult"],
+            "last_accepted_captured_return_current_run_retry_generation"
+        );
         let (member_epoch, member_credential) =
             fixture.claim_bind_and_issue(&member_run_id, "native-gather-member");
         fixture
@@ -5078,7 +5088,7 @@ Use this exact public input @agent_2";
     }
 
     #[test]
-    fn task_linked_public_delivery_reuses_exact_run_notice_bytes() {
+    fn task_linked_public_delivery_reuses_exact_run_fact_bytes() {
         let mut fixture = Fixture::new();
         let created = CollaborationService::default()
             .create_task(
@@ -5089,7 +5099,7 @@ Use this exact public input @agent_2";
                     CreateTaskCommand {
                         camp_id: fixture.camp_id.clone(),
                         title: "Frozen notice task".to_string(),
-                        description: "Exercise exact Run Notice bytes".to_string(),
+                        description: "Exercise exact Run Fact bytes".to_string(),
                         assignee_agent_id: "agent_2".to_string(),
                         ..Default::default()
                     },
@@ -5123,12 +5133,12 @@ Use this exact public input @agent_2";
             )
             .unwrap();
         let frozen_snapshot: Value = serde_json::from_str(&frozen_snapshot).unwrap();
-        let frozen_notice_payload =
-            frozen_snapshot["frozenContext"]["manifestSelection"]["runNoticePayload"]
+        let frozen_fact_payload =
+            frozen_snapshot["frozenContext"]["manifestSelection"]["runFactPayload"]
                 .as_str()
                 .unwrap()
                 .to_string();
-        assert!(frozen_notice_payload.contains("\"taskId\""));
+        assert!(frozen_fact_payload.contains("\"taskId\""));
 
         let (target_epoch, _) =
             fixture.claim_bind_and_issue(&target_run_id, "native-frozen-task-run-notice");
@@ -5147,25 +5157,25 @@ Use this exact public input @agent_2";
         else {
             panic!("Task-linked Public Delivery context should materialize");
         };
-        let run_notice_section = context
+        let run_fact_section = context
             .rendered_payload
-            .split("[RUN_NOTICES]\n")
+            .split("[RUN_FACTS]\n")
             .nth(1)
             .unwrap()
-            .split("\n[/RUN_NOTICES]")
+            .split("\n[/RUN_FACTS]")
             .next()
             .unwrap();
         let (manifest_payload, manifest_digest): (String, String) = fixture
             .database
             .connection()
             .query_row(
-                "SELECT run_notice_payload_json, run_notice_digest FROM context_manifest WHERE id = ?1",
+                "SELECT run_fact_payload_json, run_fact_digest FROM context_manifest WHERE id = ?1",
                 [&context.manifest_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(run_notice_section, frozen_notice_payload);
-        assert_eq!(manifest_payload, frozen_notice_payload);
+        assert_eq!(run_fact_section, frozen_fact_payload);
+        assert_eq!(manifest_payload, frozen_fact_payload);
         assert_eq!(
             manifest_digest,
             format!("sha256:{:x}", Sha256::digest(manifest_payload.as_bytes()))

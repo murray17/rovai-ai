@@ -58,9 +58,9 @@ verification.
 
 ## 3. Upgrade and recovery
 
-Collecting Gathers build only v2 inputs after upgrade. Already-ready/completing v1 Gathers, pending v1 Completion
-Deliveries, frozen Formatter v15 contexts and stored Formatter v15 manifests remain valid immutable recovery inputs;
-they are not rewritten into v2. A ready Gather never reopens to obtain newer semantics.
+New collecting Gathers build only v2 inputs. Migration 89 cancels collecting/ready/completing Gathers and their
+nonterminal Items/Deliveries before removing incompatible frozen input; completed/cancelled business history remains.
+No old Gather is reopened, translated or resumed under newer formatter semantics.
 
 Budget cost is now: Gather forward `acceptedA2a=1/runResponsibility=1`; ordinary non-captured return `1/1`; captured
 return `0/0` plus the independent bound above; completion `0/1`, reserved at acceptance. The ordinary CampTurn maximum
@@ -72,4 +72,4 @@ is not removed or increased.
 - [ADR-0196](../adr/0196-self-contained-gather-completion-request.md)
 - [Camp Message Send v9](camp-message-send-v9.md)
 - [Message Delivery v4](message-delivery-v4.md)
-- [ContextManifest Evidence v14](context-manifest-evidence-v14.md)
+- [ContextManifest Evidence v15](context-manifest-evidence-v15.md)

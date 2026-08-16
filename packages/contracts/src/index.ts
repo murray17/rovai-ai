@@ -990,8 +990,8 @@ export interface CampAttachmentRefView {
   contentDigest: string
 }
 
-export interface RunNoticeRefView {
-  code: string
+export interface RunFactRefView {
+  fact: 'task_context' | 'session_continuity' | 'external_effect' | 'gather' | 'delegation'
   taskId?: string
 }
 
@@ -1027,9 +1027,9 @@ export interface ContextManifestView {
   collaborationStateIncluded: boolean
   sharedMessageEvidence: unknown[]
   sharedMessageEvidenceDigest: string
-  runNoticeRefs: RunNoticeRefView[]
-  runNoticePayload: unknown
-  runNoticeDigest: string
+  runFactRefs: RunFactRefView[]
+  runFactPayload: unknown
+  runFactDigest: string
   currentInputSource: unknown
   attachmentRefs: CampAttachmentRefView[]
   attachmentDigest: string
@@ -1040,7 +1040,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 16
+  formatterVersion: 17
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

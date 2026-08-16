@@ -3,8 +3,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::command::canonical_json_digest;
 
-pub const OMITTED_PUBLIC_MESSAGES_NAVIGATION_HINT: &str = "Some public messages are omitted. The sequence envelope may contain gaps and is not an executable range. Do not infer omitted content or retrieve it unless the current work requires it; use camp.search to locate relevant messages and camp.read with its canonical input to read them.";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ContextDeliveryProfile {

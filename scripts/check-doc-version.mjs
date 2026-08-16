@@ -265,6 +265,83 @@ const requiredImpactScopes = [
 ];
 const currentDocument = versionDocuments.get(currentVersion);
 if (currentDocument) {
+  const modelContextChange = currentDocument.frontMatter.model_context_change;
+  check(
+    modelContextChange === "true" || modelContextChange === "false",
+    repoPath(currentDocument.readmePath) +
+      " must declare model_context_change: true or false"
+  );
+
+  const currentVersionDirectory = path.dirname(currentDocument.readmePath);
+  const contextChangeFiles = (await readdir(currentVersionDirectory, { withFileTypes: true }))
+    .filter(
+      (entry) =>
+        entry.isFile() &&
+        /^model-context-change(?:-[a-z0-9-]+)?\.md$/.test(entry.name)
+    )
+    .map((entry) => path.join(currentVersionDirectory, entry.name))
+    .sort();
+
+  if (modelContextChange === "true") {
+    check(
+      contextChangeFiles.length > 0,
+      repoPath(currentDocument.readmePath) +
+        " declares a core model-context change but has no separate model-context-change*.md statement"
+    );
+  } else if (modelContextChange === "false") {
+    check(
+      contextChangeFiles.length === 0,
+      repoPath(currentDocument.readmePath) +
+        " declares no core model-context change but contains a model-context-change*.md statement"
+    );
+  }
+
+  for (const changeFile of contextChangeFiles) {
+    const changeText = await readFile(changeFile, "utf8");
+    const changeFrontMatter = parseFrontMatter(changeText, changeFile);
+    const changePath = repoPath(changeFile);
+    check(
+      changeFrontMatter.document_type === "model-context-change",
+      changePath + " must declare document_type: model-context-change"
+    );
+    check(
+      changeFrontMatter.version === currentVersion,
+      changePath + " must declare version: " + currentVersion
+    );
+    check(
+      /^\d+$/.test(changeFrontMatter.revision ?? ""),
+      changePath + " must declare a numeric revision"
+    );
+    check(
+      changeFrontMatter.confirmed_revision === changeFrontMatter.revision,
+      changePath + " confirmed_revision must equal revision"
+    );
+    check(
+      changeFrontMatter.confirmation_status === "confirmed",
+      changePath + " must declare confirmation_status: confirmed before implementation"
+    );
+    check(
+      Boolean(changeFrontMatter.confirmed_by) &&
+        !/^(?:tbd|todo|unknown|none)$/i.test(changeFrontMatter.confirmed_by ?? ""),
+      changePath + " must identify the developer who explicitly reconfirmed the change"
+    );
+    check(
+      /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?$/.test(
+        changeFrontMatter.confirmed_at ?? ""
+      ),
+      changePath + " must declare confirmed_at as an ISO date or timestamp"
+    );
+    for (const heading of [
+      "## 变更前",
+      "## 变更后",
+      "## 明确不变",
+      "## 二次确认",
+      "## 验证",
+    ]) {
+      check(changeText.includes(heading), changePath + " must contain " + heading);
+    }
+  }
+
   const impactHeading = "## 跨版本文档影响";
   const impactStart = currentDocument.text.indexOf(impactHeading);
   check(

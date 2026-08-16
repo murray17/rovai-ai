@@ -8,11 +8,11 @@ const criteria = [
   criterion('CCC-002', 'Ordinary user Current Input remains type:user', [
     test('crates/rovai-core/src/context.rs', 'current_input_is_complete_even_when_it_exceeds_the_history_body_limit')
   ]),
-  criterion('CCC-003', 'Run Notice is rendered once', [
-    test('crates/rovai-core/src/team_tool.rs', 'task_linked_public_delivery_reuses_exact_run_notice_bytes')
+  criterion('CCC-003', 'Run Fact is rendered once', [
+    test('crates/rovai-core/src/team_tool.rs', 'task_linked_public_delivery_reuses_exact_run_fact_bytes')
   ]),
-  criterion('CCC-004', 'Frozen Delivery, model section, and Manifest reuse exact Run Notice bytes and digest', [
-    test('crates/rovai-core/src/team_tool.rs', 'task_linked_public_delivery_reuses_exact_run_notice_bytes')
+  criterion('CCC-004', 'Frozen Delivery, model section, and Manifest reuse exact Run Fact bytes and digest', [
+    test('crates/rovai-core/src/team_tool.rs', 'task_linked_public_delivery_reuses_exact_run_fact_bytes')
   ]),
   criterion('CCC-005', 'Structured CampMessage prefix and camp.read continuation reconstruct the persisted body', [
     test('crates/rovai-core/src/context.rs', 'structured_history_continuation_uses_the_persisted_body_text_space')
@@ -30,7 +30,7 @@ const criteria = [
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 14', [
+  criterion('CCC-010', 'ContextManifest version is 15', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
   criterion('CCC-011', 'Data Contract is v0.90 with projection schema 43', [

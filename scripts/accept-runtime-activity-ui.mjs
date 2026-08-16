@@ -996,7 +996,7 @@ async function seedFixture() {
       id, agent_run_id, bootstrap_evidence_id, native_binding_generation,
       camp_message_boundary_sequence, conversation_message_boundary_sequence,
       raw_message_refs_json, collaboration_state_digest, collaboration_state_included,
-      run_notice_refs_json, run_notice_digest, current_input_source_json,
+      run_fact_refs_json, run_fact_digest, current_input_source_json,
       attachment_refs_json, attachment_digest,
       skill_exposure_json, skill_exposure_digest,
       mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
@@ -1009,12 +1009,12 @@ async function seedFixture() {
       rendered_payload_blob_id, rendered_payload_digest, created_at,
       reference_closure_refs_json, omission_entries_json,
       shared_message_evidence_json, shared_message_evidence_digest,
-      run_notice_payload_json
+      run_fact_payload_json
     ) VALUES (
       'fixture-copilot-manifest', ${sqlLiteral(recoveryBlockedRunId)},
       'fixture-copilot-bootstrap', 1, ${runtimes.length}, 0,
       '[]', 'fixture-collaboration', 0,
-      '[]', 'fixture-run-notice', '{}',
+      '[]', 'fixture-run-fact', '{}',
       '[]', 'fixture-attachments',
       '{"schemaVersion":2,"skills":[]}', 'sha256:legacy-empty-skill-exposure',
       '{"schemaVersion":2,"configDigest":"sha256:empty-mcp-config","configStatus":"ready","projectionMode":"unsupported","sameNamePolicy":null,"warnings":[],"servers":[]}',
@@ -1023,9 +1023,9 @@ async function seedFixture() {
       0, ${runtimes.length}, 0,
       3, '{"profileVersion":3,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
-      '[]', 14,
+      '[]', 17,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
-      '[]', '[]', '[]', 'fixture-shared-message-evidence', '[]'
+      '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}'
     );
     INSERT INTO runtime_input_delivery(
       id, agent_run_id, execution_epoch, context_manifest_id,

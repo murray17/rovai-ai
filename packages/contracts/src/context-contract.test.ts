@@ -1,16 +1,20 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v16.json'
+import fixture from '../fixtures/agent-run-context-v17.json'
 import type { ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v16 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 16
+  it('uses the shared frozen v17 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 17
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(3)
-    expect(fixture.contextManifestVersion).toBe(14)
-    expect(fixture.modelCampMessageFields).toEqual(['body', 'mentionsCurrentUser'])
+    expect(fixture.contextManifestVersion).toBe(15)
+    expect(fixture.dynamicContextSectionOrder.at(-1)).toBe('CURRENT_INPUT')
+    expect(fixture.collaborationState).toEqual({
+      schemaVersion: 2,
+      peerFields: ['agentId', 'name', 'teamRole', 'professionalResponsibilities'],
+    })
     expect(fixture.selfActiveTaskProjection).toMatchObject({
       section: 'SELF_ACTIVE_TASKS',
       maxTasks: 8,
@@ -39,16 +43,24 @@ describe('AgentRun context contract', () => {
       },
     })
     expect(fixture.gatherCompletionManifestEvidence).toContain('completionInputDigest')
-    expect(fixture.historicalMessageIdentityFields).toEqual([
-      'messageId',
-      'sequence',
-      'senderType',
-      'senderId',
-      'replyToMessageId',
+    expect(fixture.sharedConversationTopLevelFields).toEqual(['campId'])
+    expect(fixture.modelCampMessageRequiredFields).toEqual([
+      'messageId', 'sequence', 'senderType', 'senderId', 'body',
+    ])
+    expect(fixture.modelCampMessageOptionalFields).toContain('mentionsCurrentUser:true')
+    expect(fixture.modelCampMessageRemovedFields).toEqual([
+      'bodyLength', 'bodyTruncated', 'continuation', 'mentionsCurrentUser:false',
     ])
     expect(fixture.historicalAttachmentFields).toEqual(['name', 'mediaType', 'path'])
-    expect(fixture.truncatedBodyContinuation.operation).toBe('camp.read')
-    expect(fixture.omissionRecoveryField).toBe('navigationHint')
+    expect(fixture.truncatedBodyContinuation).toEqual({
+      field: 'nextBodyOffset',
+      unit: 'unicode_scalar',
+      campReadItemMapping: [
+        'SHARED_CONVERSATION.campId', 'message.messageId', 'message.nextBodyOffset',
+      ],
+    })
+    expect(fixture.omittedMessagesFields).toEqual(['count', 'sequenceStart', 'sequenceEnd'])
+    expect(fixture.omittedMessagesRemovedFields).toEqual(['navigationHint'])
     expect(fixture.contextManifestSharedMessageEvidence).toContain('attachmentIdPathDigest')
     expect(fixture.contextManifestSharedMessageEvidence).toContain('mentionsCurrentUser')
     expect(fixture.contextManifestSharedMessageEvidence).toContain('projectedBodyDigest')
@@ -58,11 +70,9 @@ describe('AgentRun context contract', () => {
       messageIds: ['message-123'],
       reason: 'history_budget',
     })
-    expect(fixture.contextManifestRunNoticeEvidence).toEqual([
-      'typedTaskReference',
-      'code',
-      'exactCompactJsonBytes',
-      'digest',
+    expect(fixture.runFacts).toMatchObject({schemaVersion: 1, emptyProjection: 'section_omitted'})
+    expect(fixture.contextManifestRunFactEvidence).toEqual([
+      'typedFactReferences', 'typedTaskReference', 'exactCompactJsonBytes', 'digest',
     ])
     expect(fixture.bootstrapRedeliveryEnvelopeVersion).toBe(2)
     expect(fixture.bootstrapRedeliveryFormatterVersion).toBe(2)

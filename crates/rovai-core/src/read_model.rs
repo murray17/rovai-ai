@@ -364,9 +364,9 @@ pub struct ContextManifestView {
     pub collaboration_state_included: bool,
     pub shared_message_evidence: Vec<Value>,
     pub shared_message_evidence_digest: String,
-    pub run_notice_refs: Vec<RunNoticeRefView>,
-    pub run_notice_payload: Value,
-    pub run_notice_digest: String,
+    pub run_fact_refs: Vec<RunFactRefView>,
+    pub run_fact_payload: Value,
+    pub run_fact_digest: String,
     pub current_input_source: Value,
     pub attachment_refs: Vec<CampAttachmentRefView>,
     pub attachment_digest: String,
@@ -385,8 +385,8 @@ pub struct ContextManifestView {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunNoticeRefView {
-    pub code: String,
+pub struct RunFactRefView {
+    pub fact: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub task_id: Option<String>,
 }
@@ -2477,8 +2477,8 @@ fn load_context_manifests(
                manifest.conversation_message_boundary_sequence,
                manifest.raw_message_refs_json,
                manifest.collaboration_state_digest,
-               manifest.run_notice_refs_json,
-               manifest.run_notice_digest,
+               manifest.run_fact_refs_json,
+               manifest.run_fact_digest,
                manifest.current_input_source_json,
                manifest.attachment_refs_json,
                manifest.attachment_digest,
@@ -2522,7 +2522,7 @@ fn load_context_manifests(
                manifest.collaboration_state_included,
                manifest.shared_message_evidence_json,
                manifest.shared_message_evidence_digest,
-               manifest.run_notice_payload_json,
+               manifest.run_fact_payload_json,
                delivery.bootstrap_redelivery_present,
                delivery.bootstrap_redelivery_revision,
                delivery.bootstrap_redelivery_evidence_id,
@@ -2613,12 +2613,12 @@ fn load_context_manifests(
         .map(|row| {
             let raw_message_refs = serde_json::from_str::<Vec<Value>>(&row.5)
                 .context("ContextManifest raw message references are invalid")?;
-            let run_notice_refs = serde_json::from_str::<Vec<RunNoticeRefView>>(&row.7)
-                .context("ContextManifest Run Notice references are invalid")?;
+            let run_fact_refs = serde_json::from_str::<Vec<RunFactRefView>>(&row.7)
+                .context("ContextManifest Run Fact references are invalid")?;
             let shared_message_evidence = serde_json::from_str::<Vec<Value>>(&row.43)
                 .context("ContextManifest Shared Message evidence is invalid")?;
-            let run_notice_payload = serde_json::from_str::<Value>(&row.45)
-                .context("ContextManifest Run Notice payload is invalid")?;
+            let run_fact_payload = serde_json::from_str::<Value>(&row.45)
+                .context("ContextManifest Run Fact payload is invalid")?;
             let omission_entries = serde_json::from_str::<Vec<Value>>(&row.51)
                 .context("ContextManifest omission evidence is invalid")?;
             let self_active_task_evidence = serde_json::from_str::<Value>(&row.52)
@@ -2702,9 +2702,9 @@ fn load_context_manifests(
                 collaboration_state_included: row.42,
                 shared_message_evidence,
                 shared_message_evidence_digest: row.44,
-                run_notice_refs,
-                run_notice_payload,
-                run_notice_digest: row.8,
+                run_fact_refs,
+                run_fact_payload,
+                run_fact_digest: row.8,
                 current_input_source,
                 attachment_refs,
                 attachment_digest: row.11,

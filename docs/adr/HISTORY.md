@@ -211,4 +211,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0197](0197-empty-user-owned-mcp-library.md) | Empty User-Owned MCP Library Without Product Presets | `accepted` | `cross-version` | [v0.91](../versions/v0.91/README.md) | — |
 | [ADR-0198](0198-bounded-open-round-grill-duo-skills.md) | Bounded Open-Round Protocol for Self-Contained Grill Duo Skills | `accepted` | `cross-version` | [v0.92](../versions/v0.92/README.md) | — |
 | [ADR-0199](0199-session-semantic-four-message-review-duo.md) | Session-Semantic Four-Message Review Duo | `accepted` | `cross-version` | [v0.93](../versions/v0.93/README.md) | — |
+| [ADR-0200](0200-compact-context-projection-and-structured-run-facts.md) | Compact AgentRun Context Projection and Structured Run Facts | `accepted` | `cross-version` | [v0.94](../versions/v0.94/README.md) | — |
 <!-- adr-history:end -->
