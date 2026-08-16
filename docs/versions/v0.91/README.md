@@ -4,13 +4,13 @@ version: v0.91
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 last_updated: 2026-08-16
 ---
 
 # Rovai-ai v0.91：空 MCP Library 与用户自主管理
 
-> 当前状态：设计已接受，实施与验收进行中。
+> 当前状态：设计、实施、隔离打包验收与安装已完成。
 >
 > 前置版本：[v0.90 Gather 当前代最后结果与自包含 Completion](../v0.90/README.md)
 
@@ -42,7 +42,8 @@ last_updated: 2026-08-16
 - clean break 第二次执行不改变配置字节；无效预发布配置删除后重新初始化为空；
 - 设置页空状态只有两个创建入口，不存在内置/官方预设文案、preset 特殊标记或 built-in 样式；
 - MCP 手动添加、导入、编辑、删除、分配、风险确认和 Runtime Projection 回归通过；
-- Rust、TypeScript、文档治理、Desktop build、打包 App 隔离验收与签名检查通过。
+- 本版本相关 Rust、TypeScript、文档治理、Desktop build、打包 App 隔离验收与签名检查通过；
+  全工作区 Rust 基线中与本版本无关的 Campfire 规则失败单独记录，不伪装为通过。
 
 ## 跨版本文档影响
 
