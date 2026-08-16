@@ -1,5 +1,7 @@
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
 import YAML from 'yaml'
 
 const SKILL_NAME_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -56,15 +58,13 @@ function validateDescription(description, file, errors) {
 
 function markdownTargets(text) {
   const targets = []
-  for (const match of text.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
-    let target = match[1].trim()
-    if (target.startsWith('<')) {
-      const closing = target.indexOf('>')
-      if (closing >= 0) target = target.slice(1, closing)
-    } else {
-      target = target.split(/\s+["']/u, 1)[0]
+  const pending = [unified().use(remarkParse).parse(text)]
+  while (pending.length > 0) {
+    const node = pending.pop()
+    if (node.type === 'link' || node.type === 'image') {
+      targets.push(node.url)
     }
-    targets.push(target)
+    if (Array.isArray(node.children)) pending.push(...node.children)
   }
   return targets
 }

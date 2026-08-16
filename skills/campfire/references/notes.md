@@ -86,4 +86,5 @@
 
 ## 发布
 
-用 public-only `rovai send --body <纪要正文>` 发布。消息 accepted 后结束当前响应，不再邀请成员、创建 Gather 或自动处理迟到观点。
+用 public-only `rovai send --body <纪要正文>` 发布。发送成功后本场讨论结束，
+不再邀请成员，迟到观点不自动续跑。

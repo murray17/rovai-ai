@@ -8,7 +8,7 @@ import { validateSkillDirectory } from './skill-authoring.mjs'
 async function writeFixture(root, {
   name = 'example-skill',
   description = 'Use when the user needs an example workflow. Ordinary unrelated tasks do not use it.',
-  link = 'references/guide.md',
+  body = 'Read [guide](references/guide.md).',
   shortDescription = 'Guide an example workflow with clear boundaries',
 } = {}) {
   const directory = join(root, 'example-skill')
@@ -16,7 +16,7 @@ async function writeFixture(root, {
   await mkdir(join(directory, 'references'), { recursive: true })
   await writeFile(
     join(directory, 'SKILL.md'),
-    `---\nname: ${name}\ndescription: ${description}\n---\n\nRead [guide](${link}).\n`,
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`,
   )
   await writeFile(join(directory, 'references', 'guide.md'), '# Guide\n')
   await writeFile(
@@ -48,7 +48,7 @@ test('Skill authoring validation reports routing, metadata, and link failures to
     const directory = await writeFixture(root, {
       name: 'wrong-name',
       description: 'Use when gather_completed resumes this workflow, then run rovai send.',
-      link: 'references/missing.md',
+      body: 'Read [missing guide](references/missing.md).',
       shortDescription: 'Too short',
     })
     const errors = await validateSkillDirectory(directory)
@@ -57,6 +57,26 @@ test('Skill authoring validation reports routing, metadata, and link failures to
     assert(errors.some((error) => error.includes('command syntax rovai send')))
     assert(errors.some((error) => error.includes('short_description must be 25–64')))
     assert(errors.some((error) => error.includes('relative link target does not exist')))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('Skill authoring validation ignores example links inside code', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'rovai-skill-authoring-'))
+  try {
+    const directory = await writeFixture(root, {
+      body: [
+        'Read [guide](references/guide.md).',
+        '',
+        'Inline example: `[missing](references/inline-example.md)`.',
+        '',
+        '```markdown',
+        '[missing](references/fenced-example.md)',
+        '```',
+      ].join('\n'),
+    })
+    assert.deepEqual(await validateSkillDirectory(directory), [])
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -40,6 +40,7 @@ last_updated: 2026-08-16
 - 删除 Campfire 的转交启动入口，并精简根 Skill、Lead、Member 和 Notes 中重复的 Gather、回复长度、用户介入和发布说明；
 - 保留 Review Duo 四消息拓扑、Grill Duo 有界开放轮次、Campfire 第一轮/可选第二轮、主持权变化和唯一纪要。
 - 建立通用 Skill authoring validator，检查 frontmatter、UI metadata、内部路由 token 和 bundle 内链接；
+- 链接校验解析真实 Markdown link/image 节点，代码围栏和行内代码中的示例链接不作为文件依赖；
 - 同步移除 `cli-operations` 与 `member-studio` description 中的执行细节，并把 Memory 界面短描述补到推荐长度；
 - 以角色、可信输入和消息拓扑完成[协作场景 Dry Run](scenario-acceptance.md)，不再用 Rust 文案搜索充当行为验收。
 
@@ -60,6 +61,7 @@ last_updated: 2026-08-16
 - Review Duo 仍为五文件 bundle，四消息和两个独立轴不变；
 - 两份 Grill Duo 的三种发送方式各只有一个正文权威位置，开放轮次语义不变；
 - Campfire 不再接受成员转交启动，但仍保留用户直接请求 Default Lead、Gather 两轮上限、Lead 变化和最终纪要；
+- Authoring validator 继续拒绝缺失或越界的真实相对链接，但允许代码示例使用虚构链接目标；
 - Rust workspace、fmt、Clippy、Skill 校验、协作场景、TypeScript 和文档门禁通过。
 
 ## 跨版本文档影响

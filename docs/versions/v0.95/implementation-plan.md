@@ -27,14 +27,14 @@ last_updated: 2026-08-16
 
 - Core official bootstrap 测试保留原测试函数，通过通用 helper 覆盖 13 个 bundle 的精确文件集合、完整
   bytes、mode、来源、上游元数据和管理策略；删除自然语言与命令次数断言，没有减少 Rust 测试函数。
-- 新增通用 `skills:check` 与两项低层 authoring fixture，并纳入 `pnpm test`；13 个仓库 Skill 全部通过。
+- 新增通用 `skills:check` 与三项低层 authoring fixture，并纳入 `pnpm test`；13 个仓库 Skill 全部通过。
 - Authoring lint adoption 同步修正 `cli-operations`、`member-studio` 的路由描述和 Memory 的界面短描述，
   没有改变这些 Skill 的执行协议。
-- Review Duo 根文件从 134 行收敛到 69 行；两份 Grill Duo 分别收敛到 63/69 行；Campfire 根文件和三份
-  reference 从 706 行收敛到 368 行。
+- Review Duo 根文件从 134 行收敛到 75 行；两份 Grill Duo 分别收敛到 62/68 行；Campfire 根文件和三份
+  reference 从 706 行收敛到 371 行。
 - [场景 Dry Run](scenario-acceptance.md)覆盖正常、迟到、部分回答、单题失效、换搭档、错误收件人、主持权
   变化、停止和截断分支。没有运行真实 Runtime/model Smoke。
-- 自动验证：`pnpm typecheck`；`pnpm test`（21 项文档 fixture、2 项 Skill authoring fixture、
+- 自动验证：`pnpm typecheck`；`pnpm test`（21 项文档 fixture、3 项 Skill authoring fixture、
   359 项 Vitest、186 项 Node/benchmark）；`cargo test --workspace`（576 passed、3 manual smoke ignored）；
   Rust fmt、Clippy、Skill validator 和全部文档门禁。
 
@@ -117,6 +117,7 @@ Repair 完成后必须把 `SKILL.md` 的完整内容与对应编译期常量比�
 ### 2.1 Skill validator
 
 - [x] 验证 frontmatter、Skill 名称、目录结构、`agents/openai.yaml` 和相对链接；
+- [x] 解析真实 Markdown link/image 节点，忽略代码围栏和行内代码中的示例链接；
 - [x] 对四个本次修改的 Skill 分别运行 validator；
 - [x] 文件集合真值继续由 `BundledDefinition.files` 与通用 Core helper 覆盖。
 
