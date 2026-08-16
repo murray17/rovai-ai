@@ -102,7 +102,7 @@ import {
   normalizeDraftName,
   planInitialCampSelection,
   toggleCampMemberSelection,
-  workspaceCapability
+  workspaceGitPresentation
 } from './NewConversationDialog'
 import {
   MemberRuntimeForm,
@@ -601,10 +601,11 @@ describe('task event projections', () => {
     }])
   })
 
-  it('presents ordinary, empty, valid, and invalid Git workspace capability states', () => {
+  it('keeps ordinary directories quiet and presents Git detection metadata and warnings', () => {
     const inspection = (
       state: 'not_git' | 'git_valid' | 'git_invalid',
-      headCommit: string | null = null
+      headCommit: string | null = null,
+      branch: string | null = null
     ) => ({
       name: 'workspace',
       projectPath: '/workspace',
@@ -614,23 +615,38 @@ describe('task event projections', () => {
         gitCommonDir: state === 'git_valid' ? '/workspace/.git' : null,
         objectFormat: state === 'git_valid' ? 'sha1' as const : null,
         headCommit,
-        branch: null,
+        branch,
         dirty: state === 'git_valid' ? false : null,
         observedAt: '2026-07-30T00:00:00Z'
       }
     })
 
-    expect(workspaceCapability(inspection('not_git')).label).toBe('普通目录')
-    expect(workspaceCapability(inspection('git_valid')).label).toBe('空 Git 仓库')
-    expect(workspaceCapability(inspection(
+    expect(workspaceGitPresentation(null)).toEqual({ kind: 'none' })
+    expect(workspaceGitPresentation(inspection('not_git'))).toEqual({ kind: 'none' })
+    expect(workspaceGitPresentation(inspection('git_valid')))
+      .toEqual({ kind: 'metadata', label: 'Git · 尚无提交' })
+    expect(workspaceGitPresentation(inspection(
+      'git_valid',
+      '1111111111111111111111111111111111111111',
+      'feature/git-label'
+    ))).toEqual({ kind: 'metadata', label: 'Git · feature/git-label' })
+    expect(workspaceGitPresentation(inspection(
       'git_valid',
       '1111111111111111111111111111111111111111'
-    )).label).toBe('Git 仓库')
-    expect(workspaceCapability(inspection('git_invalid')).label).toBe('Git 状态异常')
-    expect(workspaceCapability({ name: 'workspace', projectPath: '/workspace' }, 'loading'))
-      .toMatchObject({ label: '正在检测 Git…', tone: 'neutral' })
-    expect(workspaceCapability({ name: 'workspace', projectPath: '/workspace' }, 'failed'))
-      .toMatchObject({ label: 'Git 检测失败', tone: 'attention' })
+    ))).toEqual({ kind: 'metadata', label: 'Git · detached' })
+    expect(workspaceGitPresentation(inspection('git_invalid'))).toEqual({
+      kind: 'warning',
+      label: 'Git 状态异常',
+      detail: '无法读取当前 Git 状态。目录仍可使用；执行前会重新检查 Git 状态。'
+    })
+    expect(workspaceGitPresentation({ name: 'workspace', projectPath: '/workspace' }, 'loading'))
+      .toEqual({ kind: 'loading', label: '检测 Git…' })
+    expect(workspaceGitPresentation({ name: 'workspace', projectPath: '/workspace' }, 'failed'))
+      .toEqual({
+        kind: 'warning',
+        label: 'Git 检测失败',
+        detail: '未能完成 Git 检测。目录仍可使用；执行前会重新检查 Git 状态。'
+      })
   })
 
   it('loads Runtime health only for member and Runtime settings views', () => {

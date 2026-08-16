@@ -3466,25 +3466,63 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   color: var(--muted);
   background: var(--surface-muted);
 }
+.new-camp-project-folder-icon {
+  width: 17px;
+  height: 17px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.55;
+}
+.new-camp-project-folder-icon .folder-fill { fill: color-mix(in srgb, var(--brand-soft) 70%, transparent); }
+.new-camp-git-metadata,
+.new-camp-git-loading {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 24px;
+  max-width: 220px;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 7px;
+  overflow: hidden;
+  border-radius: 6px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  font: 650 10.5px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-camp-git-loading i {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  border: 1.5px solid color-mix(in srgb, currentColor 25%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: camp-marker-spin 700ms linear infinite;
+}
 .new-camp-chevron { flex: 0 0 auto; color: var(--faint); font-size: 16px; transition: transform 120ms ease; }
 .new-camp-picker-trigger[aria-expanded="true"] .new-camp-chevron,
 .new-camp-optional-trigger[aria-expanded="true"] .new-camp-chevron { transform: rotate(180deg); }
-.workspace-capability-note {
+.new-camp-workspace-warning {
   display: grid;
-  gap: 2px;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
   margin-top: 7px;
   padding: 8px 10px;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--attention) 32%, var(--line));
   border-radius: 7px;
-  background: var(--surface-muted);
+  color: var(--attention);
+  background: var(--attention-soft);
 }
-.workspace-capability-note strong { font-size: 11.5px; }
-.workspace-capability-note span { color: var(--muted); font-size: 10.5px; line-height: 1.45; }
-.workspace-capability-note.clean { border-color: color-mix(in srgb, var(--success) 28%, var(--line)); }
-.workspace-capability-note.clean strong { color: var(--success); }
-.workspace-capability-note.attention { border-color: color-mix(in srgb, var(--attention) 32%, var(--line)); background: var(--attention-soft); }
-.workspace-capability-note.attention strong,
-.workspace-capability-note.attention span { color: var(--attention); }
+.new-camp-workspace-warning > svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+.new-camp-workspace-warning > div { display: grid; min-width: 0; gap: 2px; }
+.new-camp-workspace-warning strong { font-size: 11.5px; }
+.new-camp-workspace-warning span { font-size: 10.5px; line-height: 1.45; }
 .new-camp-picker-menu {
   position: absolute;
   z-index: 8;
@@ -3516,6 +3554,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 }
 .new-camp-project-option:hover { background: var(--surface-muted); }
 .new-camp-project-option.selected { color: var(--brand-ink); background: var(--brand-soft); }
+.new-camp-project-option-icon { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: var(--muted); background: var(--surface-muted); }
 .new-camp-project-option > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
 .new-camp-project-option b { opacity: 0; color: var(--brand); }
 .new-camp-project-option.selected b { opacity: 1; }

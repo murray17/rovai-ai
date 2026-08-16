@@ -10,6 +10,7 @@ import type {
   WorkspaceSelection
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
+import { NavigationIcon } from './NavigationIcon'
 
 type CreateCampDraft = Omit<CreateCampRequest, 'commandId' | 'activationState'>
 type WorkspaceChoice = WorkspaceSelection | WorkspaceInspection
@@ -111,10 +112,9 @@ export function NewConversationDialog({
       if (cancelled || inspection.projectPath !== pendingGitInspectionPath) return
       setWorkspace(inspection)
       setGitInspectionStatus('ready')
-    }).catch((error: unknown) => {
+    }).catch(() => {
       if (cancelled) return
       setGitInspectionStatus('failed')
-      setSubmitError(`Git 状态检查失败：${errorMessage(error)}`)
     })
     return () => { cancelled = true }
   }, [open, workspace])
@@ -179,7 +179,7 @@ export function NewConversationDialog({
 
   const projectLabel = workspace?.name ?? '使用快速对话'
   const projectDetail = workspace?.projectPath ?? 'Rovai AI 管理的快速对话目录'
-  const capability = workspaceCapability(workspace, gitInspectionStatus)
+  const gitPresentation = workspaceGitPresentation(workspace, gitInspectionStatus)
 
   return (
     <Dialog.Root
@@ -238,8 +238,20 @@ export function NewConversationDialog({
                     disabled={busy}
                     onClick={() => setProjectMenuOpen((current) => !current)}
                   >
-                    <span className="new-camp-picker-icon" aria-hidden="true">⌂</span>
+                    <span className="new-camp-picker-icon" aria-hidden="true">
+                      <WorkspaceIcon kind={workspace ? 'project' : 'quick-chat'} />
+                    </span>
                     <span><strong>{projectLabel}</strong><small>{projectDetail}</small></span>
+                    {gitPresentation.kind === 'metadata' && (
+                      <span className="new-camp-git-metadata" title={gitPresentation.label}>
+                        {gitPresentation.label}
+                      </span>
+                    )}
+                    {gitPresentation.kind === 'loading' && (
+                      <span className="new-camp-git-loading">
+                        <i aria-hidden="true" />{gitPresentation.label}
+                      </span>
+                    )}
                     <span className="new-camp-chevron" aria-hidden="true">⌄</span>
                   </button>
                   {projectMenuOpen && (
@@ -247,6 +259,7 @@ export function NewConversationDialog({
                       <ProjectOption
                         label="使用快速对话"
                         detail="Rovai AI 管理的快速对话目录"
+                        kind="quick-chat"
                         selected={workspace === null}
                         onSelect={() => {
                           setWorkspace(null)
@@ -259,6 +272,7 @@ export function NewConversationDialog({
                             key={candidate.projectKey}
                             label={candidate.name}
                             detail={candidate.projectPath}
+                            kind="project"
                             selected={workspace?.projectPath === candidate.projectPath}
                             onSelect={() => selectKnownWorkspace(candidate)}
                           />
@@ -270,10 +284,16 @@ export function NewConversationDialog({
                     </div>
                   )}
                 </div>
-                {workspace && (
-                  <div className={`workspace-capability-note ${capability.tone}`} role="status">
-                    <strong>{capability.label}</strong>
-                    <span>{capability.detail}</span>
+                {gitPresentation.kind === 'warning' && (
+                  <div className="new-camp-workspace-warning" role="alert">
+                    <svg viewBox="0 0 20 20" aria-hidden="true">
+                      <path d="M10 2.8 18 17H2L10 2.8Z" />
+                      <path d="M10 7.2v4.7M10 14.5h.01" />
+                    </svg>
+                    <div>
+                      <strong>{gitPresentation.label}</strong>
+                      <span>{gitPresentation.detail}</span>
+                    </div>
                   </div>
                 )}
               </section>
@@ -452,16 +472,28 @@ function SectionHeading({ step, title, detail, optional = false, suffix }: {
   )
 }
 
-function ProjectOption({ label, detail, selected, onSelect }: {
+function ProjectOption({ label, detail, kind, selected, onSelect }: {
   label: string
   detail: string
+  kind: 'quick-chat' | 'project'
   selected: boolean
   onSelect(): void
 }): React.JSX.Element {
   return (
     <button className={`new-camp-project-option ${selected ? 'selected' : ''}`} type="button" role="option" aria-selected={selected} onClick={onSelect}>
-      <span aria-hidden="true">⌂</span><span><strong>{label}</strong><small>{detail}</small></span><b aria-hidden="true">✓</b>
+      <span className="new-camp-project-option-icon" aria-hidden="true"><WorkspaceIcon kind={kind} /></span>
+      <span><strong>{label}</strong><small>{detail}</small></span><b aria-hidden="true">✓</b>
     </button>
+  )
+}
+
+function WorkspaceIcon({ kind }: { kind: 'quick-chat' | 'project' }): React.JSX.Element {
+  if (kind === 'quick-chat') return <NavigationIcon name="square-pen" />
+  return (
+    <svg className="new-camp-project-folder-icon" viewBox="0 0 24 24">
+      <path className="folder-fill" d="M3.75 7.2c0-1.1.9-2 2-2h4.05l2.05 2.15h6.4c1.1 0 2 .9 2 2v7.4c0 1.1-.9 2-2 2H5.75c-1.1 0-2-.9-2-2Z" />
+      <path d="M3.9 9.1h16.2" />
+    </svg>
   )
 }
 
@@ -491,52 +523,44 @@ function runtimeDetail(profile: AgentProfile | undefined): string {
   return `${profile.runtimeConfiguration.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
 }
 
-export function workspaceCapability(
+export type WorkspaceGitPresentation =
+  | { kind: 'none' }
+  | { kind: 'loading', label: string }
+  | { kind: 'metadata', label: string }
+  | { kind: 'warning', label: string, detail: string }
+
+export function workspaceGitPresentation(
   workspace: WorkspaceChoice | null,
   inspectionStatus: GitInspectionStatus = 'ready'
-): {
-  label: string
-  detail: string
-  tone: 'neutral' | 'clean' | 'attention'
-} {
+): WorkspaceGitPresentation {
+  if (!workspace) return { kind: 'none' }
   if (workspace && !hasGitObservation(workspace)) {
     return inspectionStatus === 'failed'
       ? {
+          kind: 'warning',
           label: 'Git 检测失败',
-          detail: '目录仍可用于创建对话；Git 能力会在实际使用前重新检查。',
-          tone: 'attention'
+          detail: '未能完成 Git 检测。目录仍可使用；执行前会重新检查 Git 状态。'
         }
       : {
-          label: '正在检测 Git…',
-          detail: '目录已经可用，你可以继续创建；Git 能力会在后台更新。',
-          tone: 'neutral'
+          kind: 'loading',
+          label: '检测 Git…'
         }
   }
-  if (!workspace || workspace.gitObservation.state === 'not_git') {
-    return {
-      label: '普通目录',
-      detail: '你可以正常创建会话并处理文件；分支、提交和差异比较等 Git 功能当前不可用。',
-      tone: 'neutral'
-    }
-  }
+  if (workspace.gitObservation.state === 'not_git') return { kind: 'none' }
   if (workspace.gitObservation.state === 'git_invalid') {
     return {
+      kind: 'warning',
       label: 'Git 状态异常',
-      detail: '当前工作区的 Git 元数据不可用。普通文件工作仍可继续，Git 相关功能暂时禁用。',
-      tone: 'attention'
+      detail: '无法读取当前 Git 状态。目录仍可使用；执行前会重新检查 Git 状态。'
     }
   }
-  return workspace.gitObservation.headCommit
-    ? {
-        label: 'Git 仓库',
-        detail: '当前可以使用分支、提交和差异比较等 Git 功能。',
-        tone: 'clean'
-      }
-    : {
-        label: '空 Git 仓库',
-        detail: 'Git 能力可用；当前仓库尚未产生首个提交。',
-        tone: 'clean'
-      }
+  if (!workspace.gitObservation.headCommit) {
+    return { kind: 'metadata', label: 'Git · 尚无提交' }
+  }
+  return {
+    kind: 'metadata',
+    label: `Git · ${workspace.gitObservation.branch ?? 'detached'}`
+  }
 }
 
 function hasGitObservation(
