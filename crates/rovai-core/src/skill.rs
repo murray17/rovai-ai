@@ -3234,6 +3234,105 @@ mod tests {
         path
     }
 
+    fn collect_relative_files(root: &Path) -> BTreeSet<String> {
+        let mut files = BTreeSet::new();
+        let mut directories = vec![root.to_path_buf()];
+        while let Some(directory) = directories.pop() {
+            let mut entries = fs::read_dir(&directory)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries {
+                let file_type = entry.file_type().unwrap();
+                let path = entry.path();
+                if file_type.is_dir() {
+                    directories.push(path);
+                    continue;
+                }
+                assert!(
+                    file_type.is_file(),
+                    "bundled Skill materialized a non-regular node: {}",
+                    path.display()
+                );
+                let relative = path.strip_prefix(root).unwrap();
+                files.insert(
+                    relative
+                        .to_string_lossy()
+                        .replace(std::path::MAIN_SEPARATOR, "/"),
+                );
+            }
+        }
+        files
+    }
+
+    fn assert_bundled_skill_materialized(
+        service: &SkillLibraryService,
+        skill: &SkillView,
+        definition: &BundledDefinition,
+    ) {
+        assert_eq!(skill.name, definition.name);
+        assert_eq!(skill.origin, SkillOrigin::Official);
+        assert_eq!(
+            skill.current_revision.source_type,
+            SkillRevisionSourceType::Bundled
+        );
+        assert_eq!(skill.management_policy, definition.management_policy);
+        assert_eq!(
+            skill.current_revision.file_count as usize,
+            definition.files.len()
+        );
+        assert_eq!(
+            skill.current_revision.source_metadata.get("bundled"),
+            Some(&Value::Bool(true))
+        );
+        match (definition.upstream_repository, definition.upstream_revision) {
+            (Some(repository), Some(revision)) => assert_eq!(
+                skill.current_revision.source_metadata.get("upstream"),
+                Some(&json!({
+                    "repository": repository,
+                    "revision": revision,
+                }))
+            ),
+            (None, None) => assert!(
+                skill
+                    .current_revision
+                    .source_metadata
+                    .get("upstream")
+                    .is_none()
+            ),
+            _ => panic!(
+                "bundled Skill {} has incomplete upstream metadata",
+                definition.name
+            ),
+        }
+
+        let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
+        assert_eq!(
+            collect_relative_files(&content),
+            definition
+                .files
+                .iter()
+                .map(|(relative, _, _)| (*relative).to_string())
+                .collect::<BTreeSet<_>>()
+        );
+        for (relative, expected_content, expected_mode) in definition.files {
+            let path = content.join(relative);
+            assert_eq!(
+                fs::read(&path).unwrap(),
+                expected_content.as_bytes(),
+                "bundled Skill {} content differs at {relative}",
+                definition.name
+            );
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                *expected_mode,
+                "bundled Skill {} mode differs at {relative}",
+                definition.name
+            );
+        }
+    }
+
     #[test]
     fn imports_default_to_all_groups_and_updates_preserve_user_changes() {
         let root = temporary_directory("rovai-skill-library");
@@ -3529,415 +3628,12 @@ mod tests {
                 .collect::<BTreeSet<_>>()
                 == all_groups
         }));
-        for skill in &skills {
-            let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
-            assert!(content.join("agents/openai.yaml").is_file());
-        }
-        let analyze_agent_codebase = skills
-            .iter()
-            .find(|skill| skill.name == "analyze-agent-codebase")
-            .unwrap();
-        let analyze_agent_codebase_content = service.revision_content_path(
-            &analyze_agent_codebase.id,
-            &analyze_agent_codebase.current_revision.id,
-        );
-        assert!(
-            analyze_agent_codebase_content
-                .join("references/dossier-structure.md")
-                .is_file()
-        );
-        assert!(
-            fs::read_to_string(analyze_agent_codebase_content.join("SKILL.md"))
-                .unwrap()
-                .contains("证据账本")
-        );
-        let campfire = skills
-            .iter()
-            .find(|skill| skill.name == "campfire")
-            .unwrap();
-        assert_eq!(campfire.current_revision.file_count, 6);
-        assert!(
-            campfire
-                .current_revision
-                .source_metadata
-                .get("upstream")
-                .is_none()
-        );
-        let campfire_content =
-            service.revision_content_path(&campfire.id, &campfire.current_revision.id);
-        for relative in [
-            "NOTICE",
-            "references/lead.md",
-            "references/member.md",
-            "references/notes.md",
-        ] {
-            assert!(campfire_content.join(relative).is_file());
-        }
-        let campfire_rules = fs::read_to_string(campfire_content.join("SKILL.md")).unwrap();
-        for required in [
-            "第一轮使用一次 Gather",
-            "第二轮是可选的定向回应 Gather",
-            "每场最多两轮 Gather",
-            "Gather accepted 后",
-            "`gather_completed`",
-        ] {
-            assert!(
-                campfire_rules.contains(required),
-                "missing Campfire rule: {required}"
-            );
-        }
-        assert!(!campfire_rules.contains("[CAMPFIRE_"));
-        assert!(!campfire_rules.contains("请使用 `$campfire`"));
-        let campfire_lead =
-            fs::read_to_string(campfire_content.join("references/lead.md")).unwrap();
-        assert!(campfire_lead.contains("rovai gather --to"));
-        assert!(campfire_lead.contains("主持权变化"));
-        assert!(campfire_lead.contains("bodyTruncated=true"));
-        let campfire_member =
-            fs::read_to_string(campfire_content.join("references/member.md")).unwrap();
-        assert!(campfire_member.contains("发送失败时遵循 CLI recovery"));
-        let cli_operations = skills
-            .iter()
-            .find(|skill| skill.name == "cli-operations")
-            .unwrap();
-        let cli_operations_content =
-            service.revision_content_path(&cli_operations.id, &cli_operations.current_revision.id);
-        for reference in [
-            "send.md",
-            "gather.md",
-            "task.md",
-            "camp-history.md",
-            "memory.md",
-            "recovery.md",
-        ] {
-            assert!(
-                cli_operations_content
-                    .join("references")
-                    .join(reference)
-                    .is_file()
-            );
-        }
-        let cli_rules = fs::read_to_string(cli_operations_content.join("SKILL.md")).unwrap();
-        assert!(cli_rules.contains("普通单一操作"));
-        assert!(cli_rules.contains("references/recovery.md"));
-        let send_reference =
-            fs::read_to_string(cli_operations_content.join("references/send.md")).unwrap();
-        assert!(send_reference.contains("普通 CampMessage 已经对用户可见"));
-        assert!(send_reference.contains("User attention 只属于当前消息"));
-        assert!(send_reference.contains("相互独立的行动时才组合"));
-        assert!(send_reference.contains("不是 Core authorization 或角色拒绝规则"));
-        assert!(!send_reference.contains("需要用户查看或决定时增加 User attention"));
-        let gather_reference =
-            fs::read_to_string(cli_operations_content.join("references/gather.md")).unwrap();
-        assert!(gather_reference.contains("接受后结束"));
-        assert!(gather_reference.contains("不要轮询"));
-        assert!(gather_reference.contains("不会立即物化 Lead Run"));
-        assert!(gather_reference.contains("只有最后一条成功接受的回传"));
-        assert!(gather_reference.contains("不占普通 A2A 配额"));
-        assert!(gather_reference.contains("完整原始 Gather 请求"));
-        assert!(gather_reference.contains("mandatory Current Input"));
-        assert!(gather_reference.contains("原 initiator Conversation"));
-        let cli_openai =
-            fs::read_to_string(cli_operations_content.join("agents/openai.yaml")).unwrap();
-        assert!(cli_openai.contains("display_name: \"CLI 操作协调\""));
-        assert!(cli_openai.contains("$cli-operations"));
-        for forbidden in [
-            "rovai task --help",
-            "rovai camp --help",
-            "rovai memory --help",
-            "chatgpt.com",
-        ] {
-            assert!(!cli_rules.contains(forbidden));
-        }
-        let grill_duo = skills
-            .iter()
-            .find(|skill| skill.name == "grill-duo")
-            .unwrap();
-        let grill_duo_content =
-            service.revision_content_path(&grill_duo.id, &grill_duo.current_revision.id);
-        assert_eq!(grill_duo.current_revision.file_count, 2);
-        let grill_duo_rules = fs::read_to_string(grill_duo_content.join("SKILL.md")).unwrap();
-        let grill_duo_description = grill_duo_rules
-            .lines()
-            .find(|line| line.starts_with("description:"))
-            .unwrap();
-        assert!(grill_duo_description.contains("需要同步维护领域词汇或 ADR 的追问"));
-        assert!(!grill_duo_description.contains("双人追问 ·"));
-        assert!(!grill_duo_description.contains("rovai send"));
-        for required in [
-            "## 消息方式",
-            "前提已经确认、彼此不依赖的 1–4 个问题",
-            "一轮在其中所有问题被明确回答、取消或失效前保持开放",
-            "开放轮次期间不混入新问题",
-            "只重新复核该题",
-            "搭档只处理触发当前 AgentRun 的请求",
-            "当前固定搭档对本轮当前有效邀请的直接回复",
-            "旧轮、已失效邀请或迟到建议只作补充",
-            "rovai send --to <搭档 Agent ID> --body <本轮问题>",
-            "rovai send --to <邀请者 Agent ID> --body <本轮建议>",
-            "rovai send --to-user --body <正文>",
-            "消息返回 `accepted` 后才结束当前响应",
-            "需要同步维护领域词汇或 ADR 的追问",
-        ] {
-            assert!(
-                grill_duo_rules.contains(required),
-                "missing grill-duo rule: {required}"
-            );
-        }
-        assert_eq!(grill_duo_rules.matches("rovai send").count(), 3);
-        let retired_duo_markers =
-            ["REVIEW", "ADVISORY"].map(|suffix| ["GRILL", "DUO", suffix].join("_"));
-        for retired_marker in &retired_duo_markers {
-            assert!(!grill_duo_rules.contains(retired_marker));
-        }
-        let grill_duo_with_docs = skills
-            .iter()
-            .find(|skill| skill.name == "grill-duo-with-docs")
-            .unwrap();
-        let grill_duo_with_docs_content = service.revision_content_path(
-            &grill_duo_with_docs.id,
-            &grill_duo_with_docs.current_revision.id,
-        );
-        assert_eq!(grill_duo_with_docs.current_revision.file_count, 5);
-        for reference in ["domain-modeling.md", "context-format.md", "adr-format.md"] {
-            assert!(
-                grill_duo_with_docs_content
-                    .join("references")
-                    .join(reference)
-                    .is_file()
-            );
-        }
-        let grill_duo_with_docs_rules =
-            fs::read_to_string(grill_duo_with_docs_content.join("SKILL.md")).unwrap();
-        let grill_duo_with_docs_description = grill_duo_with_docs_rules
-            .lines()
-            .find(|line| line.starts_with("description:"))
-            .unwrap();
-        assert!(grill_duo_with_docs_description.contains("已确认的领域词汇或必要 ADR"));
-        assert!(!grill_duo_with_docs_description.contains("双人追问与文档 ·"));
-        assert!(!grill_duo_with_docs_description.contains("rovai send"));
-        for required in [
-            "## 消息方式",
-            "前提已经确认、彼此不依赖的 1–4 个问题",
-            "一轮在其中所有问题被明确回答、取消或失效前保持开放",
-            "开放轮次期间不混入新问题",
-            "只重新复核该题",
-            "搭档只处理触发当前 AgentRun 的请求",
-            "当前固定搭档对本轮当前有效邀请的直接回复",
-            "旧轮、已失效邀请或迟到建议只作补充",
-            "rovai send --to <搭档 Agent ID> --body <本轮问题>",
-            "rovai send --to <邀请者 Agent ID> --body <本轮建议>",
-            "rovai send --to-user --body <正文>",
-            "消息返回 `accepted` 后才结束当前响应",
-            "只记录用户明确确认的术语和决定",
-            "无需维护领域文档的追问",
-        ] {
-            assert!(
-                grill_duo_with_docs_rules.contains(required),
-                "missing grill-duo-with-docs rule: {required}"
-            );
-        }
-        assert_eq!(grill_duo_with_docs_rules.matches("rovai send").count(), 3);
-        assert!(
-            !grill_duo_with_docs_content
-                .join("references")
-                .join("grill-duo.md")
-                .exists()
-        );
-        for retired_marker in &retired_duo_markers {
-            assert!(!grill_duo_with_docs_rules.contains(retired_marker));
-        }
-        for openai_path in [
-            grill_duo_content.join("agents/openai.yaml"),
-            grill_duo_with_docs_content.join("agents/openai.yaml"),
-        ] {
-            let openai = fs::read_to_string(openai_path).unwrap();
-            let short_description = openai
-                .lines()
-                .find_map(|line| line.trim().strip_prefix("short_description: "))
-                .unwrap()
-                .trim_matches('"');
-            assert!((25..=64).contains(&short_description.chars().count()));
-            assert!(!short_description.contains(" · "));
-            assert!(!short_description.contains("rovai send"));
-        }
-        let review_duo = skills
-            .iter()
-            .find(|skill| skill.name == "review-duo")
-            .unwrap();
-        assert_eq!(review_duo.current_revision.file_count, 5);
-        assert!(
-            review_duo
-                .current_revision
-                .source_metadata
-                .get("upstream")
-                .is_none()
-        );
-        let review_duo_content =
-            service.revision_content_path(&review_duo.id, &review_duo.current_revision.id);
-        for relative in ["NOTICE", "references/findings.md", "references/snapshot.md"] {
-            assert!(review_duo_content.join(relative).is_file());
-        }
-        for retired in [
-            "references/acceptance.md",
-            "references/fallbacks.md",
-            "references/lead.md",
-            "references/messages-and-replies.md",
-            "references/spec-reviewer.md",
-            "references/standards-reviewer.md",
-        ] {
-            assert!(!review_duo_content.join(retired).exists());
-        }
-        let review_duo_rules = fs::read_to_string(review_duo_content.join("SKILL.md")).unwrap();
-        let review_duo_description = review_duo_rules
-            .lines()
-            .find(|line| line.starts_with("description:"))
-            .unwrap();
-        assert!(review_duo_description.contains("只要求修改代码而未要求双人评审"));
-        assert!(!review_duo_description.contains("rovai send"));
-        let review_duo_openai =
-            fs::read_to_string(review_duo_content.join("agents/openai.yaml")).unwrap();
-        assert!(review_duo_openai.contains("display_name: \"双人代码评审\""));
-        let review_duo_short_description = review_duo_openai
-            .lines()
-            .find_map(|line| line.trim().strip_prefix("short_description: "))
-            .unwrap()
-            .trim_matches('"');
-        assert!((25..=64).contains(&review_duo_short_description.chars().count()));
-        for required in [
-            "同一位发起者在同一个 Camp 中一次只推进一场",
-            "正常流程只使用以上四条消息",
-            "每个方向最多报告 8 条",
-            "2,000–2,500 个中文字符",
-            "每条 finding 的“问题、依据、影响、建议”分别只写 1–2 句",
-            "accepted 后必须确认 `effectiveRecipients=[]`",
-            "收件人必须恰好是预期的可信 Agent ID",
-            "发起者在同一响应中继续独立完成并发布需求检查",
-            "只有搭档明确不可用或 Delivery 明确失败时才更换",
-            "只接受新搭档对当前有效请求的直接回复",
-            "最多 3 条最重要问题",
-            "最终报告本身表示当前会话中的本场评审已经完成",
-            "不为此建立确定性历史查重协议",
-        ] {
-            assert!(
-                review_duo_rules.contains(required),
-                "missing review-duo rule: {required}"
-            );
-        }
-        let review_duo_findings =
-            fs::read_to_string(review_duo_content.join("references").join("findings.md")).unwrap();
-        for required in [
-            "每条的“问题、依据、影响、建议”分别只写 1–2 句",
-            "单方向完整结果目标控制在约 2,000–2,500 个中文字符",
-            "Finding 数量：** <0–8>",
-            "重要问题：最多 3 条",
-            "不得复制两个方向的全部 finding",
-        ] {
-            assert!(
-                review_duo_findings.contains(required),
-                "missing review-duo result rule: {required}"
-            );
-        }
-        let review_duo_snapshot =
-            fs::read_to_string(review_duo_content.join("references").join("snapshot.md")).unwrap();
-        for required in [
-            "git:<完整 merge-base SHA>...<完整 head SHA>",
-            "patch:sha256:<64 位小写摘要>",
-            "固定范围是四条评审消息共同携带的自然关联信息",
-        ] {
-            assert!(review_duo_snapshot.contains(required));
-        }
-        let review_duo_protocol =
-            [review_duo_rules, review_duo_findings, review_duo_snapshot].join("\n");
-        for retired in [
-            "requestMessageId",
-            "reviewKey",
-            "Spec source locator",
-            "Standards result locator",
-            "30 KiB 工作上限",
-            "expected part count",
-        ] {
-            assert!(
-                !review_duo_protocol.contains(retired),
-                "retired review-duo transport rule remains: {retired}"
-            );
-        }
-        let tasteful_ui = skills
-            .iter()
-            .find(|skill| skill.name == "tasteful-ui")
-            .unwrap();
-        assert_eq!(tasteful_ui.current_revision.file_count, 84);
-        assert_eq!(
-            tasteful_ui.current_revision.source_metadata["upstream"]["repository"],
-            "https://github.com/DonkeyKing01/tasteful-ui-skill"
-        );
-        assert_eq!(
-            tasteful_ui.current_revision.source_metadata["upstream"]["revision"],
-            "159ccd47a320f3a7bd0289d07366d422211895a1"
-        );
-        let tasteful_ui_content =
-            service.revision_content_path(&tasteful_ui.id, &tasteful_ui.current_revision.id);
-        for relative in [
-            "LICENSE",
-            "NOTICE",
-            "references/catalog.md",
-            "references/designs/productivity _ saas/linear.md",
-            "workflows/verification.md",
-        ] {
-            assert!(tasteful_ui_content.join(relative).is_file());
-        }
-        assert!(
-            fs::read_to_string(tasteful_ui_content.join("SKILL.md"))
-                .unwrap()
-                .contains("# Tasteful UI")
-        );
-        for (name, file_count, required_files, description_fragment) in [
-            (
-                "diagnosing-bugs",
-                5,
-                &["LICENSE", "NOTICE", "scripts/hitl-loop.template.sh"][..],
-                "a diagnosis-only request does not authorize implementing a fix",
-            ),
-            (
-                "tdd",
-                6,
-                &["LICENSE", "NOTICE", "mocking.md", "tests.md"][..],
-                "Do not trigger merely because tests will be added",
-            ),
-            (
-                "writing-for-agents",
-                5,
-                &["LICENSE", "NOTICE", "SKILL-MECHANICS.md"][..],
-                "not for ordinary user documentation",
-            ),
-        ] {
-            let skill = skills.iter().find(|skill| skill.name == name).unwrap();
-            assert_eq!(skill.current_revision.file_count, file_count);
-            assert_eq!(
-                skill.current_revision.source_metadata["upstream"]["repository"],
-                MATTPOCOCK_SKILLS_REPOSITORY
-            );
-            assert_eq!(
-                skill.current_revision.source_metadata["upstream"]["revision"],
-                MATTPOCOCK_SKILLS_REVISION
-            );
-            let content = service.revision_content_path(&skill.id, &skill.current_revision.id);
-            for relative in required_files {
-                assert!(
-                    content.join(relative).is_file(),
-                    "{name} is missing {relative}"
-                );
-            }
-            assert!(
-                fs::read_to_string(content.join("SKILL.md"))
-                    .unwrap()
-                    .contains(description_fragment)
-            );
-            assert!(
-                fs::read_to_string(content.join("agents/openai.yaml"))
-                    .unwrap()
-                    .contains(&format!("${name}"))
-            );
+        for definition in BUNDLED_SKILLS {
+            let skill = skills
+                .iter()
+                .find(|skill| skill.name == definition.name)
+                .unwrap();
+            assert_bundled_skill_materialized(&service, skill, definition);
         }
         let diagnosing_bugs = skills
             .iter()
@@ -3965,73 +3661,15 @@ mod tests {
             &memory_stewardship.id,
             &memory_stewardship.current_revision.id,
         );
-        for reference in [
-            "authority-and-safety.md",
-            "scopes.md",
-            "read-write-workflow.md",
-            "content-and-keys.md",
-        ] {
-            assert!(content.join("references").join(reference).is_file());
-        }
-        let memory_semantics = [
-            fs::read_to_string(content.join("SKILL.md")).unwrap(),
-            fs::read_to_string(content.join("references/authority-and-safety.md")).unwrap(),
-            fs::read_to_string(content.join("references/scopes.md")).unwrap(),
-            fs::read_to_string(content.join("references/read-write-workflow.md")).unwrap(),
-            fs::read_to_string(content.join("references/content-and-keys.md")).unwrap(),
-        ]
-        .join("\n");
-        for required in [
-            "当前用户输入、当前授权、当前工具结果，以及当前仓库与协作状态始终高于 Memory",
-            "discovery cache",
-            "revision_changed",
-            "inactive",
-            "deleted",
-            "access_changed",
-            "unavailable",
-            "文件路径、SQLite、Markdown Projection 或 Skill Projection",
-            "credentials",
-            "当前队员 → counterparty",
-            "target",
-            "Scope、Kind、counterparty 或 Relationship direction",
-            "2,048 UTF-8 bytes",
-            "1–3 个 key",
-            "2–24 UTF-8 bytes",
-            "48 UTF-8 bytes",
-            "rovai memory view --help",
-            "rovai memory search --help",
-            "rovai memory read --help",
-            "rovai memory write --help",
-            "outcome: effective",
-            "outcome: review_pending",
-            "Mutual 只属于 structured user governance",
-            "Retire、Reactivate、Forget、Supersession",
-        ] {
-            assert!(
-                memory_semantics.contains(required),
-                "missing Memory semantic: {required}"
-            );
-        }
-        for forbidden in [
-            "`memory.search`",
-            "`memory.read`",
-            "`memory.write`",
-            "`memory.propose_hearth`",
-            "baseRevisionId",
-            "rovai memory --help",
-        ] {
-            assert!(!memory_semantics.contains(forbidden));
-        }
         fs::write(content.join("SKILL.md"), "corrupted by local edit").unwrap();
         let repair_bootstrap = service.install_bundled_skills(&mut database).unwrap();
         assert!(repair_bootstrap.changed);
         assert_eq!(repair_bootstrap.fast_path_count, BUNDLED_SKILLS.len() - 1);
         assert_eq!(repair_bootstrap.materialized_count, 1);
         assert_eq!(repair_bootstrap.repaired_count, 1);
-        assert!(
-            fs::read_to_string(content.join("SKILL.md"))
-                .unwrap()
-                .contains("name: memory-stewardship")
+        assert_eq!(
+            fs::read(content.join("SKILL.md")).unwrap(),
+            MEMORY_STEWARDSHIP_RULES.as_bytes()
         );
         let repair_count: i64 = database
             .connection()

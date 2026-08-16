@@ -347,11 +347,12 @@ send/`--to-user`/list/get/search/read 不要求加载 `cli-operations`。
 上游来源，不把它们变成用户 Imported Skill，也不赋予诊断、测试 seam、文档写入或实现权威。
 
 `campfire` 是无外部上游的 Rovai original official Skill，并使用 ordinary `user_managed` delivery。
-它仅以公开 A2A Camp Messages 组织 2–3 位成员的独立开场、有限定向回应与 Default Lead 终止纪要；
-非 Lead 通过 `defaultLeadAgentId` 显式寻址交接；邀请 accepted 后冻结 participant/invitation 清单，每次
-开场回传都经过 Opening Barrier，未收齐有效直接回复或权威终态前只能 public-only 等待，不能提前形成
-分岔点或纪要。自然阶段标题不是 Core protocol，`### 篝火纪要` 不触发续跑，也不产生 Task、Memory、
-ADR 或实施副作用。
+只有用户直接请求当前 Default Lead 才能开始新讨论；普通成员不会代为启动或把用户请求发送给 Lead。
+第一轮以一次 Gather 邀请 2–3 位成员独立作答，只有一个会改变结论的关键分歧可以触发一次邀请 1–2 人的
+定向回应 Gather。成员回传保持公开，但精确绑定当前 Item/Run/retry generation 的最后一条 captured return
+不会逐条唤醒 Lead；所有 Item 终态后，Completion Delivery 才按原 initiator Conversation FIFO 物化一次
+continuation。原发起者失去 Default Lead 身份后仍完成本场纪要，但不得再创建第二轮 Gather。自然阶段标题
+不是 Core protocol，`### 篝火纪要` 不触发续跑，也不产生 Task、Memory、ADR 或实施副作用。
 
 `grill-duo`、`grill-duo-with-docs` 与 `review-duo` 同样使用 ordinary `user_managed` delivery。自然标题只
 提供公屏阅读线索；Skill 进入后使用可信 Current Input sender、显式 Agent recipient 和 reference closure

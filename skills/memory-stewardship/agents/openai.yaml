@@ -1,4 +1,4 @@
 interface:
   display_name: "共同记忆维护"
-  short_description: "发现并维护值得跨未来协作保留的长期路标"
+  short_description: "发现、核对并维护值得跨未来 AgentRun 和团队协作保留的长期信息"
   default_prompt: "使用 $memory-stewardship 判断这段信息是否构成长期记忆机会，核对现有 Memory，并决定最小的 add、revise 或停止。"

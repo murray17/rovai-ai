@@ -1,6 +1,6 @@
 ---
 name: cli-operations
-description: 当不确定当前工作应使用 CampMessage、Gather、持久 Task、Camp/History 检索还是 Memory，需要由 Default Lead 并行征集多个成员后统一综合，普通消息是否应升级为 Task，一次业务事件需要协调多个 Rovai 操作，或 CLI 返回要求 refresh、confirm_outcome 等业务状态判断时使用。普通单一操作、收件人参数和具体 flags 应直接查看对应 operation 的 --help，不要因此自动加载本 Skill。
+description: 当不确定当前工作应使用 CampMessage、Gather、持久 Task、Camp/History 检索还是 Memory，需要由 Default Lead 并行征集多个成员后统一综合，普通消息是否应升级为 Task，一次业务事件需要协调多个 Rovai 操作，或 CLI 返回后需要根据最新状态选择恢复动作时使用。普通单一操作及其具体收件人或参数应直接查看对应操作帮助，不要因此自动加载本 Skill。
 ---
 
 # Rovai CLI 操作协调

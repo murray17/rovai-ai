@@ -130,8 +130,12 @@ description: 当当前任务可能需要在【操作 A、操作 B、操作 C】�
 2. 检查 `agents/openai.yaml` 是否仍与 Skill 的用户可见定位一致；确认 `short_description` 为
    25–64 个字符，不要把 frontmatter `description` 原样复制成界面文案。
 3. 修改 pinned third-party Skill 时，继续服从其 provenance、许可和有效 ADR 允许的改动面。
-4. 使用当前 Skill authoring 工具提供的 validator 检查 frontmatter、名称和目录结构。
-5. 运行 `git diff --check`；修改本文或文档导航时再运行 `pnpm docs:test`、`pnpm docs:check`
+4. 运行 `pnpm skills:check`，检查全部仓库 Skill 的 frontmatter、目录名称、`agents/openai.yaml`、
+   short description 长度、内部路由 token 和相对链接。单独修改某个 Skill 时也可以把其目录传给
+   `node scripts/check-skills.mjs <skill-directory>`。
+5. 修改 authoring checker 时运行 `pnpm skills:test`；它验证通用 bundle 的正向路径，以及名称、路由
+   元数据、界面元数据和链接错误能够同时报告。不要为单一 Skill、版本或固定句子增加 checker 例外。
+6. 运行 `git diff --check`；修改本文或文档导航时再运行 `pnpm docs:test`、`pnpm docs:check`
    和 `pnpm docs:adr:generate -- --check`。
-6. 更新相关语义测试时，断言应覆盖自然语言选择边界和排除边界；不要为了让测试通过而把命令、
+7. 更新相关语义测试时，断言应覆盖自然语言选择边界和排除边界；不要为了让测试通过而把命令、
    固定消息标题或内部完成事件塞回 `description`。

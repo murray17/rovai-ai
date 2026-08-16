@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.94
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -14,6 +14,8 @@ last_updated: 2026-08-16
 > 当前状态：设计、二次确认、实施与自动验收已完成。
 >
 > 前置版本：[v0.93 Review Duo 会话语义精简](../v0.93/README.md)
+>
+> 后续版本：[v0.95 官方 Skill 测试去文案化与协议去重](../v0.95/README.md)
 
 ## 版本目标
 

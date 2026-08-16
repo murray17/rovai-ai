@@ -77,13 +77,17 @@ cargo test --workspace -- --list
 
 ```bash
 pnpm typecheck
+pnpm skills:test
+pnpm skills:check
 pnpm test
 pnpm test:rust:staged
 ```
 
-`pnpm test` 首先显式执行 `pnpm docs:test` 和 `pnpm docs:check`。前者覆盖 YAML/Markdown 解析、
-直接替代图、CURRENT/HISTORY、链接、legacy exception、amendment 和 diff freeze fixture；后者验证
-当前版本唯一性以及真实仓库的 ADR/Architecture/链接快照。文档治理改动至少单独运行：
+`pnpm test` 首先显式执行 `pnpm docs:test`、`pnpm docs:check`、`pnpm skills:test` 和
+`pnpm skills:check`。`docs:test` 覆盖 YAML/Markdown 解析、直接替代图、CURRENT/HISTORY、链接、
+legacy exception、amendment 和 diff freeze fixture；`docs:check` 验证当前版本唯一性以及真实仓库的
+ADR/Architecture/链接快照。Skill 检查覆盖通用 authoring fixture、
+frontmatter、界面元数据和 bundle 内相对链接，不用自然语言逐字断言代替协作场景验收。文档治理改动至少单独运行：
 
 ```bash
 pnpm docs:test
