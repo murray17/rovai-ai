@@ -7,6 +7,7 @@ import type {
   PermissionOptionDescriptor
 } from '@contracts'
 import {
+  MemberModelParameters,
   MemberRuntimeParameters,
   draftFromDefaults,
   runtimeDraftForMember,
@@ -14,6 +15,23 @@ import {
 } from './MemberRuntimeParameters'
 
 describe('member runtime parameters', () => {
+  it('keeps onboarding limited to model fields while permissions come from adapter defaults', () => {
+    const installation = runtimeInstallation('codex-cli')
+    const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
+      adapterKind: 'codex-cli',
+      installation,
+      model: { mode: 'runtime_default' },
+      disabled: false,
+      onChange: () => undefined
+    }))
+
+    expect(markup).toContain('onboarding-model-parameter-form')
+    expect(markup).toContain('模型策略')
+    expect(markup).not.toContain('文件系统访问')
+    expect(markup).not.toContain('审批策略')
+    expect(markup).not.toContain('danger-full-access')
+  })
+
   it('uses Core-provided defaults and keeps the parameters visible by default', () => {
     const installation = runtimeInstallation('codex-cli')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {

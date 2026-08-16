@@ -1,7 +1,10 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
-import { assertUserDataIsIsolated } from './lib/dev-desktop.mjs'
+import {
+  assertUserDataIsIsolated,
+  seedCompletedOnboardingForAcceptance
+} from './lib/dev-desktop.mjs'
 
 const appPath = process.argv[2]
 const outputPrefix = process.argv[3] ?? '/tmp/rovai-desktop'
@@ -24,6 +27,7 @@ const targetRuntimeLabel = targetRuntimeKind && ({
 })[targetRuntimeKind]
 if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Rovai-ai.app> [output-prefix]')
 const userDataDirectory = assertUserDataIsIsolated(process.env.ROVAI_CAPTURE_USER_DATA_DIR)
+seedCompletedOnboardingForAcceptance(userDataDirectory)
 if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown ROVAI_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
 if (captureTheme && !['system', 'day', 'night'].includes(captureTheme)) {
   throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${captureTheme}`)

@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
@@ -46,6 +47,7 @@ import {
 import { RestorableLocationStore, parseRestorableLocation } from './restorable-location'
 import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
+import { OnboardingStore } from './onboarding-preferences'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -169,6 +171,7 @@ let lastDiagnosticsExportPath: string | null = null
 let lastMonitoringExportPath: string | null = null
 let lastAppearanceSignature = ''
 let generalPreferences: GeneralPreferencesStore | null = null
+let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
 let quitDrainStarted = false
@@ -325,17 +328,26 @@ if (primaryInstance) void app.whenReady().then(async () => {
   )
   removeRetiredLoginItemRegistration()
   await deleteRetiredManagedDirectory(app.getPath('userData'))
-  appearanceFilePath = join(app.getPath('userData'), 'appearance.json')
+  const userDataPath = app.getPath('userData')
+  const hadExistingCoreDatabase = existsSync(join(userDataPath, 'rovai.sqlite'))
+    || existsSync(join(userDataPath, 'lumen.sqlite'))
+  appearanceFilePath = join(userDataPath, 'appearance.json')
   const [
     loadedGeneralPreferences,
+    loadedOnboarding,
     loadedRestorableLocations,
     loadedNavigationPreferences
   ] = await Promise.all([
-    GeneralPreferencesStore.load(join(app.getPath('userData'), 'general-preferences.json')),
-    RestorableLocationStore.load(join(app.getPath('userData'), 'restorable-location.json')),
-    NavigationPreferencesStore.load(join(app.getPath('userData'), 'navigation.json'))
+    GeneralPreferencesStore.load(join(userDataPath, 'general-preferences.json')),
+    OnboardingStore.load(join(userDataPath, 'onboarding.json')),
+    RestorableLocationStore.load(join(userDataPath, 'restorable-location.json')),
+    NavigationPreferencesStore.load(join(userDataPath, 'navigation.json'))
   ])
   generalPreferences = loadedGeneralPreferences
+  onboarding = loadedOnboarding
+  // Decide first-run versus upgrade before Core can create a fresh SQLite file.
+  // initialize() is idempotent, so a persisted in-progress or completed flow wins.
+  await onboarding.initialize(hadExistingCoreDatabase)
   restorableLocations = loadedRestorableLocations
   navigationPreferences = loadedNavigationPreferences
   console.info(
@@ -438,6 +450,50 @@ ipcMain.handle('rovai:general-preferences-set-one-click-new-conversation', (_eve
 ipcMain.handle('rovai:general-preferences-invalidate-new-conversation-defaults', () => {
   return requireGeneralPreferences().invalidateNewConversationDefaults()
 })
+
+ipcMain.handle('rovai:onboarding-get', () => requireOnboarding().get())
+
+ipcMain.handle('rovai:onboarding-show-welcome', () => requireOnboarding().showWelcome())
+
+ipcMain.handle('rovai:onboarding-complete-welcome', () => requireOnboarding().completeWelcome())
+
+ipcMain.handle('rovai:onboarding-select-member', (_event, role: unknown) => {
+  return requireOnboarding().selectMember(role)
+})
+
+ipcMain.handle('rovai:onboarding-show-member-selection', () => {
+  return requireOnboarding().showMemberSelection()
+})
+
+ipcMain.handle('rovai:onboarding-complete-member-selection', () => {
+  return requireOnboarding().completeMemberSelection()
+})
+
+ipcMain.handle('rovai:onboarding-set-runtime-selection', (_event, selection: unknown) => {
+  return requireOnboarding().setRuntimeSelection(selection)
+})
+
+ipcMain.handle('rovai:onboarding-begin-provisioning', (
+  _event,
+  selection: unknown,
+  runtimePermissions: unknown
+) => {
+  return requireOnboarding().beginProvisioning(selection, runtimePermissions)
+})
+
+ipcMain.handle('rovai:onboarding-record-member', (_event, agentId: unknown, version: unknown) => {
+  return requireOnboarding().recordProvisionedMember(agentId, version)
+})
+
+ipcMain.handle('rovai:onboarding-record-runtime', (_event, version: unknown) => {
+  return requireOnboarding().recordProvisionedRuntime(version)
+})
+
+ipcMain.handle('rovai:onboarding-record-camp', (_event, campId: unknown) => {
+  return requireOnboarding().recordProvisionedCamp(campId)
+})
+
+ipcMain.handle('rovai:onboarding-complete', () => requireOnboarding().complete())
 
 ipcMain.handle('rovai:window-reset-capability', (event) => {
   const window = requireMainWindow(event.sender)
@@ -829,6 +885,11 @@ app.on('before-quit', (event) => {
 function requireGeneralPreferences(): GeneralPreferencesStore {
   if (!generalPreferences) throw new Error('General Preferences store is unavailable')
   return generalPreferences
+}
+
+function requireOnboarding(): OnboardingStore {
+  if (!onboarding) throw new Error('Onboarding store is unavailable')
+  return onboarding
 }
 
 function requireNavigationPreferences(): NavigationPreferencesStore {

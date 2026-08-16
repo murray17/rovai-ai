@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(
@@ -64,6 +65,7 @@ const acceptancePermissionOptions = JSON.stringify([
   }
 ])
 
+seedCompletedOnboardingForAcceptance(dataDir)
 await mkdir(outputDir, { recursive: true })
 
 let first = null

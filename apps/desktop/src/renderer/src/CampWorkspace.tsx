@@ -10,6 +10,7 @@ import type {
   AgentRunExecutionEvidencePage,
   AgentRunExecutionEvidenceView,
   AgentRunView,
+  BuiltinMemberAvatarRole,
   CampComposerDraftView,
   CampComposerReplyRecipient,
   CampMessageAttachmentView,
@@ -80,6 +81,10 @@ const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
 export type CampInspectorTab = 'tasks' | 'members'
 export type CampConversationView = 'conversation' | 'world'
+export interface FirstRunCampContext {
+  memberAgentId: string
+  memberRole: BuiltinMemberAvatarRole
+}
 type ExecutionConsolePlacement = 'bottom' | 'inspector'
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
 type AttachmentKind = 'file' | 'directory'
@@ -124,6 +129,13 @@ export function composerRecipientSummary(
 
 export function campConversationViewFromStoredValue(value: string | null): CampConversationView {
   return value === 'conversation' ? 'conversation' : 'world'
+}
+
+export function initialCampConversationView(
+  storedValue: string | null,
+  showingFirstRunWelcome: boolean
+): CampConversationView {
+  return showingFirstRunWelcome ? 'conversation' : campConversationViewFromStoredValue(storedValue)
 }
 
 export function dataTransferContainsFiles(dataTransfer: Pick<DataTransfer, 'types'>): boolean {
@@ -511,6 +523,42 @@ const EMPTY_CAMP_STARTERS = [
   }
 ] as const
 
+const FIRST_RUN_ROLE_PROMPTS: Record<BuiltinMemberAvatarRole, string> = {
+  luoke: '请帮我读这段材料，先列重点，再指出需要确认的地方。',
+  muwa: '请评审这份方案，分别给出结论、依据、风险和修改建议。',
+  mianzhi: '请检查这个流程，列出可能中断的地方和恢复办法。',
+  qilu: '帮我整理这个页面的信息层级和主操作。'
+}
+
+export interface FirstRunCampStarter {
+  title: string
+  body: string
+  prompt: string
+}
+
+export function firstRunCampStarters(
+  role: BuiltinMemberAvatarRole,
+  displayName: string
+): FirstRunCampStarter[] {
+  return [
+    {
+      title: '创建一位新队员',
+      body: '从身份、职责和工作方式开始。',
+      prompt: '我想创建一个新的队员，请用 member-studio 帮我开始。'
+    },
+    {
+      title: `和${displayName}开始一件事`,
+      body: '先放入一条符合这位队员特长的任务。',
+      prompt: FIRST_RUN_ROLE_PROMPTS[role]
+    },
+    {
+      title: '先认识 Rovai',
+      body: '了解三个最常用的工作入口。',
+      prompt: '先告诉我快速对话、Camp 和队员名册分别适合做什么。'
+    }
+  ]
+}
+
 export async function loadCompleteAgentRunExecutionEvidence(
   requestPage: (params: {
     campId: string
@@ -844,6 +892,7 @@ export function CampWorkspace({
   onNotificationFocusPresented,
   onVisibleNotificationSources,
   runtimeRecovery = null,
+  firstRunCamp = null,
   onConfigureRuntime,
   onDismissRuntimeRecovery
 }: {
@@ -875,6 +924,7 @@ export function CampWorkspace({
   onNotificationFocusPresented?(requestId: number): void
   onVisibleNotificationSources?(sources: VisibleNotificationSources): void
   runtimeRecovery?: CampRuntimeRecovery | null
+  firstRunCamp?: FirstRunCampContext | null
   onConfigureRuntime?(agentId: string): void
   onDismissRuntimeRecovery?(): void
 }): JSX.Element {
@@ -888,6 +938,7 @@ export function CampWorkspace({
   const [replyInteractionError, setReplyInteractionError] = useState<string | null>(null)
   const [suppressPointerFocusRing, setSuppressPointerFocusRing] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [starterNotice, setStarterNotice] = useState<string | null>(null)
   const [mentionPopover, setMentionPopover] = useState<MentionPopoverRequest | null>(null)
   const [composerSkillCatalog, setComposerSkillCatalog] = useState<{
     skills: SkillView[]
@@ -921,14 +972,25 @@ export function CampWorkspace({
   } | null>(null)
   const timelinePositionSaveTimer = useRef<number | null>(null)
   const lastVisibleNotificationSources = useRef<string | null>(null)
+  const showingFirstRunWelcome = firstRunCamp !== null
+    && snapshot.messages.length === 0
+    && snapshot.agentRuns.length === 0
   const [conversationView, setConversationView] = useState<CampConversationView>(() => {
-    if (typeof window === 'undefined') return 'world'
+    if (typeof window === 'undefined') {
+      return initialCampConversationView(null, showingFirstRunWelcome)
+    }
     try {
-      return campConversationViewFromStoredValue(window.localStorage.getItem(CAMP_CONVERSATION_VIEW_STORAGE_KEY))
+      return initialCampConversationView(
+        window.localStorage.getItem(CAMP_CONVERSATION_VIEW_STORAGE_KEY),
+        showingFirstRunWelcome
+      )
     } catch {
-      return 'world'
+      return initialCampConversationView(null, showingFirstRunWelcome)
     }
   })
+  const firstRunConversationShownForCamp = useRef<string | null>(
+    showingFirstRunWelcome ? snapshot.camp.id : null
+  )
   const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
   const [executionPlacement, setExecutionPlacement] = useState<ExecutionConsolePlacement>('bottom')
@@ -962,6 +1024,12 @@ export function CampWorkspace({
       // A denied storage surface must not block the Camp reading plane.
     }
   }, [conversationView])
+  useEffect(() => {
+    if (!showingFirstRunWelcome
+      || firstRunConversationShownForCamp.current === snapshot.camp.id) return
+    firstRunConversationShownForCamp.current = snapshot.camp.id
+    setConversationView('conversation')
+  }, [showingFirstRunWelcome, snapshot.camp.id])
   const memberById = useMemo(
     () => new Map(snapshot.members.map((member) => [member.agentId, member])),
     [snapshot.members]
@@ -2144,8 +2212,9 @@ export function CampWorkspace({
     })
   }
 
-  const chooseStarterPrompt = (prompt: string): void => {
+  const chooseStarterPrompt = (prompt: string, announceDraft = false): void => {
     changeMessage([{ kind: 'text', text: prompt }])
+    if (announceDraft) setStarterNotice('已填入输入框，可修改后发送')
     window.requestAnimationFrame(() => {
       const editor = composerEditorRef.current
       if (!editor) return
@@ -2627,6 +2696,8 @@ export function CampWorkspace({
                   snapshot={snapshot}
                   projectName={projectName}
                   agents={agents}
+                  firstRunCamp={firstRunCamp}
+                  starterNotice={starterNotice}
                   onChoosePrompt={chooseStarterPrompt}
                 />
               )}
@@ -4530,12 +4601,16 @@ function EmptyCampWelcome({
   snapshot,
   projectName,
   agents,
+  firstRunCamp,
+  starterNotice,
   onChoosePrompt
 }: {
   snapshot: CampSnapshot
   projectName: string | null
   agents: AgentProfile[]
-  onChoosePrompt(prompt: string): void
+  firstRunCamp: FirstRunCampContext | null
+  starterNotice: string | null
+  onChoosePrompt(prompt: string, announceDraft?: boolean): void
 }): JSX.Element {
   const activeMembers = snapshot.members.filter((member) =>
     member.membershipStatus === 'active' && member.profilePresence === 'present'
@@ -4546,6 +4621,26 @@ function EmptyCampWelcome({
   const projectLabel = snapshot.camp.projectBindingKind === 'quick_chat'
     ? '快速对话'
     : projectName ?? '当前项目'
+
+  if (firstRunCamp) {
+    const firstMember = activeMembers.find(
+      (member) => member.agentId === firstRunCamp.memberAgentId
+    ) ?? lead
+    const profile = agents.find(
+      (agent) => agent.agentId === firstRunCamp.memberAgentId
+    ) ?? null
+    const displayName = firstMember?.displayName ?? profile?.displayName ?? '队员'
+    return (
+      <FirstRunCampWelcome
+        displayName={displayName}
+        agentId={firstRunCamp.memberAgentId}
+        avatarRef={firstMember?.avatarRef ?? profile?.avatarRef ?? null}
+        role={firstRunCamp.memberRole}
+        starterNotice={starterNotice}
+        onChoosePrompt={onChoosePrompt}
+      />
+    )
+  }
 
   return (
     <section className="empty-camp-welcome" aria-labelledby="empty-camp-title">
@@ -4597,6 +4692,74 @@ function EmptyCampWelcome({
           </button>
         ))}
       </div>
+    </section>
+  )
+}
+
+function FirstRunCampWelcome({
+  displayName,
+  agentId,
+  avatarRef,
+  role,
+  starterNotice,
+  onChoosePrompt
+}: {
+  displayName: string
+  agentId: string
+  avatarRef: string | null
+  role: BuiltinMemberAvatarRole
+  starterNotice: string | null
+  onChoosePrompt(prompt: string, announceDraft?: boolean): void
+}): JSX.Element {
+  const starters = firstRunCampStarters(role, displayName)
+  return (
+    <section className="empty-camp-welcome first-run-camp-welcome" aria-labelledby="first-run-camp-title">
+      <div className="first-run-camp-intro">
+        <MemberPortrait
+          agentId={agentId}
+          avatarRef={avatarRef}
+          displayName={displayName}
+          decorative
+          className="first-run-camp-portrait"
+        />
+        <div>
+          <span>初次集结 · 快速对话</span>
+          <h2 id="first-run-camp-title">你好，我是{displayName}。</h2>
+          <p>先从下面选一件事。我会先把内容放进输入框，由你确认后再发送。</p>
+        </div>
+      </div>
+
+      <div className="first-run-camp-facts" aria-label="当前快速对话配置">
+        <span><i aria-hidden="true" />对话已保存</span>
+        <span><i aria-hidden="true" />{displayName}是当前队员和负责人</span>
+      </div>
+
+      <div className="first-run-starters" aria-label="可选的起步内容">
+        {starters.map((starter, index) => (
+          <button
+            type="button"
+            key={starter.title}
+            onClick={() => onChoosePrompt(starter.prompt, true)}
+          >
+            <span className="first-run-starter-key" aria-hidden="true">
+              {String.fromCharCode(65 + index)}
+            </span>
+            <span><strong>{starter.title}</strong><small>{starter.body}</small></span>
+            <span className="first-run-starter-action">
+              填入输入框
+              <svg className="first-run-starter-arrow" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="m6.25 3.25 4.5 4.75-4.5 4.75M10.5 8h-6" />
+              </svg>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      <p className="first-run-draft-notice" role="status" aria-live="polite">
+        {starterNotice && (
+          <><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.25 8.25 3 3 6.5-6.5" /></svg>{starterNotice}</>
+        )}
+      </p>
     </section>
   )
 }

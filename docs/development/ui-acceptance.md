@@ -57,6 +57,10 @@ ROVAI_CAPTURE_HEIGHT=700 \
 node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/compact"
 ```
 
+通用页面验收会在隔离目录缺少状态时写入 `completed(existing_installation)` 的私有
+`onboarding.json`，以继续覆盖原有 App Shell；它不会修改已有 onboarding 状态。只有下文的
+`accept:onboarding-ui` 使用真正全新的状态并拥有首次安装语义。
+
 ## 独立 UI 验收
 
 以下 package scripts 自行创建或要求隔离 fixture，不调用模型：
@@ -72,6 +76,7 @@ pnpm accept:structured-mentions-ui
 pnpm accept:task-card-ui
 pnpm accept:runtime-activity-ui
 pnpm accept:diagnostics-ui
+pnpm accept:onboarding-ui
 ```
 
 它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏（含 Project/Camp 置顶、
@@ -81,6 +86,24 @@ Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限
 当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、七个设置页、
 队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
+
+### 首次训练门禁
+
+修改首次安装 admission、`onboarding.json`、三页 mandatory gate、Runtime/模型选择、provisioning、
+`初次集结` 或第四页 starter 后，运行：
+
+```bash
+pnpm package:mac
+pnpm accept:onboarding-ui
+```
+
+脚本必须使用全新隔离 `userData` 和 packaged App，在 `1040×700` 下证明：欢迎页无 Skip/步骤导航；
+队员页只有一张当前半身像与四条文字选择；重启分别恢复未完成的队员页和 Runtime 页；真实 Runtime
+状态与模型默认值可用；第三页完成后创建 Active Quick Chat `初次集结`，Camp 只有所选成员且同一成员
+是 Default Lead。第四页必须默认显示会话中的三条 `A/B/C` starter，不得被地图偏好遮住或产生横向
+滚动。点击 starter 后持久 Draft、Composer 焦点与末尾光标正确，CampMessage/AgentRun 数量保持不变；
+再次重启仍保留 completed 状态、同一 Camp 和未发送草稿。Day/Night 截图与 JSON report 输出到脚本
+报告的隔离目录。
 
 ### 计划内关闭真实 Runtime 门禁
 

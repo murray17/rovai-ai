@@ -37,6 +37,21 @@ export function runtimeEditorInstallation(
   )) ?? null
 }
 
+export function runtimeModelSelectionAvailable(
+  installation: AdapterInstallation | null,
+  model: ModelSelection | null
+): boolean {
+  if (!installation?.memberRuntimeDefaults || !model) return false
+  if (model.mode === 'runtime_default') return true
+  const descriptor = installation.snapshot?.models.find((candidate) => (
+    candidate.id === model.modelId
+    && !candidate.hidden
+    && !candidate.deprecated
+    && !candidate.id.endsWith('://runtime-default')
+  ))
+  return descriptor !== undefined
+}
+
 export function runtimeDraftForMember(
   agent: AgentProfile,
   adapterKind: AdapterKind,
@@ -118,6 +133,44 @@ export function MemberRuntimeParameters({
   )
 }
 
+export function MemberModelParameters({
+  adapterKind,
+  installation,
+  model,
+  disabled,
+  onChange
+}: {
+  adapterKind: AdapterKind
+  installation: AdapterInstallation | null
+  model: ModelSelection | null
+  disabled: boolean
+  onChange(model: ModelSelection): void
+}): React.JSX.Element {
+  const snapshot = installation?.snapshot ?? null
+  const defaults = installation?.memberRuntimeDefaults ?? null
+  if (!snapshot || !defaults || !model) {
+    return (
+      <p className="runtime-parameter-empty">
+        当前没有可编辑的模型目录；如果 Agent 运行时已准备好，将使用它的默认模型。
+      </p>
+    )
+  }
+  const draft: MemberRuntimeDraft = {
+    model,
+    permissions: defaults.permissions
+  }
+  return (
+    <div className="runtime-parameter-form onboarding-model-parameter-form">
+      {modelFieldsFor(adapterKind, {
+        snapshot,
+        draft,
+        disabled,
+        onChange: (nextDraft) => onChange(nextDraft.model)
+      })}
+    </div>
+  )
+}
+
 function runtimeParametersFor(
   adapterKind: AdapterKind,
   props: RuntimeParameterProps
@@ -149,7 +202,7 @@ function runtimeParametersFor(
 function CodexRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
+      {modelFieldsFor('codex-cli', props)}
       <PermissionSelect {...props} fieldKey="sandbox_mode" label="文件系统访问" />
       <PermissionSelect {...props} fieldKey="approval_policy" label="审批策略" />
     </div>
@@ -159,7 +212,7 @@ function CodexRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element
 function OpenCodeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
+      {modelFieldsFor('opencode-cli', props)}
       <PermissionSelect {...props} fieldKey="permission" label="工具权限" />
     </div>
   )
@@ -168,7 +221,7 @@ function OpenCodeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Elem
 function CopilotRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
+      {modelFieldsFor('copilot-cli', props)}
       <PermissionSwitch {...props} fieldKey="allow_all" label="自动允许全部操作" />
     </div>
   )
@@ -177,7 +230,7 @@ function CopilotRuntimeParameters(props: RuntimeParameterProps): React.JSX.Eleme
 function ClaudeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} optionKey="effort" optionLabel="思考强度" />
+      {modelFieldsFor('claude-code-cli', props)}
       <PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" />
     </div>
   )
@@ -186,7 +239,7 @@ function ClaudeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Elemen
 function KiroRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} />
+      {modelFieldsFor('kiro-cli', props)}
     </div>
   )
 }
@@ -194,7 +247,7 @@ function KiroRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element 
 function QoderRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
+      {modelFieldsFor('qoder-cli', props)}
       <PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" />
     </div>
   )
@@ -203,7 +256,7 @@ function QoderRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element
 function CodeBuddyRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
+      {modelFieldsFor('codebuddy-cli', props)}
       <PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" />
     </div>
   )
@@ -212,7 +265,7 @@ function CodeBuddyRuntimeParameters(props: RuntimeParameterProps): React.JSX.Ele
 function QwenRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
+      {modelFieldsFor('qwen-code', props)}
       <PermissionSelect {...props} fieldKey="approval_mode" label="审批模式" />
     </div>
   )
@@ -221,7 +274,7 @@ function QwenRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element 
 function TraeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} />
+      {modelFieldsFor('trae-cn-cli', props)}
       <PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" />
     </div>
   )
@@ -230,7 +283,7 @@ function TraeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element 
 function AntigravityRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
-      <ModelFields {...props} />
+      {modelFieldsFor('antigravity-app', props)}
       <PermissionSelect {...props} fieldKey="mode" label="执行模式" />
       <PermissionSelect {...props} fieldKey="sandbox" label="终端沙箱" />
       <PermissionSwitch
@@ -240,6 +293,27 @@ function AntigravityRuntimeParameters(props: RuntimeParameterProps): React.JSX.E
       />
     </div>
   )
+}
+
+function modelFieldsFor(
+  adapterKind: AdapterKind,
+  props: RuntimeParameterProps
+): React.JSX.Element {
+  switch (adapterKind) {
+    case 'claude-code-cli':
+      return <ModelFields {...props} optionKey="effort" optionLabel="思考强度" />
+    case 'codex-cli':
+    case 'opencode-cli':
+    case 'copilot-cli':
+    case 'qoder-cli':
+    case 'codebuddy-cli':
+    case 'qwen-code':
+      return <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
+    case 'kiro-cli':
+    case 'trae-cn-cli':
+    case 'antigravity-app':
+      return <ModelFields {...props} />
+  }
 }
 
 function ModelFields({

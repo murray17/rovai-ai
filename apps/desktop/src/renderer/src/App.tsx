@@ -22,6 +22,8 @@ import type {
   HealthStatus,
   NotificationActionView,
   NotificationEpisodeView,
+  OnboardingRuntimeSelection,
+  OnboardingSnapshot,
   NavigationCampItem,
   NavigationCampPage,
   NavigationPin,
@@ -90,6 +92,11 @@ import {
   type LiveRuntimeEvent
 } from './ui-model'
 import { restoredMemberId, startupTargetFromSnapshot } from './startup-location'
+import {
+  OnboardingFlow,
+  type OnboardingRuntimePhase
+} from './OnboardingFlow'
+import { provisionFirstRun } from './onboarding-provisioning'
 import {
   currentProjectForCamp,
   currentProjectGroup,
@@ -389,6 +396,10 @@ export function App(): React.JSX.Element {
   const [startupRouteTarget, setStartupRouteTarget] = useState<RestorableLocation | null>(null)
   const [startupStatus, setStartupStatus] = useState<StartupStatus>('loading')
   const [startupError, setStartupError] = useState<string | null>(null)
+  const [onboardingSnapshot, setOnboardingSnapshot] = useState<OnboardingSnapshot | null>(null)
+  const [onboardingRuntimePhase, setOnboardingRuntimePhase] = useState<OnboardingRuntimePhase>('idle')
+  const [onboardingBusy, setOnboardingBusy] = useState(false)
+  const [onboardingError, setOnboardingError] = useState<string | null>(null)
   const [locationSaveError, setLocationSaveError] = useState<string | null>(null)
   const [view, setView] = useState<View>('compose')
   const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null)
@@ -432,6 +443,8 @@ export function App(): React.JSX.Element {
   const navigationRequest = useRef<Promise<NavigationSnapshot> | null>(null)
   const overviewRequest = useRef<Promise<boolean> | null>(null)
   const startupSnapshotRequest = useRef<Promise<void> | null>(null)
+  const onboardingSnapshotRequest = useRef<Promise<void> | null>(null)
+  const onboardingRuntimeRequest = useRef<Promise<void> | null>(null)
   const startupTraceId = useRef(crypto.randomUUID())
   const startupStartedAt = useRef(performance.now())
   const lastMainView = useRef<View>('compose')
@@ -565,6 +578,27 @@ export function App(): React.JSX.Element {
     return request
   }, [])
 
+  const loadOnboarding = useCallback((): Promise<void> => {
+    if (onboardingSnapshotRequest.current) return onboardingSnapshotRequest.current
+    const request = (async (): Promise<void> => {
+      setOnboardingError(null)
+      try {
+        const snapshot = await window.rovai.onboarding.get()
+        if (snapshot.status === 'uninitialized') {
+          throw new Error('首次引导状态尚未就绪，请重试。')
+        }
+        setOnboardingSnapshot(snapshot)
+      } catch (nextError) {
+        setOnboardingError(errorMessage(nextError))
+      }
+    })()
+    onboardingSnapshotRequest.current = request
+    void request.finally(() => {
+      if (onboardingSnapshotRequest.current === request) onboardingSnapshotRequest.current = null
+    }).catch(() => undefined)
+    return request
+  }, [])
+
   const loadOverview = useCallback((showLoading = false): Promise<boolean> => {
     if (showLoading) setState('loading')
     if (overviewRequest.current) return overviewRequest.current
@@ -645,6 +679,51 @@ export function App(): React.JSX.Element {
         setHealthLoading(false)
       })
     healthRequest.current = request
+    return request
+  }, [])
+
+  const refreshOnboardingRuntime = useCallback((): Promise<void> => {
+    if (onboardingRuntimeRequest.current) return onboardingRuntimeRequest.current
+    const request = (async (): Promise<void> => {
+      setOnboardingError(null)
+      try {
+        setOnboardingRuntimePhase('discovering')
+        await window.rovai.request('runtime.discovery.rescan', { interactiveShell: true })
+
+        setOnboardingRuntimePhase('checking')
+        let nextHealth = await window.rovai.request<HealthStatus>('health.check')
+        const runtimesToInspect = nextHealth.runtimeAvailability.filter((runtime) =>
+          runtime.status === 'found_uninspected'
+          || runtime.status === 'checking'
+          || runtime.status === 'detecting'
+        )
+        await Promise.allSettled(runtimesToInspect.map((runtime) =>
+          window.rovai.request(
+            runtime.runtimeKind === 'trae-cn-cli'
+              ? 'runtime.product.check'
+              : 'runtime.product.ensure',
+            { runtimeKind: runtime.runtimeKind }
+          )
+        ))
+        nextHealth = await window.rovai.request<HealthStatus>('health.check')
+        setHealth(nextHealth)
+        setHealthAttempted(true)
+
+        setOnboardingRuntimePhase('models')
+        const nextInstallations = await window.rovai.request<AdapterInstallation[]>(
+          'runtime.installations.list'
+        )
+        setInstallations(nextInstallations)
+        setOnboardingRuntimePhase('ready')
+      } catch (nextError) {
+        setOnboardingRuntimePhase('error')
+        setOnboardingError(errorMessage(nextError))
+      }
+    })()
+    onboardingRuntimeRequest.current = request
+    void request.finally(() => {
+      if (onboardingRuntimeRequest.current === request) onboardingRuntimeRequest.current = null
+    }).catch(() => undefined)
     return request
   }, [])
 
@@ -957,6 +1036,19 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     void loadStartupSnapshot()
   }, [loadStartupSnapshot])
+
+  useEffect(() => {
+    void loadOnboarding()
+  }, [loadOnboarding])
+
+  useEffect(() => {
+    if (
+      onboardingSnapshot?.status !== 'in_progress'
+      || onboardingSnapshot.step !== 'runtime'
+      || onboardingRuntimePhase !== 'idle'
+    ) return
+    void refreshOnboardingRuntime()
+  }, [onboardingRuntimePhase, onboardingSnapshot, refreshOnboardingRuntime])
 
   useEffect(() => {
     if (startupStatus !== 'resolved') return
@@ -1620,7 +1712,9 @@ export function App(): React.JSX.Element {
   const retryStartup = (): void => {
     setStartupStatus('loading')
     setStartupError(null)
+    setOnboardingError(null)
     void loadStartupSnapshot()
+    void loadOnboarding()
   }
 
   const beginNewConversation = (): void => {
@@ -2180,6 +2274,77 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const runOnboardingMutation = async (
+    mutate: () => Promise<OnboardingSnapshot>
+  ): Promise<void> => {
+    setOnboardingBusy(true)
+    setOnboardingError(null)
+    try {
+      setOnboardingSnapshot(await mutate())
+    } catch (nextError) {
+      setOnboardingError(errorMessage(nextError))
+    } finally {
+      setOnboardingBusy(false)
+    }
+  }
+
+  const changeOnboardingTheme = async (preference: ThemePreference): Promise<void> => {
+    setOnboardingBusy(true)
+    setOnboardingError(null)
+    try {
+      const snapshot = await window.rovai.appearance.setPreference(preference)
+      applyAppearanceSnapshot(document.documentElement, snapshot)
+      setAppearance(snapshot)
+    } catch (nextError) {
+      setOnboardingError(errorMessage(nextError))
+    } finally {
+      setOnboardingBusy(false)
+    }
+  }
+
+  const completeOnboarding = async (): Promise<void> => {
+    if (onboardingSnapshot?.status !== 'in_progress') return
+    setOnboardingBusy(true)
+    setOnboardingError(null)
+    try {
+      const result = await provisionFirstRun(
+        window.rovai,
+        onboardingSnapshot,
+        installations,
+        (checkpoint) => {
+          if (checkpoint.status === 'in_progress') setOnboardingSnapshot(checkpoint)
+        }
+      )
+      const [nextAgents, nextNavigation, nextInstallations] = await Promise.all([
+        window.rovai.request<AgentProfile[]>('members.list'),
+        window.rovai.request<NavigationSnapshot>('navigation.snapshot'),
+        window.rovai.request<AdapterInstallation[]>('runtime.installations.list')
+      ])
+      setAgents(nextAgents)
+      setNavigation(nextNavigation)
+      setInstallations(nextInstallations)
+      setState('ready')
+      await activateCamp(result.quickChatCampId, { reconcileDefaultLead: false })
+      setOnboardingSnapshot(result.snapshot)
+    } catch (nextError) {
+      const message = errorMessage(nextError)
+      try {
+        const stored = await window.rovai.onboarding.get()
+        if (stored.status === 'completed') {
+          setOnboardingSnapshot(stored)
+          setError(`“初次集结”已保存，但当前页面还未完全打开：${message}`)
+        } else {
+          setOnboardingSnapshot(stored)
+          setOnboardingError(message)
+        }
+      } catch {
+        setOnboardingError(message)
+      }
+    } finally {
+      setOnboardingBusy(false)
+    }
+  }
+
   const openCampInspector = (tab: CampInspectorTab): void => {
     setCampInspectorTab(tab)
     setCampInspectorVisible(true)
@@ -2198,6 +2363,16 @@ export function App(): React.JSX.Element {
   const visibleCampSnapshot = campSnapshot && activeCampId
     ? campSnapshotWithCurrentAnchor(campSnapshot, activeCampId, notificationAnchor)
     : campSnapshot
+  const firstRunCamp = onboardingSnapshot?.status === 'completed'
+    && onboardingSnapshot.origin === 'onboarding'
+    && onboardingSnapshot.quickChatCampId === activeCampId
+    && onboardingSnapshot.memberAgentId
+    && onboardingSnapshot.selectedMemberRole
+    ? {
+        memberAgentId: onboardingSnapshot.memberAgentId,
+        memberRole: onboardingSnapshot.selectedMemberRole
+      }
+    : null
   const pageContentClassName: Record<View, string> = {
     compose: 'task-content compose-content',
     camp: 'task-content camp-content',
@@ -2247,6 +2422,66 @@ export function App(): React.JSX.Element {
         </>
       )
     : null
+
+  if (onboardingSnapshot === null) {
+    return (
+      <div className="app-shell onboarding-app-shell">
+        <section className="startup-gate onboarding-admission-gate" aria-busy={!onboardingError} aria-live="polite">
+          <span className="startup-gate-mark" aria-hidden="true">✦</span>
+          <p className="settings-page-eyebrow">ROVAI FIRST START</p>
+          <h1>{onboardingError ? '暂时无法读取首次训练状态' : '正在准备 Rovai'}</h1>
+          <p>{onboardingError
+            ? '已保存的进度不会被清除。重试后会继续打开同一个未完成页面。'
+            : '正在读取本机的首次训练进度。'}</p>
+          {onboardingError && <small role="alert">{onboardingError}</small>}
+          {onboardingError && (
+            <button className="quiet-button" type="button" onClick={retryStartup}>重试</button>
+          )}
+        </section>
+        {shuttingDown && <ControlledShutdownOverlay />}
+      </div>
+    )
+  }
+
+  if (onboardingSnapshot.status === 'in_progress') {
+    return (
+      <div className="app-shell onboarding-app-shell">
+        <OnboardingFlow
+          snapshot={onboardingSnapshot}
+          appearance={appearance}
+          health={health}
+          installations={installations}
+          runtimePhase={onboardingRuntimePhase}
+          busy={onboardingBusy}
+          error={onboardingError}
+          onThemeChange={(preference) => void changeOnboardingTheme(preference)}
+          onShowWelcome={() => void runOnboardingMutation(
+            () => window.rovai.onboarding.showWelcome()
+          )}
+          onCompleteWelcome={() => void runOnboardingMutation(
+            () => window.rovai.onboarding.completeWelcome()
+          )}
+          onSelectMember={(role) => void runOnboardingMutation(
+            () => window.rovai.onboarding.selectMember(role)
+          )}
+          onShowMemberSelection={() => void runOnboardingMutation(
+            () => window.rovai.onboarding.showMemberSelection()
+          )}
+          onCompleteMemberSelection={() => void runOnboardingMutation(
+            () => window.rovai.onboarding.completeMemberSelection()
+          )}
+          onRefreshRuntime={() => void refreshOnboardingRuntime()}
+          onRuntimeSelectionChange={(selection: OnboardingRuntimeSelection | null) => {
+            void runOnboardingMutation(
+              () => window.rovai.onboarding.setRuntimeSelection(selection)
+            )
+          }}
+          onComplete={() => void completeOnboarding()}
+        />
+        {shuttingDown && <ControlledShutdownOverlay />}
+      </div>
+    )
+  }
 
   return (
     <div className="app-shell">
@@ -2376,6 +2611,7 @@ export function App(): React.JSX.Element {
             onNotificationFocusPresented={completeNotificationNavigation}
             onVisibleNotificationSources={setVisibleNotificationSources}
             runtimeRecovery={runtimeRecovery?.campId === activeCampId ? runtimeRecovery : null}
+            firstRunCamp={firstRunCamp}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
           />

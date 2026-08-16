@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { execFileSync, spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -21,6 +22,7 @@ const renamedTitle = '侧栏操作验收已重命名'
 await mkdir(dataDir, { recursive: true })
 await mkdir(workspaceDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
+seedCompletedOnboardingForAcceptance(dataDir)
 await writeFile(join(workspaceDir, 'README.md'), '# Sidebar UI acceptance\n')
 
 let fixture = null

@@ -1,3 +1,5 @@
+import type { BuiltinMemberAvatarRole } from './member-avatar'
+
 export * from './member-avatar'
 
 export type AdapterKind =
@@ -1694,6 +1696,65 @@ export interface GeneralPreferencesApi {
   invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot>
 }
 
+export type OnboardingStep = 'welcome' | 'member' | 'runtime'
+
+export interface OnboardingRuntimeSelection {
+  adapterKind: AdapterKind
+  model: ModelSelection | null
+}
+
+export interface OnboardingProvisioningOperation {
+  memberCommandId: string
+  runtimeCommandId: string
+  campCommandId: string
+  runtimePermissions: AdapterPermissionConfig
+  memberAgentId: string | null
+  memberVersionBeforeRuntime: number | null
+  memberVersionAfterRuntime: number | null
+  quickChatCampId: string | null
+}
+
+export type OnboardingSnapshot =
+  | {
+      schemaVersion: 1
+      status: 'uninitialized'
+    }
+  | {
+      schemaVersion: 1
+      status: 'in_progress'
+      step: OnboardingStep
+      selectedMemberRole: BuiltinMemberAvatarRole | null
+      runtimeSelection: OnboardingRuntimeSelection | null
+      provisioning: OnboardingProvisioningOperation | null
+    }
+  | {
+      schemaVersion: 1
+      status: 'completed'
+      origin: 'onboarding' | 'existing_installation'
+      completedAt: string
+      selectedMemberRole: BuiltinMemberAvatarRole | null
+      memberAgentId: string | null
+      quickChatCampId: string | null
+    }
+
+export interface OnboardingApi {
+  get(): Promise<OnboardingSnapshot>
+  showWelcome(): Promise<OnboardingSnapshot>
+  completeWelcome(): Promise<OnboardingSnapshot>
+  selectMember(role: BuiltinMemberAvatarRole): Promise<OnboardingSnapshot>
+  showMemberSelection(): Promise<OnboardingSnapshot>
+  completeMemberSelection(): Promise<OnboardingSnapshot>
+  setRuntimeSelection(selection: OnboardingRuntimeSelection | null): Promise<OnboardingSnapshot>
+  beginProvisioning(
+    selection: OnboardingRuntimeSelection,
+    runtimePermissions: AdapterPermissionConfig
+  ): Promise<OnboardingSnapshot>
+  recordProvisionedMember(agentId: string, version: number): Promise<OnboardingSnapshot>
+  recordProvisionedRuntime(version: number): Promise<OnboardingSnapshot>
+  recordProvisionedCamp(campId: string): Promise<OnboardingSnapshot>
+  complete(): Promise<OnboardingSnapshot>
+}
+
 export interface WindowControlsApi {
   getResetCapability(): Promise<WindowResetCapability>
   resetBounds(): Promise<WindowResetResult>
@@ -2296,6 +2357,7 @@ export interface RovaiApi {
   appearance: AppearanceApi
   desktopSession: DesktopSessionApi
   generalPreferences: GeneralPreferencesApi
+  onboarding: OnboardingApi
   windowControls: WindowControlsApi
   navigationPreferences: NavigationPreferencesApi
   memberAvatars: MemberAvatarsApi

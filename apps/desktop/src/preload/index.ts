@@ -65,6 +65,48 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:general-preferences-invalidate-new-conversation-defaults')
     }
   },
+  onboarding: {
+    get() {
+      return ipcRenderer.invoke('rovai:onboarding-get')
+    },
+    showWelcome() {
+      return ipcRenderer.invoke('rovai:onboarding-show-welcome')
+    },
+    completeWelcome() {
+      return ipcRenderer.invoke('rovai:onboarding-complete-welcome')
+    },
+    selectMember(role) {
+      return ipcRenderer.invoke('rovai:onboarding-select-member', role)
+    },
+    showMemberSelection() {
+      return ipcRenderer.invoke('rovai:onboarding-show-member-selection')
+    },
+    completeMemberSelection() {
+      return ipcRenderer.invoke('rovai:onboarding-complete-member-selection')
+    },
+    setRuntimeSelection(selection) {
+      return ipcRenderer.invoke('rovai:onboarding-set-runtime-selection', selection)
+    },
+    beginProvisioning(selection, runtimePermissions) {
+      return ipcRenderer.invoke(
+        'rovai:onboarding-begin-provisioning',
+        selection,
+        runtimePermissions
+      )
+    },
+    recordProvisionedMember(agentId, version) {
+      return ipcRenderer.invoke('rovai:onboarding-record-member', agentId, version)
+    },
+    recordProvisionedRuntime(version) {
+      return ipcRenderer.invoke('rovai:onboarding-record-runtime', version)
+    },
+    recordProvisionedCamp(campId) {
+      return ipcRenderer.invoke('rovai:onboarding-record-camp', campId)
+    },
+    complete() {
+      return ipcRenderer.invoke('rovai:onboarding-complete')
+    }
+  },
   windowControls: {
     getResetCapability() {
       return ipcRenderer.invoke('rovai:window-reset-capability')

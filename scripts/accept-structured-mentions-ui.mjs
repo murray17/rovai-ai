@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const cliArguments = process.argv.slice(2)
@@ -112,6 +113,7 @@ const acceptancePermissionOptions = JSON.stringify([
 
 await access(join(appPath, 'Contents', 'MacOS', 'Rovai-ai'))
 await mkdir(dataDir, { recursive: true })
+seedCompletedOnboardingForAcceptance(dataDir)
 await mkdir(acceptanceHome, { recursive: true })
 await mkdir(runtimeTempDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })

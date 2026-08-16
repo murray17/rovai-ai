@@ -5,6 +5,7 @@ import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -29,6 +30,7 @@ try {
   await mkdir(projectRoot, { recursive: true })
   await mkdir(dataDir, { recursive: true })
   await mkdir(outputDir, { recursive: true })
+  seedCompletedOnboardingForAcceptance(dataDir)
   await writeFile(join(projectRoot, 'README.md'), '# Planned shutdown acceptance fixture\n')
   await runProcess('git', ['init', '-b', 'main'], { cwd: projectRoot })
   await runProcess('git', ['config', 'user.name', 'Rovai-ai Planned Shutdown Acceptance'], {

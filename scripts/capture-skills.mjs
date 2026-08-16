@@ -1,6 +1,7 @@
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const appPath = process.argv[2]
 const outputPath = process.argv[3] ?? '/tmp/rovai-skills.png'
@@ -29,6 +30,7 @@ if (!['day', 'night'].includes(theme)) throw new Error(`Unknown ROVAI_CAPTURE_TH
 if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
   throw new Error(`ROVAI_CAPTURE_ZOOM_FACTOR must be greater than zero: ${zoomFactor}`)
 }
+seedCompletedOnboardingForAcceptance(userDataDir)
 
 const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
 const app = spawn(executable, [

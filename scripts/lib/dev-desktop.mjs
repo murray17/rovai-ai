@@ -64,6 +64,26 @@ export function assertUserDataIsIsolated(
   return resolvedCandidate
 }
 
+export function seedCompletedOnboardingForAcceptance(
+  userDataDirectory,
+  { dailyDirectories = knownDailyUserDataDirectories() } = {}
+) {
+  const isolatedDirectory = assertUserDataIsIsolated(userDataDirectory, { dailyDirectories })
+  mkdirSync(isolatedDirectory, { recursive: true })
+  const filePath = join(isolatedDirectory, 'onboarding.json')
+  if (existsSync(filePath)) return filePath
+  writeFileSync(filePath, `${JSON.stringify({
+    schemaVersion: 1,
+    status: 'completed',
+    origin: 'existing_installation',
+    completedAt: '1970-01-01T00:00:00.000Z',
+    selectedMemberRole: null,
+    memberAgentId: null,
+    quickChatCampId: null
+  }, null, 2)}\n`, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+  return filePath
+}
+
 function canonicalPathIdentity(path) {
   let existingAncestor = resolve(path)
   const missingSegments = []

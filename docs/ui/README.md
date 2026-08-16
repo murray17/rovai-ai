@@ -31,7 +31,7 @@ Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主�
 ## 复杂组件
 
 [复杂组件索引](components/README.md)路由以下稳定呈现合同：App Shell/统一侧栏、Camp 会话工作区、
-结构化 Mention、队员身份与图像，以及会话区附件拖放。Task、AgentRun、A2A、Recovery、权限、
+首次训练、结构化 Mention、队员身份与图像，以及会话区附件拖放。Task、AgentRun、A2A、Recovery、权限、
 持久化和事务语义仍须读取相关 ADR/Contract，不能从 UI 文档反向推导。
 
 ## 页面局部 Brief

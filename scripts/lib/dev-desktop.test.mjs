@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -7,7 +7,8 @@ import {
   acquireDevelopmentLaunchLock,
   assertDevelopmentUserDataIsIsolated,
   assertUserDataIsIsolated,
-  defaultDevelopmentUserDataDirectory
+  defaultDevelopmentUserDataDirectory,
+  seedCompletedOnboardingForAcceptance
 } from './dev-desktop.mjs'
 
 test('default development userData is deterministic per repository and outside daily data', () => {
@@ -63,4 +64,28 @@ test('development launch lock rejects a live owner and can be released', (contex
   release()
   const releaseAgain = acquireDevelopmentLaunchLock(root)
   releaseAgain()
+})
+
+test('generic App acceptance can seed a private completed onboarding fixture', (context) => {
+  const root = mkdtempSync(join(tmpdir(), 'rovai-onboarding-fixture-'))
+  context.after(() => rmSync(root, { recursive: true, force: true }))
+  const dailyDirectory = join(root, 'daily')
+  const userDataDirectory = join(root, 'isolated')
+  const path = seedCompletedOnboardingForAcceptance(userDataDirectory, {
+    dailyDirectories: [dailyDirectory]
+  })
+  const snapshot = JSON.parse(readFileSync(path, 'utf8'))
+
+  assert.equal(snapshot.status, 'completed')
+  assert.equal(snapshot.origin, 'existing_installation')
+  assert.equal(statSync(path).mode & 0o777, 0o600)
+  assert.equal(seedCompletedOnboardingForAcceptance(userDataDirectory, {
+    dailyDirectories: [dailyDirectory]
+  }), path)
+  assert.throws(
+    () => seedCompletedOnboardingForAcceptance(dailyDirectory, {
+      dailyDirectories: [dailyDirectory]
+    }),
+    /must not use the daily Rovai directory/
+  )
 })

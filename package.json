@@ -85,6 +85,7 @@
     "accept:planned-shutdown": "node scripts/accept-planned-shutdown.mjs",
     "accept:diagnostics-ui": "node scripts/accept-diagnostics-ui.mjs",
     "accept:runtime-monitoring-ui": "node scripts/accept-runtime-monitoring-ui.mjs",
+    "accept:onboarding-ui": "node scripts/accept-onboarding-ui.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
     "smoke:missing-send-recovery": "pnpm core:build:debug && node scripts/smoke-missing-send-recovery.mjs",
     "experiment:p1:copilot-native-turn": "node scripts/experiment-copilot-native-turn-reconciliation.mjs",

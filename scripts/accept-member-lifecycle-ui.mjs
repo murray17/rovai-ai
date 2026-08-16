@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(
@@ -75,6 +76,8 @@ const acceptancePermissionOptions = JSON.stringify([
 await mkdir(freshDataDir, { recursive: true })
 await mkdir(upgradeDataDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
+seedCompletedOnboardingForAcceptance(freshDataDir)
+seedCompletedOnboardingForAcceptance(upgradeDataDir)
 
 let running = null
 let campId = null

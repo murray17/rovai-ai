@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -14,6 +15,7 @@ const initialBody = '实际验收：重要改动应提供明确验证结果。'
 const revisedBody = '实际验收：重要改动应提供明确、可复现的验证结果。'
 const forgottenBody = '实际验收临时项：完成后应被永久遗忘。'
 
+seedCompletedOnboardingForAcceptance(dataDir)
 await mkdir(outputDir, { recursive: true })
 
 let first = null

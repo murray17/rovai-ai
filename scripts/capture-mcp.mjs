@@ -9,6 +9,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const appPath = process.argv[2]
 const outputPrefix = process.argv[3] ?? '/tmp/rovai-mcp'
@@ -25,6 +26,7 @@ const codexHome = join(home, '.codex')
 const configPath = join(home, '.rovai', 'mcp.json')
 await mkdir(codexHome, { recursive: true })
 await mkdir(userDataDir, { recursive: true })
+seedCompletedOnboardingForAcceptance(userDataDir)
 await writeFile(join(codexHome, 'config.toml'), [
   '[mcp_servers.imported_docs]',
   'command = "/usr/bin/env"',

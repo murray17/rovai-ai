@@ -2,6 +2,7 @@ import { access, chmod, mkdir, mkdtemp, readFile, realpath, stat, writeFile } fr
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -144,6 +145,7 @@ async function createFixture(name, withPermissionIssue) {
   const mcpPath = join(mcpDirectory, 'mcp.json')
   await mkdir(dataDir, { recursive: true })
   await mkdir(homeDir, { recursive: true })
+  seedCompletedOnboardingForAcceptance(dataDir)
   if (withPermissionIssue) {
     await mkdir(mcpDirectory, { recursive: true, mode: 0o700 })
     await writeFile(mcpPath, `${JSON.stringify({
