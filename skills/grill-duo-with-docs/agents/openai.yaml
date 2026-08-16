@@ -1,4 +1,4 @@
 interface:
   display_name: "双人追问与文档"
-  short_description: "由当前队员与固定搭档双人厘清方案并同步维护领域词汇与必要架构决定"
-  default_prompt: "使用 $grill-duo-with-docs 与固定 Camp 搭档逐项澄清设计，并同步维护领域词汇和必要 ADR。"
+  short_description: "与固定 Camp 搭档分轮厘清设计，并同步维护已确认的必要领域文档"
+  default_prompt: "使用 $grill-duo-with-docs 与一位固定 Camp 搭档分轮澄清这个设计，并在决定确认后同步维护领域词汇和必要 ADR。"

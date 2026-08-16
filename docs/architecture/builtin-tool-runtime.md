@@ -349,10 +349,14 @@ send/`--to-user`/list/get/search/read 不要求加载 `cli-operations`。
 ADR 或实施副作用。
 
 `grill-duo`、`grill-duo-with-docs` 与 `review-duo` 同样使用 ordinary `user_managed` delivery。自然标题只
-提供 discovery 与公屏阅读线索；Skill 进入后使用可信 Current Input sender、显式 Agent recipient 和
-reference closure 中的真实 reply relation。Agent 不提供或选择 reply ID，Core 始终把新消息链接到当前
-AgentRun trigger。两个 Grill 在搭档返回后使用 `--to-user` 发布当前消息新产生的唯一用户决策题，并在
-frontmatter 覆盖用户只回答上一题的续跑；搭档内部往返与无新决定的收尾不升级 User attention。
+提供公屏阅读线索；Skill 进入后使用可信 Current Input sender、显式 Agent recipient 和 reference closure
+中的真实 reply relation。Agent 不提供或选择 reply ID，Core 始终把新消息链接到当前 AgentRun trigger。
+两个 Grill 按 [ADR-0198](../adr/0198-bounded-open-round-grill-duo-skills.md)使用 Skill-owned 有界开放轮次：
+每轮包含 1–4 个前提已确认且彼此独立的问题，一条初始 A2A 邀请和一条固定搭档直接回复覆盖全轮；未回答题
+保留稳定编号与建议，改变的问题单独重新复核，当前轮关闭前不混入新题。它们不接入 Gather，也不创建 Core
+持久轮次。普通版排除领域词汇/ADR 维护；文档版把完整执行协议保留在自己的 `SKILL.md`，immutable Revision
+只额外携带 domain-modeling、glossary 和 ADR references。面向搭档或用户的当前响应都只在 `rovai send`
+返回 accepted 后结束；accepted 不代表接收方开始或完成。
 
 Review Duo 因而把启动标记、Standards 请求与 Spec parts/manifest 作为初始 user trigger 的 sibling
 messages；Standards parts public-only 回复请求，最后 manifest 才寻址 Lead 并触发 continuation。Lead

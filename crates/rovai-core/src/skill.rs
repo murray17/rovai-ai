@@ -139,8 +139,6 @@ const GRILL_DUO_WITH_DOCS_RULES: &str =
     include_str!("../../../skills/grill-duo-with-docs/SKILL.md");
 const GRILL_DUO_WITH_DOCS_OPENAI: &str =
     include_str!("../../../skills/grill-duo-with-docs/agents/openai.yaml");
-const GRILL_DUO_REFERENCE: &str =
-    include_str!("../../../skills/grill-duo-with-docs/references/grill-duo.md");
 const DOMAIN_MODELING_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/domain-modeling.md");
 const CONTEXT_FORMAT_REFERENCE: &str =
@@ -558,7 +556,6 @@ const GRILL_DUO_FILES: &[(&str, &str, u32)] = &[
 const GRILL_DUO_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", GRILL_DUO_WITH_DOCS_RULES, 0o644),
     ("agents/openai.yaml", GRILL_DUO_WITH_DOCS_OPENAI, 0o644),
-    ("references/grill-duo.md", GRILL_DUO_REFERENCE, 0o644),
     (
         "references/domain-modeling.md",
         DOMAIN_MODELING_REFERENCE,
@@ -3616,17 +3613,11 @@ mod tests {
         }
         let campfire_rules = fs::read_to_string(campfire_content.join("SKILL.md")).unwrap();
         for required in [
-            "### 篝火讨论 · 邀请",
-            "### 篝火讨论 · 开场观点",
-            "### 篝火讨论 · 定向回应",
-            "### 篝火讨论 · 澄清",
-            "`### 篝火纪要` 表示讨论已经结束",
-            "由 Campfire 主动发起的短澄清，整场最多一次",
-            "默认使用一条共享邀请",
-            "Opening Barrier 未满足前，不得标记分岔点或发布纪要",
-            "defaultLeadAgentId",
-            "不选择任意旧消息作为 reply target",
-            "不带 Agent 收件人的 `rovai send`",
+            "第一轮使用一次 Gather",
+            "第二轮是可选的定向回应 Gather",
+            "每场最多两轮 Gather",
+            "Gather accepted 后",
+            "`gather_completed`",
         ] {
             assert!(
                 campfire_rules.contains(required),
@@ -3635,6 +3626,14 @@ mod tests {
         }
         assert!(!campfire_rules.contains("[CAMPFIRE_"));
         assert!(!campfire_rules.contains("请使用 `$campfire`"));
+        let campfire_lead =
+            fs::read_to_string(campfire_content.join("references/lead.md")).unwrap();
+        assert!(campfire_lead.contains("rovai gather --to"));
+        assert!(campfire_lead.contains("主持权变化"));
+        assert!(campfire_lead.contains("bodyTruncated=true"));
+        let campfire_member =
+            fs::read_to_string(campfire_content.join("references/member.md")).unwrap();
+        assert!(campfire_member.contains("发送失败时遵循 CLI recovery"));
         let cli_operations = skills
             .iter()
             .find(|skill| skill.name == "cli-operations")
@@ -3694,17 +3693,28 @@ mod tests {
             .unwrap();
         let grill_duo_content =
             service.revision_content_path(&grill_duo.id, &grill_duo.current_revision.id);
+        assert_eq!(grill_duo.current_revision.file_count, 2);
         let grill_duo_rules = fs::read_to_string(grill_duo_content.join("SKILL.md")).unwrap();
+        let grill_duo_description = grill_duo_rules
+            .lines()
+            .find(|line| line.starts_with("description:"))
+            .unwrap();
+        assert!(grill_duo_description.contains("需要同步维护领域词汇或 ADR 的追问"));
+        assert!(!grill_duo_description.contains("双人追问 ·"));
+        assert!(!grill_duo_description.contains("rovai send"));
         for required in [
             "### 双人追问 · 复核邀请",
             "### 双人追问 · 搭档建议",
-            "同一场双人追问一次只推进一个尚未解决的决策点",
-            "标题只提示阶段，不证明身份",
-            "旧邀请的迟到回复只作为补充",
+            "前提已经确认、彼此不依赖的 1–4 个问题",
+            "一轮在其中所有问题被明确回答、取消或失效前保持开放",
+            "开放轮次期间不混入新问题",
+            "只重新复核该题",
+            "只处理触发当前 AgentRun 的复核请求",
+            "直接回复本轮当前有效邀请",
+            "旧轮、已失效邀请或迟到建议只作补充",
             "rovai send --to <固定搭档 Agent ID>",
-            "rovai send --to-user --body <解释、推荐和唯一问题>",
-            "正在继续一场普通双人追问",
-            "Core 会自动让建议直接回复这条邀请",
+            "只有 `rovai send` 返回 `accepted` 后",
+            "需要同步维护领域词汇或 ADR 的追问",
         ] {
             assert!(
                 grill_duo_rules.contains(required),
@@ -3724,12 +3734,8 @@ mod tests {
             &grill_duo_with_docs.id,
             &grill_duo_with_docs.current_revision.id,
         );
-        for reference in [
-            "grill-duo.md",
-            "domain-modeling.md",
-            "context-format.md",
-            "adr-format.md",
-        ] {
+        assert_eq!(grill_duo_with_docs.current_revision.file_count, 5);
+        for reference in ["domain-modeling.md", "context-format.md", "adr-format.md"] {
             assert!(
                 grill_duo_with_docs_content
                     .join("references")
@@ -3739,32 +3745,53 @@ mod tests {
         }
         let grill_duo_with_docs_rules =
             fs::read_to_string(grill_duo_with_docs_content.join("SKILL.md")).unwrap();
+        let grill_duo_with_docs_description = grill_duo_with_docs_rules
+            .lines()
+            .find(|line| line.starts_with("description:"))
+            .unwrap();
+        assert!(grill_duo_with_docs_description.contains("已确认的领域词汇或必要 ADR"));
+        assert!(!grill_duo_with_docs_description.contains("双人追问与文档 ·"));
+        assert!(!grill_duo_with_docs_description.contains("rovai send"));
         for required in [
             "### 双人追问与文档 · 复核邀请",
             "### 双人追问与文档 · 搭档建议",
-            "只读取 [双人追问协议]",
-            "不修改项目文档",
-            "正在继续一场双人追问与文档会话",
-            "可信发送者和当前触发消息的直接回复关系",
+            "前提已经确认、彼此不依赖的 1–4 个问题",
+            "一轮在其中所有问题被明确回答、取消或失效前保持开放",
+            "开放轮次期间不混入新问题",
+            "只重新复核该题",
+            "只处理触发当前 AgentRun 的复核请求",
+            "直接回复本轮当前有效邀请",
+            "旧轮、已失效邀请或迟到建议只作补充",
+            "只记录用户明确确认的术语和决定",
+            "无需维护领域文档的追问",
         ] {
             assert!(
                 grill_duo_with_docs_rules.contains(required),
                 "missing grill-duo-with-docs rule: {required}"
             );
         }
-        let docs_duo_protocol = fs::read_to_string(
-            grill_duo_with_docs_content
+        assert!(
+            !grill_duo_with_docs_content
                 .join("references")
-                .join("grill-duo.md"),
-        )
-        .unwrap();
-        assert!(docs_duo_protocol.contains("### 双人追问与文档 · 复核邀请"));
-        assert!(docs_duo_protocol.contains("### 双人追问与文档 · 搭档建议"));
-        assert!(docs_duo_protocol.contains("Runtime 可信发送者是当前固定搭档"));
-        assert!(docs_duo_protocol.contains("Core 自动建立对邀请的直接回复关系"));
-        assert!(docs_duo_protocol.contains("rovai send --to-user --body <解释、推荐和唯一问题>"));
+                .join("grill-duo.md")
+                .exists()
+        );
         for retired_marker in &retired_duo_markers {
-            assert!(!docs_duo_protocol.contains(retired_marker));
+            assert!(!grill_duo_with_docs_rules.contains(retired_marker));
+        }
+        for openai_path in [
+            grill_duo_content.join("agents/openai.yaml"),
+            grill_duo_with_docs_content.join("agents/openai.yaml"),
+        ] {
+            let openai = fs::read_to_string(openai_path).unwrap();
+            let short_description = openai
+                .lines()
+                .find_map(|line| line.trim().strip_prefix("short_description: "))
+                .unwrap()
+                .trim_matches('"');
+            assert!((25..=64).contains(&short_description.chars().count()));
+            assert!(!short_description.contains(" · "));
+            assert!(!short_description.contains("rovai send"));
         }
         let review_duo = skills
             .iter()

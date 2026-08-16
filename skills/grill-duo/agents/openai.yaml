@@ -1,4 +1,4 @@
 interface:
   display_name: "双人追问"
-  short_description: "由当前队员与固定 Camp 搭档共同厘清计划和决定"
-  default_prompt: "使用 $grill-duo 与一位固定 Camp 搭档逐项澄清这个计划，并在实施前取得共同确认。"
+  short_description: "与固定 Camp 搭档分轮厘清计划、需求和决定，并逐题形成明确建议"
+  default_prompt: "使用 $grill-duo 与一位固定 Camp 搭档分轮澄清这个计划：每轮提出当前可以同时回答的问题，为每题给出建议，并在实施前取得共同确认。"

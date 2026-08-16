@@ -209,4 +209,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0195](0195-generation-scoped-last-gather-return.md) | Generation-Scoped Last Gather Return with Independent Bound | `accepted` | `cross-version` | [v0.90](../versions/v0.90/README.md) | — |
 | [ADR-0196](0196-self-contained-gather-completion-request.md) | Self-Contained Gather Request in Mandatory Completion Input | `accepted` | `cross-version` | [v0.90](../versions/v0.90/README.md) | — |
 | [ADR-0197](0197-empty-user-owned-mcp-library.md) | Empty User-Owned MCP Library Without Product Presets | `accepted` | `cross-version` | [v0.91](../versions/v0.91/README.md) | — |
+| [ADR-0198](0198-bounded-open-round-grill-duo-skills.md) | Bounded Open-Round Protocol for Self-Contained Grill Duo Skills | `accepted` | `cross-version` | [v0.92](../versions/v0.92/README.md) | — |
 <!-- adr-history:end -->

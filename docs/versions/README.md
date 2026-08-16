@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.91
+current_version: v0.92
 last_updated: 2026-08-16
 ---
 
@@ -142,4 +142,5 @@ last_updated: 2026-08-16
 | v0.88 | `historical` | Camp 世界地图环境片段、全局闲时调度与拥挤布局字幕回退 | [v0.88/README.md](v0.88/README.md) |
 | v0.89 | `historical` | 持久 Gather Barrier、统一 Completion Delivery 与类型化聚合输入 | [v0.89/README.md](v0.89/README.md) |
 | v0.90 | `historical` | Gather 当前代最后结果、独立回传限额与 self-contained completion | [v0.90/README.md](v0.90/README.md) |
-| v0.91 | `current` | 空 MCP Library、预发布 clean break 与用户自主管理 | [v0.91/README.md](v0.91/README.md) |
+| v0.91 | `historical` | 空 MCP Library、预发布 clean break 与用户自主管理 | [v0.91/README.md](v0.91/README.md) |
+| v0.92 | `current` | Grill Duo 有界开放轮次、自包含协议与自然语言路由收敛 | [v0.92/README.md](v0.92/README.md) |

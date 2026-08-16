@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # Rovai-ai 开发者指南
@@ -97,6 +97,7 @@ pnpm build:desktop
 | 创建、复用、交接、合入或清理 Git worktree | [Git Worktree 生命周期与清理](worktrees.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
 | 新增、合并或退役 Rust 测试，或选择单元测试、集成测试、Smoke 与版本验收命令 | [测试与 Smoke Test](testing.md) |
+| 编写或更新仓库 Skill、触发 `description`、正文分层、references 或界面元数据 | [Skill 编写与 description 路由规范](skill-authoring.md) |
 | 构建 Release Core、App、DMG，检查签名 | [macOS 构建与打包](packaging.md) |
 | 使用隔离 `userData` 运行真实 App、截图或桌面验收 | [桌面 UI 验收](ui-acceptance.md) |
 | 为 Coding Agent 安装本地 Impeccable、更新设计上下文或维护 UI 文档分类 | [Coding Agent Impeccable 与 UI 文档工作流](coding-agent-impeccable-ui-workflow.md) |

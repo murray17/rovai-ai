@@ -215,6 +215,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0188](0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md) | Bundled Skill Bootstrap Fast Path and Execution-Time Integrity |
 | [ADR-0191](0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md) | Agent-Mediated Member Creation and Thirteen-Skill Official Inventory |
 | [ADR-0197](0197-empty-user-owned-mcp-library.md) | Empty User-Owned MCP Library Without Product Presets |
+| [ADR-0198](0198-bounded-open-round-grill-duo-skills.md) | Bounded Open-Round Protocol for Self-Contained Grill Duo Skills |
 <!-- adr-current-primary:end -->
 
 Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。

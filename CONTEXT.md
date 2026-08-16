@@ -443,12 +443,16 @@ The self-contained official Rovai Skill `analyze-agent-codebase` (“Agent 代�
 _Avoid_: README paraphrase, keyword-only architecture label, automatic document mutation, implementation authority, required multi-member Camp
 
 **Grill Duo Skill**:
-The self-contained official Rovai Skill `grill-duo` (“双人追问”) in which the current member resolves one decision point at a time while one fixed eligible Camp partner independently explains trade-offs and recommends an answer through explicit Public A2A Messages. It is enabled and assigned to every Skill Delivery Group by default, and send acceptance never implies that the partner started or completed.
-_Avoid_: synchronous member call, hidden second opinion, automatic reply obligation, bundled `grilling` dependency
+The self-contained official Rovai Skill `grill-duo` (“双人追问”) in which an inviter and one fixed eligible Camp partner review one bounded open round of one to four independent, stable-numbered questions through explicit Public A2A Messages. Only the current partner's direct reply to the current effective invitation is formal advice; send acceptance never implies that the partner started or completed. The Skill excludes sessions that must also maintain domain vocabulary or qualifying ADRs.
+_Avoid_: synchronous member call, Gather, hidden second opinion, arbitrary question batch, documentation-maintaining grill, bundled `grilling` dependency
 
 **Grill Duo with Docs Skill**:
-The self-contained official Rovai Skill `grill-duo-with-docs` (“双人追问与文档”) that applies Grill Duo while maintaining resolved domain language and only qualifying architectural decisions. It is enabled and assigned to every Skill Delivery Group by default; its immutable Revision carries its own duo, domain-modeling, glossary, and ADR references rather than requiring another Skill Assignment.
-_Avoid_: dependent `grill-duo` assignment, generic `domain-modeling` bundled Skill, implementation-before-agreement, documentation batch after the session
+The self-contained official Rovai Skill `grill-duo-with-docs` (“双人追问与文档”) that uses the same bounded open-round protocol while maintaining only user-confirmed domain language and qualifying architectural decisions. It is enabled and assigned to every Skill Delivery Group by default; its executable duo protocol lives in its own `SKILL.md`, and its immutable Revision carries only the additional domain-modeling, glossary, and ADR references rather than requiring another Skill Assignment.
+_Avoid_: dependent `grill-duo` assignment, unconfirmed documentation fact, generic `domain-modeling` bundled Skill, implementation-before-agreement, documentation batch after the session
+
+**Grill Duo Open Round**:
+A Skill-owned set of one to four prerequisite-confirmed, mutually independent questions with stable `Q1`–`Q4` identifiers. It stays open until every question is answered, cancelled, or invalidated; unchanged unanswered questions retain existing partner advice, a changed question alone is re-reviewed, and new questions wait for the next round. It is expressed in public messages and is not a Core-persisted entity.
+_Avoid_: CampTurn, Gather Barrier, persisted Round, omission-as-agreement, renumbered partial answer
 
 **Tasteful UI Skill**:
 The official Rovai Skill `tasteful-ui` (“品味优先 UI 设计”) vendored from one exact MIT-licensed upstream revision with its complete taste exploration, reference catalog, project-design format, implementation workflow, and result critique. It is enabled and assigned to every Skill Delivery Group by default; its task-local investment gates guide UI work but never grant Tool, network, filesystem, implementation, approval, or product authority.

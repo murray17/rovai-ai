@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.91
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-16
 > 当前状态：设计、实施、隔离打包验收与安装已完成。
 >
 > 前置版本：[v0.90 Gather 当前代最后结果与自包含 Completion](../v0.90/README.md)
+>
+> 后续版本：[v0.92 Grill Duo 有界开放轮次与路由收敛](../v0.92/README.md)
 
 ## 版本目标
 
