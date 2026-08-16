@@ -1,7 +1,7 @@
 ---
 document_type: adr-current
 authority: current-cross-version-adr-navigation
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # 当前跨版本架构决策
@@ -32,9 +32,9 @@ Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题�
 
 ## Camp 与 workspace
 
-- **何时阅读：** 修改 Camp 生命周期、Workspace、附件、Draft 或激活事务时阅读。
-- **当前架构：** [Camp Activation Lifecycle](../architecture/camp-activation-lifecycle.md)、[Camp Composer Draft](../architecture/camp-composer-draft.md)
-- **当前合同：** [Pending Camp Activation v1](../contracts/pending-camp-activation-v1.md)、[Camp Composer Draft v2](../contracts/camp-composer-draft-v2.md)
+- **何时阅读：** 修改首次安装 admission、Camp 生命周期、Workspace、附件、Draft 或激活事务时阅读。
+- **当前架构：** [First-run Onboarding](../architecture/first-run-onboarding.md)、[Camp Activation Lifecycle](../architecture/camp-activation-lifecycle.md)、[Camp Composer Draft](../architecture/camp-composer-draft.md)
+- **当前合同：** [First-run Onboarding v1](../contracts/first-run-onboarding-v1.md)、[Pending Camp Activation v1](../contracts/pending-camp-activation-v1.md)、[Camp Composer Draft v2](../contracts/camp-composer-draft-v2.md)
 
 <!-- adr-current-primary:begin topic=camp-workspace -->
 | ADR | Decision |
@@ -50,6 +50,7 @@ Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题�
 | [ADR-0173](0173-leading-structured-mentions-excluded-from-generated-camp-names.md) | Leading Structured Mentions Excluded from Generated Camp Names |
 | [ADR-0185](0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md) | Durable Composer Reply Intent and Explicit Recipient Resolution |
 | [ADR-0187](0187-durable-composer-recipient-continuation.md) | Durable Composer Recipient Continuation |
+| [ADR-0202](0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md) | Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning |
 <!-- adr-current-primary:end -->
 
 Related: Session bootstrap、public delivery 与 product surface 仍从各自 primary 主题进入。

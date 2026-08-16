@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.96
-last_updated: 2026-08-16
+current_version: v0.97
+last_updated: 2026-08-17
 ---
 
 # Rovai-ai 版本记录
@@ -147,4 +147,5 @@ last_updated: 2026-08-16
 | v0.93 | `historical` | Review Duo 四消息会话语义、结果有界化与 Grill Duo CLI 去重 | [v0.93/README.md](v0.93/README.md) |
 | v0.94 | `historical` | 核心模型输入精简、历史投影收敛与结构化 Run Facts | [v0.94/README.md](v0.94/README.md) |
 | v0.95 | `historical` | Official Skill 测试去文案化、场景验收分层与协作协议去重 | [v0.95/README.md](v0.95/README.md) |
-| v0.96 | `current` | Clean-break 运行监控、原生 Usage 观测与诚实 Coverage | [v0.96/README.md](v0.96/README.md) |
+| v0.96 | `historical` | Clean-break 运行监控、原生 Usage 观测与诚实 Coverage | [v0.96/README.md](v0.96/README.md) |
+| v0.97 | `current` | 持久首次训练、断点恢复与真实“初次集结”快速对话 | [v0.97/README.md](v0.97/README.md) |

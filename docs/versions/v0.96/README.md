@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.96
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
@@ -16,6 +16,8 @@ last_updated: 2026-08-17
 > Application 场景尚未完成，因此未把 Fixture 结果写成完整兼容性结论。
 >
 > 前置版本：[v0.95 官方 Skill 测试去文案化与协议去重](../v0.95/README.md)
+>
+> 后续版本：[v0.97 持久首次训练与“初次集结”](../v0.97/README.md)
 
 ## 版本目标
 

@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # Rovai-ai 文档导航

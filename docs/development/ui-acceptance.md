@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # 桌面 UI 验收与隔离数据

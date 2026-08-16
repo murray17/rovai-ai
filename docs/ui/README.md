@@ -4,7 +4,7 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-08-13
+last_updated: 2026-08-17
 ---
 
 # Rovai AI UI 规范

@@ -2,7 +2,7 @@
 document_type: ui-component-index
 authority: renderer-component-routing
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-17
 ---
 
 # Rovai AI 复杂 UI 组件

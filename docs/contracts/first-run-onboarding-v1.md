@@ -132,6 +132,7 @@ an explicit user action through the normal Draft-only message contract.
 
 ## References
 
+- [ADR-0202: Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning](../adr/0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md)
 - [Configured Camp Creation and Lazy Conversations](../adr/0071-configured-camp-creation-and-lazy-conversations.md)
 - [Quick Chat Ubiquitous Language](../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md)
 - [Background Runtime Checks](../adr/0083-background-runtime-checks-and-actionable-status.md)
