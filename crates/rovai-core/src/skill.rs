@@ -148,22 +148,10 @@ const ADR_FORMAT_REFERENCE: &str =
 const REVIEW_DUO_RULES: &str = include_str!("../../../skills/review-duo/SKILL.md");
 const REVIEW_DUO_NOTICE: &str = include_str!("../../../skills/review-duo/NOTICE");
 const REVIEW_DUO_OPENAI: &str = include_str!("../../../skills/review-duo/agents/openai.yaml");
-const REVIEW_DUO_ACCEPTANCE_REFERENCE: &str =
-    include_str!("../../../skills/review-duo/references/acceptance.md");
-const REVIEW_DUO_FALLBACKS_REFERENCE: &str =
-    include_str!("../../../skills/review-duo/references/fallbacks.md");
 const REVIEW_DUO_FINDINGS_REFERENCE: &str =
     include_str!("../../../skills/review-duo/references/findings.md");
-const REVIEW_DUO_LEAD_REFERENCE: &str =
-    include_str!("../../../skills/review-duo/references/lead.md");
-const REVIEW_DUO_MESSAGES_REFERENCE: &str =
-    include_str!("../../../skills/review-duo/references/messages-and-replies.md");
 const REVIEW_DUO_SNAPSHOT_REFERENCE: &str =
     include_str!("../../../skills/review-duo/references/snapshot.md");
-const REVIEW_DUO_SPEC_REVIEWER_REFERENCE: &str =
-    include_str!("../../../skills/review-duo/references/spec-reviewer.md");
-const REVIEW_DUO_STANDARDS_REVIEWER_REFERENCE: &str =
-    include_str!("../../../skills/review-duo/references/standards-reviewer.md");
 include!(concat!(env!("OUT_DIR"), "/third_party_bundled_files.rs"));
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -574,39 +562,13 @@ const REVIEW_DUO_FILES: &[(&str, &str, u32)] = &[
     ("NOTICE", REVIEW_DUO_NOTICE, 0o644),
     ("agents/openai.yaml", REVIEW_DUO_OPENAI, 0o644),
     (
-        "references/acceptance.md",
-        REVIEW_DUO_ACCEPTANCE_REFERENCE,
-        0o644,
-    ),
-    (
-        "references/fallbacks.md",
-        REVIEW_DUO_FALLBACKS_REFERENCE,
-        0o644,
-    ),
-    (
         "references/findings.md",
         REVIEW_DUO_FINDINGS_REFERENCE,
-        0o644,
-    ),
-    ("references/lead.md", REVIEW_DUO_LEAD_REFERENCE, 0o644),
-    (
-        "references/messages-and-replies.md",
-        REVIEW_DUO_MESSAGES_REFERENCE,
         0o644,
     ),
     (
         "references/snapshot.md",
         REVIEW_DUO_SNAPSHOT_REFERENCE,
-        0o644,
-    ),
-    (
-        "references/spec-reviewer.md",
-        REVIEW_DUO_SPEC_REVIEWER_REFERENCE,
-        0o644,
-    ),
-    (
-        "references/standards-reviewer.md",
-        REVIEW_DUO_STANDARDS_REVIEWER_REFERENCE,
         0o644,
     ),
 ];
@@ -3703,17 +3665,18 @@ mod tests {
         assert!(!grill_duo_description.contains("双人追问 ·"));
         assert!(!grill_duo_description.contains("rovai send"));
         for required in [
-            "### 双人追问 · 复核邀请",
-            "### 双人追问 · 搭档建议",
+            "## 消息方式",
             "前提已经确认、彼此不依赖的 1–4 个问题",
             "一轮在其中所有问题被明确回答、取消或失效前保持开放",
             "开放轮次期间不混入新问题",
             "只重新复核该题",
-            "只处理触发当前 AgentRun 的复核请求",
-            "直接回复本轮当前有效邀请",
+            "搭档只处理触发当前 AgentRun 的请求",
+            "当前固定搭档对本轮当前有效邀请的直接回复",
             "旧轮、已失效邀请或迟到建议只作补充",
-            "rovai send --to <固定搭档 Agent ID>",
-            "只有 `rovai send` 返回 `accepted` 后",
+            "rovai send --to <搭档 Agent ID> --body <本轮问题>",
+            "rovai send --to <邀请者 Agent ID> --body <本轮建议>",
+            "rovai send --to-user --body <正文>",
+            "消息返回 `accepted` 后才结束当前响应",
             "需要同步维护领域词汇或 ADR 的追问",
         ] {
             assert!(
@@ -3721,6 +3684,7 @@ mod tests {
                 "missing grill-duo rule: {required}"
             );
         }
+        assert_eq!(grill_duo_rules.matches("rovai send").count(), 3);
         let retired_duo_markers =
             ["REVIEW", "ADVISORY"].map(|suffix| ["GRILL", "DUO", suffix].join("_"));
         for retired_marker in &retired_duo_markers {
@@ -3753,15 +3717,18 @@ mod tests {
         assert!(!grill_duo_with_docs_description.contains("双人追问与文档 ·"));
         assert!(!grill_duo_with_docs_description.contains("rovai send"));
         for required in [
-            "### 双人追问与文档 · 复核邀请",
-            "### 双人追问与文档 · 搭档建议",
+            "## 消息方式",
             "前提已经确认、彼此不依赖的 1–4 个问题",
             "一轮在其中所有问题被明确回答、取消或失效前保持开放",
             "开放轮次期间不混入新问题",
             "只重新复核该题",
-            "只处理触发当前 AgentRun 的复核请求",
-            "直接回复本轮当前有效邀请",
+            "搭档只处理触发当前 AgentRun 的请求",
+            "当前固定搭档对本轮当前有效邀请的直接回复",
             "旧轮、已失效邀请或迟到建议只作补充",
+            "rovai send --to <搭档 Agent ID> --body <本轮问题>",
+            "rovai send --to <邀请者 Agent ID> --body <本轮建议>",
+            "rovai send --to-user --body <正文>",
+            "消息返回 `accepted` 后才结束当前响应",
             "只记录用户明确确认的术语和决定",
             "无需维护领域文档的追问",
         ] {
@@ -3770,6 +3737,7 @@ mod tests {
                 "missing grill-duo-with-docs rule: {required}"
             );
         }
+        assert_eq!(grill_duo_with_docs_rules.matches("rovai send").count(), 3);
         assert!(
             !grill_duo_with_docs_content
                 .join("references")
@@ -3797,7 +3765,7 @@ mod tests {
             .iter()
             .find(|skill| skill.name == "review-duo")
             .unwrap();
-        assert_eq!(review_duo.current_revision.file_count, 11);
+        assert_eq!(review_duo.current_revision.file_count, 5);
         assert!(
             review_duo
                 .current_revision
@@ -3807,94 +3775,91 @@ mod tests {
         );
         let review_duo_content =
             service.revision_content_path(&review_duo.id, &review_duo.current_revision.id);
-        for relative in [
-            "NOTICE",
+        for relative in ["NOTICE", "references/findings.md", "references/snapshot.md"] {
+            assert!(review_duo_content.join(relative).is_file());
+        }
+        for retired in [
             "references/acceptance.md",
             "references/fallbacks.md",
-            "references/findings.md",
             "references/lead.md",
             "references/messages-and-replies.md",
-            "references/snapshot.md",
             "references/spec-reviewer.md",
             "references/standards-reviewer.md",
         ] {
-            assert!(review_duo_content.join(relative).is_file());
+            assert!(!review_duo_content.join(retired).exists());
         }
         let review_duo_rules = fs::read_to_string(review_duo_content.join("SKILL.md")).unwrap();
+        let review_duo_description = review_duo_rules
+            .lines()
+            .find(|line| line.starts_with("description:"))
+            .unwrap();
+        assert!(review_duo_description.contains("只要求修改代码而未要求双人评审"));
+        assert!(!review_duo_description.contains("rovai send"));
+        let review_duo_openai =
+            fs::read_to_string(review_duo_content.join("agents/openai.yaml")).unwrap();
+        assert!(review_duo_openai.contains("display_name: \"双人代码评审\""));
+        let review_duo_short_description = review_duo_openai
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("short_description: "))
+            .unwrap()
+            .trim_matches('"');
+        assert!((25..=64).contains(&review_duo_short_description.chars().count()));
         for required in [
-            "普通单人 code review 不自动触发",
-            "启动消息是用户可读的评审标记",
-            "最终报告因此直接回复该 manifest",
-            "Agent 不能选择任意 reply target",
-            "Skill-only v1 的完整 duo 只接受两类输入",
-            "同一位 Review Lead 在同一个 Camp 中同一时间只主动推进一场",
-            "Spec source locator",
-            "30 KiB 工作上限",
-            "最终报告只做有界摘要",
+            "同一位发起者在同一个 Camp 中一次只推进一场",
+            "正常流程只使用以上四条消息",
+            "每个方向最多报告 8 条",
+            "2,000–2,500 个中文字符",
+            "每条 finding 的“问题、依据、影响、建议”分别只写 1–2 句",
+            "accepted 后必须确认 `effectiveRecipients=[]`",
+            "收件人必须恰好是预期的可信 Agent ID",
+            "发起者在同一响应中继续独立完成并发布需求检查",
+            "只有搭档明确不可用或 Delivery 明确失败时才更换",
+            "只接受新搭档对当前有效请求的直接回复",
+            "最多 3 条最重要问题",
+            "最终报告本身表示当前会话中的本场评审已经完成",
+            "不为此建立确定性历史查重协议",
         ] {
             assert!(
                 review_duo_rules.contains(required),
                 "missing review-duo rule: {required}"
             );
         }
-        assert!(!review_duo_rules.contains("workflow_session_id"));
-        assert!(!review_duo_rules.contains("[REVIEW_DUO_"));
-        let review_duo_messages = fs::read_to_string(
-            review_duo_content
-                .join("references")
-                .join("messages-and-replies.md"),
-        )
-        .unwrap();
-        assert!(review_duo_messages.contains(
-            "Lead 初始 Run 中的启动、Standards 请求、Spec parts/manifest 和等待状态都是用户触发消息的子消息"
-        ));
-        assert!(review_duo_messages.contains("rovai send --to <固定搭档 Agent ID>"));
-        assert!(review_duo_messages.contains("Spec source locator <request messageId>"));
-        assert!(review_duo_messages.contains("这条消息自动回复当前 Standards manifest"));
-        let review_duo_standards = fs::read_to_string(
-            review_duo_content
-                .join("references")
-                .join("standards-reviewer.md"),
-        )
-        .unwrap();
-        assert!(review_duo_standards.contains("rovai send --to <请求发送者 Agent ID>"));
-        assert!(review_duo_standards.contains("Standards result locator"));
         let review_duo_findings =
             fs::read_to_string(review_duo_content.join("references").join("findings.md")).unwrap();
         for required in [
-            "ID 必须形成从 `001` 到 manifest `Total` 的完整连续序列",
-            "accepted `effectiveRecipients` 必须为空",
-            "transmitted severity counts",
+            "每条的“问题、依据、影响、建议”分别只写 1–2 句",
+            "单方向完整结果目标控制在约 2,000–2,500 个中文字符",
+            "Finding 数量：** <0–8>",
+            "重要问题：最多 3 条",
+            "不得复制两个方向的全部 finding",
         ] {
             assert!(
                 review_duo_findings.contains(required),
-                "missing review-duo result transport rule: {required}"
+                "missing review-duo result rule: {required}"
             );
         }
-        let review_duo_protocol = [
-            review_duo_rules,
-            review_duo_findings,
-            fs::read_to_string(review_duo_content.join("references/acceptance.md")).unwrap(),
-            fs::read_to_string(review_duo_content.join("references/fallbacks.md")).unwrap(),
-            fs::read_to_string(review_duo_content.join("references/lead.md")).unwrap(),
-            review_duo_messages,
-            fs::read_to_string(review_duo_content.join("references/snapshot.md")).unwrap(),
-            fs::read_to_string(review_duo_content.join("references/spec-reviewer.md")).unwrap(),
-            review_duo_standards,
-        ]
-        .join("\n");
-        for retired_result_digest_rule in [
-            "Result digest",
-            "result digest",
-            "canonical result digest",
-            "canonical digest",
-            "digest 不匹配",
-            "digest 可验证",
-            "part/digest",
+        let review_duo_snapshot =
+            fs::read_to_string(review_duo_content.join("references").join("snapshot.md")).unwrap();
+        for required in [
+            "git:<完整 merge-base SHA>...<完整 head SHA>",
+            "patch:sha256:<64 位小写摘要>",
+            "固定范围是四条评审消息共同携带的自然关联信息",
+        ] {
+            assert!(review_duo_snapshot.contains(required));
+        }
+        let review_duo_protocol =
+            [review_duo_rules, review_duo_findings, review_duo_snapshot].join("\n");
+        for retired in [
+            "requestMessageId",
+            "reviewKey",
+            "Spec source locator",
+            "Standards result locator",
+            "30 KiB 工作上限",
+            "expected part count",
         ] {
             assert!(
-                !review_duo_protocol.contains(retired_result_digest_rule),
-                "retired review-duo result transport rule remains: {retired_result_digest_rule}"
+                !review_duo_protocol.contains(retired),
+                "retired review-duo transport rule remains: {retired}"
             );
         }
         let tasteful_ui = skills

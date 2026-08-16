@@ -356,17 +356,21 @@ ADR 或实施副作用。
 保留稳定编号与建议，改变的问题单独重新复核，当前轮关闭前不混入新题。它们不接入 Gather，也不创建 Core
 持久轮次。普通版排除领域词汇/ADR 维护；文档版把完整执行协议保留在自己的 `SKILL.md`，immutable Revision
 只额外携带 domain-modeling、glossary 和 ADR references。面向搭档或用户的当前响应都只在 `rovai send`
-返回 accepted 后结束；accepted 不代表接收方开始或完成。
+返回 accepted 后结束；accepted 不代表接收方开始或完成。三个 CLI 动作只在各 Skill 的“消息方式”章节
+定义一次，其它阶段只说明本轮内容与推进条件，不复制命令示例。
 
-Review Duo 因而把启动标记、Standards 请求与 Spec parts/manifest 作为初始 user trigger 的 sibling
-messages；Standards parts public-only 回复请求，最后 manifest 才寻址 Lead 并触发 continuation。Lead
-使用 accepted Standards request message ID 搜索唯一 Spec locator，取得 Camp ID 后用 `camp.read item`
-精确读取两轴 manifests/parts。每条结果使用 30 KiB 工作上限和轴内稳定分片；manifest 锁定 expected
-part count、accepted part message IDs、编号、finding ranges、transmitted/total 数量与 transmitted severity
-counts，Lead 同时验证可信发送者、直接父消息、snapshot 和收件人集合。最终报告只做有界摘要并引用
-完整 parts；缺失或不一致时必须标记 partial，不能依赖 recent history 或记忆补齐。
-`review-duo` 是带原则级 MIT attribution、但无 vendored upstream 的 Rovai original Skill；完整 duo v1
-只接受双方可解析的 Git-object-backed SHA 范围或用户已提供的稳定共享 patch/attachment。
+Review Duo 按 [ADR-0199](../adr/0199-session-semantic-four-message-review-duo.md)使用正常 Camp 会话中的
+四消息拓扑：Lead 向固定搭档发送 Standards 请求，public-only 保存独立 Spec 结果；搭档直接返回一条
+Standards 结果后，Lead public-only 发布有界最终报告。四条消息携带相同的不可变 Git 或 patch 评审范围，
+Lead 只接受可信当前搭档对当前有效请求的直接回复，并且同一 Lead 在一个 Camp 中一次只推进一场未完成评审。
+该 Skill 不使用 Gather，不建立 review key、request-message locator、completion locator、parts、manifest 或
+Core 持久评审对象，也不承诺会话上下文全部丢失后的确定性恢复或 exactly-once 发布。
+
+每个轴最多八条 finding，每个字段保持一至两句，完整轴结果目标约 2,000–2,500 个中文字符；超出时标记
+partial 并建议缩小范围。最终报告只列每轴状态、数量、最多三条重要问题和覆盖限制，不重复两轴全文。
+public-only 结果必须没有 effective Agent recipient，定向消息必须只产生预期可信收件人；意外 recipient 的
+消息不能推进评审。`review-duo` 是带原则级 MIT attribution、但无 vendored upstream 的 Rovai original
+Skill；五文件 bundle 只接受双方可解析的 Git-object-backed SHA 范围或用户已提供的稳定共享 patch。
 
 ### 四层 Context 权威
 

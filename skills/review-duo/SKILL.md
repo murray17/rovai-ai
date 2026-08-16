@@ -1,264 +1,134 @@
 ---
 name: review-duo
-description: 在 Rovai Camp 中由当前队员与一位固定搭档，对冻结代码差异分别进行 Standards（仓库规范与代码质量）和 Spec（需求符合度）双轴评审。用户明确要求双人、双轴或团队 code/PR/diff review，明确要求 Standards 与 Spec 独立评审，或当前消息是另一位成员发来的“双轴代码评审 · Standards（规范）请求”/同义请求，或本次固定搭档发来的“双轴代码评审 · Standards（规范）结果”/同义结果时使用。普通单人 code review 不自动触发；默认只读，不直接修复、提交、创建 PR 或 Task。
+description: 当用户希望由两位 Camp 成员共同审查一份明确的代码改动，并分别检查代码质量与需求符合度时使用。当前评审者发起、完成需求检查和整理报告，固定搭档收到本次规范与质量检查请求时也使用。普通单人评审、没有明确改动范围，以及只要求修改代码而未要求双人评审的任务不使用。
 ---
 
-# 双轴代码评审
+# 双人代码评审
 
-让两位真实的 Camp 成员检查同一份冻结代码差异：
+两位成员检查同一份固定代码改动：
 
-- 固定搭档负责 **Standards**：仓库规范、正确性与代码质量；
-- 当前队员负责 **Spec**：实现是否满足原始需求与验收条件；
-- 最终报告保留两个独立区块，不让一个轴掩盖另一个轴。
+- 固定搭档检查仓库规范、正确性与代码质量；
+- 当前评审者检查实现是否满足需求与验收条件；
+- 最终报告保留两个独立方向，不互相覆盖。
 
-## 使用边界
+评审默认只读。完成报告不自动修改代码、创建任务、提交、推送或更新 PR。用户同时要求评审后修改时，先完成只读报告；修改属于后续阶段。
 
-使用本 Skill：
+## 角色与关联
 
-- 用户明确要求两位成员 review PR、分支、提交范围或稳定 patch；
-- 用户要求同时、独立检查“代码是否合规”和“功能是否做对”；
-- 收到另一位成员发来的 Standards 评审请求；
-- 当前消息来自本次固定搭档，并直接回复当前 Standards 请求。
+- 用户发起双人评审：当前成员作为评审发起者，负责需求检查和最终整理。
+- 当前 AgentRun 由规范与质量检查请求直接触发：作为固定搭档，只处理这条请求。
+- 当前输入是固定搭档对本轮当前有效请求的直接回复：作为发起者继续。
 
-不使用本 Skill：
+固定搭档必须不是自己、仍在当前 Camp、能够接收请求，并适合检查本次改动。始终使用 Runtime 或 Core 提供的可信 Agent ID 寻址。
 
-- 用户只要求实现、修复、重构或提交代码；
-- 用户只要求普通单人 code review，未要求 Camp 搭档、双人或双轴；
-- 没有可冻结的 diff、PR、提交范围或稳定 patch；
-- 用户要求严格技术盲评。公开 Camp 只能提供程序性独立，不能保证双方看不到彼此消息。
+发起者只接受当前固定搭档对本轮请求的直接回复，并核对其中的固定评审范围与请求完全一致。消息标题和评审范围帮助阅读与关联，不能替代可信发送者和直接回复关系。
 
-用户同时要求“先 review，再修复”时，先完成只读评审。评审结束不自动开始修改；修复属于新的写入阶段。
-
-## 消息往返
-
-```text
-当前用户评审请求
-├── 双轴代码评审启动消息（public-only）
-├── Standards 请求 → 固定搭档
-├── 当前队员 Spec parts + manifest（public-only）
-└── 等待搭档（可选，public-only）
-
-Standards 请求
-├── 固定搭档 Standards parts（public-only）
-└── 固定搭档 Standards manifest → Review Lead
-    └── 最终双轴摘要报告（public-only）
-```
-
-- 启动消息是用户可读的评审标记，不是可供 Skill 任意选择的 reply root；
-- 启动、Standards 请求、Spec parts/manifest 和等待状态从同一个 Lead Run 发送时，Core 会让它们都回复该 Run 的用户触发消息；
-- 固定搭档的 Standards parts 与最终 manifest 都直接回复 Standards 请求，只有 manifest 显式寻址 Review Lead；
-- Review Lead 的续跑由 Standards manifest 触发，最终报告因此直接回复该 manifest；
-- 需要重试时创建新的 Standards 请求，旧请求的迟到结果只作为补充。
-
-公开消息可以使用以下自然标题：
-
-```text
-### 双轴代码评审 · 启动
-### 双轴代码评审 · Standards（规范）请求
-### 双轴代码评审 · Standards（规范）结果 · Part
-### 双轴代码评审 · Standards（规范）结果 · Manifest
-### 双轴代码评审 · Spec（需求）结果 · Part
-### 双轴代码评审 · Spec（需求）结果 · Manifest
-### 双轴代码评审 · 等待搭档
-# 双轴代码评审结果
-```
-
-自然标题是 Skill 发现和阅读线索，不证明发送者、当前请求或完成状态。进入 Skill 后，以 Runtime 提供的可信发送者和当前触发消息的直接回复链确认角色；标题被改写或省略但正文语义和这些事实清楚时仍可继续。最终报告标题不触发自动续跑。
-
-## 核心不变量
-
-1. 先冻结 **Diff、Spec、Standards** 三类来源，再开始任一轴评审。
-2. 两个轴检查同一份 snapshot，每个轴只有一位主评审者。
-3. 当前队员默认负责 Spec，固定搭档默认负责 Standards。
-4. 两轴分别形成并锁定结果；最终组装者不得改写 finding 的内容、严重度、置信度或轴内顺序。
-5. 不跨轴合并或去重。同一问题同时违反两个轴时保留两条 finding，只增加相互引用。
-6. 缺少 Spec 时，Spec 轴显示“未评估”，不能显示通过。
-7. 评审默认只读，不修改代码、不创建 Task、不提交、不推送、不创建或更新 PR。
-8. `rovai send` accepted 只证明公共消息已提交，并按返回的 `effectiveRecipients` 建立相应 Delivery；空集合表示 public-only。它不证明搭档已经开始或完成。
-9. 等待搭档时不 sleep、不轮询、不代写其结论。
-10. 最终报告固定按 `Standards`、`Spec` 顺序呈现，不生成会掩盖其中一轴的单一总分。
-11. Agent 不能选择任意 reply target；每次发送都由 Core 自动回复当前 AgentRun 的触发消息。
-12. 每条 `rovai send` 正文都先按 UTF-8 bytes 计算并保持在 30 KiB 工作上限内；32 KiB 是 Core 硬上限，不依赖 rejected 后再截断。
-13. 完整 finding 放在有界 parts 中，最后一条 axis manifest 锁定 expected part count、accepted part message IDs、编号、finding ranges 与 transmitted/total 数量；最终报告只做有界摘要并引用完整结果，不再次复制两轴全文。
-14. accepted Standards request `messageId` 是本轮唯一关联键；Spec manifest 使用 `Spec source locator <request messageId>`，最终 Lead 先搜索取得 Camp ID，再 exact-read 完整结果。
-
-## 默认分工
-
-```text
-当前队员
-= Review Lead
-= Spec 主评审者
-= 最终组装者
-
-一位固定合格搭档
-= Standards 主评审者
-```
-
-固定搭档必须：
-
-- 不是当前队员；
-- 仍在当前 Camp；
-- 能接收公开协作请求；
-- 能读取同一份冻结 diff 与 Standards 来源；
-- 对改动语言、模块或仓库规则具备足够匹配。
-
-整场评审使用同一位搭档。只有搭档明确不可用、Delivery 明确失败、搭档拒绝或用户明确要求时才更换。
-
-没有合格搭档时可以降级为单人双轴评审，但必须明确写出：
-
-```text
-本次为单人降级评审；两个轴仍分别报告，但不具备双人独立性。
-```
-
-用户明确要求必须双人时，不得静默降级。
-
-## 单场推进
-
-同一位 Review Lead 在同一个 Camp 中同一时间只主动推进一场尚未结束的 Review Duo。以下任一情况结束当前评审：
-
-- 最终双轴报告已发布；
-- 用户明确取消；
-- 用户明确要求用新目标替换当前评审；
-- 缺少稳定输入或有效搭档，Lead 已说明 solo fallback 或终止。
-
-旧评审未结束时收到新目标：用户明确要求替换时先结束旧评审；意图不清楚时只做一次最小确认。不要让两场 Review Duo 的请求和结果交错。
-
-## 冻结评审快照
-
-一次快照同时包含：
-
-```text
-Diff Bundle
-Spec Bundle
-Standards Bundle
-```
-
-至少记录：
-
-- 评审目标与仓库；
-- base、head 与 merge-base 的不可变提交标识；
-- 稳定 snapshot identifier；
-- 文件、hunk、generated、binary 与跳过项的 coverage；
-- 原子 Requirement 及其来源；
-- 适用于改动路径的仓库规范、Contract、ADR、配置与质量基线；
-- 快照短摘要。
-
-PR、分支和提交范围优先使用不可变 SHA。不要只记录会移动的 `main`、`HEAD` 或分支名。
-
-Skill-only v1 的完整 duo 只接受两类输入：两个成员都可解析的 Git-object-backed 不可变 SHA 范围，或用户已经提供且双方可读取的不可变 patch/附件。工作树包含 staged、unstaged 或 untracked 内容但没有这种共享 artifact 时，要求用户先提交或提供稳定 patch；否则降级为 solo 或停止。不要承诺本 Skill 能创建或分发不存在的共享快照，也不要让两人分别读取不同时间点的实时工作树。
-
-详细规则见 [评审快照](references/snapshot.md)。
+同一位发起者在同一个 Camp 中一次只推进一场未完成的 Review Duo。
 
 ## 基本流程
 
-```text
-读取仓库规则与用户目标
-        ↓
-冻结 Diff / Spec / Standards
-        ↓
-选择并冻结固定搭档
-        ↓
-发布 public-only“评审启动”标记
-        ↓
-向固定搭档发送 Standards 请求并保留 accepted request messageId
-        ↓
-当前队员独立完成 Spec，public-only 发布 parts 与 manifest；manifest 绑定 request messageId
-        ↓
-结束本次响应，等待固定搭档回复
-        ↓
-固定搭档 public-only 发布 Standards parts，最后仅用 manifest 返回 Lead
-        ↓
-确认可信发送者、直接父请求、request messageId 和 snapshot identifier 都正确
-        ↓
-用 current request messageId 定位并 exact-read Spec manifest 与所有 parts
-        ↓
-验证两轴 expected/accepted parts、编号、finding ranges、transmitted/total 数量与传输完整性
-        ↓
-重新检查快照是否 stale
-        ↓
-从 Standards manifest 触发的续跑中组装并 public-only 发布有界最终摘要
-```
+1. 固定代码改动范围、需求来源、仓库规范来源以及覆盖限制。
+2. 选择一位固定搭档，把规范与质量检查一次发给对方。
+3. 当前评审者独立完成需求检查，并公开保存一份完整结果。
+4. 固定搭档用一条消息向发起者返回规范与质量结果。
+5. 发起者验证可信发送者、直接回复关系和固定评审范围。
+6. 发起者公开发布有界的最终双人评审报告。
 
-向搭档发送 Standards 请求时，不附带当前队员的 Spec 推荐或结论，避免锚定。
+正常流程只使用以上四条消息，不发布启动消息、等待消息、结果分片、清单、指针或额外完成定位标记，也不接入 Gather。
 
-## 两轴边界
+## 固定评审输入
 
-### Standards
+开始前读取 [评审范围](references/snapshot.md)。完整双人评审必须让两位成员读取同一份固定输入，例如：
 
-检查：
+- 已解析为不可变提交标识的 PR、分支或提交范围；
+- 用户已经提供且双方都能读取的固定 patch。
 
-- 适用的仓库规则与目录局部约束；
-- 明确正确性、错误处理、事务、并发、幂等与安全问题；
-- API、schema、migration、测试与构建约束；
-- 代码质量和可维护性；
-- 本次 diff 是否试图通过同时修改规范来自我豁免。
+同时固定代码改动、需求与验收来源、适用的仓库规范，以及未覆盖、跳过或无法运行的内容。找不到明确需求时，需求检查标记为 `not_assessed`，不能写成通过。
 
-不检查需求是否满足，不根据 Spec 重新解释实现。
+没有稳定代码范围时，请用户提供明确提交范围或固定 patch。不要让两位成员分别读取不同时间点的实时工作区后声称检查了同一份代码。
 
-### Spec
+## 独立检查
 
-检查：
+### 固定搭档：规范与质量
 
-- 原始 Requirement 是否缺失、部分实现或实现错误；
-- 验收条件是否可观察地满足；
-- diff 是否加入未要求的行为；
-- Requirements 之间是否冲突或缺少可判断依据。
+只检查仓库规则、目录约束、明确正确性问题、错误处理、数据一致性、并发、重试、安全边界、API、数据库、迁移、生命周期、关键测试缺口和显著维护成本。不要判断产品需求是否满足。
 
-不把代码、测试名、commit message 或 branch name 反向当作需求真源。
+### 当前评审者：需求符合度
 
-## 独立与锁定
+只检查需求是否缺失、部分实现或实现错误，验收条件是否成立，是否加入未要求的行为，以及需求来源是否冲突或不足。不要把一般代码风格问题写成需求问题，也不要从代码反向创造需求。
 
-Standards 评审者只依据冻结的 Diff 与 Standards 来源形成结果。Spec 评审者只依据冻结的 Diff 与 Requirement 形成结果。
+当前评审者必须在吸收搭档结论前完成并公开保存自己的需求检查。发送给搭档的请求中不要包含自己的结论。
 
-当前队员应在吸收搭档结果之前锁定自己的 Spec 结果。结果一旦锁定：
+## 结果规模
 
-- 可以修复 Markdown 或结构格式；
-- 不得修改结论语义；
-- 不得调高或调低严重度；
-- 不得为了“统一口径”删除另一轴 finding；
-- 不得跨轴重新排序。
+每个方向最多报告 8 条有实际影响的问题，按严重度和影响排序。每条 finding 的“问题、依据、影响、建议”分别只写 1–2 句。单方向完整结果目标控制在约 2,000–2,500 个中文字符。
 
-同一轴中的精确重复由该轴评审者在锁定前处理。
+重要问题或必要证据无法在该范围内完整表达时，保留最重要的 8 条，把该方向标记为 `partial`，列明覆盖限制，并建议缩小到具体模块或更小代码范围重新评审。不要使用分片或 manifest。
 
-轴结果的传输也属于锁定条件。只有所有预期 parts 和最后 manifest 都 accepted，且 exact-read 后的发送者、直接父消息、snapshot、part 编号、finding IDs/ranges/counts、transmitted/total 数量与预期收件人集合全部一致，才可把该轴称为完整传输。缺 part、编号重复或断档、finding 缺失或重复、汇总数量不一致、出现非预期收件人、超预算或 locator 不唯一时，必须标记 `partial` 或 `failed`。
+Finding、单方向结果和最终报告格式见 [Finding 与报告](references/findings.md)。
 
-## 结果状态
+## 消息边界
 
-每个轴独立标记：
+- 公开结果不寻址任何 Agent；accepted 后必须确认 `effectiveRecipients=[]`。
+- 定向请求只发送给当前固定搭档，搭档结果只发送给可信请求发送者；accepted 后收件人必须恰好是预期的可信 Agent ID。
+- 正文需要引用可能被识别为寻址的 `@` 内容时，将其放入代码块或转义。
+- 出现非预期收件人时，该消息不作为有效请求或结果，也不能推进评审。
+- 每条发送都必须先取得 `rovai send` 的 `accepted` 并验证收件人边界，才能依赖该消息继续；`accepted` 不证明接收者已经开始或完成。
+
+发送异常时遵循 CLI 返回的 recovery 指示，不盲目重复发送。
+
+## 四条消息
+
+### 1. 发起者请求固定搭档
 
 ```text
-complete
-partial
-blocked
-failed
-not_assessed
+rovai send --to <固定搭档 Agent ID> --body <评审请求>
 ```
 
-最终结果还应标明：
+请求包含固定评审范围、需求来源、仓库规范来源、覆盖限制和“只检查规范与质量”的分工，要求最多 8 条 finding，并要求用一条完整消息返回。
 
-- `duo` 或 `solo fallback`；
-- `fresh` 或 `stale`；
-- coverage 是否完整；
-- 没有运行的测试或无法验证的环境行为；
-- generated、binary、vendor 或超大 diff 的限制。
+请求 accepted 且唯一有效收件人是固定搭档后，发起者在同一响应中继续独立完成并发布需求检查；不要先等待搭档结果。此后搭档保持固定。只有搭档明确不可用或 Delivery 明确失败时才更换；更换后发送同一固定评审范围的新请求，只接受新搭档对当前有效请求的直接回复，旧搭档结果只作补充。
 
-快照在组装前已经移动时，可以发布旧快照报告，但必须醒目标记 `stale`，不能声称适用于最新代码，也不能自动把旧 finding 映射到新 diff。
+### 2. 发起者公开需求检查结果
 
-## 完成边界
+```text
+rovai send --body <需求检查结果>
+```
 
-发布最终报告后，本次只读评审结束。
+结果必须携带与请求完全相同的固定评审范围。accepted 且 `effectiveRecipients=[]` 后结束当前响应，等待搭档结果。
 
-迟到的旧结果可以作为补充信息阅读，但不自动更新报告或重新开启评审。用户明确要求重新评审时，创建新的冻结 snapshot 和新的启动消息。
+### 3. 固定搭档返回规范与质量结果
 
-发布报告不自动修改或修复代码，不创建 Task、Issue、PR、Memory 或 ADR，不提交、推送、合并或唤醒搭档继续实施。
+```text
+rovai send --to <请求发送者 Agent ID> --body <规范与质量结果>
+```
 
-## 按角色读取
+搭档只处理触发当前 AgentRun 的请求，结果携带相同固定评审范围并用一条消息完整返回。accepted 且唯一有效收件人是可信请求发送者后结束当前响应。
 
-- 作为 Review Lead，读取 [Lead 指南](references/lead.md)。
-- 负责 Standards 时，读取 [Standards 评审者指南](references/standards-reviewer.md)。
-- 负责 Spec 时，读取 [Spec 评审者指南](references/spec-reviewer.md)。
-- 冻结目标或检查 stale 时，读取 [评审快照](references/snapshot.md)。
-- 写 finding、锁定轴结果或组装最终报告时，读取 [Finding 与结果格式](references/findings.md)。
-- 发送、接收、重试或处理迟到结果时，读取 [消息与回复关系](references/messages-and-replies.md)。
-- 只有出现能力缺失、搭档不可用、超大 diff 或其它异常时，读取 [降级与失败处理](references/fallbacks.md)。
-- 维护或验收本 Skill 时，读取 [验收清单](references/acceptance.md)。
+### 4. 发起者发布最终报告
+
+采用搭档结果前必须确认：发送者是当前固定搭档、消息直接回复当前有效请求、固定评审范围一致，并且内容确实是规范与质量检查结果。
+
+最终报告通过 `rovai send --body <最终报告>` public-only 发布。它不复制两个方向的全文，只列每个方向的状态、finding 数量、最多 3 条最重要问题和覆盖限制；完整结果保留在前面的两条轴结果中。accepted 且 `effectiveRecipients=[]` 后结束当前响应。
+
+## 结果独立性
+
+- 不跨方向合并、删除或重新编号问题；
+- 不改变问题内容和严重度；
+- 不为了统一口径改写一方结论；
+- 同一行为同时违反两个方向时保留两条问题；
+- 固定先呈现“规范与质量”，再呈现“需求符合度”；
+- 不生成会掩盖其中一个方向的单一总分或总通过状态。
+
+最终报告中的重要问题直接复用对应 finding 的 ID、严重度和“问题”句，不另行改写。
+
+## 完成、迟到与降级
+
+最终报告本身表示当前会话中的本场评审已经完成。同一固定评审范围的最终报告发布后，重复、旧搭档或迟到结果只作补充，不再次推进或发布报告；不为此建立确定性历史查重协议。
+
+- 没有合格搭档且用户没有要求必须双人：可以降级为单人双方向评审，但必须明确不具备双人独立性。
+- 用户要求必须双人而没有合格搭档：停止。
+- 搭档无法读取固定代码范围：更换一次搭档或停止，不改读实时分支。
+- 需求缺失：规范与质量继续，需求方向标记为 `not_assessed`。
+- 代码范围在最终整理前发生变化：可以发布旧范围报告，但必须标记 `stale`，不能声称适用于最新代码。
+- 用户取消或以新目标替换当前评审：结束旧评审；旧结果不能推进新评审。

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.92
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -13,6 +13,8 @@ last_updated: 2026-08-16
 > 当前状态：设计、实施与自动验收已完成。
 >
 > 前置版本：[v0.91 空 MCP Library 与用户自主管理](../v0.91/README.md)
+>
+> 后续版本：[v0.93 Review Duo 会话语义精简](../v0.93/README.md)
 
 ## 版本目标
 

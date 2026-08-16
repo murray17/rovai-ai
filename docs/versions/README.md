@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.92
+current_version: v0.93
 last_updated: 2026-08-16
 ---
 
@@ -143,4 +143,5 @@ last_updated: 2026-08-16
 | v0.89 | `historical` | 持久 Gather Barrier、统一 Completion Delivery 与类型化聚合输入 | [v0.89/README.md](v0.89/README.md) |
 | v0.90 | `historical` | Gather 当前代最后结果、独立回传限额与 self-contained completion | [v0.90/README.md](v0.90/README.md) |
 | v0.91 | `historical` | 空 MCP Library、预发布 clean break 与用户自主管理 | [v0.91/README.md](v0.91/README.md) |
-| v0.92 | `current` | Grill Duo 有界开放轮次、自包含协议与自然语言路由收敛 | [v0.92/README.md](v0.92/README.md) |
+| v0.92 | `historical` | Grill Duo 有界开放轮次、自包含协议与自然语言路由收敛 | [v0.92/README.md](v0.92/README.md) |
+| v0.93 | `current` | Review Duo 四消息会话语义、结果有界化与 Grill Duo CLI 去重 | [v0.93/README.md](v0.93/README.md) |

@@ -423,7 +423,7 @@ The transient list of current Agent Profiles whose currently selected Agent Runt
 _Avoid_: Skill Assignment, persisted Group membership, Camp membership, historical Member snapshot
 
 **Official Skill Inventory**:
-The exact application-release-owned set of official Rovai Skill identities: `analyze-agent-codebase`, `cli-operations`, `diagnosing-bugs`, `grill-duo`, `grill-duo-with-docs`, `memory-stewardship`, `tasteful-ui`, `tdd`, `worktree`, and `writing-for-agents`. It is not a scan of Runtime-native Skills, and changing the set requires a successor architecture decision and coordinated package/UI/fixture update.
+The exact application-release-owned set of official Rovai Skill identities: `analyze-agent-codebase`, `campfire`, `cli-operations`, `diagnosing-bugs`, `grill-duo`, `grill-duo-with-docs`, `member-studio`, `memory-stewardship`, `review-duo`, `tasteful-ui`, `tdd`, `worktree`, and `writing-for-agents`. It is not a scan of Runtime-native Skills, and changing the set requires a successor architecture decision and coordinated package/UI/fixture update.
 _Avoid_: Runtime-native inventory, dynamic directory scan, enabled Skill set, effective Runtime exposure
 
 **CLI Operations Skill**:
@@ -453,6 +453,10 @@ _Avoid_: dependent `grill-duo` assignment, unconfirmed documentation fact, gener
 **Grill Duo Open Round**:
 A Skill-owned set of one to four prerequisite-confirmed, mutually independent questions with stable `Q1`–`Q4` identifiers. It stays open until every question is answered, cancelled, or invalidated; unchanged unanswered questions retain existing partner advice, a changed question alone is re-reviewed, and new questions wait for the next round. It is expressed in public messages and is not a Core-persisted entity.
 _Avoid_: CampTurn, Gather Barrier, persisted Round, omission-as-agreement, renumbered partial answer
+
+**Review Duo Skill**:
+The session-semantic official Rovai Skill `review-duo` (“双人代码评审”) in which one Lead and one fixed eligible Camp partner independently review the same immutable Git or patch range along Spec and Standards axes. Its normal workflow uses four ordinary Camp Messages, accepts only the current trusted partner's direct reply with the same range, bounds each complete axis result to one message, and publishes a compact final report without creating a Gather or persisted review transaction.
+_Avoid_: ordinary solo review, live-worktree dual read, Gather Barrier, review key, completion locator, parts/manifest transport, deterministic recovery after complete conversation-context loss
 
 **Tasteful UI Skill**:
 The official Rovai Skill `tasteful-ui` (“品味优先 UI 设计”) vendored from one exact MIT-licensed upstream revision with its complete taste exploration, reference catalog, project-design format, implementation workflow, and result critique. It is enabled and assigned to every Skill Delivery Group by default; its task-local investment gates guide UI work but never grant Tool, network, filesystem, implementation, approval, or product authority.
