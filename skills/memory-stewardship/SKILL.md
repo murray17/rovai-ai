@@ -1,33 +1,41 @@
 ---
 name: memory-stewardship
-description: 在 Rovai-ai 中发现并维护可能值得跨未来 AgentRun 保留的长期信息。当对话可能包含稳定偏好、未来协作约定、有证据的可复用经验，或用户说“记住”“以后默认”“不要再”“更正记忆”等高信号表达时使用；先核对现有 Memory，再决定 add、revise 或停止，不保证每个机会都应写入。
+description: 当用户明确要求记住、更正或停止沿用某项长期信息，或当前内容包含会影响未来协作的稳定偏好、约定或经验时使用。先检查相关 Memory，再决定新增、修订、转交用户治理或不写入。临时状态、当前任务进度、项目事实、敏感信息和无依据推测不使用。
 ---
 
-# 共同记忆维护 —— 留下路标，不收集脚印
+# 共同记忆维护
 
-把当前输入视为一个 best-effort Memory opportunity，而不是已确认的 Memory。只有在内容跨 Run 仍有价值、
-有明确依据、会改变未来协作且能独立表达时，才继续写入。显式“记住”是高信号，不免除安全、Scope、
-查重和正文质量检查；不能可靠抽象时停止，不写。
+只保留会影响未来协作的稳定信息。当前事实、用户最新指令和项目权威来源始终高于 Memory。
 
-## 核心流程
+## 判断标准
 
-1. 应用当前事实高于 Memory 的权威与安全边界。
+候选内容应当同时满足：
+
+- 当前任务结束后仍有价值；
+- 来自用户明确表达或真实经历支持的经验；
+- 会改变未来协作行为，而不只是复述发生过的事情；
+- 能写成一条独立、原子的偏好、约定或经验；
+- 不应由 Task、项目文档、代码、历史记录或权限系统承担；
+- 不包含敏感信息或无依据的人格判断。
+
+不满足这些条件时不写入。
+
+## 流程
+
+1. 读取 [Authority 与安全](references/authority-and-safety.md)，确认候选内容适合长期保留。
 2. 把候选压缩成一条原子的未来协作路标。
-3. 选择最小合法 Scope 与 Kind；Relationship 只考虑当前队员承担的 directed 方向。
-4. 在线捕获执行 `view -> add/revise/stop`，一次读取所选精确 Scope 的完整适用集合，只做一次最小
-   mutation；revise 必须原样复制 deciding View item 的 `target`。跨 Scope 广泛回忆才使用
-   `search -> read`。
-5. 按 `rovai memory write` 的 `outcome` 准确说明结果：`effective` 已生效；`review_pending` 只表示 Hearth
-   Review Item 等待用户决定。
+3. 读取 [Scopes、Kind 与方向](references/scopes.md)，选择最小适用范围。
+4. 读取 [View、广泛回忆与最小写入](references/read-write-workflow.md)，检查相关现有 Memory。
+5. 只选择一个结果：已有等价内容则停止；已有内容需要纠正则修订；确有新价值则新增；无法确定则停止。
+6. 写入前读取 [正文与 Retrieval Keys](references/content-and-keys.md)，完成一次最小更新。
+7. 根据实际结果准确说明已经生效、等待用户决定或未写入。
 
-不要把自然语言 opportunity 当作确定性路由，不做会话结束 checkpoint，也不为了“更保险”连续写多条。
+用户要求删除、停用、恢复或修改不属于当前队员权限的 Memory 时，不用相反正文模拟操作；说明需要由用户在记忆管理中完成。
 
-## 按需读取
+## 边界
 
-- 每次使用 Memory 前读取 [Authority 与安全](references/authority-and-safety.md)。
-- 选择 Hearth、Companion、Relationship、Kind 或 direction 时读取 [Scopes](references/scopes.md)。
-- 任何搜索、读取或 mutation 前读取 [读写流程](references/read-write-workflow.md)。
-- 起草正文或 Retrieval Keys、检查 byte limits 时读取 [正文与检索键](references/content-and-keys.md)。
-
-所有 Agent 调用都使用一个具体的 `rovai memory <action>` operation。先查看该 operation 的精确
-`--help`；JSON 只能作为 stdin 或 `--input-file` 输入，不能把内部 dotted operation 当作 CLI。
+- 一次只处理一条原子信息，不连续写多条“以防万一”。
+- 不在会话结束时进行全面记忆扫描。
+- 不把临时日期、路径、分支、进度和一次性阻塞写成长期记忆。
+- 不把搜索摘要、缓存或旧版本当作当前权威正文。
+- 写入失败或结果不确定时，不声称已经保存。
