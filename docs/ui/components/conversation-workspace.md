@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # Camp 会话工作区
@@ -208,9 +208,14 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 ### Skill 快速选择
 
 Composer 为空或正文被完整选中时输入 `/`，打开当前 Lead 可用 Skill 的原生候选。候选来自真实
-Skill/生效组 Read Side；方向键移动，Enter/Tab 选择，Esc 关闭。选中只写普通
-`/<skill-name> ` 文本并保留 Mention、附件和发送边界，不创建 Slash Command 协议，也不声称
-Runtime 已读取 Skill。
+Skill/生效组 Read Side；方向键移动，Enter/Tab 选择，Esc 关闭。选中创建一个原子结构化 Skill token，
+视觉与正文投影仍为 `/<skill-name>`，随后插入一个可编辑普通空格。token 保存稳定 `skillId/nameAtSend`；
+手写、粘贴和旧 Draft 的 lookalike 永远保持普通 Text，不自动升级。
+
+删除 token 一次删除整个结构化 identity；Draft 保存/恢复、undo/redo、IME、Mention、附件和发送边界继续
+使用同一编辑器真源。Skill 后来 disabled/deleted/renamed 时 token 仍显示发送 Marker，不查询当前名称改写
+正文。是否向某个 Run 提供 `SKILL.md` 文件链接由 Core 在发送时与 start time 分别判断；Composer 不显示
+虚构的 Runtime load 状态，也不把 token 变成 Slash Command、附件或 Provider-specific Skill 控件。
 
 ### 结构化 Mention 与当前用户
 

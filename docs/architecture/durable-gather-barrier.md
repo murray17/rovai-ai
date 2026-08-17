@@ -68,11 +68,11 @@ of resolving the current Default Lead, but otherwise uses recipient FIFO, attemp
 capacity, Context preflight and explicit interrupted recovery. Materialization validates that Conversation still belongs
 to the initiator and CAS-writes completionRunId.
 
-Formatter v17 projects the Barrier snapshot as mandatory `gather_completed` Current Input, including the full durable
+Formatter v18 projects the Barrier snapshot as mandatory `gather_completed` Current Input, including the full durable
 request and current-generation Item/result evidence. Public history selection may include the same messages, but
 duplicates do not change snapshot authority. Recovery reads frozen Context bytes; it never re-runs the Barrier or
-reselects results. Migration 89 removes incompatible frozen Context and nonterminal Gather technical state; there is
-no Formatter v15/v16 recovery reader after the v0.94 clean break.
+reselects results. Migration 91 removes incompatible frozen Context and nonterminal Gather technical state; there is
+no Formatter v17 recovery reader after the v0.98 clean break.
 
 ## Cancellation and read projection
 

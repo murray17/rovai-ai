@@ -85,12 +85,12 @@ generation, allowance or any other admission. Core reauthorizes every invocation
 ## Serialization and evidence
 
 Top-level field order is `schemaVersion`, `taskContext`, `sessionContinuity`, `externalEffect`, `gather`, `delegation`.
-Each absent fact is omitted, not serialized as `null`, false defaults or empty objects. ContextManifest v15 freezes
+Each absent fact is omitted, not serialized as `null`, false defaults or empty objects. ContextManifest v16 freezes
 ordered typed fact references, exact compact JSON bytes and their SHA-256 digest even when the model section is absent.
 
 ## References
 
 - [ADR-0200](../adr/0200-compact-context-projection-and-structured-run-facts.md)
-- [ContextManifest Evidence v15](context-manifest-evidence-v15.md)
+- [ContextManifest Evidence v16](context-manifest-evidence-v16.md)
 - [Gather v2](gather-v2.md)
 - [Message Delivery v4](message-delivery-v4.md)

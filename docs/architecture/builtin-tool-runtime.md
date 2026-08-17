@@ -31,7 +31,7 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 omission 的 bounded aggregate 边界见
 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
 [ADR-0200](../adr/0200-compact-context-projection-and-structured-run-facts.md)、
-[ContextManifest Evidence v15](../contracts/context-manifest-evidence-v15.md)及
+[ContextManifest Evidence v16](../contracts/context-manifest-evidence-v16.md)及
 [Run Facts v1](../contracts/run-facts-v1.md)。Task authority 与
 self-active awareness 见
 [ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)；真实空集合
@@ -404,13 +404,13 @@ AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break �
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
-Context Formatter v17 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+Context Formatter v18 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
 CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v15 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v16 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
@@ -419,14 +419,14 @@ digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 s
 ### Self Active Task Projection
 
 Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
-八项。Formatter v17 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
+八项。Formatter v18 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
 `SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
 `{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
 将所有 Task entry 淘汰时才省略整个 section。Default Lead 不获得其他成员 Task 的隐式 projection。
 公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
 selection/budget omission。
 
-ContextManifest v15 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+ContextManifest v16 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
 与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
 全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
 materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只
@@ -435,17 +435,23 @@ Task 并由 Core 重授权。
 
 ### Shared Conversation 与 Run Facts
 
-Formatter v17 按 `COLLABORATION_STATE? → SELF_ACTIVE_TASKS? → SHARED_CONVERSATION? → RUN_FACTS? →
+Formatter v18 按 `COLLABORATION_STATE? → SELF_ACTIVE_TASKS? → SHARED_CONVERSATION? → RUN_FACTS? →
 CURRENT_INPUT` 输出，`CURRENT_INPUT` 始终完整且最后。Shared Conversation 顶层 `campId` 必须等于冻结
 Run Camp，origin/reference/recent 三类消息不得跨 Camp。单消息保留 identity/reply/attachment/body，
 `mentionsCurrentUser` 仅在完整 Structured Content 为 true 时出现；即使 mention 位于截断 prefix 之外也
 不能丢失。截断只投影 `nextBodyOffset`，omitted aggregate 只投影 count 与最小/最大 sequence envelope。
 
-ContextManifest v15 仍冻结真实 Camp/source refs、完整 body length、truncation/offset、source/projected
+ContextManifest v16 仍冻结真实 Camp/source refs、完整 body length、truncation/offset、source/projected
 digests、attachment identity/digest 和 omission evidence。Run Facts v1 无事实时整段省略，单项缺失时省略
 字段；Manifest 独立保存 typed refs、exact compact JSON text 与 digest。Gather fallback 只承认当前 target
 Run/active retry generation 在无 captured return 时的 successful Runtime final output；delegation budget 中
 的 captured-return `false` 不代表其他 admission 已获授权。
+
+Direct user Current Input 可按 [Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)增加
+optional sibling `skills[{name,path}]`。Picker identity、per-Run send snapshot、start-time desired state 与
+verified Exposure 由 Core resolver 组合；正文和附件不变，零 entry 省略字段。ContextManifest v16 保存
+完整 included/omitted resolution 与 exact bytes；Runtime Adapter 仍只发送既有完整 payload，不解释 Skill
+或创建 Provider-specific input item。
 
 ### Context compaction redelivery accounting
 

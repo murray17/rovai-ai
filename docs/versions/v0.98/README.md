@@ -1,0 +1,122 @@
+---
+document_type: version-overview
+version: v0.98
+lifecycle: current
+authority: version-scope-and-status
+design_status: accepted
+implementation_status: in_progress
+model_context_change: true
+last_updated: 2026-08-17
+---
+
+# Rovai-ai v0.98：结构化 Skill 文件链接
+
+> 当前状态：开发者已在实现前确认
+> [核心模型上下文变更 revision 1](model-context-change.md)；长期决定、合同、架构、UI 与版本路由已建立，
+> Core、Renderer、Migration、测试、打包和安装验收正在实施。
+>
+> 前置版本：[v0.97 持久首次训练与“初次集结”](../v0.97/README.md)
+
+## 版本目标
+
+把用户从 Composer Skill Picker 选择的 Skill 保存为稳定结构化身份，同时保持用户可见正文
+`/skill-name` 原样不变。发送事务为每个 Direct AgentRun 冻结选择资格；Runtime 启动前，Core 只把发送时
+有资格、start time 仍可用且已由严格 SkillProjection preflight 证明为 ready 的投影文件，作为同级
+`CURRENT_INPUT.skills[{name,path}]` 提供给模型。
+
+合法无路径时静默省略对应 entry；没有 entry 时省略整个字段。SkillProjection 的 `error`、`stale`、
+Revision/content digest 或 ownership 完整性错误仍阻止 Runtime launch。Runtime Adapter transport、正文、
+附件和现有 accepted-input ACK 权威不变。
+
+## 已确认产品语义
+
+- Picker 产生 `SkillMention(skillId,nameAtSend)`；手写、粘贴和旧 Draft 中的 `/name` 永远保持 Text；
+- 正文持续显示并发送 `/name`，结构化身份不替换、不展开、不删除 Marker；
+- 发送时按每个 Direct Run 冻结 Skill active/enabled/name/Runtime Group Assignment 资格；发送时无资格，
+  后来启用也不能回溯获得路径；
+- start time 再核对当前 Library desired state，并与全量 verified `SkillExposureSnapshot` 相交；
+- `skills` 位于 `CURRENT_INPUT` 对象内，与 `message`、`attachments` 同级；entry 只暴露 name 与绝对
+  `SKILL.md` 文件路径；
+- Draft 期间被禁用且发送时仍禁用时，正文照常发送，模型不获得 Skill 文件链接；
+- 合法缺席静默省略，投影完整性错误继续全量 fail closed；
+- 文件指针不证明 Runtime 或模型读取、理解或执行了 Skill。
+
+## 交付范围
+
+### Structured Content 与 Composer
+
+- closed union 新增 `skill_mention { skillId, nameAtSend }`，复用 canonical Skill name 校验；
+- Composer Picker 插入原子 Skill token 和普通尾随空格，保留 keyboard、IME、selection、Draft、Mention 与
+  Attachment 行为；
+- body projection、timeline 与 Current Input 统一把 token 渲染为 `/nameAtSend`；不反解析普通 Slash 文本。
+
+### 发送时冻结与 start-time 解析
+
+- Direct user send 在与 AgentRun 同一事务保存 `SkillSelectionSnapshot v1` 与 canonical digest；
+- A2A/Gather 延迟物化 Run 保存 versioned empty snapshot，不扫描正文；
+- `CurrentInputSkillResolver` 以选择快照、start-time Library view、prepared Exposure 与冻结 Group
+  precedence 为小 Interface，隐藏去重、资格、路径和 omission 规则；
+- Resolver 只读，不拥有 projection filesystem side effect；Reconciler 仍是唯一投影写入权威。
+
+### Model Context 与 Evidence
+
+- AgentRun Context Formatter 升至 v18，按现有 canonical object-key 顺序序列化可选 `skills`；
+- ContextManifest Evidence 升至 v16，新增 selection snapshot 引用与完整 included/omitted resolution；
+- exact rendered payload blob/digest 继续证明最终 Dynamic Context 字节，Runtime Input Delivery 继续独立
+  证明 accepted ACK；
+- Context Delivery Profile v3、Bootstrap v3/Formatter v3、其余 Dynamic Context section 与预算不变。
+
+### Clean break
+
+- Data Contract 升至 v0.98、projection schema 46、Migration 91；
+- 保留 Camp、Message、Structured Content、附件、Task、终态执行与监控业务历史；
+- 清除不兼容的 Manifest、冻结输入、Bootstrap/Binding/Session 与非终态技术状态；
+- 不回填旧 Slash Text、不读取 Formatter v17/Manifest v15、不 dual write。
+
+## 明确不做
+
+- 不内联 Skill 文件内容，不创建 Provider-specific Skill input item；
+- 不把 Skill path 当成 Attachment、权限、Runtime load receipt 或模型理解证明；
+- 不从普通文本、粘贴内容、旧 Draft 或旧消息推断 `SkillMention`；
+- 不把 start-time ready Exposure 当成发送时资格，也不让发送时资格绕过当前 disable/unassign/delete；
+- 不缩窄或放宽全量 SkillProjection 完整性 preflight；
+- 不创建 per-Run Skill 文件副本，不改变 active-Run projection protection；
+- 不改变 Session Charter、Profile budget、历史选择、A2A/Gather input、Runtime Adapter transport 或 ACK。
+
+## 验收边界
+
+- Picker/handwritten/paste/Draft/undo/delete/IME 与 malformed closed-shape 自动测试通过；
+- 发送时五类 ineligible、每 Run Group 差异、重复 Marker 去重、事务 rollback 与 retry/recovery 不重算通过；
+- start-time disable/unassign/delete/rename/shadowed/pending-removal 静默省略，ready path 指向
+  `entryPath/SKILL.md`，任意全量完整性错误仍 fail closed；
+- `CURRENT_INPUT.skills` 同级 shape、canonical bytes、零 entry 省略、多接收者差异与 Evidence tamper
+  测试通过；
+- Migration 91 的历史保留、技术状态收口、foreign-key 与 reopen 门禁通过；
+- Rust、TypeScript、Renderer、Node、文档、fmt、Clippy 与 diff 门禁通过；
+- 打包 App 使用隔离 userData 完成真实 Picker -> send -> Context evidence smoke；最终安装并只从
+  `/Applications/Rovai AI.app` 启动验收。
+
+## 跨版本文档影响
+
+| 范围 | 结论 | 证据或理由 |
+| --- | --- | --- |
+| Version lifecycle | 已更新 | v0.97 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[确认说明](model-context-change.md)、版本索引与前后链接建立唯一 current v0.98。 |
+| ADR | 已更新 | [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)冻结结构化选择、双时点资格、Core-owned 解析、非 fallback 指针与四层 Evidence 边界。 |
+| Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 wire、snapshot、resolution、Formatter 与 clean break。 |
+| Architecture | 已更新 | [Structured Current Input Skill Links](../../architecture/structured-current-input-skill-links.md)与 [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)定义 Freezer/Resolver/Reconciler/Formatter Module seam。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)把 Picker 从普通 Text 改为结构化 token，同时保持现有 Composer 视觉、键盘和正文 Marker。 |
+| Runtime Activity | 确认无需更新 | 本版不新增 Runtime Activity kind 或映射；Skill 文件指针不产生 Tool/Activity 或读取 receipt。 |
+| Runtime compatibility | 确认无需更新 | 所有 Adapter 继续传输相同完整 Dynamic Context，不声明新的 Runtime 原生发现或版本资格。 |
+| Documentation routing | 已更新 | 文档导航、ADR CURRENT/HISTORY、Contract/Architecture 索引和领域词汇加入结构化 Current Input Skill 入口。 |
+| Root README | 确认无需更新 | 项目定位、公开支持范围和常青能力没有因一个模型输入字段扩展而改变；版本状态仍由唯一 current 入口拥有。 |
+
+## References
+
+- [实施与验收计划](implementation-plan.md)
+- [核心模型上下文变更 revision 1](model-context-change.md)
+- [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
+- [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
+- [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
+- [Structured Current Input Skill Links 架构](../../architecture/structured-current-input-skill-links.md)
+- [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)
+- [Camp 会话工作区](../../ui/components/conversation-workspace.md)

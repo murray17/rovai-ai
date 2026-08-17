@@ -72,4 +72,4 @@ is not removed or increased.
 - [ADR-0196](../adr/0196-self-contained-gather-completion-request.md)
 - [Camp Message Send v9](camp-message-send-v9.md)
 - [Message Delivery v4](message-delivery-v4.md)
-- [ContextManifest Evidence v15](context-manifest-evidence-v15.md)
+- [ContextManifest Evidence v16](context-manifest-evidence-v16.md)

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v0.97
+current_version: v0.98
 last_updated: 2026-08-17
 ---
 
@@ -148,4 +148,5 @@ last_updated: 2026-08-17
 | v0.94 | `historical` | 核心模型输入精简、历史投影收敛与结构化 Run Facts | [v0.94/README.md](v0.94/README.md) |
 | v0.95 | `historical` | Official Skill 测试去文案化、场景验收分层与协作协议去重 | [v0.95/README.md](v0.95/README.md) |
 | v0.96 | `historical` | Clean-break 运行监控、原生 Usage 观测与诚实 Coverage | [v0.96/README.md](v0.96/README.md) |
-| v0.97 | `current` | 持久首次训练、断点恢复与真实“初次集结”快速对话 | [v0.97/README.md](v0.97/README.md) |
+| v0.97 | `historical` | 持久首次训练、断点恢复与真实“初次集结”快速对话 | [v0.97/README.md](v0.97/README.md) |
+| v0.98 | `current` | Picker 结构化 Skill 身份、发送时冻结与 `CURRENT_INPUT.skills` 文件链接 | [v0.98/README.md](v0.98/README.md) |

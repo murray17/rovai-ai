@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-15
+last_updated: 2026-08-17
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -16,7 +16,10 @@ SkillExposureSnapshot 的长期组件边界。决策理由见
 inventory 与 system-required policy 见
 [ADR-0191](../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)。
 bundled bootstrap 与执行完整性时机见
-[ADR-0188](../adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)。
+[ADR-0188](../adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)。用户结构化选择与
+`CURRENT_INPUT.skills` 的交叉边界见
+[ADR-0203](../adr/0203-structured-current-input-skill-links.md)和
+[Structured Current Input Skill Links](structured-current-input-skill-links.md)。
 
 ## 三层状态
 
@@ -53,6 +56,7 @@ state，不改变 projection ownership、preflight、Snapshot 或 Runtime load �
 | `skill_projection_root_state` | 持久 `active | removed`、dirty 与 pending cleanup；不探测 filesystem |
 | `SkillProjectionReconciler` | 只在明确 root trigger 下安全检查、投影、验证、记录 observation 与 Snapshot |
 | `ContextService` | 在 Runtime launch 前取得或复用该 Run 已持久化的 start-time Snapshot |
+| `CurrentInputSkillResolver` | 只读相交发送时 selection、start-time Library availability 与 verified Exposure；生成 model entries 和完整 resolution evidence，不修改 filesystem |
 | AgentRun dispatcher | 对 removed root fail closed；只为当前 Run 调用 preflight |
 | Electron Main navigation preferences | 拥有本机 Project 隐藏偏好，并通过私有 Core method 同步 root access ledger |
 | Diagnostics | 默认只读取 DB stored state；用户显式“修复”才允许检查仍 active 的已知 roots |
@@ -128,6 +132,12 @@ claimed AgentRun
 
 已存在 ContextManifest 的 active Run 恢复时复用其已持久化 SkillExposureSnapshot，不把 Snapshot
 重新解释为当下 filesystem health，也不因此扫描其他 roots。
+
+为 `CURRENT_INPUT.skills` 解析时，Exposure 仍只是 start-time 物理可见性证据。Core 必须额外读取该 Run
+发送时 `SkillSelectionSnapshot` 与 Manifest materialization 时的 Library desired-state view；否则发送后
+启用会回溯获得路径，或 active-Run protection 保留的旧 link 会绕过后来 disable/unassign/delete。
+Resolver 只接受 `ready`、同 ID/同名且与冻结 Runtime Group 相容的候选，并把 `entryPath` 解释为目录，
+模型文件为其下 `SKILL.md`。这条只读解析不缩窄本节的全量 fail-closed preflight。
 
 ## 安全与失败
 

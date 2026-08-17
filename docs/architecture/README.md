@@ -29,4 +29,5 @@ last_updated: 2026-08-17
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、有界 SQLite open projection、轻量 exists、渐进消息/Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
 | [First-run Onboarding](first-run-onboarding.md) | Desktop 首次安装 admission、三页持久状态、幂等 Core provisioning、`初次集结` restore 与 Draft-only 第四页边界 |
 | [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、bundled bootstrap 快速路径、root access ledger、事件驱动 dirty、当前 Run 完整校验 preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |
+| [Structured Current Input Skill Links](structured-current-input-skill-links.md) | Picker SkillMention、per-Run send snapshot、start-time desired state、verified Exposure、只读 Resolver、`CURRENT_INPUT.skills` 与 unchanged Adapter transport |
 <!-- architecture-index:end -->

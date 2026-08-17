@@ -140,8 +140,8 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 ## Session、Context 与 Bootstrap
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
-- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[ContextManifest Evidence v15](../contracts/context-manifest-evidence-v15.md)、[Run Facts v1](../contracts/run-facts-v1.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Structured Current Input Skill Links](../architecture/structured-current-input-skill-links.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)、[ContextManifest Evidence v16](../contracts/context-manifest-evidence-v16.md)、[Run Facts v1](../contracts/run-facts-v1.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -165,6 +165,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 | [ADR-0194](0194-mandatory-typed-gather-completion-current-input.md) | Mandatory Typed Gather Completion Current Input |
 | [ADR-0196](0196-self-contained-gather-completion-request.md) | Self-Contained Gather Request in Mandatory Completion Input |
 | [ADR-0200](0200-compact-context-projection-and-structured-run-facts.md) | Compact AgentRun Context Projection and Structured Run Facts |
+| [ADR-0203](0203-structured-current-input-skill-links.md) | Structured Current Input Skill Links |
 <!-- adr-current-primary:end -->
 
 Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍从各自 primary 主题进入。
@@ -221,7 +222,9 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0199](0199-session-semantic-four-message-review-duo.md) | Session-Semantic Four-Message Review Duo |
 <!-- adr-current-primary:end -->
 
-Related: 具体 Skill 名称或版本不是治理例外；长期边界仍按本主题的一般 ADR 准入规则判断。
+Related: [ADR-0203](0203-structured-current-input-skill-links.md)在 Session/Context 主题拥有 primary，细化用户
+选择 Skill 与原生投影文件指针的交叉边界；具体 Skill 名称或版本不是治理例外，长期边界仍按本主题的一般
+ADR 准入规则判断。
 
 ## Evidence 与 Runtime Activity
 

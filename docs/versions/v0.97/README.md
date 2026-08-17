@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.97
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -16,6 +16,8 @@ last_updated: 2026-08-17
 > `/Applications` 安装验收均已通过。
 >
 > 前置版本：[v0.96 运行监控与原生 Usage 观测](../v0.96/README.md)
+>
+> 后续版本：[v0.98 结构化 Skill 文件链接](../v0.98/README.md)
 
 ## 版本目标
 

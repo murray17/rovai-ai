@@ -1,0 +1,101 @@
+---
+document_type: implementation-plan
+version: v0.98
+authority: implementation-plan-and-acceptance
+status: in_progress
+last_updated: 2026-08-17
+---
+
+# v0.98 实施与验收计划
+
+## 计划状态与使用方式
+
+本计划基于 `main@595c234319472efcf63e02eac16d26effae83673` 和开发者已确认的
+[model-context-change revision 1](model-context-change.md)。实现不得偏离其中的模型 shape、发送/省略
+条件、Evidence、版本轴或 clean break；若必须语义调整，先递增 revision 并重新确认。
+
+修改 Rust 测试前遵守 [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)；
+启动 Core、Desktop、打包 App 或真实 Runtime 前遵守
+[本地 Runtime 工作流](../../development/local-workflow.md)。
+
+## 不变量
+
+- Picker identity 与正文 Marker 分离：token 是结构化身份，`message` 始终保留 `/name`；
+- eligibility 在 Direct user send 的每个 Run 冻结，late enable 不回溯；
+- start-time desired state 与 ready Exposure 都必须通过，旧 link 存在不代表当前可用；
+- 合法无路径静默省略；全量 projection `error/stale/digest/ownership` 仍 fail closed；
+- Resolver 是只读深 Module，Reconciler 独占 filesystem side effect；
+- `skills` 与 message/attachments 同级，零 entry 时字段省略；Skill path 指向 `SKILL.md`；
+- Runtime Adapter、Attachment、Profile、Bootstrap、其他 Context section 与 ACK authority 不变；
+- Model Context Projection、Context Evidence 和 Runtime Input Delivery Evidence 不合并。
+
+## Checkpoint 0：治理基线
+
+- [x] 开启唯一 current v0.98、冻结 v0.97 并记录 revision 1 二次确认；
+- [x] 接受 [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)；
+- [x] 建立 [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与
+  [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)；
+- [x] 建立 Architecture/CONTEXT/UI/文档路由并生成 ADR HISTORY；
+- [x] 通过 docs:test、docs:check 与真实 base 的 docs:check:ci；治理 SHA 在本次独立提交后记录。
+
+## Checkpoint 1：Structured Content 与 Composer
+
+- [ ] Rust/TypeScript closed union 增加 `skill_mention`，校验 ID 与 canonical name；
+- [ ] body projection、digest、current/historical rendering 支持 `/nameAtSend`；
+- [ ] Picker 选择改为原子 token + 普通尾随空格；手写、粘贴和旧 Draft 保持 Text；
+- [ ] Draft persistence、undo/redo、Backspace、selection、IME、keyboard menu 与 a11y 回归；
+- [ ] 时间线 token 在 disabled/deleted/renamed 后仍显示发送 Marker，不查询当前名称改写正文。
+
+## Checkpoint 2：发送时选择快照
+
+- [ ] 定义 versioned `SkillSelectionSnapshot`、五类发送 omission reason 与 canonical digest；
+- [ ] Direct send 按每 Run 冻结 Adapter Groups 和 Library desired state，并与 AgentRun 原子提交；
+- [ ] A2A/Gather/旧 terminal Run 使用 versioned empty snapshot，不扫描 Slash 文本；
+- [ ] 重复 ID first occurrence 去重、不同接收者差异、rollback、retry/recovery 不重算测试；
+- [ ] AgentRun Snapshot/read side 不把 selection 当成 path、permission 或 Exposure。
+
+## Checkpoint 3：Resolver、Formatter 与 Evidence
+
+- [ ] 实现 start-time `RunSkillAvailabilityView` 和只读 `CurrentInputSkillResolver`；
+- [ ] Resolver 与全量 `PreparedSkillExposure` 相交，按冻结 Group precedence 稳定选择 ready
+  `entryPath/SKILL.md`；
+- [ ] later disabled/unassigned/deleted/renamed 与 shadowed/pending-removal 产生确定 omission evidence；
+- [ ] 保持全量 preflight error/stale/digest/ownership fail closed；
+- [ ] Formatter v18 输出 optional sibling `skills`，保持正文、附件、section 顺序和 canonical JSON；
+- [ ] Manifest v16 保存 selection/Exposure/resolution/exact payload evidence，恢复复用冻结结果。
+
+## Checkpoint 4：Migration 91 与 clean break
+
+- [ ] Data Contract v0.98、projection schema 46、Migration 91 与 current-state admission；
+- [ ] AgentRun snapshot 列和 ContextManifest resolution 列为 non-null/versioned/digested；
+- [ ] 终态业务历史保留，非终态 Run/Turn/Delivery/Gather 显式收口；
+- [ ] 不兼容 Manifest/Delivery/Bootstrap/Binding/Session/frozen context 删除并要求新 Session；
+- [ ] 无 Formatter v17/Manifest v15 reader、alias、backfill inference 或 dual write；
+- [ ] current fixture upgrade、foreign-key check、idempotent reopen 与 tamper tests 通过。
+
+## Checkpoint 5：自动化与 UI hardening
+
+- [ ] Rust focused/workspace、TypeScript/Vitest、Node protocol/acceptance、shared fixture 全部通过；
+- [ ] rustfmt、Clippy `-D warnings`、typecheck、docs gates 与 `git diff --check` 通过；
+- [ ] Composer 在 1040×700、双主题、键盘、IME、长 Skill 名、禁用/失效 token 与 Draft restart 下通过；
+- [ ] 运行 Impeccable detector，一次批量修复 findings，最多一次确认 pass；
+- [ ] Runtime Adapter 回归证明无 Provider-specific item、正文重复、Attachment 误用或 ACK 变化。
+
+## Checkpoint 6：打包、安装与发布验收
+
+- [ ] `pnpm package:mac` 生成 arm64 Application，严格 codesign 验证通过；
+- [ ] 隔离 userData 从打包路径完成 Picker -> send -> `CURRENT_INPUT.skills`/Evidence smoke；
+- [ ] 保存当前 `/Applications/Rovai AI.app` 的可恢复备份，原子替换安装版；
+- [ ] 只从 `/Applications/Rovai AI.app` 启动，核对 Main/Core/CLI/app.asar 摘要与进程来源；
+- [ ] 最终实现提交合入并推送 main，确认 main/origin/main 指向同一验收 SHA；
+- [ ] 清理已合入编码 worktree 与本地分支，不丢弃未提交内容。
+
+## References
+
+- [v0.98 版本概览](README.md)
+- [核心模型上下文变更 revision 1](model-context-change.md)
+- [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
+- [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
+- [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
+- [本地 Runtime 工作流](../../development/local-workflow.md)
+- [桌面 UI 验收](../../development/ui-acceptance.md)

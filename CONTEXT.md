@@ -390,6 +390,22 @@ _Avoid_: Project aggregate, Camp deletion, filesystem permission, historical obs
 The immutable start-time evidence of Skill identities, Revisions, delivery paths, states, and conflicts actually observed by one AgentRun preflight. It does not promise that shared projection files remain byte-identical for the Run lifetime and does not prove the Runtime loaded them.
 _Avoid_: per-Run Skill copy, lifetime Revision lease, model-read receipt, Skill Library authority
 
+**Skill Mention**:
+The structured `skillId + nameAtSend` reference created only when a user selects a Rovai Skill through the Composer Picker. Its visible and stored body marker remains `/nameAtSend`; handwritten, pasted, and historical lookalike text is never a Skill Mention.
+_Avoid_: parsed Slash text, Slash Command, Skill path, Runtime-native Skill reference
+
+**Skill Selection Snapshot**:
+The immutable per-AgentRun record of each first-occurring Skill Mention and whether that exact Skill was active, enabled, name-matched, and assigned to one frozen Runtime Delivery Group at accepted Direct send. It contains no path or Exposure and later enablement cannot retroactively make an ineligible selection available.
+_Avoid_: Draft selection, current Skill Library view, SkillExposureSnapshot, Runtime load receipt
+
+**Current Input Skill Resolution**:
+The immutable ContextManifest evidence that intersects one Skill Selection Snapshot with start-time Skill Library availability and the verified SkillExposureSnapshot, recording an included file path or exact omission reason for every selection. It does not replace the full Exposure or exact rendered-payload evidence.
+_Avoid_: SkillProjection reconciliation, Skill eligibility authority, model field, Runtime Input Delivery
+
+**Current Input Skill Link**:
+The optional model-visible `{name,path}` entry in `CURRENT_INPUT.skills` for a structured selection that was eligible at send, remains available at start time, and resolves to a ready Rovai projection's absolute `SKILL.md`. It is not an Attachment, permission, Prompt Skill fallback, Runtime load receipt, or proof the model read the file.
+_Avoid_: inline Skill content, Provider Skill item, project directory, SkillExposureSnapshot, model-read proof
+
 **Skill Enablement**:
 The application-global delivery pause state of one Rovai Skill. A new official or imported Skill starts enabled; disabling it suspends all Rovai-managed delivery without deleting or changing its Skill Group Assignments, those Assignments remain editable while disabled, and re-enabling restores delivery from the saved Assignments.
 _Avoid_: Skill Group Assignment, permission grant, deleted assignment, per-Member enablement
@@ -1063,7 +1079,7 @@ The immutable model-facing payload for exactly one AgentRun, composed in order f
 _Avoid_: Native Session Bootstrap, Member Identity Context, mutable live prompt, Work Brief, Task Context
 
 **ContextManifest**:
-The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile evidence, stable Bootstrap Evidence reference, target Runtime/formatter versions, complete Collaboration State v2 projection digest, Self Active Task Evidence, Shared Message projection evidence, typed Run Fact references, and exact rendered AgentRun Dynamic Context. Public boundaries and projection evidence are internal; Recovery reuses the dynamic payload byte-for-byte. The Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, combined first payload, transport acceptance, or model understanding.
+The immutable Core evidence that freezes one AgentRun's previous and current public-message boundaries, Cross-Camp History Fence, selected raw source references, context-delivery profile evidence, stable Bootstrap Evidence reference, target Runtime/formatter versions, complete Collaboration State v2 projection digest, Self Active Task Evidence, Shared Message projection evidence, typed Run Fact references, Skill Exposure and Current Input Skill Resolution, and exact rendered AgentRun Dynamic Context. Public boundaries and projection evidence are internal; Recovery reuses the dynamic payload byte-for-byte. The Manifest neither stores nor proves the transient Member Identity Bootstrap Projection, complete Bootstrap, combined first payload, transport acceptance, Skill load, or model understanding.
 _Avoid_: audit projection, Runtime Input Delivery, complete Runtime prompt evidence, Member Identity Snapshot, prompt template, live context query, proof the model understood input
 
 **Runtime Input Delivery**:
