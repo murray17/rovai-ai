@@ -676,6 +676,10 @@ try {
       .find((button) => button.textContent?.trim() === '保存运行配置')
     return section?.querySelector('.field-label select')?.disabled === false
       && save?.disabled === true
+      && section?.querySelector('.member-runtime-save-state')?.textContent?.trim()
+        === '当前配置已保存'
+      && !section?.querySelector('.member-runtime-conflict')
+      && !section?.querySelector('.inline-error')
   })()`)
   await selectFieldValue(
     running.cdp,
