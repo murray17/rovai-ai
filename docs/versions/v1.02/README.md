@@ -1,12 +1,12 @@
 ---
 document_type: version-overview
 version: v1.02
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
 model_context_change: false
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Rovai-ai v1.02：Runtime Usage 补全与 Codex 公价估算
@@ -16,6 +16,8 @@ last_updated: 2026-08-17
 > [计划](implementation-plan.md)完成。
 >
 > 前置版本：[v1.01 TRAE 与 Kiro 最高权限队员默认](../v1.01/README.md)
+>
+> 后继版本：[v1.03 TRAE 轻检与显式可用性验证](../v1.03/README.md)
 
 ## 版本目标
 

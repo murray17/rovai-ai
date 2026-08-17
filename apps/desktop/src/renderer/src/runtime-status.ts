@@ -67,7 +67,7 @@ export function runtimeAvailabilityPresentation(
     case 'installed_unverified':
       return presentation(
         'installed_unverified',
-        '已检测到 TRAE CLI。为避免 macOS 钥匙串弹窗，登录状态与运行能力将在首次实际任务中验证。'
+        '已检测到 TRAE CLI，但尚未形成轻度启动证据；请重新检测或检查可用性。'
       )
     case 'ready':
       return presentation(
@@ -165,7 +165,7 @@ export function memberRuntimePresentation(
     }
     return presentation(
       'installed_unverified',
-      '已检测到 TRAE CLI。为避免 macOS 钥匙串弹窗，登录状态与运行能力将在首次实际任务中验证。'
+      '已检测到 TRAE CLI，但尚未形成轻度启动证据；请重新检测或检查可用性。'
     )
   }
   if (blockerCodes.has('runtime_authentication_required')) {
@@ -210,7 +210,7 @@ export function runtimeReadinessLabel(
     runtime_not_configured: '未配置 Agent 运行时',
     needs_attention: '不可用',
     light_ready: '可用',
-    installed_unverified: '已安装，待首次运行验证',
+    installed_unverified: '已安装，待检查',
     ready: '可用'
   })[status]
 }

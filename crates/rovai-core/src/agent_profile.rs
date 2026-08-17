@@ -1198,7 +1198,10 @@ impl AgentProfileService {
         let execution_deferred = runtime.adapter_kind == AdapterKind::TraeCnCli
             && runtime.model.source == "runtime_default"
             && runtime.model.model_id == TRAE_RUNTIME_DEFAULT_MODEL_ID
-            && probe_status.as_deref() == Some("installed_unverified")
+            && matches!(
+                probe_status.as_deref(),
+                Some("light_ready" | "installed_unverified")
+            )
             && authentication_status.as_deref() == Some("unknown");
         if probe_status.as_deref() != Some("ready") && !execution_deferred {
             return Ok(Some(runtime_blocker(
@@ -5671,7 +5674,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn trae_static_installation_defers_verification_to_the_same_real_session() {
+    fn trae_light_ready_installation_defers_deep_verification_to_the_real_session() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let executable_path = directory.join("traecli");
@@ -5679,7 +5682,12 @@ mod slow_tests {
         let fingerprint = "sha256:trae-static".to_string();
         let observed_at = chrono::Utc::now().to_rfc3339();
         let static_snapshot = AgentRuntimeAdapterRegistry::default()
-            .trae_installed_unverified_snapshot(None, fingerprint.clone(), observed_at.clone())
+            .light_ready_snapshot(
+                AdapterKind::TraeCnCli,
+                Some("traecli 0.120.52".to_string()),
+                fingerprint.clone(),
+                observed_at.clone(),
+            )
             .unwrap();
         let installation_id = service
             .commit_discovered_managed_installation(
@@ -5700,7 +5708,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             installation.snapshot.as_ref().unwrap().probe_status,
-            "installed_unverified"
+            "light_ready"
         );
         let defaults = installation.member_runtime_defaults.clone().unwrap();
         assert_eq!(defaults.model, ModelSelection::RuntimeDefault);
@@ -5732,7 +5740,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(
             configured_profile.runtime_readiness.status,
-            RuntimeReadinessStatus::InstalledUnverified
+            RuntimeReadinessStatus::LightReady
         );
 
         let binding = ResolvedRuntimeBinding {
@@ -5744,7 +5752,10 @@ mod slow_tests {
         let deferred = resolve_frozen_runtime_binding(database.connection(), &binding)
             .unwrap()
             .unwrap();
-        assert_eq!(deferred.reported_version, None);
+        assert_eq!(
+            deferred.reported_version.as_deref(),
+            Some("traecli 0.120.52")
+        );
         assert_eq!(deferred.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
         assert!(deferred.capabilities.is_empty());
         assert!(
@@ -5752,7 +5763,7 @@ mod slow_tests {
                 .runtime_dispatch_blocker(&database, &deferred)
                 .unwrap()
                 .is_none(),
-            "static identity is sufficient to launch one real verification process"
+            "light identity is sufficient to launch one real verification process"
         );
 
         let live_snapshot = AgentRuntimeAdapterRegistry::default()

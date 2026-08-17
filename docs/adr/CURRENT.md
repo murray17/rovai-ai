@@ -1,7 +1,7 @@
 ---
 document_type: adr-current
 authority: current-cross-version-adr-navigation
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # 当前跨版本架构决策
@@ -112,7 +112,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
 - **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Runtime Launch and Verification v4](../contracts/runtime-launch-and-verification-v4.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
+- **当前合同：** [Runtime Launch and Verification v5](../contracts/runtime-launch-and-verification-v5.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |
@@ -136,6 +136,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 | [ADR-0192](0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md) | Purpose-Scoped Runtime Launch and Execution-Deferred Verification |
 | [ADR-0204](0204-on-demand-runtime-deep-verification.md) | On-Demand Runtime Deep Verification with Manager-Owned Attempts |
 | [ADR-0207](0207-explicit-maximum-authority-member-runtime-defaults.md) | Explicit Maximum-Authority Member Runtime Defaults |
+| [ADR-0208](0208-user-authorized-trae-light-and-availability-verification.md) | User-Authorized TRAE Light and Availability Verification |
 <!-- adr-current-primary:end -->
 
 Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。

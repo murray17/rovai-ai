@@ -219,4 +219,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0205](0205-minimal-runtime-usage-metering.md) | Minimal Runtime Usage Metering | `accepted` | `cross-version` | [v0.99](../versions/v0.99/README.md) | — |
 | [ADR-0206](0206-user-confirmed-force-camp-deletion.md) | User-Confirmed Force Camp Deletion | `accepted` | `cross-version` | [v1.00](../versions/v1.00/README.md) | — |
 | [ADR-0207](0207-explicit-maximum-authority-member-runtime-defaults.md) | Explicit Maximum-Authority Member Runtime Defaults | `accepted` | `cross-version` | [v1.01](../versions/v1.01/README.md) | — |
+| [ADR-0208](0208-user-authorized-trae-light-and-availability-verification.md) | User-Authorized TRAE Light and Availability Verification | `accepted` | `cross-version` | [v1.03](../versions/v1.03/README.md) | — |
 <!-- adr-history:end -->

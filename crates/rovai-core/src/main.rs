@@ -1576,6 +1576,23 @@ impl Core {
         );
     }
 
+    async fn publish_verified_runtime_discovery(&self, observation: RuntimeDiscoveryObservation) {
+        if self.runtime_search_environment.read().await.generation()
+            != observation.search_generation
+        {
+            return;
+        }
+        self.runtime_discovery
+            .write()
+            .await
+            .insert(observation.runtime_kind, observation.clone());
+        emit(
+            &self.output,
+            "runtime.discovery.updated",
+            serde_json::to_value(observation).unwrap_or_else(|_| json!({})),
+        );
+    }
+
     async fn persist_light_discovery(
         &self,
         observation: &RuntimeDiscoveryObservation,
@@ -1592,31 +1609,26 @@ impl Core {
             .source
             .context("light Runtime discovery did not include source")?;
         let registry = AgentRuntimeAdapterRegistry::default();
-        let snapshot = if observation.runtime_kind == AdapterKind::TraeCnCli {
-            registry.trae_installed_unverified_snapshot(
-                observation.reported_version.clone(),
-                executable_fingerprint.to_string(),
-                observation.observed_at.clone(),
-            )?
-        } else if observation.reported_version.is_some() && observation.diagnostic_code.is_none() {
-            registry.light_ready_snapshot(
-                observation.runtime_kind,
-                observation.reported_version.clone(),
-                executable_fingerprint.to_string(),
-                observation.observed_at.clone(),
-            )?
-        } else {
-            registry.light_failed_snapshot(
-                observation.runtime_kind,
-                observation.reported_version.clone(),
-                executable_fingerprint.to_string(),
-                observation.observed_at.clone(),
-                observation
-                    .diagnostic_code
-                    .clone()
-                    .unwrap_or_else(|| "runtime_light_probe_incomplete".to_string()),
-            )?
-        };
+        let snapshot =
+            if observation.reported_version.is_some() && observation.diagnostic_code.is_none() {
+                registry.light_ready_snapshot(
+                    observation.runtime_kind,
+                    observation.reported_version.clone(),
+                    executable_fingerprint.to_string(),
+                    observation.observed_at.clone(),
+                )?
+            } else {
+                registry.light_failed_snapshot(
+                    observation.runtime_kind,
+                    observation.reported_version.clone(),
+                    executable_fingerprint.to_string(),
+                    observation.observed_at.clone(),
+                    observation
+                        .diagnostic_code
+                        .clone()
+                        .unwrap_or_else(|| "runtime_light_probe_incomplete".to_string()),
+                )?
+            };
         let mut database = self.database.lock().await;
         AgentProfileService::default().commit_discovered_managed_installation(
             &mut database,
@@ -2340,7 +2352,7 @@ impl Core {
                     },
                 )?;
                 drop(database);
-                self.publish_runtime_discovery(RuntimeDiscoveryObservation {
+                self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
                     runtime_kind: kind,
                     discovery_status: RuntimeDiscoveryStatus::Found,
                     executable_path: Some(executable_path),
@@ -4939,7 +4951,9 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::CodebuddyCli
             | rovai_core::agent_profile::AdapterKind::QwenCode
             | rovai_core::agent_profile::AdapterKind::TraeCnCli) => {
-                let probe = health::acp_capability_probe_at(executable_path, kind).await;
+                let probe =
+                    health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
+                        .await;
                 registry.acp_capability_snapshot(AcpProbeObservation {
                     adapter_kind: kind,
                     reported_version: probe.result.reported_version,
@@ -8622,11 +8636,12 @@ impl Core {
         let Some(installation) = installation else {
             return;
         };
-        if !installation
-            .snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.probe_status == "installed_unverified")
-        {
+        if !installation.snapshot.as_ref().is_some_and(|snapshot| {
+            matches!(
+                snapshot.probe_status.as_str(),
+                "light_ready" | "installed_unverified"
+            )
+        }) {
             return;
         }
         let detail = format!("{error:#}");

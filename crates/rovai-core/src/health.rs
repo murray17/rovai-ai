@@ -171,8 +171,24 @@ pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
     codex_runtime_probe_uncached(path, path_text, fingerprint, probed_at).await
 }
 
-pub async fn acp_capability_probe_at(path: &Path, kind: AdapterKind) -> AcpCapabilityProbe {
-    acp_probe_at(path, kind, acp_deep_session_probe_enabled(kind)).await
+pub async fn acp_capability_probe_at_for_purpose(
+    path: &Path,
+    kind: AdapterKind,
+    purpose: RuntimeLaunchPurpose,
+) -> AcpCapabilityProbe {
+    acp_probe_at(path, kind, acp_deep_session_probe_enabled(kind), purpose).await
+}
+
+fn runtime_launch_disallowed_detail(purpose: RuntimeLaunchPurpose) -> String {
+    let purpose = match purpose {
+        RuntimeLaunchPurpose::DiscoveryVersion => "discovery_version",
+        RuntimeLaunchPurpose::AvailabilityCheck => "availability_check",
+        RuntimeLaunchPurpose::InstallationRefresh => "installation_refresh",
+        RuntimeLaunchPurpose::HealthProbe => "health_probe",
+        RuntimeLaunchPurpose::DispatchPreflight => "dispatch_preflight",
+        RuntimeLaunchPurpose::AgentExecution => "agent_execution",
+    };
+    format!("runtime_launch_disallowed_for_{purpose}")
 }
 
 pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
@@ -683,9 +699,15 @@ fn antigravity_required_capabilities() -> Vec<String> {
     .collect()
 }
 
-async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> AcpCapabilityProbe {
+async fn acp_probe_at(
+    path: &Path,
+    kind: AdapterKind,
+    include_session: bool,
+    purpose: RuntimeLaunchPurpose,
+) -> AcpCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
+    let required_capabilities = acp_required_capabilities_for_purpose(kind, purpose);
     if !matches!(
         kind,
         AdapterKind::OpencodeCli
@@ -704,7 +726,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 None,
                 AgentRuntimeProbeStatus::MissingCapabilities,
                 Vec::new(),
-                acp_required_capabilities(kind),
+                required_capabilities.clone(),
                 Some("This Adapter has no ACP integration in this release.".to_string()),
                 probed_at,
             ),
@@ -721,7 +743,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 None,
                 AgentRuntimeProbeStatus::NotInstalled,
                 Vec::new(),
-                acp_required_capabilities(kind),
+                required_capabilities.clone(),
                 Some("Configured Runtime executable does not exist.".to_string()),
                 probed_at,
             ),
@@ -731,7 +753,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
-    if !runtime_launch_allowed(kind, RuntimeLaunchPurpose::HealthProbe) {
+    if !runtime_launch_allowed(kind, purpose) {
         return AcpCapabilityProbe {
             result: agent_probe_result(
                 kind.as_str(),
@@ -740,8 +762,8 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 fingerprint,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 Vec::new(),
-                acp_required_capabilities(kind),
-                Some("runtime_launch_disallowed_for_health_probe".to_string()),
+                required_capabilities.clone(),
+                Some(runtime_launch_disallowed_detail(purpose)),
                 probed_at,
             ),
             initialize_result: None,
@@ -761,7 +783,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     fingerprint,
                     AgentRuntimeProbeStatus::ProbeFailed,
                     Vec::new(),
-                    acp_required_capabilities(kind),
+                    required_capabilities.clone(),
                     Some(command_detail(
                         &output.stdout.bytes,
                         &output.stderr.bytes,
@@ -782,7 +804,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     fingerprint,
                     AgentRuntimeProbeStatus::ProbeFailed,
                     Vec::new(),
-                    acp_required_capabilities(kind),
+                    required_capabilities.clone(),
                     Some(format!("failed to inspect Runtime CLI: {error}")),
                     probed_at,
                 ),
@@ -793,7 +815,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
     };
     let reported_version =
         first_nonempty_line(&version_output.stdout.bytes, &version_output.stderr.bytes);
-    let probe = run_acp_probe(&canonical, kind, include_session).await;
+    let probe = run_acp_probe(&canonical, kind, include_session, purpose).await;
     match probe {
         Ok((initialize_result, session_result, behavioral_evidence)) => {
             let mut capabilities = acp_observed_capabilities(
@@ -808,7 +830,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
             }
             capabilities.sort();
             capabilities.dedup();
-            let required = acp_required_capabilities(kind);
+            let required = required_capabilities;
             let missing = required
                 .iter()
                 .filter(|required| !capabilities.contains(required))
@@ -852,7 +874,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     fingerprint,
                     status,
                     Vec::new(),
-                    acp_required_capabilities(kind),
+                    required_capabilities,
                     Some(detail),
                     probed_at,
                 ),
@@ -867,9 +889,10 @@ async fn run_acp_probe(
     path: &Path,
     kind: AdapterKind,
     include_session: bool,
+    purpose: RuntimeLaunchPurpose,
 ) -> Result<(Value, Option<Value>, Option<TraeBehavioralProbeEvidence>)> {
-    if !runtime_launch_allowed(kind, RuntimeLaunchPurpose::HealthProbe) {
-        bail!("runtime_launch_disallowed_for_health_probe");
+    if !runtime_launch_allowed(kind, purpose) {
+        bail!(runtime_launch_disallowed_detail(purpose));
     }
     let probe_root = env::temp_dir().join(format!("rovai-acp-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&probe_root)?;
@@ -990,7 +1013,9 @@ async fn run_acp_probe(
                 .await?;
                 read_rpc_result(lines, 3).await?;
             }
-            let behavioral_evidence = if kind == AdapterKind::TraeCnCli {
+            let behavioral_evidence = if kind == AdapterKind::TraeCnCli
+                && purpose != RuntimeLaunchPurpose::AvailabilityCheck
+            {
                 Some(
                     run_trae_behavioral_probe(
                         stdin,
@@ -1514,6 +1539,24 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
         .to_string(),
     );
     capabilities
+}
+
+fn acp_required_capabilities_for_purpose(
+    kind: AdapterKind,
+    purpose: RuntimeLaunchPurpose,
+) -> Vec<String> {
+    if kind == AdapterKind::TraeCnCli && purpose == RuntimeLaunchPurpose::AvailabilityCheck {
+        return [
+            "acp.initialize",
+            "session.new",
+            "model.dynamic_catalog",
+            "permission.mode_catalog",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    }
+    acp_required_capabilities(kind)
 }
 
 fn acp_deep_session_probe_enabled(kind: AdapterKind) -> bool {
@@ -2329,7 +2372,13 @@ mod tests {
     #[ignore = "manual local Runtime smoke"]
     async fn kiro_private_agent_session_real_runtime_smoke() {
         let path = find_adapter(AdapterKind::KiroCli).expect("Kiro CLI must be installed");
-        let probe = acp_probe_at(&path, AdapterKind::KiroCli, true).await;
+        let probe = acp_probe_at(
+            &path,
+            AdapterKind::KiroCli,
+            true,
+            RuntimeLaunchPurpose::HealthProbe,
+        )
+        .await;
         assert_eq!(
             probe.result.status,
             AgentRuntimeProbeStatus::Ready,
@@ -2368,6 +2417,43 @@ mod tests {
     }
 
     #[tokio::test]
+    #[ignore = "manual local Runtime smoke"]
+    async fn trae_user_authorized_availability_check_real_runtime_smoke() {
+        let path = find_adapter(AdapterKind::TraeCnCli).expect("TRAE CLI must be installed");
+        let probe = acp_capability_probe_at_for_purpose(
+            &path,
+            AdapterKind::TraeCnCli,
+            RuntimeLaunchPurpose::AvailabilityCheck,
+        )
+        .await;
+        assert_eq!(
+            probe.result.status,
+            AgentRuntimeProbeStatus::Ready,
+            "{:?}",
+            probe.result.detail
+        );
+        assert!(probe.initialize_result.is_some());
+        assert!(probe.session_result.is_some());
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::TraeCnCli,
+                reported_version: probe.result.reported_version,
+                executable_fingerprint: probe.result.executable_fingerprint,
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: probe.result.capabilities,
+                initialize_result: probe.initialize_result,
+                session_result: probe.session_result,
+                attempted_at: chrono::Utc::now().to_rfc3339(),
+                last_error: None,
+            })
+            .expect("TRAE availability evidence should map to a Ready snapshot");
+        assert_eq!(snapshot.probe_status, "ready");
+        assert!(!snapshot.models.is_empty());
+        assert!(!snapshot.permission_options.is_empty());
+    }
+
+    #[tokio::test]
     async fn trae_health_probe_is_guarded_before_any_child_process_launch() {
         let directory =
             env::temp_dir().join(format!("rovai-trae-health-guard-{}", uuid::Uuid::new_v4()));
@@ -2383,7 +2469,12 @@ mod tests {
         permissions.set_mode(0o755);
         std::fs::set_permissions(&runtime, permissions).unwrap();
 
-        let probe = acp_capability_probe_at(&runtime, AdapterKind::TraeCnCli).await;
+        let probe = acp_capability_probe_at_for_purpose(
+            &runtime,
+            AdapterKind::TraeCnCli,
+            RuntimeLaunchPurpose::HealthProbe,
+        )
+        .await;
         assert_eq!(probe.result.status, AgentRuntimeProbeStatus::ProbeFailed);
         assert_eq!(
             probe.result.detail.as_deref(),
@@ -2422,7 +2513,12 @@ exit 0
         let started = Instant::now();
         let (initialize, session, behavioral_evidence) = timeout(
             Duration::from_secs(3),
-            run_acp_probe(&runtime, AdapterKind::QwenCode, false),
+            run_acp_probe(
+                &runtime,
+                AdapterKind::QwenCode,
+                false,
+                RuntimeLaunchPurpose::HealthProbe,
+            ),
         )
         .await
         .expect("probe cleanup must remain bounded")

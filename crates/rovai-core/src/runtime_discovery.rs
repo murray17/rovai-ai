@@ -114,7 +114,8 @@ pub enum RuntimeDiscoveryStatus {
 
 /// Every Runtime child process must have an explicit product purpose. Some
 /// third-party CLIs perform credential-store initialization even for metadata
-/// commands, so "the user clicked a button" is not itself launch authority.
+/// commands, so each Adapter policy must name the user and background purposes
+/// it accepts rather than relying on the call site alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeLaunchPurpose {
@@ -128,7 +129,12 @@ pub enum RuntimeLaunchPurpose {
 
 pub fn runtime_launch_allowed(kind: AdapterKind, purpose: RuntimeLaunchPurpose) -> bool {
     !matches!(kind, AdapterKind::TraeCnCli)
-        || matches!(purpose, RuntimeLaunchPurpose::AgentExecution)
+        || matches!(
+            purpose,
+            RuntimeLaunchPurpose::DiscoveryVersion
+                | RuntimeLaunchPurpose::AvailabilityCheck
+                | RuntimeLaunchPurpose::AgentExecution
+        )
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -952,16 +958,12 @@ mod tests {
         for kind in AdapterKind::ALL {
             let mut observation = discover_runtime_path(kind, &search);
             discover_runtime_version(&mut observation, &search).await;
-            if kind == AdapterKind::TraeCnCli {
-                assert_eq!(observation.reported_version, None);
-            } else {
-                assert!(observation.reported_version.is_some());
-            }
+            assert!(observation.reported_version.is_some());
         }
 
         let invocations = fs::read_to_string(&marker).unwrap();
         let lines = invocations.lines().collect::<Vec<_>>();
-        assert_eq!(lines.len(), AdapterKind::ALL.len() - 1);
+        assert_eq!(lines.len(), AdapterKind::ALL.len());
         assert!(lines.iter().all(|line| line.ends_with(":--version")));
         assert!(!invocations.contains("acp"));
         assert!(!invocations.contains("session"));
@@ -969,10 +971,8 @@ mod tests {
     }
 
     #[test]
-    fn runtime_launch_policy_reserves_trae_for_real_agent_execution() {
+    fn runtime_launch_policy_allows_trae_light_and_user_authorized_checks() {
         for purpose in [
-            RuntimeLaunchPurpose::DiscoveryVersion,
-            RuntimeLaunchPurpose::AvailabilityCheck,
             RuntimeLaunchPurpose::InstallationRefresh,
             RuntimeLaunchPurpose::HealthProbe,
             RuntimeLaunchPurpose::DispatchPreflight,
@@ -980,15 +980,18 @@ mod tests {
             assert!(!runtime_launch_allowed(AdapterKind::TraeCnCli, purpose));
             assert!(runtime_launch_allowed(AdapterKind::CodexCli, purpose));
         }
-        assert!(runtime_launch_allowed(
-            AdapterKind::TraeCnCli,
-            RuntimeLaunchPurpose::AgentExecution
-        ));
+        for purpose in [
+            RuntimeLaunchPurpose::DiscoveryVersion,
+            RuntimeLaunchPurpose::AvailabilityCheck,
+            RuntimeLaunchPurpose::AgentExecution,
+        ] {
+            assert!(runtime_launch_allowed(AdapterKind::TraeCnCli, purpose));
+        }
     }
 
     #[tokio::test]
-    async fn trae_version_enrichment_is_static_and_never_executes_the_cli() {
-        let directory = env::temp_dir().join(format!("rovai-trae-static-{}", Uuid::new_v4()));
+    async fn trae_version_enrichment_runs_the_same_bounded_light_check_as_other_runtimes() {
+        let directory = env::temp_dir().join(format!("rovai-trae-light-{}", Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
         let marker = directory.join("executed");
         let runtime = directory.join("traecli");
@@ -1006,50 +1009,11 @@ mod tests {
         let mut observation = discover_runtime_path(AdapterKind::TraeCnCli, &search);
         discover_runtime_version(&mut observation, &search).await;
         assert!(
-            !marker.exists(),
-            "TRAE metadata reads must never start the CLI"
+            marker.exists(),
+            "TRAE light verification must execute --version"
         );
-        assert_eq!(observation.reported_version, None);
-        assert_eq!(
-            observation.diagnostic_code.as_deref(),
-            Some("runtime_version_unavailable_static_only")
-        );
-        fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[tokio::test]
-    async fn concurrent_trae_metadata_checks_never_execute_the_cli() {
-        let directory = env::temp_dir().join(format!("rovai-trae-concurrent-{}", Uuid::new_v4()));
-        fs::create_dir_all(&directory).unwrap();
-        let marker = directory.join("executed");
-        let runtime = directory.join("traecli");
-        executable(
-            &runtime,
-            &format!("#!/bin/sh\nprintf ran >> '{}'\n", marker.display()),
-        );
-        let search = test_search(vec![SearchPathEntry {
-            path: directory.clone(),
-            sources: vec![SearchPathSource::InheritedPath],
-        }]);
-        let observation = discover_runtime_path(AdapterKind::TraeCnCli, &search);
-        let mut checks = tokio::task::JoinSet::new();
-        for _ in 0..32 {
-            let mut observation = observation.clone();
-            let search = search.clone();
-            checks.spawn(async move {
-                discover_runtime_version(&mut observation, &search).await;
-                observation
-            });
-        }
-        while let Some(result) = checks.join_next().await {
-            let result = result.unwrap();
-            assert_eq!(result.discovery_status, RuntimeDiscoveryStatus::Found);
-            assert_eq!(result.reported_version, None);
-        }
-        assert!(
-            !marker.exists(),
-            "concurrent TRAE checks must remain file-only"
-        );
+        assert_eq!(observation.reported_version.as_deref(), Some("trae 9.9.9"));
+        assert_eq!(observation.diagnostic_code, None);
         fs::remove_dir_all(directory).unwrap();
     }
 

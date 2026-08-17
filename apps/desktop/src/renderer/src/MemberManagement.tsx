@@ -1511,8 +1511,8 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
                 </span>
                 <button className="quiet-button runtime-product-check" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
                   {busy === `check-${runtimeKind}`
-                    ? runtimeKind === 'trae-cn-cli' ? '正在扫描…' : '正在检查…'
-                    : runtimeKind === 'trae-cn-cli' ? '重新扫描安装' : '检查可用性'}
+                    ? '正在检查…'
+                    : '检查可用性'}
                 </button>
               </article>
             )

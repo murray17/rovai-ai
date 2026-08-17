@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Runtime Catalog Boundaries
@@ -14,8 +14,9 @@ last_updated: 2026-08-17
 [ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)，Runtime 启动与延迟验证边界见
 [ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
 [ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)和
-[ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)及
-[Runtime Launch and Verification v4](../contracts/runtime-launch-and-verification-v4.md)。实测版本和能力只由
+[ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
+[ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)及
+[Runtime Launch and Verification v5](../contracts/runtime-launch-and-verification-v5.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 三层目录
@@ -63,17 +64,22 @@ capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 `sessionCapabilities.resume` 存在时走 `session/resume`，否则建立 `session/new`。TRAE 的
 `session/load` 只作为历史能力证据保留，禁止用于正式 AgentRun 续跑。
 
-TRAE 是 static-only inspection Runtime。Core 的 discovery、设置页 check/ensure、managed/custom refresh、
-health/diagnostics 与 dispatch preflight 只验证 ordinary executable、canonical path、fingerprint 和可信静态
-version，不启动 `traecli`。这些证据持久化为 `installed_unverified`，不能声明登录、ACP、模型、权限或
-Session Ready；版本没有可信 `Info.plist` / Go main-module metadata 时保持 unknown。
+TRAE 参加正常 light discovery：启动和显式 rescan 通过统一 Probe process owner 执行有界
+`traecli --version`，成功持久化 `light_ready` 并在设置页显示“可用”，失败持久化 `light_failed`。轻检仍只
+证明 executable identity，可以配置和尝试执行，不能声明登录、ACP、模型、权限或 Session Ready。
+
+用户点击“检查可用性”授权 `AvailabilityCheck` 启动一次 TRAE ACP Host。Probe 使用保守
+`permission_mode=default`，只执行版本、initialize 与 session/new，并要求动态模型/权限目录；它不发送 Prompt、
+模型请求、工具或 Approval 行为测试。成功提交 Ready，随后的 discovery event 不重复静态落库覆盖该 Ready。
+Installation refresh、health/diagnostics 与 dispatch preflight 继续不启动 `traecli`；旧
+`installed_unverified` 仍可读取，但不再是正常启动轻检成功后的主状态。
 
 成员可以在该状态下原子保存 Runtime default model 与 `permission_mode=default|bypass_permissions`，新 draft
 默认后者。首次真实 AgentRun 只启动
 一个 TRAE Host，从同一个 Host 的 `initialize` 与 `session/new` response 生成 Ready snapshot 后继续发送
 任务输入。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host；失败使用该 Host 已有错误分类，不启动 diagnostic
-process。相同 path/fingerprint 且 Adapter permission schema digest 相同的静态复扫保留 Ready；任一权限
-descriptor 改变时降级为静态 snapshot，身份变化回到 `installed_unverified`，等待下一次真实执行重新验证。
+process。相同 path/fingerprint 且 Adapter permission schema digest 相同的轻检复扫保留 Ready；任一权限
+descriptor 改变时降级为 light snapshot，等待显式检查或下一次真实执行重新验证。
 
 External MCP 沿用现有 `AdditivePerRun`：当前 AgentRun 的冻结 Definition 通过
 `session/new` 参数追加；warm reuse 只允许完整 Runtime compatibility digest 相等，因此冻结 MCP Projection

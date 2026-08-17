@@ -596,13 +596,6 @@ impl AgentRuntimeAdapterRegistry {
         executable_fingerprint: String,
         observed_at: String,
     ) -> Result<AdapterCapabilitySnapshot> {
-        if kind == AdapterKind::TraeCnCli {
-            return self.trae_installed_unverified_snapshot(
-                reported_version,
-                executable_fingerprint,
-                observed_at,
-            );
-        }
         let permission_options = match kind {
             AdapterKind::CodexCli => codex_permission_options(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
@@ -613,7 +606,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::CodebuddyCli => codebuddy_permission_options(),
             AdapterKind::QwenCode => qwen_permission_options(),
             AdapterKind::AntigravityApp => antigravity_permission_options(),
-            AdapterKind::TraeCnCli => unreachable!("TRAE returned above"),
+            AdapterKind::TraeCnCli => trae_static_permission_options(),
         };
         let permission_schema_digest =
             canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
@@ -645,9 +638,6 @@ impl AgentRuntimeAdapterRegistry {
         observed_at: String,
         diagnostic_code: String,
     ) -> Result<AdapterCapabilitySnapshot> {
-        if kind == AdapterKind::TraeCnCli {
-            anyhow::bail!("TRAE static discovery does not use light-failed snapshots");
-        }
         let mut snapshot =
             self.light_ready_snapshot(kind, reported_version, executable_fingerprint, observed_at)?;
         snapshot.probe_status = "light_failed".to_string();
@@ -1616,7 +1606,7 @@ fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor> {
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
         description:
-            "TRAE CLI CN 的静态启动权限模式；完整模式目录会在首次真实任务建立 ACP Session 后刷新。"
+            "TRAE CLI CN 的轻检启动权限模式；完整模式目录会在显式检查或首次真实任务建立 ACP Session 后刷新。"
                 .to_string(),
         value_type: "enum".to_string(),
         choices: vec![

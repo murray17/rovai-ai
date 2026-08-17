@@ -102,10 +102,11 @@ capabilities are confirmed by explicit check or first task. A path-only result r
 never synthetic checking. Do not expose internal “found/not checked”, fingerprint or
 attempt stages. Executable path, fingerprint, backoff and audit remain inside advanced diagnostics.
 
-TRAE remains the static-inspection exception: its row says “已安装” after path/fingerprint detection and
-explains that login and ACP capabilities will be verified by the first real task. Other Runtime rows retain
-“检查可用性”; that action starts a deep check only for the clicked Runtime. Startup, rescan, page entry and
-selection changes never start deep checks.
+TRAE uses the same bounded startup/rescan version check and “可用” light-ready presentation as the other
+Runtime rows. Every supported row uses “检查可用性”; for TRAE that explicit action starts a fast ACP
+initialize/session check without sending a model prompt, then presents the resulting Ready or actionable
+failure. Startup and rescan may run bounded identity commands, while page entry and selection changes never
+start deep checks.
 
 The Runtime settings list may append a separately typed presentation-only preview row after supported
 products. A preview must say `待支持` and `尚未接入 AgentRun`, expose no health/configuration action and

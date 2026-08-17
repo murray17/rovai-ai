@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Agent Runtime 兼容性清单
@@ -96,6 +96,20 @@ Adapter 允许且无副作用的有界版本/身份命令；只有命令成功�
 [ADR-0207](adr/0207-explicit-maximum-authority-member-runtime-defaults.md)与
 [Runtime Launch and Verification v4](contracts/runtime-launch-and-verification-v4.md)。
 
+### 2026-08-17 TRAE 启动轻检与用户授权检查复核
+
+v1.03 按 [ADR-0208](adr/0208-user-authorized-trae-light-and-availability-verification.md)调整当前产品边界，
+不改写上方 v0.87 的历史理由。本机 `/Users/murray.xue/.local/share/trae-cli/trae-cli --version` 在一秒内成功
+返回 `trae-cli version 0.120.52`、build commit `6756e52a9238b6d493928e55b05127957dbfefb4`；启动与 rescan
+因此可以建立 `light_ready`，其含义仍只是 executable 可选择和尝试。
+
+同一安装通过 `AvailabilityCheck` purpose 完成真实 ACP initialize/session/new，并在 2.79 秒内形成 Ready
+snapshot 所需的非空模型与 permission descriptor。该 Probe 使用 `permission_mode=default`、空 MCP 与隔离临时
+cwd，没有发送 session prompt、工具或模型请求；完整 Prompt/Approval/cancel 兼容性仍以上方准入记录和专项
+Smoke 为准。Health、Installation refresh 与 dispatch preflight 继续被 launch policy 拦截。当前规范入口为
+[ADR-0208](adr/0208-user-authorized-trae-light-and-availability-verification.md)与
+[Runtime Launch and Verification v5](contracts/runtime-launch-and-verification-v5.md)。
+
 ### 2026-08-17 Kiro trust-all 与 TRAE 最高权限默认复核
 
 本机 Kiro CLI 2.16.1 的 `kiro-cli acp --help` 明确输出
@@ -121,7 +135,7 @@ Adapter，且其 replay 只能在 `LoadingReplay` 阶段被隔离；对不上 Ho
 epoch、Native Session、Native Prompt 或 Delivery 的事件，不得进入 Evidence、Action、Usage、
 Missing-Send Recovery、Compaction 或 Renderer。匹配 `session/prompt` request ID 的 response 是唯一
 ACP input ACK 权威；无 Prompt correlation 的 `session/update` 与 permission request 不再提前确认。
-当前规范入口是 [Runtime Launch and Verification v4](contracts/runtime-launch-and-verification-v4.md)。
+当前规范入口是 [Runtime Launch and Verification v5](contracts/runtime-launch-and-verification-v5.md)。
 
 2026-08-17 使用本机真实 TRAE 执行 `ROVAI_ACP_SMOKE_ADAPTER=trae-cn-cli pnpm
 smoke:acp-runtime` 通过：completion、allow-once 写入与 deny 三个连续 AgentRun 使用同一

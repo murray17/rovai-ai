@@ -85,7 +85,7 @@ describe('Runtime user status projection', () => {
     expect(runtimeReadinessLabel('runtime_not_configured')).toBe('未配置 Agent 运行时')
     expect(runtimeReadinessLabel('needs_attention')).toBe('不可用')
     expect(runtimeReadinessLabel('light_ready')).toBe('可用')
-    expect(runtimeReadinessLabel('installed_unverified')).toBe('已安装，待首次运行验证')
+    expect(runtimeReadinessLabel('installed_unverified')).toBe('已安装，待检查')
   })
 
   it('presents deferred TRAE verification without claiming readiness', () => {
@@ -113,7 +113,7 @@ describe('Runtime user status projection', () => {
     )
     expect(result.status).toBe('installed_unverified')
     expect(result.label).toBe('已安装')
-    expect(result.detail).toContain('首次实际任务中验证')
+    expect(result.detail).toContain('请重新检测或检查可用性')
   })
 })
 
