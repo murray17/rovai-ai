@@ -733,9 +733,18 @@ fn cancel_one_gather(
         transaction.execute(
             r#"
             UPDATE message_delivery
-            SET status = 'cancelled', dispatch_phase = 'terminal',
+            SET status = CASE
+                    WHEN dispatch_attempt_count = 0
+                    THEN 'interrupted_before_dispatch'
+                    ELSE 'cancelled'
+                END,
+                dispatch_phase = 'terminal',
                 wait_condition = NULL, active_dispatch_attempt_id = NULL,
-                manual_intervention_required = 0, failure_code = ?2,
+                manual_intervention_required = CASE
+                    WHEN dispatch_attempt_count = 0 THEN 1
+                    ELSE 0
+                END,
+                failure_code = ?2,
                 version = version + 1, updated_at = ?3, ended_at = ?3
             WHERE id = ?1 AND status = 'pending'
             "#,
