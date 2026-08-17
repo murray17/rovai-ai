@@ -189,10 +189,6 @@ impl ExecutionEvidenceService {
             [agent_run_id],
             |row| row.get(0),
         )?;
-        let first_occurred_at = prepared
-            .first()
-            .map(|evidence| evidence.occurred_at.clone())
-            .context("Execution Evidence batch is unexpectedly empty")?;
         let mut recorded = Vec::with_capacity(prepared.len());
         for (index, evidence) in prepared.into_iter().enumerate() {
             let sequence = first_sequence
@@ -261,15 +257,6 @@ impl ExecutionEvidenceService {
                 inserted: true,
             }));
         }
-        transaction.execute(
-            r#"
-            UPDATE monitoring_run_enrollment
-            SET first_visible_activity_at = ?3
-            WHERE agent_run_id = ?1 AND execution_epoch = ?2
-              AND first_visible_activity_at IS NULL
-            "#,
-            params![agent_run_id, execution_epoch, first_occurred_at],
-        )?;
         transaction.commit()?;
         Ok(recorded)
     }
@@ -478,15 +465,6 @@ impl ExecutionEvidenceService {
                 i64::from(is_truncated),
                 occurred_at,
             ],
-        )?;
-        transaction.execute(
-            r#"
-            UPDATE monitoring_run_enrollment
-            SET first_visible_activity_at = ?3
-            WHERE agent_run_id = ?1 AND execution_epoch = ?2
-              AND first_visible_activity_at IS NULL
-            "#,
-            params![agent_run_id, execution_epoch, occurred_at],
         )?;
         let facts = canonical_activity::classify_evidence(
             agent_run_id,

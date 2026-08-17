@@ -173,7 +173,7 @@ pnpm build:desktop
 | 命令 | 默认或支持的 Runtime | 额外说明 |
 | --- | --- | --- |
 | `pnpm smoke:intake` | Codex | 创建 Git fixture；验证 Camp 消息、连续 Conversation、重启和删除 |
-| `pnpm smoke:acp-runtime` | OpenCode + Copilot + TRAE | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个；TRAE 使用 `traecli acp serve` 与动态 Session capability，并覆盖 completion、后继 Run 复用同一 warm Host/Session、allow-once 与 deny；冷 Host 续跑不得回退 `session/load` |
+| `pnpm smoke:acp-runtime` | OpenCode + Copilot + TRAE | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个；三者都执行固定 `printf` 并断言公开 command output 进入 `runtime.action.payload.output`；TRAE 使用 `traecli acp serve` 与动态 Session capability，并覆盖 completion、后继 Run 复用同一 warm Host/Session、allow-once 与 deny；冷 Host 续跑不得回退 `session/load` |
 | `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume |
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 包含 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |

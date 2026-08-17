@@ -212,7 +212,9 @@ generated_from: docs/adr-front-matter
 | [ADR-0198](0198-bounded-open-round-grill-duo-skills.md) | Bounded Open-Round Protocol for Self-Contained Grill Duo Skills | `accepted` | `cross-version` | [v0.92](../versions/v0.92/README.md) | — |
 | [ADR-0199](0199-session-semantic-four-message-review-duo.md) | Session-Semantic Four-Message Review Duo | `accepted` | `cross-version` | [v0.93](../versions/v0.93/README.md) | — |
 | [ADR-0200](0200-compact-context-projection-and-structured-run-facts.md) | Compact AgentRun Context Projection and Structured Run Facts | `accepted` | `cross-version` | [v0.94](../versions/v0.94/README.md) | — |
-| [ADR-0201](0201-sparse-runtime-usage-and-clean-break-monitoring.md) | Sparse Runtime Usage Authority and Clean-Break Monitoring Enrollment | `accepted` | `cross-version` | [v0.96](../versions/v0.96/README.md) | — |
+| [ADR-0201](0201-sparse-runtime-usage-and-clean-break-monitoring.md) | Sparse Runtime Usage Authority and Clean-Break Monitoring Enrollment | `superseded` | `cross-version` | [v0.96](../versions/v0.96/README.md) | [ADR-0205](0205-minimal-runtime-usage-metering.md) |
 | [ADR-0202](0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md) | Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning | `accepted` | `cross-version` | [v0.97](../versions/v0.97/README.md) | — |
 | [ADR-0203](0203-structured-current-input-skill-links.md) | Structured Current Input Skill Links | `accepted` | `cross-version` | [v0.98](../versions/v0.98/README.md) | — |
+| [ADR-0204](0204-on-demand-runtime-deep-verification.md) | On-Demand Runtime Deep Verification with Manager-Owned Attempts | `accepted` | `cross-version` | [v0.98](../versions/v0.98/README.md) | — |
+| [ADR-0205](0205-minimal-runtime-usage-metering.md) | Minimal Runtime Usage Metering | `accepted` | `cross-version` | [v0.99](../versions/v0.99/README.md) | — |
 <!-- adr-history:end -->

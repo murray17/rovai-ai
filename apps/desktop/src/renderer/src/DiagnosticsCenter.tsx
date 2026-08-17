@@ -8,6 +8,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { requestProductRuntimeCheck } from './runtime-check'
 
 export type DiagnosticFilter = 'all' | DiagnosticStatus
 type Notice = {
@@ -149,9 +150,7 @@ export function DiagnosticsCenter({
       } else if (action.kind === 'repair_mcp') {
         await window.rovai.request('mcp.config.repairPermissions')
       } else {
-        await window.rovai.request('runtime.product.check', {
-          runtimeKind: action.runtimeKind
-        })
+        await requestProductRuntimeCheck(action.runtimeKind)
       }
 
       const next = action.kind === 'retry_runtime'

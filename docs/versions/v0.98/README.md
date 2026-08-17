@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.98
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -17,6 +17,8 @@ last_updated: 2026-08-17
 > [实施计划](implementation-plan.md#实施结果)。
 >
 > 前置版本：[v0.97 持久首次训练与“初次集结”](../v0.97/README.md)
+>
+> 后继版本：[v0.99 最小 Runtime Usage Metering](../v0.99/README.md)
 
 ## 版本目标
 
@@ -83,6 +85,27 @@ Session replay 隔离与 Prompt response-only ACK。
   才能产生业务副作用；
 - ACP v1 只有匹配 `session/prompt` request ID 的 response 可以结算 input ACK。
 
+### 同期 Runtime 检查架构修正
+
+- 启动和重扫只建立 path、权限、fingerprint 与无副作用的有界 one-shot 身份证据；非 TRAE 只有命令成功、
+  输出未超限且识别到基础身份才写入 `light_ready`，不自动启动 ACP、Session、认证或模型枚举；
+- `core ready` 先于后台 discovery，Runtime 深检只由单 Runtime“检查可用性”或首次真实 AgentRun 发起；
+- Runtime Check Manager 统一拥有 attempt/task/deadline、每 Runtime 单飞、全局并发二和所有终态 finalize；
+- 版本、ACP、Codex initialize/model/schema 等短命进程统一使用固定输出容量、truncation、整进程组清理和
+  bounded reader/child wait；
+- fingerprint/search generation 变化只替换静态证据并 fence 旧 attempt，不触发后台深检。
+
+### 同期 Runtime command output 修正
+
+- 通用 ACP 解析标准嵌套 Content Text block；Terminal 只表示展示边界，`rawOutput` 仅在 Content 缺席时
+  从 `stdout`、`stderr`、`output`、`text` 顶层白名单安全回退；
+- Claude stream parser 使用原生 tool-use ID 关联 partial/full `tool_use` 与 `tool_result`，把 Bash、Read、
+  Edit、Write 等映射为既有 Activity，并仅从 Bash 对应公开结果投影 command output；
+- Antigravity 只有在健康证据声明 `output.stream_json` 时启用结构化 NDJSON，旧版继续诚实保持
+  run-level 展示；两条路径都不从私有日志、workspace diff 或最终回答猜测内部 command；
+- 三类 Runtime 都复用既有 Execution Evidence、脱敏、大小限制与 Renderer 投影，不新增公开 wire 字段
+  或 Provider-specific Renderer 分支。
+
 ## 明确不做
 
 - 不内联 Skill 文件内容，不创建 Provider-specific Skill input item；
@@ -112,12 +135,12 @@ Session replay 隔离与 Prompt response-only ACK。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.97 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[确认说明](model-context-change.md)、版本索引与前后链接建立唯一 current v0.98。 |
-| ADR | 已更新 | [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)冻结结构化选择、双时点资格、Core-owned 解析、非 fallback 指针与四层 Evidence 边界。 |
-| Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 Skill wire/Evidence；[Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)定义 ACP continuation、replay quarantine、Prompt fence 与 TRAE warm Host。 |
+| ADR | 已更新 | [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)冻结结构化 Skill 选择边界；[ADR-0204](../../adr/0204-on-demand-runtime-deep-verification.md)冻结 light discovery、显式/首次执行深检、manager-owned attempt 与受限 Probe process。 |
+| Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 Skill wire/Evidence；[Runtime Launch and Verification v3](../../contracts/runtime-launch-and-verification-v3.md)继承 ACP continuation 并新增 light discovery、按需深检、attempt manager 与 Probe process owner。 |
 | Architecture | 已更新 | [Structured Current Input Skill Links](../../architecture/structured-current-input-skill-links.md)与 [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)定义 Skill Module seam；[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 TRAE LRU 与 ACP 输入隔离。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)把 Picker 从普通 Text 改为结构化 token，同时保持现有 Composer 视觉、键盘和正文 Marker。 |
-| Runtime Activity | 确认无需更新 | 本版不新增 Runtime Activity kind 或映射；Skill 文件指针不产生 Tool/Activity 或读取 receipt。 |
-| Runtime compatibility | 已更新 | Skill 指针不改变 Runtime 资格；同期登记补充 TRAE `0.120.52` warm Host/冷 Session 边界、replay 隔离与 response-only ACK。 |
+| Runtime Activity | 已更新 | Skill 文件指针仍不产生 Tool/Activity；同期 command output 修正更新 [Runtime Activity Registry](../../runtime-activity/registry.md)，不新增 kind 或公开 wire 字段。 |
+| Runtime compatibility | 已更新 | Skill 指针不改变 Runtime 资格；同期登记补充 TRAE warm/cold Session、replay/ACK 边界，以及 ACP、Claude、AGY 原生 command-output 能力与旧版回退证据。 |
 | Documentation routing | 已更新 | 文档导航、ADR CURRENT/HISTORY、Contract/Architecture 索引和领域词汇加入结构化 Current Input Skill 入口。 |
 | Root README | 确认无需更新 | 项目定位、公开支持范围和常青能力没有因一个模型输入字段扩展而改变；版本状态仍由唯一 current 入口拥有。 |
 
@@ -128,7 +151,7 @@ Session replay 隔离与 Prompt response-only ACK。
 - [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
 - [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
 - [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
-- [Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)
+- [Runtime Launch and Verification v3](../../contracts/runtime-launch-and-verification-v3.md)
 - [Structured Current Input Skill Links 架构](../../architecture/structured-current-input-skill-links.md)
 - [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)

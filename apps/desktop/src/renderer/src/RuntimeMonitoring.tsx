@@ -1,22 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type {
   AdapterKind,
-  AgentProfile,
   MonitoringFilter,
-  MonitoringMetric,
-  MonitoringMoneyValue,
   MonitoringRange,
-  MonitoringReliabilityView,
-  MonitoringSnapshot,
-  MonitoringSummaryView,
-  MonitoringTrendBucket,
-  MonitoringUsageView
+  RuntimeUsageBreakdownRow,
+  RuntimeUsageCoverageValue,
+  RuntimeUsageMoneyValue,
+  RuntimeUsageSnapshot,
+  RuntimeUsageTrendPoint
 } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
-
-type MonitoringTab = 'summary' | 'usage' | 'reliability'
-type MonitoringData = MonitoringSummaryView | MonitoringUsageView | MonitoringReliabilityView
-type MetricKind = 'integer' | 'percent' | 'duration' | 'ratio'
 
 export const MONITORING_POLL_INTERVAL_MS = 12_000
 export const MONITORING_EVENT_DEBOUNCE_MS = 300
@@ -40,17 +33,8 @@ export function monitoringEventRefreshDelay(
   urgent: boolean
 ): number {
   if (urgent || lastSuccessfulSnapshotAt === null) return MONITORING_EVENT_DEBOUNCE_MS
-  const remaining = MONITORING_BACKGROUND_MIN_INTERVAL_MS
-    - (now - lastSuccessfulSnapshotAt)
+  const remaining = MONITORING_BACKGROUND_MIN_INTERVAL_MS - (now - lastSuccessfulSnapshotAt)
   return Math.max(MONITORING_EVENT_DEBOUNCE_MS, remaining)
-}
-
-export function nextMonitoringTabIndex(currentIndex: number, key: string): number | null {
-  if (key === 'Home') return 0
-  if (key === 'End') return TABS.length - 1
-  if (key === 'ArrowRight' || key === 'ArrowDown') return (currentIndex + 1) % TABS.length
-  if (key === 'ArrowLeft' || key === 'ArrowUp') return (currentIndex - 1 + TABS.length) % TABS.length
-  return null
 }
 
 const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
@@ -66,17 +50,19 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'antigravity-app', label: 'Antigravity' }
 ]
 
-const TABS: Array<{ value: MonitoringTab; label: string }> = [
-  { value: 'summary', label: '概览' },
-  { value: 'usage', label: '用量与成本' },
-  { value: 'reliability', label: '性能与可靠性' }
-]
+const SUMMARY_METRICS = [
+  ['promptInputTotalTokens', 'Input Token', 'integer'],
+  ['outputTokens', 'Output Token', 'integer'],
+  ['cacheReadTokens', 'Cache Read', 'integer'],
+  ['cacheWriteTokens', 'Cache Write', 'integer'],
+  ['cacheReadShare', 'Cache Read 占比', 'percent'],
+  ['requestCacheHitRate', '请求 Cache 命中率', 'percent'],
+  ['reasoningOutputTokens', 'Reasoning Output', 'integer']
+] as const
 
-export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React.JSX.Element {
-  const [tab, setTab] = useState<MonitoringTab>('summary')
-  const [focusedTab, setFocusedTab] = useState<MonitoringTab>('summary')
+export function RuntimeMonitoring(): React.JSX.Element {
   const [filter, setFilter] = useState<MonitoringFilter>({ range: '24h' })
-  const [snapshot, setSnapshot] = useState<MonitoringSnapshot | null>(null)
+  const [snapshot, setSnapshot] = useState<RuntimeUsageSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
   const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -85,20 +71,20 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
   const [exporting, setExporting] = useState(false)
   const [exportPath, setExportPath] = useState<string | null>(null)
   const mountedRef = useRef(true)
-  const snapshotRef = useRef<MonitoringSnapshot | null>(null)
   const requestSequenceRef = useRef(0)
   const inFlightRef = useRef(false)
   const pendingRequestRef = useRef<{ foreground: boolean; urgent: boolean } | null>(null)
   const lastSuccessfulSnapshotAtRef = useRef<number | null>(null)
   const filterRef = useRef(filter)
+  const loadedFilterRef = useRef<MonitoringFilter | null>(null)
+  const snapshotRef = useRef<RuntimeUsageSnapshot | null>(null)
   const loadSnapshotRef = useRef<(foreground: boolean, urgent?: boolean) => void>(() => undefined)
   filterRef.current = filter
+  snapshotRef.current = snapshot
 
   useEffect(() => {
     mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
+    return () => { mountedRef.current = false }
   }, [])
 
   const loadSnapshot = useCallback(async (foreground: boolean, urgent = false) => {
@@ -109,28 +95,32 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
     if (inFlightRef.current) {
       const pending = pendingRequestRef.current
       pendingRequestRef.current = {
-        foreground: (pending?.foreground ?? false) || foreground,
-        urgent: (pending?.urgent ?? false) || urgent
+        foreground: Boolean(pending?.foreground) || foreground,
+        urgent: Boolean(pending?.urgent) || urgent
       }
       if (foreground) {
         setLoading(true)
         setError(null)
+        setRefreshError(null)
       }
       return
     }
     inFlightRef.current = true
-    const requestSequence = ++requestSequenceRef.current
     const requestedFilter = filter
+    const requestSequence = ++requestSequenceRef.current
     if (foreground) {
       setLoading(true)
       setError(null)
       setRefreshError(null)
     }
     try {
-      const result = await window.rovai.request<MonitoringSnapshot>('monitoring.snapshot', filter)
+      const result = await window.rovai.request<RuntimeUsageSnapshot>(
+        'monitoring.snapshot',
+        requestedFilter
+      )
       if (!mountedRef.current || requestSequence !== requestSequenceRef.current
         || !sameMonitoringFilter(requestedFilter, filterRef.current)) return
-      snapshotRef.current = result
+      loadedFilterRef.current = requestedFilter
       lastSuccessfulSnapshotAtRef.current = performance.now()
       setSnapshot(result)
       setError(null)
@@ -139,20 +129,18 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       if (!mountedRef.current || requestSequence !== requestSequenceRef.current
         || !sameMonitoringFilter(requestedFilter, filterRef.current)) return
       const message = errorMessage(reason)
-      if (snapshotRef.current !== null && sameMonitoringFilter(snapshotRef.current.filter, filter)) {
+      if (snapshotRef.current !== null && loadedFilterRef.current !== null
+        && sameMonitoringFilter(loadedFilterRef.current, requestedFilter)) {
         setRefreshError(message)
-      } else if (foreground || snapshotRef.current === null) {
+      } else {
         setError(message)
       }
     } finally {
       inFlightRef.current = false
-      const pendingRequest = pendingRequestRef.current
+      const pending = pendingRequestRef.current
       pendingRequestRef.current = null
-      if (mountedRef.current && pendingRequest !== null && !document.hidden) {
-        queueMicrotask(() => loadSnapshotRef.current(
-          pendingRequest.foreground,
-          pendingRequest.urgent
-        ))
+      if (mountedRef.current && pending !== null && !document.hidden) {
+        queueMicrotask(() => loadSnapshotRef.current(pending.foreground, pending.urgent))
       } else if (mountedRef.current && requestSequence === requestSequenceRef.current) {
         setLoading(false)
       }
@@ -162,67 +150,77 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
     void loadSnapshot(foreground, urgent)
   }
 
-  useEffect(() => {
-    void loadSnapshot(true)
-  }, [loadSnapshot, refreshKey])
+  useEffect(() => { void loadSnapshot(true) }, [loadSnapshot, refreshKey])
 
   useEffect(() => {
     let pollTimer: ReturnType<typeof setInterval> | null = null
     let eventTimer: ReturnType<typeof setTimeout> | null = null
-    let eventRefreshUrgent = false
+    let urgent = false
     const stopPoll = (): void => {
       if (pollTimer !== null) clearInterval(pollTimer)
       pollTimer = null
     }
     const startPoll = (): void => {
       stopPoll()
-      if (document.hidden) return
-      pollTimer = setInterval(() => void loadSnapshot(false), MONITORING_POLL_INTERVAL_MS)
+      if (!document.hidden) {
+        pollTimer = setInterval(
+          () => loadSnapshotRef.current(false),
+          MONITORING_POLL_INTERVAL_MS
+        )
+      }
     }
-    const scheduleEventRefresh = (urgent = false): void => {
+    const schedule = (nextUrgent: boolean): void => {
       if (document.hidden) return
+      urgent = urgent || nextUrgent
       if (eventTimer !== null) clearTimeout(eventTimer)
-      eventRefreshUrgent = eventRefreshUrgent || urgent
-      const delay = monitoringEventRefreshDelay(
+      eventTimer = setTimeout(() => {
+        const refreshUrgently = urgent
+        urgent = false
+        eventTimer = null
+        loadSnapshotRef.current(false, refreshUrgently)
+      }, monitoringEventRefreshDelay(
         performance.now(),
         lastSuccessfulSnapshotAtRef.current,
-        eventRefreshUrgent
-      )
-      eventTimer = setTimeout(() => {
-        const refreshUrgent = eventRefreshUrgent
-        eventTimer = null
-        eventRefreshUrgent = false
-        void loadSnapshot(false, refreshUrgent)
-      }, delay)
+        urgent
+      ))
     }
-    const handleVisibilityChange = (): void => {
+    const onVisibilityChange = (): void => {
       if (document.hidden) {
         stopPoll()
         if (eventTimer !== null) clearTimeout(eventTimer)
         eventTimer = null
-        eventRefreshUrgent = false
-        return
+        urgent = false
+      } else {
+        startPoll()
+        schedule(true)
       }
-      startPoll()
-      scheduleEventRefresh(true)
     }
     const unsubscribe = window.rovai.onEvent((event) => {
       if (shouldRefreshMonitoringEvent(event.method)) {
-        scheduleEventRefresh(event.method === 'agent_run.terminal')
+        schedule(event.method === 'agent_run.terminal')
       }
     })
-    document.addEventListener('visibilitychange', handleVisibilityChange)
+    document.addEventListener('visibilitychange', onVisibilityChange)
     startPoll()
     return () => {
       unsubscribe()
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
       stopPoll()
       if (eventTimer !== null) clearTimeout(eventTimer)
-      eventRefreshUrgent = false
     }
-  }, [loadSnapshot])
+  }, [])
 
-  const retry = useCallback(() => setRefreshKey((value) => value + 1), [])
+  const updateFilter = useCallback(<K extends keyof MonitoringFilter>(
+    key: K,
+    value: MonitoringFilter[K]
+  ) => {
+    setFilter((current) => {
+      const next = { ...current, [key]: value }
+      if (value === undefined || value === '') delete next[key]
+      return next
+    })
+  }, [])
+
   const exportData = useCallback(async () => {
     setExporting(true)
     setExportPath(null)
@@ -237,30 +235,17 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
     }
   }, [filter])
 
-  const updateFilter = useCallback(<K extends keyof MonitoringFilter>(
-    key: K,
-    value: MonitoringFilter[K]
-  ) => {
-    setFilter((current) => {
-      const next = { ...current, [key]: value }
-      if (value === undefined || value === '') delete next[key]
-      return next
-    })
-  }, [])
-
-  const data: MonitoringData | null = snapshot?.[tab] ?? null
-  const isEmpty = !loading && !error && snapshot !== null
-    && snapshot.summary.runs.eligibleCount === 0
+  const isEmpty = snapshot !== null && !hasRuntimeUsage(snapshot)
 
   return (
     <div className="runtime-monitoring">
       <SettingsPageHeader
-        eyebrow="Settings / Runtime Monitoring"
+        eyebrow="Settings / Runtime Usage"
         title="运行监控"
-        description="查看 AgentRun 的状态、用量、成本与可靠性。"
+        description="汇总 Runtime 实际上报的 Token、Cache 与成本；未上报字段显示为未知。"
         aside={(
           <>
-            <button className="quiet-button" type="button" onClick={retry} disabled={loading}>
+            <button className="quiet-button" type="button" onClick={() => setRefreshKey((value) => value + 1)} disabled={loading}>
               {loading ? '正在刷新…' : '刷新'}
             </button>
             <button className="primary-button" type="button" onClick={() => void exportData()} disabled={loading || exporting}>
@@ -271,55 +256,16 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       />
 
       <div className="runtime-monitoring-body">
-        <div className="monitoring-toolbar">
-          <div
-            className="monitoring-tabs"
-            role="tablist"
-            aria-label="运行监控视图"
-          >
-            {TABS.map((item, index) => (
-              <button
-                key={item.value}
-                id={`monitoring-${item.value}-tab`}
-                type="button"
-                role="tab"
-                aria-selected={tab === item.value}
-                aria-controls={`monitoring-${item.value}-panel`}
-                tabIndex={focusedTab === item.value ? 0 : -1}
-                className={tab === item.value ? 'is-active' : ''}
-                onFocus={() => setFocusedTab(item.value)}
-                onClick={() => {
-                  setFocusedTab(item.value)
-                  setTab(item.value)
-                }}
-                onKeyDown={(event) => {
-                  const nextIndex = nextMonitoringTabIndex(index, event.key)
-                  if (nextIndex === null) return
-                  event.preventDefault()
-                  setFocusedTab(TABS[nextIndex].value)
-                  requestAnimationFrame(() => {
-                    document.getElementById(`monitoring-${TABS[nextIndex].value}-tab`)?.focus()
-                  })
-                }}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <MonitoringFilters
-            filter={filter}
-            agents={agents}
-            disabled={loading}
-            onChange={updateFilter}
-          />
-        </div>
-
+        <MonitoringFilters
+          filter={filter}
+          snapshot={snapshot}
+          disabled={loading}
+          onChange={updateFilter}
+        />
         {exportPath && (
-          <div className="monitoring-export-notice" role="status" aria-live="polite">
+          <div className="monitoring-export-notice" role="status">
             <span>导出已保存。</span>
-            <button className="quiet-button compact" type="button" onClick={() => void window.rovai.revealMonitoringExport(exportPath)}>
-              在 Finder 中显示
-            </button>
+            <button className="quiet-button compact" type="button" onClick={() => void window.rovai.revealMonitoringExport(exportPath)}>在 Finder 中显示</button>
           </div>
         )}
         {exportError && (
@@ -329,33 +275,22 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
           </div>
         )}
         {refreshError && snapshot && (
-          <div className="monitoring-stale-notice" role="status" aria-live="polite">
-            <span>刷新失败，正在显示 {formatTimestamp(snapshot.collection.observedAt)} 的快照。</span>
-            <button className="quiet-button compact" type="button" onClick={retry}>重试</button>
+          <div className="monitoring-stale-notice" role="status">
+            <span>刷新失败，正在显示截至 {formatTimestamp(snapshot.range.to)} 的数据。</span>
+            <button className="quiet-button compact" type="button" onClick={() => setRefreshKey((value) => value + 1)}>重试</button>
           </div>
         )}
-        <div
-          id={`monitoring-${tab}-panel`}
-          role="tabpanel"
-          aria-labelledby={`monitoring-${tab}-tab`}
-          aria-busy={loading}
-        >
+        <main aria-busy={loading}>
           {loading && <MonitoringLoading />}
           {!loading && error && (
             <section className="monitoring-state is-error" role="alert">
               <div><h2>无法读取运行监控</h2><p>{error}</p></div>
-              <button className="quiet-button" type="button" onClick={retry}>重试</button>
+              <button className="quiet-button" type="button" onClick={() => setRefreshKey((value) => value + 1)}>重试</button>
             </section>
           )}
-          {isEmpty && <MonitoringEmpty />}
-          {!loading && !error && data && !isEmpty && (
-            <div className="monitoring-view">
-              {tab === 'summary' && <SummaryPanel data={data as MonitoringSummaryView} />}
-              {tab === 'usage' && <UsagePanel data={data as MonitoringUsageView} />}
-              {tab === 'reliability' && <ReliabilityPanel data={data as MonitoringReliabilityView} />}
-            </div>
-          )}
-        </div>
+          {!loading && !error && isEmpty && <RuntimeUsageEmpty />}
+          {!loading && !error && snapshot && !isEmpty && <RuntimeUsageView snapshot={snapshot} />}
+        </main>
       </div>
     </div>
   )
@@ -363,469 +298,301 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
 
 function MonitoringFilters({
   filter,
-  agents,
+  snapshot,
   disabled,
   onChange
 }: {
   filter: MonitoringFilter
-  agents: AgentProfile[]
+  snapshot: RuntimeUsageSnapshot | null
   disabled: boolean
   onChange<K extends keyof MonitoringFilter>(key: K, value: MonitoringFilter[K]): void
 }): React.JSX.Element {
+  const providerOptions = uniqueOptions([
+    filter.providerKey,
+    ...(snapshot?.byModel.map((row) => row.providerKey) ?? [])
+  ])
+  const modelOptions = uniqueOptions([
+    filter.modelKey,
+    ...(snapshot?.byModel.map((row) => row.modelKey) ?? [])
+  ])
   return (
-    <div className="monitoring-filters" aria-label="运行监控筛选">
-      <label>
-        <span>范围</span>
-        <select value={filter.range} disabled={disabled} onChange={(event) => onChange('range', event.target.value as MonitoringRange)}>
+    <div className="monitoring-toolbar">
+      <p>用量</p>
+      <div className="monitoring-filters" aria-label="运行监控筛选">
+        <Filter label="范围" value={filter.range} disabled={disabled} onChange={(value) => onChange('range', value as MonitoringRange)}>
           <option value="24h">过去 24 小时</option>
           <option value="7d">过去 7 天</option>
           <option value="30d">过去 30 天</option>
-        </select>
-      </label>
-      <label>
-        <span>Runtime</span>
-        <select value={filter.adapterKind ?? ''} disabled={disabled} onChange={(event) => onChange('adapterKind', event.target.value ? event.target.value as AdapterKind : undefined)}>
+        </Filter>
+        <Filter label="Runtime" value={filter.runtimeKind ?? ''} disabled={disabled} onChange={(value) => onChange('runtimeKind', value ? value as AdapterKind : undefined)}>
           <option value="">全部</option>
           {ADAPTERS.map((adapter) => <option key={adapter.value} value={adapter.value}>{adapter.label}</option>)}
-        </select>
-      </label>
-      <label>
-        <span>队员</span>
-        <select value={filter.agentId ?? ''} disabled={disabled} onChange={(event) => onChange('agentId', event.target.value || undefined)}>
+        </Filter>
+        <Filter label="Provider" value={filter.providerKey ?? ''} disabled={disabled} onChange={(value) => onChange('providerKey', value || undefined)}>
           <option value="">全部</option>
-          {agents.map((agent) => <option key={agent.agentId} value={agent.agentId}>{agent.displayName}</option>)}
-        </select>
-      </label>
-      <label>
-        <span>终态</span>
-        <select
-          value={filter.terminalStatus ?? ''}
-          disabled={disabled}
-          onChange={(event) => onChange('terminalStatus', event.target.value ? event.target.value as MonitoringFilter['terminalStatus'] : undefined)}
-        >
+          {providerOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+        </Filter>
+        <Filter label="模型" value={filter.modelKey ?? ''} disabled={disabled} onChange={(value) => onChange('modelKey', value || undefined)}>
           <option value="">全部</option>
-          <option value="succeeded">成功</option>
-          <option value="failed">失败</option>
-          <option value="cancelled">已取消</option>
-        </select>
-      </label>
+          {modelOptions.map((value) => <option key={value} value={value}>{value}</option>)}
+        </Filter>
+        <Filter label="成本" value={filter.costKind ?? ''} disabled={disabled} onChange={(value) => onChange('costKind', value || undefined)}>
+          <option value="">全部</option>
+          <option value="model_call">Model Call</option>
+          <option value="turn">Turn</option>
+          <option value="run">Run</option>
+          <option value="session">Session</option>
+        </Filter>
+      </div>
     </div>
   )
 }
 
-function SummaryPanel({ data }: { data: MonitoringSummaryView }): React.JSX.Element {
-  const metrics: ReadonlyArray<readonly [string, MonitoringMetric<number>, MetricKind]> = [
-    ['运行数', data.runs, 'integer'],
-    ['活跃运行', data.activeRuns, 'integer'],
-    ['成功率', data.successRate, 'percent'],
-    ['端到端 P95', data.endToEndP95Millis, 'duration'],
-    ['Session 延续率', data.nativeSessionContinuationRate, 'percent'],
-    ['Cache Read 占比', data.cacheReadTokenShare, 'percent']
-  ]
+function Filter({ label, value, disabled, onChange, children }: {
+  label: string
+  value: string
+  disabled: boolean
+  onChange(value: string): void
+  children: React.ReactNode
+}): React.JSX.Element {
   return (
-    <>
-      <MetricKeyline metrics={metrics} />
-      <section className="monitoring-section" aria-labelledby="monitoring-terminal-heading">
-        <SectionHeading id="monitoring-terminal-heading" title="终态分布" description="恢复执行仍按一个逻辑 AgentRun 计数；同一 Run 的 execution epoch 不重复进入分母。" />
-        <dl className="monitoring-terminal-distribution">
-          <div className="is-succeeded"><dt>成功</dt><dd>{formatInteger(data.terminalDistribution.succeeded)}</dd></div>
-          <div className="is-failed"><dt>失败</dt><dd>{formatInteger(data.terminalDistribution.failed)}</dd></div>
-          <div className="is-cancelled"><dt>取消</dt><dd>{formatInteger(data.terminalDistribution.cancelled)}</dd></div>
-          <div className="is-active"><dt>活跃</dt><dd>{formatInteger(data.terminalDistribution.active)}</dd></div>
-        </dl>
-      </section>
-      {data.attention.total > 0 && (
-        <div className="monitoring-attention">
-          <strong>{data.attention.total} 项需要关注</strong>
-          <span>无可见活动 {data.attention.activeWithoutVisibleActivity} · 投递未知 {data.attention.deliveryUnknown} · 待审批 {data.attention.pendingApprovals}</span>
-        </div>
-      )}
-      <section className="monitoring-section" aria-labelledby="monitoring-trend-heading">
-        <SectionHeading id="monitoring-trend-heading" title="运行趋势" description="只读取小时级 Rollup；当前状态变化不会触发原始 Evidence 或 Transcript 扫描。" />
-        <TrendChart buckets={data.trend} />
-      </section>
-      <section className="monitoring-section" aria-labelledby="monitoring-runtime-heading">
-        <SectionHeading id="monitoring-runtime-heading" title="Runtime 分布" description="Core 事实保持精确；Token、Cache 与成本按各 Runtime 实际覆盖显示。" />
-        <div className="monitoring-table-wrap">
-          <table>
-            <thead><tr><th>Runtime</th><th>Runs</th><th>活跃</th><th>成功率</th><th>端到端 P95</th></tr></thead>
-            <tbody>{data.byRuntime.map((row) => (
-              <tr key={row.adapterKind}>
-                <th scope="row">{adapterLabel(row.adapterKind)}</th>
-                <td>{formatInteger(row.runs)}</td>
-                <td>{formatInteger(row.activeRuns)}</td>
-                <td><MetricValue metric={row.successRate} kind="percent" compact /></td>
-                <td><MetricValue metric={row.endToEndP95Millis} kind="duration" compact /></td>
-              </tr>
-            ))}</tbody>
-          </table>
-        </div>
-      </section>
-      <section className="monitoring-section" aria-labelledby="monitoring-cost-heading">
-        <SectionHeading id="monitoring-cost-heading" title="最佳可用成本" description="不同币种与粒度不做隐式换汇或归并。" />
-        <CostValues metric={data.bestAvailableCost} />
-      </section>
-    </>
+    <label>
+      <span>{label}</span>
+      <select value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>{children}</select>
+    </label>
   )
 }
 
-function TrendChart({ buckets }: { buckets: MonitoringTrendBucket[] }): React.JSX.Element {
-  const maximumRuns = Math.max(0, ...buckets.map((bucket) => bucket.runs))
-  if (buckets.length === 0 || maximumRuns === 0) {
-    return <InlineUnavailable>当前范围还没有可展示的运行趋势。</InlineUnavailable>
-  }
-  const first = buckets[0]
-  const last = buckets[buckets.length - 1]
+export function RuntimeUsageView({ snapshot }: { snapshot: RuntimeUsageSnapshot }): React.JSX.Element {
   return (
-    <div className="monitoring-trend" role="group" aria-label="运行数量与终态趋势">
-      <div className="monitoring-trend-bars">
-        {buckets.map((bucket) => {
-          const terminal = bucket.succeeded + bucket.failed + bucket.cancelled
-          const active = Math.max(0, bucket.runs - terminal)
-          const height = Math.max(8, Math.round(bucket.runs / maximumRuns * 100))
-          const label = `${formatTimestamp(bucket.startAt)}：${bucket.runs} 次运行，成功 ${bucket.succeeded}，失败 ${bucket.failed}，取消 ${bucket.cancelled}，活跃 ${active}`
-          return (
-            <div key={bucket.startAt} className="monitoring-trend-column" role="img" aria-label={label} title={label}>
-              <span className="monitoring-trend-bar" style={{ height: `${height}%` }}>
-                {bucket.succeeded > 0 && <i className="is-succeeded" style={{ flexGrow: bucket.succeeded }} />}
-                {bucket.failed > 0 && <i className="is-failed" style={{ flexGrow: bucket.failed }} />}
-                {bucket.cancelled > 0 && <i className="is-cancelled" style={{ flexGrow: bucket.cancelled }} />}
-                {active > 0 && <i className="is-active" style={{ flexGrow: active }} />}
-              </span>
-            </div>
-          )
+    <div className="monitoring-view">
+      <dl className="monitoring-keyline">
+        {SUMMARY_METRICS.map(([key, label, kind]) => {
+          const value = snapshot.summary[key]
+          const coverageKey = key === 'cacheReadShare' ? 'cacheReadTokens' : key
+          const coverage = snapshot.coverage[coverageKey as keyof typeof snapshot.coverage]
+          return <Metric key={key} label={label} value={value} kind={kind} coverage={coverage} />
         })}
-      </div>
-      <div className="monitoring-trend-axis">
-        <time dateTime={first.startAt}>{formatTimestamp(first.startAt)}</time>
-        <time dateTime={last.endAt}>{formatTimestamp(last.endAt)}</time>
-      </div>
-      <div className="monitoring-trend-legend" aria-hidden="true">
-        <span className="is-succeeded">成功</span>
-        <span className="is-failed">失败</span>
-        <span className="is-cancelled">取消</span>
-        <span className="is-active">活跃</span>
-      </div>
+        <div>
+          <dt>最佳可用成本</dt>
+          <dd className="monitoring-metric-value is-compact">
+            {snapshot.summary.cost?.run.length
+              ? snapshot.summary.cost.run.map(formatMoney).join(' · ')
+              : '—'}
+          </dd>
+          <Coverage coverage={snapshot.coverage.cost} />
+        </div>
+      </dl>
+
+      <section className="monitoring-section" aria-labelledby="monitoring-trend-heading">
+        <SectionHeading id="monitoring-trend-heading" title="用量趋势" description="24 小时按小时汇总，较长范围按天汇总。" />
+        <UsageTrend points={snapshot.trend} />
+      </section>
+
+      <BreakdownTable id="monitoring-runtime-heading" title="Runtime" description="按 Runtime 汇总 Token、Cache、成本与数据覆盖。" rows={snapshot.byRuntime} mode="runtime" />
+      <BreakdownTable id="monitoring-model-heading" title="模型" description="最多展示用量最高的 10 组，其余合并为“其他”。" rows={snapshot.byModel} mode="model" />
+
+      {snapshot.summary.cost?.reconciliation.length ? <Reconciliation snapshot={snapshot} /> : null}
     </div>
   )
 }
 
-function UsagePanel({ data }: { data: MonitoringUsageView }): React.JSX.Element {
-  const tokenRows: Array<[string, MonitoringMetric<number>]> = [
-    ['Input Token', data.inputTokens],
-    ['Output Token', data.outputTokens],
-    ['Reasoning Output', data.reasoningOutputTokens],
-    ['Cache Read Input', data.cacheReadInputTokens],
-    ['Cache Write Input', data.cacheWriteInputTokens]
-  ]
+function Metric({ label, value, kind, coverage }: {
+  label: string
+  value: number | null
+  kind: 'integer' | 'percent'
+  coverage: RuntimeUsageCoverageValue
+}): React.JSX.Element {
   return (
-    <>
-      <section className="monitoring-section" aria-labelledby="monitoring-token-heading">
-        <SectionHeading id="monitoring-token-heading" title="Token 账本" description="只合并已证明互斥的 Input / Cache 桶；缺失字段不补零。" />
-        <div className="monitoring-ledger">
-          {tokenRows.map(([label, metric]) => (
-            <div key={label}><span>{label}</span><MetricValue metric={metric} kind="integer" /><CoverageLabel metric={metric} /></div>
-          ))}
-        </div>
-      </section>
-      <MetricKeyline metrics={[
-        ['Cache Read 占比', data.cacheReadTokenShare, 'percent'],
-        ['请求 Cache 命中率', data.requestCacheHitRate, 'percent'],
-        ['Read / Write 摊销', data.cacheReadWriteAmortization, 'ratio'],
-        ['Context 使用率', data.contextUsageRate, 'percent']
-      ]} />
-      <section className="monitoring-section" aria-labelledby="monitoring-cache-savings-heading">
-        <SectionHeading id="monitoring-cache-savings-heading" title="Cache 节省估算" description="只有版本化价格目录与可判定 Cache 桶同时存在时才计算；缺条件时保持未知。" />
-        <CostValues metric={data.cacheSavingsEstimate} emptyMessage="当前没有足够的价格目录与 Cache Usage 来估算节省金额。" />
-      </section>
-      <section className="monitoring-section" aria-labelledby="monitoring-model-heading">
-        <SectionHeading id="monitoring-model-heading" title="Runtime 与模型" description="没有稳定模型 Usage 的 Runtime 仅显示其真实覆盖范围。" />
-        {data.byRuntimeAndModel.length === 0
-          ? <InlineUnavailable>当前范围没有可汇总的模型 Usage。</InlineUnavailable>
-          : (
-            <div className="monitoring-table-wrap">
-              <table>
-                <thead><tr><th>Runtime / 模型</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Write</th><th>覆盖</th></tr></thead>
-                <tbody>{data.byRuntimeAndModel.map((row) => (
-                  <tr key={row.adapterKind + ':' + row.modelId}>
-                    <th scope="row"><strong>{adapterLabel(row.adapterKind)}</strong><small>{row.modelId}</small></th>
-                    <td>{formatInteger(row.inputTokens)}</td>
-                    <td>{formatInteger(row.outputTokens)}</td>
-                    <td>{formatInteger(row.cacheReadInputTokens)}</td>
-                    <td>{formatInteger(row.cacheWriteInputTokens)}</td>
-                    <td>{formatCoverage(row.coverage)}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )}
-      </section>
-      <section className="monitoring-section" aria-labelledby="monitoring-cost-layers-heading">
-        <SectionHeading id="monitoring-cost-layers-heading" title="成本层" description="Runtime 报告、价格估算与账单分摊保持分层，不伪装成单 Run 真实费用。" />
-        {data.costLayers.length === 0
-          ? <InlineUnavailable>当前 Runtime 没有上报可归因成本。</InlineUnavailable>
-          : <div className="monitoring-cost-layers">{data.costLayers.map((layer) => (
-            <div key={layer.quality + ':' + layer.grain + ':' + layer.values.map((value) => value.currency).join(',')}>
-              <span>{costLayerLabel(layer.quality)} · {costGrainLabel(layer.grain)}</span>
-              <strong>{layer.values.map(formatMoney).join(' · ')}</strong>
-              <small>{layer.observedCount}/{layer.eligibleCount} Runs · {formatCoverage(layer.coverage)} 覆盖</small>
-            </div>
-          ))}</div>}
-      </section>
-    </>
+    <div>
+      <dt>{label}</dt>
+      <dd className={`monitoring-metric-value${value === null ? ' is-unavailable' : ''}`}>
+        {kind === 'percent' ? formatPercent(value) : formatInteger(value)}
+      </dd>
+      <Coverage coverage={coverage} />
+    </div>
   )
 }
 
-function ReliabilityPanel({ data }: { data: MonitoringReliabilityView }): React.JSX.Element {
-  const latencyRows: Array<[string, MonitoringMetric<number>]> = [
-    ['排队', data.queueP95Millis],
-    ['Input 接受', data.inputAcceptanceP95Millis],
-    ['首个可见活动', data.firstVisibleActivityP95Millis],
-    ['执行', data.executionP95Millis],
-    ['端到端', data.endToEndP95Millis]
-  ]
+function Coverage({ coverage }: { coverage: RuntimeUsageCoverageValue }): React.JSX.Element {
+  const rate = coverage.eligibleRuns > 0 ? coverage.observedRuns / coverage.eligibleRuns : null
   return (
-    <>
-      <section className="monitoring-section" aria-labelledby="monitoring-latency-heading">
-        <SectionHeading id="monitoring-latency-heading" title="延迟 P95" description="首个可见活动来自持久化投影，不标成首 Token；页面不扫描 Evidence。" />
-        <div className="monitoring-latency-list">
-          {latencyRows.map(([label, metric]) => (
-            <div key={label}><span>{label}</span><MetricValue metric={metric} kind="duration" /><CoverageLabel metric={metric} /></div>
-          ))}
-        </div>
-      </section>
-      <section className="monitoring-reliability-grid" aria-label="可靠性事实">
-        <ReliabilityFact
-          title="Native Session"
-          value={<MetricValue metric={data.session.continuationRate} kind="percent" />}
-          detail={'成功延续 ' + data.session.succeeded + ' · 新 Session ' + data.session.newSessions + ' · fallback ' + data.session.fallbackToNewSession + ' · 失败/不兼容/不明确 ' + (data.session.failed + data.session.incompatible + data.session.ambiguous)}
-          coverageMetric={data.session.continuationRate}
-        />
-        <ReliabilityFact
-          title="审批等待"
-          value={<MetricValue metric={data.approval.waitP95Millis} kind="duration" />}
-          detail={'请求 ' + data.approval.requested + ' · 已处理 ' + data.approval.resolved + ' · 待处理 ' + data.approval.pending}
-          coverageMetric={data.approval.waitP95Millis}
-        />
-        <ReliabilityFact
-          title="Tool 耗时覆盖"
-          value={<strong>{formatCoverage(data.toolDuration.coverage)}</strong>}
-          detail={'严格配对 ' + data.toolDuration.pairedCalls + '/' + data.toolDuration.eligibleCalls + ' · 累计 ' + formatOptionalDuration(data.toolDuration.pairedElapsedMillis) + ' · 墙钟并集 ' + formatOptionalDuration(data.toolDuration.wallClockUnionMillis)}
-        />
-        <ReliabilityFact
-          title="可见活动覆盖"
-          value={<MetricValue metric={data.activity.runCoverage} kind="percent" />}
-          detail={formatInteger(data.activity.evidenceCount) + ' 条 Execution Evidence'}
-          coverageMetric={data.activity.runCoverage}
-        />
-        <ReliabilityFact
-          title="Context 使用率"
-          value={<MetricValue metric={data.context.usageRate} kind="percent" />}
-          detail={'Input 已接受 ' + data.context.deliveryAcceptedRuns + ' Runs · 覆盖 ' + formatCoverage(data.context.deliveryCoverage)}
-          coverageMetric={data.context.usageRate}
-        />
-        <ReliabilityFact
-          title="Compaction 可观测性"
-          value={<MetricValue metric={data.compaction.coverage} kind="percent" />}
-          detail={formatInteger(data.compaction.observationCount) + ' 条观测'}
-          coverageMetric={data.compaction.coverage}
-        />
-      </section>
-      <section className="monitoring-section" aria-labelledby="monitoring-runtime-health-heading">
-        <SectionHeading id="monitoring-runtime-health-heading" title="纳管运行健康" description="只汇总当前筛选范围内的新 Run；错误码来自 Core 终态，不读取或复制 Runtime 日志正文。" />
-        {data.runtimeHealth.length === 0
-          ? <InlineUnavailable>当前范围没有纳管的 Runtime 运行。</InlineUnavailable>
-          : (
-            <div className="monitoring-table-wrap">
-              <table>
-                <thead><tr><th>Runtime</th><th>Runs</th><th>活跃</th><th>失败</th><th>最近错误</th></tr></thead>
-                <tbody>{data.runtimeHealth.map((row) => (
-                  <tr key={row.adapterKind}>
-                    <th scope="row">{adapterLabel(row.adapterKind)}</th>
-                    <td>{formatInteger(row.runCount)}</td>
-                    <td>{formatInteger(row.activeRunCount)}</td>
-                    <td>{formatInteger(row.failedRunCount)}</td>
-                    <td>{row.latestErrorCode ?? '—'}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            </div>
-          )}
-      </section>
-    </>
-  )
-}
-
-function MetricKeyline({ metrics }: { metrics: ReadonlyArray<readonly [string, MonitoringMetric<number>, MetricKind]> }): React.JSX.Element {
-  return (
-    <dl className="monitoring-keyline">
-      {metrics.map(([label, metric, kind]) => (
-        <div key={label}><dt>{label}</dt><dd><MetricValue metric={metric} kind={kind} /></dd><CoverageLabel metric={metric} /></div>
-      ))}
-    </dl>
-  )
-}
-
-function MetricValue({ metric, kind, compact = false }: { metric: MonitoringMetric<number>; kind: MetricKind; compact?: boolean }): React.JSX.Element {
-  return (
-    <span className={'monitoring-metric-value is-' + metric.availability + (compact ? ' is-compact' : '')} title={metric.diagnosticCode ?? undefined}>
-      {formatMetricValue(metric.value, kind)}
+    <span className={`monitoring-coverage${rate !== null && rate < 1 ? ' is-partial' : ''}`}>
+      覆盖 {coverage.observedRuns}/{coverage.eligibleRuns} Runs
     </span>
   )
 }
 
-function CoverageLabel({ metric }: { metric: MonitoringMetric<unknown> }): React.JSX.Element {
-  return <small className={'monitoring-coverage is-' + metric.availability}>{availabilityLabel(metric)}</small>
-}
-
-function CostValues({ metric, emptyMessage = '当前范围没有 Runtime 报告或可核对的成本。' }: {
-  metric: MonitoringMetric<MonitoringMoneyValue[]>
-  emptyMessage?: string
-}): React.JSX.Element {
-  if (!metric.value || metric.value.length === 0) {
-    return <div className="monitoring-cost-metric"><InlineUnavailable>{emptyMessage}</InlineUnavailable><CoverageLabel metric={metric} /></div>
+function UsageTrend({ points }: { points: RuntimeUsageTrendPoint[] }): React.JSX.Element {
+  const costPoints = points.filter((point) => point.cost?.length)
+  const maximum = Math.max(0, ...points.flatMap((point) => [
+    point.promptInputTotalTokens ?? 0,
+    point.outputTokens ?? 0,
+    point.cacheReadTokens ?? 0,
+    point.cacheWriteTokens ?? 0
+  ]))
+  if (points.length === 0 || maximum === 0) {
+    return <p className="monitoring-inline-unavailable">当前范围没有可展示的用量趋势。</p>
   }
   return (
-    <div className="monitoring-cost-metric">
-      <div className="monitoring-cost-values">
-        {metric.value.map((value) => (
-          <div key={value.currency + ':' + value.grain + ':' + value.quality}>
-            <strong>{formatMoney(value)}</strong>
-            <span>{costQualityLabel(value.quality)} · {costGrainLabel(value.grain)}</span>
+    <div className="monitoring-usage-trend" role="group" aria-label="Token 与 Cache 用量趋势">
+      <div className="monitoring-usage-bars">
+        {points.map((point) => (
+          <div key={point.bucketStartAt} className="monitoring-usage-bucket" title={trendLabel(point)}>
+            <i className="is-input" style={{ height: barHeight(point.promptInputTotalTokens, maximum) }} />
+            <i className="is-output" style={{ height: barHeight(point.outputTokens, maximum) }} />
+            <i className="is-read" style={{ height: barHeight(point.cacheReadTokens, maximum) }} />
+            <i className="is-write" style={{ height: barHeight(point.cacheWriteTokens, maximum) }} />
           </div>
         ))}
       </div>
-      <CoverageLabel metric={metric} />
+      <div className="monitoring-trend-footer">
+        <time dateTime={points[0].bucketStartAt}>{formatTimestamp(points[0].bucketStartAt)}</time>
+        <div className="monitoring-usage-legend" aria-hidden="true">
+          <span className="is-input">Input</span><span className="is-output">Output</span>
+          <span className="is-read">Cache Read</span><span className="is-write">Cache Write</span>
+        </div>
+        <time dateTime={points.at(-1)?.bucketStartAt}>{formatTimestamp(points.at(-1)?.bucketStartAt ?? '')}</time>
+      </div>
+      {costPoints.length > 0 && (
+        <div className="monitoring-trend-cost" aria-label="成本趋势">
+          <span>成本</span>
+          {costPoints.map((point) => (
+            <span key={point.bucketStartAt}>
+              <time dateTime={point.bucketStartAt}>{formatTimestamp(point.bucketStartAt)}</time>
+              {' '}{point.cost?.map(formatMoney).join(' · ')}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-function ReliabilityFact({ title, value, detail, coverageMetric }: {
+function BreakdownTable({ id, title, description, rows, mode }: {
+  id: string
   title: string
-  value: ReactNode
-  detail: string
-  coverageMetric?: MonitoringMetric<unknown>
+  description: string
+  rows: RuntimeUsageBreakdownRow[]
+  mode: 'runtime' | 'model'
 }): React.JSX.Element {
-  return <article><span>{title}</span>{value}<p>{detail}</p>{coverageMetric && <CoverageLabel metric={coverageMetric} />}</article>
+  return (
+    <section className="monitoring-section" aria-labelledby={id}>
+      <SectionHeading id={id} title={title} description={description} />
+      {rows.length === 0 ? (
+        <p className="monitoring-inline-unavailable">当前范围没有可汇总的数据。</p>
+      ) : (
+        <div className="monitoring-table-wrap">
+          <table>
+            <thead><tr><th>{mode === 'runtime' ? 'Runtime' : 'Runtime / Provider / 模型'}</th><th>Input</th><th>Output</th><th>Cache Read</th><th>Cache Write</th><th>Read 占比</th><th>成本</th><th>覆盖</th></tr></thead>
+            <tbody>{rows.map((row, index) => (
+              <tr key={`${row.runtimeKind}:${row.providerKey}:${row.modelKey}:${index}`}>
+                <th scope="row">
+                  <strong>{adapterLabel(row.runtimeKind)}</strong>
+                  {mode === 'model' && <small>{[row.providerKey, row.modelKey].filter(Boolean).join(' / ') || '未知模型'}</small>}
+                </th>
+                <td>{formatInteger(row.promptInputTotalTokens)}</td>
+                <td>{formatInteger(row.outputTokens)}</td>
+                <td>{formatInteger(row.cacheReadTokens)}</td>
+                <td>{formatInteger(row.cacheWriteTokens)}</td>
+                <td>{formatPercent(row.cacheReadShare)}</td>
+                <td>{row.cost.length ? row.cost.map(formatMoney).join(' · ') : '—'}</td>
+                <td>{row.coverage.observedRuns}/{row.coverage.eligibleRuns}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  )
+}
+
+function Reconciliation({ snapshot }: { snapshot: RuntimeUsageSnapshot }): React.JSX.Element {
+  const cost = snapshot.summary.cost
+  if (!cost) return <></>
+  return (
+    <section className="monitoring-section" aria-labelledby="monitoring-reconciliation-heading">
+      <SectionHeading id="monitoring-reconciliation-heading" title="Provider 成本对账" description="Provider 聚合账单与 Run 可归因成本分开保存，不拆分成伪造的单 Run 费用。" />
+      <dl className="monitoring-reconciliation">
+        <div><dt>Run 最佳可用成本</dt><dd>{cost.run.map(formatMoney).join(' · ') || '—'}</dd></div>
+        <div><dt>Provider 对账成本</dt><dd>{cost.reconciliation.map(formatMoney).join(' · ')}</dd></div>
+        <div><dt>差额（Provider − Run）</dt><dd>{cost.difference.map((value) => `${value.currency} ${value.amount}`).join(' · ') || '—'}</dd></div>
+        <div><dt>对账截止</dt><dd>{cost.latestReconciledAt ? formatTimestamp(cost.latestReconciledAt) : '—'}</dd></div>
+      </dl>
+    </section>
+  )
 }
 
 function SectionHeading({ id, title, description }: { id: string; title: string; description: string }): React.JSX.Element {
   return <div className="monitoring-section-heading"><h2 id={id}>{title}</h2><p>{description}</p></div>
 }
 
-function InlineUnavailable({ children }: { children: ReactNode }): React.JSX.Element {
-  return <p className="monitoring-inline-unavailable">{children}</p>
-}
-
 function MonitoringLoading(): React.JSX.Element {
-  return (
-    <div className="monitoring-loading" role="status" aria-live="polite">
-      <span className="diagnostics-spinner" aria-hidden="true" />
-      <div><strong>正在读取运行数据</strong><p>正在汇总当前范围内的数据。</p></div>
-    </div>
-  )
+  return <div className="monitoring-loading"><span className="spinner" aria-hidden="true" /><div><strong>正在读取用量</strong><p>汇总已保存的 Run Summary 与小时数据。</p></div></div>
 }
 
-function MonitoringEmpty(): React.JSX.Element {
-  return (
-    <section className="monitoring-state is-empty">
-      <span aria-hidden="true" />
-      <div>
-        <h2>暂无运行数据</h2>
-        <p>当前范围内暂无 AgentRun。</p>
-      </div>
-    </section>
-  )
+export function RuntimeUsageEmpty(): React.JSX.Element {
+  return <section className="monitoring-state is-empty"><span aria-hidden="true" /><div><h2>暂无运行数据</h2><p>新 AgentRun 纳管后会显示在这里。</p></div></section>
 }
 
-export function availabilityLabel(metric: MonitoringMetric<unknown>): string {
-  if (metric.eligibleCount === 0) return '无符合条件的 Run'
-  if (metric.observedCount === 0) return '尚未上报'
-  const coverage = metric.coverage === null ? '未知' : Math.round(metric.coverage * 100) + '%'
-  return metric.observedCount + '/' + metric.eligibleCount + ' Runs · ' + coverage + ' 覆盖'
+export function hasRuntimeUsage(snapshot: RuntimeUsageSnapshot): boolean {
+  return snapshot.byRuntime.length > 0
+    || snapshot.summary.promptInputTotalTokens !== null
+    || snapshot.summary.uncachedInputTokens !== null
+    || snapshot.summary.outputTokens !== null
+    || snapshot.summary.cacheReadTokens !== null
+    || snapshot.summary.cacheWriteTokens !== null
+    || snapshot.summary.reasoningOutputTokens !== null
+    || snapshot.summary.requestCacheHitRate !== null
+    || snapshot.summary.cost !== null
 }
 
-export function formatMetricValue(value: number | null, kind: MetricKind): string {
-  if (value === null || !Number.isFinite(value)) return '—'
-  if (kind === 'percent') return (value * 100).toFixed(value >= 0.1 ? 1 : 2) + '%'
-  if (kind === 'duration') return formatDuration(value)
-  if (kind === 'ratio') return value.toFixed(2) + '×'
-  return formatInteger(value)
+function uniqueOptions(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].sort()
 }
 
-function formatDuration(value: number): string {
-  if (value < 1000) return Math.round(value) + ' ms'
-  if (value < 60_000) return (value / 1000).toFixed(value < 10_000 ? 2 : 1) + ' s'
-  return (value / 60_000).toFixed(1) + ' min'
+function barHeight(value: number | null, maximum: number): string {
+  if (!value || maximum === 0) return '2px'
+  return `${Math.max(4, Math.round(value / maximum * 100))}%`
 }
 
-function formatOptionalDuration(value: number | null): string {
-  return value === null ? '—' : formatDuration(value)
+function trendLabel(point: RuntimeUsageTrendPoint): string {
+  return `${formatTimestamp(point.bucketStartAt)}：Input ${formatInteger(point.promptInputTotalTokens)}，Output ${formatInteger(point.outputTokens)}，Cache Read ${formatInteger(point.cacheReadTokens)}，Cache Write ${formatInteger(point.cacheWriteTokens)}`
+}
+
+function adapterLabel(value: string): string {
+  return ADAPTERS.find((adapter) => adapter.value === value)?.label ?? value
 }
 
 function formatInteger(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return '—'
-  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value)
+  return value === null ? '—' : new Intl.NumberFormat('zh-CN').format(value)
 }
 
-function formatCoverage(value: number | null): string {
-  return value === null ? '—' : Math.round(value * 100) + '%'
+function formatPercent(value: number | null): string {
+  return value === null ? '—' : new Intl.NumberFormat('zh-CN', {
+    style: 'percent', maximumFractionDigits: 1
+  }).format(value)
+}
+
+function formatMoney(value: RuntimeUsageMoneyValue): string {
+  return `${value.currency} ${value.amount}`
 }
 
 function formatTimestamp(value: string): string {
   const date = new Date(value)
-  if (Number.isNaN(date.valueOf())) return value
-  return new Intl.DateTimeFormat('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(date)
-}
-
-function formatMoney(value: { amount: string; currency: string }): string {
-  return value.currency + ' ' + value.amount
-}
-
-function adapterLabel(kind: AdapterKind): string {
-  return ADAPTERS.find((adapter) => adapter.value === kind)?.label ?? kind
-}
-
-function costLayerLabel(layer: string): string {
-  return ({
-    runtime_reported: 'Runtime 报告',
-    runtime_estimate: 'Runtime 估算',
-    price_estimated: '公开价估算',
-    provider_reconciled: 'Provider 对账',
-    allocated: '账单分摊',
-    tokenizer_price_estimated: 'Tokenizer + 公开价估算'
-  } as Record<string, string>)[layer] ?? layer
-}
-
-function costQualityLabel(quality: string): string {
-  return ({
-    runtime_reported: 'Runtime 报告值',
-    runtime_estimate: 'Runtime 估算',
-    price_estimated: '公开价估算',
-    provider_reconciled: 'Provider 已对账',
-    allocated: '账单分摊',
-    tokenizer_price_estimated: 'Tokenizer + 公开价估算'
-  } as Record<string, string>)[quality] ?? quality
-}
-
-function costGrainLabel(grain: string): string {
-  return ({
-    run: 'Run 级',
-    turn: 'Turn 级',
-    session: 'Session 级',
-    model_call: '模型调用级',
-    billing_bucket: '账单桶',
-    unknown: '粒度未知'
-  } as Record<string, string>)[grain] ?? grain
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('zh-CN', {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  }).format(date)
 }
 
 function sameMonitoringFilter(left: MonitoringFilter, right: MonitoringFilter): boolean {
   return left.range === right.range
-    && left.adapterKind === right.adapterKind
-    && left.agentId === right.agentId
-    && left.terminalStatus === right.terminalStatus
+    && left.runtimeKind === right.runtimeKind
+    && left.providerKey === right.providerKey
+    && left.modelKey === right.modelKey
+    && left.costKind === right.costKind
+}
+
+function errorMessage(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason)
 }

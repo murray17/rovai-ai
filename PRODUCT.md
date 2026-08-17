@@ -30,16 +30,16 @@ coordinates them while preserving which facts came from Rovai Core and which cam
 - A desktop Electron application operates alongside local Git workspaces and coding-agent CLIs.
 - Users move between Camps, teammates, memory, settings, approvals, diagnostics and execution detail.
 - Runtime availability, model capabilities and usage reporting vary by installed product and version.
-- Monitoring is an operational read surface: users compare recent runs, coverage, reliability and
-  reported or estimated usage without exposing prompts, completions, tool output or credentials.
+- Monitoring is a compact Usage read surface: users compare recent Runtime-reported Token, Cache,
+  attributable Cost and Coverage without exposing prompts, completions, tool output or credentials.
 
 ## Capabilities and Constraints
 
 - Supported product language includes “Camp”, “队员”, “记忆”, “Agent 运行时” and “快速对话”.
 - SQLite-backed Core facts are authoritative; Renderer pages consume typed, read-only projections.
 - Runtime Usage is sparse and source-qualified. Missing fields remain unknown and never become zero.
-- The v0.96 monitoring dataset begins at a persistent clean-break collection boundary; older runs are
-  retained by Core but are not backfilled or included in monitoring denominators.
+- Each Monitoring schema begins at a persistent clean-break collection boundary; older Core runs are
+  retained but are not backfilled or included in current Usage denominators.
 - Runtime-reported cost, public-price estimates and Provider billing buckets remain distinct grains.
 - User workspaces, Runtime-native configuration and credentials remain user-owned and local.
 - The product is pre-release; compatibility labels describe Rovai's verified evidence, not upstream

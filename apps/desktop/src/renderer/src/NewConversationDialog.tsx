@@ -494,7 +494,7 @@ function WorkspaceIcon({ kind }: { kind: 'quick-chat' | 'project' }): React.JSX.
 function RuntimeReadiness({ status }: {
   status: CampCreationPreflight['presentMembers'][number]['runtimeReadiness']
 }): React.JSX.Element {
-  const tone = status === 'ready'
+  const tone = status === 'ready' || status === 'light_ready'
     ? 'ready'
     : status === 'installed_unverified'
       ? 'deferred'
@@ -503,7 +503,7 @@ function RuntimeReadiness({ status }: {
 }
 
 function readinessLabel(status: CampCreationPreflight['presentMembers'][number]['runtimeReadiness']): string {
-  return status === 'ready'
+  return status === 'ready' || status === 'light_ready'
     ? '可用'
     : status === 'installed_unverified'
       ? '已安装，首次运行时验证'
@@ -593,7 +593,10 @@ export function planInitialCampSelection(
     : preflight.presentMembers.find(
       (member) => memberIds.includes(member.agentId) && member.runtimeReadiness === 'ready'
     )?.agentId ?? preflight.presentMembers.find(
-      (member) => memberIds.includes(member.agentId) && member.runtimeReadiness === 'installed_unverified'
+      (member) => memberIds.includes(member.agentId) && (
+        member.runtimeReadiness === 'light_ready'
+        || member.runtimeReadiness === 'installed_unverified'
+      )
     )?.agentId ?? memberIds[0] ?? ''
   return {
     memberIds,

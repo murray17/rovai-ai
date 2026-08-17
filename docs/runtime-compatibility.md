@@ -62,9 +62,12 @@ Session response 更新认证、模型、权限和 capability Ready，随后在�
 诊断或 replacement TRAE process。上游 executable identity 改变时，静态 preflight 先回到
 `installed_unverified`，下一次真实 AgentRun 再完成验证。
 
-该规则不撤销上方 `0.120.52` 的准入结论，只改变产品何时重取本机动态证据；其他 Runtime 仍按各自 policy
-执行后台主动检查。规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
-与 [Runtime Launch and Verification v1](contracts/runtime-launch-and-verification-v1.md)。
+该规则不撤销上方 `0.120.52` 的准入结论，只改变产品何时重取本机动态证据。其他 Runtime 的启动/重扫执行
+Adapter 允许且无副作用的有界版本/身份命令；只有命令成功、输出未超限并识别到基础身份才写
+`light_ready` 静态证据。深检由显式单 Runtime 检查或首次真实任务触发；Adapter policy 仍可进一步收窄目的。
+规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
+[ADR-0204](adr/0204-on-demand-runtime-deep-verification.md)与
+[Runtime Launch and Verification v3](contracts/runtime-launch-and-verification-v3.md)。
 
 ### 2026-08-17 ACP Session 隔离与 TRAE warm Host 修正
 
@@ -79,13 +82,36 @@ Adapter，且其 replay 只能在 `LoadingReplay` 阶段被隔离；对不上 Ho
 epoch、Native Session、Native Prompt 或 Delivery 的事件，不得进入 Evidence、Action、Usage、
 Missing-Send Recovery、Compaction 或 Renderer。匹配 `session/prompt` request ID 的 response 是唯一
 ACP input ACK 权威；无 Prompt correlation 的 `session/update` 与 permission request 不再提前确认。
-当前规范入口是 [Runtime Launch and Verification v2](contracts/runtime-launch-and-verification-v2.md)。
+当前规范入口是 [Runtime Launch and Verification v3](contracts/runtime-launch-and-verification-v3.md)。
 
 2026-08-17 使用本机真实 TRAE 执行 `ROVAI_ACP_SMOKE_ADAPTER=trae-cn-cli pnpm
 smoke:acp-runtime` 通过：completion、allow-once 写入与 deny 三个连续 AgentRun 使用同一
 `hostInstanceId` 和同一 Native Session；批准写入内容正确，拒绝写入未创建文件。该结果同时验证
 TRAE terminal 后进入 LRU、后继 Run 直接复用 warm Session，以及历史 replay 未进入后继 Run 的
 Evidence、Action 或最终输出。
+
+### 2026-08-17 Runtime command output 协议修正
+
+通用 ACP Adapter 现在消费标准嵌套 `type: "content"` Text block，并把 Terminal block 视为展示边界，
+不把 `terminalId`、Diff 或未知结构投影成 command output。只有没有公开 Content Text 时，才从
+`rawOutput` 顶层白名单字段 `stdout`、`stderr`、`output`、`text` 提取文本；其他字段仍只参与私有摘要，
+不得进入 `runtime.action.payload.output`。OpenCode、GitHub Copilot 与 TRAE 的固定 `printf` smoke
+断言已加入 `smoke:acp-runtime`，本轮只完成确定性 parser 测试，没有再次调用真实模型，不能把脚本
+覆盖冒充三种 Runtime 的本机实测 pass。
+
+Claude Code 保持 `--output-format stream-json --include-partial-messages`，但现在同时消费 partial
+`tool_use`、完整 assistant tool block 与对应 `tool_result`。生命周期直接使用 Claude 原生 tool-use ID；
+Bash、Read、Edit、Write 等只映射到既有 Canonical Activity kind，Bash result 仅公开标准 Content Text
+或明确的 `stdout`/`stderr`。最终 `result`、Usage 与 Session 校验路径没有改变。确定性 stream fixture
+已证明 partial/full 去重、start/terminal 关联、command marker 可见及私有字段不泄露；本轮未运行真实
+Claude 模型 smoke。
+
+Antigravity 的健康探测仅在 `--help` 同时声明 `--output-format` 与 `stream-json` 时发布可选
+`output.stream_json` capability；冻结为支持的 AgentRun 才追加 `--output-format stream-json`，从 NDJSON
+`init`、`step_update`、`result` 事件建立 native step 生命周期。command step 只公开 `tool_info` 中的
+`stdout`、`stderr`、`output`，不使用私有日志、workspace diff 或最终文本猜测内部工具。旧版或未声明
+能力的安装继续走原有 text/run-level 路径。本机 `agy 1.1.13 --help` 的只读检查确认当前安装声明该能力；
+结构化与旧版回退两条独立进程 fixture 均通过，但本轮没有启动真实 AGY 模型任务。
 
 ### v0.89 Transport v13 当前基线
 

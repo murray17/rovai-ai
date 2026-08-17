@@ -13,6 +13,7 @@ import { identityColorToken } from './theme'
 import harborCityMapUrl from './assets/world-map/harbor-city-2k.webp'
 import {
   CampWorldMapAmbientScheduler,
+  campWorldMapAuthoritativeSpeechBlocksAmbient,
   campWorldMapCaption,
   createCampWorldMapAmbientHistory,
   createCampWorldMapAmbientRandom,
@@ -191,7 +192,7 @@ export function CampWorldMap({
   const windowActive = useWindowActive()
   const sceneActive = active && windowActive
   const motionActive = sceneActive && !reducedMotion
-  const hasAuthoritativeSpeech = agents.some((agent) => agent.speech !== null)
+  const authoritativeSpeechBlocksAmbient = campWorldMapAuthoritativeSpeechBlocksAmbient(agents)
   const viewportRef = useRef<HTMLDivElement>(null)
   const agentElementById = useRef(new Map<string, HTMLDivElement>())
   const agentElementRefById = useRef(new Map<string, (element: HTMLDivElement | null) => void>())
@@ -206,7 +207,7 @@ export function CampWorldMap({
   const campIdRef = useRef(campId)
   const sceneActiveRef = useRef(sceneActive)
   const motionActiveRef = useRef(motionActive)
-  const hasAuthoritativeSpeechRef = useRef(hasAuthoritativeSpeech)
+  const authoritativeSpeechBlocksAmbientRef = useRef(authoritativeSpeechBlocksAmbient)
   const ambientSchedulerRef = useRef<CampWorldMapAmbientScheduler | null>(null)
   const ambientScheduleStartedRef = useRef(false)
   const ambientScheduleRunningRef = useRef(false)
@@ -234,8 +235,8 @@ export function CampWorldMap({
     campIdRef.current = campId
     sceneActiveRef.current = sceneActive
     motionActiveRef.current = motionActive
-    hasAuthoritativeSpeechRef.current = hasAuthoritativeSpeech
-  }, [agents, campId, hasAuthoritativeSpeech, motionActive, sceneActive])
+    authoritativeSpeechBlocksAmbientRef.current = authoritativeSpeechBlocksAmbient
+  }, [agents, authoritativeSpeechBlocksAmbient, campId, motionActive, sceneActive])
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current
@@ -416,7 +417,7 @@ export function CampWorldMap({
 
   const isAmbientEventValid = useCallback((event: CampWorldMapAmbientDisplayedEvent): boolean => {
     if (campIdRef.current !== ambientEventCampIdRef.current) return false
-    if (!sceneActiveRef.current || hasAuthoritativeSpeechRef.current) return false
+    if (!sceneActiveRef.current || authoritativeSpeechBlocksAmbientRef.current) return false
     const participantMotions = event.agentIds.map((agentId) => motionByAgentId.current.get(agentId))
     if (participantMotions.some((motion) => !motion || motion.mode !== 'idle' || motion.rendezvousKey)) {
       return false
@@ -464,7 +465,7 @@ export function CampWorldMap({
       select: (now, selectionRandom) => {
         if (campIdRef.current !== campId
           || !sceneActiveRef.current
-          || hasAuthoritativeSpeechRef.current
+          || authoritativeSpeechBlocksAmbientRef.current
           || ambientEventRef.current) return null
         const participants: CampWorldMapAmbientParticipant[] = []
         for (const agent of agentsRef.current) {
@@ -480,7 +481,7 @@ export function CampWorldMap({
         }
         return selectCampWorldMapAmbientEvent({
           now,
-          hasAuthoritativeSpeech: hasAuthoritativeSpeechRef.current,
+          hasAuthoritativeSpeech: authoritativeSpeechBlocksAmbientRef.current,
           participants,
           history
         }, selectionRandom)
@@ -494,7 +495,7 @@ export function CampWorldMap({
       }
     })
     ambientSchedulerRef.current = scheduler
-    if (sceneActiveRef.current && !hasAuthoritativeSpeechRef.current) {
+    if (sceneActiveRef.current && !authoritativeSpeechBlocksAmbientRef.current) {
       scheduler.start('initial')
       ambientScheduleStartedRef.current = true
       ambientScheduleRunningRef.current = true
@@ -515,7 +516,7 @@ export function CampWorldMap({
   useEffect(() => {
     const scheduler = ambientSchedulerRef.current
     if (!scheduler) return
-    const shouldRun = sceneActive && !hasAuthoritativeSpeech
+    const shouldRun = sceneActive && !authoritativeSpeechBlocksAmbient
     if (!shouldRun && ambientScheduleRunningRef.current) {
       scheduler.suspend()
       ambientScheduleRunningRef.current = false
@@ -526,7 +527,7 @@ export function CampWorldMap({
       ambientScheduleStartedRef.current = true
       ambientScheduleRunningRef.current = true
     }
-  }, [campId, hasAuthoritativeSpeech, sceneActive])
+  }, [authoritativeSpeechBlocksAmbient, campId, sceneActive])
 
   useLayoutEffect(() => {
     if (!sceneActive || !reducedMotion) return
@@ -539,7 +540,7 @@ export function CampWorldMap({
 
   useEffect(() => {
     cancelAmbientEventIfInvalid()
-  }, [agentModesKey, cancelAmbientEventIfInvalid, hasAuthoritativeSpeech, motionActive, rendezvous])
+  }, [agentModesKey, authoritativeSpeechBlocksAmbient, cancelAmbientEventIfInvalid, motionActive, rendezvous])
 
   useEffect(() => {
     if (!motionActive || typeof window === 'undefined') return

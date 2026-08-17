@@ -13,7 +13,8 @@ last_updated: 2026-08-17
 [ADR-0066](../adr/0066-managed-product-runtime-resolution.md)与
 [ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)，Runtime 启动与延迟验证边界见
 [ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)和
-[Runtime Launch and Verification v2](../contracts/runtime-launch-and-verification-v2.md)。实测版本和能力只由
+[ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)及
+[Runtime Launch and Verification v3](../contracts/runtime-launch-and-verification-v3.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 三层目录
@@ -21,7 +22,7 @@ last_updated: 2026-08-17
 | 层 | 真源 | 可以驱动 | 不能驱动 |
 | --- | --- | --- | --- |
 | Product Runtime Catalog | Rust/TypeScript closed `AdapterKind` 与 `AgentRuntimeAdapter` Registry | Installation、Probe、成员配置、AgentRun、诊断、Migration、Runtime Activity | 未接入候选或 roadmap |
-| Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 active/execution-deferred verification snapshot | checking、installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、静态伪造 Ready 或静默 Runtime fallback |
+| Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 active/execution-deferred verification snapshot | light ready、checking、installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
 Product Runtime Catalog 当前包含十种可执行 Adapter。Preview 与它不是“同一目录的另一种状态”；
@@ -33,12 +34,25 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 新增 Product Runtime 必须原子建立：
 
 1. 稳定 wire identity、可执行发现和 Installation/Migration closed kind；
-2. 由 Adapter launch policy 明确选择 active Probe 或 execution-deferred verification，并对协议、认证、必需 capability 与 transient failure 诚实分类；
+2. 由 Adapter launch policy 明确深检 purpose 或 execution-deferred verification，并对协议、认证、必需 capability 与 transient failure 诚实分类；
 3. 冻结模型、权限、Session、MCP、cwd 和进程策略的 AgentRun Adapter；
 4. prompt 终态、cancel、Action/Approval、Tool ID、Runtime Activity 与兼容性证据；
 5. 成员配置、Runtime 设置、诊断、测试与文档投影。
 
 图标、版本输出、`initialize` 成功或 Settings Preview 都不能单独满足准入。
+
+## 浅检测与按需深检
+
+Core 启动和 Runtime 重扫只建立 executable path、权限、metadata/fingerprint 与 Adapter 声明为无副作用的
+有界 one-shot 身份证据。非 TRAE 只有命令成功、输出未超限且识别到基础版本/身份才写入 `light_ready`；
+`found_uninspected` 既不是 light-ready，也不是 checking。`light_ready` 可以驱动成员 Runtime-default 配置和
+“可用”主状态，但只表示 executable 已通过轻度启动验证、可选择和尝试运行。认证、协议、模型、Session 与
+capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
+
+发现结束、缓存过期、fingerprint 变化、页面进入和成员选择都不排队深检。fingerprint 变化只替换静态快照并
+使旧 Ready 失效。Runtime Check Manager 以内部 attempt identity、总 deadline、每 Runtime 单飞和全局并发二
+统一收口 success、failure、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
+和整进程树 cleanup。
 
 ## TRAE CLI CN 当前边界
 

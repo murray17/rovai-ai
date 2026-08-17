@@ -1,0 +1,170 @@
+name: macOS signed build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  require-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Signed builds may only run from main."
+            exit 1
+          fi
+
+  build:
+    needs: require-main
+    name: macOS ${{ matrix.arch }} signed build
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            build-command: pnpm dist:mac:release:arm64
+            artifact-name: rovai-macos-arm64-signed
+          - arch: x64
+            runner: macos-15-intel
+            build-command: pnpm dist:mac:release:x64
+            artifact-name: rovai-macos-x64-signed
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26
+
+      - name: Install pnpm
+        run: npm install --global pnpm@11.20.0
+
+      - name: Install Rust 1.97.1
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal
+          rustup default 1.97.1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import and trust fixed signing identity
+        env:
+          MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+        run: |
+          set +x
+          set -euo pipefail
+          umask 077
+
+          : "${MAC_CSC_LINK:?MAC_CSC_LINK is required}"
+          : "${MAC_CSC_KEY_PASSWORD:?MAC_CSC_KEY_PASSWORD is required}"
+
+          P12_PATH="$RUNNER_TEMP/rovai-release-signing.p12"
+          CERT_PEM="$RUNNER_TEMP/rovai-release-signing.pem"
+          CERT_DER="$RUNNER_TEMP/rovai-release-signing.cer"
+          KEYCHAIN_PATH="$RUNNER_TEMP/rovai-signing.keychain-db"
+          TRUST_MARKER="$RUNNER_TEMP/rovai-system-trust-added"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          DEFAULT_KEYCHAIN="$(security default-keychain -d user | tr -d '"')"
+
+          printf '%s' "$MAC_CSC_LINK" | /usr/bin/base64 -D > "$P12_PATH"
+          test -s "$P12_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" "$DEFAULT_KEYCHAIN"
+
+          security import "$P12_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$MAC_CSC_KEY_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+
+          openssl pkcs12 \
+            -in "$P12_PATH" \
+            -clcerts \
+            -nokeys \
+            -passin env:MAC_CSC_KEY_PASSWORD \
+            -out "$CERT_PEM"
+          openssl x509 -in "$CERT_PEM" -outform DER -out "$CERT_DER"
+
+          ACTUAL_FINGERPRINT="$(
+            openssl x509 -in "$CERT_PEM" -noout -fingerprint -sha256 \
+              | cut -d= -f2 \
+              | tr -d ':\r\n' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+          EXPECTED_FINGERPRINT="875C6F486E223AB1889A2AD63860FBE48F7E8C0E4D94832656896BA5DA4EF82E"
+          test "$ACTUAL_FINGERPRINT" = "$EXPECTED_FINGERPRINT"
+
+          sudo security add-trusted-cert \
+            -d \
+            -r trustRoot \
+            -p codeSign \
+            -k /Library/Keychains/System.keychain \
+            "$CERT_DER"
+          touch "$TRUST_MARKER"
+
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | grep -F 'Rovai Release Signing'
+
+          printf 'CSC_NAME=%s\n' 'Rovai Release Signing' >> "$GITHUB_ENV"
+          printf 'CSC_KEYCHAIN=%s\n' "$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Build signed DMG
+        run: ${{ matrix.build-command }}
+
+      - name: Verify signed DMG
+        run: node scripts/verify-macos-release.mjs ${{ matrix.arch }}
+
+      - name: Clean signing material
+        if: always()
+        run: |
+          set +x
+          P12_PATH="$RUNNER_TEMP/rovai-release-signing.p12"
+          CERT_PEM="$RUNNER_TEMP/rovai-release-signing.pem"
+          CERT_DER="$RUNNER_TEMP/rovai-release-signing.cer"
+          KEYCHAIN_PATH="$RUNNER_TEMP/rovai-signing.keychain-db"
+          TRUST_MARKER="$RUNNER_TEMP/rovai-system-trust-added"
+          DEFAULT_KEYCHAIN="$(security default-keychain -d user | tr -d '"')"
+
+          if test -f "$TRUST_MARKER" && test -f "$CERT_DER"; then
+            sudo security remove-trusted-cert -d "$CERT_DER" || true
+            sudo security delete-certificate \
+              -Z 465802DA7386E9676668078E7D44704CBBEADD1E \
+              /Library/Keychains/System.keychain || true
+          fi
+
+          security list-keychains -d user -s "$DEFAULT_KEYCHAIN" || true
+          security delete-keychain "$KEYCHAIN_PATH" || true
+          rm -f \
+            "$P12_PATH" \
+            "$CERT_PEM" \
+            "$CERT_DER" \
+            "$KEYCHAIN_PATH" \
+            "$TRUST_MARKER"
+
+      - name: Upload signed artifacts
+        if: success()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: |
+            dist/*.dmg
+            dist/signing-report-*.txt
+          if-no-files-found: error

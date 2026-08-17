@@ -587,6 +587,72 @@ impl AgentRuntimeAdapterRegistry {
         })
     }
 
+    pub fn light_ready_snapshot(
+        &self,
+        kind: AdapterKind,
+        reported_version: Option<String>,
+        executable_fingerprint: String,
+        observed_at: String,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        if kind == AdapterKind::TraeCnCli {
+            return self.trae_installed_unverified_snapshot(
+                reported_version,
+                executable_fingerprint,
+                observed_at,
+            );
+        }
+        let permission_options = match kind {
+            AdapterKind::CodexCli => codex_permission_options(),
+            AdapterKind::OpencodeCli => opencode_permission_options(),
+            AdapterKind::CopilotCli => copilot_permission_options(),
+            AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
+            AdapterKind::KiroCli => Vec::new(),
+            AdapterKind::QoderCli => qoder_permission_options(),
+            AdapterKind::CodebuddyCli => codebuddy_permission_options(),
+            AdapterKind::QwenCode => qwen_permission_options(),
+            AdapterKind::AntigravityApp => antigravity_permission_options(),
+            AdapterKind::TraeCnCli => unreachable!("TRAE returned above"),
+        };
+        let permission_schema_digest =
+            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        Ok(AdapterCapabilitySnapshot {
+            reported_version,
+            executable_fingerprint: Some(executable_fingerprint),
+            authentication_status: "unknown".to_string(),
+            probe_status: "light_ready".to_string(),
+            permission_schema_version: 1,
+            permission_schema_digest,
+            capabilities: Vec::new(),
+            protocols: Vec::new(),
+            models: Vec::new(),
+            permission_options,
+            observed_at: Some(observed_at.clone()),
+            last_attempted_at: observed_at,
+            last_successful_probe_at: None,
+            stale_at: None,
+            last_error: None,
+            native_session_compatibility_key: None,
+        })
+    }
+
+    pub fn light_failed_snapshot(
+        &self,
+        kind: AdapterKind,
+        reported_version: Option<String>,
+        executable_fingerprint: String,
+        observed_at: String,
+        diagnostic_code: String,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        if kind == AdapterKind::TraeCnCli {
+            anyhow::bail!("TRAE static discovery does not use light-failed snapshots");
+        }
+        let mut snapshot =
+            self.light_ready_snapshot(kind, reported_version, executable_fingerprint, observed_at)?;
+        snapshot.probe_status = "light_failed".to_string();
+        snapshot.last_error = Some(diagnostic_code);
+        Ok(snapshot)
+    }
+
     pub fn trae_live_session_capability_snapshot(
         &self,
         reported_version: Option<String>,

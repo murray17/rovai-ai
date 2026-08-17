@@ -111,7 +111,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
 - **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Runtime Launch and Verification v1](../contracts/runtime-launch-and-verification-v1.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
+- **当前合同：** [Runtime Launch and Verification v3](../contracts/runtime-launch-and-verification-v3.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |
@@ -133,6 +133,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 | [ADR-0177](0177-controlled-shutdown-fences-product-execution.md) | Controlled Shutdown Fences Product Execution Without Claiming Runtime Outcome |
 | [ADR-0189](0189-settings-only-runtime-preview-outside-product-catalog.md) | Settings-Only Runtime Preview Outside the Product Catalog |
 | [ADR-0192](0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md) | Purpose-Scoped Runtime Launch and Execution-Deferred Verification |
+| [ADR-0204](0204-on-demand-runtime-deep-verification.md) | On-Demand Runtime Deep Verification with Manager-Owned Attempts |
 <!-- adr-current-primary:end -->
 
 Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。
@@ -226,11 +227,11 @@ Related: [ADR-0203](0203-structured-current-input-skill-links.md)在 Session/Con
 选择 Skill 与原生投影文件指针的交叉边界；具体 Skill 名称或版本不是治理例外，长期边界仍按本主题的一般
 ADR 准入规则判断。
 
-## Evidence 与 Runtime Activity
+## Evidence、Runtime Activity 与 Usage
 
-- **何时阅读：** 修改 Execution Evidence、Canonical Activity、classifier、projection 或 observation coverage 时阅读。
-- **当前架构：** ADR-only；architecture summary pending
-- **当前合同：** 无
+- **何时阅读：** 修改 Execution Evidence、Canonical Activity、classifier、Runtime Usage 或 observation coverage 时阅读。
+- **当前架构：** [Runtime Monitoring](../architecture/runtime-monitoring.md)
+- **当前合同：** [Runtime Usage Monitoring v2](../contracts/runtime-usage-monitoring-v2.md)
 
 <!-- adr-current-primary:begin topic=evidence-activity -->
 | ADR | Decision |
@@ -244,7 +245,7 @@ ADR 准入规则判断。
 | [ADR-0116](0116-projection-pinned-classifier-version-and-explicit-historical-reprojection.md) | Projection-Pinned Classifier Version and Explicit Historical Reprojection |
 | [ADR-0117](0117-observation-capability-coverage-levels-across-runtime-adapters.md) | Observation-Capability Coverage Levels Across Runtime Adapters |
 | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) | Current Canonical Activity Projection and Deferred Identity Replay |
-| [ADR-0201](0201-sparse-runtime-usage-and-clean-break-monitoring.md) | Sparse Runtime Usage Authority and Clean-Break Monitoring Enrollment |
+| [ADR-0205](0205-minimal-runtime-usage-metering.md) | Minimal Runtime Usage Metering |
 <!-- adr-current-primary:end -->
 
 Related: Diagnostics、Qualification 与 ContextManifest Evidence 不因此合并为同一 authority。

@@ -8,10 +8,10 @@ mod runtime_fleet;
 mod runtime_mcp;
 
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     future::Future,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
     time::Instant,
 };
 
@@ -140,8 +140,7 @@ use rovai_core::{
         runtime_waiting_recipients,
     },
     monitoring::{
-        MonitoringEvidenceCountBuffer, MonitoringEvidenceCountFlushTarget, MonitoringFilter,
-        MonitoringService, NativeSessionOutcome, ParsedRuntimeUsage, RuntimeUsageBuffer,
+        MonitoringFilter, MonitoringService, ParsedRuntimeUsage, RuntimeUsageBuffer,
         RuntimeUsageFlushTarget, codex_usage_source_identity, parse_acp_usage_message,
         parse_claude_result_usage, parse_codex_usage_message,
     },
@@ -846,7 +845,55 @@ struct ProductRuntimeDiagnostic {
     status: &'static str,
     diagnostic_code: String,
     priority: u8,
-    observed_at: chrono::DateTime<chrono::Utc>,
+}
+
+const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
+const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum RuntimeCheckTrigger {
+    UserCheck,
+    Execution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeCheckActivity {
+    attempt_id: String,
+    runtime_kind: AdapterKind,
+    deadline: chrono::DateTime<chrono::Utc>,
+    running: bool,
+}
+
+struct RuntimeCheckRequest {
+    runtime_kind: AdapterKind,
+    purpose: RuntimeLaunchPurpose,
+    trigger: RuntimeCheckTrigger,
+    acknowledged: oneshot::Sender<bool>,
+    completion: Option<oneshot::Sender<std::result::Result<bool, String>>>,
+}
+
+struct RuntimeCheckAttempt {
+    attempt_id: String,
+    runtime_kind: AdapterKind,
+    purpose: RuntimeLaunchPurpose,
+    trigger: RuntimeCheckTrigger,
+    started_at: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+    waiters: Vec<oneshot::Sender<std::result::Result<bool, String>>>,
+}
+
+struct RuntimeCheckWorkerResult {
+    attempt_id: String,
+    runtime_kind: AdapterKind,
+    result: std::result::Result<bool, String>,
+    finalization: RuntimeCheckFinalization,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeCheckFinalization {
+    Product,
+    Supervisor,
+    CleanupOnly,
 }
 
 struct ClaudeInputAcceptanceTarget<'a> {
@@ -860,19 +907,16 @@ struct Core {
     database: Mutex<Database>,
     runtime_usage: Mutex<RuntimeUsageBuffer>,
     runtime_usage_flush: Mutex<()>,
-    monitoring_evidence_counts: StdMutex<MonitoringEvidenceCountBuffer>,
-    monitoring_evidence_flush: Mutex<()>,
     output: mpsc::UnboundedSender<String>,
     runtime_search_environment: RwLock<Arc<RuntimeSearchEnvironment>>,
     runtime_discovery:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeDiscoveryObservation>>,
     runtime_product_diagnostics:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, ProductRuntimeDiagnostic>>,
-    runtime_checking: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
-    runtime_checks_scheduled: RwLock<BTreeSet<rovai_core::agent_profile::AdapterKind>>,
-    runtime_check_requests: mpsc::UnboundedSender<rovai_core::agent_profile::AdapterKind>,
+    runtime_check_activity:
+        RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeCheckActivity>>,
+    runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckRequest>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
-    runtime_resolution_notify: Notify,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
     skill_library: SkillLibraryService,
@@ -1061,6 +1105,12 @@ fn runtime_diagnostic_checks(
                         "Current Runtime evidence is incomplete",
                         false,
                     ),
+                    "light_ready" => (
+                        DiagnosticStatus::Unknown,
+                        "runtime_verification_deferred",
+                        "Runtime executable is available; login and capabilities are verified on demand",
+                        false,
+                    ),
                     "installed_unverified" => (
                         DiagnosticStatus::Unknown,
                         "runtime_verification_deferred",
@@ -1071,6 +1121,12 @@ fn runtime_diagnostic_checks(
                         DiagnosticStatus::Attention,
                         "runtime_authentication_required",
                         "Runtime requires user authentication",
+                        false,
+                    ),
+                    "needs_attention" => (
+                        DiagnosticStatus::Attention,
+                        "runtime_needs_attention",
+                        "The latest Runtime check requires user attention",
                         false,
                     ),
                     "missing" => (
@@ -1195,22 +1251,6 @@ impl AgentRunRuntime {
 }
 
 impl Core {
-    fn observe_monitoring_evidence(&self, recorded: &RecordedExecutionEvidence) {
-        if !recorded.inserted {
-            return;
-        }
-        let mut buffer = self
-            .monitoring_evidence_counts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Err(error) = buffer.observe(&recorded.agent_run_id, recorded.execution_epoch) {
-            eprintln!(
-                "failed to buffer Monitoring Evidence count for AgentRun {}: {error:#}",
-                recorded.agent_run_id
-            );
-        }
-    }
-
     fn known_agent_ids(database: &Database) -> Result<BTreeSet<String>> {
         AgentProfileService::default().all_profile_ids(database)
     }
@@ -1292,33 +1332,87 @@ impl Core {
         }
 
         let mut path_tasks = tokio::task::JoinSet::new();
+        let mut path_attempts = HashMap::new();
         for kind in rovai_core::agent_profile::AdapterKind::ALL {
             let search = search.clone();
-            path_tasks.spawn_blocking(move || discover_runtime_path(kind, &search));
+            let handle = path_tasks.spawn_blocking(move || discover_runtime_path(kind, &search));
+            path_attempts.insert(handle.id(), kind);
         }
         let mut version_tasks = tokio::task::JoinSet::new();
-        while let Some(result) = path_tasks.join_next().await {
+        let mut version_attempts = HashMap::new();
+        while let Some(result) = path_tasks.join_next_with_id().await {
             match result {
-                Ok(observation) => {
-                    self.publish_runtime_discovery(observation.clone()).await;
+                Ok((task_id, observation)) => {
+                    path_attempts.remove(&task_id);
                     if observation.discovery_status == RuntimeDiscoveryStatus::Found {
                         let search = search.clone();
-                        version_tasks.spawn(async move {
+                        let fallback = observation.clone();
+                        let handle = version_tasks.spawn(async move {
                             let mut observation = observation;
                             discover_runtime_version(&mut observation, &search).await;
                             observation
                         });
+                        version_attempts.insert(handle.id(), fallback);
+                    } else {
+                        self.publish_runtime_discovery(observation).await;
                     }
                 }
                 Err(error) => {
+                    if let Some(kind) = path_attempts.remove(&error.id())
+                        && self.runtime_search_environment.read().await.generation()
+                            == search.generation()
+                    {
+                        self.runtime_product_diagnostics.write().await.insert(
+                            kind,
+                            ProductRuntimeDiagnostic {
+                                status: "needs_attention",
+                                diagnostic_code: if error.is_cancelled() {
+                                    "runtime_path_discovery_cancelled"
+                                } else if error.is_panic() {
+                                    "runtime_path_discovery_worker_panicked"
+                                } else {
+                                    "runtime_path_discovery_join_failed"
+                                }
+                                .to_string(),
+                                priority: 2,
+                            },
+                        );
+                        let mut observation =
+                            RuntimeDiscoveryObservation::detecting(kind, search.generation());
+                        observation.discovery_status = RuntimeDiscoveryStatus::Missing;
+                        observation.diagnostic_code =
+                            Some("runtime_path_discovery_supervisor_failure".to_string());
+                        self.publish_runtime_discovery(observation).await;
+                    }
                     eprintln!("Runtime quick discovery worker failed: {error}");
                 }
             }
         }
-        while let Some(result) = version_tasks.join_next().await {
+        while let Some(result) = version_tasks.join_next_with_id().await {
             match result {
-                Ok(observation) => self.publish_runtime_discovery(observation).await,
-                Err(error) => eprintln!("Runtime version discovery worker failed: {error}"),
+                Ok((task_id, observation)) => {
+                    version_attempts.remove(&task_id);
+                    self.publish_runtime_discovery(observation).await;
+                }
+                Err(error) => {
+                    let task_id = error.id();
+                    if let Some(mut observation) = version_attempts.remove(&task_id) {
+                        observation.reported_version = None;
+                        observation.diagnostic_code = Some(
+                            if error.is_cancelled() {
+                                "runtime_light_probe_cancelled"
+                            } else if error.is_panic() {
+                                "runtime_light_probe_worker_panicked"
+                            } else {
+                                "runtime_light_probe_join_failed"
+                            }
+                            .to_string(),
+                        );
+                        observation.observed_at = chrono::Utc::now().to_rfc3339();
+                        self.publish_runtime_discovery(observation).await;
+                    }
+                    eprintln!("Runtime version discovery worker failed: {error}");
+                }
             }
         }
         emit(
@@ -1326,10 +1420,22 @@ impl Core {
             "runtime.discovery.completed",
             json!({ "searchEnvironment": search.summary() }),
         );
-        self.schedule_runtime_checks_after_discovery().await;
     }
 
     async fn publish_runtime_discovery(&self, observation: RuntimeDiscoveryObservation) {
+        if self.runtime_search_environment.read().await.generation()
+            != observation.search_generation
+        {
+            return;
+        }
+        if observation.discovery_status == RuntimeDiscoveryStatus::Found
+            && let Err(error) = self.persist_light_discovery(&observation).await
+        {
+            eprintln!(
+                "failed to persist bounded Runtime discovery for {}: {error:#}",
+                observation.runtime_kind.as_str()
+            );
+        }
         self.runtime_discovery
             .write()
             .await
@@ -1339,6 +1445,79 @@ impl Core {
             "runtime.discovery.updated",
             serde_json::to_value(observation).unwrap_or_else(|_| json!({})),
         );
+    }
+
+    async fn persist_light_discovery(
+        &self,
+        observation: &RuntimeDiscoveryObservation,
+    ) -> Result<()> {
+        let executable_path = observation
+            .executable_path
+            .as_deref()
+            .context("light Runtime discovery did not include executablePath")?;
+        let executable_fingerprint = observation
+            .executable_fingerprint
+            .as_deref()
+            .context("light Runtime discovery did not include executableFingerprint")?;
+        let source = observation
+            .source
+            .context("light Runtime discovery did not include source")?;
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let snapshot = if observation.runtime_kind == AdapterKind::TraeCnCli {
+            registry.trae_installed_unverified_snapshot(
+                observation.reported_version.clone(),
+                executable_fingerprint.to_string(),
+                observation.observed_at.clone(),
+            )?
+        } else if observation.reported_version.is_some() && observation.diagnostic_code.is_none() {
+            registry.light_ready_snapshot(
+                observation.runtime_kind,
+                observation.reported_version.clone(),
+                executable_fingerprint.to_string(),
+                observation.observed_at.clone(),
+            )?
+        } else {
+            registry.light_failed_snapshot(
+                observation.runtime_kind,
+                observation.reported_version.clone(),
+                executable_fingerprint.to_string(),
+                observation.observed_at.clone(),
+                observation
+                    .diagnostic_code
+                    .clone()
+                    .unwrap_or_else(|| "runtime_light_probe_incomplete".to_string()),
+            )?
+        };
+        let mut database = self.database.lock().await;
+        AgentProfileService::default().commit_discovered_managed_installation(
+            &mut database,
+            DiscoveredManagedInstallation {
+                adapter_kind: observation.runtime_kind,
+                executable_path: executable_path.to_string(),
+                command_name: observation.runtime_kind.command_name().to_string(),
+                source,
+                auth_scope: "default".to_string(),
+                snapshot,
+            },
+        )?;
+        Ok(())
+    }
+
+    async fn runtime_probe_identity_is_current(
+        &self,
+        kind: AdapterKind,
+        search_generation: u64,
+        executable_fingerprint: &str,
+    ) -> bool {
+        if self.runtime_search_environment.read().await.generation() != search_generation {
+            return false;
+        }
+        self.runtime_discovery
+            .read()
+            .await
+            .get(&kind)
+            .and_then(|observation| observation.executable_fingerprint.as_deref())
+            .is_none_or(|current| current == executable_fingerprint)
     }
 
     async fn rescan_runtime_discovery(&self, interactive_shell: bool) -> Result<Value> {
@@ -1368,64 +1547,110 @@ impl Core {
     }
 
     async fn schedule_runtime_check(&self, kind: rovai_core::agent_profile::AdapterKind) -> bool {
-        {
-            let mut scheduled = self.runtime_checks_scheduled.write().await;
-            if !scheduled.insert(kind) {
-                return false;
-            }
-        }
-        if self.runtime_check_requests.send(kind).is_err() {
-            self.runtime_checks_scheduled.write().await.remove(&kind);
-            return false;
-        }
-        emit(
-            &self.output,
-            "runtime.availability.updated",
-            json!({ "runtimeKind": kind, "status": "checking" }),
-        );
-        true
+        self.enqueue_runtime_check(
+            kind,
+            RuntimeLaunchPurpose::AvailabilityCheck,
+            RuntimeCheckTrigger::UserCheck,
+        )
+        .await
+        .unwrap_or(false)
     }
 
     async fn ensure_runtime_check(
         &self,
-        kind: rovai_core::agent_profile::AdapterKind,
+        _kind: rovai_core::agent_profile::AdapterKind,
     ) -> Result<bool> {
-        if self.runtime_checking.read().await.contains(&kind)
-            || self.runtime_checks_scheduled.read().await.contains(&kind)
-        {
-            return Ok(false);
-        }
+        // `ensure` is retained for wire compatibility with older Renderers. Passive page loads,
+        // selection changes and discovery refreshes never authorize a deep Runtime check.
+        Ok(false)
+    }
+
+    async fn enqueue_runtime_check(
+        &self,
+        kind: AdapterKind,
+        purpose: RuntimeLaunchPurpose,
+        trigger: RuntimeCheckTrigger,
+    ) -> Result<bool> {
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        self.runtime_check_requests
+            .send(RuntimeCheckRequest {
+                runtime_kind: kind,
+                purpose,
+                trigger,
+                acknowledged,
+                completion: None,
+            })
+            .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
+        tokio::time::timeout(Duration::from_secs(2), acknowledgement)
+            .await
+            .context("Runtime check manager did not acknowledge the request")?
+            .context("Runtime check manager dropped the acknowledgement")
+    }
+
+    async fn await_runtime_check(
+        &self,
+        kind: AdapterKind,
+        purpose: RuntimeLaunchPurpose,
+        trigger: RuntimeCheckTrigger,
+    ) -> Result<bool> {
+        let (acknowledged, acknowledgement) = oneshot::channel();
+        let (completed, completion) = oneshot::channel();
+        self.runtime_check_requests
+            .send(RuntimeCheckRequest {
+                runtime_kind: kind,
+                purpose,
+                trigger,
+                acknowledged,
+                completion: Some(completed),
+            })
+            .map_err(|_| anyhow::anyhow!("Runtime check manager is unavailable"))?;
+        tokio::time::timeout(Duration::from_secs(2), acknowledgement)
+            .await
+            .context("Runtime check manager did not acknowledge the request")?
+            .context("Runtime check manager dropped the acknowledgement")?;
+        tokio::time::timeout(
+            RUNTIME_CHECK_TOTAL_DEADLINE + Duration::from_secs(3),
+            completion,
+        )
+        .await
+        .context("Runtime check attempt exceeded its manager deadline")?
+        .context("Runtime check manager dropped the completion")?
+        .map_err(anyhow::Error::msg)
+    }
+
+    async fn current_runtime_availability_status(&self, kind: AdapterKind) -> &'static str {
+        let discovery_status = self
+            .runtime_discovery
+            .read()
+            .await
+            .get(&kind)
+            .map(|observation| observation.discovery_status)
+            .unwrap_or(RuntimeDiscoveryStatus::Detecting);
+        let product_diagnostic = self
+            .runtime_product_diagnostics
+            .read()
+            .await
+            .get(&kind)
+            .cloned();
         let installation = {
             let database = self.database.lock().await;
-            AgentProfileService::default().managed_installation(&database, kind, "default")?
+            AgentProfileService::default()
+                .managed_installation(&database, kind, "default")
+                .ok()
+                .flatten()
         };
-        let now = chrono::Utc::now();
-        let needed = if let Some(installation) = installation.as_ref() {
-            registered_runtime_refresh_is_due(installation, now)
-                && !probe_retry_is_deferred(installation, now)
-        } else {
-            let discovery = self.runtime_discovery.read().await.get(&kind).cloned();
-            let cached_diagnostic = self
-                .runtime_product_diagnostics
-                .read()
-                .await
-                .get(&kind)
-                .cloned();
-            cached_diagnostic
-                .as_ref()
-                .is_none_or(|diagnostic| !product_runtime_diagnostic_is_fresh(diagnostic, now))
-                && discovery.is_none_or(|observation| {
-                    observation.discovery_status != RuntimeDiscoveryStatus::Missing
-                })
-        };
-        Ok(needed && self.schedule_runtime_check(kind).await)
+        product_runtime_availability_status(
+            discovery_status,
+            installation.as_ref(),
+            product_diagnostic.as_ref(),
+            false,
+        )
     }
 
     async fn runtime_health_payload(&self) -> Result<Value> {
         let observations = self.runtime_discovery.read().await.clone();
         let product_diagnostics = self.runtime_product_diagnostics.read().await.clone();
-        let mut checking = self.runtime_checking.read().await.clone();
-        checking.extend(self.runtime_checks_scheduled.read().await.iter().copied());
+        let checking = self.runtime_check_activity.read().await.clone();
         let installations = {
             let database = self.database.lock().await;
             AgentProfileService::default().list_installations(&database)?
@@ -1445,7 +1670,9 @@ impl Core {
                             && installation.auth_scope == "default"
                     });
                     let product_diagnostic = product_diagnostics.get(&kind);
-                    let is_checking = checking.contains(&kind);
+                    let is_checking = checking.get(&kind).is_some_and(|activity| {
+                        activity.runtime_kind == kind && activity.deadline > chrono::Utc::now()
+                    });
                     let status = product_runtime_availability_status(
                         discovery.discovery_status,
                         installation,
@@ -1704,64 +1931,12 @@ impl Core {
         Ok(())
     }
 
-    async fn resolve_product_runtime(
+    async fn run_product_runtime_resolution(
         &self,
         kind: rovai_core::agent_profile::AdapterKind,
         purpose: RuntimeLaunchPurpose,
     ) -> Result<bool> {
-        {
-            let mut checking = self.runtime_checking.write().await;
-            if !checking.insert(kind) {
-                drop(checking);
-                loop {
-                    let notified = self.runtime_resolution_notify.notified();
-                    if !self.runtime_checking.read().await.contains(&kind) {
-                        let database = self.database.lock().await;
-                        return managed_runtime_is_ready(&database, kind);
-                    }
-                    tokio::time::timeout(Duration::from_secs(90), notified)
-                        .await
-                        .context("timed out waiting for the active Runtime resolution")?;
-                }
-            }
-        }
         self.runtime_product_diagnostics.write().await.remove(&kind);
-        emit(
-            &self.output,
-            "runtime.availability.updated",
-            json!({ "runtimeKind": kind, "status": "checking" }),
-        );
-        let result = self.resolve_product_runtime_inner(kind, purpose).await;
-        self.runtime_checking.write().await.remove(&kind);
-        self.runtime_resolution_notify.notify_waiters();
-        let event_status = if result.as_ref().is_ok_and(|ready| *ready) {
-            "ready"
-        } else if result.is_ok() {
-            let database = self.database.lock().await;
-            if managed_runtime_is_installed_unverified(&database, kind).unwrap_or(false) {
-                "installed_unverified"
-            } else {
-                "needs_attention"
-            }
-        } else {
-            "needs_attention"
-        };
-        emit(
-            &self.output,
-            "runtime.availability.updated",
-            json!({
-                "runtimeKind": kind,
-                "status": event_status,
-            }),
-        );
-        result
-    }
-
-    async fn resolve_product_runtime_inner(
-        &self,
-        kind: rovai_core::agent_profile::AdapterKind,
-        purpose: RuntimeLaunchPurpose,
-    ) -> Result<bool> {
         let (existing, search) = {
             let database = self.database.lock().await;
             (
@@ -1902,9 +2077,19 @@ impl Core {
                 let snapshot = AgentRuntimeAdapterRegistry::default()
                     .trae_installed_unverified_snapshot(
                         lightweight.reported_version.clone(),
-                        candidate_fingerprint,
+                        candidate_fingerprint.clone(),
                         lightweight.observed_at.clone(),
                     )?;
+                if !self
+                    .runtime_probe_identity_is_current(
+                        kind,
+                        search.generation(),
+                        &candidate_fingerprint,
+                    )
+                    .await
+                {
+                    return Ok(false);
+                }
                 let executable_path = canonical.to_string_lossy().to_string();
                 let mut database = self.database.lock().await;
                 AgentProfileService::default().commit_discovered_managed_installation(
@@ -2000,6 +2185,16 @@ impl Core {
                     continue;
                 }
             };
+            if !self
+                .runtime_probe_identity_is_current(
+                    kind,
+                    search.generation(),
+                    &candidate_fingerprint,
+                )
+                .await
+            {
+                return Ok(false);
+            }
             if snapshot.probe_status == "ready" {
                 let executable_path = canonical.to_string_lossy().to_string();
                 let mut database = self.database.lock().await;
@@ -2070,51 +2265,6 @@ impl Core {
                 .insert(kind, diagnostic);
         }
         Ok(false)
-    }
-
-    async fn schedule_runtime_checks_after_discovery(&self) {
-        let observations = self.runtime_discovery.read().await.clone();
-        let (selected, installations) = {
-            let database = self.database.lock().await;
-            let profiles = AgentProfileService::default()
-                .list_profiles(&database)
-                .unwrap_or_default();
-            let selected = profiles
-                .into_iter()
-                .filter_map(|profile| {
-                    profile
-                        .runtime_configuration
-                        .map(|configuration| configuration.adapter_kind)
-                })
-                .collect::<BTreeSet<_>>();
-            let installations = AgentProfileService::default()
-                .list_installations(&database)
-                .unwrap_or_default();
-            (selected, installations)
-        };
-        let now = chrono::Utc::now();
-        let found = observations
-            .iter()
-            .filter_map(|(kind, observation)| {
-                (observation.discovery_status == RuntimeDiscoveryStatus::Found).then_some(*kind)
-            })
-            .collect::<BTreeSet<_>>();
-        for kind in runtime_checks_after_discovery(&found, &selected, &installations, now) {
-            self.schedule_runtime_check(kind).await;
-        }
-    }
-
-    async fn schedule_expired_runtime_checks(&self) {
-        let installations = {
-            let database = self.database.lock().await;
-            AgentProfileService::default()
-                .list_installations(&database)
-                .unwrap_or_default()
-        };
-        let now = chrono::Utc::now();
-        for kind in registered_runtime_checks_due(&installations, now) {
-            self.schedule_runtime_check(kind).await;
-        }
     }
 
     async fn recover_pending_execution_intents(&self) {
@@ -2692,7 +2842,7 @@ impl Core {
                 "receiptId": null,
                 "operationProjection": operation_projection,
             });
-            let started_evidence = ExecutionEvidenceService
+            ExecutionEvidenceService
                 .record_builtin_tool_started(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
@@ -2701,7 +2851,6 @@ impl Core {
                     &started_evidence,
                 )?
                 .context("Built-in Tool start evidence was not durably admitted")?;
-            self.observe_monitoring_evidence(&started_evidence);
             let operation_result = match request.tool_name.as_str() {
                 CAMP_MESSAGE_SEND_TOOL_NAME => {
                     let input = serde_json::from_value::<CampMessageSendInput>(request.input)
@@ -3069,8 +3218,7 @@ impl Core {
                 )
             };
             match evidence_result {
-                Ok(Some(recorded)) => self.observe_monitoring_evidence(&recorded),
-                Ok(None) => {}
+                Ok(Some(_)) | Ok(None) => {}
                 Err(error) => {
                     eprintln!("failed to record Built-in Tool result evidence: {error:#}");
                 }
@@ -3161,30 +3309,24 @@ impl Core {
             "members.runtime.set" => {
                 let params: UserCommandParams<SetMemberRuntimeConfigurationCommand> =
                     serde_json::from_value(request.params.clone())?;
-                let adapter_kind = params.command.adapter_kind;
                 let agent_id = params.command.agent_id.clone();
-                let (execution, needs_resolution) = {
+                let execution = {
                     let mut database = self.database.lock().await;
                     let execution = AgentProfileService::default().set_runtime(
                         &mut database,
                         &user_command_envelope(params.command_id, params.command),
                     )?;
-                    let needs_resolution = execution.result.status == CommandResultStatus::Applied
-                        && !managed_runtime_is_ready(&database, adapter_kind)?;
                     if execution.result.status == CommandResultStatus::Applied {
                         self.mark_skill_projections_dirty_best_effort(&mut database, true);
                     }
-                    (execution, needs_resolution)
+                    execution
                 };
                 if execution.result.status == CommandResultStatus::Applied {
                     self.runtime_fleet
                         .invalidate_runtime_config(&agent_id)
                         .await;
                 }
-                if needs_resolution {
-                    self.ensure_runtime_check(adapter_kind).await?;
-                }
-                if execution.result.status == CommandResultStatus::Applied && !needs_resolution {
+                if execution.result.status == CommandResultStatus::Applied {
                     self.pump_runtime_ready_recipient(&agent_id).await?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -3707,7 +3849,11 @@ impl Core {
                     .find(|member| member.runtime_readiness == RuntimeReadinessStatus::Ready)
                     .or_else(|| {
                         present_members.iter().find(|member| {
-                            member.runtime_readiness == RuntimeReadinessStatus::InstalledUnverified
+                            matches!(
+                                member.runtime_readiness,
+                                RuntimeReadinessStatus::LightReady
+                                    | RuntimeReadinessStatus::InstalledUnverified
+                            )
                         })
                     })
                     .or_else(|| present_members.first())
@@ -4714,9 +4860,10 @@ impl Core {
             == rovai_core::agent_profile::InstallationClass::ManagedDefault
         {
             let ready = self
-                .resolve_product_runtime(
+                .await_runtime_check(
                     installation.adapter_kind,
                     RuntimeLaunchPurpose::InstallationRefresh,
+                    RuntimeCheckTrigger::UserCheck,
                 )
                 .await?;
             return Ok(json!({
@@ -4941,20 +5088,21 @@ impl Core {
                 return;
             }
         };
-        {
+        let monitoring_run = {
             let mut database = self.database.lock().await;
-            let compaction_observable = self
-                .compaction_detector_policies
-                .policy_for(execution.runtime.adapter_kind)
-                == Some(CompactionDetectorPolicy::BestEffort);
-            if let Err(error) =
-                MonitoringService::enroll_run(&mut database, &execution, compaction_observable)
-            {
-                eprintln!(
-                    "failed to enroll AgentRun {} in Runtime Monitoring: {error:#}",
-                    execution.agent_run_id
-                );
+            match MonitoringService::enroll_run(&mut database, &execution) {
+                Ok(run) => run,
+                Err(error) => {
+                    eprintln!(
+                        "failed to enroll AgentRun {} in Runtime Monitoring: {error:#}",
+                        execution.agent_run_id
+                    );
+                    None
+                }
             }
+        };
+        if let Some(run) = monitoring_run {
+            self.runtime_usage.lock().await.register_run(run);
         }
         let active_key =
             ActiveExecutionKey::new(&execution.agent_run_id, execution.execution_epoch);
@@ -6280,20 +6428,6 @@ impl Core {
                 binding.result.code
             );
         }
-        {
-            let mut database = self.database.lock().await;
-            MonitoringService::record_session_outcome(
-                &mut database,
-                execution,
-                NativeSessionOutcome::Succeeded,
-                false,
-                None,
-                Some(native_session_id),
-            )
-            .context("failed to record successful Native Session continuation")?;
-            MonitoringService::record_session_fallback(&mut database, execution, native_session_id)
-                .context("failed to record Native Session fallback")?;
-        }
         Ok(())
     }
 
@@ -6552,9 +6686,10 @@ impl Core {
             .await;
         let refresh = match installation.installation_class {
             InstallationClass::ManagedDefault => self
-                .resolve_product_runtime(
+                .await_runtime_check(
                     frozen_runtime.adapter_kind,
                     RuntimeLaunchPurpose::DispatchPreflight,
+                    RuntimeCheckTrigger::Execution,
                 )
                 .await
                 .map(|_| ()),
@@ -6661,8 +6796,6 @@ impl Core {
             }
         };
         if let Err(error) = refresh {
-            self.schedule_runtime_check(frozen_runtime.adapter_kind)
-                .await;
             return Err(RuntimeDispatchFailure {
                 code: "runtime_refresh_failed".to_string(),
                 error: error.context("Runtime drift refresh failed"),
@@ -6854,12 +6987,9 @@ impl Core {
             .context("failed to prepare the Camp Attachment access root")?;
         let resume_disposition = {
             let mut database = self.database.lock().await;
-            let disposition = ExecutionRuntimeService::default()
+            ExecutionRuntimeService::default()
                 .prepare_native_session_resume(&mut database, execution)
-                .context("failed to prepare Native Session resume")?;
-            MonitoringService::record_session_decision(&mut database, execution, disposition)
-                .context("failed to record Runtime Monitoring Native Session decision")?;
-            disposition
+                .context("failed to prepare Native Session resume")?
         };
         if resume_disposition == NativeSessionResumeDisposition::Controlled {
             emit(
@@ -7023,14 +7153,6 @@ impl Core {
                             failure,
                         )?;
                     }
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        monitoring_outcome_for_resume_failure(failure),
-                        false,
-                        Some("native_session_resume_failed"),
-                        None,
-                    )?;
                 }
                 let replacement_binding =
                     self.prepare_builtin_tool_binding(execution, true).await?;
@@ -7275,6 +7397,7 @@ impl Core {
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         let run = self.claude_code_cli.run(ClaudeCodeRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
@@ -7291,6 +7414,7 @@ impl Core {
             attachment_access_root: Some(attachment_access_root.to_path_buf()),
             persist_session: true,
             input_accepted: Some(input_accepted_sender),
+            runtime_events: Some(runtime_event_sender),
             launch_handoff: Some(launch_handoff_sender),
         });
         tokio::pin!(run);
@@ -7320,43 +7444,78 @@ impl Core {
         let result_and_acceptance: Result<_> = async {
             let mut accepted_input = None;
             let mut acceptance_channel_open = true;
+            let mut runtime_event_channel_open = true;
             let result = loop {
                 if let Some(result) = early_result.take() {
                     break result;
                 }
-                let (observed_acceptance, completed) = tokio::select! {
+                tokio::select! {
                     biased;
                     observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
-                        (Some(observed), None)
+                        acceptance_channel_open = false;
+                        let Some(observed_acceptance) = observed else {
+                            continue;
+                        };
+                        if let Err(error) = self
+                            .settle_claude_input_acceptance(
+                                execution,
+                                &binding_credential,
+                                &acceptance_target,
+                                &observed_acceptance,
+                                output,
+                            )
+                            .await
+                        {
+                            let _ = self
+                                .claude_code_cli
+                                .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                                .await;
+                            let _ = run.as_mut().await;
+                            return Err(error);
+                        }
+                        accepted_input = Some(observed_acceptance);
                     }
-                    result = &mut run => (None, Some(result)),
-                };
-                if let Some(result) = completed {
-                    break result;
+                    runtime_event = runtime_event_receiver.recv(), if runtime_event_channel_open => {
+                        let Some(runtime_event) = runtime_event else {
+                            runtime_event_channel_open = false;
+                            continue;
+                        };
+                        if let Err(error) = process_one_shot_runtime_event(
+                            self,
+                            output,
+                            AdapterKind::ClaudeCodeCli,
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            runtime_event.event_type,
+                            &runtime_event.payload,
+                        ).await {
+                            eprintln!(
+                                "failed to persist Claude Code Runtime Evidence for AgentRun {}: {error:#}",
+                                execution.agent_run_id
+                            );
+                        }
+                    }
+                    result = &mut run => break result,
                 }
-                acceptance_channel_open = false;
-                let Some(Some(observed_acceptance)) = observed_acceptance else {
-                    continue;
-                };
-                if let Err(error) = self
-                    .settle_claude_input_acceptance(
-                        execution,
-                        &binding_credential,
-                        &acceptance_target,
-                        &observed_acceptance,
-                        output,
-                    )
-                    .await
-                {
-                    let _ = self
-                        .claude_code_cli
-                        .interrupt(&execution.agent_run_id, execution.execution_epoch)
-                        .await;
-                    let _ = run.as_mut().await;
-                    return Err(error);
-                }
-                accepted_input = Some(observed_acceptance);
             };
+            while let Ok(runtime_event) = runtime_event_receiver.try_recv() {
+                if let Err(error) = process_one_shot_runtime_event(
+                    self,
+                    output,
+                    AdapterKind::ClaudeCodeCli,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    runtime_event.event_type,
+                    &runtime_event.payload,
+                )
+                .await
+                {
+                    eprintln!(
+                        "failed to persist queued Claude Code Runtime Evidence for AgentRun {}: {error:#}",
+                        execution.agent_run_id
+                    );
+                }
+            }
             if accepted_input.is_none()
                 && let Ok(observed_acceptance) = input_accepted_receiver.try_recv()
             {
@@ -7429,16 +7588,6 @@ impl Core {
                         &mut database,
                         execution,
                         NativeSessionResumeFailure::Ambiguous,
-                    )?;
-                }
-                if resume_disposition != NativeSessionResumeDisposition::New {
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        NativeSessionOutcome::Ambiguous,
-                        false,
-                        Some("native_session_resume_outcome_unknown"),
-                        None,
                     )?;
                 }
                 ContextService.mark_input_delivery_unknown(
@@ -7746,6 +7895,7 @@ impl Core {
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         let run = self.antigravity_app.run(AntigravityRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
@@ -7758,6 +7908,7 @@ impl Core {
             attachment_access_root: Some(attachment_access_root.to_path_buf()),
             builtin_tools: Some(builtin_tools.clone()),
             input_accepted: Some(input_accepted_sender),
+            runtime_events: Some(runtime_event_sender),
             launch_handoff: Some(launch_handoff_sender),
         });
         tokio::pin!(run);
@@ -7787,43 +7938,78 @@ impl Core {
         let result_and_acceptance: Result<_> = async {
             let mut accepted_input = None;
             let mut acceptance_channel_open = true;
+            let mut runtime_event_channel_open = true;
             let result = loop {
                 if let Some(result) = early_result.take() {
                     break result;
                 }
-                let (observed_acceptance, completed) = tokio::select! {
+                tokio::select! {
                     biased;
                     observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
-                        (Some(observed), None)
+                        acceptance_channel_open = false;
+                        let Some(observed_acceptance) = observed else {
+                            continue;
+                        };
+                        if let Err(error) = self
+                            .settle_antigravity_input_acceptance(
+                                execution,
+                                &binding_credential,
+                                &input_delivery.id,
+                                &observed_acceptance,
+                                output,
+                            )
+                            .await
+                        {
+                            let _ = self
+                                .antigravity_app
+                                .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                                .await;
+                            let _ = run.as_mut().await;
+                            return Err(error);
+                        }
+                        accepted_input = Some(observed_acceptance);
                     }
-                    result = &mut run => (None, Some(result)),
-                };
-                if let Some(result) = completed {
-                    break result;
+                    runtime_event = runtime_event_receiver.recv(), if runtime_event_channel_open => {
+                        let Some(runtime_event) = runtime_event else {
+                            runtime_event_channel_open = false;
+                            continue;
+                        };
+                        if let Err(error) = process_one_shot_runtime_event(
+                            self,
+                            output,
+                            AdapterKind::AntigravityApp,
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            runtime_event.event_type,
+                            &runtime_event.payload,
+                        ).await {
+                            eprintln!(
+                                "failed to persist Antigravity Runtime Evidence for AgentRun {}: {error:#}",
+                                execution.agent_run_id
+                            );
+                        }
+                    }
+                    result = &mut run => break result,
                 }
-                acceptance_channel_open = false;
-                let Some(Some(observed_acceptance)) = observed_acceptance else {
-                    continue;
-                };
-                if let Err(error) = self
-                    .settle_antigravity_input_acceptance(
-                        execution,
-                        &binding_credential,
-                        &input_delivery.id,
-                        &observed_acceptance,
-                        output,
-                    )
-                    .await
-                {
-                    let _ = self
-                        .antigravity_app
-                        .interrupt(&execution.agent_run_id, execution.execution_epoch)
-                        .await;
-                    let _ = run.as_mut().await;
-                    return Err(error);
-                }
-                accepted_input = Some(observed_acceptance);
             };
+            while let Ok(runtime_event) = runtime_event_receiver.try_recv() {
+                if let Err(error) = process_one_shot_runtime_event(
+                    self,
+                    output,
+                    AdapterKind::AntigravityApp,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    runtime_event.event_type,
+                    &runtime_event.payload,
+                )
+                .await
+                {
+                    eprintln!(
+                        "failed to persist queued Antigravity Runtime Evidence for AgentRun {}: {error:#}",
+                        execution.agent_run_id
+                    );
+                }
+            }
             // The adapter performs a final log scan before returning. Consume
             // evidence queued in the same scheduling turn even if completion
             // won the select race.
@@ -7918,16 +8104,6 @@ impl Core {
                         &mut database,
                         execution,
                         NativeSessionResumeFailure::Ambiguous,
-                    )?;
-                }
-                if resume_disposition != NativeSessionResumeDisposition::New {
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        NativeSessionOutcome::Ambiguous,
-                        false,
-                        Some("native_session_resume_outcome_unknown"),
-                        None,
                     )?;
                 }
                 ContextService.mark_input_delivery_unknown(
@@ -8079,14 +8255,6 @@ impl Core {
                             failure,
                         )?;
                     }
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        monitoring_outcome_for_resume_failure(failure),
-                        false,
-                        Some("native_session_resume_failed"),
-                        None,
-                    )?;
                 }
                 adapter
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -8639,7 +8807,7 @@ fn note_product_runtime_diagnostic(
     let (status, priority) = match failure_class {
         "authentication_required" => ("authentication_required", 4),
         "identity_changed" | "incompatible" => ("incompatible", 3),
-        "transient" => ("found_uninspected", 2),
+        "transient" => ("needs_attention", 2),
         _ => ("missing", 1),
     };
     if current
@@ -8652,15 +8820,7 @@ fn note_product_runtime_diagnostic(
         status,
         diagnostic_code: diagnostic_code.to_string(),
         priority,
-        observed_at: chrono::Utc::now(),
     });
-}
-
-fn product_runtime_diagnostic_is_fresh(
-    diagnostic: &ProductRuntimeDiagnostic,
-    now: chrono::DateTime<chrono::Utc>,
-) -> bool {
-    now.signed_duration_since(diagnostic.observed_at) < chrono::Duration::hours(24)
 }
 
 fn product_runtime_availability_status(
@@ -8676,21 +8836,27 @@ fn product_runtime_availability_status(
         if installation.path_state == "path_missing" {
             return "path_missing";
         }
+        if !checking && let Some(diagnostic) = product_diagnostic {
+            return if managed_installation_is_usable(installation) {
+                "refresh_failed_using_last_success"
+            } else {
+                diagnostic.status
+            };
+        }
         if installation
             .snapshot
             .as_ref()
             .is_some_and(|snapshot| snapshot.probe_status == "installed_unverified")
         {
-            let snapshot_attempted_at = installation
+            let snapshot_fingerprint = installation
                 .snapshot
                 .as_ref()
-                .map(|snapshot| snapshot.last_attempted_at.as_str())
-                .unwrap_or_default();
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref());
             if installation
                 .last_probe_attempt
                 .as_ref()
                 .is_some_and(|attempt| {
-                    attempt.attempted_at.as_str() > snapshot_attempted_at
+                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
                         && attempt.status == "failed"
                         && attempt.failure_class == "authentication_required"
                 })
@@ -8701,7 +8867,7 @@ fn product_runtime_availability_status(
                 .last_probe_attempt
                 .as_ref()
                 .is_some_and(|attempt| {
-                    attempt.attempted_at.as_str() > snapshot_attempted_at
+                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
                         && attempt.status == "failed"
                         && matches!(
                             attempt.failure_class.as_str(),
@@ -8711,10 +8877,73 @@ fn product_runtime_availability_status(
             {
                 return "incompatible";
             }
+            if installation
+                .last_probe_attempt
+                .as_ref()
+                .is_some_and(|attempt| {
+                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                        && attempt.status == "failed"
+                })
+            {
+                return "needs_attention";
+            }
             return if checking {
                 "checking"
             } else {
                 "installed_unverified"
+            };
+        }
+        if installation.snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.probe_status == "light_ready" && snapshot.stale_at.is_none()
+        }) {
+            let snapshot_fingerprint = installation
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref());
+            if installation
+                .last_probe_attempt
+                .as_ref()
+                .is_some_and(|attempt| {
+                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                        && attempt.status == "failed"
+                        && attempt.failure_class == "authentication_required"
+                })
+            {
+                return "authentication_required";
+            }
+            if installation
+                .last_probe_attempt
+                .as_ref()
+                .is_some_and(|attempt| {
+                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                        && attempt.status == "failed"
+                        && matches!(
+                            attempt.failure_class.as_str(),
+                            "incompatible" | "identity_changed"
+                        )
+                })
+            {
+                return "incompatible";
+            }
+            if installation
+                .last_probe_attempt
+                .as_ref()
+                .is_some_and(|attempt| {
+                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                        && attempt.status == "failed"
+                })
+            {
+                return "needs_attention";
+            }
+            return if checking { "checking" } else { "light_ready" };
+        }
+        if installation.snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot.probe_status == "light_failed" && snapshot.stale_at.is_none()
+        }) {
+            return if checking {
+                "checking"
+            } else {
+                "needs_attention"
             };
         }
         if installation
@@ -8784,19 +9013,6 @@ fn managed_runtime_is_ready(database: &Database, kind: AdapterKind) -> Result<bo
         .is_some_and(managed_installation_is_usable))
 }
 
-fn managed_runtime_is_installed_unverified(database: &Database, kind: AdapterKind) -> Result<bool> {
-    Ok(AgentProfileService::default()
-        .managed_installation(database, kind, "default")?
-        .as_ref()
-        .is_some_and(|installation| {
-            installation.enabled
-                && installation.path_state == "valid"
-                && installation.snapshot.as_ref().is_some_and(|snapshot| {
-                    snapshot.probe_status == "installed_unverified" && snapshot.stale_at.is_none()
-                })
-        }))
-}
-
 fn managed_installation_is_usable(installation: &AdapterInstallationView) -> bool {
     installation.enabled
         && installation.path_state == "valid"
@@ -8805,82 +9021,6 @@ fn managed_installation_is_usable(installation: &AdapterInstallationView) -> boo
                 && snapshot.stale_at.is_none()
                 && snapshot.authentication_status == "authenticated"
         })
-}
-
-fn probe_retry_is_deferred(
-    installation: &AdapterInstallationView,
-    now: chrono::DateTime<chrono::Utc>,
-) -> bool {
-    installation
-        .last_probe_attempt
-        .as_ref()
-        .and_then(|attempt| attempt.retry_after.as_deref())
-        .and_then(|retry_after| chrono::DateTime::parse_from_rfc3339(retry_after).ok())
-        .is_some_and(|retry_after| retry_after.with_timezone(&chrono::Utc) > now)
-}
-
-fn registered_runtime_refresh_is_due(
-    installation: &AdapterInstallationView,
-    now: chrono::DateTime<chrono::Utc>,
-) -> bool {
-    if installation.adapter_kind == AdapterKind::TraeCnCli {
-        return chrono::DateTime::parse_from_rfc3339(&installation.updated_at)
-            .ok()
-            .is_none_or(|observed| {
-                now.signed_duration_since(observed.with_timezone(&chrono::Utc))
-                    >= chrono::Duration::hours(24)
-            });
-    }
-    if !managed_installation_is_usable(installation) {
-        return true;
-    }
-    installation.snapshot.as_ref().is_none_or(|snapshot| {
-        snapshot
-            .last_successful_probe_at
-            .as_deref()
-            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-            .is_none_or(|observed| {
-                now.signed_duration_since(observed.with_timezone(&chrono::Utc))
-                    >= chrono::Duration::hours(24)
-            })
-    })
-}
-
-fn registered_runtime_checks_due(
-    installations: &[AdapterInstallationView],
-    now: chrono::DateTime<chrono::Utc>,
-) -> BTreeSet<AdapterKind> {
-    installations
-        .iter()
-        .filter(|installation| {
-            installation.enabled
-                && installation.installation_class == InstallationClass::ManagedDefault
-                && registered_runtime_refresh_is_due(installation, now)
-                && !probe_retry_is_deferred(installation, now)
-        })
-        .map(|installation| installation.adapter_kind)
-        .collect()
-}
-
-fn runtime_checks_after_discovery(
-    found: &BTreeSet<AdapterKind>,
-    selected: &BTreeSet<AdapterKind>,
-    installations: &[AdapterInstallationView],
-    now: chrono::DateTime<chrono::Utc>,
-) -> BTreeSet<AdapterKind> {
-    let registered = installations
-        .iter()
-        .filter(|installation| installation.installation_class == InstallationClass::ManagedDefault)
-        .map(|installation| installation.adapter_kind)
-        .collect::<BTreeSet<_>>();
-    let mut scheduled = registered_runtime_checks_due(installations, now);
-    scheduled.extend(
-        selected
-            .iter()
-            .filter(|kind| found.contains(kind) && !registered.contains(kind))
-            .copied(),
-    );
-    scheduled
 }
 
 fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeFailure {
@@ -8909,15 +9049,6 @@ fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeF
         // outcome may have delivered input. The persistent fence prevents a
         // second controlled Resume for the same Installation generation.
         NativeSessionResumeFailure::Ambiguous
-    }
-}
-
-fn monitoring_outcome_for_resume_failure(
-    failure: NativeSessionResumeFailure,
-) -> NativeSessionOutcome {
-    match failure {
-        NativeSessionResumeFailure::Incompatible => NativeSessionOutcome::Incompatible,
-        NativeSessionResumeFailure::Ambiguous => NativeSessionOutcome::Ambiguous,
     }
 }
 
@@ -9128,8 +9259,6 @@ async fn run_core(
         database: Mutex::new(database),
         runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
         runtime_usage_flush: Mutex::new(()),
-        monitoring_evidence_counts: StdMutex::new(MonitoringEvidenceCountBuffer::default()),
-        monitoring_evidence_flush: Mutex::new(()),
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
         runtime_discovery: RwLock::new(
@@ -9147,11 +9276,9 @@ async fn run_core(
                 .collect(),
         ),
         runtime_product_diagnostics: RwLock::new(BTreeMap::new()),
-        runtime_checking: RwLock::new(BTreeSet::new()),
-        runtime_checks_scheduled: RwLock::new(BTreeSet::new()),
+        runtime_check_activity: RwLock::new(BTreeMap::new()),
         runtime_check_requests: runtime_check_tx,
         compaction_detector_policies: compaction_detector_policies.clone(),
-        runtime_resolution_notify: Notify::new(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
         skill_library,
@@ -10907,51 +11034,91 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
 }
 
 fn public_acp_tool_output(update: &Value) -> Option<String> {
-    match update.get("content")? {
-        Value::String(text) => Some(text.clone()),
+    public_acp_content_text(update.get("content")).or_else(|| {
+        let raw_output = update.get("rawOutput")?.as_object()?;
+        let mut public = Vec::new();
+        for field in ["stdout", "stderr", "output", "text"] {
+            let Some(text) = public_acp_content_text(raw_output.get(field)) else {
+                continue;
+            };
+            if !public.iter().any(|existing| existing == &text) {
+                public.push(text);
+            }
+        }
+        (!public.is_empty()).then(|| public.join("\n"))
+    })
+}
+
+fn public_acp_content_text(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    match value {
+        Value::String(text) => nonempty_public_text(text),
         Value::Array(blocks) => {
             let text = blocks
                 .iter()
-                .filter_map(|block| match block {
-                    Value::String(text) => Some(text.as_str()),
-                    Value::Object(block)
-                        if block
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .is_none_or(|kind| kind == "text") =>
-                    {
-                        block.get("text").and_then(Value::as_str).or_else(|| {
-                            block
-                                .get("content")
-                                .and_then(|content| content.get("text"))
-                                .and_then(Value::as_str)
-                        })
-                    }
-                    _ => None,
-                })
+                .filter_map(|block| public_acp_content_text(Some(block)))
                 .collect::<Vec<_>>()
                 .join("\n");
-            (!text.is_empty()).then_some(text)
+            nonempty_public_text(&text)
         }
-        Value::Object(block)
-            if block
-                .get("type")
-                .and_then(Value::as_str)
-                .is_none_or(|kind| kind == "text") =>
-        {
-            block
+        Value::Object(block) => match block.get("type").and_then(Value::as_str) {
+            Some("content") => public_acp_content_text(block.get("content")),
+            Some("text") => block
                 .get("text")
                 .and_then(Value::as_str)
-                .or_else(|| {
-                    block
-                        .get("content")
-                        .and_then(|content| content.get("text"))
-                        .and_then(Value::as_str)
-                })
-                .map(str::to_string)
-        }
+                .and_then(nonempty_public_text),
+            // ACP terminal content is only a display anchor owned by the Agent.
+            // Rovai advertises no Client Terminal capability and must not treat a
+            // terminalId (or a diff/resource payload) as public command output.
+            Some("terminal" | "diff" | "image" | "audio" | "resource" | "resource_link") => None,
+            Some(_) => None,
+            // Preserve the small legacy shapes emitted by older ACP adapters,
+            // while still refusing to walk arbitrary untyped object fields.
+            None => block
+                .get("text")
+                .and_then(Value::as_str)
+                .and_then(nonempty_public_text)
+                .or_else(|| public_acp_content_text(block.get("content"))),
+        },
         _ => None,
     }
+}
+
+fn nonempty_public_text(text: &str) -> Option<String> {
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+async fn process_one_shot_runtime_event(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    adapter_kind: AdapterKind,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    event_type: &str,
+    payload: &Value,
+) -> Result<()> {
+    let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
+        return Ok(());
+    };
+    let Some(evidence) =
+        persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, payload).await?
+    else {
+        return Ok(());
+    };
+    emit(
+        output,
+        event_type,
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "adapterKind": adapter_kind,
+            "nativeMethod": "stream-json",
+            "evidenceId": evidence.id,
+            "payload": evidence.payload,
+            "canonical": evidence.canonical,
+        }),
+    );
+    Ok(())
 }
 
 async fn persist_runtime_evidence(
@@ -10973,12 +11140,7 @@ async fn persist_runtime_evidence(
         event_type,
         payload,
     )?;
-    if let Some(recorded) = recorded {
-        core.observe_monitoring_evidence(&recorded);
-        Ok(Some(recorded.into_evidence()))
-    } else {
-        Ok(None)
-    }
+    Ok(recorded.map(RecordedExecutionEvidence::into_evidence))
 }
 
 async fn persist_prepared_runtime_evidence_batch(
@@ -10997,12 +11159,7 @@ async fn persist_prepared_runtime_evidence_batch(
     drop(database);
     Ok(recorded
         .into_iter()
-        .map(|recorded| {
-            recorded.map(|recorded| {
-                core.observe_monitoring_evidence(&recorded);
-                recorded.into_evidence()
-            })
-        })
+        .map(|recorded| recorded.map(RecordedExecutionEvidence::into_evidence))
         .collect())
 }
 
@@ -11774,15 +11931,9 @@ async fn buffer_runtime_usage(
     if observations.is_empty() {
         return Ok(());
     }
-    let run = {
-        let database = core.database.lock().await;
-        MonitoringService::enrolled_usage_run(&database, agent_run_id, execution_epoch)?
-    };
-    let Some(run) = run else {
-        return Ok(());
-    };
-    core.runtime_usage.lock().await.observe_run(
-        &run,
+    core.runtime_usage.lock().await.observe_registered_run(
+        agent_run_id,
+        execution_epoch,
         source_identity,
         observations,
         Instant::now(),
@@ -11817,7 +11968,6 @@ async fn flush_runtime_usage(
     match persistence {
         Ok(inserted) => {
             let mut usage = core.runtime_usage.lock().await;
-            usage.complete(&batches);
             usage.finish_idle_target_after_flush(&target);
             drop(usage);
             if inserted > 0 && notify_monitoring {
@@ -11836,54 +11986,13 @@ async fn flush_runtime_usage(
     }
 }
 
-async fn flush_monitoring_evidence_counts(
-    core: &Core,
-    target: MonitoringEvidenceCountFlushTarget,
-) -> Result<usize> {
-    let _flush_guard = core.monitoring_evidence_flush.lock().await;
-    let needs_flush = core
-        .monitoring_evidence_counts
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .needs_flush(&target);
-    if !needs_flush {
-        return Ok(0);
-    }
-    // Evidence admission records the durable row while holding the Database
-    // Mutex, then increments this in-memory buffer. Preserve the same lock
-    // order here so an exact terminal reconciliation cannot include a newer
-    // Evidence row while leaving its buffered increment pending for a second
-    // application.
-    let mut database = core.database.lock().await;
-    let flush = {
-        core.monitoring_evidence_counts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .drain(target)
-    };
-    if flush.is_empty() {
-        return Ok(0);
-    }
-    let persistence = MonitoringService::record_evidence_count_flush(&mut database, &flush);
-    match persistence {
-        Ok(changed) => Ok(changed),
-        Err(error) => {
-            core.monitoring_evidence_counts
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .restore(flush)?;
-            Err(error)
-        }
-    }
-}
-
 async fn flush_runtime_monitoring_run(
     core: &Core,
     agent_run_id: &str,
     execution_epoch: i64,
     reason: &'static str,
-) -> Result<(usize, usize)> {
-    let usage = flush_runtime_usage(
+) -> Result<usize> {
+    flush_runtime_usage(
         core,
         RuntimeUsageFlushTarget::Run {
             agent_run_id: agent_run_id.to_string(),
@@ -11892,23 +12001,7 @@ async fn flush_runtime_monitoring_run(
         reason,
         true,
     )
-    .await;
-    let evidence = flush_monitoring_evidence_counts(
-        core,
-        MonitoringEvidenceCountFlushTarget::Run {
-            agent_run_id: agent_run_id.to_string(),
-            execution_epoch,
-        },
-    )
-    .await;
-    match (usage, evidence) {
-        (Ok(usage), Ok(evidence)) => Ok((usage, evidence)),
-        (Err(usage), Ok(_)) => Err(usage),
-        (Ok(_), Err(evidence)) => Err(evidence),
-        (Err(usage), Err(evidence)) => Err(anyhow::anyhow!(
-            "Runtime Usage flush failed: {usage:#}; Monitoring Evidence count flush failed: {evidence:#}"
-        )),
-    }
+    .await
 }
 
 async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::Receiver<()>) {
@@ -11917,6 +12010,11 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
         RUNTIME_USAGE_FLUSH_INTERVAL,
     );
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut retention_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(24 * 60 * 60),
+        Duration::from_secs(24 * 60 * 60),
+    );
+    retention_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -11928,11 +12026,14 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                 ).await {
                     eprintln!("periodic Runtime Usage flush failed: {error:#}");
                 }
-                if let Err(error) = flush_monitoring_evidence_counts(
-                    &core,
-                    MonitoringEvidenceCountFlushTarget::Periodic,
-                ).await {
-                    eprintln!("periodic Monitoring Evidence count flush failed: {error:#}");
+            }
+            _ = retention_interval.tick() => {
+                let result = {
+                    let mut database = core.database.lock().await;
+                    MonitoringService::purge_expired(&mut database)
+                };
+                if let Err(error) = result {
+                    eprintln!("Runtime Usage retention cleanup failed: {error:#}");
                 }
             }
             _ = &mut shutdown => {
@@ -11943,12 +12044,6 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     false,
                 ).await {
                     eprintln!("terminal Runtime Usage shutdown flush failed: {error:#}");
-                }
-                if let Err(error) = flush_monitoring_evidence_counts(
-                    &core,
-                    MonitoringEvidenceCountFlushTarget::All,
-                ).await {
-                    eprintln!("terminal Monitoring Evidence count shutdown flush failed: {error:#}");
                 }
                 break;
             }
@@ -12937,59 +13032,296 @@ async fn process_agent_run_scheduler(
 
 async fn process_runtime_check_manager(
     core: Arc<Core>,
-    mut requests: mpsc::UnboundedReceiver<AdapterKind>,
+    mut requests: mpsc::UnboundedReceiver<RuntimeCheckRequest>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
-    let mut checks = tokio::task::JoinSet::new();
-    let mut expiry_interval = tokio::time::interval_at(
-        tokio::time::Instant::now() + Duration::from_secs(60),
-        Duration::from_secs(60),
-    );
-    expiry_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut checks: tokio::task::JoinSet<RuntimeCheckWorkerResult> = tokio::task::JoinSet::new();
+    let mut active: HashMap<tokio::task::Id, RuntimeCheckAttempt> = HashMap::new();
+    let mut pending: Vec<RuntimeCheckAttempt> = Vec::new();
     loop {
         tokio::select! {
             request = requests.recv() => {
-                let Some(kind) = request else { break };
-                let check_core = core.clone();
-                checks.spawn(async move {
-                    let result = check_core
-                        .resolve_product_runtime(kind, RuntimeLaunchPurpose::AvailabilityCheck)
-                        .await;
-                    check_core.runtime_checks_scheduled.write().await.remove(&kind);
-                    (kind, result)
-                });
-            },
-            completed = checks.join_next(), if !checks.is_empty() => {
-                match completed {
-                    Some(Ok((kind, Err(error)))) => {
-                        eprintln!(
-                            "background Runtime check failed for {}: {error:#}",
-                            kind.as_str()
-                        );
+                let Some(request) = request else { break };
+                if let Some(existing) = pending
+                    .iter_mut()
+                    .find(|attempt| attempt.runtime_kind == request.runtime_kind)
+                {
+                    if request.trigger > existing.trigger {
+                        existing.trigger = request.trigger;
+                        existing.purpose = request.purpose;
                     }
-                    Some(Ok((kind, Ok(true)))) => {
-                        if let Err(error) = core.pump_runtime_ready_recipients(kind).await {
-                            eprintln!(
-                                "failed to pump Message Deliveries after Runtime {} became ready: {error:#}",
-                                kind.as_str()
-                            );
+                    if let Some(completion) = request.completion {
+                        existing.waiters.push(completion);
+                    }
+                    let _ = request.acknowledged.send(false);
+                    continue;
+                }
+                if let Some(existing) = active
+                    .values_mut()
+                    .find(|attempt| attempt.runtime_kind == request.runtime_kind)
+                {
+                    if let Some(completion) = request.completion {
+                        existing.waiters.push(completion);
+                    }
+                    let _ = request.acknowledged.send(false);
+                    continue;
+                }
+
+                let attempt_id = uuid::Uuid::new_v4().to_string();
+                let started_at = tokio::time::Instant::now();
+                let deadline = started_at + RUNTIME_CHECK_TOTAL_DEADLINE;
+                let deadline_at = chrono::Utc::now()
+                    + chrono::Duration::from_std(RUNTIME_CHECK_TOTAL_DEADLINE)
+                        .unwrap_or_else(|_| chrono::Duration::seconds(90));
+                let mut waiters = Vec::new();
+                if let Some(completion) = request.completion {
+                    waiters.push(completion);
+                }
+                let attempt = RuntimeCheckAttempt {
+                    attempt_id: attempt_id.clone(),
+                    runtime_kind: request.runtime_kind,
+                    purpose: request.purpose,
+                    trigger: request.trigger,
+                    started_at,
+                    deadline,
+                    waiters,
+                };
+                core.runtime_check_activity.write().await.insert(
+                    request.runtime_kind,
+                    RuntimeCheckActivity {
+                        attempt_id,
+                        runtime_kind: request.runtime_kind,
+                        deadline: deadline_at,
+                        running: false,
+                    },
+                );
+                emit(
+                    &core.output,
+                    "runtime.availability.updated",
+                    json!({ "runtimeKind": request.runtime_kind, "status": "checking" }),
+                );
+                pending.push(attempt);
+                let _ = request.acknowledged.send(true);
+            },
+            completed = checks.join_next_with_id(), if !checks.is_empty() => {
+                match completed {
+                    Some(Ok((task_id, worker))) => {
+                        if let Some(attempt) = active.remove(&task_id) {
+                            if worker.attempt_id != attempt.attempt_id
+                                || worker.runtime_kind != attempt.runtime_kind
+                            {
+                                finalize_runtime_check(
+                                    &core,
+                                    attempt,
+                                    Err("runtime_check_attempt_identity_mismatch".to_string()),
+                                    RuntimeCheckFinalization::Supervisor,
+                                )
+                                .await;
+                            } else {
+                                finalize_runtime_check(
+                                    &core,
+                                    attempt,
+                                    worker.result,
+                                    worker.finalization,
+                                )
+                                .await;
+                            }
                         }
                     }
                     Some(Err(error)) => {
-                        eprintln!("background Runtime check worker failed: {error}");
+                        let task_id = error.id();
+                        if let Some(attempt) = active.remove(&task_id) {
+                            let diagnostic = if error.is_cancelled() {
+                                "runtime_check_cancelled"
+                            } else if error.is_panic() {
+                                "runtime_check_worker_panicked"
+                            } else {
+                                "runtime_check_join_failed"
+                            };
+                            let finalization = if error.is_cancelled() {
+                                RuntimeCheckFinalization::CleanupOnly
+                            } else {
+                                RuntimeCheckFinalization::Supervisor
+                            };
+                            finalize_runtime_check(
+                                &core,
+                                attempt,
+                                Err(diagnostic.to_string()),
+                                finalization,
+                            )
+                            .await;
+                        }
                     }
-                    _ => {}
+                    None => {}
                 }
-            },
-            _ = expiry_interval.tick() => {
-                core.schedule_expired_runtime_checks().await;
             },
             _ = &mut shutdown => break,
         }
+
+        while runtime_check_has_capacity(active.len()) && !pending.is_empty() {
+            let next = pending
+                .iter()
+                .enumerate()
+                .max_by_key(|(_, attempt)| attempt.trigger)
+                .map(|(index, _)| index)
+                .expect("pending Runtime attempt index must exist");
+            let attempt = pending.swap_remove(next);
+            if let Some(activity) = core
+                .runtime_check_activity
+                .write()
+                .await
+                .get_mut(&attempt.runtime_kind)
+                .filter(|activity| activity.attempt_id == attempt.attempt_id)
+            {
+                activity.running = true;
+            }
+            let check_core = core.clone();
+            let worker_attempt_id = attempt.attempt_id.clone();
+            let worker_kind = attempt.runtime_kind;
+            let worker_purpose = attempt.purpose;
+            let worker_deadline = attempt.deadline;
+            let abort_handle = checks.spawn(async move {
+                let (result, finalization) = match tokio::time::timeout_at(
+                    worker_deadline,
+                    check_core.run_product_runtime_resolution(worker_kind, worker_purpose),
+                )
+                .await
+                {
+                    Ok(Ok(ready)) => (Ok(ready), RuntimeCheckFinalization::Product),
+                    Ok(Err(error)) => (
+                        Err(format!("runtime_check_failed: {error:#}")),
+                        RuntimeCheckFinalization::Product,
+                    ),
+                    Err(_) => (
+                        Err("runtime_check_timed_out".to_string()),
+                        RuntimeCheckFinalization::Supervisor,
+                    ),
+                };
+                RuntimeCheckWorkerResult {
+                    attempt_id: worker_attempt_id,
+                    runtime_kind: worker_kind,
+                    result,
+                    finalization,
+                }
+            });
+            active.insert(abort_handle.id(), attempt);
+        }
     }
+
     checks.abort_all();
-    while checks.join_next().await.is_some() {}
-    core.runtime_checks_scheduled.write().await.clear();
+    while let Some(completed) = checks.join_next_with_id().await {
+        let task_id = match completed {
+            Ok((task_id, _)) => task_id,
+            Err(error) => error.id(),
+        };
+        if let Some(attempt) = active.remove(&task_id) {
+            finalize_runtime_check(
+                &core,
+                attempt,
+                Err("runtime_check_shutdown".to_string()),
+                RuntimeCheckFinalization::CleanupOnly,
+            )
+            .await;
+        }
+    }
+    for attempt in pending {
+        finalize_runtime_check(
+            &core,
+            attempt,
+            Err("runtime_check_shutdown".to_string()),
+            RuntimeCheckFinalization::CleanupOnly,
+        )
+        .await;
+    }
+}
+
+async fn finalize_runtime_check(
+    core: &Core,
+    attempt: RuntimeCheckAttempt,
+    result: std::result::Result<bool, String>,
+    finalization: RuntimeCheckFinalization,
+) {
+    let owns_terminal = {
+        let mut activity = core.runtime_check_activity.write().await;
+        take_runtime_check_activity(&mut activity, attempt.runtime_kind, &attempt.attempt_id)
+    };
+    if !owns_terminal {
+        for waiter in attempt.waiters {
+            let _ = waiter.send(result.clone());
+        }
+        return;
+    }
+
+    if let Err(diagnostic_code) = &result
+        && runtime_check_writes_diagnostic(finalization)
+    {
+        core.runtime_product_diagnostics
+            .write()
+            .await
+            .entry(attempt.runtime_kind)
+            .or_insert_with(|| ProductRuntimeDiagnostic {
+                status: "needs_attention",
+                diagnostic_code: diagnostic_code.clone(),
+                priority: 2,
+            });
+        eprintln!(
+            "Runtime check {} for {} finalized with {} after {} ms",
+            attempt.attempt_id,
+            attempt.runtime_kind.as_str(),
+            diagnostic_code,
+            attempt.started_at.elapsed().as_millis(),
+        );
+    }
+
+    let event_status = core
+        .current_runtime_availability_status(attempt.runtime_kind)
+        .await;
+    emit(
+        &core.output,
+        "runtime.availability.updated",
+        json!({
+            "runtimeKind": attempt.runtime_kind,
+            "status": event_status,
+        }),
+    );
+
+    if result.as_ref().is_ok_and(|ready| *ready)
+        && let Err(error) = core
+            .pump_runtime_ready_recipients(attempt.runtime_kind)
+            .await
+    {
+        eprintln!(
+            "failed to pump Message Deliveries after Runtime {} became ready: {error:#}",
+            attempt.runtime_kind.as_str()
+        );
+    }
+    for waiter in attempt.waiters {
+        let _ = waiter.send(result.clone());
+    }
+}
+
+fn take_runtime_check_activity(
+    activity: &mut BTreeMap<AdapterKind, RuntimeCheckActivity>,
+    runtime_kind: AdapterKind,
+    attempt_id: &str,
+) -> bool {
+    if activity
+        .get(&runtime_kind)
+        .is_some_and(|current| current.attempt_id == attempt_id)
+    {
+        activity.remove(&runtime_kind);
+        true
+    } else {
+        false
+    }
+}
+
+fn runtime_check_has_capacity(active_count: usize) -> bool {
+    active_count < RUNTIME_CHECK_MAX_CONCURRENCY
+}
+
+fn runtime_check_writes_diagnostic(finalization: RuntimeCheckFinalization) -> bool {
+    finalization != RuntimeCheckFinalization::CleanupOnly
 }
 
 #[cfg(unix)]
@@ -13413,6 +13745,111 @@ fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_check_activity_has_two_slots_and_one_terminal_owner() {
+        assert!(runtime_check_has_capacity(0));
+        assert!(runtime_check_has_capacity(1));
+        assert!(!runtime_check_has_capacity(2));
+
+        let mut activity = BTreeMap::from([(
+            AdapterKind::QwenCode,
+            RuntimeCheckActivity {
+                attempt_id: "attempt-new".to_string(),
+                runtime_kind: AdapterKind::QwenCode,
+                deadline: chrono::Utc::now(),
+                running: true,
+            },
+        )]);
+        assert!(!take_runtime_check_activity(
+            &mut activity,
+            AdapterKind::QwenCode,
+            "attempt-old",
+        ));
+        assert!(take_runtime_check_activity(
+            &mut activity,
+            AdapterKind::QwenCode,
+            "attempt-new",
+        ));
+        assert!(!take_runtime_check_activity(
+            &mut activity,
+            AdapterKind::QwenCode,
+            "attempt-new",
+        ));
+        assert!(activity.is_empty());
+    }
+
+    #[tokio::test]
+    async fn runtime_check_task_ids_clear_activity_after_success_panic_abort_and_shutdown() {
+        let mut tasks = tokio::task::JoinSet::new();
+        let success = tasks.spawn(async {});
+        let panic = tasks.spawn(async { panic!("injected Runtime check panic") });
+        let aborted = tasks.spawn(async { std::future::pending::<()>().await });
+        let mut task_kinds = HashMap::from([
+            (success.id(), AdapterKind::CodexCli),
+            (panic.id(), AdapterKind::QwenCode),
+            (aborted.id(), AdapterKind::ClaudeCodeCli),
+        ]);
+        let mut activity = task_kinds
+            .iter()
+            .map(|(task_id, runtime_kind)| {
+                (
+                    *runtime_kind,
+                    RuntimeCheckActivity {
+                        attempt_id: format!("attempt-{task_id}"),
+                        runtime_kind: *runtime_kind,
+                        deadline: chrono::Utc::now(),
+                        running: true,
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        aborted.abort();
+
+        let mut terminal_events = 0;
+        while let Some(completed) = tasks.join_next_with_id().await {
+            let task_id = match completed {
+                Ok((task_id, ())) => task_id,
+                Err(error) => error.id(),
+            };
+            let runtime_kind = task_kinds
+                .remove(&task_id)
+                .expect("task id must retain its Runtime attempt");
+            terminal_events += usize::from(take_runtime_check_activity(
+                &mut activity,
+                runtime_kind,
+                &format!("attempt-{task_id}"),
+            ));
+        }
+        let shutdown_kind = AdapterKind::TraeCnCli;
+        activity.insert(
+            shutdown_kind,
+            RuntimeCheckActivity {
+                attempt_id: "attempt-shutdown".to_string(),
+                runtime_kind: shutdown_kind,
+                deadline: chrono::Utc::now(),
+                running: false,
+            },
+        );
+        terminal_events += usize::from(take_runtime_check_activity(
+            &mut activity,
+            shutdown_kind,
+            "attempt-shutdown",
+        ));
+
+        assert_eq!(terminal_events, 4);
+        assert!(task_kinds.is_empty());
+        assert!(activity.is_empty());
+        assert!(runtime_check_writes_diagnostic(
+            RuntimeCheckFinalization::Product
+        ));
+        assert!(runtime_check_writes_diagnostic(
+            RuntimeCheckFinalization::Supervisor
+        ));
+        assert!(!runtime_check_writes_diagnostic(
+            RuntimeCheckFinalization::CleanupOnly
+        ));
+    }
 
     #[test]
     fn runtime_delta_batching_is_bounded_and_stops_at_durable_boundaries() {
@@ -13938,105 +14375,6 @@ mod tests {
     }
 
     #[test]
-    fn registered_runtime_refresh_uses_the_last_successful_probe_and_retry_backoff() {
-        let now = chrono::Utc::now();
-        let fresh =
-            managed_runtime_fixture(&(now - chrono::Duration::hours(23)).to_rfc3339(), None);
-        assert!(!registered_runtime_refresh_is_due(&fresh, now));
-
-        let due = managed_runtime_fixture(&(now - chrono::Duration::hours(24)).to_rfc3339(), None);
-        assert!(registered_runtime_refresh_is_due(&due, now));
-
-        let retry_at = (now + chrono::Duration::minutes(5)).to_rfc3339();
-        let deferred = managed_runtime_fixture(
-            &(now - chrono::Duration::hours(30)).to_rfc3339(),
-            Some(&retry_at),
-        );
-        assert!(registered_runtime_refresh_is_due(&deferred, now));
-        assert!(probe_retry_is_deferred(&deferred, now));
-        assert!(
-            managed_installation_is_usable(&deferred),
-            "a transient refresh failure retains the last successful snapshot"
-        );
-    }
-
-    #[test]
-    fn trae_refresh_cadence_uses_the_latest_static_identity_check() {
-        let now = chrono::Utc::now();
-        let mut installation =
-            managed_runtime_fixture(&(now - chrono::Duration::hours(48)).to_rfc3339(), None);
-        installation.adapter_kind = AdapterKind::TraeCnCli;
-        installation.updated_at = (now - chrono::Duration::hours(23)).to_rfc3339();
-
-        assert!(!registered_runtime_refresh_is_due(&installation, now));
-        installation.updated_at = (now - chrono::Duration::hours(24)).to_rfc3339();
-        assert!(registered_runtime_refresh_is_due(&installation, now));
-    }
-
-    #[test]
-    fn automatic_runtime_checks_are_limited_to_selected_or_due_registered_products() {
-        let now = chrono::Utc::now();
-        let mut fresh_registered =
-            managed_runtime_fixture(&(now - chrono::Duration::hours(23)).to_rfc3339(), None);
-        fresh_registered.adapter_kind = AdapterKind::ClaudeCodeCli;
-
-        let mut due_registered =
-            managed_runtime_fixture(&(now - chrono::Duration::hours(24)).to_rfc3339(), None);
-        due_registered.adapter_kind = AdapterKind::CopilotCli;
-
-        let retry_at = (now + chrono::Duration::minutes(5)).to_rfc3339();
-        let mut deferred_registered = managed_runtime_fixture(
-            &(now - chrono::Duration::hours(30)).to_rfc3339(),
-            Some(&retry_at),
-        );
-        deferred_registered.adapter_kind = AdapterKind::QwenCode;
-
-        let mut disabled_registered =
-            managed_runtime_fixture(&(now - chrono::Duration::hours(30)).to_rfc3339(), None);
-        disabled_registered.adapter_kind = AdapterKind::KiroCli;
-        disabled_registered.enabled = false;
-
-        let mut static_registered =
-            managed_runtime_fixture(&(now - chrono::Duration::hours(30)).to_rfc3339(), None);
-        static_registered.adapter_kind = AdapterKind::TraeCnCli;
-
-        let found = BTreeSet::from([
-            AdapterKind::CodexCli,
-            AdapterKind::OpencodeCli,
-            AdapterKind::CopilotCli,
-            AdapterKind::ClaudeCodeCli,
-            AdapterKind::KiroCli,
-            AdapterKind::QwenCode,
-            AdapterKind::TraeCnCli,
-        ]);
-        let selected = BTreeSet::from([AdapterKind::CodexCli, AdapterKind::TraeCnCli]);
-        let installations = [
-            fresh_registered,
-            due_registered,
-            deferred_registered,
-            disabled_registered,
-            static_registered,
-        ];
-
-        assert_eq!(
-            runtime_checks_after_discovery(&found, &selected, &installations, now),
-            BTreeSet::from([
-                AdapterKind::CodexCli,
-                AdapterKind::CopilotCli,
-                AdapterKind::TraeCnCli,
-            ])
-        );
-        assert_eq!(
-            registered_runtime_checks_due(&installations, now),
-            BTreeSet::from([AdapterKind::CopilotCli, AdapterKind::TraeCnCli])
-        );
-        assert!(!runtime_launch_allowed(
-            AdapterKind::TraeCnCli,
-            RuntimeLaunchPurpose::AvailabilityCheck,
-        ));
-    }
-
-    #[test]
     fn availability_prefers_a_usable_cached_result_while_background_refresh_runs() {
         let now = chrono::Utc::now();
         let installation =
@@ -14082,6 +14420,49 @@ mod tests {
     }
 
     #[test]
+    fn light_ready_is_available_until_an_explicit_check_fails_for_the_same_fingerprint() {
+        let now = chrono::Utc::now();
+        let mut installation = managed_runtime_fixture(&now.to_rfc3339(), None);
+        let snapshot = installation.snapshot.as_mut().unwrap();
+        snapshot.probe_status = "light_ready".to_string();
+        snapshot.authentication_status = "unknown".to_string();
+        snapshot.models.clear();
+        snapshot.capabilities.clear();
+        snapshot.protocols.clear();
+        snapshot.last_successful_probe_at = None;
+
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&installation),
+                None,
+                false,
+            ),
+            "light_ready"
+        );
+        installation.last_probe_attempt = Some(rovai_core::agent_profile::AdapterProbeAttempt {
+            id: "attempt-light-failed".to_string(),
+            installation_id: installation.id.clone(),
+            status: "failed".to_string(),
+            failure_class: "transient".to_string(),
+            diagnostic_code: Some("runtime_probe_transient_failure".to_string()),
+            candidate_path: installation.executable_path.clone(),
+            executable_fingerprint: Some("sha256:test".to_string()),
+            attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
+            retry_after: None,
+        });
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&installation),
+                None,
+                false,
+            ),
+            "needs_attention"
+        );
+    }
+
+    #[test]
     fn unregistered_product_probe_diagnostics_preserve_the_most_actionable_status() {
         let mut diagnostic = None;
         note_product_runtime_diagnostic(&mut diagnostic, "path_missing", "runtime_path_missing");
@@ -14102,14 +14483,6 @@ mod tests {
             "runtime_authentication_required"
         );
         assert_eq!(diagnostic.priority, 4);
-        assert!(product_runtime_diagnostic_is_fresh(
-            &diagnostic,
-            chrono::Utc::now()
-        ));
-        assert!(!product_runtime_diagnostic_is_fresh(
-            &diagnostic,
-            diagnostic.observed_at + chrono::Duration::hours(24)
-        ));
     }
 
     #[test]
@@ -14279,7 +14652,10 @@ mod tests {
                     "title": "Run command",
                     "content": [{"type": "text", "text": "Visible tool progress"}],
                     "rawInput": {"command": "echo TOP_SECRET_INPUT"},
-                    "rawOutput": {"stdout": "TOP_SECRET_OUTPUT"}
+                    "rawOutput": {
+                        "stdout": "unused public fallback",
+                        "credential": "TOP_SECRET_OUTPUT"
+                    }
                 }
             }),
         );
@@ -14291,6 +14667,92 @@ mod tests {
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+    }
+
+    #[test]
+    fn acp_command_output_uses_standard_content_and_allowlisted_raw_fallbacks() {
+        let fixtures = [
+            (
+                "opencode-cli",
+                json!({
+                    "content": [{"type": "text", "text": "OPENCODE_PRINTF_OK"}],
+                    "rawOutput": {"secret": "OPENCODE_MUST_NOT_LEAK"}
+                }),
+                "OPENCODE_PRINTF_OK",
+                "OPENCODE_MUST_NOT_LEAK",
+            ),
+            (
+                "copilot-cli",
+                json!({
+                    "content": [{
+                        "type": "content",
+                        "content": {"type": "text", "text": "COPILOT_PRINTF_OK"}
+                    }],
+                    "rawOutput": {"token": "COPILOT_MUST_NOT_LEAK"}
+                }),
+                "COPILOT_PRINTF_OK",
+                "COPILOT_MUST_NOT_LEAK",
+            ),
+            (
+                "trae-cn-cli",
+                json!({
+                    "content": [{"type": "terminal", "terminalId": "private-terminal"}],
+                    "rawOutput": {
+                        "stdout": "TRAE_PRINTF_OK",
+                        "stderr": "TRAE_STDERR_OK",
+                        "environment": "TRAE_MUST_NOT_LEAK"
+                    }
+                }),
+                "TRAE_PRINTF_OK\nTRAE_STDERR_OK",
+                "TRAE_MUST_NOT_LEAK",
+            ),
+        ];
+
+        for (adapter_kind, fixture, expected_output, secret) in fixtures {
+            let (_, payload) = normalize_acp_event(
+                "session/update",
+                &json!({
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": format!("{adapter_kind}-printf"),
+                        "status": "completed",
+                        "kind": "execute",
+                        "title": "Run fixed printf",
+                        "content": fixture.get("content"),
+                        "rawOutput": fixture.get("rawOutput"),
+                    }
+                }),
+            );
+            let serialized = serde_json::to_string(&payload).expect("payload should serialize");
+            assert_eq!(payload["output"], expected_output, "{adapter_kind}");
+            assert!(!serialized.contains(secret), "{adapter_kind}");
+            assert!(payload["rawOutputDigest"].is_string(), "{adapter_kind}");
+        }
+    }
+
+    #[test]
+    fn acp_terminal_content_is_never_misrepresented_as_command_output() {
+        let (_, payload) = normalize_acp_event(
+            "session/update",
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "terminal-only",
+                    "status": "completed",
+                    "kind": "execute",
+                    "content": [{
+                        "type": "terminal",
+                        "terminalId": "terminal-secret-identity"
+                    }]
+                }
+            }),
+        );
+        assert!(payload["output"].is_null());
+        assert!(
+            !serde_json::to_string(&payload)
+                .expect("payload should serialize")
+                .contains("terminal-secret-identity")
+        );
     }
 
     #[test]

@@ -30,7 +30,7 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 10] = [
     descriptor(
         AdapterKind::ClaudeCodeCli,
         "claude-stream-json",
-        "run_level",
+        "fine_grained",
         "claude-code",
     ),
     descriptor(AdapterKind::KiroCli, "acp-v1", "fine_grained", "acp"),
@@ -40,7 +40,7 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 10] = [
     descriptor(AdapterKind::TraeCnCli, "acp-v1", "fine_grained", "acp"),
     descriptor(
         AdapterKind::AntigravityApp,
-        "antigravity-log",
+        "antigravity-stream-json-or-text",
         "run_level",
         "antigravity",
     ),
@@ -277,10 +277,10 @@ mod tests {
     }
 
     #[test]
-    fn run_level_adapters_are_declared_without_invented_tool_coverage() {
+    fn structured_and_legacy_one_shot_coverage_remain_explicit() {
         assert_eq!(
             descriptor_for(AdapterKind::ClaudeCodeCli).baseline_coverage,
-            "run_level"
+            "fine_grained"
         );
         assert_eq!(
             descriptor_for(AdapterKind::AntigravityApp).baseline_coverage,

@@ -59,6 +59,8 @@ export interface AdapterCapabilitySnapshot {
   authenticationStatus: string
   probeStatus:
     | 'ready'
+    | 'light_ready'
+    | 'light_failed'
     | 'installed_unverified'
     | 'not_installed'
     | 'authentication_required'
@@ -170,6 +172,7 @@ export interface MemberRuntimeConfiguration {
 export type RuntimeReadinessStatus =
   | 'runtime_not_configured'
   | 'needs_attention'
+  | 'light_ready'
   | 'installed_unverified'
   | 'ready'
 
@@ -318,11 +321,13 @@ export type ProductRuntimeAvailabilityStatus =
   | 'detecting'
   | 'missing'
   | 'found_uninspected'
+  | 'light_ready'
   | 'installed_unverified'
   | 'checking'
   | 'ready'
   | 'authentication_required'
   | 'incompatible'
+  | 'needs_attention'
   | 'path_missing'
   | 'disabled'
   | 'refresh_failed_using_last_success'
@@ -402,205 +407,99 @@ export interface DiagnosticsReport {
 }
 
 export type MonitoringRange = '24h' | '7d' | '30d'
-export type MonitoringAvailability = 'available' | 'partial' | 'unavailable'
 
 export interface MonitoringFilter {
   range: MonitoringRange
-  adapterKind?: AdapterKind
-  agentId?: string
-  terminalStatus?: 'succeeded' | 'failed' | 'cancelled'
+  runtimeKind?: AdapterKind
+  providerKey?: string
+  modelKey?: string
+  costKind?: string
 }
 
-export interface MonitoringCollectionBoundary {
-  schemaVersion: 1
-  collectionEpoch: string
-  collectionStartedAt: string
-  requestedStartAt: string
-  effectiveStartAt: string
-  endAt: string
-  observedAt: string
+export interface RuntimeUsageCoverageValue {
+  eligibleRuns: number
+  observedRuns: number
 }
 
-export interface MonitoringMetric<T = number> {
-  availability: MonitoringAvailability
-  value: T | null
-  numerator: number | null
-  denominator: number | null
-  observedCount: number
-  eligibleCount: number
-  coverage: number | null
-  source: string
-  quality: string[]
-  latestObservedAt: string | null
-  diagnosticCode: string | null
-}
-
-export interface MonitoringMoneyValue {
+export interface RuntimeUsageMoneyValue {
   amount: string
   currency: string
-  quality: string
-  grain: string
-  pricingCatalogVersion: string | null
-  reconciledThrough: string | null
+  kind: string
+  source: string
 }
 
-export interface MonitoringAttentionSummary {
-  total: number
-  activeWithoutVisibleActivity: number
-  deliveryUnknown: number
-  pendingApprovals: number
+export interface RuntimeUsageCostSummary {
+  run: RuntimeUsageMoneyValue[]
+  reconciliation: RuntimeUsageMoneyValue[]
+  latestReconciledAt: string | null
+  difference: Array<{ amount: string; currency: string }>
 }
 
-export interface MonitoringTrendBucket {
-  startAt: string
-  endAt: string
-  runs: number
-  succeeded: number
-  failed: number
-  cancelled: number
-}
-
-export interface MonitoringRuntimeSummaryRow {
-  adapterKind: AdapterKind
-  runs: number
-  activeRuns: number
-  successRate: MonitoringMetric<number>
-  endToEndP95Millis: MonitoringMetric<number>
-}
-
-export interface MonitoringSummaryView {
-  schemaVersion: 1
-  collection: MonitoringCollectionBoundary
-  filter: MonitoringFilter
-  runs: MonitoringMetric<number>
-  activeRuns: MonitoringMetric<number>
-  successRate: MonitoringMetric<number>
-  endToEndP95Millis: MonitoringMetric<number>
-  nativeSessionContinuationRate: MonitoringMetric<number>
-  cacheReadTokenShare: MonitoringMetric<number>
-  bestAvailableCost: MonitoringMetric<MonitoringMoneyValue[]>
-  trend: MonitoringTrendBucket[]
-  terminalDistribution: {
-    succeeded: number
-    failed: number
-    cancelled: number
-    active: number
-  }
-  byRuntime: MonitoringRuntimeSummaryRow[]
-  attention: MonitoringAttentionSummary
-}
-
-export interface MonitoringUsageBreakdownRow {
-  adapterKind: AdapterKind
-  modelId: string
-  observedRunCount: number
-  eligibleRunCount: number
-  coverage: number | null
-  inputTokens: number | null
+export interface RuntimeUsageSummary {
+  promptInputTotalTokens: number | null
+  uncachedInputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
   outputTokens: number | null
   reasoningOutputTokens: number | null
-  cacheReadInputTokens: number | null
-  cacheWriteInputTokens: number | null
+  cacheReadShare: number | null
+  requestCacheHitRate: number | null
+  cost: RuntimeUsageCostSummary | null
 }
 
-export interface MonitoringCostLayerView {
-  quality: string
-  grain: string
-  values: MonitoringMoneyValue[]
-  observedCount: number
-  eligibleCount: number
-  coverage: number | null
+export interface RuntimeUsageTrendPoint {
+  bucketStartAt: string
+  promptInputTotalTokens: number | null
+  uncachedInputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+  outputTokens: number | null
+  reasoningOutputTokens: number | null
+  cacheReadShare: number | null
+  requestCacheHitRate: number | null
+  cost: RuntimeUsageMoneyValue[] | null
 }
 
-export interface MonitoringUsageView {
-  schemaVersion: 1
-  collection: MonitoringCollectionBoundary
-  filter: MonitoringFilter
-  inputTokens: MonitoringMetric<number>
-  outputTokens: MonitoringMetric<number>
-  reasoningOutputTokens: MonitoringMetric<number>
-  cacheReadInputTokens: MonitoringMetric<number>
-  cacheWriteInputTokens: MonitoringMetric<number>
-  cacheReadTokenShare: MonitoringMetric<number>
-  requestCacheHitRate: MonitoringMetric<number>
-  cacheReadWriteAmortization: MonitoringMetric<number>
-  contextUsageRate: MonitoringMetric<number>
-  cacheSavingsEstimate: MonitoringMetric<MonitoringMoneyValue[]>
-  costLayers: MonitoringCostLayerView[]
-  byRuntimeAndModel: MonitoringUsageBreakdownRow[]
+export interface RuntimeUsageBreakdownRow {
+  runtimeKind: string
+  providerKey: string | null
+  modelKey: string | null
+  promptInputTotalTokens: number | null
+  uncachedInputTokens: number | null
+  cacheReadTokens: number | null
+  cacheWriteTokens: number | null
+  outputTokens: number | null
+  reasoningOutputTokens: number | null
+  cacheReadShare: number | null
+  requestCacheHitRate: number | null
+  cost: RuntimeUsageMoneyValue[]
+  coverage: RuntimeUsageCoverageValue
 }
 
-export interface MonitoringReliabilityView {
-  schemaVersion: 1
-  collection: MonitoringCollectionBoundary
-  filter: MonitoringFilter
-  queueP95Millis: MonitoringMetric<number>
-  inputAcceptanceP95Millis: MonitoringMetric<number>
-  firstVisibleActivityP95Millis: MonitoringMetric<number>
-  executionP95Millis: MonitoringMetric<number>
-  endToEndP95Millis: MonitoringMetric<number>
-  session: {
-    continuationRate: MonitoringMetric<number>
-    eligibleRuns: number
-    factCount: number
-    resumeRequested: number
-    succeeded: number
-    newSessions: number
-    rejected: number
-    incompatible: number
-    ambiguous: number
-    failed: number
-    fallbackToNewSession: number
-    unresolved: number
+export interface RuntimeUsageSnapshot {
+  schemaVersion: 2
+  collection: {
+    epoch: string
+    startedAt: string
   }
-  context: {
-    usageRate: MonitoringMetric<number>
-    deliveryAcceptedRuns: number
-    deliveryCoverage: number | null
+  range: {
+    from: string
+    to: string
   }
-  approval: {
-    requested: number
-    resolved: number
-    pending: number
-    waitP95Millis: MonitoringMetric<number>
+  summary: RuntimeUsageSummary
+  trend: RuntimeUsageTrendPoint[]
+  byRuntime: RuntimeUsageBreakdownRow[]
+  byModel: RuntimeUsageBreakdownRow[]
+  coverage: {
+    promptInputTotalTokens: RuntimeUsageCoverageValue
+    uncachedInputTokens: RuntimeUsageCoverageValue
+    cacheReadTokens: RuntimeUsageCoverageValue
+    cacheWriteTokens: RuntimeUsageCoverageValue
+    outputTokens: RuntimeUsageCoverageValue
+    reasoningOutputTokens: RuntimeUsageCoverageValue
+    requestCacheHitRate: RuntimeUsageCoverageValue
+    cost: RuntimeUsageCoverageValue
   }
-  toolDuration: {
-    eligibleCalls: number
-    pairedCalls: number
-    coverage: number | null
-    pairedElapsedMillis: number | null
-    wallClockUnionMillis: number | null
-    unpairedStartedCalls: number
-    terminalOnlyCalls: number
-    conflictingCalls: number
-    diagnosticCode?: string | null
-  }
-  activity: {
-    runCoverage: MonitoringMetric<number>
-    evidenceCount: number
-  }
-  compaction: {
-    coverage: MonitoringMetric<number>
-    observationCount: number
-  }
-  runtimeHealth: Array<{
-    adapterKind: AdapterKind
-    runCount: number
-    activeRunCount: number
-    failedRunCount: number
-    latestErrorCode: string | null
-    latestObservedAt: string | null
-  }>
-  attention: MonitoringAttentionSummary
-}
-
-export interface MonitoringSnapshot {
-  schemaVersion: 1
-  collection: MonitoringCollectionBoundary
-  filter: MonitoringFilter
-  summary: MonitoringSummaryView
-  usage: MonitoringUsageView
-  reliability: MonitoringReliabilityView
 }
 
 export type StartPreflightBlockerCode =

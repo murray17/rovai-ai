@@ -18,7 +18,7 @@ last_updated: 2026-08-17
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | Agent CLI v13、十五项固定 operation、`rovai gather`、Core Router、direct-user `member.create`、Runtime Fleet、精确 help、十三项 official Skill、peer routing Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [持久 Gather Barrier](durable-gather-barrier.md) | 一条公共请求、N 个 Item/forward Delivery、持久 return capture、原子 Barrier、Completion FIFO 与 mandatory typed Current Input 的组件权威 |
 | [Runtime Catalog Boundaries](runtime-catalog-boundaries.md) | 可执行 Product Runtime Catalog、机器 Availability 与 Renderer-only Settings Preview 的权威分层、准入和晋升边界 |
-| [Runtime Monitoring](runtime-monitoring.md) | Clean-break enrollment、Runtime Usage dialect/raw/projection/parser state、Rollup、Tool Duration、Cost layer、三个只读查询与 Renderer 边界 |
+| [Runtime Monitoring](runtime-monitoring.md) | 五表 clean-break Usage metering、内存 parser/buffer、短 Flush、稀疏 Rollup、单 Snapshot 与 Renderer 边界 |
 | [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md) | compaction detector、Session Observer、Bootstrap/Member Identity 重投递、Redelivery v2、Dynamic Context 与 accepted-input 水位 |
 | [Notification Episode](notification-episodes.md) | Occurrence/Disposition/Episode/Change Journal 原子投影、可见来源精确确认、read hydration、并发边界与保留 |
 | [Online Memory Capture](online-memory-capture.md) | best-effort Skill discovery、complete exact-Scope View、copyable target、active body aggregate quota、durable rejection、Agent Memory Facade、原子 Supersession、隔离 Hearth Review、formal publication、clean break 与 Forget 闭包 |

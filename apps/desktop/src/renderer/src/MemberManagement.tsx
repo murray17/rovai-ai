@@ -54,6 +54,7 @@ import {
   memberRuntimePresentation,
   runtimeAvailabilityPresentation,
 } from './runtime-status'
+import { requestProductRuntimeCheck } from './runtime-check'
 import {
   type PendingRuntimeSubmission,
   persistedRuntimeChangeDisposition,
@@ -267,14 +268,6 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     setNotice('Agent 运行时已清除。')
   }
 
-  const ensureRuntime = useCallback((adapterKind: AdapterKind): void => {
-    const method = adapterKind === 'trae-cn-cli'
-      ? 'runtime.product.check'
-      : 'runtime.product.ensure'
-    void window.rovai.request(method, { runtimeKind: adapterKind })
-      .catch((nextError) => setError(errorMessage(nextError)))
-  }, [])
-
   const changePresence = async (presence: 'present' | 'away'): Promise<void> => {
     if (!selectedAgent) return
     await runCommand(`presence-${presence}`, 'members.presence.set', {
@@ -462,7 +455,6 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                     onDirtyChange={setRuntimeDirty}
                     onSave={saveRuntime}
                     onClear={clearRuntime}
-                    onRuntimeEnsure={ensureRuntime}
                     onOpenRuntimeSettings={onOpenRuntimeSettings}
                   />
                 </div>
@@ -889,7 +881,6 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   onDirtyChange?(dirty: boolean): void
   onSave(adapterKind: AdapterKind, draft: MemberRuntimeDraft | null): Promise<void>
   onClear(): Promise<void>
-  onRuntimeEnsure?(adapterKind: AdapterKind): void
   onOpenRuntimeSettings(): void
 }>(function MemberRuntimeForm({
   agent,
@@ -900,7 +891,6 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   onDirtyChange,
   onSave,
   onClear,
-  onRuntimeEnsure,
   onOpenRuntimeSettings
 }, ref): React.JSX.Element {
   const initialStateRef = useRef<MemberRuntimeEditorState | null>(null)
@@ -1066,16 +1056,6 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
                 {selectedKind && <span>{runtimeStatus.label}</span>}
               </em>
               {reportedVersion && <code>{reportedVersion}</code>}
-              {selectedKind && (
-                <button
-                  className="runtime-status-refresh"
-                  type="button"
-                  disabled={runtimeDiscoveryPending || busy !== null}
-                  onClick={() => onRuntimeEnsure?.(selectedKind)}
-                >{runtimeDiscoveryPending
-                    ? selectedKind === 'trae-cn-cli' ? '正在扫描…' : '检查中…'
-                    : selectedKind === 'trae-cn-cli' ? '重新扫描安装' : '重新检查'}</button>
-              )}
             </div>
             {runtimeStatus.detail && <small className="runtime-status-detail">{runtimeStatus.detail}</small>}
             {selectedKind && (
@@ -1454,7 +1434,7 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
     setBusy(`check-${runtimeKind}`)
     setError(null)
     try {
-      await window.rovai.request('runtime.product.check', { runtimeKind })
+      await requestProductRuntimeCheck(runtimeKind)
       await onReload()
     } catch (nextError) {
       setError(errorMessage(nextError))

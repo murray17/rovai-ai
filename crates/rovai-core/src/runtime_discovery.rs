@@ -16,12 +16,13 @@ use std::{
 use anyhow::{Context, Result};
 use plist::Value as PlistValue;
 use serde::Serialize;
-use tokio::{io::AsyncReadExt, process::Command as TokioCommand, time::timeout};
+use tokio::process::Command as TokioCommand;
 use uuid::Uuid;
 
 use crate::{
     agent_profile::{AdapterKind, InstallationSource},
     agent_runtime_adapter::executable_fingerprint,
+    runtime_probe_process::{ProbeCommandLimits, run_bounded_command},
 };
 
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
@@ -394,7 +395,7 @@ pub async fn discover_runtime_version(
     {
         Ok(version) if !version.is_empty() => observation.reported_version = Some(version),
         Ok(_) => observation.diagnostic_code = Some("runtime_version_empty".to_string()),
-        Err(error) => observation.diagnostic_code = Some(error.to_string()),
+        Err(error) => observation.diagnostic_code = Some(format!("{error:#}")),
     }
     observation.observed_at = chrono::Utc::now().to_rfc3339();
 }
@@ -511,61 +512,30 @@ async fn bounded_version_command(
         anyhow::bail!("runtime_launch_disallowed_for_{purpose:?}");
     }
     let mut command = TokioCommand::new(executable);
-    command
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    command.as_std_mut().process_group(0);
+    command.args(arguments).stdin(Stdio::null());
     search.configure_tokio_command(&mut command);
-    let mut child = command.spawn().context("runtime_version_spawn_failed")?;
-    let pid = child.id();
-    let mut stdout = child
-        .stdout
-        .take()
-        .context("runtime_version_stdout_unavailable")?;
-    let reader = tokio::spawn(async move {
-        let mut kept = Vec::new();
-        let mut buffer = [0_u8; 1024];
-        loop {
-            let read = stdout.read(&mut buffer).await?;
-            if read == 0 {
-                break;
-            }
-            if kept.len() < MAX_VERSION_OUTPUT_BYTES {
-                let remaining = MAX_VERSION_OUTPUT_BYTES - kept.len();
-                kept.extend_from_slice(&buffer[..read.min(remaining)]);
-            }
-        }
-        Ok::<_, std::io::Error>(kept)
-    });
-    let status = match timeout(VERSION_TIMEOUT, child.wait()).await {
-        Ok(result) => result.context("runtime_version_wait_failed")?,
-        Err(_) => {
-            if let Some(pid) = pid {
-                // SAFETY: pid is the just-spawned child process group, never a broad or inferred
-                // target. A failed kill is followed by Child::start_kill as a fallback.
-                unsafe {
-                    libc::kill(-(pid as i32), libc::SIGKILL);
-                }
-            }
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            reader.abort();
-            anyhow::bail!("runtime_version_timed_out");
-        }
-    };
-    let output = reader
-        .await
-        .context("runtime_version_reader_join_failed")?
-        .context("runtime_version_read_failed")?;
-    if !status.success() {
+    let output = run_bounded_command(
+        &mut command,
+        ProbeCommandLimits {
+            deadline: VERSION_TIMEOUT,
+            stdout_bytes: MAX_VERSION_OUTPUT_BYTES,
+            stderr_bytes: MAX_VERSION_OUTPUT_BYTES,
+            cleanup_timeout: Duration::from_secs(1),
+        },
+    )
+    .await
+    .context("runtime_version_command_failed")?;
+    if !output.status.success() {
         anyhow::bail!("runtime_version_failed");
     }
-    let output_text = String::from_utf8_lossy(&output);
-    let first_line = output_text
+    if output.stdout.truncated || output.stderr.truncated {
+        anyhow::bail!("runtime_version_output_truncated");
+    }
+    let stdout_text = String::from_utf8_lossy(&output.stdout.bytes);
+    let stderr_text = String::from_utf8_lossy(&output.stderr.bytes);
+    let first_line = stdout_text
         .lines()
+        .chain(stderr_text.lines())
         .find(|line| !line.trim().is_empty())
         .unwrap_or_default()
         .trim();
@@ -953,6 +923,48 @@ mod tests {
             marker.exists(),
             "version enrichment is a separate bounded step"
         );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn installed_catalog_discovery_runs_only_bounded_identity_commands() {
+        let directory = env::temp_dir().join(format!(
+            "rovai-discovery-catalog-light-only-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let marker = directory.join("invocations");
+        for kind in AdapterKind::ALL {
+            executable(
+                &directory.join(kind.command_name()),
+                &format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$0:$*\" >> '{}'\nprintf '{} 1.2.3\\n'\n",
+                    marker.display(),
+                    kind.command_name()
+                ),
+            );
+        }
+        let search = test_search(vec![SearchPathEntry {
+            path: directory.clone(),
+            sources: vec![SearchPathSource::InheritedPath],
+        }]);
+
+        for kind in AdapterKind::ALL {
+            let mut observation = discover_runtime_path(kind, &search);
+            discover_runtime_version(&mut observation, &search).await;
+            if kind == AdapterKind::TraeCnCli {
+                assert_eq!(observation.reported_version, None);
+            } else {
+                assert!(observation.reported_version.is_some());
+            }
+        }
+
+        let invocations = fs::read_to_string(&marker).unwrap();
+        let lines = invocations.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), AdapterKind::ALL.len() - 1);
+        assert!(lines.iter().all(|line| line.ends_with(":--version")));
+        assert!(!invocations.contains("acp"));
+        assert!(!invocations.contains("session"));
         fs::remove_dir_all(directory).unwrap();
     }
 

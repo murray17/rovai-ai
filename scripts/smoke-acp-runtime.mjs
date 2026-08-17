@@ -179,6 +179,75 @@ try {
     })
 
     if (['opencode-cli', 'copilot-cli', 'trae-cn-cli'].includes(specification.adapterKind)) {
+      const commandMarker = `ROVAI_${specification.adapterKind.replaceAll('-', '_').toUpperCase()}_PRINTF_OK`
+      const commandRequest = await sendExistingCampMessage(
+        request,
+        camp.id,
+        `Use the Bash or terminal tool exactly once to run this command without changing files: printf '%s\\n' '${commandMarker}'. Do not call any other tool. Then immediately reply exactly ACP_COMMAND_OUTPUT_OK.`,
+        {
+          taskId: null,
+          purpose: 'Verify fixed printf command output enters Runtime Evidence',
+          completionRole: 'required'
+        }
+      )
+      const commandRunId = commandRequest.commandResult?.payload?.agentRunIds?.[0]
+      if (!commandRunId) throw new Error(`ACP command-output AgentRun was not accepted: ${JSON.stringify(commandRequest)}`)
+      const commandApprovals = new Set()
+      const commandDeadline = Date.now() + 180_000
+      let commandSnapshot
+      let commandRun
+      while (Date.now() < commandDeadline) {
+        commandSnapshot = await request('camps.snapshot', { campId: camp.id })
+        for (const approval of commandSnapshot.approvals.filter((candidate) =>
+          candidate.status === 'pending'
+            && !commandApprovals.has(candidate.id)
+            && commandSnapshot.actions.some((action) => action.id === candidate.actionId && action.agentRunId === commandRunId)
+        )) {
+          const option = approval.options.find((candidate) => candidate.kind === 'allow_once')
+            ?? approval.options.find((candidate) => candidate.kind === 'allow_session')
+          if (!option) throw new Error(`ACP printf request has no exact allow option: ${JSON.stringify(approval)}`)
+          const resolution = await request('action.approvals.resolve', {
+            commandId: crypto.randomUUID(),
+            campId: camp.id,
+            approvalId: approval.id,
+            expectedVersion: approval.version,
+            optionId: option.optionId,
+            reason: 'ACP fixed printf output smoke test'
+          })
+          if (resolution.status === 'rejected') throw new Error(`ACP printf approval was rejected: ${JSON.stringify(resolution)}`)
+          commandApprovals.add(approval.id)
+        }
+        commandRun = commandSnapshot.agentRuns.find((value) => value.id === commandRunId)
+        if (commandRun?.status === 'succeeded') break
+        if (commandRun?.status === 'failed' || commandRun?.status === 'cancelled') {
+          throw new Error(`${specification.adapterKind} printf AgentRun entered ${commandRun.status}: ${JSON.stringify({
+            commandRun,
+            actions: commandSnapshot.actions.filter((action) => action.agentRunId === commandRunId),
+            events: events.filter((event) => event.params?.agentRunId === commandRunId).slice(-30)
+          })}`)
+        }
+        await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+      }
+      const commandOutputEvent = events.find((event) =>
+        event.method === 'runtime.action'
+          && event.params?.agentRunId === commandRunId
+          && String(event.params?.payload?.output ?? '').includes(commandMarker)
+      )
+      if (commandRun?.status !== 'succeeded' || !commandOutputEvent) {
+        throw new Error(`${specification.adapterKind} fixed printf output was not projected: ${JSON.stringify({
+          commandRun,
+          marker: commandMarker,
+          runtimeActions: events.filter((event) =>
+            event.method === 'runtime.action' && event.params?.agentRunId === commandRunId
+          )
+        })}`)
+      }
+      results.at(-1).commandOutput = {
+        marker: commandMarker,
+        output: commandOutputEvent.params.payload.output,
+        approvalCount: commandApprovals.size
+      }
+
       const writeToken = 'ROVAI_ACP_APPROVED_WRITE'
       const adapterFileStem = ({
         'opencode-cli': 'OPENCODE',

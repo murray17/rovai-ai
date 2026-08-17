@@ -59,9 +59,10 @@ that Runtime. The Runtime, model and permissions save atomically through the exi
 “运行参数” directly visible by default in the vertical reading flow. Do not restore the removed
 “高级设置”, summary-model configuration or “对话压缩模型”.
 
-For an `installed_unverified` TRAE installation, expose only Runtime default model and the safe
-`permission_mode=default`. Its action reads “重新扫描安装”, and supporting copy says the first real
-task performs login/capability verification. Do not offer explicit models before a real Session catalog.
+For any `light_ready` installation, expose Runtime default model plus only permissions described by the
+static Adapter schema. Supporting copy says login, model and capability verification happens on explicit
+check or the first real task. Do not offer explicit models before a verified catalog. TRAE keeps its narrower
+`installed_unverified` state, Runtime default model and safe `permission_mode=default`.
 
 After Runtime configuration, keep Memory Capability and the danger zone. Do not expose Installation
 IDs, executable paths or internal bindings in the ordinary profile.

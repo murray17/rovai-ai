@@ -22,12 +22,15 @@ last_updated: 2026-08-17
 
 ## Runtime 状态
 
-扫描依次表达“查找安装入口 / 检查登录与版本 / 读取模型目录”，使用真实 discovery、health、managed
-Installation 和 model catalog。各 Runtime 可以继续显示自己的后台 `checking` 状态；不可用、需要登录、
-版本不支持和 `installed_unverified` 不能被改写成可用。
+扫描只表达“查找安装入口 / 执行无副作用的有界身份命令”，使用真实 discovery 与 managed Installation，且不
+自动启动登录、ACP、Session 或模型目录深检。`light_ready` 显示“可用”，严格表示 executable 已成功轻度启动、
+输出未超限且身份可识别，可以选择并尝试运行；支持文案说明登录、模型与能力将在显式检查或首次任务时确认。
+只找到 executable 的 `found_uninspected` 不显示“正在检查”或“可用”。不可用、需要登录、版本不支持和
+TRAE `installed_unverified` 不能被改写成深检 Ready。
 
-模型字段复用队员运行配置的 schema 驱动组件。`installed_unverified` 只允许 Runtime Default；显式模型需要
-已验证的可用状态。页面只告诉用户选择 Runtime 与模型，权限取 Adapter 默认值且不在 onboarding 展示。
+模型字段复用队员运行配置的 schema 驱动组件。`light_ready` 与 `installed_unverified` 只允许 Runtime
+Default；显式模型需要已验证 catalog。页面只告诉用户选择 Runtime 与模型，权限取 Adapter 静态默认值且
+不在 onboarding 展示。
 
 ## 第四页
 
