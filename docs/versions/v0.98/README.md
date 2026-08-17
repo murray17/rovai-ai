@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.98
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -17,6 +17,8 @@ last_updated: 2026-08-17
 > [实施计划](implementation-plan.md#实施结果)。
 >
 > 前置版本：[v0.97 持久首次训练与“初次集结”](../v0.97/README.md)
+>
+> 后继版本：[v0.99 最小 Runtime Usage Metering](../v0.99/README.md)
 
 ## 版本目标
 

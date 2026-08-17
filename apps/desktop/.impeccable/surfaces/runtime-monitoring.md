@@ -1,73 +1,67 @@
 ---
-version: 2
-slug: "runtime-monitoring"
-primary_target: "apps/desktop/src/renderer/src/RuntimeMonitoring.tsx"
-related_targets:
-  - "apps/desktop/src/renderer/src/styles.css"
-  - "apps/desktop/src/renderer/src/CampNavigation.tsx"
-  - "apps/desktop/src/renderer/src/App.tsx"
+surface: runtime-monitoring
+status: current
+last_updated: 2026-08-17
 ---
 
-# Runtime monitoring surface brief
+# Runtime Monitoring surface brief
 
-## User goal
+## Purpose
 
-Understand what happened after the current monitoring cutover without mistaking missing Runtime data,
-estimates or aggregate billing for exact facts. The surface is read-only and belongs to the Settings
-workspace support group.
+This Settings surface is a compact Usage ledger. It answers how much Token, Cache and attributable Cost recent
+AgentRuns actually reported, where Coverage is incomplete, and how the totals vary by time, Runtime and model. It is
+not an execution debugger or reliability dashboard.
 
-## Composition and shared state
+The permanent description is one sentence:
 
-Use the shared borderless Settings header and centered `1040px` content track. The header has one direct,
-purpose-level description matching the other Settings categories. Place one horizontal Tab group first in
-the body: 概览、用量与成本、性能与可靠性. Do not repeat collection cutover, historical backfill or sparse-field
-rules as persistent notices or version-specific empty-state copy. Those rules remain enforced by the read
-model, range clamp, Coverage and export. All three views share one range/Runtime/member/terminal-status
-filter and one consistent snapshot. Moving between Tabs preserves the filter and does not issue another query.
+> 汇总 Runtime 实际上报的 Token、Cache 与成本；未上报字段显示为未知。
 
-Do not turn metrics into a card wall. Use a compact keyline for the most important values, open ledgers
-for sparse token or latency facts, and quiet tables for Runtime/model detail. Tables may scroll inside
-their own bounded region; the page itself must not overflow horizontally. Long Runtime/model/currency
-labels wrap or truncate with an accessible detail rather than widening the content track.
+Do not add cutover notices, historical-data explanations, unsupported-Runtime warnings or implementation prose to the
+page. Empty state copy describes only the current result.
 
-## Sparse facts and cost honesty
+## Information architecture
 
-Every sparse metric presents its value with observed/eligible Coverage. Distinguish all three cases:
+There is one page and no Tab strip. Preserve the established Rovai Settings heading, rail, surface tokens and compact
+typography.
 
-- no eligible Run;
-- eligible Runs whose Runtime has not reported the field;
-- an explicitly reported zero.
+Order the content as:
 
-Keep cost quality, grain and currency visually separate. Runtime-reported values, estimates,
-reconciled buckets and allocations never merge into an unlabeled total. Antigravity native Token,
-Cache and cost remain unavailable until an authoritative upstream signal exists.
+1. range, Runtime, Provider, Model and Cost-kind filters;
+2. eight sparse summary metrics with observed/eligible Coverage;
+3. Token/Cache trend and optional Cost ledger;
+4. Runtime breakdown;
+5. Model breakdown;
+6. Provider reconciliation only when compatible saved data exists.
 
-## State and refresh matrix
+Do not render Session, Tool, Activity, Delivery, Approval, Reliability, Context, Compaction, Probe or terminal-state
+panels. Unknown is `—`, never zero. Partial Coverage is visible next to the value rather than hidden in a tooltip.
 
-Support Loading, global Empty, Partial, Populated, Stale, Error and Export success/failure without
-removing the Settings header or filters. Empty copy describes only the current result and does not restate
-the release version or collection policy. A background refresh failure keeps the
-last good snapshot visible, identifies its `observedAt` time and offers a local retry. The page never
-starts Provider reconciliation or price synchronization.
+## States
 
-Polling, event debounce, Usage flush cadence, rollup reads and database-lock boundaries are owned by
-the [Runtime Monitoring contract](../../../../docs/contracts/runtime-monitoring-v1.md) and
-[architecture](../../../../docs/architecture/runtime-monitoring.md); this brief does not duplicate
-their numeric constants.
+Support Loading, global Empty, Partial, Populated, Stale, Error and Export success/failure without removing the
+Settings header or filters. A background refresh failure keeps the last good snapshot visible, identifies its
+range end time and offers local retry. Export preserves raw numeric strings and sparse `null` values.
+
+The page never starts Provider reconciliation, pricing sync, retention, Runtime probing or any network request.
 
 ## Interaction and accessibility
 
-Tabs use manual activation: arrow keys and Home/End move focus, while Enter/Space or click changes the
-view. Filters have visible labels, unavailable values use `—` plus textual Coverage, and freshness,
-errors and export results use appropriate live-region semantics. Do not rely on color or animation to
-communicate availability.
+Filters have persistent visible labels, native keyboard behavior and visible focus. A foreground filter request may
+show the loading state; a background failure preserves the last readable snapshot. Status and export feedback use
+appropriate live-region semantics without repeated announcements.
 
-Verify Day and Night at `1040×700` and `1440×920`, plus 200% zoom and reduced motion. Populated,
-Partial, Stale and Error data must receive the same coverage as the clean-break Empty state.
+Snapshot requests are single-flight. Poll only while the page is visible, at most once per 12 seconds. Coalesce event,
+poll, filter and manual requests; ordinary Usage Flush does not request an immediate refresh, non-terminal events use
+a global minimum interval, and terminal events refresh after Debounce. Stop all polling after leaving the Settings
+item.
 
-## Inheritance and hard boundaries
+At 1040×700 and 200% zoom, filters wrap, summary cards collapse from four to two to one column, tables scroll within
+their own surface, and the Settings panel does not gain horizontal overflow. Motion remains optional and respects
+reduced-motion preferences.
 
-Inherit [`settings-workspace.md`](settings-workspace.md), root [`DESIGN.md`](../../../../DESIGN.md), theme
-and accessibility contracts. This brief controls information hierarchy and interaction only; it does
-not redefine collection eligibility, Usage semantics, cost authority, Runtime compatibility or Core
-persistence.
+## Authority
+
+Persistence, Coverage, Cost grain, refresh cadence and Snapshot shape are owned by the
+[Runtime Usage Monitoring v2 contract](../../../../docs/contracts/runtime-usage-monitoring-v2.md) and
+[Runtime Monitoring architecture](../../../../docs/architecture/runtime-monitoring.md). This brief owns presentation
+strategy only.

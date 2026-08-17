@@ -7,7 +7,7 @@ import type {
   AppearanceSnapshot,
   CoreMethod,
   MonitoringFilter,
-  MonitoringSnapshot,
+  RuntimeUsageSnapshot,
   NavigationPin,
   SaveMemberAvatarAssetInput,
   SettingsSection,
@@ -828,7 +828,7 @@ ipcMain.handle('rovai:export-monitoring', async (_event, filter: MonitoringFilte
         filters: [{ name: 'JSON', extensions: ['json'] }]
       })
   if (result.canceled || !result.filePath) return null
-  const snapshot = await core.request<MonitoringSnapshot>('monitoring.snapshot', filter)
+  const snapshot = await core.request<RuntimeUsageSnapshot>('monitoring.snapshot', filter)
   const payload = {
     exportedAt: new Date().toISOString(),
     ...snapshot

@@ -28,11 +28,6 @@ try {
   const dayCapture = join(outputDir, 'runtime-monitoring-empty-day-1440x920.png')
   await capture(isolatedApp.cdp, dayCapture)
 
-  for (const label of ['用量与成本', '性能与可靠性', '概览']) {
-    await clickButton(isolatedApp.cdp, '.monitoring-tabs button', label)
-    await waitForExpression(isolatedApp.cdp, '!document.querySelector(\'.monitoring-loading\')')
-  }
-
   await isolatedApp.cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 1040,
     height: 700,
@@ -58,20 +53,18 @@ try {
 
   const filter = { range: '24h' }
   const snapshot = await request(isolatedApp.cdp, 'monitoring.snapshot', filter)
-  const { summary, usage, reliability } = snapshot
-  assert(snapshot?.schemaVersion === 1, 'Snapshot did not return schemaVersion 1')
-  assert(snapshot?.collection?.collectionEpoch, 'Snapshot omitted collectionEpoch')
-  for (const [name, view] of Object.entries({ summary, usage, reliability })) {
-    assert(view?.schemaVersion === 1, name + ' did not return schemaVersion 1')
-    assert(view?.collection?.schemaVersion === 1, name + ' omitted its collection boundary')
-    assert(view?.collection?.collectionEpoch, name + ' omitted collectionEpoch')
+  assert(snapshot?.schemaVersion === 2, 'Snapshot did not return schemaVersion 2')
+  assert(snapshot?.collection?.epoch, 'Snapshot omitted collection epoch')
+  assert(snapshot?.collection?.startedAt, 'Snapshot omitted collection start')
+  assert(snapshot?.summary?.promptInputTotalTokens === null,
+    'clean-break Snapshot manufactured Input Token data')
+  assert(snapshot?.summary?.cacheReadTokens === null,
+    'clean-break Snapshot manufactured Cache data')
+  assert(snapshot?.summary?.cost === null,
+    'clean-break Snapshot manufactured Cost data')
+  for (const removed of ['reliability', 'sessions', 'toolDuration', 'activity', 'delivery', 'compaction', 'context', 'probe']) {
+    assert(!(removed in snapshot), 'Snapshot retained removed field ' + removed)
   }
-  assert(summary.runs.value === null && summary.runs.eligibleCount === 0,
-    'clean-break Summary manufactured historical Runs')
-  assert(usage.inputTokens.value === null,
-    'clean-break Usage manufactured Token data')
-  assert(reliability.endToEndP95Millis.value === null,
-    'clean-break Reliability manufactured latency')
 
   console.log(JSON.stringify({
     ok: true,
@@ -83,7 +76,7 @@ try {
       rendererToCoreMonitoring: true,
       cleanBreakEmptyState: true,
       noHistoricalBackfill: true,
-      threeTabsAndPersistentFilters: true,
+      usageOnlySurfaceAndFilters: true,
       dayAndNightLayouts: true,
       compactReducedMotionLayout: true,
       twoHundredPercentLayout: true,
@@ -108,16 +101,15 @@ async function openMonitoring(cdp) {
 async function assertEmptyMonitoring(cdp, context) {
   const state = await evaluate(cdp, "({ heading: document.querySelector('.runtime-monitoring h1')?.textContent ?? '', description: document.querySelector('.runtime-monitoring .settings-page-heading-copy > p:last-child')?.textContent ?? '', hasBoundaryNotice: Boolean(document.querySelector('.monitoring-boundary-note')), empty: document.querySelector('.monitoring-state.is-empty')?.textContent ?? '', tabs: [...document.querySelectorAll('.monitoring-tabs button')].map((button) => button.textContent?.trim()), filters: document.querySelectorAll('.monitoring-filters select').length, exportLabel: [...document.querySelectorAll('.settings-page-heading button')].some((button) => button.textContent?.includes('导出 JSON')), documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1, surfaceOverflow: (() => { const node = document.querySelector('.runtime-monitoring'); return node ? node.scrollWidth > node.clientWidth + 1 : true })() })")
   assert(state.heading === '运行监控', context + ' omitted its heading')
-  assert(state.description === '查看 AgentRun 的状态、用量、成本与可靠性。',
+  assert(state.description === '汇总 Runtime 实际上报的 Token、Cache 与成本；未上报字段显示为未知。',
     context + ' did not use the concise page description')
   assert(!state.hasBoundaryNotice, context + ' retained the collection boundary notice')
-  assert(state.empty.includes('暂无运行数据') && state.empty.includes('当前范围内暂无 AgentRun。'),
+  assert(state.empty.includes('暂无 Usage 数据') && state.empty.includes('新 AgentRun 上报 Token、Cache 或成本后'),
     context + ' did not render the real empty state')
   assert(!/(Clean break|历史 Run 不补算|当前采集边界|采集从)/.test(state.description + state.empty),
     context + ' retained redundant cutover copy')
-  assert(JSON.stringify(state.tabs) === JSON.stringify(['概览', '用量与成本', '性能与可靠性']),
-    context + ' tabs were incomplete: ' + JSON.stringify(state.tabs))
-  assert(state.filters === 4, context + ' did not render all persistent filters')
+  assert(state.tabs.length === 0, context + ' retained legacy Monitoring tabs')
+  assert(state.filters === 5, context + ' did not render all Usage filters')
   assert(state.exportLabel, context + ' omitted explicit JSON export')
   assert(!state.documentOverflow && !state.surfaceOverflow,
     context + ' overflowed horizontally: ' + JSON.stringify(state))
@@ -127,11 +119,6 @@ async function assertNoHorizontalOverflow(cdp, context) {
   const state = await evaluate(cdp, "({ documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1, surfaceOverflow: (() => { const node = document.querySelector('.runtime-monitoring'); return node ? node.scrollWidth > node.clientWidth + 1 : true })() })")
   assert(!state.documentOverflow && !state.surfaceOverflow,
     context + ' overflowed horizontally: ' + JSON.stringify(state))
-}
-
-async function clickButton(cdp, selector, label) {
-  const expression = "(() => { const button = [...document.querySelectorAll(" + JSON.stringify(selector) + ")].find((candidate) => candidate.textContent?.trim() === " + JSON.stringify(label) + "); if (!button || button.disabled) return false; button.click(); return true })()"
-  assert(await evaluate(cdp, expression), 'Could not click ' + label)
 }
 
 async function request(cdp, method, params = {}) {

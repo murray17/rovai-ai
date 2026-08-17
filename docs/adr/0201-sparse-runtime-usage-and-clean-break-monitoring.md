@@ -2,12 +2,12 @@
 document_type: adr
 id: ADR-0201
 title: Sparse Runtime Usage Authority and Clean-Break Monitoring Enrollment
-status: accepted
+status: superseded
 date: 2026-08-16
 decision_scope: cross-version
 source_version: v0.96
 supersedes: []
-superseded_by: null
+superseded_by: ADR-0205
 ---
 
 # ADR-0201: Sparse Runtime Usage Authority and Clean-Break Monitoring Enrollment

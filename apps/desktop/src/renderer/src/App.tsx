@@ -2913,7 +2913,7 @@ export function SettingsView({
           <NotificationSettings />
         )}
         {section === 'monitoring' && (
-          <RuntimeMonitoring agents={agents} />
+          <RuntimeMonitoring />
         )}
         {section === 'diagnostics' && (
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} />

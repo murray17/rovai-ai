@@ -227,11 +227,11 @@ Related: [ADR-0203](0203-structured-current-input-skill-links.md)在 Session/Con
 选择 Skill 与原生投影文件指针的交叉边界；具体 Skill 名称或版本不是治理例外，长期边界仍按本主题的一般
 ADR 准入规则判断。
 
-## Evidence 与 Runtime Activity
+## Evidence、Runtime Activity 与 Usage
 
-- **何时阅读：** 修改 Execution Evidence、Canonical Activity、classifier、projection 或 observation coverage 时阅读。
-- **当前架构：** ADR-only；architecture summary pending
-- **当前合同：** 无
+- **何时阅读：** 修改 Execution Evidence、Canonical Activity、classifier、Runtime Usage 或 observation coverage 时阅读。
+- **当前架构：** [Runtime Monitoring](../architecture/runtime-monitoring.md)
+- **当前合同：** [Runtime Usage Monitoring v2](../contracts/runtime-usage-monitoring-v2.md)
 
 <!-- adr-current-primary:begin topic=evidence-activity -->
 | ADR | Decision |
@@ -245,7 +245,7 @@ ADR 准入规则判断。
 | [ADR-0116](0116-projection-pinned-classifier-version-and-explicit-historical-reprojection.md) | Projection-Pinned Classifier Version and Explicit Historical Reprojection |
 | [ADR-0117](0117-observation-capability-coverage-levels-across-runtime-adapters.md) | Observation-Capability Coverage Levels Across Runtime Adapters |
 | [ADR-0122](0122-current-canonical-activity-projection-and-deferred-identity-replay.md) | Current Canonical Activity Projection and Deferred Identity Replay |
-| [ADR-0201](0201-sparse-runtime-usage-and-clean-break-monitoring.md) | Sparse Runtime Usage Authority and Clean-Break Monitoring Enrollment |
+| [ADR-0205](0205-minimal-runtime-usage-metering.md) | Minimal Runtime Usage Metering |
 <!-- adr-current-primary:end -->
 
 Related: Diagnostics、Qualification 与 ContextManifest Evidence 不因此合并为同一 authority。

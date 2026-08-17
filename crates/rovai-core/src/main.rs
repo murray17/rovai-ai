@@ -11,7 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     future::Future,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex as StdMutex},
+    sync::Arc,
     time::Instant,
 };
 
@@ -140,8 +140,7 @@ use rovai_core::{
         runtime_waiting_recipients,
     },
     monitoring::{
-        MonitoringEvidenceCountBuffer, MonitoringEvidenceCountFlushTarget, MonitoringFilter,
-        MonitoringService, NativeSessionOutcome, ParsedRuntimeUsage, RuntimeUsageBuffer,
+        MonitoringFilter, MonitoringService, ParsedRuntimeUsage, RuntimeUsageBuffer,
         RuntimeUsageFlushTarget, codex_usage_source_identity, parse_acp_usage_message,
         parse_claude_result_usage, parse_codex_usage_message,
     },
@@ -908,8 +907,6 @@ struct Core {
     database: Mutex<Database>,
     runtime_usage: Mutex<RuntimeUsageBuffer>,
     runtime_usage_flush: Mutex<()>,
-    monitoring_evidence_counts: StdMutex<MonitoringEvidenceCountBuffer>,
-    monitoring_evidence_flush: Mutex<()>,
     output: mpsc::UnboundedSender<String>,
     runtime_search_environment: RwLock<Arc<RuntimeSearchEnvironment>>,
     runtime_discovery:
@@ -1254,22 +1251,6 @@ impl AgentRunRuntime {
 }
 
 impl Core {
-    fn observe_monitoring_evidence(&self, recorded: &RecordedExecutionEvidence) {
-        if !recorded.inserted {
-            return;
-        }
-        let mut buffer = self
-            .monitoring_evidence_counts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Err(error) = buffer.observe(&recorded.agent_run_id, recorded.execution_epoch) {
-            eprintln!(
-                "failed to buffer Monitoring Evidence count for AgentRun {}: {error:#}",
-                recorded.agent_run_id
-            );
-        }
-    }
-
     fn known_agent_ids(database: &Database) -> Result<BTreeSet<String>> {
         AgentProfileService::default().all_profile_ids(database)
     }
@@ -2861,7 +2842,7 @@ impl Core {
                 "receiptId": null,
                 "operationProjection": operation_projection,
             });
-            let started_evidence = ExecutionEvidenceService
+            ExecutionEvidenceService
                 .record_builtin_tool_started(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
@@ -2870,7 +2851,6 @@ impl Core {
                     &started_evidence,
                 )?
                 .context("Built-in Tool start evidence was not durably admitted")?;
-            self.observe_monitoring_evidence(&started_evidence);
             let operation_result = match request.tool_name.as_str() {
                 CAMP_MESSAGE_SEND_TOOL_NAME => {
                     let input = serde_json::from_value::<CampMessageSendInput>(request.input)
@@ -3238,8 +3218,7 @@ impl Core {
                 )
             };
             match evidence_result {
-                Ok(Some(recorded)) => self.observe_monitoring_evidence(&recorded),
-                Ok(None) => {}
+                Ok(Some(_)) | Ok(None) => {}
                 Err(error) => {
                     eprintln!("failed to record Built-in Tool result evidence: {error:#}");
                 }
@@ -5109,20 +5088,21 @@ impl Core {
                 return;
             }
         };
-        {
+        let monitoring_run = {
             let mut database = self.database.lock().await;
-            let compaction_observable = self
-                .compaction_detector_policies
-                .policy_for(execution.runtime.adapter_kind)
-                == Some(CompactionDetectorPolicy::BestEffort);
-            if let Err(error) =
-                MonitoringService::enroll_run(&mut database, &execution, compaction_observable)
-            {
-                eprintln!(
-                    "failed to enroll AgentRun {} in Runtime Monitoring: {error:#}",
-                    execution.agent_run_id
-                );
+            match MonitoringService::enroll_run(&mut database, &execution) {
+                Ok(run) => run,
+                Err(error) => {
+                    eprintln!(
+                        "failed to enroll AgentRun {} in Runtime Monitoring: {error:#}",
+                        execution.agent_run_id
+                    );
+                    None
+                }
             }
+        };
+        if let Some(run) = monitoring_run {
+            self.runtime_usage.lock().await.register_run(run);
         }
         let active_key =
             ActiveExecutionKey::new(&execution.agent_run_id, execution.execution_epoch);
@@ -6448,20 +6428,6 @@ impl Core {
                 binding.result.code
             );
         }
-        {
-            let mut database = self.database.lock().await;
-            MonitoringService::record_session_outcome(
-                &mut database,
-                execution,
-                NativeSessionOutcome::Succeeded,
-                false,
-                None,
-                Some(native_session_id),
-            )
-            .context("failed to record successful Native Session continuation")?;
-            MonitoringService::record_session_fallback(&mut database, execution, native_session_id)
-                .context("failed to record Native Session fallback")?;
-        }
         Ok(())
     }
 
@@ -7021,12 +6987,9 @@ impl Core {
             .context("failed to prepare the Camp Attachment access root")?;
         let resume_disposition = {
             let mut database = self.database.lock().await;
-            let disposition = ExecutionRuntimeService::default()
+            ExecutionRuntimeService::default()
                 .prepare_native_session_resume(&mut database, execution)
-                .context("failed to prepare Native Session resume")?;
-            MonitoringService::record_session_decision(&mut database, execution, disposition)
-                .context("failed to record Runtime Monitoring Native Session decision")?;
-            disposition
+                .context("failed to prepare Native Session resume")?
         };
         if resume_disposition == NativeSessionResumeDisposition::Controlled {
             emit(
@@ -7190,14 +7153,6 @@ impl Core {
                             failure,
                         )?;
                     }
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        monitoring_outcome_for_resume_failure(failure),
-                        false,
-                        Some("native_session_resume_failed"),
-                        None,
-                    )?;
                 }
                 let replacement_binding =
                     self.prepare_builtin_tool_binding(execution, true).await?;
@@ -7633,16 +7588,6 @@ impl Core {
                         &mut database,
                         execution,
                         NativeSessionResumeFailure::Ambiguous,
-                    )?;
-                }
-                if resume_disposition != NativeSessionResumeDisposition::New {
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        NativeSessionOutcome::Ambiguous,
-                        false,
-                        Some("native_session_resume_outcome_unknown"),
-                        None,
                     )?;
                 }
                 ContextService.mark_input_delivery_unknown(
@@ -8161,16 +8106,6 @@ impl Core {
                         NativeSessionResumeFailure::Ambiguous,
                     )?;
                 }
-                if resume_disposition != NativeSessionResumeDisposition::New {
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        NativeSessionOutcome::Ambiguous,
-                        false,
-                        Some("native_session_resume_outcome_unknown"),
-                        None,
-                    )?;
-                }
                 ContextService.mark_input_delivery_unknown(
                     &mut database,
                     &input_delivery.id,
@@ -8320,14 +8255,6 @@ impl Core {
                             failure,
                         )?;
                     }
-                    MonitoringService::record_session_outcome(
-                        &mut database,
-                        execution,
-                        monitoring_outcome_for_resume_failure(failure),
-                        false,
-                        Some("native_session_resume_failed"),
-                        None,
-                    )?;
                 }
                 adapter
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -9125,15 +9052,6 @@ fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeF
     }
 }
 
-fn monitoring_outcome_for_resume_failure(
-    failure: NativeSessionResumeFailure,
-) -> NativeSessionOutcome {
-    match failure {
-        NativeSessionResumeFailure::Incompatible => NativeSessionOutcome::Incompatible,
-        NativeSessionResumeFailure::Ambiguous => NativeSessionOutcome::Ambiguous,
-    }
-}
-
 fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'static str {
     match status {
         health::AgentRuntimeProbeStatus::AuthenticationRequired => "authentication_required",
@@ -9341,8 +9259,6 @@ async fn run_core(
         database: Mutex::new(database),
         runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
         runtime_usage_flush: Mutex::new(()),
-        monitoring_evidence_counts: StdMutex::new(MonitoringEvidenceCountBuffer::default()),
-        monitoring_evidence_flush: Mutex::new(()),
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
         runtime_discovery: RwLock::new(
@@ -11211,12 +11127,7 @@ async fn persist_runtime_evidence(
         event_type,
         payload,
     )?;
-    if let Some(recorded) = recorded {
-        core.observe_monitoring_evidence(&recorded);
-        Ok(Some(recorded.into_evidence()))
-    } else {
-        Ok(None)
-    }
+    Ok(recorded.map(RecordedExecutionEvidence::into_evidence))
 }
 
 async fn persist_prepared_runtime_evidence_batch(
@@ -11235,12 +11146,7 @@ async fn persist_prepared_runtime_evidence_batch(
     drop(database);
     Ok(recorded
         .into_iter()
-        .map(|recorded| {
-            recorded.map(|recorded| {
-                core.observe_monitoring_evidence(&recorded);
-                recorded.into_evidence()
-            })
-        })
+        .map(|recorded| recorded.map(RecordedExecutionEvidence::into_evidence))
         .collect())
 }
 
@@ -12012,15 +11918,9 @@ async fn buffer_runtime_usage(
     if observations.is_empty() {
         return Ok(());
     }
-    let run = {
-        let database = core.database.lock().await;
-        MonitoringService::enrolled_usage_run(&database, agent_run_id, execution_epoch)?
-    };
-    let Some(run) = run else {
-        return Ok(());
-    };
-    core.runtime_usage.lock().await.observe_run(
-        &run,
+    core.runtime_usage.lock().await.observe_registered_run(
+        agent_run_id,
+        execution_epoch,
         source_identity,
         observations,
         Instant::now(),
@@ -12055,7 +11955,6 @@ async fn flush_runtime_usage(
     match persistence {
         Ok(inserted) => {
             let mut usage = core.runtime_usage.lock().await;
-            usage.complete(&batches);
             usage.finish_idle_target_after_flush(&target);
             drop(usage);
             if inserted > 0 && notify_monitoring {
@@ -12074,54 +11973,13 @@ async fn flush_runtime_usage(
     }
 }
 
-async fn flush_monitoring_evidence_counts(
-    core: &Core,
-    target: MonitoringEvidenceCountFlushTarget,
-) -> Result<usize> {
-    let _flush_guard = core.monitoring_evidence_flush.lock().await;
-    let needs_flush = core
-        .monitoring_evidence_counts
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .needs_flush(&target);
-    if !needs_flush {
-        return Ok(0);
-    }
-    // Evidence admission records the durable row while holding the Database
-    // Mutex, then increments this in-memory buffer. Preserve the same lock
-    // order here so an exact terminal reconciliation cannot include a newer
-    // Evidence row while leaving its buffered increment pending for a second
-    // application.
-    let mut database = core.database.lock().await;
-    let flush = {
-        core.monitoring_evidence_counts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .drain(target)
-    };
-    if flush.is_empty() {
-        return Ok(0);
-    }
-    let persistence = MonitoringService::record_evidence_count_flush(&mut database, &flush);
-    match persistence {
-        Ok(changed) => Ok(changed),
-        Err(error) => {
-            core.monitoring_evidence_counts
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .restore(flush)?;
-            Err(error)
-        }
-    }
-}
-
 async fn flush_runtime_monitoring_run(
     core: &Core,
     agent_run_id: &str,
     execution_epoch: i64,
     reason: &'static str,
-) -> Result<(usize, usize)> {
-    let usage = flush_runtime_usage(
+) -> Result<usize> {
+    flush_runtime_usage(
         core,
         RuntimeUsageFlushTarget::Run {
             agent_run_id: agent_run_id.to_string(),
@@ -12130,23 +11988,7 @@ async fn flush_runtime_monitoring_run(
         reason,
         true,
     )
-    .await;
-    let evidence = flush_monitoring_evidence_counts(
-        core,
-        MonitoringEvidenceCountFlushTarget::Run {
-            agent_run_id: agent_run_id.to_string(),
-            execution_epoch,
-        },
-    )
-    .await;
-    match (usage, evidence) {
-        (Ok(usage), Ok(evidence)) => Ok((usage, evidence)),
-        (Err(usage), Ok(_)) => Err(usage),
-        (Ok(_), Err(evidence)) => Err(evidence),
-        (Err(usage), Err(evidence)) => Err(anyhow::anyhow!(
-            "Runtime Usage flush failed: {usage:#}; Monitoring Evidence count flush failed: {evidence:#}"
-        )),
-    }
+    .await
 }
 
 async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::Receiver<()>) {
@@ -12155,6 +11997,11 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
         RUNTIME_USAGE_FLUSH_INTERVAL,
     );
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut retention_interval = tokio::time::interval_at(
+        tokio::time::Instant::now() + Duration::from_secs(24 * 60 * 60),
+        Duration::from_secs(24 * 60 * 60),
+    );
+    retention_interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
     loop {
         tokio::select! {
             _ = interval.tick() => {
@@ -12166,11 +12013,14 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                 ).await {
                     eprintln!("periodic Runtime Usage flush failed: {error:#}");
                 }
-                if let Err(error) = flush_monitoring_evidence_counts(
-                    &core,
-                    MonitoringEvidenceCountFlushTarget::Periodic,
-                ).await {
-                    eprintln!("periodic Monitoring Evidence count flush failed: {error:#}");
+            }
+            _ = retention_interval.tick() => {
+                let result = {
+                    let mut database = core.database.lock().await;
+                    MonitoringService::purge_expired(&mut database)
+                };
+                if let Err(error) = result {
+                    eprintln!("Runtime Usage retention cleanup failed: {error:#}");
                 }
             }
             _ = &mut shutdown => {
@@ -12181,12 +12031,6 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     false,
                 ).await {
                     eprintln!("terminal Runtime Usage shutdown flush failed: {error:#}");
-                }
-                if let Err(error) = flush_monitoring_evidence_counts(
-                    &core,
-                    MonitoringEvidenceCountFlushTarget::All,
-                ).await {
-                    eprintln!("terminal Monitoring Evidence count shutdown flush failed: {error:#}");
                 }
                 break;
             }

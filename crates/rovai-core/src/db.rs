@@ -43,8 +43,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.98";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 46;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.99";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 47;
+const V092_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.98";
+const V092_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 46;
 const V091_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.96";
 const V091_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 45;
 const V090_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.94";
@@ -105,6 +107,7 @@ struct CurrentMigrationState {
     v89: bool,
     v90: bool,
     v91: bool,
+    v92: bool,
 }
 
 impl CurrentMigrationState {
@@ -132,7 +135,34 @@ impl CurrentMigrationState {
                 && self.v88
                 && self.v89
                 && self.v90
-                && self.v91;
+                && self.v91
+                && self.v92;
+        }
+        if contract == V092_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V092_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && !self.v92;
+        }
+        if self.v92 {
+            return false;
         }
         if self.v91 {
             return false;
@@ -502,7 +532,8 @@ fn has_current_data_contract(path: &Path) -> bool {
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 88),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 89),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 90),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 91)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 91),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 92)
         "#,
         [],
         |row| {
@@ -529,6 +560,7 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v89: row.get(19)?,
                 v90: row.get(20)?,
                 v91: row.get(21)?,
+                v92: row.get(22)?,
             })
         },
     );
@@ -1653,6 +1685,9 @@ impl Database {
             if !self.schema_migration_applied(91)? {
                 self.migrate_current_input_skill_links_v91()?;
             }
+            if !self.schema_migration_applied(92)? {
+                self.migrate_minimal_runtime_usage_v92()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -1975,6 +2010,9 @@ impl Database {
         }
         if !self.schema_migration_applied(91)? {
             self.migrate_current_input_skill_links_v91()?;
+        }
+        if !self.schema_migration_applied(92)? {
+            self.migrate_minimal_runtime_usage_v92()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -10493,453 +10531,13 @@ impl Database {
     }
 
     fn migrate_runtime_monitoring_v90(&mut self) -> Result<()> {
-        let transaction = self
-            .connection
-            .transaction_with_behavior(TransactionBehavior::Immediate)?;
-        transaction.execute_batch(
+        self.connection.execute_batch(
             r#"
-            CREATE TABLE monitoring_collection_state (
-                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-                collection_epoch TEXT NOT NULL UNIQUE,
-                collection_started_at TEXT NOT NULL,
-                identity_salt TEXT NOT NULL,
-                parser_schema_version INTEGER NOT NULL CHECK(parser_schema_version >= 1),
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            );
-
-            CREATE TABLE monitoring_run_enrollment (
-                agent_run_id TEXT NOT NULL
-                    REFERENCES agent_run(id) ON DELETE CASCADE,
-                collection_epoch TEXT NOT NULL,
-                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                agent_id TEXT NOT NULL REFERENCES agent_profile(id),
-                adapter_kind TEXT NOT NULL,
-                runtime_version TEXT,
-                model_id TEXT,
-                support_snapshot_json TEXT NOT NULL,
-                usage_input_supported INTEGER NOT NULL
-                    CHECK(usage_input_supported IN (0, 1)),
-                usage_output_supported INTEGER NOT NULL
-                    CHECK(usage_output_supported IN (0, 1)),
-                usage_reasoning_output_supported INTEGER NOT NULL
-                    CHECK(usage_reasoning_output_supported IN (0, 1)),
-                usage_cache_read_supported INTEGER NOT NULL
-                    CHECK(usage_cache_read_supported IN (0, 1)),
-                usage_cache_write_supported INTEGER NOT NULL
-                    CHECK(usage_cache_write_supported IN (0, 1)),
-                usage_context_used_supported INTEGER NOT NULL
-                    CHECK(usage_context_used_supported IN (0, 1)),
-                usage_context_size_supported INTEGER NOT NULL
-                    CHECK(usage_context_size_supported IN (0, 1)),
-                usage_cost_supported INTEGER NOT NULL
-                    CHECK(usage_cost_supported IN (0, 1)),
-                compaction_observable INTEGER NOT NULL
-                    CHECK(compaction_observable IN (0, 1)),
-                tool_duration_capability TEXT NOT NULL
-                    CHECK(tool_duration_capability IN (
-                        'fine_grained', 'covered_only', 'unavailable'
-                    )),
-                rollup_bucket_started_at TEXT NOT NULL,
-                first_visible_activity_at TEXT,
-                evidence_count INTEGER NOT NULL DEFAULT 0
-                    CHECK(evidence_count >= 0),
-                logical_enrolled_at TEXT NOT NULL,
-                enrolled_at TEXT NOT NULL,
-                PRIMARY KEY(agent_run_id, execution_epoch),
-                FOREIGN KEY(collection_epoch)
-                    REFERENCES monitoring_collection_state(collection_epoch)
-            );
-            CREATE INDEX monitoring_run_enrollment_range_idx
-                ON monitoring_run_enrollment(
-                    collection_epoch, logical_enrolled_at, adapter_kind, agent_id
-                );
-            CREATE INDEX monitoring_compaction_observation_time_idx
-                ON native_session_compaction_observation(
-                    observer_lease_id, observed_at
-                );
-            CREATE INDEX monitoring_canonical_activity_scope_idx
-                ON canonical_runtime_activity(
-                    classifier_version, activity_domain,
-                    agent_run_id, execution_epoch
-                );
-
-            CREATE TABLE runtime_usage_raw_observation (
-                id TEXT PRIMARY KEY,
-                collection_epoch TEXT NOT NULL,
-                agent_run_id TEXT NOT NULL,
-                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                adapter_kind TEXT NOT NULL,
-                runtime_version TEXT,
-                dialect_id TEXT NOT NULL,
-                source TEXT NOT NULL CHECK(source IN (
-                    'runtime_event', 'runtime_result',
-                    'runtime_private_extension', 'provider_usage_api',
-                    'local_tokenizer'
-                )),
-                scope TEXT NOT NULL CHECK(scope IN (
-                    'model_call', 'turn', 'run', 'session'
-                )),
-                source_kind TEXT NOT NULL,
-                source_event_identity_digest TEXT NOT NULL,
-                native_session_digest TEXT,
-                native_turn_digest TEXT,
-                native_request_digest TEXT,
-                counter_mode TEXT NOT NULL
-                    CHECK(counter_mode IN ('delta', 'cumulative', 'gauge')),
-                model_id TEXT,
-                provider TEXT,
-                service_tier TEXT,
-                input_semantics TEXT NOT NULL CHECK(input_semantics IN (
-                    'exclusive_buckets', 'cache_inclusive_total', 'unknown'
-                )),
-                input_tokens INTEGER
-                    CHECK(input_tokens IS NULL OR input_tokens >= 0),
-                output_tokens INTEGER
-                    CHECK(output_tokens IS NULL OR output_tokens >= 0),
-                reasoning_output_tokens INTEGER
-                    CHECK(reasoning_output_tokens IS NULL OR reasoning_output_tokens >= 0),
-                cache_read_input_tokens INTEGER
-                    CHECK(cache_read_input_tokens IS NULL OR cache_read_input_tokens >= 0),
-                cache_write_input_tokens INTEGER
-                    CHECK(cache_write_input_tokens IS NULL OR cache_write_input_tokens >= 0),
-                context_used_tokens INTEGER
-                    CHECK(context_used_tokens IS NULL OR context_used_tokens >= 0),
-                context_size_tokens INTEGER
-                    CHECK(context_size_tokens IS NULL OR context_size_tokens >= 0),
-                reported_cost_decimal TEXT,
-                reported_cost_currency TEXT,
-                cost_grain TEXT
-                    CHECK(cost_grain IS NULL OR cost_grain IN (
-                        'model_call', 'turn', 'run', 'session',
-                        'billing_bucket', 'unknown'
-                    )),
-                cost_quality TEXT
-                    CHECK(cost_quality IS NULL OR cost_quality IN (
-                        'runtime_reported', 'runtime_estimate',
-                        'price_estimated', 'provider_reconciled',
-                        'allocated', 'tokenizer_price_estimated'
-                    )),
-                occurred_at TEXT NOT NULL,
-                observed_at TEXT NOT NULL,
-                UNIQUE(
-                    collection_epoch, adapter_kind, source_kind,
-                    source_event_identity_digest
-                ),
-                FOREIGN KEY(agent_run_id, execution_epoch)
-                    REFERENCES monitoring_run_enrollment(
-                        agent_run_id, execution_epoch
-                    ) ON DELETE CASCADE
-            );
-            CREATE INDEX runtime_usage_raw_run_idx
-                ON runtime_usage_raw_observation(
-                    agent_run_id, execution_epoch, occurred_at, id
-                );
-
-            CREATE TABLE runtime_usage_source_observation_dedupe (
-                source_observation_identity_digest TEXT PRIMARY KEY,
-                raw_observation_id TEXT NOT NULL
-                    REFERENCES runtime_usage_raw_observation(id) ON DELETE CASCADE,
-                observed_at TEXT NOT NULL
-            );
-            CREATE INDEX runtime_usage_source_observation_dedupe_raw_idx
-                ON runtime_usage_source_observation_dedupe(raw_observation_id);
-
-            CREATE TABLE runtime_usage_normalized_observation (
-                raw_observation_id TEXT PRIMARY KEY
-                    REFERENCES runtime_usage_raw_observation(id) ON DELETE CASCADE,
-                parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
-                projection_version INTEGER NOT NULL
-                    CHECK(projection_version = 1),
-                normalization_status TEXT NOT NULL
-                    CHECK(normalization_status IN ('complete', 'partial', 'invalid')),
-                diagnostic_code TEXT,
-                input_tokens INTEGER
-                    CHECK(input_tokens IS NULL OR input_tokens >= 0),
-                output_tokens INTEGER
-                    CHECK(output_tokens IS NULL OR output_tokens >= 0),
-                reasoning_output_tokens INTEGER
-                    CHECK(reasoning_output_tokens IS NULL OR reasoning_output_tokens >= 0),
-                cache_read_input_tokens INTEGER
-                    CHECK(cache_read_input_tokens IS NULL OR cache_read_input_tokens >= 0),
-                cache_write_input_tokens INTEGER
-                    CHECK(cache_write_input_tokens IS NULL OR cache_write_input_tokens >= 0),
-                context_used_tokens INTEGER
-                    CHECK(context_used_tokens IS NULL OR context_used_tokens >= 0),
-                context_size_tokens INTEGER
-                    CHECK(context_size_tokens IS NULL OR context_size_tokens >= 0),
-                reported_cost_decimal TEXT,
-                reported_cost_currency TEXT,
-                cost_grain TEXT,
-                cost_quality TEXT,
-                semantics_json TEXT NOT NULL,
-                normalized_at TEXT NOT NULL
-            );
-
-            CREATE TABLE runtime_usage_parser_state (
-                adapter_kind TEXT NOT NULL,
-                runtime_version TEXT NOT NULL,
-                parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
-                fixture_digest TEXT,
-                status TEXT NOT NULL
-                    CHECK(status IN ('verified', 'observed', 'unsupported')),
-                last_observed_at TEXT,
-                PRIMARY KEY(adapter_kind, runtime_version, parser_version)
-            );
-
-            CREATE TABLE runtime_usage_run_rollup (
-                collection_epoch TEXT NOT NULL,
-                agent_run_id TEXT NOT NULL,
-                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                adapter_kind TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                input_tokens INTEGER CHECK(input_tokens IS NULL OR input_tokens >= 0),
-                output_tokens INTEGER CHECK(output_tokens IS NULL OR output_tokens >= 0),
-                reasoning_output_tokens INTEGER
-                    CHECK(reasoning_output_tokens IS NULL OR reasoning_output_tokens >= 0),
-                cache_read_input_tokens INTEGER
-                    CHECK(cache_read_input_tokens IS NULL OR cache_read_input_tokens >= 0),
-                cache_write_input_tokens INTEGER
-                    CHECK(cache_write_input_tokens IS NULL OR cache_write_input_tokens >= 0),
-                context_used_tokens INTEGER
-                    CHECK(context_used_tokens IS NULL OR context_used_tokens >= 0),
-                context_size_tokens INTEGER
-                    CHECK(context_size_tokens IS NULL OR context_size_tokens >= 0),
-                context_observed_at TEXT,
-                latest_observed_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(agent_run_id, execution_epoch),
-                FOREIGN KEY(agent_run_id, execution_epoch)
-                    REFERENCES monitoring_run_enrollment(
-                        agent_run_id, execution_epoch
-                    ) ON DELETE CASCADE
-            );
-            CREATE INDEX runtime_usage_run_rollup_range_idx
-                ON runtime_usage_run_rollup(
-                    collection_epoch, adapter_kind, model_id, latest_observed_at
-                );
-
-            CREATE TABLE runtime_cost_run_rollup (
-                collection_epoch TEXT NOT NULL,
-                agent_run_id TEXT NOT NULL,
-                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                adapter_kind TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                quality TEXT NOT NULL CHECK(quality IN (
-                    'runtime_reported', 'runtime_estimate',
-                    'price_estimated', 'provider_reconciled',
-                    'allocated', 'tokenizer_price_estimated'
-                )),
-                grain TEXT NOT NULL CHECK(grain IN (
-                    'model_call', 'turn', 'run', 'session',
-                    'billing_bucket', 'unknown'
-                )),
-                currency TEXT NOT NULL,
-                amount_decimal TEXT NOT NULL,
-                latest_observed_at TEXT NOT NULL,
-                pricing_catalog_version TEXT,
-                reconciled_through TEXT,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(
-                    agent_run_id, execution_epoch, quality, grain, currency
-                ),
-                FOREIGN KEY(agent_run_id, execution_epoch)
-                    REFERENCES monitoring_run_enrollment(
-                        agent_run_id, execution_epoch
-                    ) ON DELETE CASCADE
-            );
-            CREATE INDEX runtime_cost_run_rollup_range_idx
-                ON runtime_cost_run_rollup(
-                    collection_epoch, quality, grain, currency,
-                    latest_observed_at
-                );
-
-            CREATE TABLE runtime_usage_rollup_hourly (
-                collection_epoch TEXT NOT NULL,
-                bucket_started_at TEXT NOT NULL,
-                agent_run_id TEXT NOT NULL,
-                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                adapter_kind TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                input_tokens INTEGER CHECK(input_tokens IS NULL OR input_tokens >= 0),
-                output_tokens INTEGER CHECK(output_tokens IS NULL OR output_tokens >= 0),
-                reasoning_output_tokens INTEGER
-                    CHECK(reasoning_output_tokens IS NULL OR reasoning_output_tokens >= 0),
-                cache_read_input_tokens INTEGER
-                    CHECK(cache_read_input_tokens IS NULL OR cache_read_input_tokens >= 0),
-                cache_write_input_tokens INTEGER
-                    CHECK(cache_write_input_tokens IS NULL OR cache_write_input_tokens >= 0),
-                latest_observed_at TEXT NOT NULL,
-                PRIMARY KEY(
-                    collection_epoch, bucket_started_at,
-                    agent_run_id, execution_epoch
-                ),
-                FOREIGN KEY(agent_run_id, execution_epoch)
-                    REFERENCES monitoring_run_enrollment(
-                        agent_run_id, execution_epoch
-                    ) ON DELETE CASCADE
-            );
-            CREATE INDEX runtime_usage_rollup_hourly_range_idx
-                ON runtime_usage_rollup_hourly(
-                    collection_epoch, bucket_started_at, adapter_kind, model_id
-                );
-
-            CREATE TABLE monitoring_run_rollup_hourly (
-                collection_epoch TEXT NOT NULL,
-                bucket_started_at TEXT NOT NULL,
-                adapter_kind TEXT NOT NULL,
-                model_id TEXT NOT NULL,
-                agent_id TEXT NOT NULL,
-                terminal_status TEXT NOT NULL CHECK(terminal_status IN (
-                    'active', 'succeeded', 'failed', 'cancelled'
-                )),
-                run_count INTEGER NOT NULL CHECK(run_count >= 0),
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(
-                    collection_epoch, bucket_started_at, adapter_kind,
-                    model_id, agent_id, terminal_status
-                )
-            );
-            CREATE INDEX monitoring_run_rollup_hourly_range_idx
-                ON monitoring_run_rollup_hourly(
-                    collection_epoch, bucket_started_at, terminal_status,
-                    adapter_kind, agent_id
-                );
-
-            CREATE TABLE agent_run_native_session_fact (
-                agent_run_id TEXT NOT NULL,
-                collection_epoch TEXT NOT NULL
-                    REFERENCES monitoring_collection_state(collection_epoch),
-                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
-                resume_requested INTEGER NOT NULL
-                    CHECK(resume_requested IN (0, 1)),
-                resume_disposition TEXT NOT NULL
-                    CHECK(resume_disposition IN (
-                        'new', 'compatible', 'controlled'
-                    )),
-                resume_outcome TEXT NOT NULL
-                    CHECK(resume_outcome IN (
-                        'not_attempted', 'succeeded', 'rejected',
-                        'incompatible', 'ambiguous', 'failed'
-                    )),
-                resume_rejected INTEGER NOT NULL
-                    CHECK(resume_rejected IN (0, 1)),
-                fallback_to_new_session INTEGER NOT NULL
-                    CHECK(fallback_to_new_session IN (0, 1)),
-                reason_code TEXT,
-                native_session_digest TEXT,
-                decided_at TEXT NOT NULL,
-                resolved_at TEXT,
-                updated_at TEXT NOT NULL,
-                PRIMARY KEY(agent_run_id, execution_epoch),
-                FOREIGN KEY(agent_run_id, execution_epoch)
-                    REFERENCES monitoring_run_enrollment(
-                        agent_run_id, execution_epoch
-                    ) ON DELETE CASCADE,
-                CHECK(
-                    resume_requested = 1
-                    OR (
-                        resume_disposition = 'new'
-                        AND resume_outcome = 'not_attempted'
-                        AND fallback_to_new_session = 0
-                        AND resolved_at IS NULL
-                    )
-                ),
-                CHECK(
-                    resume_outcome <> 'succeeded'
-                    OR fallback_to_new_session = 0
-                ),
-                CHECK(
-                    (resume_outcome = 'not_attempted' AND resolved_at IS NULL)
-                    OR
-                    (resume_outcome <> 'not_attempted' AND resolved_at IS NOT NULL)
-                )
-            );
-            CREATE INDEX agent_run_native_session_fact_outcome_idx
-                ON agent_run_native_session_fact(
-                    resume_requested, resume_outcome, updated_at
-                );
-
             ALTER TABLE canonical_runtime_activity
                 ADD COLUMN started_at TEXT;
             ALTER TABLE canonical_runtime_activity
                 ADD COLUMN terminal_at TEXT;
 
-            CREATE TRIGGER monitoring_agent_run_status_rollup
-            AFTER UPDATE OF status ON agent_run
-            WHEN CASE
-                    WHEN OLD.status IN ('queued', 'running', 'waiting') THEN 'active'
-                    ELSE OLD.status
-                 END <> CASE
-                    WHEN NEW.status IN ('queued', 'running', 'waiting') THEN 'active'
-                    ELSE NEW.status
-                 END
-              AND EXISTS (
-                    SELECT 1
-                    FROM monitoring_run_enrollment enrollment
-                    WHERE enrollment.agent_run_id = NEW.id
-              )
-            BEGIN
-                UPDATE monitoring_run_rollup_hourly
-                SET run_count = run_count - 1,
-                    updated_at = datetime('now')
-                WHERE (
-                    collection_epoch, bucket_started_at, adapter_kind,
-                    model_id, agent_id
-                ) = (
-                    SELECT collection_epoch, rollup_bucket_started_at,
-                           adapter_kind, COALESCE(model_id, 'unknown'), agent_id
-                    FROM monitoring_run_enrollment
-                    WHERE agent_run_id = NEW.id
-                    ORDER BY execution_epoch
-                    LIMIT 1
-                )
-                  AND terminal_status = CASE
-                        WHEN OLD.status IN ('queued', 'running', 'waiting')
-                            THEN 'active'
-                        ELSE OLD.status
-                      END;
-
-                DELETE FROM monitoring_run_rollup_hourly
-                WHERE run_count = 0;
-
-                INSERT INTO monitoring_run_rollup_hourly(
-                    collection_epoch, bucket_started_at, adapter_kind,
-                    model_id, agent_id, terminal_status, run_count, updated_at
-                )
-                SELECT collection_epoch, rollup_bucket_started_at, adapter_kind,
-                       COALESCE(model_id, 'unknown'), agent_id,
-                       CASE
-                           WHEN NEW.status IN ('queued', 'running', 'waiting')
-                               THEN 'active'
-                           ELSE NEW.status
-                       END,
-                       1, datetime('now')
-                FROM monitoring_run_enrollment
-                WHERE agent_run_id = NEW.id
-                ORDER BY execution_epoch
-                LIMIT 1
-                ON CONFLICT(
-                    collection_epoch, bucket_started_at, adapter_kind,
-                    model_id, agent_id, terminal_status
-                ) DO UPDATE SET
-                    run_count = run_count + 1,
-                    updated_at = excluded.updated_at;
-            END;
-            "#,
-        )?;
-        let now = chrono::Utc::now().to_rfc3339();
-        transaction.execute(
-            r#"
-            INSERT INTO monitoring_collection_state(
-                singleton, collection_epoch, collection_started_at, identity_salt,
-                parser_schema_version, created_at, updated_at
-            ) VALUES (1, ?1, ?2, ?3, 1, ?2, ?2)
-            "#,
-            params![Uuid::new_v4().to_string(), now, Uuid::new_v4().to_string()],
-        )?;
-        transaction.execute_batch(
-            r#"
             UPDATE rovai_data_contract
             SET contract_version = 'v0.96', projection_schema_version = 45,
                 reset_reason = NULL, updated_at = datetime('now')
@@ -10949,10 +10547,8 @@ impl Database {
             VALUES (90, datetime('now'));
             "#,
         )?;
-        transaction.commit()?;
         Ok(())
     }
-
     fn migrate_current_input_skill_links_v91(&mut self) -> Result<()> {
         self.connection
             .execute_batch("PRAGMA foreign_keys = OFF;")?;
@@ -11174,6 +10770,242 @@ impl Database {
         {
             anyhow::bail!("v91 migration left a foreign-key violation in {table} row {row_id}");
         }
+        Ok(())
+    }
+
+    fn migrate_minimal_runtime_usage_v92(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            DROP TRIGGER IF EXISTS monitoring_agent_run_status_rollup;
+            DROP TRIGGER IF EXISTS runtime_usage_agent_run_terminal;
+            DROP INDEX IF EXISTS monitoring_compaction_observation_time_idx;
+            DROP INDEX IF EXISTS monitoring_canonical_activity_scope_idx;
+
+            DROP TABLE IF EXISTS runtime_usage_source_observation_dedupe;
+            DROP TABLE IF EXISTS runtime_usage_normalized_observation;
+            DROP TABLE IF EXISTS runtime_usage_raw_observation;
+            DROP TABLE IF EXISTS runtime_usage_parser_state;
+            DROP TABLE IF EXISTS runtime_cost_run_rollup;
+            DROP TABLE IF EXISTS runtime_usage_rollup_hourly;
+            DROP TABLE IF EXISTS runtime_usage_run_rollup;
+            DROP TABLE IF EXISTS agent_run_native_session_fact;
+            DROP TABLE IF EXISTS monitoring_run_rollup_hourly;
+            DROP TABLE IF EXISTS monitoring_run_enrollment;
+            DROP TABLE IF EXISTS monitoring_collection_state;
+
+            DROP TABLE IF EXISTS runtime_usage_checkpoint;
+            DROP TABLE IF EXISTS runtime_usage_hourly;
+            DROP TABLE IF EXISTS runtime_cost_reconciliation_bucket;
+            DROP TABLE IF EXISTS runtime_usage_run_summary;
+            DROP TABLE IF EXISTS runtime_usage_collection_state;
+
+            CREATE TABLE runtime_usage_collection_state (
+                singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                schema_version INTEGER NOT NULL CHECK(schema_version = 2),
+                collection_epoch TEXT NOT NULL UNIQUE,
+                collection_started_at TEXT NOT NULL
+            );
+
+            CREATE TABLE runtime_usage_run_summary (
+                collection_epoch TEXT NOT NULL,
+                agent_run_id TEXT NOT NULL,
+                runtime_kind TEXT NOT NULL,
+                runtime_version TEXT,
+                provider_key TEXT,
+                model_key TEXT,
+                service_tier TEXT,
+                parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+                eligible_mask INTEGER NOT NULL CHECK(eligible_mask >= 0),
+                input_semantics TEXT NOT NULL CHECK(input_semantics IN (
+                    'exclusive_buckets', 'cache_inclusive_total', 'unknown'
+                )),
+                usage_source TEXT,
+                usage_quality TEXT,
+                prompt_input_total_tokens INTEGER
+                    CHECK(prompt_input_total_tokens IS NULL OR prompt_input_total_tokens >= 0),
+                uncached_input_tokens INTEGER
+                    CHECK(uncached_input_tokens IS NULL OR uncached_input_tokens >= 0),
+                cache_read_tokens INTEGER
+                    CHECK(cache_read_tokens IS NULL OR cache_read_tokens >= 0),
+                cache_write_tokens INTEGER
+                    CHECK(cache_write_tokens IS NULL OR cache_write_tokens >= 0),
+                output_tokens INTEGER
+                    CHECK(output_tokens IS NULL OR output_tokens >= 0),
+                reasoning_output_tokens INTEGER
+                    CHECK(reasoning_output_tokens IS NULL OR reasoning_output_tokens >= 0),
+                cache_observable_request_count INTEGER
+                    CHECK(cache_observable_request_count IS NULL OR cache_observable_request_count >= 0),
+                cache_hit_request_count INTEGER
+                    CHECK(cache_hit_request_count IS NULL OR cache_hit_request_count >= 0),
+                cost_amount_decimal TEXT,
+                cost_currency TEXT,
+                cost_kind TEXT,
+                cost_source TEXT,
+                pricing_catalog_version TEXT,
+                enrolled_at TEXT NOT NULL,
+                first_observed_at TEXT,
+                last_observed_at TEXT,
+                finalized_at TEXT,
+                PRIMARY KEY(collection_epoch, agent_run_id),
+                FOREIGN KEY(collection_epoch)
+                    REFERENCES runtime_usage_collection_state(collection_epoch),
+                CHECK(
+                    (cost_amount_decimal IS NULL AND cost_currency IS NULL
+                     AND cost_kind IS NULL AND cost_source IS NULL)
+                    OR
+                    (cost_amount_decimal IS NOT NULL AND cost_currency IS NOT NULL
+                     AND cost_kind IS NOT NULL AND cost_source IS NOT NULL)
+                ),
+                CHECK(
+                    reasoning_output_tokens IS NULL OR output_tokens IS NULL
+                    OR reasoning_output_tokens <= output_tokens
+                ),
+                CHECK(
+                    cache_hit_request_count IS NULL
+                    OR cache_observable_request_count IS NULL
+                    OR cache_hit_request_count <= cache_observable_request_count
+                )
+            );
+            CREATE INDEX runtime_usage_run_summary_range_idx
+                ON runtime_usage_run_summary(
+                    collection_epoch, enrolled_at, runtime_kind,
+                    provider_key, model_key
+                );
+            CREATE INDEX runtime_usage_run_summary_retention_idx
+                ON runtime_usage_run_summary(finalized_at, last_observed_at);
+
+            CREATE TABLE runtime_usage_hourly (
+                collection_epoch TEXT NOT NULL,
+                bucket_start_at TEXT NOT NULL,
+                runtime_kind TEXT NOT NULL,
+                provider_key TEXT,
+                model_key TEXT,
+                prompt_input_total_tokens INTEGER
+                    CHECK(prompt_input_total_tokens IS NULL OR prompt_input_total_tokens >= 0),
+                uncached_input_tokens INTEGER
+                    CHECK(uncached_input_tokens IS NULL OR uncached_input_tokens >= 0),
+                cache_read_tokens INTEGER
+                    CHECK(cache_read_tokens IS NULL OR cache_read_tokens >= 0),
+                cache_write_tokens INTEGER
+                    CHECK(cache_write_tokens IS NULL OR cache_write_tokens >= 0),
+                output_tokens INTEGER
+                    CHECK(output_tokens IS NULL OR output_tokens >= 0),
+                reasoning_output_tokens INTEGER
+                    CHECK(reasoning_output_tokens IS NULL OR reasoning_output_tokens >= 0),
+                cache_observable_request_count INTEGER
+                    CHECK(cache_observable_request_count IS NULL OR cache_observable_request_count >= 0),
+                cache_hit_request_count INTEGER
+                    CHECK(cache_hit_request_count IS NULL OR cache_hit_request_count >= 0),
+                last_updated_at TEXT NOT NULL,
+                FOREIGN KEY(collection_epoch)
+                    REFERENCES runtime_usage_collection_state(collection_epoch)
+            );
+            CREATE UNIQUE INDEX runtime_usage_hourly_identity_idx
+                ON runtime_usage_hourly(
+                    collection_epoch, bucket_start_at, runtime_kind,
+                    COALESCE(provider_key, ''), COALESCE(model_key, '')
+                );
+            CREATE INDEX runtime_usage_hourly_range_idx
+                ON runtime_usage_hourly(
+                    collection_epoch, bucket_start_at, runtime_kind
+                );
+
+            CREATE TABLE runtime_cost_reconciliation_bucket (
+                collection_epoch TEXT NOT NULL,
+                provider_key TEXT NOT NULL,
+                billing_scope_digest TEXT NOT NULL,
+                currency TEXT NOT NULL,
+                bucket_start_at TEXT NOT NULL,
+                bucket_end_at TEXT NOT NULL,
+                provider_cost_decimal TEXT NOT NULL,
+                reconciled_through_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(
+                    collection_epoch, provider_key, billing_scope_digest,
+                    currency, bucket_start_at, bucket_end_at
+                ),
+                FOREIGN KEY(collection_epoch)
+                    REFERENCES runtime_usage_collection_state(collection_epoch)
+            );
+            CREATE INDEX runtime_cost_reconciliation_range_idx
+                ON runtime_cost_reconciliation_bucket(
+                    collection_epoch, bucket_end_at, provider_key, currency
+                );
+
+            CREATE TABLE runtime_usage_checkpoint (
+                collection_epoch TEXT NOT NULL,
+                agent_run_id TEXT NOT NULL,
+                execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
+                checkpoint_key TEXT NOT NULL,
+                runtime_kind TEXT NOT NULL,
+                parser_version INTEGER NOT NULL CHECK(parser_version >= 1),
+                source_kind TEXT NOT NULL,
+                counter_mode TEXT NOT NULL CHECK(counter_mode IN (
+                    'delta', 'cumulative', 'gauge'
+                )),
+                last_event_digest TEXT NOT NULL,
+                prompt_input_total_baseline INTEGER,
+                uncached_input_baseline INTEGER,
+                cache_read_baseline INTEGER,
+                cache_write_baseline INTEGER,
+                output_baseline INTEGER,
+                reasoning_output_baseline INTEGER,
+                cache_observable_request_baseline INTEGER,
+                cache_hit_request_baseline INTEGER,
+                cumulative_cost_baseline_decimal TEXT,
+                cumulative_cost_currency TEXT,
+                updated_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                PRIMARY KEY(
+                    collection_epoch, agent_run_id,
+                    execution_epoch, checkpoint_key
+                ),
+                FOREIGN KEY(collection_epoch, agent_run_id)
+                    REFERENCES runtime_usage_run_summary(
+                        collection_epoch, agent_run_id
+                    ) ON DELETE CASCADE
+            );
+            CREATE INDEX runtime_usage_checkpoint_expiry_idx
+                ON runtime_usage_checkpoint(expires_at);
+
+            CREATE TRIGGER runtime_usage_agent_run_terminal
+            AFTER UPDATE OF status ON agent_run
+            WHEN NEW.status IN ('succeeded', 'failed', 'cancelled')
+             AND OLD.status NOT IN ('succeeded', 'failed', 'cancelled')
+            BEGIN
+                UPDATE runtime_usage_run_summary
+                SET finalized_at = COALESCE(finalized_at, NEW.ended_at, NEW.updated_at)
+                WHERE collection_epoch = (
+                    SELECT collection_epoch
+                    FROM runtime_usage_collection_state
+                    WHERE singleton_id = 1
+                ) AND agent_run_id = NEW.id;
+                DELETE FROM runtime_usage_checkpoint
+                WHERE collection_epoch = (
+                    SELECT collection_epoch
+                    FROM runtime_usage_collection_state
+                    WHERE singleton_id = 1
+                ) AND agent_run_id = NEW.id;
+            END;
+
+            INSERT INTO runtime_usage_collection_state(
+                singleton_id, schema_version,
+                collection_epoch, collection_started_at
+            ) VALUES (1, 2, lower(hex(randomblob(16))), strftime('%Y-%m-%dT%H:%M:%fZ', 'now'));
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v0.99', projection_schema_version = 47,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (92, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -15598,6 +15430,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 92;
                 DELETE FROM schema_migration WHERE version = 91;
                 "#,
             )
@@ -15882,41 +15715,136 @@ mod tests {
     }
 
     #[test]
-    fn runtime_monitoring_v90_starts_a_clean_collection_without_backfill() {
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-runtime-monitoring-v90-test-{}",
-            Uuid::new_v4()
-        ));
+    fn runtime_usage_v92_replaces_legacy_monitoring_without_backfill() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-usage-v92-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
-        let (epoch, started_at, parser_version): (String, String, i64) = database
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                CREATE TABLE monitoring_collection_state(
+                    singleton INTEGER PRIMARY KEY,
+                    collection_epoch TEXT NOT NULL
+                );
+                CREATE TABLE monitoring_run_enrollment(
+                    agent_run_id TEXT PRIMARY KEY,
+                    first_visible_activity_at TEXT
+                );
+                CREATE TABLE runtime_usage_raw_observation(
+                    id TEXT PRIMARY KEY,
+                    payload_json TEXT NOT NULL
+                );
+                INSERT INTO monitoring_collection_state VALUES(1, 'legacy-epoch');
+                INSERT INTO monitoring_run_enrollment VALUES('legacy-run', '2026-08-16T00:00:00Z');
+                INSERT INTO runtime_usage_raw_observation VALUES('legacy-usage', '{"input":42}');
+                UPDATE rovai_data_contract
+                SET contract_version = 'v0.98', projection_schema_version = 46
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 92;
+                "#,
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v0.98 source should migrate to v0.99");
+        let (epoch, started_at, schema_version): (String, String, i64) = reopened
             .connection()
             .query_row(
                 r#"
-                SELECT collection_epoch, collection_started_at,
-                       parser_schema_version
-                FROM monitoring_collection_state
-                WHERE singleton = 1
+                SELECT collection_epoch, collection_started_at, schema_version
+                FROM runtime_usage_collection_state WHERE singleton_id = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
-            .expect("v90 collection state should exist");
-        assert!(Uuid::parse_str(&epoch).is_ok());
+            .expect("v92 collection state should exist");
+        assert_eq!(epoch.len(), 32);
+        assert!(epoch.chars().all(|value| value.is_ascii_hexdigit()));
         assert!(chrono::DateTime::parse_from_rfc3339(&started_at).is_ok());
-        assert_eq!(parser_version, 1);
-        let enrollment_count: i64 = database
+        assert_eq!(schema_version, 2);
+        let usage_tables = [
+            "runtime_usage_collection_state",
+            "runtime_usage_run_summary",
+            "runtime_usage_hourly",
+            "runtime_cost_reconciliation_bucket",
+            "runtime_usage_checkpoint",
+        ];
+        for table in usage_tables {
+            let exists: bool = reopened
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(exists, "new Runtime Usage table {table} should exist");
+        }
+        let monitoring_tables: Vec<String> = reopened
+            .connection()
+            .prepare(
+                r#"
+                SELECT name FROM sqlite_master
+                WHERE type = 'table'
+                  AND (name LIKE 'monitoring_%'
+                       OR name LIKE 'runtime_usage_%'
+                       OR name = 'runtime_cost_reconciliation_bucket'
+                       OR name = 'runtime_cost_run_rollup'
+                       OR name = 'agent_run_native_session_fact')
+                ORDER BY name
+                "#,
+            )
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        let mut expected_tables = usage_tables
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        expected_tables.sort();
+        assert_eq!(monitoring_tables, expected_tables);
+        let terminal_trigger_exists: bool = reopened
             .connection()
             .query_row(
-                "SELECT COUNT(*) FROM monitoring_run_enrollment",
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM sqlite_master
+                    WHERE type = 'trigger' AND name = 'runtime_usage_agent_run_terminal'
+                )
+                "#,
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(
-            enrollment_count, 0,
-            "migration must not manufacture enrollment for historical Runs"
-        );
-        let contract: (String, i64) = database
+        assert!(terminal_trigger_exists);
+        for table in [
+            "monitoring_collection_state",
+            "monitoring_run_enrollment",
+            "runtime_usage_raw_observation",
+        ] {
+            let exists: bool = reopened
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(!exists, "legacy Monitoring table {table} should be dropped");
+        }
+        let summary_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_usage_run_summary",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(summary_count, 0, "legacy Usage must not be migrated");
+        let contract: (String, i64) = reopened
             .connection()
             .query_row(
                 r#"
@@ -15927,7 +15855,9 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.98".to_string(), 46));
+        assert_eq!(contract, ("v0.99".to_string(), 47));
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -15988,6 +15918,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 92;
                 DELETE FROM schema_migration WHERE version = 91;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -16023,7 +15954,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.98".to_string(), 46, 1));
+        assert_eq!(contract, ("v0.99".to_string(), 47, 1));
         assert_eq!(
             reopened
                 .connection()
