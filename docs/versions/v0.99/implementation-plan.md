@@ -87,6 +87,22 @@ last_updated: 2026-08-17
 - Monitoring persistence 精确只含五张 Usage 表，Run Summary 与 Checkpoint 均为 0，证明旧 Monitoring 数据
   未补算，同时 Core 历史未被 Monitoring clean break 删除。
 
+### ACP 私有 Usage 增量验收
+
+- Parser version 3 接入 OpenCode 1.18.15 terminal Usage、CodeBuddy 2.133.1
+  `usage_update._meta.usage` 与 Qwen Code 0.21.5 `agent_message_chunk._meta.usage`；不改变 schema、Migration
+  或 collection epoch；
+- 三份 Fixture 来自本机真实 Runtime 调用并已脱敏。CodeBuddy 同一 request 的重复补发按稳定 ID 去重；
+  OpenCode 独立 thought bucket 被归一为 Output 子集语义；三者未上报的 Cache Write 保持 `NULL`；
+- `cargo test --workspace -- --test-threads=2`：325 passed、0 failed、3 ignored；Monitoring 定向 5/5、
+  `cargo fmt --all --check`、严格 Clippy、TypeScript、399 项 Vitest、文档及 diff-aware 文档门禁通过；
+- 聚合 `pnpm test` 的唯一失败来自主线已有 Benchmark profile 仍引用已合并删除的 DB 测试名；本增量没有
+  修改该无关 Benchmark 合同，其他 186 项 Node/Protocol 测试通过；
+- arm64 App 重新打包并通过 App/Core/CLI 严格签名、Mach-O 架构与隔离 packaged Core 验收；SHA-256：
+  `app.asar` = `39e57d5e95c2a2641127e832521a74bf12bf239af813c1acc01effabcd04be82`，
+  `rovai-core` = `954592b42599668a4666581f83ccc6b3081bdf9c085775b303ec9580670d9f8a`，
+  `rovai` = `368bcc197e0bc7e89d315c8ce4f6bbab474a3e4fefcee1fd29fd73069d21c9f4`。
+
 ## References
 
 - [v0.99 版本概览](README.md)

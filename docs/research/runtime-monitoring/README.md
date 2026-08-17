@@ -1,7 +1,7 @@
 ---
 title: "Rovai AI 运行监控指标可采集性审计"
 status: "accepted-design-input"
-reviewed_at: "2026-08-16"
+reviewed_at: "2026-08-17"
 target_repo: "murray17/rovai-ai"
 target_version: "v0.96"
 baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
@@ -23,7 +23,9 @@ baseline_ref: "4b4fe088b15ef785cd76f54f221e5d87c9d639a4"
   Rovai 尚未解析、归一化和持久化这些字段。
 - ACP 标准 `usage_update` 只能稳定表达当前 Context Used、Context Window 和可选的累计 Session Cost，
   而且通知本身是可选能力；不能据此宣称所有 ACP Runtime 都有 Input、Output 和 Cache 桶。
-- OpenCode、Kiro、Qoder、CodeBuddy、Qwen Code 和 TRAE CLI 仍缺当前版本真实 Usage Fixture。
+- OpenCode 1.18.15、CodeBuddy 2.133.1 和 Qwen Code 0.21.5 已完成真实调用并建立脱敏 Usage Fixture；
+  Kiro 与 TRAE 的当前真实样本未返回 Token/Cache，Qoder 虽返回终态 Usage 结构但数值全为 0，不能作为
+  可靠消耗数据。
 - Antigravity 当前没有可靠的结构化 Token、Cache、Context Token 或真实运行级成本来源。Rovai 可以对
   已知输入与最终输出做本地 Tokenizer 粗估，但必须单独标为 `tokenizer_estimated`，不能进入原生
   Usage Coverage，也不能据此声称还原了 Cache 或 Provider 费用。
@@ -112,12 +114,12 @@ v0.96 **不回填任何历史监控指标**：不扫描旧 Runtime transcript，
 | Claude Code | 可补采集 | 部分 | Runtime estimate | 当前使用 `stream-json`，但 parser 只保存终态、正文和 session ID。官方 result/modelUsage 足够扩展；需处理重复 message ID 和 subagent 口径。 |
 | Codex CLI | 可补采集 | 可补采集 | 无运行级实际成本 | 本机 `codex-cli 0.147.0` 生成 schema 已确认 `thread/tokenUsage/updated` 包含 last/total、context window、input、cached input、cache write、output 和 reasoning output；当前 normalize 分支尚未解析。 |
 | GitHub Copilot CLI | **Fixture 已证明，可补采集** | **Fixture 已证明** | 未证明 | v0.64 真实 ACP ledger 同时包含 `usage_update {used,size}` 和终态 `usage {inputTokens, outputTokens, thoughtTokens, cachedReadTokens, cachedWriteTokens}`；当前 prompt completion 只读 stop reason。 |
-| OpenCode | 待 Fixture | 条件支持 | 条件支持 | ACP 协议允许 `usage_update`，但仓库没有当前版本真实 Usage Fixture，不能假设实现一定发送。 |
-| Kiro | 待 Fixture | 条件支持 | 条件支持 | 同上；还需覆盖 resume 后累计值与非复用 Host 边界。 |
-| Qoder | 待 Fixture | 条件支持 | 条件支持 | 同上。 |
-| CodeBuddy | 待 Fixture | 条件支持 | 条件支持 | 同上；不能直接套用 Claude 字段语义。 |
-| Qwen Code | 待 Fixture | 条件支持 | 条件支持 | 同上；必须验证 Cache Write 是否存在及 Input 是否含 Cache。 |
-| TRAE CLI CN | 待企业版 Fixture | 条件支持 | 条件支持 | 当前兼容性本就要求企业版实机 Probe；Usage 不能从一般 ACP 能力推断。 |
+| OpenCode | **Fixture 已证明，部分** | ACP Context | Session gauge | 1.18.15 终态返回 uncached input、cache read、visible output 与独立 thought；parser 将后两者归一为包含 reasoning 的 Output。未上报 cache write，因此 prompt input total 保持未知。 |
+| Kiro | 当前样本未上报 | 当前样本未上报 | 未证明 | 2.16.1 的真实最小 AgentRun 成功，但 ACP 边界没有 Usage 消息；不能从标准可选能力推断字段。 |
+| Qoder | 结构存在但不可用 | 未证明 | 未证明 | 1.1.17 的真实 AgentRun 成功，终态 `inputTokens/outputTokens/totalTokens` 却全为 0；与实际生成不一致，不能纳管为真实消耗。 |
+| CodeBuddy | **Fixture 已证明，部分** | ACP Context | 未证明 | 2.133.1 私有 `usage_update._meta.usage` 返回 prompt/uncached/cache-read/output/reasoning；同一 request 会重复补发，按 request ID 去重。未上报 cache write。 |
+| Qwen Code | **Fixture 已证明，部分** | 未证明 | 未证明 | 0.21.5 私有 `agent_message_chunk._meta.usage` 返回 input/output/thought/cache-read；Input 含 Cache Read，未上报 uncached input 与 cache write。 |
+| TRAE CLI CN | 当前样本未上报 | 当前样本未上报 | 未证明 | 0.120.52 的真实最小 AgentRun 成功，但 ACP 边界没有 Usage；不能从一般 ACP 能力推断字段。 |
 | Antigravity | 原生不可得；可粗估 I/O | 当前不可得 | 真实成本不可得 | 现有 plain output/受控日志没有 Usage。可对 Rovai 已知输入与最终输出运行版本化本地 Tokenizer，但不能还原 Cache、Provider 实际 Token 或费用；权威数据需要上游 Usage 或可控 Provider Gateway/API 请求关联。 |
 
 ### 3.1 Copilot 已有真实证据

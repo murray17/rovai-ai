@@ -1,1 +1,37 @@
-{"method":"session/update","params":{"sessionId":"opencode-session","update":{"sessionUpdate":"usage_update","used":2048,"size":32768}}}
+{
+  "runtimeVersion": "1.18.15",
+  "messages": [
+    {
+      "method": "session/update",
+      "params": {
+        "sessionId": "opencode-session-fixture",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 12817,
+          "size": 200000,
+          "cost": {
+            "amount": 0,
+            "currency": "USD"
+          }
+        }
+      }
+    },
+    {
+      "method": "rovai/acp_prompt_completed",
+      "params": {
+        "sessionId": "opencode-session-fixture",
+        "promptId": "opencode-prompt-fixture",
+        "result": {
+          "stopReason": "end_turn",
+          "usage": {
+            "inputTokens": 11793,
+            "cachedReadTokens": 1024,
+            "outputTokens": 11,
+            "thoughtTokens": 31,
+            "totalTokens": 12859
+          }
+        }
+      }
+    }
+  ]
+}

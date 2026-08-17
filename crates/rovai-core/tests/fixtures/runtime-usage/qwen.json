@@ -1,1 +1,25 @@
-{"method":"session/update","params":{"sessionId":"qwen-session","update":{"sessionUpdate":"usage_update","used":3072,"size":32768}}}
+{
+  "runtimeVersion": "0.21.5",
+  "messages": [
+    {
+      "method": "session/update",
+      "params": {
+        "sessionId": "qwen-session-fixture",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": { "type": "text", "text": "" },
+          "_meta": {
+            "usage": {
+              "inputTokens": 37573,
+              "outputTokens": 65,
+              "totalTokens": 37638,
+              "thoughtTokens": 55,
+              "cachedReadTokens": 0
+            },
+            "durationMs": 3318
+          }
+        }
+      }
+    }
+  ]
+}

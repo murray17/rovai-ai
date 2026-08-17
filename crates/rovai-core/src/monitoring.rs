@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use crate::{agent_profile::AdapterKind, db::Database, runtime::AgentRunExecution};
 
 const USAGE_SCHEMA_VERSION: i64 = 2;
-const USAGE_PARSER_VERSION: i64 = 2;
+const USAGE_PARSER_VERSION: i64 = 3;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const CHECKPOINT_TTL_HOURS: i64 = 72;
 const RETENTION_DAYS: i64 = 45;
@@ -118,6 +118,7 @@ impl RuntimeInputSemantics {
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeUsageFields {
     pub input_tokens: Option<i64>,
+    pub uncached_input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
     pub reasoning_output_tokens: Option<i64>,
     pub cache_read_input_tokens: Option<i64>,
@@ -129,6 +130,7 @@ pub struct RuntimeUsageFields {
 impl RuntimeUsageFields {
     fn is_empty(&self) -> bool {
         self.input_tokens.is_none()
+            && self.uncached_input_tokens.is_none()
             && self.output_tokens.is_none()
             && self.reasoning_output_tokens.is_none()
             && self.cache_read_input_tokens.is_none()
@@ -468,6 +470,10 @@ fn merge_delta_fields(
     incoming: &RuntimeUsageFields,
 ) -> Result<()> {
     add_optional(&mut current.input_tokens, incoming.input_tokens)?;
+    add_optional(
+        &mut current.uncached_input_tokens,
+        incoming.uncached_input_tokens,
+    )?;
     add_optional(&mut current.output_tokens, incoming.output_tokens)?;
     add_optional(
         &mut current.reasoning_output_tokens,
@@ -1327,7 +1333,7 @@ fn normalize_usage(usage: &ParsedRuntimeUsage) -> Result<UsageCounters> {
     let read = usage.fields.cache_read_input_tokens;
     let write = usage.fields.cache_write_input_tokens;
     let input = usage.fields.input_tokens;
-    let (prompt_total, uncached) = match usage.input_semantics {
+    let (prompt_total, derived_uncached) = match usage.input_semantics {
         RuntimeInputSemantics::CacheInclusiveTotal => {
             if let (Some(total), Some(read), Some(write)) = (input, read, write) {
                 let cached = read
@@ -1354,6 +1360,13 @@ fn normalize_usage(usage: &ParsedRuntimeUsage) -> Result<UsageCounters> {
             (prompt_total, input)
         }
         RuntimeInputSemantics::Unknown => (None, None),
+    };
+    let uncached = match (usage.fields.uncached_input_tokens, derived_uncached) {
+        (Some(reported), Some(derived)) if reported != derived => {
+            anyhow::bail!("Runtime Usage uncached input conflicts with bucket arithmetic")
+        }
+        (Some(reported), _) => Some(reported),
+        (None, derived) => derived,
     };
     if let (Some(reasoning), Some(output)) = (
         usage.fields.reasoning_output_tokens,
@@ -1432,6 +1445,7 @@ fn validate_usage(usage: &ParsedRuntimeUsage) -> Result<()> {
     }
     for value in [
         usage.fields.input_tokens,
+        usage.fields.uncached_input_tokens,
         usage.fields.output_tokens,
         usage.fields.reasoning_output_tokens,
         usage.fields.cache_read_input_tokens,
@@ -1501,12 +1515,43 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
                 | ELIGIBLE_REQUEST_CACHE_HIT
                 | ELIGIBLE_RUNTIME_REPORTED_COST
         }
-        AdapterKind::OpencodeCli
-        | AdapterKind::KiroCli
-        | AdapterKind::QoderCli
-        | AdapterKind::CodebuddyCli
-        | AdapterKind::QwenCode
-        | AdapterKind::TraeCnCli => ELIGIBLE_RUNTIME_REPORTED_COST,
+        AdapterKind::OpencodeCli => {
+            let mut mask = ELIGIBLE_RUNTIME_REPORTED_COST;
+            if reported_version_at_least(runtime_version, [1, 18, 15]) {
+                mask |= ELIGIBLE_UNCACHED_INPUT
+                    | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_OUTPUT
+                    | ELIGIBLE_REASONING_OUTPUT
+                    | ELIGIBLE_REQUEST_CACHE_HIT;
+            }
+            mask
+        }
+        AdapterKind::CodebuddyCli => {
+            let mut mask = ELIGIBLE_RUNTIME_REPORTED_COST;
+            if reported_version_at_least(runtime_version, [2, 133, 1]) {
+                mask |= ELIGIBLE_PROMPT_INPUT_TOTAL
+                    | ELIGIBLE_UNCACHED_INPUT
+                    | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_OUTPUT
+                    | ELIGIBLE_REASONING_OUTPUT
+                    | ELIGIBLE_REQUEST_CACHE_HIT;
+            }
+            mask
+        }
+        AdapterKind::QwenCode => {
+            let mut mask = ELIGIBLE_RUNTIME_REPORTED_COST;
+            if reported_version_at_least(runtime_version, [0, 21, 5]) {
+                mask |= ELIGIBLE_PROMPT_INPUT_TOTAL
+                    | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_OUTPUT
+                    | ELIGIBLE_REASONING_OUTPUT
+                    | ELIGIBLE_REQUEST_CACHE_HIT;
+            }
+            mask
+        }
+        AdapterKind::KiroCli | AdapterKind::QoderCli | AdapterKind::TraeCnCli => {
+            ELIGIBLE_RUNTIME_REPORTED_COST
+        }
         AdapterKind::AntigravityApp => 0,
     }
 }
@@ -2370,9 +2415,13 @@ fn string_option(value: &Value, keys: &[&str]) -> Option<String> {
 }
 
 fn codex_cache_write_supported(runtime_version: Option<&str>) -> bool {
+    reported_version_at_least(runtime_version, [0, 145, 0])
+}
+
+fn reported_version_at_least(runtime_version: Option<&str>, minimum: [u64; 3]) -> bool {
     runtime_version
         .and_then(parse_reported_version)
-        .is_some_and(|version| version >= [0, 145, 0])
+        .is_some_and(|version| version >= minimum)
 }
 
 fn parse_reported_version(value: &str) -> Option<[u64; 3]> {
@@ -2438,6 +2487,7 @@ pub fn parse_codex_usage_message(method: &str, params: &Value) -> Vec<ParsedRunt
     let value = &params["tokenUsage"]["last"];
     let fields = RuntimeUsageFields {
         input_tokens: integer_at_any(value, &["/inputTokens"]),
+        uncached_input_tokens: None,
         output_tokens: integer_at_any(value, &["/outputTokens"]),
         reasoning_output_tokens: integer_at_any(value, &["/reasoningOutputTokens"]),
         cache_read_input_tokens: integer_at_any(value, &["/cachedInputTokens"]),
@@ -2483,13 +2533,78 @@ pub fn parse_acp_usage_message(
     method: &str,
     params: &Value,
 ) -> Vec<ParsedRuntimeUsage> {
-    if method == "session/update"
-        && params
-            .pointer("/update/sessionUpdate")
-            .and_then(Value::as_str)
-            == Some("usage_update")
-    {
+    if method == "session/update" {
         let update = &params["update"];
+        let update_kind = update.get("sessionUpdate").and_then(Value::as_str);
+        let mut observations = Vec::new();
+
+        if adapter_kind == AdapterKind::CodebuddyCli && update_kind == Some("usage_update") {
+            let usage = update.pointer("/_meta/usage").unwrap_or(&Value::Null);
+            let fields = RuntimeUsageFields {
+                input_tokens: integer_at_any(usage, &["/prompt_tokens"]),
+                uncached_input_tokens: integer_at_any(usage, &["/prompt_cache_miss_tokens"]),
+                output_tokens: integer_at_any(usage, &["/completion_tokens"]),
+                reasoning_output_tokens: integer_at_any(
+                    usage,
+                    &["/completion_tokens_details/reasoning_tokens"],
+                ),
+                cache_read_input_tokens: integer_at_any(
+                    usage,
+                    &[
+                        "/prompt_cache_hit_tokens",
+                        "/prompt_tokens_details/cached_tokens",
+                    ],
+                ),
+                cache_write_input_tokens: None,
+                context_used_tokens: None,
+                context_size_tokens: None,
+            };
+            if !fields.is_empty() {
+                observations.push(ParsedRuntimeUsage {
+                    identity_suffix: "private_usage".to_string(),
+                    dialect_id: "codebuddy-acp-private-usage-v1".to_string(),
+                    source: "runtime_private_extension".to_string(),
+                    scope: "model_call".to_string(),
+                    counter_mode: RuntimeUsageCounterMode::Delta,
+                    input_semantics: RuntimeInputSemantics::CacheInclusiveTotal,
+                    native_session_id: string_at_any(params, &["/sessionId"]),
+                    native_turn_id: string_at_any(update, &["/_meta/codebuddy.ai~1requestId"]),
+                    fields,
+                    cost: None,
+                    occurred_at: None,
+                });
+            }
+        }
+
+        if adapter_kind == AdapterKind::QwenCode && update_kind == Some("agent_message_chunk") {
+            let usage = update.pointer("/_meta/usage").unwrap_or(&Value::Null);
+            let fields = RuntimeUsageFields {
+                input_tokens: integer_at_any(usage, &["/inputTokens"]),
+                uncached_input_tokens: None,
+                output_tokens: integer_at_any(usage, &["/outputTokens"]),
+                reasoning_output_tokens: integer_at_any(usage, &["/thoughtTokens"]),
+                cache_read_input_tokens: integer_at_any(usage, &["/cachedReadTokens"]),
+                cache_write_input_tokens: None,
+                context_used_tokens: None,
+                context_size_tokens: None,
+            };
+            if !fields.is_empty() {
+                observations.push(ParsedRuntimeUsage {
+                    identity_suffix: "private_usage".to_string(),
+                    dialect_id: "qwen-acp-private-usage-v1".to_string(),
+                    source: "runtime_private_extension".to_string(),
+                    scope: "model_call".to_string(),
+                    counter_mode: RuntimeUsageCounterMode::Delta,
+                    input_semantics: RuntimeInputSemantics::CacheInclusiveTotal,
+                    native_session_id: string_at_any(params, &["/sessionId"]),
+                    native_turn_id: None,
+                    fields,
+                    cost: None,
+                    occurred_at: None,
+                });
+            }
+        }
+
         let currency = string_at_any(update, &["/cost/currency"]);
         let cost = currency.as_deref().and_then(|currency| {
             cost_from_value(
@@ -2499,56 +2614,90 @@ pub fn parse_acp_usage_message(
                 "session",
             )
         });
-        if cost.is_none() {
-            return Vec::new();
+        if let Some(cost) = cost {
+            observations.push(ParsedRuntimeUsage {
+                identity_suffix: "usage_update".to_string(),
+                dialect_id: "acp-usage-update-v2".to_string(),
+                source: "runtime_event".to_string(),
+                scope: "session".to_string(),
+                counter_mode: RuntimeUsageCounterMode::Gauge,
+                input_semantics: RuntimeInputSemantics::Unknown,
+                native_session_id: string_at_any(params, &["/sessionId"]),
+                native_turn_id: None,
+                fields: RuntimeUsageFields::default(),
+                cost: Some(cost),
+                occurred_at: None,
+            });
         }
-        return vec![ParsedRuntimeUsage {
-            identity_suffix: "usage_update".to_string(),
-            dialect_id: "acp-usage-update-v2".to_string(),
-            source: "runtime_event".to_string(),
-            scope: "session".to_string(),
-            counter_mode: RuntimeUsageCounterMode::Gauge,
-            input_semantics: RuntimeInputSemantics::Unknown,
-            native_session_id: string_at_any(params, &["/sessionId"]),
-            native_turn_id: None,
-            fields: RuntimeUsageFields::default(),
-            cost,
-            occurred_at: None,
-        }];
+        return observations;
     }
-    if method != "rovai/acp_prompt_completed" || adapter_kind != AdapterKind::CopilotCli {
+
+    if method != "rovai/acp_prompt_completed" {
         return Vec::new();
     }
     let usage = params.pointer("/result/usage").unwrap_or(&Value::Null);
-    let fields = RuntimeUsageFields {
-        input_tokens: integer_at_any(usage, &["/inputTokens", "/input_tokens"]),
-        output_tokens: integer_at_any(usage, &["/outputTokens", "/output_tokens"]),
-        reasoning_output_tokens: integer_at_any(
-            usage,
-            &[
-                "/thoughtTokens",
-                "/reasoningOutputTokens",
-                "/reasoning_output_tokens",
-            ],
+    let (dialect_id, input_semantics, fields) = match adapter_kind {
+        AdapterKind::CopilotCli => (
+            "acp-copilot-usage-v2",
+            RuntimeInputSemantics::CacheInclusiveTotal,
+            RuntimeUsageFields {
+                input_tokens: integer_at_any(usage, &["/inputTokens", "/input_tokens"]),
+                uncached_input_tokens: None,
+                output_tokens: integer_at_any(usage, &["/outputTokens", "/output_tokens"]),
+                reasoning_output_tokens: integer_at_any(
+                    usage,
+                    &[
+                        "/thoughtTokens",
+                        "/reasoningOutputTokens",
+                        "/reasoning_output_tokens",
+                    ],
+                ),
+                cache_read_input_tokens: integer_at_any(
+                    usage,
+                    &[
+                        "/cachedReadTokens",
+                        "/cacheReadInputTokens",
+                        "/cache_read_input_tokens",
+                    ],
+                ),
+                cache_write_input_tokens: integer_at_any(
+                    usage,
+                    &[
+                        "/cachedWriteTokens",
+                        "/cacheWriteInputTokens",
+                        "/cache_write_input_tokens",
+                    ],
+                ),
+                context_used_tokens: None,
+                context_size_tokens: None,
+            },
         ),
-        cache_read_input_tokens: integer_at_any(
-            usage,
-            &[
-                "/cachedReadTokens",
-                "/cacheReadInputTokens",
-                "/cache_read_input_tokens",
-            ],
-        ),
-        cache_write_input_tokens: integer_at_any(
-            usage,
-            &[
-                "/cachedWriteTokens",
-                "/cacheWriteInputTokens",
-                "/cache_write_input_tokens",
-            ],
-        ),
-        context_used_tokens: None,
-        context_size_tokens: None,
+        AdapterKind::OpencodeCli => {
+            let visible_output = integer_at_any(usage, &["/outputTokens"]);
+            let reasoning = integer_at_any(usage, &["/thoughtTokens"]);
+            let output = match (visible_output, reasoning) {
+                (Some(visible), Some(reasoning)) => visible
+                    .checked_add(reasoning)
+                    .filter(|value| *value as u64 <= JS_MAX_SAFE_INTEGER),
+                (visible, None) => visible,
+                (None, Some(_)) => None,
+            };
+            (
+                "opencode-acp-terminal-usage-v1",
+                RuntimeInputSemantics::ExclusiveBuckets,
+                RuntimeUsageFields {
+                    input_tokens: integer_at_any(usage, &["/inputTokens"]),
+                    uncached_input_tokens: None,
+                    output_tokens: output,
+                    reasoning_output_tokens: reasoning,
+                    cache_read_input_tokens: integer_at_any(usage, &["/cachedReadTokens"]),
+                    cache_write_input_tokens: integer_at_any(usage, &["/cachedWriteTokens"]),
+                    context_used_tokens: None,
+                    context_size_tokens: None,
+                },
+            )
+        }
+        _ => return Vec::new(),
     };
     let currency = string_at_any(usage, &["/cost/currency"]);
     let cost = currency.as_deref().and_then(|currency| {
@@ -2564,23 +2713,68 @@ pub fn parse_acp_usage_message(
     }
     vec![ParsedRuntimeUsage {
         identity_suffix: "terminal_usage".to_string(),
-        dialect_id: "acp-copilot-usage-v2".to_string(),
+        dialect_id: dialect_id.to_string(),
         source: "runtime_result".to_string(),
         scope: "turn".to_string(),
         counter_mode: RuntimeUsageCounterMode::Delta,
-        input_semantics: RuntimeInputSemantics::CacheInclusiveTotal,
+        input_semantics,
         native_session_id: string_at_any(params, &["/sessionId"]),
-        native_turn_id: string_at_any(params, &["/turnId"]),
+        native_turn_id: string_at_any(params, &["/turnId", "/promptId"]),
         fields,
         cost,
         occurred_at: None,
     }]
 }
 
+pub fn acp_usage_source_identity(
+    adapter_kind: AdapterKind,
+    method: &str,
+    params: &Value,
+) -> Result<Option<String>> {
+    let stable = match (adapter_kind, method) {
+        (AdapterKind::CodebuddyCli, "session/update") => {
+            let usage = params.pointer("/update/_meta/usage");
+            let request_id = params.pointer("/update/_meta/codebuddy.ai~1requestId");
+            request_id.or(usage).map(|identity| {
+                json!({
+                    "dialect": "codebuddy-acp-private-usage-v1",
+                    "sessionId": params.get("sessionId"),
+                    "identity": identity,
+                })
+            })
+        }
+        (AdapterKind::QwenCode, "session/update") => {
+            params.pointer("/update/_meta/usage").map(|usage| {
+                json!({
+                    "dialect": "qwen-acp-private-usage-v1",
+                    "sessionId": params.get("sessionId"),
+                    "usage": usage,
+                })
+            })
+        }
+        (AdapterKind::OpencodeCli, "rovai/acp_prompt_completed") => {
+            let usage = params.pointer("/result/usage");
+            let prompt_id = params.get("promptId");
+            prompt_id.or(usage).map(|identity| {
+                json!({
+                    "dialect": "opencode-acp-terminal-usage-v1",
+                    "sessionId": params.get("sessionId"),
+                    "identity": identity,
+                })
+            })
+        }
+        _ => None,
+    };
+    stable
+        .map(|stable| crate::command::canonical_json_digest(&stable))
+        .transpose()
+}
+
 pub fn parse_claude_result_usage(result: &Value) -> Vec<ParsedRuntimeUsage> {
     let usage = result.get("usage").unwrap_or(&Value::Null);
     let fields = RuntimeUsageFields {
         input_tokens: integer_at_any(usage, &["/input_tokens"]),
+        uncached_input_tokens: None,
         output_tokens: integer_at_any(usage, &["/output_tokens"]),
         reasoning_output_tokens: integer_at_any(
             usage,
@@ -2641,6 +2835,7 @@ mod tests {
             native_turn_id: Some("turn-1".to_string()),
             fields: RuntimeUsageFields {
                 input_tokens: input,
+                uncached_input_tokens: None,
                 output_tokens: output,
                 reasoning_output_tokens: None,
                 cache_read_input_tokens: read,
@@ -2702,6 +2897,17 @@ mod tests {
             ))
             .is_err()
         );
+
+        let mut conflicting = usage(
+            RuntimeUsageCounterMode::Delta,
+            RuntimeInputSemantics::CacheInclusiveTotal,
+            Some(100),
+            Some(40),
+            Some(10),
+            Some(20),
+        );
+        conflicting.fields.uncached_input_tokens = Some(60);
+        assert!(normalize_usage(&conflicting).is_err());
     }
 
     #[test]
@@ -2873,24 +3079,12 @@ mod tests {
 
         for (runtime, fixture) in [
             (
-                AdapterKind::OpencodeCli,
-                include_str!("../tests/fixtures/runtime-usage/opencode.json"),
-            ),
-            (
                 AdapterKind::KiroCli,
                 include_str!("../tests/fixtures/runtime-usage/kiro.json"),
             ),
             (
                 AdapterKind::QoderCli,
                 include_str!("../tests/fixtures/runtime-usage/qoder.json"),
-            ),
-            (
-                AdapterKind::CodebuddyCli,
-                include_str!("../tests/fixtures/runtime-usage/codebuddy.json"),
-            ),
-            (
-                AdapterKind::QwenCode,
-                include_str!("../tests/fixtures/runtime-usage/qwen.json"),
             ),
             (
                 AdapterKind::TraeCnCli,
@@ -2906,6 +3100,158 @@ mod tests {
                 )
                 .is_empty(),
                 "Context-only ACP usage_update must not be stored as Token Usage"
+            );
+        }
+
+        let opencode: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/runtime-usage/opencode.json"
+        ))
+        .unwrap();
+        let opencode_terminal = &opencode["messages"][1];
+        let opencode_usage = parse_acp_usage_message(
+            AdapterKind::OpencodeCli,
+            opencode_terminal["method"].as_str().unwrap(),
+            &opencode_terminal["params"],
+        );
+        assert_eq!(opencode_usage.len(), 1);
+        assert_eq!(opencode_usage[0].fields.input_tokens, Some(11793));
+        assert_eq!(opencode_usage[0].fields.cache_read_input_tokens, Some(1024));
+        assert_eq!(opencode_usage[0].fields.output_tokens, Some(42));
+        assert_eq!(opencode_usage[0].fields.reasoning_output_tokens, Some(31));
+        let opencode_normalized = normalize_usage(&opencode_usage[0]).unwrap();
+        assert_eq!(opencode_normalized.uncached_input_tokens, Some(11793));
+        assert_eq!(opencode_normalized.prompt_input_total_tokens, None);
+
+        let codebuddy: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/runtime-usage/codebuddy.json"
+        ))
+        .unwrap();
+        let codebuddy_messages = codebuddy["messages"].as_array().unwrap();
+        let codebuddy_usage = codebuddy_messages
+            .iter()
+            .map(|message| {
+                parse_acp_usage_message(
+                    AdapterKind::CodebuddyCli,
+                    message["method"].as_str().unwrap(),
+                    &message["params"],
+                )
+            })
+            .collect::<Vec<_>>();
+        assert!(codebuddy_usage.iter().all(|usage| usage.len() == 1));
+        assert_eq!(codebuddy_usage[0][0].fields.input_tokens, Some(26073));
+        assert_eq!(codebuddy_usage[0][0].fields.output_tokens, Some(101));
+        assert_eq!(
+            codebuddy_usage[0][0].fields.reasoning_output_tokens,
+            Some(90)
+        );
+        assert_eq!(
+            codebuddy_usage[0][0].fields.cache_read_input_tokens,
+            Some(0)
+        );
+        assert_eq!(
+            normalize_usage(&codebuddy_usage[0][0])
+                .unwrap()
+                .uncached_input_tokens,
+            Some(26073)
+        );
+        let codebuddy_identities = codebuddy_messages
+            .iter()
+            .map(|message| {
+                acp_usage_source_identity(
+                    AdapterKind::CodebuddyCli,
+                    message["method"].as_str().unwrap(),
+                    &message["params"],
+                )
+                .unwrap()
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(codebuddy_identities[0], codebuddy_identities[1]);
+        let codebuddy_run = RuntimeUsageRun {
+            key: UsageRunKey {
+                agent_run_id: "codebuddy-run-fixture".to_string(),
+                execution_epoch: 1,
+            },
+            runtime_kind: AdapterKind::CodebuddyCli,
+            runtime_version: Some("2.133.1".to_string()),
+            provider_key: None,
+            model_key: None,
+            service_tier: None,
+        };
+        let mut codebuddy_buffer = RuntimeUsageBuffer::default();
+        for (identity, usage) in codebuddy_identities.iter().zip(&codebuddy_usage) {
+            codebuddy_buffer
+                .observe_run(&codebuddy_run, identity, usage, Instant::now())
+                .unwrap();
+        }
+        let codebuddy_batches = codebuddy_buffer.drain(RuntimeUsageFlushTarget::Run {
+            agent_run_id: "codebuddy-run-fixture".to_string(),
+            execution_epoch: 1,
+        });
+        assert_eq!(codebuddy_batches.len(), 1);
+        assert_eq!(codebuddy_batches[0].records.len(), 1);
+        assert_eq!(
+            codebuddy_batches[0].records[0].usage.fields.output_tokens,
+            Some(101),
+            "duplicate final Usage updates must not double-count the model call"
+        );
+
+        let qwen: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/runtime-usage/qwen.json"))
+                .unwrap();
+        let qwen_message = &qwen["messages"][0];
+        let qwen_usage = parse_acp_usage_message(
+            AdapterKind::QwenCode,
+            qwen_message["method"].as_str().unwrap(),
+            &qwen_message["params"],
+        );
+        assert_eq!(qwen_usage.len(), 1);
+        assert_eq!(qwen_usage[0].fields.input_tokens, Some(37573));
+        assert_eq!(qwen_usage[0].fields.output_tokens, Some(65));
+        assert_eq!(qwen_usage[0].fields.reasoning_output_tokens, Some(55));
+        assert_eq!(qwen_usage[0].fields.cache_read_input_tokens, Some(0));
+        assert_eq!(qwen_usage[0].fields.cache_write_input_tokens, None);
+
+        for (runtime, version, expected, absent) in [
+            (
+                AdapterKind::OpencodeCli,
+                opencode["runtimeVersion"].as_str().unwrap(),
+                ELIGIBLE_UNCACHED_INPUT
+                    | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_OUTPUT
+                    | ELIGIBLE_REASONING_OUTPUT
+                    | ELIGIBLE_REQUEST_CACHE_HIT,
+                ELIGIBLE_PROMPT_INPUT_TOTAL | ELIGIBLE_CACHE_WRITE,
+            ),
+            (
+                AdapterKind::CodebuddyCli,
+                codebuddy["runtimeVersion"].as_str().unwrap(),
+                ELIGIBLE_PROMPT_INPUT_TOTAL
+                    | ELIGIBLE_UNCACHED_INPUT
+                    | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_OUTPUT
+                    | ELIGIBLE_REASONING_OUTPUT
+                    | ELIGIBLE_REQUEST_CACHE_HIT,
+                ELIGIBLE_CACHE_WRITE,
+            ),
+            (
+                AdapterKind::QwenCode,
+                qwen["runtimeVersion"].as_str().unwrap(),
+                ELIGIBLE_PROMPT_INPUT_TOTAL
+                    | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_OUTPUT
+                    | ELIGIBLE_REASONING_OUTPUT
+                    | ELIGIBLE_REQUEST_CACHE_HIT,
+                ELIGIBLE_UNCACHED_INPUT | ELIGIBLE_CACHE_WRITE,
+            ),
+        ] {
+            let mask = eligible_mask(runtime, Some(version));
+            assert_eq!(mask & expected, expected);
+            assert_eq!(mask & absent, 0);
+            assert_eq!(
+                eligible_mask(runtime, None),
+                ELIGIBLE_RUNTIME_REPORTED_COST,
+                "unversioned private ACP Usage must not expand eligibility"
             );
         }
         let acp_cost = json!({

@@ -1,1 +1,59 @@
-{"method":"session/update","params":{"sessionId":"codebuddy-session","update":{"sessionUpdate":"usage_update","used":512,"size":8192}}}
+{
+  "runtimeVersion": "2.133.1",
+  "messages": [
+    {
+      "method": "session/update",
+      "params": {
+        "sessionId": "codebuddy-session-fixture",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 26073,
+          "size": 1000000,
+          "_meta": {
+            "codebuddy.ai/requestId": "codebuddy-request-fixture",
+            "usage": {
+              "prompt_tokens": 26073,
+              "completion_tokens": 101,
+              "total_tokens": 26174,
+              "prompt_tokens_details": { "cached_tokens": 0 },
+              "completion_tokens_details": { "reasoning_tokens": 90 },
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 26073
+            }
+          }
+        }
+      }
+    },
+    {
+      "method": "session/update",
+      "params": {
+        "sessionId": "codebuddy-session-fixture",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 26073,
+          "size": 1000000,
+          "_meta": {
+            "codebuddy.ai/requestId": "codebuddy-request-fixture",
+            "usage": {
+              "prompt_tokens": 26073,
+              "completion_tokens": 101,
+              "total_tokens": 26174,
+              "prompt_tokens_details": { "cached_tokens": 0 },
+              "completion_tokens_details": { "reasoning_tokens": 90 },
+              "prompt_cache_hit_tokens": 0,
+              "prompt_cache_miss_tokens": 26073
+            },
+            "codebuddy.ai/usageByCategory": {
+              "systemPrompt": 1906,
+              "conversation": 2364,
+              "tools": 20832,
+              "mcp": 0,
+              "skills": 971,
+              "version": 1
+            }
+          }
+        }
+      }
+    }
+  ]
+}

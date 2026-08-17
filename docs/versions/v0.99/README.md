@@ -40,7 +40,8 @@ Coverage 只对已由协议或真实 Fixture 证明 eligible 的 logical AgentRu
 ### Runtime Usage 语义
 
 - Codex、Claude、ACP/Copilot 按各自已证明 wire shape 解析 Token/Cache/Cost；
-- OpenCode、Kiro、Qoder、CodeBuddy、Qwen、TRAE 仅保存实际出现且 Fixture 证明的 ACP Usage；
+- OpenCode 1.18.15、CodeBuddy 2.133.1 与 Qwen Code 0.21.5 的真实私有 ACP Usage 已建立脱敏 Fixture；
+  只保存各自实际上报并可安全归一的字段，其余 ACP Runtime 仍只保存已证明的标准 Cost；
 - Antigravity 不做 Tokenizer 推断，也不制造 Cache 或真实成本；
 - delta/cumulative/gauge、counter reset、input/cache bucket 和 reasoning subset 维持稀疏且可审计的算术；
 - Run cost 只保存可归因值，Provider aggregate cost 保持独立 billing grain，currency 不推断。

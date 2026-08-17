@@ -141,8 +141,8 @@ use rovai_core::{
     },
     monitoring::{
         MonitoringFilter, MonitoringService, ParsedRuntimeUsage, RuntimeUsageBuffer,
-        RuntimeUsageFlushTarget, codex_usage_source_identity, parse_acp_usage_message,
-        parse_claude_result_usage, parse_codex_usage_message,
+        RuntimeUsageFlushTarget, acp_usage_source_identity, codex_usage_source_identity,
+        parse_acp_usage_message, parse_claude_result_usage, parse_codex_usage_message,
     },
     notification::{
         AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
@@ -10920,8 +10920,19 @@ async fn process_agent_run_acp_message(
             core,
             agent_run_id,
             execution_epoch,
-            &canonical_json_digest(&message)
-                .unwrap_or_else(|_| format!("acp:{method}:{agent_run_id}:{execution_epoch}")),
+            &acp_usage_source_identity(adapter_kind, &method, &params)
+                .unwrap_or_else(|error| {
+                    eprintln!(
+                        "failed to derive {} Usage identity for AgentRun {agent_run_id}: {error:#}",
+                        adapter_kind.as_str()
+                    );
+                    None
+                })
+                .unwrap_or_else(|| {
+                    canonical_json_digest(&message).unwrap_or_else(|_| {
+                        format!("acp:{method}:{agent_run_id}:{execution_epoch}")
+                    })
+                }),
             &usage,
         )
         .await

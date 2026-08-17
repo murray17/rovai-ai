@@ -43,6 +43,19 @@ identity 以及稀疏值。counter mode 仅接受 `delta | cumulative | gauge`�
 之后只写正向差值，回退视为 counter reset 并重建 baseline。周期 Flush 最多每 4 秒一次；AgentRun terminal
 边界强制 Flush，权威 terminal transition 完成 summary 并删除 checkpoint。
 
+当前由真实 Runtime Fixture 证明的 ACP 私有 Usage 边界为：
+
+| Runtime/version | 已证明路径 | Eligible 字段 | 保持未知 |
+| --- | --- | --- | --- |
+| OpenCode `>= 1.18.15` | terminal `result.usage` | uncached input、cache read、output、reasoning、request cache hit | prompt input total、cache write |
+| CodeBuddy `>= 2.133.1` | `usage_update._meta.usage` | prompt input total、uncached input、cache read、output、reasoning、request cache hit | cache write |
+| Qwen Code `>= 0.21.5` | `agent_message_chunk._meta.usage` | prompt input total、cache read、output、reasoning、request cache hit | uncached input、cache write |
+
+CodeBuddy 同一 model call 可能补发带分类信息的相同 Usage；以其稳定 request ID 去重，不能重复累计。
+OpenCode 的 `thoughtTokens` 是 `outputTokens` 之外的桶，parser 先合成为包含 reasoning 的规范化 Output，
+再保持 `reasoningOutputTokens` 为其中子集。版本未知或低于真实 Fixture 版本时，不扩大这些私有字段的
+Eligibility；Runtime 实际没有提供的字段继续为 `NULL`。
+
 ## Eligibility 与 Coverage
 
 Runtime/version 在 enrollment 时冻结 `eligibleMask`。仅协议合同或真实 Fixture 已证明的字段可置位。
