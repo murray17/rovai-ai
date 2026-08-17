@@ -8020,7 +8020,7 @@ Use this exact public input @agent_2";
         assert!(!TEAM_TOOL_NAMES.contains(&"team.call_member"));
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn controlled_resume_retains_binding_across_session_metadata_transition() {
         let mut fixture = Fixture::new();
         let conversation_id: String = fixture
@@ -8222,6 +8222,10 @@ Use this exact public input @agent_2";
         #[test]
         fn reverse_member_call_is_an_independent_forward_edge() {
             super::reverse_member_call_is_an_independent_forward_edge();
+        }
+        #[test]
+        fn controlled_resume_retains_binding_across_session_metadata_transition() {
+            super::controlled_resume_retains_binding_across_session_metadata_transition();
         }
     }
 }
