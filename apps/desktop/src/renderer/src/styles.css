@@ -2788,11 +2788,6 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 /* Runtime monitoring */
 .runtime-monitoring { display: grid; width: min(1040px, 100%); max-width: 1040px; padding-bottom: 20px; }
 .runtime-monitoring-body { display: grid; gap: 22px; padding-top: 18px; }
-.monitoring-boundary-note { display: grid; min-height: 42px; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 13px; border-radius: 10px; color: var(--muted); background: var(--workspace-surface-subtle); }
-.monitoring-boundary-note > span { width: 7px; height: 7px; border-radius: 50%; background: var(--info); }
-.monitoring-boundary-note p { max-width: 72ch; margin: 0; font-size: 10.5px; line-height: 1.6; }
-.monitoring-boundary-note strong { color: var(--ink); }
-.monitoring-boundary-note time { color: var(--faint); font-size: 9px; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .monitoring-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding-bottom: 13px; border-bottom: 1px solid var(--line); }
 .monitoring-tabs { display: flex; flex: 0 0 auto; gap: 3px; padding: 3px; border-radius: 9px; background: var(--workspace-surface-subtle); }
 .monitoring-tabs button { min-height: 30px; padding: 6px 11px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; font-size: 10.5px; font-weight: 670; }
@@ -2933,8 +2928,6 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   .monitoring-terminal-distribution { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .monitoring-terminal-distribution > div:nth-child(2) { border-right: 0; }
   .monitoring-terminal-distribution > div:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }
-  .monitoring-boundary-note { grid-template-columns: 10px minmax(0, 1fr); }
-  .monitoring-boundary-note time { grid-column: 2; }
   .runtime-monitoring .settings-page-heading { align-items: flex-start; flex-direction: column; }
   .monitoring-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .monitoring-filters select { width: 100%; min-width: 0; }

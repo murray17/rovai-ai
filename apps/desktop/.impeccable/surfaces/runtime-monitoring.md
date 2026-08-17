@@ -1,5 +1,5 @@
 ---
-version: 1
+version: 2
 slug: "runtime-monitoring"
 primary_target: "apps/desktop/src/renderer/src/RuntimeMonitoring.tsx"
 related_targets:
@@ -18,10 +18,12 @@ workspace support group.
 
 ## Composition and shared state
 
-Use the shared borderless Settings header and centered `1040px` content track. Keep the clean-break
-collection boundary visible above one horizontal Tab group: 概览、用量与成本、性能与可靠性. All three
-views share one range/Runtime/member/terminal-status filter and one consistent snapshot. Moving between
-Tabs preserves the filter and does not issue another query.
+Use the shared borderless Settings header and centered `1040px` content track. The header has one direct,
+purpose-level description matching the other Settings categories. Place one horizontal Tab group first in
+the body: 概览、用量与成本、性能与可靠性. Do not repeat collection cutover, historical backfill or sparse-field
+rules as persistent notices or version-specific empty-state copy. Those rules remain enforced by the read
+model, range clamp, Coverage and export. All three views share one range/Runtime/member/terminal-status
+filter and one consistent snapshot. Moving between Tabs preserves the filter and does not issue another query.
 
 Do not turn metrics into a card wall. Use a compact keyline for the most important values, open ledgers
 for sparse token or latency facts, and quiet tables for Runtime/model detail. Tables may scroll inside
@@ -43,7 +45,8 @@ Cache and cost remain unavailable until an authoritative upstream signal exists.
 ## State and refresh matrix
 
 Support Loading, global Empty, Partial, Populated, Stale, Error and Export success/failure without
-removing the Settings header, collection boundary or filters. A background refresh failure keeps the
+removing the Settings header or filters. Empty copy describes only the current result and does not restate
+the release version or collection policy. A background refresh failure keeps the
 last good snapshot visible, identifies its `observedAt` time and offers a local retry. The page never
 starts Provider reconciliation or price synchronization.
 

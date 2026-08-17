@@ -30,15 +30,17 @@ function metric(overrides: Partial<MonitoringMetric<number>> = {}): MonitoringMe
 }
 
 describe('RuntimeMonitoring', () => {
-  it('renders the clean-break boundary, persistent filters, tabs, and export action', () => {
+  it('renders concise page copy, persistent filters, tabs, and export action', () => {
     const markup = renderToStaticMarkup(createElement(RuntimeMonitoring, { agents: [] }))
     expect(markup).toContain('<h1>运行监控</h1>')
-    expect(markup).toContain('Clean break')
-    expect(markup).toContain('历史 Run 不补算')
+    expect(markup).toContain('查看 AgentRun 的状态、用量、成本与可靠性。')
+    expect(markup).not.toContain('Clean break')
+    expect(markup).not.toContain('历史 Run 不补算')
+    expect(markup).not.toContain('当前采集边界')
     expect(markup).toContain('用量与成本')
     expect(markup).toContain('性能与可靠性')
     expect(markup).toContain('导出 JSON')
-    expect(markup).toContain('正在读取运行事实')
+    expect(markup).toContain('正在读取运行数据')
     expect(markup).toContain('role="tabpanel"')
     expect(markup).toContain('aria-controls="monitoring-summary-panel"')
     expect(markup).toContain('tabindex="-1"')

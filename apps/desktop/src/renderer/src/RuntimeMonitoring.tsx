@@ -203,7 +203,6 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
   }, [])
 
   const data: MonitoringData | null = snapshot?.[tab] ?? null
-  const collection = snapshot?.collection ?? null
   const isEmpty = !loading && !error && snapshot !== null
     && snapshot.summary.runs.eligibleCount === 0
 
@@ -212,7 +211,7 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       <SettingsPageHeader
         eyebrow="Settings / Runtime Monitoring"
         title="运行监控"
-        description="只展示当前采集边界后显式纳管的 AgentRun；Runtime 未上报的字段保持未知。"
+        description="查看 AgentRun 的状态、用量、成本与可靠性。"
         aside={(
           <>
             <button className="quiet-button" type="button" onClick={retry} disabled={loading}>
@@ -226,19 +225,6 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       />
 
       <div className="runtime-monitoring-body">
-        <div className="monitoring-boundary-note">
-          <span aria-hidden="true" />
-          <p>
-            <strong>Clean break：</strong>
-            {collection
-              ? '采集从 ' + formatTimestamp(collection.collectionStartedAt) + ' 开始；历史 Run 不补算。'
-              : '历史 Run 不补算，新版本启动后新准入的 Run 才进入统计。'}
-          </p>
-          {collection && (
-            <time dateTime={collection.observedAt}>快照更新于 {formatTimestamp(collection.observedAt)}</time>
-          )}
-        </div>
-
         <div className="monitoring-toolbar">
           <div
             className="monitoring-tabs"
@@ -315,7 +301,7 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
               <button className="quiet-button" type="button" onClick={retry}>重试</button>
             </section>
           )}
-          {isEmpty && <MonitoringEmpty collectionStartedAt={collection?.collectionStartedAt ?? null} />}
+          {isEmpty && <MonitoringEmpty />}
           {!loading && !error && data && !isEmpty && (
             <div className="monitoring-view">
               {tab === 'summary' && <SummaryPanel data={data as MonitoringSummaryView} />}
@@ -689,18 +675,18 @@ function MonitoringLoading(): React.JSX.Element {
   return (
     <div className="monitoring-loading" role="status" aria-live="polite">
       <span className="diagnostics-spinner" aria-hidden="true" />
-      <div><strong>正在读取运行事实</strong><p>查询当前采集边界、覆盖率和稀疏 Usage。</p></div>
+      <div><strong>正在读取运行数据</strong><p>正在汇总当前范围内的数据。</p></div>
     </div>
   )
 }
 
-function MonitoringEmpty({ collectionStartedAt }: { collectionStartedAt: string | null }): React.JSX.Element {
+function MonitoringEmpty(): React.JSX.Element {
   return (
     <section className="monitoring-state is-empty">
       <span aria-hidden="true" />
       <div>
-        <h2>还没有新版本纳管的运行</h2>
-        <p>v0.96 不补算历史数据。{collectionStartedAt ? '采集从 ' + formatTimestamp(collectionStartedAt) + ' 开始；' : ''}启动一次新的 AgentRun 后，这里会按 Runtime 实际上报内容显示。</p>
+        <h2>暂无运行数据</h2>
+        <p>当前范围内暂无 AgentRun。</p>
       </div>
     </section>
   )

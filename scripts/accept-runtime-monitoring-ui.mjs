@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -16,6 +17,7 @@ const port = Number(process.env.ROVAI_MONITORING_ACCEPT_DEBUG_PORT ?? 9501)
 await mkdir(dataDir, { recursive: true })
 await mkdir(homeDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
+seedCompletedOnboardingForAcceptance(dataDir)
 
 let isolatedApp = null
 try {
@@ -104,12 +106,15 @@ async function openMonitoring(cdp) {
 }
 
 async function assertEmptyMonitoring(cdp, context) {
-  const state = await evaluate(cdp, "({ heading: document.querySelector('.runtime-monitoring h1')?.textContent ?? '', cleanBreak: document.querySelector('.monitoring-boundary-note')?.textContent ?? '', empty: document.querySelector('.monitoring-state.is-empty')?.textContent ?? '', tabs: [...document.querySelectorAll('.monitoring-tabs button')].map((button) => button.textContent?.trim()), filters: document.querySelectorAll('.monitoring-filters select').length, exportLabel: [...document.querySelectorAll('.settings-page-heading button')].some((button) => button.textContent?.includes('导出 JSON')), documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1, surfaceOverflow: (() => { const node = document.querySelector('.runtime-monitoring'); return node ? node.scrollWidth > node.clientWidth + 1 : true })() })")
+  const state = await evaluate(cdp, "({ heading: document.querySelector('.runtime-monitoring h1')?.textContent ?? '', description: document.querySelector('.runtime-monitoring .settings-page-heading-copy > p:last-child')?.textContent ?? '', hasBoundaryNotice: Boolean(document.querySelector('.monitoring-boundary-note')), empty: document.querySelector('.monitoring-state.is-empty')?.textContent ?? '', tabs: [...document.querySelectorAll('.monitoring-tabs button')].map((button) => button.textContent?.trim()), filters: document.querySelectorAll('.monitoring-filters select').length, exportLabel: [...document.querySelectorAll('.settings-page-heading button')].some((button) => button.textContent?.includes('导出 JSON')), documentOverflow: document.documentElement.scrollWidth > window.innerWidth + 1, surfaceOverflow: (() => { const node = document.querySelector('.runtime-monitoring'); return node ? node.scrollWidth > node.clientWidth + 1 : true })() })")
   assert(state.heading === '运行监控', context + ' omitted its heading')
-  assert(state.cleanBreak.includes('Clean break') && state.cleanBreak.includes('历史 Run 不补算'),
-    context + ' omitted the collection boundary')
-  assert(state.empty.includes('还没有新版本纳管的运行'),
+  assert(state.description === '查看 AgentRun 的状态、用量、成本与可靠性。',
+    context + ' did not use the concise page description')
+  assert(!state.hasBoundaryNotice, context + ' retained the collection boundary notice')
+  assert(state.empty.includes('暂无运行数据') && state.empty.includes('当前范围内暂无 AgentRun。'),
     context + ' did not render the real empty state')
+  assert(!/(Clean break|历史 Run 不补算|当前采集边界|采集从)/.test(state.description + state.empty),
+    context + ' retained redundant cutover copy')
   assert(JSON.stringify(state.tabs) === JSON.stringify(['概览', '用量与成本', '性能与可靠性']),
     context + ' tabs were incomplete: ' + JSON.stringify(state.tabs))
   assert(state.filters === 4, context + ' did not render all persistent filters')
