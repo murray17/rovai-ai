@@ -32,6 +32,10 @@ terminal Run Evidence 继续在用户展开精确 Run 后按需加载；关闭�
 不得触发完整历史预取。普通 event refresh 使用轻量 open projection，并保留用户已经加载的较早消息、
 Draft、滚动位置、Inspector 选择和地图模式。
 
+用户主动提交消息时，时间线立即回到最底部并恢复 follow-latest；optimistic 用户消息和随后的权威回执
+渲染完成后仍须保持在最新位置。其他新增消息只有在用户原本位于底部附近时才自动跟随，用户手动上滚
+阅读较早内容时不得被后台消息抢走位置。
+
 冷启动恢复与应用内切换的呈现边界不同。Main Window Session 一旦给出恢复目标，全局 StartupGate 必须
 关闭并显示对应一级页面框架；Camp shell 可暂时显示标题区、局部状态与结构占位，但不得伪装成 meaningful
 content，也不得在 `camps.enter` 成功前提交 active Camp。Members 与 Memory 同样在自己的内容区域读取，

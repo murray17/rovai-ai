@@ -83,6 +83,14 @@ export function campTimelineIsNearBottom(
   return scrollHeight - scrollTop - clientHeight <= threshold
 }
 
+export function followLatestCampTimeline(
+  scroll: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'>
+): CampTimelineReadingPosition {
+  const scrollTop = Math.max(0, scroll.scrollHeight - scroll.clientHeight)
+  scroll.scrollTop = scrollTop
+  return { scrollTop, followingLatest: true }
+}
+
 export function restoredCampTimelineScrollTop(
   position: CampTimelineReadingPosition | null,
   scrollHeight: number,

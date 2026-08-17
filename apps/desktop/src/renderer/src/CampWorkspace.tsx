@@ -63,6 +63,7 @@ import {
   CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
   campTimelineIsNearBottom,
   campTimelineReadingPositionFromStoredValue,
+  followLatestCampTimeline,
   restoredCampTimelineScrollTop,
   storedCampTimelineReadingPositionsWithUpdate,
   type CampTimelineReadingPosition
@@ -1808,6 +1809,19 @@ export function CampWorkspace({
     }, 180)
   }, [])
 
+  const followTimelineAfterUserSend = useCallback((campId: string): void => {
+    const scroll = timelineScrollRef.current
+    const position = scroll
+      ? followLatestCampTimeline(scroll)
+      : { scrollTop: 0, followingLatest: true }
+    timelineReadingPosition.current = { campId, position }
+    if (timelinePositionSaveTimer.current !== null) {
+      window.clearTimeout(timelinePositionSaveTimer.current)
+      timelinePositionSaveTimer.current = null
+    }
+    persistCampTimelineReadingPosition(campId, position)
+  }, [])
+
   useLayoutEffect(() => {
     const campId = snapshot.camp.id
     if (conversationView === 'conversation') {
@@ -1956,6 +1970,8 @@ export function CampWorkspace({
       || preparingAttachments.length > 0
       || failedAttachments.length > 0
     ) return
+    const campId = snapshot.camp.id
+    followTimelineAfterUserSend(campId)
     setComposerSubmitting(true)
     let sendAttempted = false
     let restoreEditorFocus = true
@@ -1965,7 +1981,6 @@ export function CampWorkspace({
         draftSaveTimer.current = null
       }
       await attachmentPreparationQueue.current
-      const campId = snapshot.camp.id
       const frozenDraft = await saveStructuredDraft(campId, draftContent.current)
       applyComposerDraft(campId, frozenDraft)
       sendAttempted = true
@@ -1992,7 +2007,6 @@ export function CampWorkspace({
       if (draftCampId.current === campId) syncReplyDraft(nextDraft)
     } catch {
       if (sendAttempted) {
-        const campId = snapshot.camp.id
         try {
           const draft = await window.rovai.request<CampComposerDraftView>(
             'camp.composerDraft.get',

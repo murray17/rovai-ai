@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   campTimelineIsNearBottom,
   campTimelineReadingPositionFromStoredValue,
+  followLatestCampTimeline,
   restoredCampTimelineScrollTop,
   storedCampTimelineReadingPositionsWithUpdate
 } from './camp-timeline-position'
@@ -73,5 +74,15 @@ describe('Camp timeline reading positions', () => {
   it('uses a small bottom tolerance for follow-latest behavior', () => {
     expect(campTimelineIsNearBottom(652, 1_000, 300)).toBe(true)
     expect(campTimelineIsNearBottom(651, 1_000, 300)).toBe(false)
+  })
+
+  it('moves an earlier reading position to the latest message after user submission', () => {
+    const scroll = { scrollTop: 240, scrollHeight: 1_000, clientHeight: 300 }
+
+    expect(followLatestCampTimeline(scroll)).toEqual({
+      scrollTop: 700,
+      followingLatest: true
+    })
+    expect(scroll.scrollTop).toBe(700)
   })
 })
