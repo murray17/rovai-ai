@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # Agent Runtime 兼容性清单
@@ -65,6 +65,27 @@ Session response 更新认证、模型、权限和 capability Ready，随后在�
 该规则不撤销上方 `0.120.52` 的准入结论，只改变产品何时重取本机动态证据；其他 Runtime 仍按各自 policy
 执行后台主动检查。规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
 与 [Runtime Launch and Verification v1](contracts/runtime-launch-and-verification-v1.md)。
+
+### 2026-08-17 ACP Session 隔离与 TRAE warm Host 修正
+
+当前实现已把 TRAE 加入 ACP Fleet LRU：兼容 Host 在 AgentRun terminal 后保持 IdleWarm，后继 Run
+轮换 Built-in Tool lease 后直接复用同一 Host 已持有的 Native Session。冷 Host 依次选择
+`session/resume` 或 `session/new`；TRAE 正常 AgentRun 不再使用会重放历史的 `session/load`。
+本机 `0.120.52` 的 initialize snapshot 只声明 load、未声明 ACP v1 resume，因此它在 warm 命中时
+直接复用，Host 冷却或被淘汰后建立新 Session。
+
+所有 ACP Host 同时增加 route lifecycle 和 Prompt fence。`session/load` 仅保留给明确允许的 legacy
+Adapter，且其 replay 只能在 `LoadingReplay` 阶段被隔离；对不上 Host instance、AgentRun、execution
+epoch、Native Session、Native Prompt 或 Delivery 的事件，不得进入 Evidence、Action、Usage、
+Missing-Send Recovery、Compaction 或 Renderer。匹配 `session/prompt` request ID 的 response 是唯一
+ACP input ACK 权威；无 Prompt correlation 的 `session/update` 与 permission request 不再提前确认。
+当前规范入口是 [Runtime Launch and Verification v2](contracts/runtime-launch-and-verification-v2.md)。
+
+2026-08-17 使用本机真实 TRAE 执行 `ROVAI_ACP_SMOKE_ADAPTER=trae-cn-cli pnpm
+smoke:acp-runtime` 通过：completion、allow-once 写入与 deny 三个连续 AgentRun 使用同一
+`hostInstanceId` 和同一 Native Session；批准写入内容正确，拒绝写入未创建文件。该结果同时验证
+TRAE terminal 后进入 LRU、后继 Run 直接复用 warm Session，以及历史 replay 未进入后继 Run 的
+Evidence、Action 或最终输出。
 
 ### v0.89 Transport v13 当前基线
 
@@ -240,12 +261,12 @@ ledger 和 digest manifest 见
 或 assistant event 提前确认，并保留 success result fallback。该 smoke 只验证输入确认 surface，不替代
 上表十三项 Built-in CLI qualification。
 
-OpenCode、Copilot、Kiro、Qoder、CodeBuddy 与 Qwen 的输入确认由同一 ACP Host 实现。确定性回归确认
-`session/prompt` stdin write/flush 不再直接 ACK；当前 active prompt 的 agent message/thought、plan、tool、
-permission request 可提前确认，匹配 request ID 的成功 response 为 fallback，usage/mode/catalog update 不
-确认，明确 error response 在尚无 accepted evidence 时结算为 `not_accepted`。这项共享实现不改写上表
-各 Runtime 的实测版本；上游若改变 ACP `session/update` 或 prompt response shape，须重新执行对应真实
-Runtime smoke。
+OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE 的输入确认由同一 ACP Host 实现。
+确定性回归确认 `session/prompt` stdin write/flush 不再直接 ACK；ACP v1 的 agent
+message/thought、plan、tool、permission request 与 usage/mode/catalog update 都只有 Session ID，不能单独证明
+属于当前 Prompt。只有匹配 request ID 的成功 prompt response 确认 accepted，匹配 error response
+结算为 `not_accepted`。这项共享实现不改写上表各 Runtime 的实测版本；上游若改变
+ACP prompt response shape，须重新执行对应真实 Runtime smoke。
 
 ## Antigravity one-shot 输入确认
 
@@ -301,7 +322,7 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | Qoder | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 strict/allowlist | 待 v0.43 矩阵 |
 | CodeBuddy | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 strict | 待 v0.43 矩阵 |
 | Qwen Code | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 allowlist | 待 v0.43 矩阵 |
-| TRAE CLI CN | `AdditivePerRun` / `RovaiWins` | ACP Session `session/new` / `session/load` 的 `mcpServers` | `0.120.52` 原生 Session A/B 追加与不泄漏 Probe、正式 Core smoke 均通过 |
+| TRAE CLI CN | `AdditivePerRun` / `RovaiWins` | 首次 ACP `session/new.mcpServers`；后续只有 compatibility digest 相同时复用 warm Host/Session | `0.120.52` 原生 Session A/B 追加与不泄漏 Probe、正式 Core smoke 均通过 |
 | Antigravity | `Unsupported` | 无不修改 Global/Workspace 文件的逐 Run 动态通道 | 诊断披露；配置页保持中立 |
 
 ## 历史：内置 MCP / Antigravity 专项复核

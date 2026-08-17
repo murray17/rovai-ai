@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # Built-in Tool Runtime Architecture
@@ -224,6 +224,13 @@ Kiro 的 additive MCP Host 配置按 AgentRun 冻结，且 ACP process 在存活
 Host；后继 Run 由新 Host 通过 `session/load` 续接持久 Native Session。停止 Host 不能清除 compatible
 Native Session binding。
 
+TRAE 不具有 Kiro 的 Host 排除条件。兼容 Host 在 Run 完成且进程静默后进入 IdleWarm；
+后继 Run 获取它时先轮换 lease，再直接复用该 Host 已持有的 Native Session。冷 Host 优先使用
+ACP `session/resume`；上游未声明 resume 能力时创建 `session/new`，正常续跑不使用会重放历史的
+`session/load`。每次重新绑定仍要满足 Runtime/解析后 MCP Server 集合/cwd/权限 compatibility
+digest；只含 AgentRun ID 的投影文件 digest 不是 Host 输入。旧 lease、旧 Prompt
+与迟到 Session event 在任何 Evidence、Action 或 Renderer 副作用前 fail closed。
+
 ### Antigravity one-shot 输入确认
 
 Antigravity companion 的 `--print` 进程同时承担输入投递与完整生成，进程退出不是唯一可用的 accepted
@@ -258,16 +265,16 @@ status 和 stdin 写入都不是 accepted evidence。Adapter 只接受带预期 
 
 ### ACP Prompt 输入确认
 
-OpenCode、Copilot、Kiro、Qoder、CodeBuddy 与 Qwen 共用 ACP Host 输入确认。Core 创建 prepared Delivery
-并发送 `session/prompt` 后，stdin write/flush 只表示 transport send，不立即 ACK。Host 把 Delivery identity
-绑定到当前 Session 的唯一 active prompt，并只在该 prompt 上观察到运行时产生的 agent message/thought、
-plan、tool update 或 permission request 时报告早期 accepted evidence；usage、mode、command catalog 等
-Session metadata update 不构成 ACK。
+OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE 共用 ACP Host 输入确认。Core 创建
+prepared Delivery 并发送 `session/prompt` 后，stdin write/flush 只表示 transport send，不立即 ACK。
+Host 把 Delivery identity 绑定到当前 Session 的唯一 active prompt；ACP v1 的普通
+`session/update` 和 `session/request_permission` 只含 Session ID，无法单独证明它们属于当前输入，
+因此不再报告早期 accepted evidence。
 
-若没有早期事件，匹配 JSON-RPC request ID 的成功 prompt response 是 terminal accepted fallback。明确的
-JSON-RPC error response 在尚无 accepted evidence 时把 Delivery 结算为 `not_accepted`，不推进水位；若早期
-accepted 已持久化，迟到 error/退出不得降级它。Host 在任何关联运行时证据前丢失时继续进入既有
-runtime-loss / `delivery_unknown` 对账，不能以 pipe flush 抑制重试或恢复。
+只有匹配 JSON-RPC request ID 的成功 `session/prompt` response 产生 `InputAccepted`；匹配的 error
+response 产生 `InputNotAccepted`。Host 在 response 前丢失时继续进入既有 runtime-loss /
+`delivery_unknown` 对账，不能以 pipe flush 或无 Prompt correlation 的 Session event 抑制重试或恢复。
+历史 load replay 仅能在 `LoadingReplay` route 中被丢弃，不能进入该 ACK 边界。
 
 ### Successful Run 的 Missing-Send Recovery
 

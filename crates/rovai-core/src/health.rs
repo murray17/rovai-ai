@@ -1492,6 +1492,12 @@ fn acp_observed_capabilities(
     {
         capabilities.push("session.load".to_string());
     }
+    if initialize
+        .pointer("/agentCapabilities/sessionCapabilities/resume")
+        .is_some_and(Value::is_object)
+    {
+        capabilities.push("session.resume".to_string());
+    }
     if let Some(session) = session {
         capabilities.push("session.new".to_string());
         if kind == AdapterKind::TraeCnCli {
@@ -1560,7 +1566,6 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
             "structured_permission_request",
             "mcp.additive_per_run",
             "session.set_config_option",
-            "session.load",
             "model.dynamic_catalog",
             "permission.mode_catalog",
             "tool_call.stable_id",

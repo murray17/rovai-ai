@@ -76,6 +76,10 @@ pub enum AcpIncoming {
         host_instance_id: String,
         agent_run_id: String,
         execution_epoch: i64,
+        native_session_id: String,
+        native_prompt_id: String,
+        delivery_id: String,
+        sequence: u64,
         message: Value,
     },
     HostDiagnostic {
@@ -149,6 +153,9 @@ impl AcpRuntimeOwner {
         &self,
         adapter_kind: AdapterKind,
         host_instance_id: &str,
+        native_session_id: &str,
+        active_prompt: &AcpActivePrompt,
+        sequence: u64,
         message: Value,
     ) -> AcpIncoming {
         AcpIncoming::Message {
@@ -156,6 +163,10 @@ impl AcpRuntimeOwner {
             host_instance_id: host_instance_id.to_string(),
             agent_run_id: self.agent_run_id.clone(),
             execution_epoch: self.execution_epoch,
+            native_session_id: native_session_id.to_string(),
+            native_prompt_id: active_prompt.prompt_id.clone(),
+            delivery_id: active_prompt.delivery_id.clone(),
+            sequence,
             message,
         }
     }
@@ -173,7 +184,17 @@ impl AcpRuntimeOwner {
 #[derive(Debug, Clone)]
 struct AcpSessionRoute {
     owner: AcpRuntimeOwner,
-    active_prompt: Option<AcpActivePrompt>,
+    phase: AcpSessionPhase,
+    sequence: u64,
+}
+
+#[derive(Debug, Clone)]
+enum AcpSessionPhase {
+    LoadingReplay { replay_event_count: u64 },
+    Ready,
+    PromptActive(AcpActivePrompt),
+    PromptCompleted(AcpActivePrompt),
+    ProtocolViolated { reason: String },
 }
 
 #[derive(Debug, Clone)]
@@ -181,6 +202,30 @@ struct AcpActivePrompt {
     prompt_id: String,
     delivery_id: String,
     acceptance_emitted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AcpSessionContinuation {
+    ReuseSameHost,
+    Resume,
+    New,
+    LoadHistory,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct AcpSessionCapabilities {
+    pub can_resume: bool,
+    pub can_load_history: bool,
+}
+
+enum AcpSessionMessageRoute {
+    Forward {
+        owner: AcpRuntimeOwner,
+        active_prompt: AcpActivePrompt,
+        sequence: u64,
+    },
+    Quarantined(String),
+    Missing,
 }
 
 #[derive(Debug, Clone)]
@@ -197,6 +242,32 @@ struct ObservedToolMetadata {
     // events and Action records continue to store digests, never this payload.
     raw_input: Option<Value>,
     locations: Option<Value>,
+}
+
+#[derive(Debug)]
+struct AcpPromptObservation {
+    prompt_id: String,
+    delivery_id: String,
+    streamed_agent_text: String,
+    missing_send_recovery: AcpMissingSendRecoveryCollector,
+    observed_tools: HashMap<String, ObservedToolMetadata>,
+}
+
+impl AcpPromptObservation {
+    fn new(prompt_id: String, delivery_id: String) -> Self {
+        Self {
+            prompt_id,
+            delivery_id,
+            streamed_agent_text: String::new(),
+            missing_send_recovery: AcpMissingSendRecoveryCollector::default(),
+            observed_tools: HashMap::new(),
+        }
+    }
+}
+
+struct AcpPreparedPrompt {
+    request_id: u64,
+    prompt_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -226,8 +297,10 @@ pub(crate) struct AcpHost {
     routes: RwLock<HashMap<String, AcpSessionRoute>>,
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
+    session_results: RwLock<HashMap<String, Value>>,
     incoming: mpsc::UnboundedSender<AcpIncoming>,
     alive: AtomicBool,
+    protocol_violated: AtomicBool,
     initialize_result: RwLock<Option<Value>>,
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
@@ -340,8 +413,10 @@ impl AcpHost {
             routes: RwLock::new(HashMap::new()),
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
+            session_results: RwLock::new(HashMap::new()),
             incoming,
             alive: AtomicBool::new(true),
+            protocol_violated: AtomicBool::new(false),
             initialize_result: RwLock::new(None),
             startup_diagnostics: Mutex::new(String::new()),
             private_config_root,
@@ -433,41 +508,66 @@ impl AcpHost {
                             }
                             continue;
                         }
-                        let session_id =
-                            message.pointer("/params/sessionId").and_then(Value::as_str);
-                        if let Some(session_id) = session_id {
-                            host.forward_compaction_observation(session_id, &message)
-                                .await;
-                        }
-                        let route = if let Some(session_id) = session_id {
-                            host.routes.read().await.get(session_id).cloned()
-                        } else {
-                            None
+                        let session_id = message
+                            .pointer("/params/sessionId")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
+                        let route = match session_id.as_deref() {
+                            Some(session_id) => host.route_session_message(session_id).await,
+                            None => AcpSessionMessageRoute::Missing,
                         };
-                        if let Some(route) = route {
-                            if acp_message_proves_input_accepted(&message)
-                                && let Some(session_id) = session_id
-                            {
-                                host.emit_input_accepted_if_active(session_id, &route.owner)
+                        match route {
+                            AcpSessionMessageRoute::Forward {
+                                owner,
+                                active_prompt,
+                                sequence,
+                            } => {
+                                let session_id = session_id
+                                    .as_deref()
+                                    .expect("forwarded ACP route has Session ID");
+                                host.forward_compaction_observation(session_id, &message)
+                                    .await;
+                                let _ = host.incoming.send(owner.message(
+                                    host.adapter_kind,
+                                    &host.host_instance_id,
+                                    session_id,
+                                    &active_prompt,
+                                    sequence,
+                                    message,
+                                ));
+                            }
+                            AcpSessionMessageRoute::Quarantined(reason) => {
+                                host.send_host_diagnostic(format!(
+                                    "ACP Session message was quarantined: {reason}"
+                                ));
+                                if message.get("id").is_some() {
+                                    let id = message.get("id").cloned().unwrap_or(Value::Null);
+                                    let _ = host
+                                        .send(json!({
+                                            "jsonrpc": "2.0",
+                                            "id": id,
+                                            "error": {
+                                                "code": -32602,
+                                                "message": "Rovai-ai has no active prompt for this ACP Session"
+                                            }
+                                        }))
+                                        .await;
+                                }
+                            }
+                            AcpSessionMessageRoute::Missing if message.get("id").is_some() => {
+                                let id = message.get("id").cloned().unwrap_or(Value::Null);
+                                let _ = host
+                                    .send(json!({
+                                        "jsonrpc": "2.0",
+                                        "id": id,
+                                        "error": {
+                                            "code": -32602,
+                                            "message": "Rovai-ai has no active logical Conversation binding for this ACP Session"
+                                        }
+                                    }))
                                     .await;
                             }
-                            let _ = host.incoming.send(route.owner.message(
-                                host.adapter_kind,
-                                &host.host_instance_id,
-                                message,
-                            ));
-                        } else if message.get("id").is_some() {
-                            let id = message.get("id").cloned().unwrap_or(Value::Null);
-                            let _ = host
-                                .send(json!({
-                                    "jsonrpc": "2.0",
-                                    "id": id,
-                                    "error": {
-                                        "code": -32602,
-                                        "message": "Rovai-ai has no active logical Conversation binding for this ACP Session"
-                                    }
-                                }))
-                                .await;
+                            AcpSessionMessageRoute::Missing => {}
                         }
                     }
                     Ok(Some(_)) => {}
@@ -516,21 +616,22 @@ impl AcpHost {
                     let Some(route) = routes.get_mut(&session_id) else {
                         return;
                     };
-                    if route.owner != owner
-                        || route
-                            .active_prompt
-                            .as_ref()
-                            .map(|active| active.prompt_id.as_str())
-                            != Some(prompt_id.as_str())
-                    {
-                        None
-                    } else {
-                        route.active_prompt.take()
+                    let AcpSessionPhase::PromptActive(active_prompt) = &mut route.phase else {
+                        return;
+                    };
+                    if route.owner != owner || active_prompt.prompt_id != prompt_id {
+                        return;
                     }
+                    let should_emit_acceptance = !active_prompt.acceptance_emitted;
+                    active_prompt.acceptance_emitted = true;
+                    let active_prompt = active_prompt.clone();
+                    route.phase = AcpSessionPhase::PromptCompleted(active_prompt.clone());
+                    route.sequence = route.sequence.saturating_add(1);
+                    Some((active_prompt, should_emit_acceptance, route.sequence))
                 };
-                if let Some(active_prompt) = active_prompt {
+                if let Some((active_prompt, should_emit_acceptance, sequence)) = active_prompt {
                     match &response {
-                        Ok(_) if !active_prompt.acceptance_emitted => {
+                        Ok(_) if should_emit_acceptance => {
                             let _ = self.incoming.send(owner.input_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -538,7 +639,7 @@ impl AcpHost {
                                 &active_prompt,
                             ));
                         }
-                        Err(error) if !active_prompt.acceptance_emitted => {
+                        Err(error) if should_emit_acceptance => {
                             let _ = self.incoming.send(owner.input_not_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -565,6 +666,9 @@ impl AcpHost {
                     let _ = self.incoming.send(owner.message(
                         self.adapter_kind,
                         &self.host_instance_id,
+                        &session_id,
+                        &active_prompt,
+                        sequence,
                         json!({
                             "jsonrpc": "2.0",
                             "method": "rovai/acp_prompt_completed",
@@ -595,7 +699,12 @@ impl AcpHost {
         });
     }
 
-    async fn bind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
+    async fn bind_session(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        phase: AcpSessionPhase,
+    ) -> Result<()> {
         let mut routes = self.routes.write().await;
         if let Some(existing) = routes.get(session_id)
             && &existing.owner != owner
@@ -606,21 +715,86 @@ impl AcpHost {
             session_id.to_string(),
             AcpSessionRoute {
                 owner: owner.clone(),
-                active_prompt: None,
+                phase,
+                sequence: 0,
             },
         );
         Ok(())
+    }
+
+    async fn mark_session_ready(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
+        let mut routes = self.routes.write().await;
+        let route = routes
+            .get_mut(session_id)
+            .context("ACP Session has no loading route")?;
+        if &route.owner != owner || !matches!(route.phase, AcpSessionPhase::LoadingReplay { .. }) {
+            bail!("ACP Session loading route failed Host/Run fencing");
+        }
+        route.phase = AcpSessionPhase::Ready;
+        Ok(())
+    }
+
+    async fn route_session_message(&self, session_id: &str) -> AcpSessionMessageRoute {
+        let mut routes = self.routes.write().await;
+        let Some(route) = routes.get_mut(session_id) else {
+            return AcpSessionMessageRoute::Missing;
+        };
+        match &mut route.phase {
+            AcpSessionPhase::PromptActive(active_prompt) => {
+                route.sequence = route.sequence.saturating_add(1);
+                AcpSessionMessageRoute::Forward {
+                    owner: route.owner.clone(),
+                    active_prompt: active_prompt.clone(),
+                    sequence: route.sequence,
+                }
+            }
+            AcpSessionPhase::LoadingReplay { replay_event_count } => {
+                *replay_event_count = replay_event_count.saturating_add(1);
+                AcpSessionMessageRoute::Quarantined(format!(
+                    "ACP continuation replay event #{replay_event_count}"
+                ))
+            }
+            AcpSessionPhase::Ready => {
+                let reason = "session-scoped message arrived without an active prompt".to_string();
+                route.phase = AcpSessionPhase::ProtocolViolated {
+                    reason: reason.clone(),
+                };
+                self.protocol_violated.store(true, Ordering::Release);
+                AcpSessionMessageRoute::Quarantined(reason)
+            }
+            AcpSessionPhase::PromptCompleted(_) => {
+                let reason = "session-scoped message arrived after prompt completion".to_string();
+                route.phase = AcpSessionPhase::ProtocolViolated {
+                    reason: reason.clone(),
+                };
+                self.protocol_violated.store(true, Ordering::Release);
+                AcpSessionMessageRoute::Quarantined(reason)
+            }
+            AcpSessionPhase::ProtocolViolated { reason } => {
+                AcpSessionMessageRoute::Quarantined(reason.clone())
+            }
+        }
     }
 
     async fn knows_session(&self, session_id: &str) -> bool {
         self.known_sessions.read().await.contains(session_id)
     }
 
-    async fn remember_session(&self, session_id: &str) {
+    async fn remember_session(&self, session_id: &str, result: Option<&Value>) {
         self.known_sessions
             .write()
             .await
             .insert(session_id.to_string());
+        if let Some(result) = result {
+            self.session_results
+                .write()
+                .await
+                .insert(session_id.to_string(), result.clone());
+        }
+    }
+
+    async fn session_result(&self, session_id: &str) -> Option<Value> {
+        self.session_results.read().await.get(session_id).cloned()
     }
 
     async fn install_compaction_observer(&self, lease: CompactionObserverLease) -> Result<()> {
@@ -700,38 +874,39 @@ impl AcpHost {
             .await
             .get(session_id)
             .filter(|route| &route.owner == owner)
-            .and_then(|route| {
-                route
-                    .active_prompt
-                    .as_ref()
-                    .map(|active| active.prompt_id.clone())
+            .and_then(|route| match &route.phase {
+                AcpSessionPhase::PromptActive(active_prompt)
+                | AcpSessionPhase::PromptCompleted(active_prompt) => {
+                    Some(active_prompt.prompt_id.clone())
+                }
+                AcpSessionPhase::LoadingReplay { .. }
+                | AcpSessionPhase::Ready
+                | AcpSessionPhase::ProtocolViolated { .. } => None,
             })
     }
 
-    async fn emit_input_accepted_if_active(&self, session_id: &str, owner: &AcpRuntimeOwner) {
-        let accepted = {
-            let mut routes = self.routes.write().await;
-            let Some(route) = routes.get_mut(session_id) else {
-                return;
-            };
-            if &route.owner != owner {
-                return;
-            }
-            let Some(active_prompt) = route.active_prompt.as_mut() else {
-                return;
-            };
-            if active_prompt.acceptance_emitted {
-                return;
-            }
-            active_prompt.acceptance_emitted = true;
-            active_prompt.clone()
-        };
-        let _ = self.incoming.send(owner.input_accepted(
-            self.adapter_kind,
-            &self.host_instance_id,
-            session_id,
-            &accepted,
-        ));
+    async fn matches_prompt_fence(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        prompt_id: &str,
+        delivery_id: &str,
+    ) -> bool {
+        self.routes
+            .read()
+            .await
+            .get(session_id)
+            .filter(|route| &route.owner == owner)
+            .and_then(|route| match &route.phase {
+                AcpSessionPhase::PromptActive(active_prompt)
+                | AcpSessionPhase::PromptCompleted(active_prompt) => Some(active_prompt),
+                AcpSessionPhase::LoadingReplay { .. }
+                | AcpSessionPhase::Ready
+                | AcpSessionPhase::ProtocolViolated { .. } => None,
+            })
+            .is_some_and(|active_prompt| {
+                active_prompt.prompt_id == prompt_id && active_prompt.delivery_id == delivery_id
+            })
     }
 
     async fn owners(&self) -> HashSet<AcpRuntimeOwner> {
@@ -777,6 +952,7 @@ impl AcpHost {
 
     pub(crate) async fn is_quiescent(&self) -> bool {
         self.is_alive()
+            && !self.protocol_violated.load(Ordering::Acquire)
             && self.pending.lock().await.is_empty()
             && self.routes.read().await.is_empty()
     }
@@ -840,19 +1016,16 @@ impl AcpHost {
         response.map_err(|message| anyhow::anyhow!("{method}: {message}"))
     }
 
-    async fn start_prompt(
+    async fn prepare_prompt(
         &self,
         session_id: &str,
         owner: &AcpRuntimeOwner,
         delivery_id: &str,
-        text: &str,
-    ) -> Result<String> {
+    ) -> Result<AcpPreparedPrompt> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        // ACP request IDs restart from 1 for every Host process. Team Tool
-        // isolation intentionally creates a fresh Host for each AgentRun, while
-        // a logical Native Binding can span many Runs. Include the Host identity
-        // so RuntimeInputDelivery keeps a unique Native Input identity across
-        // those resumptions.
+        // ACP request IDs restart from 1 for every Host process. A logical
+        // Native Binding can span warm or replacement Hosts, so include Host
+        // identity in the Native Input correlation.
         let prompt_id = acp_prompt_id(&self.host_instance_id, id);
         {
             let mut routes = self.routes.write().await;
@@ -862,10 +1035,10 @@ impl AcpHost {
             if &route.owner != owner {
                 bail!("ACP Session failed Host/Run fencing");
             }
-            if route.active_prompt.is_some() {
+            if !matches!(route.phase, AcpSessionPhase::Ready) {
                 bail!("ACP Session already has an active prompt");
             }
-            route.active_prompt = Some(AcpActivePrompt {
+            route.phase = AcpSessionPhase::PromptActive(AcpActivePrompt {
                 prompt_id: prompt_id.clone(),
                 delivery_id: delivery_id.to_string(),
                 acceptance_emitted: false,
@@ -879,11 +1052,23 @@ impl AcpHost {
                 prompt_id: prompt_id.clone(),
             },
         );
+        Ok(AcpPreparedPrompt {
+            request_id: id,
+            prompt_id,
+        })
+    }
+
+    async fn dispatch_prepared_prompt(
+        &self,
+        session_id: &str,
+        prepared: &AcpPreparedPrompt,
+        text: &str,
+    ) -> Result<()> {
         if let Err(error) = self
             .send(json!({
                 "jsonrpc": "2.0",
                 "method": "session/prompt",
-                "id": id,
+                "id": prepared.request_id,
                 "params": {
                     "sessionId": session_id,
                     "prompt": [{"type": "text", "text": text}]
@@ -891,13 +1076,15 @@ impl AcpHost {
             }))
             .await
         {
-            self.pending.lock().await.remove(&id);
-            if let Some(route) = self.routes.write().await.get_mut(session_id) {
-                route.active_prompt = None;
+            self.pending.lock().await.remove(&prepared.request_id);
+            if let Some(route) = self.routes.write().await.get_mut(session_id)
+                && matches!(route.phase, AcpSessionPhase::PromptActive(_))
+            {
+                route.phase = AcpSessionPhase::Ready;
             }
             return Err(error);
         }
-        Ok(prompt_id)
+        Ok(())
     }
 
     #[allow(dead_code)] // Used when the v0.02 CancelAgentRun command is exposed by the Core API.
@@ -940,25 +1127,6 @@ fn diagnostic_is_explicit_mcp_rejection(diagnostic: &str) -> bool {
 
 fn acp_prompt_id(host_instance_id: &str, request_id: u64) -> String {
     format!("acp-prompt-{host_instance_id}-{request_id}")
-}
-
-fn acp_message_proves_input_accepted(message: &Value) -> bool {
-    match message.get("method").and_then(Value::as_str) {
-        Some("session/request_permission") => true,
-        Some("session/update") => matches!(
-            message
-                .pointer("/params/update/sessionUpdate")
-                .and_then(Value::as_str),
-            Some(
-                "agent_message_chunk"
-                    | "agent_thought_chunk"
-                    | "tool_call"
-                    | "tool_call_update"
-                    | "plan"
-            )
-        ),
-        _ => false,
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1102,10 +1270,44 @@ pub struct AcpRuntime {
     execution_root: PathBuf,
     attachment_access_root: Option<PathBuf>,
     workspace_access: String,
-    streamed_agent_text: Mutex<String>,
-    missing_send_recovery: Mutex<AcpMissingSendRecoveryCollector>,
-    observed_tools: Mutex<HashMap<String, ObservedToolMetadata>>,
+    active_observation: Mutex<Option<AcpPromptObservation>>,
     authorized_file_writes: Mutex<HashSet<PathBuf>>,
+}
+
+fn select_acp_session_continuation(
+    adapter_kind: AdapterKind,
+    same_host_knows_session: bool,
+    existing_session_id: Option<&str>,
+    capabilities: AcpSessionCapabilities,
+) -> AcpSessionContinuation {
+    if same_host_knows_session {
+        return AcpSessionContinuation::ReuseSameHost;
+    }
+    if existing_session_id.is_none() {
+        return AcpSessionContinuation::New;
+    }
+    if capabilities.can_resume {
+        return AcpSessionContinuation::Resume;
+    }
+    if adapter_kind == AdapterKind::TraeCnCli {
+        return AcpSessionContinuation::New;
+    }
+    if capabilities.can_load_history && legacy_load_continuation_allowed(adapter_kind) {
+        return AcpSessionContinuation::LoadHistory;
+    }
+    AcpSessionContinuation::New
+}
+
+fn legacy_load_continuation_allowed(adapter_kind: AdapterKind) -> bool {
+    matches!(
+        adapter_kind,
+        AdapterKind::OpencodeCli
+            | AdapterKind::CopilotCli
+            | AdapterKind::KiroCli
+            | AdapterKind::QoderCli
+            | AdapterKind::CodebuddyCli
+            | AdapterKind::QwenCode
+    )
 }
 
 impl AcpRuntime {
@@ -1129,17 +1331,32 @@ impl AcpRuntime {
             execution_root,
             attachment_access_root,
             workspace_access,
-            streamed_agent_text: Mutex::new(String::new()),
-            missing_send_recovery: Mutex::new(AcpMissingSendRecoveryCollector::default()),
-            observed_tools: Mutex::new(HashMap::new()),
+            active_observation: Mutex::new(None),
             authorized_file_writes: Mutex::new(HashSet::new()),
         })
+    }
+
+    pub(crate) async fn session_continuation(
+        &self,
+        existing_session_id: Option<&str>,
+        capabilities: AcpSessionCapabilities,
+    ) -> AcpSessionContinuation {
+        let same_host_knows_session = match existing_session_id {
+            Some(session_id) => self.host.knows_session(session_id).await,
+            None => false,
+        };
+        select_acp_session_continuation(
+            self.host.adapter_kind,
+            same_host_knows_session,
+            existing_session_id,
+            capabilities,
+        )
     }
 
     pub async fn start_or_resume_session(
         &self,
         existing_session_id: Option<&str>,
-        supports_load: bool,
+        capabilities: AcpSessionCapabilities,
         model: &str,
         model_options: &Value,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
@@ -1166,27 +1383,79 @@ impl AcpRuntime {
             // additive configuration channel rather than ACP session fields.
             Vec::new()
         };
-        let session_id = if let Some(session_id) = existing_session_id
-            && self.host.knows_session(session_id).await
-        {
-            // The Session still belongs to this live Host. Rebinding it does
-            // not require the optional cross-process session/load capability.
-            session_id.to_string()
-        } else {
-            let result = if let Some(session_id) = existing_session_id.filter(|_| supports_load) {
+        let continuation = self
+            .session_continuation(existing_session_id, capabilities)
+            .await;
+        let (session_id, prebound_session) = match continuation {
+            AcpSessionContinuation::ReuseSameHost => (
+                existing_session_id
+                    .context("same-Host ACP continuation has no Session ID")?
+                    .to_string(),
+                false,
+            ),
+            AcpSessionContinuation::Resume | AcpSessionContinuation::LoadHistory => {
+                let existing_session_id =
+                    existing_session_id.context("cross-Host ACP continuation has no Session ID")?;
                 self.host
+                    .bind_session(
+                        existing_session_id,
+                        &self.owner,
+                        AcpSessionPhase::LoadingReplay {
+                            replay_event_count: 0,
+                        },
+                    )
+                    .await?;
+                let method = if continuation == AcpSessionContinuation::Resume {
+                    "session/resume"
+                } else {
+                    "session/load"
+                };
+                let result = match self
+                    .host
                     .rpc(
-                        "session/load",
+                        method,
                         json!({
-                            "sessionId": session_id,
+                            "sessionId": existing_session_id,
                             "cwd": cwd,
                             "mcpServers": mcp_servers,
                             "additionalDirectories": additional_directories,
                         }),
                     )
-                    .await?
-            } else {
-                self.host
+                    .await
+                {
+                    Ok(result) => result,
+                    Err(error) => {
+                        self.host
+                            .unbind_session(existing_session_id, &self.owner)
+                            .await;
+                        return Err(error);
+                    }
+                };
+                *self.session_result.write().await = Some(result.clone());
+                let session_id = result
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .unwrap_or(existing_session_id)
+                    .to_string();
+                if session_id != existing_session_id {
+                    self.host
+                        .unbind_session(existing_session_id, &self.owner)
+                        .await;
+                    self.host
+                        .bind_session(
+                            &session_id,
+                            &self.owner,
+                            AcpSessionPhase::LoadingReplay {
+                                replay_event_count: 0,
+                            },
+                        )
+                        .await?;
+                }
+                (session_id, true)
+            }
+            AcpSessionContinuation::New => {
+                let result = self
+                    .host
                     .rpc(
                         "session/new",
                         json!({
@@ -1195,17 +1464,25 @@ impl AcpRuntime {
                             "additionalDirectories": additional_directories,
                         }),
                     )
-                    .await?
-            };
-            *self.session_result.write().await = Some(result.clone());
-            result
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .or(existing_session_id.filter(|_| supports_load))
-                .context("ACP Session response did not include sessionId")?
-                .to_string()
+                    .await?;
+                *self.session_result.write().await = Some(result.clone());
+                let session_id = result
+                    .get("sessionId")
+                    .and_then(Value::as_str)
+                    .context("ACP Session response did not include sessionId")?
+                    .to_string();
+                (session_id, false)
+            }
         };
-        self.host.remember_session(&session_id).await;
+        if self.session_result.read().await.is_none()
+            && let Some(result) = self.host.session_result(&session_id).await
+        {
+            *self.session_result.write().await = Some(result);
+        }
+        let session_result = self.session_result.read().await.clone();
+        self.host
+            .remember_session(&session_id, session_result.as_ref())
+            .await;
         if self.host.adapter_kind == AdapterKind::KiroCli {
             self.set_model(&session_id, model).await?;
         } else if !(self.host.adapter_kind == AdapterKind::TraeCnCli
@@ -1229,7 +1506,15 @@ impl AcpRuntime {
                 }
             }
         }
-        self.host.bind_session(&session_id, &self.owner).await?;
+        if prebound_session {
+            self.host
+                .mark_session_ready(&session_id, &self.owner)
+                .await?;
+        } else {
+            self.host
+                .bind_session(&session_id, &self.owner, AcpSessionPhase::Ready)
+                .await?;
+        }
         let previous_session_id = self.session_id.write().await.replace(session_id.clone());
         if let Some(previous_session_id) = previous_session_id
             && previous_session_id != session_id
@@ -1281,15 +1566,33 @@ impl AcpRuntime {
     }
 
     pub async fn start_prompt(&self, delivery_id: &str, text: &str) -> Result<String> {
-        self.streamed_agent_text.lock().await.clear();
-        self.missing_send_recovery.lock().await.clear();
         let session_id = self
             .session_id()
             .await
             .context("ACP Session is not ready")?;
-        self.host
-            .start_prompt(&session_id, &self.owner, delivery_id, text)
+        let prepared = self
+            .host
+            .prepare_prompt(&session_id, &self.owner, delivery_id)
+            .await?;
+        *self.active_observation.lock().await = Some(AcpPromptObservation::new(
+            prepared.prompt_id.clone(),
+            delivery_id.to_string(),
+        ));
+        if let Err(error) = self
+            .host
+            .dispatch_prepared_prompt(&session_id, &prepared, text)
             .await
+        {
+            let mut observation = self.active_observation.lock().await;
+            if observation
+                .as_ref()
+                .is_some_and(|observation| observation.prompt_id == prepared.prompt_id)
+            {
+                *observation = None;
+            }
+            return Err(error);
+        }
+        Ok(prepared.prompt_id)
     }
 
     pub async fn install_compaction_observer(&self, lease: CompactionObserverLease) -> Result<()> {
@@ -1331,14 +1634,19 @@ impl AcpRuntime {
 
     pub async fn observe_message(
         &self,
+        native_prompt_id: &str,
         method: &str,
         params: &Value,
     ) -> Result<Option<CompletedAcpAction>> {
+        let mut observation = self.active_observation.lock().await;
+        let observation = observation
+            .as_mut()
+            .context("ACP event arrived without an active Prompt observation")?;
+        if observation.prompt_id != native_prompt_id {
+            bail!("ACP event targeted a stale Prompt observation");
+        }
         if method == "session/request_permission" {
-            self.missing_send_recovery
-                .lock()
-                .await
-                .observe_tool_activity();
+            observation.missing_send_recovery.observe_tool_activity();
             return Ok(None);
         }
         if method != "session/update" {
@@ -1351,22 +1659,18 @@ impl AcpRuntime {
         if session_update == Some("agent_message_chunk")
             && let Some(text) = update.pointer("/content/text").and_then(Value::as_str)
         {
-            self.streamed_agent_text.lock().await.push_str(text);
+            observation.streamed_agent_text.push_str(text);
             let message_id = update
                 .get("messageId")
                 .or_else(|| update.pointer("/content/messageId"))
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty());
-            self.missing_send_recovery
-                .lock()
-                .await
+            observation
+                .missing_send_recovery
                 .observe_assistant_chunk(message_id, text);
         }
         if matches!(session_update, Some("tool_call" | "tool_call_update")) {
-            self.missing_send_recovery
-                .lock()
-                .await
-                .observe_tool_activity();
+            observation.missing_send_recovery.observe_tool_activity();
         }
         if !matches!(session_update, Some("tool_call" | "tool_call_update")) {
             return Ok(None);
@@ -1378,8 +1682,10 @@ impl AcpRuntime {
             update.get("status").and_then(Value::as_str),
             Some("completed" | "failed")
         );
-        let mut observations = self.observed_tools.lock().await;
-        let observed = observations.entry(native_item_id.to_string()).or_default();
+        let observed = observation
+            .observed_tools
+            .entry(native_item_id.to_string())
+            .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
             observed.native_kind =
@@ -1402,8 +1708,10 @@ impl AcpRuntime {
         if !terminal {
             return Ok(None);
         }
-        let observed = observations.remove(native_item_id).unwrap_or_default();
-        drop(observations);
+        let observed = observation
+            .observed_tools
+            .remove(native_item_id)
+            .unwrap_or_default();
         let Some(mut completion) = completed_action(params)? else {
             return Ok(None);
         };
@@ -1427,13 +1735,22 @@ impl AcpRuntime {
         Ok(Some(completion))
     }
 
-    pub async fn final_agent_message(&self) -> Option<String> {
-        let text = self.streamed_agent_text.lock().await.trim().to_string();
+    pub async fn final_agent_message(&self, native_prompt_id: &str) -> Option<String> {
+        let observation = self.active_observation.lock().await;
+        let observation = observation
+            .as_ref()
+            .filter(|observation| observation.prompt_id == native_prompt_id)?;
+        let text = observation.streamed_agent_text.trim().to_string();
         (!text.is_empty()).then_some(text)
     }
 
-    pub async fn missing_send_recovery_candidate(&self) -> Option<String> {
-        self.missing_send_recovery.lock().await.candidate()
+    pub async fn missing_send_recovery_candidate(&self, native_prompt_id: &str) -> Option<String> {
+        self.active_observation
+            .lock()
+            .await
+            .as_ref()
+            .filter(|observation| observation.prompt_id == native_prompt_id)
+            .and_then(|observation| observation.missing_send_recovery.candidate())
     }
 
     pub async fn session_id(&self) -> Option<String> {
@@ -1445,14 +1762,47 @@ impl AcpRuntime {
         self.host.active_prompt(&session_id, &self.owner).await
     }
 
-    pub async fn observed_tool_context(
+    pub async fn matches_prompt_fence(
         &self,
-        native_item_id: &str,
-    ) -> Option<ObservedAcpToolContext> {
-        self.observed_tools
+        native_session_id: &str,
+        native_prompt_id: &str,
+        delivery_id: &str,
+    ) -> bool {
+        if self.session_id().await.as_deref() != Some(native_session_id) {
+            return false;
+        }
+        if !self
+            .host
+            .matches_prompt_fence(
+                native_session_id,
+                &self.owner,
+                native_prompt_id,
+                delivery_id,
+            )
+            .await
+        {
+            return false;
+        }
+        self.active_observation
             .lock()
             .await
-            .get(native_item_id)
+            .as_ref()
+            .is_some_and(|observation| {
+                observation.prompt_id == native_prompt_id && observation.delivery_id == delivery_id
+            })
+    }
+
+    pub async fn observed_tool_context(
+        &self,
+        native_prompt_id: &str,
+        native_item_id: &str,
+    ) -> Option<ObservedAcpToolContext> {
+        self.active_observation
+            .lock()
+            .await
+            .as_ref()
+            .filter(|observation| observation.prompt_id == native_prompt_id)
+            .and_then(|observation| observation.observed_tools.get(native_item_id))
             .map(|observed| ObservedAcpToolContext {
                 native_kind: observed.native_kind.clone(),
                 raw_input: observed.raw_input.clone(),
@@ -1523,6 +1873,7 @@ impl AcpRuntime {
     }
 
     pub(crate) async fn detach(&self) {
+        *self.active_observation.lock().await = None;
         if let Some(session_id) = self.session_id().await {
             self.host.unbind_session(&session_id, &self.owner).await;
         }
@@ -1743,9 +2094,10 @@ impl AcpCliRuntimeAdapter {
         agent_run_id: &str,
         execution_epoch: i64,
     ) {
-        if completed_run_release_disposition(self.kind) == FleetReleaseDisposition::Stop {
-            // Finish non-reusable Host teardown before the durable terminal
-            // state allows a successor Run to start. complete_agent_run is
+        if matches!(self.kind, AdapterKind::KiroCli | AdapterKind::TraeCnCli) {
+            // Kiro must finish Host teardown, while TRAE must publish its
+            // quiescent Host to the warm LRU, before a durable terminal lets a
+            // successor Run compete for a process. complete_agent_run is
             // idempotent, so the common post-terminal cleanup remains safe.
             self.complete_agent_run(agent_run_id, execution_epoch).await;
         }
@@ -1766,12 +2118,10 @@ impl AcpCliRuntimeAdapter {
 }
 
 fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseDisposition {
-    if matches!(adapter_kind, AdapterKind::KiroCli | AdapterKind::TraeCnCli) {
+    if adapter_kind == AdapterKind::KiroCli {
         // Kiro keeps a Native Session locked for the lifetime of its ACP
-        // process. TRAE's first supported build has only been qualified with
-        // run-scoped Hosts. Stop either Host here so the successor process can
-        // load the persisted Session without extending unverified warm-reuse
-        // state across AgentRuns.
+        // process. Stop the Host here so the successor process can load the
+        // persisted Session without extending locked state across AgentRuns.
         FleetReleaseDisposition::Stop
     } else {
         FleetReleaseDisposition::Reusable
@@ -1794,10 +2144,21 @@ pub(crate) fn runtime_compatibility_digest(
                 workspace.execution_root
             )
         })?;
+    // TRAE's first real AgentRun upgrades an installed-unverified snapshot to
+    // Ready and therefore changes the full frozen config digest. Its MCP
+    // projection file digest is also Run-local because the file includes the
+    // AgentRun ID. Neither value is a Host launch input. Keep TRAE warm
+    // compatibility on the dedicated Host digest and the concrete resolved MCP
+    // server set below.
+    let excludes_run_local_digests = frozen_runtime.adapter_kind == AdapterKind::TraeCnCli;
+    let runtime_config_digest =
+        (!excludes_run_local_digests).then_some(frozen_runtime.config_digest.as_str());
+    let mcp_projection_compatibility_digest =
+        (!excludes_run_local_digests).then_some(mcp_projection_digest);
     canonical_json_digest(&json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "adapterKind": frozen_runtime.adapter_kind,
-        "runtimeConfigDigest": frozen_runtime.config_digest,
+        "runtimeConfigDigest": runtime_config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "executionRoot": execution_root,
         "workspace": workspace,
@@ -1805,7 +2166,7 @@ pub(crate) fn runtime_compatibility_digest(
         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         "externalMcpServers": external_mcp_servers,
-        "mcpProjectionDigest": mcp_projection_digest,
+        "mcpProjectionDigest": mcp_projection_compatibility_digest,
         "attachmentAccessRoot": attachment_access_root,
     }))
 }
@@ -2916,36 +3277,19 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime_fleet::AgentRuntimeFleetConfig;
     use rovai_core::agent_profile::{AdapterPermissionConfig, ResolvedModelSelection};
     use std::os::unix::fs::PermissionsExt;
 
-    #[tokio::test]
-    async fn deferred_trae_verification_reuses_the_only_agent_process() {
-        let root =
-            std::env::temp_dir().join(format!("rovai-trae-agent-process-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&root).unwrap();
-        let executable = root.join("traecli");
-        let invocation_log = root.join("invocations");
-        std::fs::write(
-            &executable,
-            format!(
-                r#"#!/bin/sh
-printf '%s\n' "$*" >> '{}'
-IFS= read -r initialize || exit 1
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
-IFS= read -r session || exit 1
-printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-real","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}},"configOptions":[{{"id":"model","currentValue":"trae-default","options":[{{"value":"trae-default","name":"TRAE Default"}}]}}],"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
-while IFS= read -r ignored; do :; done
-"#,
-                invocation_log.display()
-            ),
-        )
-        .unwrap();
-        let mut permissions = std::fs::metadata(&executable).unwrap().permissions();
+    fn make_executable(path: &Path, body: &str) {
+        std::fs::write(path, body).unwrap();
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o755);
-        std::fs::set_permissions(&executable, permissions).unwrap();
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
 
-        let frozen = FrozenAgentRuntimeConfig {
+    fn frozen_trae_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
+        FrozenAgentRuntimeConfig {
             adapter_kind: AdapterKind::TraeCnCli,
             installation_id: "installation-trae".to_string(),
             installation_generation: 1,
@@ -2970,7 +3314,48 @@ while IFS= read -r ignored; do :; done
             binding_compatibility_digest: "sha256:binding".to_string(),
             host_config_digest: "sha256:host".to_string(),
             config_digest: "sha256:config".to_string(),
-        };
+        }
+    }
+
+    async fn receive_through_prompt_completion(
+        receiver: &mut mpsc::UnboundedReceiver<AcpIncoming>,
+    ) {
+        loop {
+            let incoming = receiver.recv().await.expect("ACP Host stopped early");
+            if matches!(
+                incoming,
+                AcpIncoming::Message { ref message, .. }
+                    if message.get("method").and_then(Value::as_str)
+                        == Some("rovai/acp_prompt_completed")
+            ) {
+                return;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn deferred_trae_verification_reuses_the_only_agent_process() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-trae-agent-process-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        let invocation_log = root.join("invocations");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-real","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}},"configOptions":[{{"id":"model","currentValue":"trae-default","options":[{{"value":"trae-default","name":"TRAE Default"}}]}}],"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                invocation_log.display()
+            ),
+        );
+
+        let frozen = frozen_trae_runtime(&executable);
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let (incoming, _receiver) = mpsc::unbounded_channel();
         let host = AcpHost::spawn(
@@ -3003,7 +3388,7 @@ while IFS= read -r ignored; do :; done
         let session_id = runtime
             .start_or_resume_session(
                 None,
-                false,
+                AcpSessionCapabilities::default(),
                 TRAE_RUNTIME_DEFAULT_MODEL_ID,
                 &json!({}),
                 &BTreeMap::new(),
@@ -3023,23 +3408,294 @@ while IFS= read -r ignored; do :; done
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[tokio::test]
+    async fn resume_replay_is_quarantined_and_prompt_response_is_the_only_ack() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-resume-quarantine-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        let protocol_log = root.join("protocol.jsonl");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
+IFS= read -r resume || exit 1
+printf '%s\n' "$resume" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"historical"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}'
+IFS= read -r prompt || exit 1
+printf '%s\n' "$prompt" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"current"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+            ),
+        );
+
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            None,
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "agent-run-resume".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            None,
+            "runtime_managed".to_string(),
+        );
+        let session_id = runtime
+            .start_or_resume_session(
+                Some("session-old"),
+                AcpSessionCapabilities {
+                    can_resume: true,
+                    can_load_history: true,
+                },
+                TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(session_id, "session-old");
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AcpIncoming::HostDiagnostic { text, .. })
+                if text.contains("ACP continuation replay")
+        ));
+        assert!(receiver.try_recv().is_err());
+
+        let prompt_id = runtime
+            .start_prompt("delivery-current", "continue")
+            .await
+            .unwrap();
+        let first = receiver
+            .recv()
+            .await
+            .expect("current prompt update missing");
+        assert!(matches!(
+            first,
+            AcpIncoming::Message {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence: 1,
+                message,
+                ..
+            } if native_session_id == "session-old"
+                && native_prompt_id == prompt_id
+                && delivery_id == "delivery-current"
+                && message.pointer("/params/update/content/text").and_then(Value::as_str)
+                    == Some("current")
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AcpIncoming::InputAccepted {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                ..
+            }) if native_session_id == "session-old"
+                && native_prompt_id == prompt_id
+                && delivery_id == "delivery-current"
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AcpIncoming::Message {
+                sequence: 2,
+                message,
+                ..
+            }) if message.get("method").and_then(Value::as_str)
+                == Some("rovai/acp_prompt_completed")
+        ));
+        host.shutdown().await;
+
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert!(protocol.contains("\"method\":\"session/resume\""));
+        assert!(!protocol.contains("\"method\":\"session/load\""));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn trae_completed_run_enters_lru_and_reuses_the_same_host_session() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-trae-warm-lru-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        let protocol_log = root.join("protocol.jsonl");
+        let invocation_log = root.join("invocations");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' "$session" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-warm","configOptions":[{{"id":"model","currentValue":"trae-default","options":[{{"value":"trae-default","name":"TRAE Default"}}]}}],"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
+IFS= read -r prompt_one || exit 1
+printf '%s\n' "$prompt_one" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-warm","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"one"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"stopReason":"end_turn"}}}}'
+IFS= read -r prompt_two || exit 1
+printf '%s\n' "$prompt_two" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-warm","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"two"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                invocation_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+            ),
+        );
+        let cli = root.join("rovai");
+        make_executable(&cli, "#!/bin/sh\nexit 0\n");
+        let builtin_tools =
+            BuiltinToolProcessConfig::create(&cli, &root.join("core.sock"), &root.join("runtime"))
+                .unwrap();
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let attachment_root = root.join("attachments");
+        std::fs::create_dir_all(&attachment_root).unwrap();
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(
+            AgentRuntimeFleetConfig::default(),
+        ));
+        let adapter = AcpCliRuntimeAdapter::new(
+            AdapterKind::TraeCnCli,
+            incoming,
+            root.join("private"),
+            fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        )
+        .unwrap();
+
+        let first = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-one",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &BTreeMap::new(),
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        let first_host = first.host_instance_id().to_string();
+        let session_id = first
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities {
+                    can_resume: false,
+                    can_load_history: true,
+                },
+                TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        first.start_prompt("delivery-one", "one").await.unwrap();
+        receive_through_prompt_completion(&mut receiver).await;
+        adapter.complete_agent_run("agent-run-one", 1).await;
+
+        let second = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-two",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &BTreeMap::new(),
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.host_instance_id(), first_host);
+        let successor_session = second
+            .start_or_resume_session(
+                Some(&session_id),
+                AcpSessionCapabilities {
+                    can_resume: false,
+                    can_load_history: true,
+                },
+                TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(successor_session, session_id);
+        assert!(second.verification_evidence().await.is_some());
+        second.start_prompt("delivery-two", "two").await.unwrap();
+        receive_through_prompt_completion(&mut receiver).await;
+        adapter.complete_agent_run("agent-run-two", 1).await;
+        fleet.shutdown_all().await;
+
+        let invocations = std::fs::read_to_string(&invocation_log).unwrap();
+        assert_eq!(invocations.lines().count(), 1);
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert_eq!(protocol.matches("\"method\":\"session/new\"").count(), 1);
+        assert_eq!(protocol.matches("\"method\":\"session/prompt\"").count(), 2);
+        assert!(!protocol.contains("\"method\":\"session/load\""));
+        assert!(!protocol.contains("\"method\":\"session/resume\""));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn completed_run_disposition_preserves_adapter_reuse_evidence() {
         assert_eq!(
             completed_run_release_disposition(AdapterKind::KiroCli),
             FleetReleaseDisposition::Stop
         );
-        assert_eq!(
-            completed_run_release_disposition(AdapterKind::TraeCnCli),
-            FleetReleaseDisposition::Stop
-        );
-
         for adapter_kind in [
             AdapterKind::OpencodeCli,
             AdapterKind::CopilotCli,
             AdapterKind::QoderCli,
             AdapterKind::CodebuddyCli,
             AdapterKind::QwenCode,
+            AdapterKind::TraeCnCli,
         ] {
             assert_eq!(
                 completed_run_release_disposition(adapter_kind),
@@ -3215,44 +3871,136 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn only_active_prompt_response_events_prove_acp_input_acceptance() {
-        for update in [
-            "agent_message_chunk",
-            "agent_thought_chunk",
-            "tool_call",
-            "tool_call_update",
-            "plan",
-        ] {
-            assert!(acp_message_proves_input_accepted(&json!({
-                "method": "session/update",
-                "params": {
-                    "sessionId": "session-1",
-                    "update": {"sessionUpdate": update}
-                }
-            })));
-        }
-        assert!(acp_message_proves_input_accepted(&json!({
-            "id": 7,
-            "method": "session/request_permission",
-            "params": {"sessionId": "session-1"}
-        })));
-        for update in [
-            "usage_update",
-            "available_commands_update",
-            "current_mode_update",
-        ] {
-            assert!(!acp_message_proves_input_accepted(&json!({
-                "method": "session/update",
-                "params": {
-                    "sessionId": "session-1",
-                    "update": {"sessionUpdate": update}
-                }
-            })));
-        }
-        assert!(!acp_message_proves_input_accepted(&json!({
-            "method": "session/update",
-            "params": {"sessionId": "session-1"}
-        })));
+    fn continuation_prefers_same_host_then_resume_and_never_loads_trae() {
+        let load_only = AcpSessionCapabilities {
+            can_resume: false,
+            can_load_history: true,
+        };
+        let resume_and_load = AcpSessionCapabilities {
+            can_resume: true,
+            can_load_history: true,
+        };
+
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::TraeCnCli,
+                true,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::ReuseSameHost
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::TraeCnCli,
+                false,
+                Some("session-1"),
+                resume_and_load,
+            ),
+            AcpSessionContinuation::Resume
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::TraeCnCli,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::New
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::CopilotCli,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::LoadHistory
+        );
+        assert_eq!(
+            select_acp_session_continuation(AdapterKind::TraeCnCli, false, None, resume_and_load,),
+            AcpSessionContinuation::New
+        );
+    }
+
+    #[test]
+    fn trae_warm_compatibility_ignores_live_snapshot_upgrade_but_not_host_inputs() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-trae-compatibility-{}", uuid::Uuid::new_v4()));
+        let attachments = root.join("attachments");
+        std::fs::create_dir_all(&attachments).unwrap();
+        let executable = root.join("traecli");
+        make_executable(&executable, "#!/bin/sh\nexit 0\n");
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let frozen = frozen_trae_runtime(&executable);
+        let first = runtime_compatibility_digest(
+            &frozen,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:mcp",
+            &attachments,
+        )
+        .unwrap();
+
+        let mut upgraded = frozen.clone();
+        upgraded.reported_version = Some("0.120.52".to_string());
+        upgraded.capabilities = vec!["session.load".to_string(), "session.new".to_string()];
+        upgraded.model.model_id = "GLM-5.2".to_string();
+        upgraded.config_digest = "sha256:ready-snapshot".to_string();
+        let ready = runtime_compatibility_digest(
+            &upgraded,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:mcp",
+            &attachments,
+        )
+        .unwrap();
+        assert_eq!(ready, first);
+
+        let run_local_mcp_projection = runtime_compatibility_digest(
+            &upgraded,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:another-run-local-mcp-projection",
+            &attachments,
+        )
+        .unwrap();
+        assert_eq!(run_local_mcp_projection, first);
+
+        let mut changed_servers = BTreeMap::new();
+        changed_servers.insert(
+            "fixture".to_string(),
+            McpServerDefinition::StreamableHttp {
+                url: "https://mcp.invalid/example".to_string(),
+                headers: BTreeMap::new(),
+            },
+        );
+        let changed_mcp = runtime_compatibility_digest(
+            &upgraded,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &changed_servers,
+            "sha256:another-run-local-mcp-projection",
+            &attachments,
+        )
+        .unwrap();
+        assert_ne!(changed_mcp, first);
+
+        upgraded.host_config_digest = "sha256:changed-host-input".to_string();
+        let changed_host = runtime_compatibility_digest(
+            &upgraded,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:mcp",
+            &attachments,
+        )
+        .unwrap();
+        assert_ne!(changed_host, first);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

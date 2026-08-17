@@ -6172,6 +6172,37 @@ impl Core {
         })
     }
 
+    async fn prepare_initial_builtin_tool_binding(
+        &self,
+        execution: &AgentRunExecution,
+        resume_disposition: NativeSessionResumeDisposition,
+    ) -> Result<BuiltinToolBindingCredential> {
+        Ok({
+            let mut database = self.database.lock().await;
+            let service = TeamToolService::default();
+            match resume_disposition {
+                NativeSessionResumeDisposition::Controlled => service
+                    .prepare_controlled_resume_binding_credential(
+                        &mut database,
+                        &execution.agent_run_id,
+                        execution.execution_epoch,
+                    )?,
+                NativeSessionResumeDisposition::New => service.prepare_binding_credential(
+                    &mut database,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    execution.native_session_id.is_some(),
+                )?,
+                NativeSessionResumeDisposition::Compatible => service.prepare_binding_credential(
+                    &mut database,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    false,
+                )?,
+            }
+        })
+    }
+
     fn prepare_builtin_tool_process_config(&self) -> Result<BuiltinToolProcessConfig> {
         BuiltinToolProcessConfig::create(
             &bundled_cli_executable()?,
@@ -6890,11 +6921,7 @@ impl Core {
             );
         }
         let initial_binding = self
-            .prepare_builtin_tool_binding(
-                execution,
-                resume_disposition == NativeSessionResumeDisposition::New
-                    && execution.native_session_id.is_some(),
-            )
+            .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         let runtime_compatibility_digest = codex::runtime_compatibility_digest(
@@ -7156,11 +7183,7 @@ impl Core {
         // The credential identifies the long-lived Native Binding, not this
         // AgentRun. Core resolves the current active Run at every tool call.
         let binding_credential = self
-            .prepare_builtin_tool_binding(
-                execution,
-                resume_disposition == NativeSessionResumeDisposition::New
-                    && execution.native_session_id.is_some(),
-            )
+            .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
         let is_new_session = binding_credential.native_session_id.is_none();
         let native_session_id = binding_credential
@@ -7645,16 +7668,9 @@ impl Core {
                 execution_root.display()
             );
         }
-        let binding_credential = {
-            let mut database = self.database.lock().await;
-            TeamToolService::default().prepare_binding_credential(
-                &mut database,
-                &execution.agent_run_id,
-                execution.execution_epoch,
-                resume_disposition == NativeSessionResumeDisposition::New
-                    && execution.native_session_id.is_some(),
-            )?
-        };
+        let binding_credential = self
+            .prepare_initial_builtin_tool_binding(execution, resume_disposition)
+            .await?;
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
@@ -7972,11 +7988,7 @@ impl Core {
             .acp_adapter(execution.runtime.adapter_kind)
             .context("AgentRun selected an unsupported ACP Adapter")?;
         let initial_binding = self
-            .prepare_builtin_tool_binding(
-                execution,
-                resume_disposition == NativeSessionResumeDisposition::New
-                    && execution.native_session_id.is_some(),
-            )
+            .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
         let mut runtime_compatibility_digest = acp::runtime_compatibility_digest(
@@ -8010,25 +8022,43 @@ impl Core {
             .builtin_tool_process_config()
             .context("ACP Runtime has no Built-in Tool process context")?
             .clone();
-        self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &initial_binding)
+        let session_capabilities = acp::AcpSessionCapabilities {
+            can_resume: execution
+                .runtime
+                .capabilities
+                .iter()
+                .any(|capability| capability == "session.resume"),
+            can_load_history: execution
+                .runtime
+                .capabilities
+                .iter()
+                .any(|capability| capability == "session.load"),
+        };
+        let mut binding_credential = initial_binding;
+        if binding_credential.native_session_id.is_some()
+            && runtime
+                .session_continuation(
+                    binding_credential.native_session_id.as_deref(),
+                    session_capabilities,
+                )
+                .await
+                == acp::AcpSessionContinuation::New
+        {
+            binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
+        }
+        self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
             .await?;
-        let resumable_session_id = initial_binding.native_session_id.clone();
-        let supports_load = execution
-            .runtime
-            .capabilities
-            .iter()
-            .any(|capability| capability == "session.load");
+        let resumable_session_id = binding_credential.native_session_id.clone();
         let model = execution.runtime.model.model_id.as_str();
         let session = runtime
             .start_or_resume_session(
                 resumable_session_id.as_deref(),
-                supports_load,
+                session_capabilities,
                 model,
                 &execution.runtime.model.options,
                 &mcp_projection.servers,
             )
             .await;
-        let mut binding_credential = initial_binding;
         let session_id = match session {
             Ok(session_id) => session_id,
             Err(error)
@@ -8099,7 +8129,7 @@ impl Core {
                 let session_id = runtime
                     .start_or_resume_session(
                         None,
-                        supports_load,
+                        session_capabilities,
                         model,
                         &execution.runtime.model.options,
                         &mcp_projection.servers,
@@ -9829,6 +9859,10 @@ async fn process_acp_events(
                 host_instance_id,
                 agent_run_id,
                 execution_epoch,
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence,
                 message,
             } => {
                 process_agent_run_acp_message(
@@ -9838,6 +9872,10 @@ async fn process_acp_events(
                     &host_instance_id,
                     &agent_run_id,
                     execution_epoch,
+                    &native_session_id,
+                    &native_prompt_id,
+                    &delivery_id,
+                    sequence,
                     message,
                     &mut runtime_route_permit,
                 )
@@ -10056,6 +10094,10 @@ async fn process_agent_run_acp_message(
     host_instance_id: &str,
     agent_run_id: &str,
     execution_epoch: i64,
+    native_session_id: &str,
+    native_prompt_id: &str,
+    delivery_id: &str,
+    sequence: u64,
     message: Value,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
@@ -10070,6 +10112,15 @@ async fn process_agent_run_acp_message(
     else {
         return;
     };
+    if !runtime
+        .matches_prompt_fence(native_session_id, native_prompt_id, delivery_id)
+        .await
+    {
+        eprintln!(
+            "dropped fenced ACP message for AgentRun {agent_run_id} at Session sequence {sequence}"
+        );
+        return;
+    }
     let method = message
         .get("method")
         .and_then(Value::as_str)
@@ -10077,6 +10128,13 @@ async fn process_agent_run_acp_message(
         .to_string();
     let params = message.get("params").cloned().unwrap_or(Value::Null);
     if let Some(id) = message.get("id").cloned() {
+        if method == "session/request_permission"
+            && let Err(error) = runtime
+                .observe_message(native_prompt_id, &method, &params)
+                .await
+        {
+            eprintln!("failed to observe ACP permission request: {error:#}");
+        }
         let result = match method.as_str() {
             "session/request_permission" => {
                 process_agent_run_acp_approval_request(
@@ -10149,7 +10207,10 @@ async fn process_agent_run_acp_message(
             adapter_kind.as_str()
         );
     }
-    let completed_action = match runtime.observe_message(&method, &params).await {
+    let completed_action = match runtime
+        .observe_message(native_prompt_id, &method, &params)
+        .await
+    {
         Ok(completion) => completion,
         Err(error) => {
             eprintln!("failed to normalize ACP Runtime event: {error:#}");
@@ -10445,7 +10506,11 @@ async fn process_agent_run_acp_approval_request(
         .pointer("/toolCall/toolCallId")
         .and_then(Value::as_str)
     {
-        Some(native_item_id) => runtime.observed_tool_context(native_item_id).await,
+        Some(native_item_id) => {
+            runtime
+                .observed_tool_context(&native_prompt_id, native_item_id)
+                .await
+        }
         None => None,
     };
     let action_request = match acp::intercepted_action_request(
@@ -10788,14 +10853,17 @@ async fn persist_acp_prompt_completion(
         } else {
             "unknown"
         });
-    let final_agent_message = runtime.final_agent_message().await;
+    let final_agent_message = runtime.final_agent_message(prompt_id).await;
     let missing_send_recovery_candidate = if stop_reason == "end_turn" {
-        runtime.missing_send_recovery_candidate().await.map(|body| {
-            MissingSendRecoveryCandidate::new(
-                MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
-                body,
-            )
-        })
+        runtime
+            .missing_send_recovery_candidate(prompt_id)
+            .await
+            .map(|body| {
+                MissingSendRecoveryCandidate::new(
+                    MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,
+                    body,
+                )
+            })
     } else {
         None
     };
@@ -10821,7 +10889,7 @@ async fn persist_acp_prompt_completion(
             .planned_shutdown
             .enter_runtime_route()
             .await
-            .context("non-reusable ACP terminal route was fenced during Host teardown")?;
+            .context("ACP terminal route was fenced during Host release")?;
     }
     let mut terminal_admission = core
         .admit_planned_shutdown_terminal(

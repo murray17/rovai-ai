@@ -101,7 +101,10 @@ try {
       specification.adapterKind,
       [agentId]
     )
-    if (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length) {
+    const executionDeferred = specification.adapterKind === 'trae-cn-cli'
+      && installation?.snapshot?.probeStatus === 'installed_unverified'
+    if (!executionDeferred
+        && (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length)) {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
 
@@ -150,11 +153,27 @@ try {
     if (start?.params?.adapterKind !== specification.adapterKind || !start.params.nativeThreadId) {
       throw new Error(`${specification.adapterKind} did not expose its Native Session: ${JSON.stringify(start)}`)
     }
+    let verifiedInstallation = installation
+    if (executionDeferred) {
+      for (let attempt = 0; attempt < 80; attempt += 1) {
+        verifiedInstallation = (await request('runtime.installations.list')).find((candidate) =>
+          candidate.id === installation.id
+        )
+        if (verifiedInstallation?.snapshot?.probeStatus === 'ready'
+            && verifiedInstallation.snapshot.models.length) break
+        await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+      }
+      if (verifiedInstallation?.snapshot?.probeStatus !== 'ready'
+          || !verifiedInstallation.snapshot.models.length) {
+        throw new Error(`TRAE execution did not persist a Ready snapshot: ${JSON.stringify(verifiedInstallation)}`)
+      }
+    }
     results.push({
       adapterKind: specification.adapterKind,
-      version: installation.snapshot.reportedVersion,
-      modelCount: installation.snapshot.models.length,
+      version: verifiedInstallation.snapshot.reportedVersion,
+      modelCount: verifiedInstallation.snapshot.models.length,
       model: start.params.modelId,
+      hostInstanceId: start.params.hostInstanceId,
       nativeSessionId: start.params.nativeThreadId,
       output: output.body
     })
@@ -231,12 +250,17 @@ try {
       if (writeRun?.status !== 'succeeded'
           || written !== `${writeToken}\n`
           || !writeActions.some((action) => action.status === 'succeeded')
-          || writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId) {
+          || writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId
+          || (specification.adapterKind === 'trae-cn-cli'
+            && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)) {
         throw new Error(`ACP approved write did not converge: ${JSON.stringify({
           writeRun,
           writeActions,
           writeStart,
+          expectedHostInstanceId: results.at(-1).hostInstanceId,
+          expectedNativeSessionId: results.at(-1).nativeSessionId,
           written,
+          hostLogs: events.filter((event) => event.method === 'runtime.host.log'),
           events: events.filter((event) => event.params?.agentRunId === writeRunId).slice(-30)
         })}`)
       }
@@ -244,6 +268,7 @@ try {
         resolved: resolvedApprovals.size,
         actionKinds: writeActions.map((action) => action.actionKind),
         nativeSessionContinued: true,
+        warmHostReused: writeStart?.params?.hostInstanceId === results.at(-1).hostInstanceId,
         written
       }
 

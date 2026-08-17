@@ -653,7 +653,27 @@ impl TeamToolService {
         execution_epoch: i64,
         force_new_binding: bool,
     ) -> Result<BuiltinToolBindingCredential> {
-        self.prepare_binding(database, agent_run_id, execution_epoch, force_new_binding)
+        self.prepare_binding(
+            database,
+            agent_run_id,
+            execution_epoch,
+            force_new_binding,
+            false,
+        )
+    }
+
+    /// Retains the current Native Binding while an Adapter performs the one
+    /// controlled continuation allowed across an unverified-to-verified
+    /// session compatibility transition. The successful bind updates the
+    /// compatibility metadata atomically; a failed continuation must replace
+    /// the Binding through `prepare_binding_credential(..., true)`.
+    pub fn prepare_controlled_resume_binding_credential(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<BuiltinToolBindingCredential> {
+        self.prepare_binding(database, agent_run_id, execution_epoch, false, true)
     }
 
     fn prepare_binding(
@@ -662,6 +682,7 @@ impl TeamToolService {
         agent_run_id: &str,
         execution_epoch: i64,
         force_new_binding: bool,
+        allow_controlled_session_transition: bool,
     ) -> Result<BuiltinToolBindingCredential> {
         if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
             return Err(invocation_error(
@@ -765,22 +786,26 @@ impl TeamToolService {
         let frozen_installation_generation = frozen_installation_generation
             .context("Team Tool AgentRun has no frozen installation generation")?;
 
-        let compatible_binding = current_binding_id.is_some()
+        let stable_binding_identity = current_binding_id.is_some()
             && current_generation >= 1
             && current_installation_id.as_deref() == Some(frozen_installation_id.as_str())
             && current_compatibility_digest.as_deref()
-                == Some(frozen_compatibility_digest.as_str())
-            && match (
-                current_session_compatibility_key.as_deref(),
-                frozen_session_compatibility_key.as_deref(),
-            ) {
-                (Some(previous), Some(current)) => previous == current,
-                (None, None) => current_installation_generation.is_some_and(|generation| {
-                    generation == frozen_installation_generation
-                        || current_native_session_id.is_some()
-                }),
-                _ => false,
-            };
+                == Some(frozen_compatibility_digest.as_str());
+        let session_metadata_compatible = match (
+            current_session_compatibility_key.as_deref(),
+            frozen_session_compatibility_key.as_deref(),
+        ) {
+            (Some(previous), Some(current)) => previous == current,
+            (None, None) => current_installation_generation.is_some_and(|generation| {
+                generation == frozen_installation_generation || current_native_session_id.is_some()
+            }),
+            _ => false,
+        };
+        let controlled_session_transition = allow_controlled_session_transition
+            && current_native_session_id.is_some()
+            && !session_metadata_compatible;
+        let compatible_binding = stable_binding_identity
+            && (session_metadata_compatible || controlled_session_transition);
         let binding_replaced = force_new_binding || !compatible_binding;
         let binding_id = if binding_replaced {
             Uuid::new_v4().to_string()
@@ -7989,5 +8014,42 @@ Use this exact public input @agent_2";
     #[test]
     fn reverse_member_call_is_an_independent_forward_edge() {
         assert!(!TEAM_TOOL_NAMES.contains(&"team.call_member"));
+    }
+
+    #[test]
+    fn controlled_resume_retains_binding_across_session_metadata_transition() {
+        let mut fixture = Fixture::new();
+        let conversation_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT conversation_id FROM agent_run WHERE id = ?1",
+                [&fixture.source_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE conversation SET native_session_compatibility_key = NULL WHERE id = ?1",
+                [&conversation_id],
+            )
+            .unwrap();
+
+        let resumed = TeamToolService::default()
+            .prepare_controlled_resume_binding_credential(
+                &mut fixture.database,
+                &fixture.source_run_id,
+                fixture.source_epoch,
+            )
+            .unwrap();
+
+        assert!(!resumed.binding_replaced);
+        assert_eq!(
+            resumed.native_binding_id,
+            fixture.credential.native_binding_id
+        );
+        assert_eq!(resumed.native_session_id.as_deref(), Some("native-source"));
     }
 }

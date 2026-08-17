@@ -26,7 +26,8 @@ last_updated: 2026-08-17
 - 合法无路径静默省略；全量 projection `error/stale/digest/ownership` 仍 fail closed；
 - Resolver 是只读深 Module，Reconciler 独占 filesystem side effect；
 - `skills` 与 message/attachments 同级，零 entry 时字段省略；Skill path 指向 `SKILL.md`；
-- Runtime Adapter、Attachment、Profile、Bootstrap、其他 Context section 与 ACK authority 不变；
+- Skill 文件链接不改变 Runtime Adapter、Attachment、Profile、Bootstrap、其他 Context section 与 ACK；
+- 同期 ACP 修正只以 Prompt response 结算 ACK，隔离 replay，不改公开 Runtime Event wire；
 - Model Context Projection、Context Evidence 和 Runtime Input Delivery Evidence 不合并。
 
 ## Checkpoint 0：治理基线
@@ -81,6 +82,17 @@ last_updated: 2026-08-17
 - [x] 运行 Impeccable detector，一次批量修复 findings，最多一次确认 pass；
 - [x] Runtime Adapter 回归证明无 Provider-specific item、正文重复、Attachment 误用或 ACK 变化。
 
+## Checkpoint 5A：ACP Session 续接与事件隔离
+
+- [x] 统一 `ReuseSameHost -> Resume -> New`，仅对明确允许的 legacy Adapter 保留
+  `LoadHistory`；
+- [x] TRAE 移除 Host Stop 特例并进入 Fleet LRU；warm 命中复用同一 Host/Session，冷 Host
+  不使用 `session/load`；
+- [x] `LoadingReplay/Ready/PromptActive/PromptCompleted/ProtocolViolated` route 和
+  Host/Run/epoch/Session/Prompt/Delivery fence 在业务副作用前 fail closed；
+- [x] Prompt 观察状态按 prompt 隔离；ACP input ACK 仅由匹配 prompt request ID 的 response 产生；
+- [x] Core 全回归、真实 TRAE smoke 与文档门禁通过；打包验收由 Checkpoint 6 独立记录。
+
 ## Checkpoint 6：打包、安装与发布验收
 
 - [x] `pnpm package:mac` 生成 arm64 Application，严格 codesign 验证通过；
@@ -117,5 +129,6 @@ last_updated: 2026-08-17
 - [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
 - [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
 - [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
+- [Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)
 - [本地 Runtime 工作流](../../development/local-workflow.md)
 - [桌面 UI 验收](../../development/ui-acceptance.md)

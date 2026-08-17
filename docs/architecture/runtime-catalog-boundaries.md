@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-16
+last_updated: 2026-08-17
 ---
 
 # Runtime Catalog Boundaries
@@ -13,7 +13,7 @@ last_updated: 2026-08-16
 [ADR-0066](../adr/0066-managed-product-runtime-resolution.md)与
 [ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)，Runtime 启动与延迟验证边界见
 [ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)和
-[Runtime Launch and Verification v1](../contracts/runtime-launch-and-verification-v1.md)。实测版本和能力只由
+[Runtime Launch and Verification v2](../contracts/runtime-launch-and-verification-v2.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 三层目录
@@ -43,8 +43,10 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 ## TRAE CLI CN 当前边界
 
 `trae-cn-cli` 通过既有 ACP v1 Host 启动 `traecli acp serve`。模型与 permission mode catalog 来自
-每次真实 Session 返回；默认只接受安全的 `default`，不默认使用 `--yolo`。Session 恢复走
-`session/load`，第一版完成 Run 后停止 Host。
+每次真实 Session 返回；默认只接受安全的 `default`，不默认使用 `--yolo`。Session 恢复采用
+统一 ACP continuation：兼容 IdleWarm 命中时直接复用同一 Host 已持有的 Session；冷 Host 只有在
+`sessionCapabilities.resume` 存在时走 `session/resume`，否则建立 `session/new`。TRAE 的
+`session/load` 只作为历史能力证据保留，禁止用于正式 AgentRun 续跑。
 
 TRAE 是 static-only inspection Runtime。Core 的 discovery、设置页 check/ensure、managed/custom refresh、
 health/diagnostics 与 dispatch preflight 只验证 ordinary executable、canonical path、fingerprint 和可信静态
@@ -52,14 +54,16 @@ version，不启动 `traecli`。这些证据持久化为 `installed_unverified`�
 Session Ready；版本没有可信 `Info.plist` / Go main-module metadata 时保持 unknown。
 
 成员可以在该状态下原子保存 Runtime default model 与 `permission_mode=default`。首次真实 AgentRun 只启动
-一个 TRAE Host，从同一个 Host 的 `initialize` 与 `session/new|load` response 生成 Ready snapshot 后继续发送
-任务输入。失败使用该 Host 已有错误分类，不启动 replacement 或 diagnostic process。相同 path/fingerprint 的
+一个 TRAE Host，从同一个 Host 的 `initialize` 与 `session/new` response 生成 Ready snapshot 后继续发送
+任务输入。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host；失败使用该 Host 已有错误分类，不启动 diagnostic
+process。相同 path/fingerprint 的
 静态复扫保留 Ready；身份变化回到 `installed_unverified`，等待下一次真实执行重新验证。
 
 External MCP 沿用现有 `AdditivePerRun`：当前 AgentRun 的冻结 Definition 通过
-`session/new` / `session/load` 参数追加，不写 Runtime 用户级或 Workspace 配置。这里不新增独立
-MCP 隔离层；回归只需证明未配置的相邻 Run 不继承本次追加项，以及 cwd、权限和 Session 绑定仍由
-各自 AgentRun 冻结。
+`session/new` 参数追加；warm reuse 只允许完整 Runtime compatibility digest 相等，因此冻结 MCP Projection
+的解析后 Server 集合、cwd 或其他 Host 输入不同时不会领取该 Host；只含 AgentRun ID 的投影文件
+digest 不是 Host 输入。不写 Runtime 用户级或 Workspace 配置，也不新增独立 MCP 隔离层；回归必须证明
+不同解析后 Server 集合不会命中同一 Host，以及 cwd、权限和 Session 绑定仍由各自 AgentRun 冻结。
 
 TRAE 的 `append_system_prompt` 已实测为独立 system message，但正式集成仍使用首包 Charter；能力存在
 不等于模型在冲突场景中可靠服从。Rovai Skill 原生投递路径和 compaction detector 仍无合格证据，

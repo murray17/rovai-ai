@@ -603,6 +603,12 @@ impl AgentRuntimeAdapterRegistry {
         {
             capabilities.push("session.load".to_string());
         }
+        if initialize_result
+            .pointer("/agentCapabilities/sessionCapabilities/resume")
+            .is_some_and(Value::is_object)
+        {
+            capabilities.push("session.resume".to_string());
+        }
         if session_result
             .get("configOptions")
             .and_then(Value::as_array)
@@ -1209,6 +1215,14 @@ fn acp_capability_snapshot(
             == Some(true);
         if supports_load {
             capabilities.push("session.load".to_string());
+        }
+        let supports_resume = observation
+            .initialize_result
+            .as_ref()
+            .and_then(|value| value.pointer("/agentCapabilities/sessionCapabilities/resume"))
+            .is_some_and(Value::is_object);
+        if supports_resume {
+            capabilities.push("session.resume".to_string());
         }
         capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
         append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
@@ -2122,7 +2136,10 @@ mod tests {
                 capabilities: Vec::new(),
                 initialize_result: Some(json!({
                     "protocolVersion": 1,
-                    "agentCapabilities": {"loadSession": true}
+                    "agentCapabilities": {
+                        "loadSession": true,
+                        "sessionCapabilities": {"resume": {}}
+                    }
                 })),
                 session_result: Some(json!({
                     "sessionId": "ses-test",
@@ -2147,6 +2164,11 @@ mod tests {
         assert!(snapshot.models[0].is_default);
         assert_eq!(snapshot.permission_options[0].key, "permission");
         assert!(snapshot.capabilities.contains(&"session.load".to_string()));
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"session.resume".to_string())
+        );
         assert!(
             snapshot
                 .capabilities

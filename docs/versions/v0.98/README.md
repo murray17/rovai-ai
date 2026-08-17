@@ -26,8 +26,9 @@ last_updated: 2026-08-17
 `CURRENT_INPUT.skills[{name,path}]` 提供给模型。
 
 合法无路径时静默省略对应 entry；没有 entry 时省略整个字段。SkillProjection 的 `error`、`stale`、
-Revision/content digest 或 ownership 完整性错误仍阻止 Runtime launch。Runtime Adapter transport、正文、
-附件和现有 accepted-input ACK 权威不变。
+Revision/content digest 或 ownership 完整性错误仍阻止 Runtime launch。本版 Skill 传输不改变
+Runtime Adapter transport、正文、附件或 accepted-input ACK；同期 ACP 缺陷修正则独立收紧
+Session replay 隔离与 Prompt response-only ACK。
 
 ## 已确认产品语义
 
@@ -74,6 +75,14 @@ Revision/content digest 或 ownership 完整性错误仍阻止 Runtime launch。
 - 清除不兼容的 Manifest、冻结输入、Bootstrap/Binding/Session 与非终态技术状态；
 - 不回填旧 Slash Text、不读取 Formatter v17/Manifest v15、不 dual write。
 
+### 同期 ACP 会话续接缺陷修正
+
+- 统一 ACP continuation 为同 Host 直接复用、冷 Host `session/resume`、否则 `session/new`；
+- TRAE 加入 Fleet LRU，正常 AgentRun 续接不再使用会重放历史的 `session/load`；
+- legacy load 进入 `LoadingReplay` 隔离，事件必须通过 Host/Run/epoch/Session/Prompt/Delivery fence
+  才能产生业务副作用；
+- ACP v1 只有匹配 `session/prompt` request ID 的 response 可以结算 input ACK。
+
 ## 明确不做
 
 - 不内联 Skill 文件内容，不创建 Provider-specific Skill input item；
@@ -82,7 +91,8 @@ Revision/content digest 或 ownership 完整性错误仍阻止 Runtime launch。
 - 不把 start-time ready Exposure 当成发送时资格，也不让发送时资格绕过当前 disable/unassign/delete；
 - 不缩窄或放宽全量 SkillProjection 完整性 preflight；
 - 不创建 per-Run Skill 文件副本，不改变 active-Run projection protection；
-- 不改变 Session Charter、Profile budget、历史选择、A2A/Gather input、Runtime Adapter transport 或 ACK。
+- Skill 链接本身不改变 Session Charter、Profile budget、历史选择、A2A/Gather input、Runtime Adapter
+  transport 或 ACK；ACP ACK 收紧仅属于上述同期缺陷修正。
 
 ## 验收边界
 
@@ -103,11 +113,11 @@ Revision/content digest 或 ownership 完整性错误仍阻止 Runtime launch。
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.97 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[确认说明](model-context-change.md)、版本索引与前后链接建立唯一 current v0.98。 |
 | ADR | 已更新 | [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)冻结结构化选择、双时点资格、Core-owned 解析、非 fallback 指针与四层 Evidence 边界。 |
-| Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 wire、snapshot、resolution、Formatter 与 clean break。 |
-| Architecture | 已更新 | [Structured Current Input Skill Links](../../architecture/structured-current-input-skill-links.md)与 [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)定义 Freezer/Resolver/Reconciler/Formatter Module seam。 |
+| Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 Skill wire/Evidence；[Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)定义 ACP continuation、replay quarantine、Prompt fence 与 TRAE warm Host。 |
+| Architecture | 已更新 | [Structured Current Input Skill Links](../../architecture/structured-current-input-skill-links.md)与 [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)定义 Skill Module seam；[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 TRAE LRU 与 ACP 输入隔离。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)把 Picker 从普通 Text 改为结构化 token，同时保持现有 Composer 视觉、键盘和正文 Marker。 |
 | Runtime Activity | 确认无需更新 | 本版不新增 Runtime Activity kind 或映射；Skill 文件指针不产生 Tool/Activity 或读取 receipt。 |
-| Runtime compatibility | 确认无需更新 | 所有 Adapter 继续传输相同完整 Dynamic Context，不声明新的 Runtime 原生发现或版本资格。 |
+| Runtime compatibility | 已更新 | Skill 指针不改变 Runtime 资格；同期登记补充 TRAE `0.120.52` warm Host/冷 Session 边界、replay 隔离与 response-only ACK。 |
 | Documentation routing | 已更新 | 文档导航、ADR CURRENT/HISTORY、Contract/Architecture 索引和领域词汇加入结构化 Current Input Skill 入口。 |
 | Root README | 确认无需更新 | 项目定位、公开支持范围和常青能力没有因一个模型输入字段扩展而改变；版本状态仍由唯一 current 入口拥有。 |
 
@@ -118,6 +128,7 @@ Revision/content digest 或 ownership 完整性错误仍阻止 Runtime launch。
 - [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
 - [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
 - [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
+- [Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)
 - [Structured Current Input Skill Links 架构](../../architecture/structured-current-input-skill-links.md)
 - [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
