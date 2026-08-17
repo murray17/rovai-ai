@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     error::Error as StdError,
     fmt,
     path::{Path, PathBuf},
@@ -47,6 +47,7 @@ pub struct ClaudeCodeRunRequest {
     pub attachment_access_root: Option<PathBuf>,
     pub persist_session: bool,
     pub input_accepted: Option<mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
+    pub runtime_events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
     pub launch_handoff: Option<oneshot::Sender<()>>,
 }
 
@@ -54,6 +55,12 @@ pub struct ClaudeCodeRunRequest {
 pub struct ClaudeCodeInputAccepted {
     pub native_session_id: String,
     pub native_turn_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClaudeCodeRuntimeEvent {
+    pub event_type: &'static str,
+    pub payload: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -345,6 +352,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             native_session_id.clone(),
             native_turn_id.clone(),
             request.input_accepted.clone(),
+            request.runtime_events.clone(),
         ));
         let stderr_task = tokio::spawn(capture_bounded(stderr));
         tokio::pin!(interrupted);
@@ -471,19 +479,29 @@ struct ClaudeCodeStreamCapture {
     final_result: Option<ClaudeCodeJsonResult>,
 }
 
+#[derive(Debug, Default)]
+struct ClaudeCodeStreamState {
+    final_result: Option<ClaudeCodeJsonResult>,
+    acceptance_emitted: bool,
+    tool_names: HashMap<String, String>,
+    partial_tools: HashMap<u64, (String, String)>,
+    started_tools: HashSet<String>,
+    terminal_tools: HashSet<String>,
+}
+
 async fn capture_claude_stream<R>(
     mut reader: R,
     expected_session_id: String,
     native_turn_id: String,
     input_accepted: Option<mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
+    runtime_events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
 ) -> Result<ClaudeCodeStreamCapture>
 where
     R: AsyncRead + Unpin,
 {
     let mut line = Vec::new();
     let mut buffer = [0_u8; 16 * 1024];
-    let mut final_result = None;
-    let mut acceptance_emitted = false;
+    let mut state = ClaudeCodeStreamState::default();
     loop {
         let read = reader.read(&mut buffer).await?;
         if read == 0 {
@@ -497,8 +515,8 @@ where
                         &expected_session_id,
                         &native_turn_id,
                         input_accepted.as_ref(),
-                        &mut acceptance_emitted,
-                        &mut final_result,
+                        runtime_events.as_ref(),
+                        &mut state,
                     )?;
                     line.clear();
                 }
@@ -519,11 +537,13 @@ where
             &expected_session_id,
             &native_turn_id,
             input_accepted.as_ref(),
-            &mut acceptance_emitted,
-            &mut final_result,
+            runtime_events.as_ref(),
+            &mut state,
         )?;
     }
-    Ok(ClaudeCodeStreamCapture { final_result })
+    Ok(ClaudeCodeStreamCapture {
+        final_result: state.final_result,
+    })
 }
 
 fn process_claude_stream_line(
@@ -531,29 +551,256 @@ fn process_claude_stream_line(
     expected_session_id: &str,
     native_turn_id: &str,
     input_accepted: Option<&mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
-    acceptance_emitted: &mut bool,
-    final_result: &mut Option<ClaudeCodeJsonResult>,
+    runtime_events: Option<&mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
+    state: &mut ClaudeCodeStreamState,
 ) -> Result<()> {
     let event: Value =
         serde_json::from_slice(line).context("Claude Code emitted invalid stream JSON")?;
-    if !*acceptance_emitted && claude_event_proves_input_accepted(&event, expected_session_id)? {
+    if claude_event_proves_input_accepted(&event, expected_session_id)? && !state.acceptance_emitted
+    {
         if let Some(sender) = input_accepted {
             let _ = sender.send(ClaudeCodeInputAccepted {
                 native_session_id: expected_session_id.to_string(),
                 native_turn_id: native_turn_id.to_string(),
             });
         }
-        *acceptance_emitted = true;
+        state.acceptance_emitted = true;
+    }
+    for runtime_event in normalize_claude_runtime_events(&event, expected_session_id, state)? {
+        if let Some(sender) = runtime_events {
+            let _ = sender.send(runtime_event);
+        }
     }
     if event.get("type").and_then(Value::as_str) == Some("result") {
-        if final_result.is_some() {
+        if state.final_result.is_some() {
             anyhow::bail!("Claude Code stream emitted more than one final result event");
         }
-        *final_result = Some(
+        state.final_result = Some(
             serde_json::from_value(event).context("Claude Code final stream event was invalid")?,
         );
     }
     Ok(())
+}
+
+fn normalize_claude_runtime_events(
+    event: &Value,
+    expected_session_id: &str,
+    state: &mut ClaudeCodeStreamState,
+) -> Result<Vec<ClaudeCodeRuntimeEvent>> {
+    let mut normalized = Vec::new();
+    match event.get("type").and_then(Value::as_str) {
+        Some("stream_event")
+            if event.pointer("/event/type").and_then(Value::as_str)
+                == Some("content_block_start") =>
+        {
+            let Some(block) = event.pointer("/event/content_block") else {
+                return Ok(normalized);
+            };
+            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+                return Ok(normalized);
+            }
+            validate_claude_stream_session(event, expected_session_id)?;
+            let Some(tool_use_id) = nonempty_string(block.get("id")) else {
+                return Ok(normalized);
+            };
+            let Some(tool_name) = nonempty_string(block.get("name")) else {
+                return Ok(normalized);
+            };
+            if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
+                state
+                    .partial_tools
+                    .insert(index, (tool_use_id.clone(), tool_name.clone()));
+            }
+            if let Some(event) = claude_tool_started(state, tool_use_id, tool_name) {
+                normalized.push(event);
+            }
+        }
+        Some("stream_event")
+            if event.pointer("/event/type").and_then(Value::as_str)
+                == Some("content_block_stop") =>
+        {
+            validate_claude_stream_session(event, expected_session_id)?;
+            if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
+                state.partial_tools.remove(&index);
+            }
+        }
+        Some("assistant") => {
+            let Some(blocks) = claude_message_content(event) else {
+                return Ok(normalized);
+            };
+            let tool_blocks = blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
+                .collect::<Vec<_>>();
+            if tool_blocks.is_empty() {
+                return Ok(normalized);
+            }
+            validate_claude_stream_session(event, expected_session_id)?;
+            for block in tool_blocks {
+                let Some(tool_use_id) = nonempty_string(block.get("id")) else {
+                    continue;
+                };
+                let Some(tool_name) = nonempty_string(block.get("name")) else {
+                    continue;
+                };
+                if let Some(event) = claude_tool_started(state, tool_use_id, tool_name) {
+                    normalized.push(event);
+                }
+            }
+        }
+        Some("user") => {
+            let Some(blocks) = claude_message_content(event) else {
+                return Ok(normalized);
+            };
+            let tool_results = blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
+                .collect::<Vec<_>>();
+            if tool_results.is_empty() {
+                return Ok(normalized);
+            }
+            validate_claude_stream_session(event, expected_session_id)?;
+            for block in tool_results {
+                let Some(tool_use_id) = nonempty_string(block.get("tool_use_id")) else {
+                    continue;
+                };
+                if !state.terminal_tools.insert(tool_use_id.clone()) {
+                    continue;
+                }
+                let tool_name = state.tool_names.get(&tool_use_id).cloned();
+                let failed = block.get("is_error").and_then(Value::as_bool) == Some(true)
+                    || event
+                        .pointer("/tool_use_result/is_error")
+                        .and_then(Value::as_bool)
+                        == Some(true);
+                let output = tool_name
+                    .as_deref()
+                    .filter(|name| name.eq_ignore_ascii_case("bash"))
+                    .and_then(|_| public_claude_bash_output(event, block));
+                let kind = tool_name.as_deref().map(claude_tool_kind).unwrap_or("tool");
+                let title = tool_name.clone();
+                normalized.push(ClaudeCodeRuntimeEvent {
+                    event_type: "runtime.action",
+                    payload: serde_json::json!({
+                        "toolCallId": tool_use_id,
+                        "toolName": tool_name,
+                        "status": if failed { "failed" } else { "completed" },
+                        "kind": kind,
+                        "title": title,
+                        "output": output,
+                    }),
+                });
+            }
+        }
+        _ => {}
+    }
+    Ok(normalized)
+}
+
+fn claude_tool_started(
+    state: &mut ClaudeCodeStreamState,
+    tool_use_id: String,
+    tool_name: String,
+) -> Option<ClaudeCodeRuntimeEvent> {
+    let kind = claude_tool_kind(&tool_name);
+    let title = tool_name.clone();
+    state
+        .tool_names
+        .insert(tool_use_id.clone(), tool_name.clone());
+    state
+        .started_tools
+        .insert(tool_use_id.clone())
+        .then(|| ClaudeCodeRuntimeEvent {
+            event_type: "runtime.action",
+            payload: serde_json::json!({
+                "toolCallId": tool_use_id,
+                "toolName": tool_name,
+                "status": "in_progress",
+                "kind": kind,
+                "title": title,
+            }),
+        })
+}
+
+fn claude_tool_kind(tool_name: &str) -> &'static str {
+    match tool_name.to_ascii_lowercase().as_str() {
+        "bash" => "execute",
+        "read" | "glob" => "read",
+        "grep" | "websearch" => "search",
+        "edit" | "notebookedit" => "edit",
+        "write" => "write",
+        _ => "tool",
+    }
+}
+
+fn claude_message_content(event: &Value) -> Option<&Vec<Value>> {
+    event
+        .pointer("/message/content")
+        .or_else(|| event.get("content"))
+        .and_then(Value::as_array)
+}
+
+fn validate_claude_stream_session(event: &Value, expected_session_id: &str) -> Result<()> {
+    let observed_session_id = event
+        .get("session_id")
+        .and_then(Value::as_str)
+        .context("Claude Code tool event omitted session_id")?;
+    validate_session_id(observed_session_id)?;
+    if observed_session_id != expected_session_id {
+        anyhow::bail!(
+            "Claude Code tool event targeted another session (expected {expected_session_id}, observed {observed_session_id})"
+        );
+    }
+    Ok(())
+}
+
+fn public_claude_bash_output(event: &Value, tool_result: &Value) -> Option<String> {
+    let structured = event.get("tool_use_result").and_then(Value::as_object);
+    let mut output = Vec::<String>::new();
+    if let Some(structured) = structured {
+        for field in ["stdout", "stderr"] {
+            let Some(text) = structured
+                .get(field)
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+            else {
+                continue;
+            };
+            if !output.iter().any(|existing| existing == text) {
+                output.push(text.to_string());
+            }
+        }
+    }
+    if output.is_empty()
+        && let Some(text) = public_claude_tool_result_text(tool_result.get("content"))
+    {
+        output.push(text);
+    }
+    (!output.is_empty()).then(|| output.join("\n"))
+}
+
+fn public_claude_tool_result_text(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(text) if !text.is_empty() => Some(text.clone()),
+        Value::Array(blocks) => {
+            let joined = blocks
+                .iter()
+                .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+                .filter_map(|block| block.get("text").and_then(Value::as_str))
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            (!joined.is_empty()).then_some(joined)
+        }
+        _ => None,
+    }
+}
+
+fn nonempty_string(value: Option<&Value>) -> Option<String> {
+    value
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string)
 }
 
 fn claude_event_proves_input_accepted(event: &Value, expected_session_id: &str) -> Result<bool> {
@@ -771,6 +1018,7 @@ mod tests {
         let native_turn_id = "claude-code:run-1:1";
         let (mut writer, reader) = tokio::io::duplex(16 * 1024);
         let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (finish_sender, finish_receiver) = oneshot::channel();
         let session_id_for_writer = session_id.to_string();
         let writer_task = tokio::spawn(async move {
@@ -784,6 +1032,44 @@ mod tests {
                     "type": "stream_event",
                     "session_id": session_id_for_writer,
                     "event": {"type": "message_start"}
+                }),
+                json!({
+                    "type": "stream_event",
+                    "session_id": session_id_for_writer,
+                    "event": {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {
+                            "type": "tool_use",
+                            "id": "toolu_bash_1",
+                            "name": "Bash",
+                            "input": {}
+                        }
+                    }
+                }),
+                json!({
+                    "type": "assistant",
+                    "session_id": session_id_for_writer,
+                    "message": {"content": [{
+                        "type": "tool_use",
+                        "id": "toolu_bash_1",
+                        "name": "Bash",
+                        "input": {"command": "printf CLAUDE_PRINTF_OK"}
+                    }]}
+                }),
+                json!({
+                    "type": "user",
+                    "session_id": session_id_for_writer,
+                    "message": {"content": [{
+                        "type": "tool_result",
+                        "tool_use_id": "toolu_bash_1",
+                        "content": "fallback must not win"
+                    }]},
+                    "tool_use_result": {
+                        "stdout": "CLAUDE_PRINTF_OK",
+                        "stderr": "",
+                        "privateCommand": "CLAUDE_MUST_NOT_LEAK"
+                    }
                 }),
             ] {
                 writer
@@ -809,6 +1095,7 @@ mod tests {
             session_id.to_string(),
             native_turn_id.to_string(),
             Some(accepted_sender),
+            Some(runtime_event_sender),
         ));
 
         let accepted = tokio::time::timeout(Duration::from_secs(1), accepted_receiver.recv())
@@ -817,11 +1104,39 @@ mod tests {
             .expect("acceptance channel should remain open");
         assert_eq!(accepted.native_session_id, session_id);
         assert_eq!(accepted.native_turn_id, native_turn_id);
+        let started = tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
+            .await
+            .expect("tool start should be emitted")
+            .expect("runtime event channel should remain open");
+        let completed = tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
+            .await
+            .expect("tool result should be emitted")
+            .expect("runtime event channel should remain open");
+        assert_eq!(started.payload["toolCallId"], "toolu_bash_1");
+        assert_eq!(started.payload["status"], "in_progress");
+        assert_eq!(started.payload["kind"], "execute");
+        assert_eq!(completed.payload["toolCallId"], "toolu_bash_1");
+        assert_eq!(completed.payload["status"], "completed");
+        assert_eq!(completed.payload["output"], "CLAUDE_PRINTF_OK");
+        assert!(
+            !serde_json::to_string(&completed.payload)
+                .expect("normalized event should serialize")
+                .contains("CLAUDE_MUST_NOT_LEAK")
+        );
+        assert!(
+            runtime_event_receiver.try_recv().is_err(),
+            "duplicate complete assistant tool_use must not create another start"
+        );
         finish_sender.send(()).unwrap();
 
         let captured = capture_task.await.unwrap().unwrap();
         assert_eq!(captured.final_result.unwrap().result, "done");
         writer_task.await.unwrap();
         assert!(accepted_receiver.try_recv().is_err());
+        assert_eq!(claude_tool_kind("Bash"), "execute");
+        assert_eq!(claude_tool_kind("Read"), "read");
+        assert_eq!(claude_tool_kind("Edit"), "edit");
+        assert_eq!(claude_tool_kind("Write"), "write");
+        assert_eq!(claude_tool_kind("FutureTool"), "tool");
     }
 }

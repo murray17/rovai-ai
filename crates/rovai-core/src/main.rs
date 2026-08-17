@@ -7442,6 +7442,7 @@ impl Core {
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         let run = self.claude_code_cli.run(ClaudeCodeRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
@@ -7458,6 +7459,7 @@ impl Core {
             attachment_access_root: Some(attachment_access_root.to_path_buf()),
             persist_session: true,
             input_accepted: Some(input_accepted_sender),
+            runtime_events: Some(runtime_event_sender),
             launch_handoff: Some(launch_handoff_sender),
         });
         tokio::pin!(run);
@@ -7487,43 +7489,78 @@ impl Core {
         let result_and_acceptance: Result<_> = async {
             let mut accepted_input = None;
             let mut acceptance_channel_open = true;
+            let mut runtime_event_channel_open = true;
             let result = loop {
                 if let Some(result) = early_result.take() {
                     break result;
                 }
-                let (observed_acceptance, completed) = tokio::select! {
+                tokio::select! {
                     biased;
                     observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
-                        (Some(observed), None)
+                        acceptance_channel_open = false;
+                        let Some(observed_acceptance) = observed else {
+                            continue;
+                        };
+                        if let Err(error) = self
+                            .settle_claude_input_acceptance(
+                                execution,
+                                &binding_credential,
+                                &acceptance_target,
+                                &observed_acceptance,
+                                output,
+                            )
+                            .await
+                        {
+                            let _ = self
+                                .claude_code_cli
+                                .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                                .await;
+                            let _ = run.as_mut().await;
+                            return Err(error);
+                        }
+                        accepted_input = Some(observed_acceptance);
                     }
-                    result = &mut run => (None, Some(result)),
-                };
-                if let Some(result) = completed {
-                    break result;
+                    runtime_event = runtime_event_receiver.recv(), if runtime_event_channel_open => {
+                        let Some(runtime_event) = runtime_event else {
+                            runtime_event_channel_open = false;
+                            continue;
+                        };
+                        if let Err(error) = process_one_shot_runtime_event(
+                            self,
+                            output,
+                            AdapterKind::ClaudeCodeCli,
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            runtime_event.event_type,
+                            &runtime_event.payload,
+                        ).await {
+                            eprintln!(
+                                "failed to persist Claude Code Runtime Evidence for AgentRun {}: {error:#}",
+                                execution.agent_run_id
+                            );
+                        }
+                    }
+                    result = &mut run => break result,
                 }
-                acceptance_channel_open = false;
-                let Some(Some(observed_acceptance)) = observed_acceptance else {
-                    continue;
-                };
-                if let Err(error) = self
-                    .settle_claude_input_acceptance(
-                        execution,
-                        &binding_credential,
-                        &acceptance_target,
-                        &observed_acceptance,
-                        output,
-                    )
-                    .await
-                {
-                    let _ = self
-                        .claude_code_cli
-                        .interrupt(&execution.agent_run_id, execution.execution_epoch)
-                        .await;
-                    let _ = run.as_mut().await;
-                    return Err(error);
-                }
-                accepted_input = Some(observed_acceptance);
             };
+            while let Ok(runtime_event) = runtime_event_receiver.try_recv() {
+                if let Err(error) = process_one_shot_runtime_event(
+                    self,
+                    output,
+                    AdapterKind::ClaudeCodeCli,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    runtime_event.event_type,
+                    &runtime_event.payload,
+                )
+                .await
+                {
+                    eprintln!(
+                        "failed to persist queued Claude Code Runtime Evidence for AgentRun {}: {error:#}",
+                        execution.agent_run_id
+                    );
+                }
+            }
             if accepted_input.is_none()
                 && let Ok(observed_acceptance) = input_accepted_receiver.try_recv()
             {
@@ -7913,6 +7950,7 @@ impl Core {
         self.bind_builtin_tool_runtime(&builtin_tools, execution, &binding_credential)
             .await?;
         let (input_accepted_sender, mut input_accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (launch_handoff_sender, mut launch_handoff_receiver) = oneshot::channel();
         let run = self.antigravity_app.run(AntigravityRunRequest {
             agent_run_id: execution.agent_run_id.clone(),
@@ -7925,6 +7963,7 @@ impl Core {
             attachment_access_root: Some(attachment_access_root.to_path_buf()),
             builtin_tools: Some(builtin_tools.clone()),
             input_accepted: Some(input_accepted_sender),
+            runtime_events: Some(runtime_event_sender),
             launch_handoff: Some(launch_handoff_sender),
         });
         tokio::pin!(run);
@@ -7954,43 +7993,78 @@ impl Core {
         let result_and_acceptance: Result<_> = async {
             let mut accepted_input = None;
             let mut acceptance_channel_open = true;
+            let mut runtime_event_channel_open = true;
             let result = loop {
                 if let Some(result) = early_result.take() {
                     break result;
                 }
-                let (observed_acceptance, completed) = tokio::select! {
+                tokio::select! {
                     biased;
                     observed = input_accepted_receiver.recv(), if acceptance_channel_open => {
-                        (Some(observed), None)
+                        acceptance_channel_open = false;
+                        let Some(observed_acceptance) = observed else {
+                            continue;
+                        };
+                        if let Err(error) = self
+                            .settle_antigravity_input_acceptance(
+                                execution,
+                                &binding_credential,
+                                &input_delivery.id,
+                                &observed_acceptance,
+                                output,
+                            )
+                            .await
+                        {
+                            let _ = self
+                                .antigravity_app
+                                .interrupt(&execution.agent_run_id, execution.execution_epoch)
+                                .await;
+                            let _ = run.as_mut().await;
+                            return Err(error);
+                        }
+                        accepted_input = Some(observed_acceptance);
                     }
-                    result = &mut run => (None, Some(result)),
-                };
-                if let Some(result) = completed {
-                    break result;
+                    runtime_event = runtime_event_receiver.recv(), if runtime_event_channel_open => {
+                        let Some(runtime_event) = runtime_event else {
+                            runtime_event_channel_open = false;
+                            continue;
+                        };
+                        if let Err(error) = process_one_shot_runtime_event(
+                            self,
+                            output,
+                            AdapterKind::AntigravityApp,
+                            &execution.agent_run_id,
+                            execution.execution_epoch,
+                            runtime_event.event_type,
+                            &runtime_event.payload,
+                        ).await {
+                            eprintln!(
+                                "failed to persist Antigravity Runtime Evidence for AgentRun {}: {error:#}",
+                                execution.agent_run_id
+                            );
+                        }
+                    }
+                    result = &mut run => break result,
                 }
-                acceptance_channel_open = false;
-                let Some(Some(observed_acceptance)) = observed_acceptance else {
-                    continue;
-                };
-                if let Err(error) = self
-                    .settle_antigravity_input_acceptance(
-                        execution,
-                        &binding_credential,
-                        &input_delivery.id,
-                        &observed_acceptance,
-                        output,
-                    )
-                    .await
-                {
-                    let _ = self
-                        .antigravity_app
-                        .interrupt(&execution.agent_run_id, execution.execution_epoch)
-                        .await;
-                    let _ = run.as_mut().await;
-                    return Err(error);
-                }
-                accepted_input = Some(observed_acceptance);
             };
+            while let Ok(runtime_event) = runtime_event_receiver.try_recv() {
+                if let Err(error) = process_one_shot_runtime_event(
+                    self,
+                    output,
+                    AdapterKind::AntigravityApp,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    runtime_event.event_type,
+                    &runtime_event.payload,
+                )
+                .await
+                {
+                    eprintln!(
+                        "failed to persist queued Antigravity Runtime Evidence for AgentRun {}: {error:#}",
+                        execution.agent_run_id
+                    );
+                }
+            }
             // The adapter performs a final log scan before returning. Consume
             // evidence queued in the same scheduling turn even if completion
             // won the select race.
@@ -11031,51 +11105,91 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
 }
 
 fn public_acp_tool_output(update: &Value) -> Option<String> {
-    match update.get("content")? {
-        Value::String(text) => Some(text.clone()),
+    public_acp_content_text(update.get("content")).or_else(|| {
+        let raw_output = update.get("rawOutput")?.as_object()?;
+        let mut public = Vec::new();
+        for field in ["stdout", "stderr", "output", "text"] {
+            let Some(text) = public_acp_content_text(raw_output.get(field)) else {
+                continue;
+            };
+            if !public.iter().any(|existing| existing == &text) {
+                public.push(text);
+            }
+        }
+        (!public.is_empty()).then(|| public.join("\n"))
+    })
+}
+
+fn public_acp_content_text(value: Option<&Value>) -> Option<String> {
+    let value = value?;
+    match value {
+        Value::String(text) => nonempty_public_text(text),
         Value::Array(blocks) => {
             let text = blocks
                 .iter()
-                .filter_map(|block| match block {
-                    Value::String(text) => Some(text.as_str()),
-                    Value::Object(block)
-                        if block
-                            .get("type")
-                            .and_then(Value::as_str)
-                            .is_none_or(|kind| kind == "text") =>
-                    {
-                        block.get("text").and_then(Value::as_str).or_else(|| {
-                            block
-                                .get("content")
-                                .and_then(|content| content.get("text"))
-                                .and_then(Value::as_str)
-                        })
-                    }
-                    _ => None,
-                })
+                .filter_map(|block| public_acp_content_text(Some(block)))
                 .collect::<Vec<_>>()
                 .join("\n");
-            (!text.is_empty()).then_some(text)
+            nonempty_public_text(&text)
         }
-        Value::Object(block)
-            if block
-                .get("type")
-                .and_then(Value::as_str)
-                .is_none_or(|kind| kind == "text") =>
-        {
-            block
+        Value::Object(block) => match block.get("type").and_then(Value::as_str) {
+            Some("content") => public_acp_content_text(block.get("content")),
+            Some("text") => block
                 .get("text")
                 .and_then(Value::as_str)
-                .or_else(|| {
-                    block
-                        .get("content")
-                        .and_then(|content| content.get("text"))
-                        .and_then(Value::as_str)
-                })
-                .map(str::to_string)
-        }
+                .and_then(nonempty_public_text),
+            // ACP terminal content is only a display anchor owned by the Agent.
+            // Rovai advertises no Client Terminal capability and must not treat a
+            // terminalId (or a diff/resource payload) as public command output.
+            Some("terminal" | "diff" | "image" | "audio" | "resource" | "resource_link") => None,
+            Some(_) => None,
+            // Preserve the small legacy shapes emitted by older ACP adapters,
+            // while still refusing to walk arbitrary untyped object fields.
+            None => block
+                .get("text")
+                .and_then(Value::as_str)
+                .and_then(nonempty_public_text)
+                .or_else(|| public_acp_content_text(block.get("content"))),
+        },
         _ => None,
     }
+}
+
+fn nonempty_public_text(text: &str) -> Option<String> {
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+async fn process_one_shot_runtime_event(
+    core: &Core,
+    output: &mpsc::UnboundedSender<String>,
+    adapter_kind: AdapterKind,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    event_type: &str,
+    payload: &Value,
+) -> Result<()> {
+    let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
+        return Ok(());
+    };
+    let Some(evidence) =
+        persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, payload).await?
+    else {
+        return Ok(());
+    };
+    emit(
+        output,
+        event_type,
+        json!({
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "adapterKind": adapter_kind,
+            "nativeMethod": "stream-json",
+            "evidenceId": evidence.id,
+            "payload": evidence.payload,
+            "canonical": evidence.canonical,
+        }),
+    );
+    Ok(())
 }
 
 async fn persist_runtime_evidence(
@@ -14484,7 +14598,10 @@ mod tests {
                     "title": "Run command",
                     "content": [{"type": "text", "text": "Visible tool progress"}],
                     "rawInput": {"command": "echo TOP_SECRET_INPUT"},
-                    "rawOutput": {"stdout": "TOP_SECRET_OUTPUT"}
+                    "rawOutput": {
+                        "stdout": "unused public fallback",
+                        "credential": "TOP_SECRET_OUTPUT"
+                    }
                 }
             }),
         );
@@ -14496,6 +14613,92 @@ mod tests {
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+    }
+
+    #[test]
+    fn acp_command_output_uses_standard_content_and_allowlisted_raw_fallbacks() {
+        let fixtures = [
+            (
+                "opencode-cli",
+                json!({
+                    "content": [{"type": "text", "text": "OPENCODE_PRINTF_OK"}],
+                    "rawOutput": {"secret": "OPENCODE_MUST_NOT_LEAK"}
+                }),
+                "OPENCODE_PRINTF_OK",
+                "OPENCODE_MUST_NOT_LEAK",
+            ),
+            (
+                "copilot-cli",
+                json!({
+                    "content": [{
+                        "type": "content",
+                        "content": {"type": "text", "text": "COPILOT_PRINTF_OK"}
+                    }],
+                    "rawOutput": {"token": "COPILOT_MUST_NOT_LEAK"}
+                }),
+                "COPILOT_PRINTF_OK",
+                "COPILOT_MUST_NOT_LEAK",
+            ),
+            (
+                "trae-cn-cli",
+                json!({
+                    "content": [{"type": "terminal", "terminalId": "private-terminal"}],
+                    "rawOutput": {
+                        "stdout": "TRAE_PRINTF_OK",
+                        "stderr": "TRAE_STDERR_OK",
+                        "environment": "TRAE_MUST_NOT_LEAK"
+                    }
+                }),
+                "TRAE_PRINTF_OK\nTRAE_STDERR_OK",
+                "TRAE_MUST_NOT_LEAK",
+            ),
+        ];
+
+        for (adapter_kind, fixture, expected_output, secret) in fixtures {
+            let (_, payload) = normalize_acp_event(
+                "session/update",
+                &json!({
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": format!("{adapter_kind}-printf"),
+                        "status": "completed",
+                        "kind": "execute",
+                        "title": "Run fixed printf",
+                        "content": fixture.get("content"),
+                        "rawOutput": fixture.get("rawOutput"),
+                    }
+                }),
+            );
+            let serialized = serde_json::to_string(&payload).expect("payload should serialize");
+            assert_eq!(payload["output"], expected_output, "{adapter_kind}");
+            assert!(!serialized.contains(secret), "{adapter_kind}");
+            assert!(payload["rawOutputDigest"].is_string(), "{adapter_kind}");
+        }
+    }
+
+    #[test]
+    fn acp_terminal_content_is_never_misrepresented_as_command_output() {
+        let (_, payload) = normalize_acp_event(
+            "session/update",
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "terminal-only",
+                    "status": "completed",
+                    "kind": "execute",
+                    "content": [{
+                        "type": "terminal",
+                        "terminalId": "terminal-secret-identity"
+                    }]
+                }
+            }),
+        );
+        assert!(payload["output"].is_null());
+        assert!(
+            !serde_json::to_string(&payload)
+                .expect("payload should serialize")
+                .contains("terminal-secret-identity")
+        );
     }
 
     #[test]

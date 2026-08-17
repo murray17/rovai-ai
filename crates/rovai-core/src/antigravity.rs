@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     error::Error as StdError,
     ffi::OsString,
     fmt,
@@ -18,6 +18,7 @@ use rovai_core::{
     runtime::{AgentRunWorkspace, PermissionSemantics},
     runtime_discovery::configure_active_runtime_command,
 };
+use serde_json::Value;
 use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncRead, AsyncReadExt},
@@ -40,6 +41,7 @@ pub struct AntigravityRunRequest {
     pub attachment_access_root: Option<PathBuf>,
     pub builtin_tools: Option<BuiltinToolProcessConfig>,
     pub input_accepted: Option<mpsc::UnboundedSender<AntigravityInputAccepted>>,
+    pub runtime_events: Option<mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
     pub launch_handoff: Option<oneshot::Sender<()>>,
 }
 
@@ -47,6 +49,12 @@ pub struct AntigravityRunRequest {
 pub struct AntigravityInputAccepted {
     pub native_session_id: String,
     pub native_turn_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AntigravityRuntimeEvent {
+    pub event_type: &'static str,
+    pub payload: Value,
 }
 
 #[derive(Debug, Clone)]
@@ -243,6 +251,15 @@ impl AntigravityAppRuntimeAdapter {
             OsString::from("--log-file"),
             log_path.as_os_str().to_os_string(),
         ];
+        let structured_output = request
+            .runtime
+            .capabilities
+            .iter()
+            .any(|capability| capability == "output.stream_json");
+        if structured_output {
+            runtime_args.push(OsString::from("--output-format"));
+            runtime_args.push(OsString::from("stream-json"));
+        }
         // Antigravity 1.1.9 uses explicit --add-dir values as the model-visible
         // workspace list. Include the execution root as well as the attachment
         // projection, and canonicalize both so macOS sandbox rules do not mix
@@ -299,7 +316,25 @@ impl AntigravityAppRuntimeAdapter {
             .stderr
             .take()
             .context("Antigravity companion stderr was unavailable")?;
-        let stdout_task = tokio::spawn(capture_bounded(stdout));
+        let stdout_task = if structured_output {
+            let resumable_native_session_id = request.resumable_native_session_id.clone();
+            let runtime_events = request.runtime_events.clone();
+            tokio::spawn(async move {
+                capture_antigravity_stream(
+                    stdout,
+                    resumable_native_session_id.as_deref(),
+                    runtime_events.as_ref(),
+                )
+                .await
+                .map(AntigravityStdoutCapture::Structured)
+            })
+        } else {
+            tokio::spawn(async move {
+                capture_bounded(stdout)
+                    .await
+                    .map(AntigravityStdoutCapture::Legacy)
+            })
+        };
         let stderr_task = tokio::spawn(capture_bounded(stderr));
         tokio::pin!(interrupted);
         let mut was_interrupted = false;
@@ -354,24 +389,46 @@ impl AntigravityAppRuntimeAdapter {
             );
         }
         let native_turn_id = format!("agy:{}:{}", request.agent_run_id, request.execution_epoch);
-        if stdout.truncated {
-            return Err(AntigravityDeliveredFailure {
-                native_session_id,
-                native_turn_id,
-                error_code: "runtime_output_too_large",
+        let final_output = match stdout {
+            AntigravityStdoutCapture::Structured(capture) => {
+                let result = capture
+                    .final_result
+                    .context("Antigravity stream-json output omitted its final result event")?;
+                if result.conversation_id != native_session_id {
+                    anyhow::bail!(
+                        "Antigravity stream targeted another conversation (expected {native_session_id}, observed {})",
+                        result.conversation_id
+                    );
+                }
+                if !result.status.eq_ignore_ascii_case("success") {
+                    return Err(AntigravityDeliveredFailure {
+                        native_session_id,
+                        native_turn_id,
+                        error_code: "runtime_terminal_failure",
+                    }
+                    .into());
+                }
+                result.response.trim().to_string()
             }
-            .into());
-        }
-        let final_output = match String::from_utf8(stdout.bytes) {
-            Ok(output) => output.trim().to_string(),
-            Err(_) => {
+            AntigravityStdoutCapture::Legacy(stdout) if stdout.truncated => {
                 return Err(AntigravityDeliveredFailure {
                     native_session_id,
                     native_turn_id,
-                    error_code: "runtime_invalid_final_output",
+                    error_code: "runtime_output_too_large",
                 }
                 .into());
             }
+            AntigravityStdoutCapture::Legacy(stdout) => match String::from_utf8(stdout.bytes) {
+                Ok(output) => output.trim().to_string(),
+                Err(_) => {
+                    return Err(AntigravityDeliveredFailure {
+                        native_session_id,
+                        native_turn_id,
+                        error_code: "runtime_invalid_final_output",
+                    }
+                    .into());
+                }
+            },
         };
         if final_output.is_empty() {
             return Err(AntigravityDeliveredFailure {
@@ -424,6 +481,254 @@ fn canonical_antigravity_workspace_roots(
         }
     }
     Ok(roots)
+}
+
+#[derive(Debug)]
+enum AntigravityStdoutCapture {
+    Structured(AntigravityStreamCapture),
+    Legacy(CapturedBytes),
+}
+
+#[derive(Debug, Default)]
+struct AntigravityStreamCapture {
+    conversation_id: Option<String>,
+    final_result: Option<AntigravityJsonResult>,
+    started_tools: HashSet<String>,
+    terminal_tools: HashSet<String>,
+}
+
+#[derive(Debug)]
+struct AntigravityJsonResult {
+    conversation_id: String,
+    status: String,
+    response: String,
+}
+
+async fn capture_antigravity_stream<R>(
+    mut reader: R,
+    expected_session_id: Option<&str>,
+    runtime_events: Option<&mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
+) -> Result<AntigravityStreamCapture>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut line = Vec::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    let mut capture = AntigravityStreamCapture::default();
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        for byte in &buffer[..read] {
+            if *byte == b'\n' {
+                if !line.is_empty() {
+                    process_antigravity_stream_line(
+                        &line,
+                        expected_session_id,
+                        runtime_events,
+                        &mut capture,
+                    )?;
+                    line.clear();
+                }
+                continue;
+            }
+            if line.len() >= MAX_CAPTURE_BYTES {
+                anyhow::bail!(
+                    "Antigravity stream event exceeded the {} byte safety limit",
+                    MAX_CAPTURE_BYTES
+                );
+            }
+            line.push(*byte);
+        }
+    }
+    if !line.is_empty() {
+        process_antigravity_stream_line(&line, expected_session_id, runtime_events, &mut capture)?;
+    }
+    Ok(capture)
+}
+
+fn process_antigravity_stream_line(
+    line: &[u8],
+    expected_session_id: Option<&str>,
+    runtime_events: Option<&mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
+    capture: &mut AntigravityStreamCapture,
+) -> Result<()> {
+    let event: Value =
+        serde_json::from_slice(line).context("Antigravity emitted invalid stream JSON")?;
+    match event.get("event").and_then(Value::as_str) {
+        Some("init") => {
+            let conversation_id = antigravity_event_conversation_id(&event, "init")?;
+            observe_antigravity_conversation(capture, expected_session_id, conversation_id)?;
+        }
+        Some("step_update") => {
+            let step = event
+                .get("step_update")
+                .context("Antigravity step_update event omitted its payload")?;
+            let conversation_id = step
+                .get("conversation_id")
+                .and_then(Value::as_str)
+                .context("Antigravity step_update omitted conversation_id")?;
+            observe_antigravity_conversation(capture, expected_session_id, conversation_id)?;
+            if let Some(runtime_event) = normalize_antigravity_tool_step(step, capture)?
+                && let Some(sender) = runtime_events
+            {
+                let _ = sender.send(runtime_event);
+            }
+        }
+        Some("result") => {
+            if capture.final_result.is_some() {
+                anyhow::bail!("Antigravity stream emitted more than one final result event");
+            }
+            let result = event
+                .get("result")
+                .context("Antigravity result event omitted its payload")?;
+            let conversation_id = result
+                .get("conversation_id")
+                .and_then(Value::as_str)
+                .context("Antigravity result omitted conversation_id")?;
+            observe_antigravity_conversation(capture, expected_session_id, conversation_id)?;
+            capture.final_result = Some(AntigravityJsonResult {
+                conversation_id: conversation_id.to_string(),
+                status: result
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .context("Antigravity result omitted status")?
+                    .to_string(),
+                response: result
+                    .get("response")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            });
+        }
+        Some(_) => {}
+        None => anyhow::bail!("Antigravity stream event omitted its event type"),
+    }
+    Ok(())
+}
+
+fn antigravity_event_conversation_id<'a>(event: &'a Value, event_name: &str) -> Result<&'a str> {
+    event
+        .get("conversation_id")
+        .and_then(Value::as_str)
+        .with_context(|| format!("Antigravity {event_name} event omitted conversation_id"))
+}
+
+fn observe_antigravity_conversation(
+    capture: &mut AntigravityStreamCapture,
+    expected_session_id: Option<&str>,
+    conversation_id: &str,
+) -> Result<()> {
+    validate_session_id(conversation_id)?;
+    if let Some(expected) = expected_session_id
+        && conversation_id != expected
+    {
+        anyhow::bail!(
+            "Antigravity stream targeted another conversation (expected {expected}, observed {conversation_id})"
+        );
+    }
+    if let Some(observed) = capture.conversation_id.as_deref()
+        && observed != conversation_id
+    {
+        anyhow::bail!(
+            "Antigravity stream changed conversations (expected {observed}, observed {conversation_id})"
+        );
+    }
+    capture.conversation_id = Some(conversation_id.to_string());
+    Ok(())
+}
+
+fn normalize_antigravity_tool_step(
+    step: &Value,
+    capture: &mut AntigravityStreamCapture,
+) -> Result<Option<AntigravityRuntimeEvent>> {
+    if step.get("step_type").and_then(Value::as_str) != Some("tool") {
+        return Ok(None);
+    }
+    let conversation_id = step
+        .get("conversation_id")
+        .and_then(Value::as_str)
+        .context("Antigravity tool step omitted conversation_id")?;
+    let step_index = step
+        .get("step_index")
+        .and_then(Value::as_u64)
+        .context("Antigravity tool step omitted step_index")?;
+    let tool_info = step.get("tool_info").unwrap_or(&Value::Null);
+    let tool_name = step
+        .get("tool_name")
+        .or_else(|| tool_info.get("name"))
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("tool");
+    let tool_call_id = format!("agy:{conversation_id}:step:{step_index}");
+    let state = step
+        .get("state")
+        .and_then(Value::as_str)
+        .unwrap_or("IN_PROGRESS")
+        .to_ascii_uppercase();
+    let status = match state.as_str() {
+        "DONE" | "SUCCESS" | "SUCCEEDED" => "completed",
+        "FAILED" | "ERROR" | "CANCELLED" | "CANCELED" => "failed",
+        _ => "in_progress",
+    };
+    let newly_observed = if status == "in_progress" {
+        capture.started_tools.insert(tool_call_id.clone())
+    } else {
+        capture.terminal_tools.insert(tool_call_id.clone())
+    };
+    if !newly_observed {
+        return Ok(None);
+    }
+    let output = antigravity_command_tool(tool_name)
+        .then(|| public_antigravity_command_output(tool_info))
+        .flatten();
+    Ok(Some(AntigravityRuntimeEvent {
+        event_type: "runtime.action",
+        payload: serde_json::json!({
+            "toolCallId": tool_call_id,
+            "toolName": tool_name,
+            "status": status,
+            "kind": antigravity_tool_kind(tool_name),
+            "title": tool_name,
+            "output": output,
+        }),
+    }))
+}
+
+fn antigravity_tool_kind(tool_name: &str) -> &'static str {
+    match tool_name.to_ascii_lowercase().as_str() {
+        "run_command" | "bash" | "terminal" => "execute",
+        "read_file" | "read" | "list_directory" => "read",
+        "grep_search" | "search" | "web_search" => "search",
+        "replace_file_content" | "edit_file" | "apply_patch" => "edit",
+        "write_to_file" | "write_file" => "write",
+        _ => "tool",
+    }
+}
+
+fn antigravity_command_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name.to_ascii_lowercase().as_str(),
+        "run_command" | "bash" | "terminal"
+    )
+}
+
+fn public_antigravity_command_output(tool_info: &Value) -> Option<String> {
+    let mut output = Vec::new();
+    for field in ["stdout", "stderr", "output"] {
+        let Some(text) = tool_info
+            .get(field)
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+        else {
+            continue;
+        };
+        if !output.iter().any(|existing| existing == text) {
+            output.push(text.to_string());
+        }
+    }
+    (!output.is_empty()).then(|| output.join("\n"))
 }
 
 #[derive(Debug)]
@@ -714,6 +1019,7 @@ mod tests {
                 attachment_access_root: None,
                 builtin_tools: None,
                 input_accepted: None,
+                runtime_events: None,
                 launch_handoff: None,
             })
             .await
@@ -871,6 +1177,7 @@ mod tests {
             attachment_access_root: None,
             builtin_tools: None,
             input_accepted: None,
+            runtime_events: None,
             launch_handoff: None,
         }
     }
@@ -890,6 +1197,7 @@ mod tests {
         std::fs::write(
             &executable,
             r#"#!/bin/sh
+printf '%s\n' "$@" > .agy-args
 log_file=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--log-file" ]; then
@@ -916,8 +1224,10 @@ echo "finished"
         let run_id = uuid::Uuid::new_v4().to_string();
         let mut request = fake_antigravity_request(&workspace, &executable, run_id.clone());
         let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
         let (handoff_sender, handoff_receiver) = oneshot::channel();
         request.input_accepted = Some(accepted_sender);
+        request.runtime_events = Some(runtime_event_sender);
         request.launch_handoff = Some(handoff_sender);
         let running_adapter = Arc::clone(&adapter);
         let task = tokio::spawn(async move { running_adapter.run(request).await });
@@ -945,6 +1255,102 @@ echo "finished"
             .expect("run task should join")
             .expect("final output should remain successful");
         assert_eq!(result.final_output, "finished");
+        let arguments = std::fs::read_to_string(workspace.join(".agy-args"))
+            .expect("legacy fixture should record its arguments");
+        assert!(!arguments.contains("--output-format"));
+        assert!(
+            runtime_event_receiver.try_recv().is_err(),
+            "legacy text output must remain run-level"
+        );
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stream_json_projects_tool_lifecycle_and_command_output() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-antigravity-stream-json-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let executable = root.join("fake-agy");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+printf '%s\n' "$@" > .agy-args
+log_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--log-file" ]; then
+    shift
+    log_file="$1"
+  fi
+  shift
+done
+session_id="0bdd2166-d420-40c6-94be-70b93eb290c5"
+echo "Created conversation $session_id" >> "$log_file"
+echo "Forwarding user message to conversation $session_id" >> "$log_file"
+echo "I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1" >> "$log_file"
+printf '%s\n' '{"event":"init","conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","init":{"tools":["run_command"]}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"RUNNING","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"private command"}}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","output":"AGY_PRINTF_OK","privateToken":"AGY_MUST_NOT_LEAK"}}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","status":"SUCCESS","response":"structured final"}}'
+"#,
+        )
+        .expect("fake Antigravity companion should be written");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("fake Antigravity companion should be executable");
+        let adapter = AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        let mut request =
+            fake_antigravity_request(&workspace, &executable, uuid::Uuid::new_v4().to_string());
+        request
+            .runtime
+            .capabilities
+            .push("output.stream_json".to_string());
+        let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
+        request.input_accepted = Some(accepted_sender);
+        request.runtime_events = Some(runtime_event_sender);
+
+        let result = adapter
+            .run(request)
+            .await
+            .expect("structured fixture should complete");
+        assert_eq!(result.final_output, "structured final");
+        assert_eq!(
+            accepted_receiver
+                .try_recv()
+                .expect("structured run should preserve accepted-input proof")
+                .native_session_id,
+            "0bdd2166-d420-40c6-94be-70b93eb290c5"
+        );
+        let started = runtime_event_receiver
+            .try_recv()
+            .expect("structured tool start should be emitted");
+        let completed = runtime_event_receiver
+            .try_recv()
+            .expect("structured tool result should be emitted");
+        assert_eq!(
+            started.payload["toolCallId"],
+            completed.payload["toolCallId"]
+        );
+        assert_eq!(started.payload["status"], "in_progress");
+        assert_eq!(completed.payload["status"], "completed");
+        assert_eq!(completed.payload["kind"], "execute");
+        assert_eq!(completed.payload["output"], "AGY_PRINTF_OK");
+        assert!(
+            !serde_json::to_string(&completed.payload)
+                .expect("normalized event should serialize")
+                .contains("AGY_MUST_NOT_LEAK")
+        );
+        let arguments = std::fs::read_to_string(workspace.join(".agy-args"))
+            .expect("structured fixture should record its arguments");
+        assert!(arguments.contains("--output-format\nstream-json"));
+        assert_eq!(antigravity_tool_kind("read_file"), "read");
+        assert_eq!(antigravity_tool_kind("write_to_file"), "write");
+        assert_eq!(antigravity_tool_kind("future_tool"), "tool");
         std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }
 
@@ -1082,6 +1488,7 @@ echo "Created conversation 0bdd2166-d420-40c6-94be-70b93eb290c5" > "$log_file"
                 attachment_access_root: None,
                 builtin_tools: None,
                 input_accepted: None,
+                runtime_events: None,
                 launch_handoff: None,
             })
             .await
@@ -1183,6 +1590,7 @@ exec sleep 30
             attachment_access_root: None,
             builtin_tools: None,
             input_accepted: Some(accepted_sender),
+            runtime_events: None,
             launch_handoff: None,
         };
         let running_adapter = adapter.clone();

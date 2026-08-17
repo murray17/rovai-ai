@@ -93,6 +93,17 @@ Session replay 隔离与 Prompt response-only ACK。
   bounded reader/child wait；
 - fingerprint/search generation 变化只替换静态证据并 fence 旧 attempt，不触发后台深检。
 
+### 同期 Runtime command output 修正
+
+- 通用 ACP 解析标准嵌套 Content Text block；Terminal 只表示展示边界，`rawOutput` 仅在 Content 缺席时
+  从 `stdout`、`stderr`、`output`、`text` 顶层白名单安全回退；
+- Claude stream parser 使用原生 tool-use ID 关联 partial/full `tool_use` 与 `tool_result`，把 Bash、Read、
+  Edit、Write 等映射为既有 Activity，并仅从 Bash 对应公开结果投影 command output；
+- Antigravity 只有在健康证据声明 `output.stream_json` 时启用结构化 NDJSON，旧版继续诚实保持
+  run-level 展示；两条路径都不从私有日志、workspace diff 或最终回答猜测内部 command；
+- 三类 Runtime 都复用既有 Execution Evidence、脱敏、大小限制与 Renderer 投影，不新增公开 wire 字段
+  或 Provider-specific Renderer 分支。
+
 ## 明确不做
 
 - 不内联 Skill 文件内容，不创建 Provider-specific Skill input item；
@@ -126,8 +137,8 @@ Session replay 隔离与 Prompt response-only ACK。
 | Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 Skill wire/Evidence；[Runtime Launch and Verification v3](../../contracts/runtime-launch-and-verification-v3.md)继承 ACP continuation 并新增 light discovery、按需深检、attempt manager 与 Probe process owner。 |
 | Architecture | 已更新 | [Structured Current Input Skill Links](../../architecture/structured-current-input-skill-links.md)与 [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)定义 Skill Module seam；[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 TRAE LRU 与 ACP 输入隔离。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)把 Picker 从普通 Text 改为结构化 token，同时保持现有 Composer 视觉、键盘和正文 Marker。 |
-| Runtime Activity | 确认无需更新 | 本版不新增 Runtime Activity kind 或映射；Skill 文件指针不产生 Tool/Activity 或读取 receipt。 |
-| Runtime compatibility | 已更新 | Skill 指针不改变 Runtime 资格；同期登记补充 TRAE `0.120.52` warm Host/冷 Session 边界、replay 隔离与 response-only ACK。 |
+| Runtime Activity | 已更新 | Skill 文件指针仍不产生 Tool/Activity；同期 command output 修正更新 [Runtime Activity Registry](../../runtime-activity/registry.md)，不新增 kind 或公开 wire 字段。 |
+| Runtime compatibility | 已更新 | Skill 指针不改变 Runtime 资格；同期登记补充 TRAE warm/cold Session、replay/ACK 边界，以及 ACP、Claude、AGY 原生 command-output 能力与旧版回退证据。 |
 | Documentation routing | 已更新 | 文档导航、ADR CURRENT/HISTORY、Contract/Architecture 索引和领域词汇加入结构化 Current Input Skill 入口。 |
 | Root README | 确认无需更新 | 项目定位、公开支持范围和常青能力没有因一个模型输入字段扩展而改变；版本状态仍由唯一 current 入口拥有。 |
 

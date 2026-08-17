@@ -466,6 +466,9 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
             models: Vec::new(),
         };
     }
+    if antigravity_stream_json_supported(&help) {
+        capabilities.push("output.stream_json".to_string());
+    }
 
     let mut model_command = runtime_command(&canonical);
     model_command.arg("models");
@@ -541,6 +544,10 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
             probed_at,
         ),
     }
+}
+
+fn antigravity_stream_json_supported(help: &str) -> bool {
+    help.contains("--output-format") && help.contains("stream-json")
 }
 
 fn is_antigravity_model_identifier(value: &str) -> bool {
@@ -2201,6 +2208,24 @@ mod tests {
     use super::*;
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
     use std::{os::unix::fs::PermissionsExt, time::Instant};
+
+    #[test]
+    fn antigravity_stream_json_is_optional_and_help_gated() {
+        assert!(antigravity_stream_json_supported(
+            "--output-format Output format (text, json, stream-json)"
+        ));
+        assert!(!antigravity_stream_json_supported(
+            "--output-format Output format (text, json)"
+        ));
+        assert!(!antigravity_stream_json_supported(
+            "legacy print mode without structured output"
+        ));
+        assert!(
+            !antigravity_required_capabilities()
+                .iter()
+                .any(|capability| capability == "output.stream_json")
+        );
+    }
 
     #[test]
     fn additive_acp_launch_shapes_match_the_verified_cli_contracts() {

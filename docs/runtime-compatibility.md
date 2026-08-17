@@ -90,6 +90,29 @@ smoke:acp-runtime` 通过：completion、allow-once 写入与 deny 三个连续 
 TRAE terminal 后进入 LRU、后继 Run 直接复用 warm Session，以及历史 replay 未进入后继 Run 的
 Evidence、Action 或最终输出。
 
+### 2026-08-17 Runtime command output 协议修正
+
+通用 ACP Adapter 现在消费标准嵌套 `type: "content"` Text block，并把 Terminal block 视为展示边界，
+不把 `terminalId`、Diff 或未知结构投影成 command output。只有没有公开 Content Text 时，才从
+`rawOutput` 顶层白名单字段 `stdout`、`stderr`、`output`、`text` 提取文本；其他字段仍只参与私有摘要，
+不得进入 `runtime.action.payload.output`。OpenCode、GitHub Copilot 与 TRAE 的固定 `printf` smoke
+断言已加入 `smoke:acp-runtime`，本轮只完成确定性 parser 测试，没有再次调用真实模型，不能把脚本
+覆盖冒充三种 Runtime 的本机实测 pass。
+
+Claude Code 保持 `--output-format stream-json --include-partial-messages`，但现在同时消费 partial
+`tool_use`、完整 assistant tool block 与对应 `tool_result`。生命周期直接使用 Claude 原生 tool-use ID；
+Bash、Read、Edit、Write 等只映射到既有 Canonical Activity kind，Bash result 仅公开标准 Content Text
+或明确的 `stdout`/`stderr`。最终 `result`、Usage 与 Session 校验路径没有改变。确定性 stream fixture
+已证明 partial/full 去重、start/terminal 关联、command marker 可见及私有字段不泄露；本轮未运行真实
+Claude 模型 smoke。
+
+Antigravity 的健康探测仅在 `--help` 同时声明 `--output-format` 与 `stream-json` 时发布可选
+`output.stream_json` capability；冻结为支持的 AgentRun 才追加 `--output-format stream-json`，从 NDJSON
+`init`、`step_update`、`result` 事件建立 native step 生命周期。command step 只公开 `tool_info` 中的
+`stdout`、`stderr`、`output`，不使用私有日志、workspace diff 或最终文本猜测内部工具。旧版或未声明
+能力的安装继续走原有 text/run-level 路径。本机 `agy 1.1.13 --help` 的只读检查确认当前安装声明该能力；
+结构化与旧版回退两条独立进程 fixture 均通过，但本轮没有启动真实 AGY 模型任务。
+
 ### v0.89 Transport v13 当前基线
 
 当前字段级合同已推进到 [Built-in Tool Transport v13](contracts/builtin-tool-transport-v13.md)，固定十五项

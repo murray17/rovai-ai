@@ -28,6 +28,8 @@ last_updated: 2026-08-17
 - `skills` 与 message/attachments 同级，零 entry 时字段省略；Skill path 指向 `SKILL.md`；
 - Skill 文件链接不改变 Runtime Adapter、Attachment、Profile、Bootstrap、其他 Context section 与 ACK；
 - 同期 ACP 修正只以 Prompt response 结算 ACK，隔离 replay，不改公开 Runtime Event wire；
+- Runtime command output 只能来自各 Adapter 原生结构化协议中的公开 Content/result 字段；私有日志、
+  workspace diff、terminal locator、未知 `rawOutput` 字段与最终自然语言不得作为工具证据；
 - Model Context Projection、Context Evidence 和 Runtime Input Delivery Evidence 不合并。
 
 ## Checkpoint 0：治理基线
@@ -93,6 +95,19 @@ last_updated: 2026-08-17
 - [x] Prompt 观察状态按 prompt 隔离；ACP input ACK 仅由匹配 prompt request ID 的 response 产生；
 - [x] Core 全回归、真实 TRAE smoke 与文档门禁通过；打包验收由 Checkpoint 6 独立记录。
 
+## Checkpoint 5B：Runtime command output
+
+- [x] 通用 ACP 支持标准嵌套 Content Text、明确 Terminal 边界，并仅从 `rawOutput` 的
+  `stdout/stderr/output/text` 顶层白名单回退；
+- [x] OpenCode、GitHub Copilot、TRAE 固定 `printf` smoke 增加 output 硬断言；确定性测试同时证明
+  未授权敏感字段不会进入公开 payload；
+- [x] Claude 消费 partial/full `tool_use` 与 `tool_result`，以原生 ID 关联生命周期并把 Bash 等工具映射
+  到既有 Activity/Evidence，同时保持 final result、Usage、Session 校验不变；
+- [x] AGY 以健康能力证据选择 stream-json，解析原生 step/tool/result；未声明能力的旧版继续保持
+  text/run-level 展示，不从日志、diff 或最终文本推断 command；
+- [x] ACP、Claude、AGY parser/process fixture 与相关 Rust 全量、Clippy、脚本语法和文档门禁通过；本轮
+  没有调用真实模型，兼容性清单不登记新的 Runtime 实机 pass。
+
 ## Checkpoint 6：打包、安装与发布验收
 
 - [x] `pnpm package:mac` 生成 arm64 Application，严格 codesign 验证通过；
@@ -109,6 +124,9 @@ last_updated: 2026-08-17
 - 自动化：Rust 全量 602 项通过、3 项手工 Runtime smoke 按设计 ignored；最终 `main` monitoring 增量另有
   19 项 library 与 79 项 Core binary 测试通过。Vitest 56 files / 388 tests、Node 187 tests、TypeScript、
   docs、skills、rustfmt、Clippy `-D warnings` 与 `git diff --check` 全部通过；
+- 同期 Runtime command-output 修正复跑当前 Rust 套件：623 项通过、3 项既有手工 Runtime smoke 按设计
+  ignored；`cargo fmt --check`、workspace Clippy `-D warnings`、ACP smoke 脚本语法、docs:test、
+  docs:check、真实 Git base 的 docs:check:ci 与 `git diff --check` 通过；
 - 打包验收：`accept:composer-skill-context`、`accept:structured-mentions-ui`、
   `accept:runtime-activity-ui` 均从隔离 userData 通过；最终 Skill smoke 证据位于
   `/var/folders/49/z0f8w56s28j4pfc7t80cm3w80000gq/T/rovai-structured-mentions-ui-captures-pINYFI`；
