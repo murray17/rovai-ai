@@ -4,13 +4,20 @@ import type { MemberRuntimeDraft } from './MemberRuntimeParameters'
 export type PersistedRuntimeChangeDisposition =
   | 'unchanged'
   | 'saved_submission'
+  | 'saved_submission_with_newer_draft'
   | 'external_conflict'
   | 'reload'
+
+export type PendingRuntimeSubmission = {
+  baseVersion: number
+  persistedKey: string
+  editorStateKey: string
+}
 
 export function persistedRuntimeConfigurationKey(
   configuration: MemberRuntimeConfiguration | null
 ): string {
-  return JSON.stringify(configuration)
+  return JSON.stringify(stableJsonValue(configuration))
 }
 
 export function submittedRuntimeConfigurationKey(
@@ -29,15 +36,37 @@ export function submittedRuntimeConfigurationKey(
 export function persistedRuntimeChangeDisposition({
   previousPersistedKey,
   nextPersistedKey,
-  submittedPersistedKey,
+  currentVersion,
+  pendingSubmission,
+  currentEditorStateKey,
   dirty
 }: {
   previousPersistedKey: string
   nextPersistedKey: string
-  submittedPersistedKey: string | null
+  currentVersion: number
+  pendingSubmission: PendingRuntimeSubmission | null
+  currentEditorStateKey: string
   dirty: boolean
 }): PersistedRuntimeChangeDisposition {
+  if (
+    pendingSubmission
+    && currentVersion > pendingSubmission.baseVersion
+    && pendingSubmission.persistedKey === nextPersistedKey
+  ) {
+    return currentEditorStateKey === pendingSubmission.editorStateKey
+      ? 'saved_submission'
+      : 'saved_submission_with_newer_draft'
+  }
   if (previousPersistedKey === nextPersistedKey) return 'unchanged'
-  if (submittedPersistedKey === nextPersistedKey) return 'saved_submission'
   return dirty ? 'external_conflict' : 'reload'
+}
+
+function stableJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableJsonValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, entry]) => [key, stableJsonValue(entry)])
+  )
 }

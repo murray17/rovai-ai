@@ -55,6 +55,7 @@ import {
   runtimeAvailabilityPresentation,
 } from './runtime-status'
 import {
+  type PendingRuntimeSubmission,
   persistedRuntimeChangeDisposition,
   persistedRuntimeConfigurationKey,
   submittedRuntimeConfigurationKey
@@ -174,7 +175,8 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   const runCommand = async (
     busyKey: string,
     method: 'members.create' | 'members.update' | 'members.avatar.set' | 'members.runtime.set' | 'members.runtime.clear' | 'members.presence.set' | 'members.remove' | 'members.reorder',
-    command: unknown
+    command: unknown,
+    appliedReloadFailurePrefix?: string
   ): Promise<StoredCommandResult> => {
     setBusy(busyKey)
     setError(null)
@@ -184,7 +186,12 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
         command
       })
       assertApplied(result)
-      await onReload()
+      try {
+        await onReload()
+      } catch (reloadError) {
+        if (!appliedReloadFailurePrefix) throw reloadError
+        setError(`${appliedReloadFailurePrefix}：${errorMessage(reloadError)}`)
+      }
       return result
     } catch (nextError) {
       setError(errorMessage(nextError))
@@ -247,7 +254,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
         model: draft.model,
         permissions: draft.permissions
       } : {})
-    })
+    }, '运行配置已保存，但页面未能重新载入最新值')
     setNotice(`${adapterLabel(adapterKind)} 已保存。`)
   }
 
@@ -256,7 +263,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
     await runCommand('runtime-clear', 'members.runtime.clear', {
       agentId: selectedAgent.agentId,
       expectedVersion: selectedAgent.version
-    })
+    }, '运行配置已清除，但页面未能重新载入最新值')
     setNotice('Agent 运行时已清除。')
   }
 
@@ -907,7 +914,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   const [conflict, setConflict] = useState(false)
   const agentIdRef = useRef(agent.agentId)
   const persistedRuntimeKeyRef = useRef(persistedRuntimeKey(agent))
-  const submittedPersistedRuntimeKeyRef = useRef<string | null>(null)
+  const pendingSubmissionRef = useRef<PendingRuntimeSubmission | null>(null)
   const currentStateKey = runtimeEditorStateKey({ selectedKind, draft })
   const dirty = currentStateKey !== baselineStateKey
   const availability = runtimeAvailability.find((item) => item.runtimeKind === selectedKind) ?? null
@@ -942,7 +949,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     setConflict(false)
     agentIdRef.current = agent.agentId
     persistedRuntimeKeyRef.current = persistedRuntimeKey(agent)
-    submittedPersistedRuntimeKeyRef.current = null
+    pendingSubmissionRef.current = null
   }, [agent, installations])
 
   useImperativeHandle(ref, () => ({ discard: resetFromAgent }), [resetFromAgent])
@@ -960,7 +967,9 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     const disposition = persistedRuntimeChangeDisposition({
       previousPersistedKey: persistedRuntimeKeyRef.current,
       nextPersistedKey,
-      submittedPersistedKey: submittedPersistedRuntimeKeyRef.current,
+      currentVersion: agent.version,
+      pendingSubmission: pendingSubmissionRef.current,
+      currentEditorStateKey: currentStateKey,
       dirty
     })
     if (disposition === 'unchanged') return
@@ -969,19 +978,33 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
       resetFromAgent()
       return
     }
+    if (disposition === 'saved_submission_with_newer_draft') {
+      const submittedEditorStateKey = pendingSubmissionRef.current?.editorStateKey
+      pendingSubmissionRef.current = null
+      if (submittedEditorStateKey) setBaselineStateKey(submittedEditorStateKey)
+      setConflict(false)
+      setSubmitError(null)
+      return
+    }
     if (disposition === 'external_conflict') {
+      pendingSubmissionRef.current = null
       setConflict(true)
-      setSubmitError('已保存的运行配置在编辑期间发生变化。请重新读取后再编辑，或放弃当前更改。')
+      setSubmitError(null)
       return
     }
     resetFromAgent()
-  }, [agent, dirty, resetFromAgent])
+  }, [agent, currentStateKey, dirty, resetFromAgent])
 
   const submit = async (event: FormEvent): Promise<void> => {
     event.preventDefault()
     if (!canSave) return
     setSubmitError(null)
-    submittedPersistedRuntimeKeyRef.current = submittedRuntimeConfigurationKey(selectedKind, draft)
+    const pendingSubmission: PendingRuntimeSubmission = {
+      baseVersion: agent.version,
+      persistedKey: submittedRuntimeConfigurationKey(selectedKind, draft),
+      editorStateKey: currentStateKey
+    }
+    pendingSubmissionRef.current = pendingSubmission
     try {
       if (selectedKind) {
         await onSave(selectedKind, draft)
@@ -992,9 +1015,10 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
       setConflict(false)
       setSubmitError(null)
     } catch (nextError) {
+      if (pendingSubmissionRef.current === pendingSubmission) {
+        pendingSubmissionRef.current = null
+      }
       setSubmitError(errorMessage(nextError))
-    } finally {
-      submittedPersistedRuntimeKeyRef.current = null
     }
   }
 
