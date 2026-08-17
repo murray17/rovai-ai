@@ -134,6 +134,30 @@ uncachedInputTokens = inputTokens - cachedReadTokens - cachedWriteTokens
 这证明当前观测版本至少存在 cache-inclusive Input 语义和稳定 prompt-response 边界。实现仍应把 Runtime
 版本、dialect/parser 版本和原始字段存在性写入 Fixture，不能把一个版本的结论永久泛化。
 
+### 3.2 v1.01 OpenCode/Codex 补充证据
+
+后续对 OpenCode tag `v1.18.15`（commit
+`d7b115f623760e68a4749d16508a9eca350f246f`）的源码审计修正了上表 OpenCode 缺口：
+
+- `packages/opencode/src/acp/usage.ts` 明确定义 `inputTokens = message.tokens.input`，并把
+  `message.tokens.cache.read/write` 分别映射为 `cachedReadTokens/cachedWriteTokens`；
+- Thought、Cache Read、Cache Write 只在正值时输出，因此已验证版本的成功 terminal Usage 中省略代表
+  显式零；
+- 官方 ACP service 成功 `end_turn` Fixture 包含 Input 100、Output 40、Thought 7、Read 11、Write 13，
+  可冻结正 Cache Write 与 Output/Reasoning 组合回归；
+- `usage_update.cost` 调用 `totalSessionCost(messages)`，是累计 Session gauge，不能直接归因当前 Run。
+
+本机 OpenCode `1.18.15` 还完成两次隔离真实成功调用：`opencode/hy3-free` 的约 65k Input 返回 Cache
+Read 1728、未返回 Write；`deepseek/deepseek-v4-flash` 的约 52k Input 未返回任何 Cache 分类。DeepSeek
+secret 只从 Qwen 本机配置注入子进程环境，未回显或持久化。这两次结果说明“dialect 支持 Cache Write”与
+“当前 Provider 实际产生正 Cache Write”必须分开；本机无独立 Anthropic API credential，本轮不能把官方
+正值 Fixture 描述成 Provider 实测。
+
+Codex `>= 0.145.0` 的 App Server 四桶已足以计算 API 公价等价估算。v1.01 采用 model key、service tier、
+effective date 版本化目录；GPT-5.6 Cache Write 按 uncached Input `1.25x`，早期模型保留各自规则。
+Reasoning 属于 Output 子集，不额外计费；结果固定标记 `price_estimated / price_catalog / USD`，不冒充
+订阅账单、Codex Credits 或 Provider reconciliation。
+
 ## 4. 必须修正的指标口径
 
 附件之间存在几处冲突，建 Contract 前必须统一：
@@ -293,3 +317,7 @@ Provider 对账不应阻塞 v0.96 的本地可信监控。
 - [Claude Code cost and usage](https://code.claude.com/docs/en/agent-sdk/cost-tracking)
 - [Claude Prompt Caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
 - [ACP Session Context Size and Cost](https://agentclientprotocol.com/rfds/session-usage)
+- [OpenCode v1.18.15 ACP Usage source](https://github.com/sst/opencode/blob/v1.18.15/packages/opencode/src/acp/usage.ts)
+- [GPT-5.6 pricing and Cache Write](https://openai.com/index/gpt-5-6/)
+- [GPT-5.6 Terra/Luna July 30 price update](https://openai.com/index/advancing-the-price-performance-frontier-with-gpt-5-6/)
+- [OpenAI Fast mode pricing](https://openai.com/api-fast-mode/)

@@ -288,6 +288,7 @@ enum PendingRpc {
 
 pub(crate) struct AcpHost {
     adapter_kind: AdapterKind,
+    reported_version: Option<String>,
     host_instance_id: String,
     child: Mutex<Child>,
     stdin: Mutex<ChildStdin>,
@@ -404,6 +405,7 @@ impl AcpHost {
         let stderr = child.stderr.take().context("ACP stderr was unavailable")?;
         let host = Arc::new(Self {
             adapter_kind: frozen_runtime.adapter_kind,
+            reported_version: frozen_runtime.reported_version.clone(),
             host_instance_id,
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
@@ -1820,6 +1822,10 @@ impl AcpRuntime {
 
     pub fn adapter_kind(&self) -> AdapterKind {
         self.host.adapter_kind
+    }
+
+    pub fn reported_version(&self) -> Option<&str> {
+        self.host.reported_version.as_deref()
     }
 
     pub fn execution_epoch(&self) -> i64 {

@@ -10991,7 +10991,7 @@ async fn process_agent_run_acp_message(
         return;
     }
 
-    let usage = parse_acp_usage_message(adapter_kind, &method, &params);
+    let usage = parse_acp_usage_message(adapter_kind, runtime.reported_version(), &method, &params);
     if !usage.is_empty()
         && let Err(error) = buffer_runtime_usage(
             core,

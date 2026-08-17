@@ -233,7 +233,7 @@ ADR 准入规则判断。
 
 - **何时阅读：** 修改 Execution Evidence、Canonical Activity、classifier、Runtime Usage 或 observation coverage 时阅读。
 - **当前架构：** [Runtime Monitoring](../architecture/runtime-monitoring.md)
-- **当前合同：** [Runtime Usage Monitoring v2](../contracts/runtime-usage-monitoring-v2.md)
+- **当前合同：** [Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)
 
 <!-- adr-current-primary:begin topic=evidence-activity -->
 | ADR | Decision |

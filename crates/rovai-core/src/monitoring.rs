@@ -14,10 +14,15 @@ use rusqlite::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::{agent_profile::AdapterKind, db::Database, runtime::AgentRunExecution};
+use crate::{
+    agent_profile::AdapterKind,
+    db::Database,
+    runtime::AgentRunExecution,
+    runtime_pricing::{CodexTokenBuckets, estimate_codex_api_price, supports_codex_price_estimate},
+};
 
 const USAGE_SCHEMA_VERSION: i64 = 2;
-const USAGE_PARSER_VERSION: i64 = 3;
+const USAGE_PARSER_VERSION: i64 = 4;
 const JS_MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 const CHECKPOINT_TTL_HOURS: i64 = 72;
 const RETENTION_DAYS: i64 = 45;
@@ -30,7 +35,7 @@ const ELIGIBLE_CACHE_WRITE: i64 = 0x008;
 const ELIGIBLE_OUTPUT: i64 = 0x010;
 const ELIGIBLE_REASONING_OUTPUT: i64 = 0x020;
 const ELIGIBLE_REQUEST_CACHE_HIT: i64 = 0x040;
-const ELIGIBLE_RUNTIME_REPORTED_COST: i64 = 0x080;
+const ELIGIBLE_COST: i64 = 0x080;
 
 struct DecimalSum;
 
@@ -597,7 +602,7 @@ impl MonitoringService {
                 run.model_key,
                 run.service_tier,
                 USAGE_PARSER_VERSION,
-                eligible_mask(run.runtime_kind, run.runtime_version.as_deref()),
+                eligible_mask_for_run(&run, parse_time(&now)?),
                 now,
             ],
         )?;
@@ -685,6 +690,7 @@ impl MonitoringService {
                     changed += 1;
                 }
             }
+            project_codex_run_cost(&transaction, &collection_epoch, &batch.run)?;
         }
         transaction.commit()?;
         Ok(changed)
@@ -1197,6 +1203,95 @@ fn update_best_run_cost(
     Ok(())
 }
 
+fn project_codex_run_cost(
+    transaction: &rusqlite::Transaction<'_>,
+    collection_epoch: &str,
+    run: &RuntimeUsageRun,
+) -> Result<()> {
+    if run.runtime_kind != AdapterKind::CodexCli
+        || !codex_cache_write_supported(run.runtime_version.as_deref())
+    {
+        return Ok(());
+    }
+    let row = transaction
+        .query_row(
+            r#"
+            SELECT model_key, service_tier, enrolled_at,
+                   uncached_input_tokens, cache_read_tokens,
+                   cache_write_tokens, output_tokens,
+                   cost_kind, cost_source
+            FROM runtime_usage_run_summary
+            WHERE collection_epoch = ?1 AND agent_run_id = ?2
+            "#,
+            params![collection_epoch, run.key.agent_run_id],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<i64>>(4)?,
+                    row.get::<_, Option<i64>>(5)?,
+                    row.get::<_, Option<i64>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((
+        model_key,
+        service_tier,
+        enrolled_at,
+        Some(uncached_input),
+        Some(cache_read),
+        Some(cache_write),
+        Some(output),
+        current_kind,
+        current_source,
+    )) = row
+    else {
+        return Ok(());
+    };
+    if current_kind.is_some()
+        && (current_kind.as_deref() != Some("price_estimated")
+            || current_source.as_deref() != Some("price_catalog"))
+    {
+        return Ok(());
+    }
+    let Some(estimate) = estimate_codex_api_price(
+        model_key.as_deref(),
+        service_tier.as_deref(),
+        parse_time(&enrolled_at)?,
+        CodexTokenBuckets {
+            uncached_input,
+            cache_read,
+            cache_write,
+            output,
+        },
+    ) else {
+        return Ok(());
+    };
+    transaction.execute(
+        r#"
+        UPDATE runtime_usage_run_summary
+        SET cost_amount_decimal = ?3, cost_currency = 'USD',
+            cost_kind = 'price_estimated', cost_source = 'price_catalog',
+            pricing_catalog_version = ?4,
+            eligible_mask = eligible_mask | ?5
+        WHERE collection_epoch = ?1 AND agent_run_id = ?2
+        "#,
+        params![
+            collection_epoch,
+            run.key.agent_run_id,
+            estimate.amount_decimal,
+            estimate.catalog_version,
+            ELIGIBLE_COST,
+        ],
+    )?;
+    Ok(())
+}
+
 fn update_hourly(
     transaction: &rusqlite::Transaction<'_>,
     collection_epoch: &str,
@@ -1482,6 +1577,21 @@ fn validate_usage(usage: &ParsedRuntimeUsage) -> Result<()> {
     Ok(())
 }
 
+fn eligible_mask_for_run(run: &RuntimeUsageRun, enrolled_at: DateTime<Utc>) -> i64 {
+    let mut mask = eligible_mask(run.runtime_kind, run.runtime_version.as_deref());
+    if run.runtime_kind == AdapterKind::CodexCli
+        && codex_cache_write_supported(run.runtime_version.as_deref())
+        && supports_codex_price_estimate(
+            run.model_key.as_deref(),
+            run.service_tier.as_deref(),
+            enrolled_at,
+        )
+    {
+        mask |= ELIGIBLE_COST;
+    }
+    mask
+}
+
 fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
     match runtime {
         AdapterKind::CodexCli => {
@@ -1503,7 +1613,7 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
                 | ELIGIBLE_OUTPUT
                 | ELIGIBLE_REASONING_OUTPUT
                 | ELIGIBLE_REQUEST_CACHE_HIT
-                | ELIGIBLE_RUNTIME_REPORTED_COST
+                | ELIGIBLE_COST
         }
         AdapterKind::CopilotCli => {
             ELIGIBLE_PROMPT_INPUT_TOTAL
@@ -1513,21 +1623,23 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
                 | ELIGIBLE_OUTPUT
                 | ELIGIBLE_REASONING_OUTPUT
                 | ELIGIBLE_REQUEST_CACHE_HIT
-                | ELIGIBLE_RUNTIME_REPORTED_COST
+                | ELIGIBLE_COST
         }
         AdapterKind::OpencodeCli => {
-            let mut mask = ELIGIBLE_RUNTIME_REPORTED_COST;
             if reported_version_at_least(runtime_version, [1, 18, 15]) {
-                mask |= ELIGIBLE_UNCACHED_INPUT
+                ELIGIBLE_PROMPT_INPUT_TOTAL
+                    | ELIGIBLE_UNCACHED_INPUT
                     | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_CACHE_WRITE
                     | ELIGIBLE_OUTPUT
                     | ELIGIBLE_REASONING_OUTPUT
-                    | ELIGIBLE_REQUEST_CACHE_HIT;
+                    | ELIGIBLE_REQUEST_CACHE_HIT
+            } else {
+                0
             }
-            mask
         }
         AdapterKind::CodebuddyCli => {
-            let mut mask = ELIGIBLE_RUNTIME_REPORTED_COST;
+            let mut mask = ELIGIBLE_COST;
             if reported_version_at_least(runtime_version, [2, 133, 1]) {
                 mask |= ELIGIBLE_PROMPT_INPUT_TOTAL
                     | ELIGIBLE_UNCACHED_INPUT
@@ -1539,7 +1651,7 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
             mask
         }
         AdapterKind::QwenCode => {
-            let mut mask = ELIGIBLE_RUNTIME_REPORTED_COST;
+            let mut mask = ELIGIBLE_COST;
             if reported_version_at_least(runtime_version, [0, 21, 5]) {
                 mask |= ELIGIBLE_PROMPT_INPUT_TOTAL
                     | ELIGIBLE_CACHE_READ
@@ -1549,9 +1661,7 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
             }
             mask
         }
-        AdapterKind::KiroCli | AdapterKind::QoderCli | AdapterKind::TraeCnCli => {
-            ELIGIBLE_RUNTIME_REPORTED_COST
-        }
+        AdapterKind::KiroCli | AdapterKind::QoderCli | AdapterKind::TraeCnCli => ELIGIBLE_COST,
         AdapterKind::AntigravityApp => 0,
     }
 }
@@ -1681,7 +1791,7 @@ fn load_coverage(connection: &Connection, scope: &Scope) -> Result<Value> {
         output = ELIGIBLE_OUTPUT,
         reasoning = ELIGIBLE_REASONING_OUTPUT,
         hit = ELIGIBLE_REQUEST_CACHE_HIT,
-        cost = ELIGIBLE_RUNTIME_REPORTED_COST,
+        cost = ELIGIBLE_COST,
     );
     let mut query_params = scope.params.clone();
     if let Some(kind) = &scope.cost_kind {
@@ -2397,7 +2507,7 @@ fn cost_quality_rank(value: &str) -> u8 {
     match value {
         "runtime_reported" => 4,
         "runtime_estimate" => 3,
-        "price_estimated" => 2,
+        "price_estimated" | "price_catalog" => 2,
         "tokenizer_price_estimated" => 1,
         _ => 0,
     }
@@ -2451,6 +2561,18 @@ fn value_at_any<'a>(value: &'a Value, pointers: &[&str]) -> Option<&'a Value> {
 
 fn integer_at_any(value: &Value, pointers: &[&str]) -> Option<i64> {
     safe_integer(value_at_any(value, pointers))
+}
+
+fn integer_at_any_or_omitted_zero(
+    value: &Value,
+    pointer: &str,
+    omitted_is_zero: bool,
+) -> Option<i64> {
+    match value.pointer(pointer) {
+        Some(reported) => safe_integer(Some(reported)),
+        None if omitted_is_zero => Some(0),
+        None => None,
+    }
 }
 
 fn string_at_any(value: &Value, pointers: &[&str]) -> Option<String> {
@@ -2530,6 +2652,7 @@ pub fn codex_usage_source_identity(params: &Value) -> Result<String> {
 
 pub fn parse_acp_usage_message(
     adapter_kind: AdapterKind,
+    runtime_version: Option<&str>,
     method: &str,
     params: &Value,
 ) -> Vec<ParsedRuntimeUsage> {
@@ -2605,15 +2728,22 @@ pub fn parse_acp_usage_message(
             }
         }
 
-        let currency = string_at_any(update, &["/cost/currency"]);
-        let cost = currency.as_deref().and_then(|currency| {
-            cost_from_value(
-                value_at_any(update, &["/cost/amount"]),
-                currency,
-                "runtime_reported",
-                "session",
-            )
-        });
+        let cost = if adapter_kind == AdapterKind::OpencodeCli {
+            // OpenCode reports totalSessionCost(messages) here, not the current
+            // Turn/Run cost. A Run projection requires a Native Session-scoped
+            // baseline, which the minimal Usage model intentionally does not own.
+            None
+        } else {
+            let currency = string_at_any(update, &["/cost/currency"]);
+            currency.as_deref().and_then(|currency| {
+                cost_from_value(
+                    value_at_any(update, &["/cost/amount"]),
+                    currency,
+                    "runtime_reported",
+                    "session",
+                )
+            })
+        };
         if let Some(cost) = cost {
             observations.push(ParsedRuntimeUsage {
                 identity_suffix: "usage_update".to_string(),
@@ -2673,8 +2803,27 @@ pub fn parse_acp_usage_message(
             },
         ),
         AdapterKind::OpencodeCli => {
+            let input = integer_at_any(usage, &["/inputTokens"]);
             let visible_output = integer_at_any(usage, &["/outputTokens"]);
-            let reasoning = integer_at_any(usage, &["/thoughtTokens"]);
+            let omitted_optional_bucket_is_zero =
+                reported_version_at_least(runtime_version, [1, 18, 15])
+                    && input.is_some()
+                    && visible_output.is_some();
+            let reasoning = integer_at_any_or_omitted_zero(
+                usage,
+                "/thoughtTokens",
+                omitted_optional_bucket_is_zero,
+            );
+            let cache_read = integer_at_any_or_omitted_zero(
+                usage,
+                "/cachedReadTokens",
+                omitted_optional_bucket_is_zero,
+            );
+            let cache_write = integer_at_any_or_omitted_zero(
+                usage,
+                "/cachedWriteTokens",
+                omitted_optional_bucket_is_zero,
+            );
             let output = match (visible_output, reasoning) {
                 (Some(visible), Some(reasoning)) => visible
                     .checked_add(reasoning)
@@ -2686,12 +2835,12 @@ pub fn parse_acp_usage_message(
                 "opencode-acp-terminal-usage-v1",
                 RuntimeInputSemantics::ExclusiveBuckets,
                 RuntimeUsageFields {
-                    input_tokens: integer_at_any(usage, &["/inputTokens"]),
+                    input_tokens: input,
                     uncached_input_tokens: None,
                     output_tokens: output,
                     reasoning_output_tokens: reasoning,
-                    cache_read_input_tokens: integer_at_any(usage, &["/cachedReadTokens"]),
-                    cache_write_input_tokens: integer_at_any(usage, &["/cachedWriteTokens"]),
+                    cache_read_input_tokens: cache_read,
+                    cache_write_input_tokens: cache_write,
                     context_used_tokens: None,
                     context_size_tokens: None,
                 },
@@ -2699,15 +2848,19 @@ pub fn parse_acp_usage_message(
         }
         _ => return Vec::new(),
     };
-    let currency = string_at_any(usage, &["/cost/currency"]);
-    let cost = currency.as_deref().and_then(|currency| {
-        cost_from_value(
-            value_at_any(usage, &["/cost/amount"]),
-            currency,
-            "runtime_reported",
-            "turn",
-        )
-    });
+    let cost = if adapter_kind == AdapterKind::OpencodeCli {
+        None
+    } else {
+        let currency = string_at_any(usage, &["/cost/currency"]);
+        currency.as_deref().and_then(|currency| {
+            cost_from_value(
+                value_at_any(usage, &["/cost/amount"]),
+                currency,
+                "runtime_reported",
+                "turn",
+            )
+        })
+    };
     if fields.is_empty() && cost.is_none() {
         return Vec::new();
     }
@@ -3042,6 +3195,95 @@ mod tests {
     }
 
     #[test]
+    fn codex_complete_buckets_project_versioned_public_price_without_double_charging_reasoning() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-codex-price-projection-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let mut database = Database::open(&directory).unwrap();
+        let (epoch, _) = collection_identity(&database).unwrap();
+        let enrolled_at = "2026-08-17T00:00:00Z";
+        let run = RuntimeUsageRun {
+            key: UsageRunKey {
+                agent_run_id: "codex-price-run".to_string(),
+                execution_epoch: 1,
+            },
+            runtime_kind: AdapterKind::CodexCli,
+            runtime_version: Some("codex-cli 0.147.0".to_string()),
+            provider_key: Some("openai".to_string()),
+            model_key: Some("gpt-5.6-terra".to_string()),
+            service_tier: None,
+        };
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO runtime_usage_run_summary(
+                    collection_epoch, agent_run_id, runtime_kind, runtime_version,
+                    provider_key, model_key, parser_version, eligible_mask,
+                    input_semantics, enrolled_at
+                ) VALUES(?1, ?2, 'codex-cli', ?3, 'openai', ?4, ?5, ?6, 'unknown', ?7)
+                "#,
+                params![
+                    epoch,
+                    run.key.agent_run_id,
+                    run.runtime_version,
+                    run.model_key,
+                    USAGE_PARSER_VERSION,
+                    eligible_mask_for_run(&run, parse_time(enrolled_at).unwrap()),
+                    enrolled_at,
+                ],
+            )
+            .unwrap();
+        let fixture: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/runtime-usage/codex.json"))
+                .unwrap();
+        let parsed =
+            parse_codex_usage_message(fixture["method"].as_str().unwrap(), &fixture["params"])
+                .remove(0);
+        MonitoringService::record_usage_batches(
+            &mut database,
+            &[RuntimeUsageFlushBatch {
+                run: run.clone(),
+                records: vec![BufferedUsageRecord {
+                    key: BufferedUsageKey::new(&run.key, &parsed),
+                    usage: parsed,
+                    source_identities: vec!["codex-price-source".to_string()],
+                }],
+                pending_since: Instant::now(),
+            }],
+        )
+        .unwrap();
+        let cost: (String, String, String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT cost_amount_decimal, cost_currency, cost_kind, cost_source,
+                       pricing_catalog_version
+                FROM runtime_usage_run_summary WHERE agent_run_id = ?1
+                "#,
+                [&run.key.agent_run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(cost.0, "0.000533");
+        assert_eq!(cost.1, "USD");
+        assert_eq!(cost.2, "price_estimated");
+        assert_eq!(cost.3, "price_catalog");
+        assert_eq!(cost.4, "openai-api-standard-2026-07-30-gpt-5.6-terra");
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
     fn runtime_parsers_emit_sparse_usage_without_antigravity_inference() {
         let codex: Value =
             serde_json::from_str(include_str!("../tests/fixtures/runtime-usage/codex.json"))
@@ -3065,6 +3307,7 @@ mod tests {
                 .unwrap();
         let copilot_usage = parse_acp_usage_message(
             AdapterKind::CopilotCli,
+            None,
             copilot["method"].as_str().unwrap(),
             &copilot["params"],
         );
@@ -3095,6 +3338,7 @@ mod tests {
             assert!(
                 parse_acp_usage_message(
                     runtime,
+                    None,
                     fixture["method"].as_str().unwrap(),
                     &fixture["params"],
                 )
@@ -3103,24 +3347,71 @@ mod tests {
             );
         }
 
+        let opencode_cache_write: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/runtime-usage/opencode-cache-write.json"
+        ))
+        .unwrap();
+        let opencode_usage = parse_acp_usage_message(
+            AdapterKind::OpencodeCli,
+            opencode_cache_write["runtimeVersion"].as_str(),
+            opencode_cache_write["method"].as_str().unwrap(),
+            &opencode_cache_write["params"],
+        );
+        assert_eq!(opencode_usage.len(), 1);
+        assert_eq!(opencode_usage[0].fields.input_tokens, Some(100));
+        assert_eq!(opencode_usage[0].fields.cache_read_input_tokens, Some(11));
+        assert_eq!(opencode_usage[0].fields.cache_write_input_tokens, Some(13));
+        assert_eq!(opencode_usage[0].fields.output_tokens, Some(47));
+        assert_eq!(opencode_usage[0].fields.reasoning_output_tokens, Some(7));
+        let opencode_normalized = normalize_usage(&opencode_usage[0]).unwrap();
+        assert_eq!(opencode_normalized.uncached_input_tokens, Some(100));
+        assert_eq!(opencode_normalized.cache_read_tokens, Some(11));
+        assert_eq!(opencode_normalized.cache_write_tokens, Some(13));
+        assert_eq!(opencode_normalized.prompt_input_total_tokens, Some(124));
+        assert_eq!(opencode_normalized.output_tokens, Some(47));
+        assert_eq!(opencode_normalized.reasoning_output_tokens, Some(7));
+
         let opencode: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/runtime-usage/opencode.json"
         ))
         .unwrap();
         let opencode_terminal = &opencode["messages"][1];
-        let opencode_usage = parse_acp_usage_message(
+        let omitted_zero_usage = parse_acp_usage_message(
             AdapterKind::OpencodeCli,
+            opencode["runtimeVersion"].as_str(),
             opencode_terminal["method"].as_str().unwrap(),
             &opencode_terminal["params"],
         );
-        assert_eq!(opencode_usage.len(), 1);
-        assert_eq!(opencode_usage[0].fields.input_tokens, Some(11793));
-        assert_eq!(opencode_usage[0].fields.cache_read_input_tokens, Some(1024));
-        assert_eq!(opencode_usage[0].fields.output_tokens, Some(42));
-        assert_eq!(opencode_usage[0].fields.reasoning_output_tokens, Some(31));
-        let opencode_normalized = normalize_usage(&opencode_usage[0]).unwrap();
-        assert_eq!(opencode_normalized.uncached_input_tokens, Some(11793));
-        assert_eq!(opencode_normalized.prompt_input_total_tokens, None);
+        assert_eq!(
+            omitted_zero_usage[0].fields.cache_write_input_tokens,
+            Some(0),
+            "verified OpenCode versions omit optional zero buckets"
+        );
+        assert_eq!(
+            normalize_usage(&omitted_zero_usage[0])
+                .unwrap()
+                .prompt_input_total_tokens,
+            Some(12817)
+        );
+        let mut malformed_optional_bucket = opencode_terminal.clone();
+        malformed_optional_bucket["params"]["result"]["usage"]["cachedWriteTokens"] =
+            json!("invalid");
+        let malformed_usage = parse_acp_usage_message(
+            AdapterKind::OpencodeCli,
+            opencode["runtimeVersion"].as_str(),
+            malformed_optional_bucket["method"].as_str().unwrap(),
+            &malformed_optional_bucket["params"],
+        );
+        assert_eq!(
+            malformed_usage[0].fields.cache_write_input_tokens, None,
+            "a malformed reported bucket must not be normalized as omitted zero"
+        );
+        assert_eq!(
+            normalize_usage(&malformed_usage[0])
+                .unwrap()
+                .prompt_input_total_tokens,
+            None
+        );
 
         let codebuddy: Value = serde_json::from_str(include_str!(
             "../tests/fixtures/runtime-usage/codebuddy.json"
@@ -3132,6 +3423,7 @@ mod tests {
             .map(|message| {
                 parse_acp_usage_message(
                     AdapterKind::CodebuddyCli,
+                    codebuddy["runtimeVersion"].as_str(),
                     message["method"].as_str().unwrap(),
                     &message["params"],
                 )
@@ -3202,6 +3494,7 @@ mod tests {
         let qwen_message = &qwen["messages"][0];
         let qwen_usage = parse_acp_usage_message(
             AdapterKind::QwenCode,
+            qwen["runtimeVersion"].as_str(),
             qwen_message["method"].as_str().unwrap(),
             &qwen_message["params"],
         );
@@ -3212,16 +3505,19 @@ mod tests {
         assert_eq!(qwen_usage[0].fields.cache_read_input_tokens, Some(0));
         assert_eq!(qwen_usage[0].fields.cache_write_input_tokens, None);
 
-        for (runtime, version, expected, absent) in [
+        for (runtime, version, expected, absent, unversioned) in [
             (
                 AdapterKind::OpencodeCli,
                 opencode["runtimeVersion"].as_str().unwrap(),
-                ELIGIBLE_UNCACHED_INPUT
+                ELIGIBLE_PROMPT_INPUT_TOTAL
+                    | ELIGIBLE_UNCACHED_INPUT
                     | ELIGIBLE_CACHE_READ
+                    | ELIGIBLE_CACHE_WRITE
                     | ELIGIBLE_OUTPUT
                     | ELIGIBLE_REASONING_OUTPUT
                     | ELIGIBLE_REQUEST_CACHE_HIT,
-                ELIGIBLE_PROMPT_INPUT_TOTAL | ELIGIBLE_CACHE_WRITE,
+                ELIGIBLE_COST,
+                0,
             ),
             (
                 AdapterKind::CodebuddyCli,
@@ -3233,6 +3529,7 @@ mod tests {
                     | ELIGIBLE_REASONING_OUTPUT
                     | ELIGIBLE_REQUEST_CACHE_HIT,
                 ELIGIBLE_CACHE_WRITE,
+                ELIGIBLE_COST,
             ),
             (
                 AdapterKind::QwenCode,
@@ -3243,6 +3540,7 @@ mod tests {
                     | ELIGIBLE_REASONING_OUTPUT
                     | ELIGIBLE_REQUEST_CACHE_HIT,
                 ELIGIBLE_UNCACHED_INPUT | ELIGIBLE_CACHE_WRITE,
+                ELIGIBLE_COST,
             ),
         ] {
             let mask = eligible_mask(runtime, Some(version));
@@ -3250,7 +3548,7 @@ mod tests {
             assert_eq!(mask & absent, 0);
             assert_eq!(
                 eligible_mask(runtime, None),
-                ELIGIBLE_RUNTIME_REPORTED_COST,
+                unversioned,
                 "unversioned private ACP Usage must not expand eligibility"
             );
         }
@@ -3261,8 +3559,18 @@ mod tests {
                 "cost": { "amount": "1.25", "currency": "USD" }
             }
         });
+        let acp_cost_usage = parse_acp_usage_message(
+            AdapterKind::OpencodeCli,
+            Some("1.18.15"),
+            "session/update",
+            &acp_cost,
+        );
+        assert!(
+            acp_cost_usage.is_empty(),
+            "OpenCode totalSessionCost must not be projected as Run cost"
+        );
         let acp_cost_usage =
-            parse_acp_usage_message(AdapterKind::OpencodeCli, "session/update", &acp_cost);
+            parse_acp_usage_message(AdapterKind::CopilotCli, None, "session/update", &acp_cost);
         assert_eq!(
             acp_cost_usage[0].counter_mode,
             RuntimeUsageCounterMode::Gauge
@@ -3272,7 +3580,8 @@ mod tests {
         missing_currency["update"]["cost"] = json!({ "amount": "1.25" });
         assert!(
             parse_acp_usage_message(
-                AdapterKind::OpencodeCli,
+                AdapterKind::CopilotCli,
+                None,
                 "session/update",
                 &missing_currency,
             )

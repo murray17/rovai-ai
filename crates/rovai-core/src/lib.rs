@@ -54,5 +54,7 @@ pub mod skill_projection;
 pub mod team_tool;
 pub mod team_tool_catalog;
 
+mod runtime_pricing;
+
 #[cfg(test)]
 pub(crate) mod test_support;

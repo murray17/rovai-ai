@@ -25,6 +25,32 @@ Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code 与 TRAE CLI CN
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
+### 2026-08-17 OpenCode Usage 与 Codex Cost Projection
+
+OpenCode `1.18.15` 的官方 `buildUsage()` 把 `inputTokens` 定义为 non-cached Input，并仅在正值时输出
+`thoughtTokens`、`cachedReadTokens`、`cachedWriteTokens`。同 tag 的 ACP service 成功 `end_turn` Fixture
+返回 Input 100、visible Output 40、Thought 7、Cache Read 11、Cache Write 13；Rovai 因而对该版本声明
+Prompt Total、Uncached、Read、Write、Output、Reasoning 和 request cache hit Eligibility，并把省略的三个
+可选桶归一为零。字段畸形、版本未知或核心 Input/Output 不完整时仍保持未知。
+
+本机隔离探针进一步确认 Provider 覆盖不能从上游合同反推：
+
+| OpenCode/model | 成功 terminal Usage | 结论 |
+| --- | --- | --- |
+| `1.18.15` / `opencode/hy3-free` | Input 65193、Output 3、Thought 54、Cache Read 1728；无 Cache Write | 省略的 Write 按已验证 dialect 为 0；不能宣称 Provider 产生过正 Cache Write |
+| `1.18.15` / `deepseek/deepseek-v4-flash` | Input 52448、Output 2；无 Thought/Read/Write | DeepSeek 链路成功但未回传 Cache 分类；不能从 cache miss 或长 Prompt 推断 Write |
+
+DeepSeek 探针只在子进程环境复用 Qwen 本机配置中的 secret，未回显、未写仓库、未改变日常 Runtime 配置。
+由于本机没有独立 Anthropic API credential，本轮没有获得 Provider 实测 `cachedWriteTokens > 0`；正值回归
+明确标记为同版本 OpenCode 官方成功 Turn Fixture，不冒充本机 Provider 记录。OpenCode
+`usage_update.cost` 是累计 Session Cost，不进入 Run cost。
+
+Codex CLI `>= 0.145.0` 已有 Input、Cache Read、Cache Write、Output 四桶。当前实现只在模型与 effective-date
+价格目录可辨识时生成 `price_estimated / price_catalog / USD` 的 OpenAI API public-price equivalent；
+Reasoning 是 Output 子集，不重复收费。它不是 ChatGPT/Codex 订阅实际账单，不包含 Codex Credits、未知
+Fast/Enterprise rate、long-context multiplier、regional uplift 或 Tool fee。字段级边界见
+[Runtime Usage Monitoring v3](contracts/runtime-usage-monitoring-v3.md)。
+
 ### TRAE CLI CN v0.83 准入记录
 
 2026-08-15 在临时工作目录直接启动 `traecli acp serve`，实测版本为 `0.120.52`、build commit

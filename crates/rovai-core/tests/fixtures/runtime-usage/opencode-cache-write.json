@@ -1,0 +1,28 @@
+{
+  "runtimeVersion": "1.18.15",
+  "provenance": {
+    "kind": "official_upstream_success_test",
+    "repository": "sst/opencode",
+    "tag": "v1.18.15",
+    "commit": "d7b115f623760e68a4749d16508a9eca350f246f",
+    "sourcePath": "packages/opencode/test/acp/service-session.test.ts",
+    "note": "OpenCode's successful end_turn ACP service fixture; local DeepSeek and OpenCode Zen probes did not report a positive cache-write bucket."
+  },
+  "method": "rovai/acp_prompt_completed",
+  "params": {
+    "sessionId": "opencode-session-cache-write-fixture",
+    "promptId": "00000000-0000-4000-8000-000000000001",
+    "result": {
+      "stopReason": "end_turn",
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 40,
+        "thoughtTokens": 7,
+        "cachedReadTokens": 11,
+        "cachedWriteTokens": 13,
+        "totalTokens": 171
+      },
+      "_meta": {}
+    }
+  }
+}
