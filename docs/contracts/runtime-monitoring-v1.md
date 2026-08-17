@@ -517,6 +517,14 @@ Execution Evidence admission 只在 `firstVisibleActivityAt IS NULL` 时立即�
 shutdown 强制 Flush，其中 Run terminal/Host exit 必须从带索引的 Evidence key 精确对齐最终计数。Snapshot
 只读 Enrollment 标量，不扫描 Evidence。
 
+同一 `(agentRunId, executionEpoch)` 的连续 `agent.text.delta`、Thought/Reasoning Delta、Plan Delta、Command
+Output Delta 与 File Change Update 可以共享一个 SQLite transaction，但不得合并、删除或重排 Evidence 行。
+每条源事件仍须拥有独立 Evidence ID、连续 sequence、原 normalized payload 和提交后 Renderer Event。批次最多
+等待 25ms、包含 32 行或 64KiB normalized inline payload；任一 Activity/Tool/Approval、Run terminal、Host exit
+或 shutdown 边界必须先结束当前批次，并按原顺序立即处理；并发取消/Fence 必须在批次 transaction 内拒绝整批。
+超过 inline/batch 上限的事件回退到单条 Evidence 路径；不得为了批处理绕过 Managed Blob、去重、Fence 或
+durable-before-visible 约束。
+
 ## Errors and privacy
 
 Closed errors 至少包括：

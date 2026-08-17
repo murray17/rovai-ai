@@ -144,6 +144,10 @@ Core currently owns one Database Mutex. Monitoring therefore keeps database crit
 - Execution Evidence keeps first-visible activity durable in the admitting transaction, but only while that scalar is
   still `NULL`; Evidence count increments are coalesced in memory, flushed on the same four-second cadence, and replaced
   with an exact indexed count at terminal/Host-exit boundaries;
+- consecutive high-frequency Runtime Delta Evidence for one `(agentRunId, executionEpoch)` is normalized before taking
+  the Database Mutex, then micro-batched for at most 25ms, 32 rows and 64KiB into one transaction. Every source Delta
+  retains its own Evidence ID, sequence, payload and Renderer event; Activity, Tool, Approval, terminal, Host-exit and
+  shutdown boundaries stop the batch, while a concurrent cancellation/Fence atomically rejects the pending batch;
 - enrollment projects Usage capability booleans, first-visible activity and Evidence counts so snapshot assembly does
   not parse per-Run capability JSON or scan immutable Evidence;
 - trend queries read `monitoring_run_rollup_hourly`; lifecycle/P95 and Usage/Context return scalar aggregates, while

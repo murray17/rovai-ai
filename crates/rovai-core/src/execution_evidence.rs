@@ -15,6 +15,7 @@ use crate::{
 const INLINE_PAYLOAD_LIMIT_BYTES: usize = 16 * 1024;
 const PREVIEW_STRING_LIMIT_CHARS: usize = 4_000;
 const PREVIEW_ARRAY_LIMIT: usize = 24;
+pub const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +39,28 @@ pub struct AgentRunExecutionEvidence {
 pub struct RecordedExecutionEvidence {
     pub evidence: AgentRunExecutionEvidence,
     pub inserted: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PreparedRuntimeEvidence {
+    event_type: String,
+    kind: String,
+    phase: String,
+    payload: Value,
+    payload_json: String,
+    content_byte_count: i64,
+    occurred_at: String,
+}
+
+impl PreparedRuntimeEvidence {
+    pub fn is_inline_delta_batchable(&self) -> bool {
+        ExecutionEvidenceService::is_batchable_runtime_delta_event(&self.event_type)
+            && self.content_byte_count <= INLINE_PAYLOAD_LIMIT_BYTES as i64
+    }
+
+    pub fn content_byte_count(&self) -> usize {
+        usize::try_from(self.content_byte_count).unwrap_or(usize::MAX)
+    }
 }
 
 impl RecordedExecutionEvidence {
@@ -72,6 +95,183 @@ impl ExecutionEvidenceService {
                 | "activity.started"
                 | "activity.completed"
         )
+    }
+
+    pub fn is_batchable_runtime_delta_event(event_type: &str) -> bool {
+        matches!(
+            event_type,
+            "agent.reasoning.summary.delta"
+                | "agent.thought.delta"
+                | "agent.text.delta"
+                | "runtime.plan.delta"
+                | "command.output.delta"
+                | "file.change.updated"
+        )
+    }
+
+    pub fn prepare_runtime_event(
+        &self,
+        event_type: &str,
+        payload: &Value,
+    ) -> Result<Option<PreparedRuntimeEvidence>> {
+        let Some((kind, phase)) = evidence_classification(event_type, payload) else {
+            return Ok(None);
+        };
+        let payload = normalize_public_payload(event_type, payload);
+        let encoded = serde_json::to_vec(&payload)?;
+        Ok(Some(PreparedRuntimeEvidence {
+            event_type: event_type.to_string(),
+            kind: kind.to_string(),
+            phase: phase.to_string(),
+            payload_json: serde_json::to_string(&payload)?,
+            payload,
+            content_byte_count: i64::try_from(encoded.len())
+                .context("Execution Evidence payload size overflow")?,
+            occurred_at: chrono::Utc::now().to_rfc3339(),
+        }))
+    }
+
+    pub fn record_prepared_runtime_event_batch(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        prepared: Vec<PreparedRuntimeEvidence>,
+    ) -> Result<Vec<Option<RecordedExecutionEvidence>>> {
+        if prepared.is_empty() {
+            return Ok(Vec::new());
+        }
+        let total_bytes = prepared.iter().try_fold(0_usize, |total, evidence| {
+            if !evidence.is_inline_delta_batchable() {
+                anyhow::bail!("Execution Evidence batch contains a non-inline Delta");
+            }
+            total
+                .checked_add(evidence.content_byte_count())
+                .context("Execution Evidence batch size overflow")
+        })?;
+        if total_bytes > RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES {
+            anyhow::bail!(
+                "Execution Evidence batch exceeds {} bytes",
+                RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES
+            );
+        }
+
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let still_current: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM agent_run
+                WHERE id = ?1
+                  AND execution_epoch = ?2
+                  AND status IN ('running', 'waiting')
+                  AND cancel_requested_at IS NULL
+            )
+            "#,
+            params![agent_run_id, execution_epoch],
+            |row| row.get(0),
+        )?;
+        if !still_current {
+            transaction.commit()?;
+            return Ok(std::iter::repeat_with(|| None)
+                .take(prepared.len())
+                .collect());
+        }
+
+        let first_sequence: i64 = transaction.query_row(
+            r#"
+            SELECT COALESCE(MAX(sequence), 0) + 1
+            FROM agent_run_execution_evidence
+            WHERE agent_run_id = ?1
+            "#,
+            [agent_run_id],
+            |row| row.get(0),
+        )?;
+        let first_occurred_at = prepared
+            .first()
+            .map(|evidence| evidence.occurred_at.clone())
+            .context("Execution Evidence batch is unexpectedly empty")?;
+        let mut recorded = Vec::with_capacity(prepared.len());
+        for (index, evidence) in prepared.into_iter().enumerate() {
+            let sequence = first_sequence
+                .checked_add(i64::try_from(index).context("Evidence batch index overflow")?)
+                .context("Execution Evidence sequence overflow")?;
+            let id = Uuid::new_v4().to_string();
+            transaction.execute(
+                r#"
+                INSERT INTO agent_run_execution_evidence(
+                    id, agent_run_id, execution_epoch, sequence,
+                    event_type, kind, phase, source_event_key,
+                    payload_preview_json, content_blob_id,
+                    content_byte_count, is_truncated, occurred_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL,
+                    ?8, NULL, ?9, 0, ?10
+                )
+                "#,
+                params![
+                    id,
+                    agent_run_id,
+                    execution_epoch,
+                    sequence,
+                    evidence.event_type,
+                    evidence.kind,
+                    evidence.phase,
+                    evidence.payload_json,
+                    evidence.content_byte_count,
+                    evidence.occurred_at,
+                ],
+            )?;
+            let facts = canonical_activity::classify_evidence(
+                agent_run_id,
+                execution_epoch,
+                &id,
+                &evidence.event_type,
+                &evidence.kind,
+                &evidence.phase,
+                &evidence.payload,
+            );
+            let canonical = upsert_canonical_activity(
+                &transaction,
+                agent_run_id,
+                execution_epoch,
+                sequence,
+                &id,
+                &evidence.occurred_at,
+                &facts,
+            )?;
+            recorded.push(Some(RecordedExecutionEvidence {
+                evidence: AgentRunExecutionEvidence {
+                    id,
+                    agent_run_id: agent_run_id.to_string(),
+                    execution_epoch,
+                    sequence,
+                    event_type: evidence.event_type,
+                    kind: evidence.kind,
+                    phase: evidence.phase,
+                    payload: evidence.payload,
+                    content_blob_id: None,
+                    content_byte_count: evidence.content_byte_count,
+                    is_truncated: false,
+                    occurred_at: evidence.occurred_at,
+                    canonical,
+                },
+                inserted: true,
+            }));
+        }
+        transaction.execute(
+            r#"
+            UPDATE monitoring_run_enrollment
+            SET first_visible_activity_at = ?3
+            WHERE agent_run_id = ?1 AND execution_epoch = ?2
+              AND first_visible_activity_at IS NULL
+            "#,
+            params![agent_run_id, execution_epoch, first_occurred_at],
+        )?;
+        transaction.commit()?;
+        Ok(recorded)
     }
 
     pub fn record_runtime_event(
@@ -1120,6 +1320,76 @@ mod tests {
             .unwrap();
         assert_eq!(canonical_count, 1);
 
+        let prepared_batch = [
+            (
+                "agent.text.delta",
+                json!({"itemId": "message-1", "delta": "hello "}),
+            ),
+            (
+                "command.output.delta",
+                json!({"itemId": "command-1", "delta": "line 1\n"}),
+            ),
+            (
+                "command.output.delta",
+                json!({"itemId": "command-1", "delta": "line 2\n"}),
+            ),
+        ]
+        .into_iter()
+        .map(|(event_type, payload)| {
+            ExecutionEvidenceService
+                .prepare_runtime_event(event_type, &payload)
+                .unwrap()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+        assert!(
+            prepared_batch
+                .iter()
+                .all(PreparedRuntimeEvidence::is_inline_delta_batchable)
+        );
+        let batch = ExecutionEvidenceService
+            .record_prepared_runtime_event_batch(
+                &mut database,
+                &run_id,
+                execution_epoch,
+                prepared_batch,
+            )
+            .unwrap()
+            .into_iter()
+            .map(Option::unwrap)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            batch
+                .iter()
+                .map(|evidence| evidence.sequence)
+                .collect::<Vec<_>>(),
+            vec![2, 3, 4]
+        );
+        assert_eq!(batch[0].payload["delta"], "hello ");
+        assert!(batch[0].canonical.is_none());
+        let command_projection = batch[2]
+            .canonical
+            .as_ref()
+            .expect("Command Delta batch must retain its Canonical Projection");
+        assert_eq!(command_projection.last_evidence_sequence, 4);
+        assert_eq!(command_projection.revision, 3);
+        assert_eq!(command_projection.source_evidence_ids.len(), 3);
+
+        let oversized = ExecutionEvidenceService
+            .prepare_runtime_event(
+                "agent.text.delta",
+                &json!({"itemId": "message-2", "delta": "x".repeat(20_000)}),
+            )
+            .unwrap()
+            .unwrap();
+        assert!(!oversized.is_inline_delta_batchable());
+        assert!(ExecutionEvidenceService::is_batchable_runtime_delta_event(
+            "file.change.updated"
+        ));
+        assert!(!ExecutionEvidenceService::is_batchable_runtime_delta_event(
+            "runtime.action"
+        ));
+
         let started_tool = ExecutionEvidenceService
             .record_builtin_tool_started(
                 &mut database,
@@ -1142,7 +1412,7 @@ mod tests {
             .unwrap()
             .expect("a Built-in Tool start must be durable before execution");
         assert!(started_tool.inserted);
-        assert_eq!(started_tool.sequence, 2);
+        assert_eq!(started_tool.sequence, 5);
 
         let materialized = ContextService
             .materialize(
@@ -1199,6 +1469,27 @@ mod tests {
             )
             .unwrap();
         assert!(late.is_none());
+        let fenced_batch = ["late one", "late two"]
+            .into_iter()
+            .map(|delta| {
+                ExecutionEvidenceService
+                    .prepare_runtime_event(
+                        "agent.text.delta",
+                        &json!({"itemId": "message-3", "delta": delta}),
+                    )
+                    .unwrap()
+                    .unwrap()
+            })
+            .collect();
+        let fenced_batch = ExecutionEvidenceService
+            .record_prepared_runtime_event_batch(
+                &mut database,
+                &run_id,
+                execution_epoch,
+                fenced_batch,
+            )
+            .unwrap();
+        assert!(fenced_batch.iter().all(Option::is_none));
 
         let failed_tool_result = json!({
             "toolCallId": "team-tool-call-1",
@@ -1222,7 +1513,7 @@ mod tests {
             .unwrap()
             .expect("terminal Team Tool result must survive the Turn fence");
         assert!(failed.inserted);
-        assert_eq!(failed.sequence, 3);
+        assert_eq!(failed.sequence, 6);
         assert_eq!(
             failed.payload["errorCode"],
             "team_tool.execution_budget_exhausted"
@@ -1254,7 +1545,7 @@ mod tests {
             .unwrap()
             .expect("the first replay observation must remain visible");
         assert!(replay.inserted);
-        assert_eq!(replay.sequence, 4);
+        assert_eq!(replay.sequence, 7);
         assert_eq!(replay.payload["idempotentReplay"], true);
 
         let replay_duplicate = ExecutionEvidenceService
@@ -1269,7 +1560,7 @@ mod tests {
             .unwrap();
         assert!(replay_duplicate.inserted);
         assert_ne!(replay_duplicate.id, replay.id);
-        assert_eq!(replay_duplicate.sequence, 5);
+        assert_eq!(replay_duplicate.sequence, 8);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

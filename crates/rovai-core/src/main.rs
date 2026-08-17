@@ -108,7 +108,8 @@ use rovai_core::{
     },
     execution_budget::camp_turn_execution_budget_now,
     execution_evidence::{
-        AgentRunExecutionEvidence, ExecutionEvidenceService, RecordedExecutionEvidence,
+        AgentRunExecutionEvidence, ExecutionEvidenceService, PreparedRuntimeEvidence,
+        RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES, RecordedExecutionEvidence,
     },
     git,
     managed_blob::ManagedBlobStore,
@@ -208,6 +209,8 @@ const PLANNED_SHUTDOWN_OUTPUT_RESERVE: Duration = Duration::from_millis(250);
 const PLANNED_SHUTDOWN_GUARD_GRACE: Duration = Duration::from_millis(250);
 const PLANNED_SHUTDOWN_FENCE_SETTLEMENT_RESERVE: Duration = Duration::from_secs(1);
 const RUNTIME_USAGE_FLUSH_INTERVAL: Duration = Duration::from_secs(4);
+const RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW: Duration = Duration::from_millis(25);
+const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -9713,24 +9716,247 @@ async fn run_core(
     Ok(())
 }
 
+fn codex_delta_batch_identity(incoming: &CodexIncoming) -> Option<(&str, &str, i64)> {
+    let CodexIncoming::Message {
+        host_instance_id,
+        agent_run_id,
+        execution_epoch,
+        message,
+    } = incoming
+    else {
+        return None;
+    };
+    if message.get("id").is_some() {
+        return None;
+    }
+    let method = message.get("method").and_then(Value::as_str)?;
+    matches!(
+        method,
+        "item/agentMessage/delta"
+            | "item/reasoning/summaryTextDelta"
+            | "item/plan/delta"
+            | "item/commandExecution/outputDelta"
+            | "command/exec/outputDelta"
+            | "item/fileChange/patchUpdated"
+    )
+    .then_some((
+        host_instance_id.as_str(),
+        agent_run_id.as_str(),
+        *execution_epoch,
+    ))
+}
+
+fn acp_delta_batch_identity(
+    incoming: &AcpIncoming,
+) -> Option<(AdapterKind, &str, &str, i64, &str, &str, &str)> {
+    let AcpIncoming::Message {
+        adapter_kind,
+        host_instance_id,
+        agent_run_id,
+        execution_epoch,
+        native_session_id,
+        native_prompt_id,
+        delivery_id,
+        message,
+        ..
+    } = incoming
+    else {
+        return None;
+    };
+    if message.get("id").is_some()
+        || message.get("method").and_then(Value::as_str) != Some("session/update")
+    {
+        return None;
+    }
+    let session_update = message
+        .pointer("/params/update/sessionUpdate")
+        .and_then(Value::as_str);
+    matches!(
+        session_update,
+        Some("agent_message_chunk" | "agent_thought_chunk")
+    )
+    .then_some((
+        *adapter_kind,
+        host_instance_id.as_str(),
+        agent_run_id.as_str(),
+        *execution_epoch,
+        native_session_id.as_str(),
+        native_prompt_id.as_str(),
+        delivery_id.as_str(),
+    ))
+}
+
+struct PreparedRuntimeDeltaMessage {
+    native_method: String,
+    params: Value,
+    evidence: PreparedRuntimeEvidence,
+}
+
+struct AcpRuntimeDeltaMessage {
+    native_session_id: String,
+    native_prompt_id: String,
+    delivery_id: String,
+    sequence: u64,
+    message: Value,
+}
+
+fn prepare_codex_delta_batch(
+    messages: &[Value],
+) -> Result<Option<Vec<PreparedRuntimeDeltaMessage>>> {
+    let mut total_bytes = 0_usize;
+    let mut prepared = Vec::with_capacity(messages.len());
+    for message in messages {
+        let native_method = message
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let params = message.get("params").cloned().unwrap_or(Value::Null);
+        let (event_type, payload) = codex::normalize_event(&native_method, &params);
+        let Some(evidence) =
+            ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
+        else {
+            return Ok(None);
+        };
+        if !evidence.is_inline_delta_batchable() {
+            return Ok(None);
+        }
+        total_bytes = total_bytes
+            .checked_add(evidence.content_byte_count())
+            .context("Codex Evidence batch size overflow")?;
+        if total_bytes > RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES {
+            return Ok(None);
+        }
+        prepared.push(PreparedRuntimeDeltaMessage {
+            native_method,
+            params,
+            evidence,
+        });
+    }
+    Ok(Some(prepared))
+}
+
+fn prepare_acp_delta_batch(
+    messages: &[AcpRuntimeDeltaMessage],
+) -> Result<Option<Vec<PreparedRuntimeDeltaMessage>>> {
+    let mut total_bytes = 0_usize;
+    let mut prepared = Vec::with_capacity(messages.len());
+    for incoming in messages {
+        let message = &incoming.message;
+        let native_method = message
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        let params = message.get("params").cloned().unwrap_or(Value::Null);
+        let (event_type, payload) = normalize_acp_event(&native_method, &params);
+        let Some(evidence) =
+            ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
+        else {
+            return Ok(None);
+        };
+        if !evidence.is_inline_delta_batchable() {
+            return Ok(None);
+        }
+        total_bytes = total_bytes
+            .checked_add(evidence.content_byte_count())
+            .context("ACP Evidence batch size overflow")?;
+        if total_bytes > RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES {
+            return Ok(None);
+        }
+        prepared.push(PreparedRuntimeDeltaMessage {
+            native_method,
+            params,
+            evidence,
+        });
+    }
+    Ok(Some(prepared))
+}
+
 async fn process_codex_events(
     core: Arc<Core>,
     mut receiver: mpsc::UnboundedReceiver<CodexIncoming>,
     output: mpsc::UnboundedSender<String>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
+    let mut pending = None;
     loop {
-        let incoming = tokio::select! {
-            incoming = receiver.recv() => match incoming {
-                Some(incoming) => incoming,
-                None => break,
+        let incoming = match pending.take() {
+            Some(incoming) => incoming,
+            None => tokio::select! {
+                incoming = receiver.recv() => match incoming {
+                    Some(incoming) => incoming,
+                    None => break,
+                },
+                _ = &mut shutdown => break,
             },
-            _ = &mut shutdown => break,
         };
         let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
         else {
             break;
         };
+        if let Some((host_instance_id, agent_run_id, execution_epoch)) =
+            codex_delta_batch_identity(&incoming)
+                .map(|(host, run, epoch)| (host.to_string(), run.to_string(), epoch))
+        {
+            let CodexIncoming::Message { message, .. } = incoming else {
+                unreachable!("Codex Delta batch identity requires a Message")
+            };
+            let mut messages = vec![message];
+            let deadline = tokio::time::Instant::now() + RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW;
+            let mut stop_after_batch = false;
+            while messages.len() < RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS {
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
+                let next = tokio::select! {
+                    _ = &mut shutdown => {
+                        stop_after_batch = true;
+                        None
+                    },
+                    _ = tokio::time::sleep_until(deadline) => None,
+                    incoming = receiver.recv() => match incoming {
+                        Some(incoming) => Some(incoming),
+                        None => {
+                            stop_after_batch = true;
+                            None
+                        }
+                    },
+                };
+                let Some(next) = next else {
+                    break;
+                };
+                let same_batch = codex_delta_batch_identity(&next).is_some_and(
+                    |(next_host, next_run, next_epoch)| {
+                        next_host == host_instance_id
+                            && next_run == agent_run_id
+                            && next_epoch == execution_epoch
+                    },
+                );
+                if !same_batch {
+                    pending = Some(next);
+                    break;
+                }
+                let CodexIncoming::Message { message, .. } = next else {
+                    unreachable!("Codex Delta batch identity requires a Message")
+                };
+                messages.push(message);
+            }
+            process_agent_run_codex_delta_batch(
+                &core,
+                &output,
+                &host_instance_id,
+                &agent_run_id,
+                execution_epoch,
+                messages,
+                &mut runtime_route_permit,
+            )
+            .await;
+            if stop_after_batch {
+                break;
+            }
+            continue;
+        }
         match incoming {
             CodexIncoming::Message {
                 host_instance_id,
@@ -9799,18 +10025,142 @@ async fn process_acp_events(
     output: mpsc::UnboundedSender<String>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
+    let mut pending = None;
     loop {
-        let incoming = tokio::select! {
-            incoming = receiver.recv() => match incoming {
-                Some(incoming) => incoming,
-                None => break,
+        let incoming = match pending.take() {
+            Some(incoming) => incoming,
+            None => tokio::select! {
+                incoming = receiver.recv() => match incoming {
+                    Some(incoming) => incoming,
+                    None => break,
+                },
+                _ = &mut shutdown => break,
             },
-            _ = &mut shutdown => break,
         };
         let Some(mut runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await
         else {
             break;
         };
+        if let Some((
+            adapter_kind,
+            host_instance_id,
+            agent_run_id,
+            execution_epoch,
+            batch_session_id,
+            batch_prompt_id,
+            batch_delivery_id,
+        )) = acp_delta_batch_identity(&incoming).map(
+            |(adapter, host, run, epoch, session, prompt, delivery)| {
+                (
+                    adapter,
+                    host.to_string(),
+                    run.to_string(),
+                    epoch,
+                    session.to_string(),
+                    prompt.to_string(),
+                    delivery.to_string(),
+                )
+            },
+        ) {
+            let AcpIncoming::Message {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence,
+                message,
+                ..
+            } = incoming
+            else {
+                unreachable!("ACP Delta batch identity requires a Message")
+            };
+            let mut messages = vec![AcpRuntimeDeltaMessage {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence,
+                message,
+            }];
+            let deadline = tokio::time::Instant::now() + RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW;
+            let mut stop_after_batch = false;
+            while messages.len() < RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS {
+                if tokio::time::Instant::now() >= deadline {
+                    break;
+                }
+                let next = tokio::select! {
+                    _ = &mut shutdown => {
+                        stop_after_batch = true;
+                        None
+                    },
+                    _ = tokio::time::sleep_until(deadline) => None,
+                    incoming = receiver.recv() => match incoming {
+                        Some(incoming) => Some(incoming),
+                        None => {
+                            stop_after_batch = true;
+                            None
+                        }
+                    },
+                };
+                let Some(next) = next else {
+                    break;
+                };
+                let same_batch = acp_delta_batch_identity(&next).is_some_and(
+                    |(
+                        next_adapter,
+                        next_host,
+                        next_run,
+                        next_epoch,
+                        next_session,
+                        next_prompt,
+                        next_delivery,
+                    )| {
+                        next_adapter == adapter_kind
+                            && next_host == host_instance_id
+                            && next_run == agent_run_id
+                            && next_epoch == execution_epoch
+                            && next_session == batch_session_id
+                            && next_prompt == batch_prompt_id
+                            && next_delivery == batch_delivery_id
+                    },
+                );
+                if !same_batch {
+                    pending = Some(next);
+                    break;
+                }
+                let AcpIncoming::Message {
+                    native_session_id,
+                    native_prompt_id,
+                    delivery_id,
+                    sequence,
+                    message,
+                    ..
+                } = next
+                else {
+                    unreachable!("ACP Delta batch identity requires a Message")
+                };
+                messages.push(AcpRuntimeDeltaMessage {
+                    native_session_id,
+                    native_prompt_id,
+                    delivery_id,
+                    sequence,
+                    message,
+                });
+            }
+            process_agent_run_acp_delta_batch(
+                &core,
+                &output,
+                adapter_kind,
+                &host_instance_id,
+                &agent_run_id,
+                execution_epoch,
+                messages,
+                &mut runtime_route_permit,
+            )
+            .await;
+            if stop_after_batch {
+                break;
+            }
+            continue;
+        }
         match incoming {
             AcpIncoming::InputAccepted {
                 adapter_kind,
@@ -10083,6 +10433,178 @@ async fn process_acp_input_not_accepted(
         eprintln!(
             "failed to persist ACP input rejection for AgentRun {agent_run_id}: {mark_error:#}"
         );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn process_agent_run_acp_delta_batch(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    adapter_kind: AdapterKind,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    messages: Vec<AcpRuntimeDeltaMessage>,
+    runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
+) {
+    let prepared = match prepare_acp_delta_batch(&messages) {
+        Ok(Some(prepared)) => prepared,
+        Ok(None) => {
+            for incoming in messages {
+                process_agent_run_acp_message(
+                    core,
+                    output,
+                    adapter_kind,
+                    host_instance_id,
+                    agent_run_id,
+                    execution_epoch,
+                    &incoming.native_session_id,
+                    &incoming.native_prompt_id,
+                    &incoming.delivery_id,
+                    incoming.sequence,
+                    incoming.message,
+                    runtime_route_permit,
+                )
+                .await;
+            }
+            return;
+        }
+        Err(error) => {
+            eprintln!(
+                "failed to prepare ACP Runtime Evidence batch for AgentRun {agent_run_id}: {error:#}"
+            );
+            for incoming in messages {
+                process_agent_run_acp_message(
+                    core,
+                    output,
+                    adapter_kind,
+                    host_instance_id,
+                    agent_run_id,
+                    execution_epoch,
+                    &incoming.native_session_id,
+                    &incoming.native_prompt_id,
+                    &incoming.delivery_id,
+                    incoming.sequence,
+                    incoming.message,
+                    runtime_route_permit,
+                )
+                .await;
+            }
+            return;
+        }
+    };
+    let Some(runtime) = acp_runtime_on_host(
+        core,
+        adapter_kind,
+        host_instance_id,
+        agent_run_id,
+        execution_epoch,
+    )
+    .await
+    else {
+        return;
+    };
+    let Some(first) = messages.first() else {
+        return;
+    };
+    if !runtime
+        .matches_prompt_fence(
+            &first.native_session_id,
+            &first.native_prompt_id,
+            &first.delivery_id,
+        )
+        .await
+    {
+        eprintln!(
+            "dropped fenced ACP Delta batch for AgentRun {agent_run_id} at Session sequence {}",
+            first.sequence
+        );
+        return;
+    }
+    let evidence = match persist_prepared_runtime_evidence_batch(
+        core,
+        agent_run_id,
+        execution_epoch,
+        prepared
+            .iter()
+            .map(|message| message.evidence.clone())
+            .collect(),
+    )
+    .await
+    {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            eprintln!(
+                "failed to persist ACP Runtime Evidence batch for AgentRun {agent_run_id}; falling back to individual Evidence: {error:#}"
+            );
+            for incoming in messages {
+                process_agent_run_acp_message(
+                    core,
+                    output,
+                    adapter_kind,
+                    host_instance_id,
+                    agent_run_id,
+                    execution_epoch,
+                    &incoming.native_session_id,
+                    &incoming.native_prompt_id,
+                    &incoming.delivery_id,
+                    incoming.sequence,
+                    incoming.message,
+                    runtime_route_permit,
+                )
+                .await;
+            }
+            return;
+        }
+    };
+    let mut completions = Vec::with_capacity(prepared.len());
+    for (message, incoming) in prepared.iter().zip(&messages) {
+        let completion = match runtime
+            .observe_message(
+                &incoming.native_prompt_id,
+                &message.native_method,
+                &message.params,
+            )
+            .await
+        {
+            Ok(completion) => completion,
+            Err(error) => {
+                eprintln!("failed to normalize ACP Runtime Delta: {error:#}");
+                None
+            }
+        };
+        completions.push(completion);
+    }
+    for ((message, evidence), completion) in prepared.into_iter().zip(evidence).zip(completions) {
+        let Some(evidence) = evidence else {
+            continue;
+        };
+        emit(
+            output,
+            &evidence.event_type,
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "adapterKind": adapter_kind,
+                "nativeMethod": message.native_method,
+                "evidenceId": evidence.id,
+                "payload": evidence.payload,
+                "canonical": evidence.canonical,
+            }),
+        );
+        if let Some(completion) = completion
+            && let Err(error) = record_acp_action_completion(
+                core,
+                output,
+                adapter_kind,
+                agent_run_id,
+                execution_epoch,
+                completion,
+            )
+            .await
+        {
+            eprintln!("failed to record ACP Action completion: {error:#}");
+        }
     }
 }
 
@@ -10444,6 +10966,31 @@ async fn persist_runtime_evidence(
     } else {
         Ok(None)
     }
+}
+
+async fn persist_prepared_runtime_evidence_batch(
+    core: &Core,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    prepared: Vec<PreparedRuntimeEvidence>,
+) -> Result<Vec<Option<AgentRunExecutionEvidence>>> {
+    let mut database = core.database.lock().await;
+    let recorded = ExecutionEvidenceService.record_prepared_runtime_event_batch(
+        &mut database,
+        agent_run_id,
+        execution_epoch,
+        prepared,
+    )?;
+    drop(database);
+    Ok(recorded
+        .into_iter()
+        .map(|recorded| {
+            recorded.map(|recorded| {
+                core.observe_monitoring_evidence(&recorded);
+                recorded.into_evidence()
+            })
+        })
+        .collect())
 }
 
 async fn process_agent_run_acp_approval_request(
@@ -11393,6 +11940,113 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                 break;
             }
         }
+    }
+}
+
+async fn process_agent_run_codex_delta_batch(
+    core: &Arc<Core>,
+    output: &mpsc::UnboundedSender<String>,
+    host_instance_id: &str,
+    agent_run_id: &str,
+    execution_epoch: i64,
+    messages: Vec<Value>,
+    runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
+) {
+    let prepared = match prepare_codex_delta_batch(&messages) {
+        Ok(Some(prepared)) => prepared,
+        Ok(None) => {
+            for message in messages {
+                process_agent_run_codex_message(
+                    core,
+                    output,
+                    host_instance_id,
+                    agent_run_id,
+                    execution_epoch,
+                    message,
+                    runtime_route_permit,
+                )
+                .await;
+            }
+            return;
+        }
+        Err(error) => {
+            eprintln!(
+                "failed to prepare Codex Runtime Evidence batch for AgentRun {agent_run_id}: {error:#}"
+            );
+            for message in messages {
+                process_agent_run_codex_message(
+                    core,
+                    output,
+                    host_instance_id,
+                    agent_run_id,
+                    execution_epoch,
+                    message,
+                    runtime_route_permit,
+                )
+                .await;
+            }
+            return;
+        }
+    };
+    let Some(runtime) = core
+        .codex_cli
+        .get_agent_run_on_host(host_instance_id, agent_run_id, execution_epoch)
+        .await
+    else {
+        return;
+    };
+    let evidence = match persist_prepared_runtime_evidence_batch(
+        core,
+        agent_run_id,
+        execution_epoch,
+        prepared
+            .iter()
+            .map(|message| message.evidence.clone())
+            .collect(),
+    )
+    .await
+    {
+        Ok(evidence) => evidence,
+        Err(error) => {
+            eprintln!(
+                "failed to persist Codex Runtime Evidence batch for AgentRun {agent_run_id}; falling back to individual Evidence: {error:#}"
+            );
+            for message in messages {
+                process_agent_run_codex_message(
+                    core,
+                    output,
+                    host_instance_id,
+                    agent_run_id,
+                    execution_epoch,
+                    message,
+                    runtime_route_permit,
+                )
+                .await;
+            }
+            return;
+        }
+    };
+    for message in &prepared {
+        runtime
+            .observe_agent_message(&message.native_method, &message.params)
+            .await;
+    }
+    for (message, evidence) in prepared.into_iter().zip(evidence) {
+        let Some(evidence) = evidence else {
+            continue;
+        };
+        emit(
+            output,
+            &evidence.event_type,
+            json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "nativeMethod": message.native_method,
+                "evidenceId": evidence.id,
+                "payload": evidence.payload,
+                "canonical": evidence.canonical,
+            }),
+        );
     }
 }
 
@@ -12746,6 +13400,92 @@ fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_delta_batching_is_bounded_and_stops_at_durable_boundaries() {
+        assert_eq!(
+            RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW,
+            Duration::from_millis(25)
+        );
+        assert_eq!(RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS, 32);
+
+        let codex_delta = CodexIncoming::Message {
+            host_instance_id: "codex-host".to_string(),
+            agent_run_id: "run-1".to_string(),
+            execution_epoch: 2,
+            message: json!({
+                "method": "item/agentMessage/delta",
+                "params": {"itemId": "message-1", "delta": "hello"}
+            }),
+        };
+        assert_eq!(
+            codex_delta_batch_identity(&codex_delta),
+            Some(("codex-host", "run-1", 2))
+        );
+        let codex_terminal = CodexIncoming::Message {
+            host_instance_id: "codex-host".to_string(),
+            agent_run_id: "run-1".to_string(),
+            execution_epoch: 2,
+            message: json!({
+                "method": "item/completed",
+                "params": {"item": {"id": "message-1", "type": "agentMessage"}}
+            }),
+        };
+        assert!(codex_delta_batch_identity(&codex_terminal).is_none());
+
+        let acp_delta = AcpIncoming::Message {
+            adapter_kind: AdapterKind::OpencodeCli,
+            host_instance_id: "acp-host".to_string(),
+            agent_run_id: "run-2".to_string(),
+            execution_epoch: 3,
+            native_session_id: "session-1".to_string(),
+            native_prompt_id: "prompt-1".to_string(),
+            delivery_id: "delivery-1".to_string(),
+            sequence: 4,
+            message: json!({
+                "method": "session/update",
+                "params": {
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "world"}
+                    }
+                }
+            }),
+        };
+        assert_eq!(
+            acp_delta_batch_identity(&acp_delta),
+            Some((
+                AdapterKind::OpencodeCli,
+                "acp-host",
+                "run-2",
+                3,
+                "session-1",
+                "prompt-1",
+                "delivery-1"
+            ))
+        );
+        let acp_tool_terminal = AcpIncoming::Message {
+            adapter_kind: AdapterKind::OpencodeCli,
+            host_instance_id: "acp-host".to_string(),
+            agent_run_id: "run-2".to_string(),
+            execution_epoch: 3,
+            native_session_id: "session-1".to_string(),
+            native_prompt_id: "prompt-1".to_string(),
+            delivery_id: "delivery-1".to_string(),
+            sequence: 5,
+            message: json!({
+                "method": "session/update",
+                "params": {
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "tool-1",
+                        "status": "completed"
+                    }
+                }
+            }),
+        };
+        assert!(acp_delta_batch_identity(&acp_tool_terminal).is_none());
+    }
 
     #[test]
     fn planned_shutdown_request_is_closed_versioned_and_bounded() {
