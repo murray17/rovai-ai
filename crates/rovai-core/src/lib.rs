@@ -20,6 +20,7 @@ pub mod context_contract;
 pub mod context_delivery;
 pub mod context_index;
 pub mod core_data_dir_lock;
+pub mod current_input_skill;
 pub mod current_user;
 pub mod db;
 pub mod diagnostics;

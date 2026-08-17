@@ -91,4 +91,26 @@ describe('structured message clipboard', () => {
       { kind: 'text', text: '请确认' }
     ])
   })
+
+  it('always downgrades copied Skill identity to visible slash text', () => {
+    const skillOnly = createStructuredMessageClipboardData([{
+      kind: 'skill_mention',
+      skillId: 'skill-review',
+      nameAtSend: 'review-pr'
+    }], members)!
+
+    expect(skillOnly.text).toBe('/review-pr')
+    expect(readStructuredMessageClipboardContent(skillOnly.html, skillOnly.text, members)).toBeNull()
+
+    const mixed = createStructuredMessageClipboardData([
+      { kind: 'member_mention', agentId: 'agent-alice' },
+      { kind: 'text', text: ' ' },
+      { kind: 'skill_mention', skillId: 'skill-review', nameAtSend: 'review-pr' }
+    ], members)!
+    expect(readStructuredMessageClipboardContent(mixed.html, mixed.text, members)).toEqual([
+      { kind: 'member_mention', agentId: 'agent-alice' },
+      { kind: 'text', text: ' ' },
+      { kind: 'text', text: '/review-pr' }
+    ])
+  })
 })

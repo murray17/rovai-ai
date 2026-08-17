@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v17.json'
+import fixture from '../fixtures/agent-run-context-v18.json'
 import type { ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v17 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 17
+  it('uses the shared frozen v18 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 18
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(3)
-    expect(fixture.contextManifestVersion).toBe(15)
+    expect(fixture.contextManifestVersion).toBe(16)
     expect(fixture.dynamicContextSectionOrder.at(-1)).toBe('CURRENT_INPUT')
     expect(fixture.collaborationState).toEqual({
       schemaVersion: 2,
@@ -42,6 +42,9 @@ describe('AgentRun context contract', () => {
         items: [],
       },
     })
+    expect(fixture.directUserCurrentInputOptionalFields.skills[0].path).toMatch(/\/SKILL\.md$/u)
+    expect(fixture.skillSelectionSnapshot.empty).toEqual({schemaVersion: 1, entries: []})
+    expect(fixture.currentInputSkillResolutionEvidence.outcomes).toEqual(['included', 'omitted'])
     expect(fixture.gatherCompletionManifestEvidence).toContain('completionInputDigest')
     expect(fixture.sharedConversationTopLevelFields).toEqual(['campId'])
     expect(fixture.modelCampMessageRequiredFields).toEqual([

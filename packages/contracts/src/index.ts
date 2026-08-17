@@ -899,8 +899,62 @@ export type StructuredCampMessageSegment =
   | { kind: 'member_mention'; agentId: string }
   | { kind: 'all_members_mention' }
   | { kind: 'current_user_mention'; userId: 'local_user' }
+  | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
 
 export type StructuredCampMessageContent = StructuredCampMessageSegment[]
+
+export type SkillSelectionOmissionReason =
+  | 'missing_at_send'
+  | 'inactive_at_send'
+  | 'disabled_at_send'
+  | 'name_mismatch_at_send'
+  | 'runtime_group_unassigned_at_send'
+
+export type CurrentInputSkillOmissionReason =
+  | 'not_eligible_at_send'
+  | 'missing_at_start'
+  | 'inactive_at_start'
+  | 'disabled_at_start'
+  | 'name_mismatch_at_start'
+  | 'runtime_group_unassigned_at_start'
+  | 'exposure_missing'
+  | 'exposure_name_mismatch'
+  | 'exposure_not_ready'
+  | 'exposure_group_incompatible'
+  | 'skill_file_unavailable'
+
+export type RunSkillAvailabilityView =
+  | { state: 'missing' }
+  | {
+      state: 'present'
+      active: boolean
+      enabled: boolean
+      name: string
+      matchingGroupKeys: string[]
+    }
+
+export interface CurrentInputSkillResolutionEntry {
+  skillId: string
+  nameAtSend: string
+  firstSegmentIndex: number
+  eligibleAtSend: boolean
+  sendOmissionReason?: SkillSelectionOmissionReason
+  runAvailability: RunSkillAvailabilityView
+  outcome: 'included' | 'omitted'
+  reason?: CurrentInputSkillOmissionReason
+  path?: string
+  revisionId?: string
+  contentDigest?: string
+  groupKey?: string
+  deliveredViaGroupKey?: string
+}
+
+export interface CurrentInputSkillResolution {
+  schemaVersion: 1
+  selectionSnapshotDigest: string
+  skillExposureDigest: string
+  entries: CurrentInputSkillResolutionEntry[]
+}
 
 export interface CampMessageView {
   id: string
@@ -1239,12 +1293,14 @@ export interface ContextManifestView {
   attachmentDigest: string
   skillExposure: SkillExposureSnapshot
   skillExposureDigest: string
+  currentInputSkillResolution: CurrentInputSkillResolution
+  currentInputSkillResolutionDigest: string
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 17
+  formatterVersion: 18
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1320,7 +1376,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 29
+  schemaVersion: 30
   throughGlobalSequence: number
   camp: {
     id: string

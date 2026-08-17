@@ -24,6 +24,7 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     context_index::index_camp_message,
+    current_input_skill::{SkillSelectionSnapshot, freeze_skill_selection},
     db::Database,
     execution_budget::{
         CampTurnExecutionBudgetExhaustionReason, CampTurnExecutionBudgetRequest,
@@ -2599,6 +2600,17 @@ fn queue_camp_message_and_runs(
                     ))
                 })
                 .transpose()?;
+            let skill_selection = if matches!(input.actor, ActorRef::User { .. }) {
+                freeze_skill_selection(
+                    transaction,
+                    input.structured_content,
+                    prepared.runtime.adapter_kind,
+                )?
+            } else {
+                SkillSelectionSnapshot::default()
+            };
+            let (skill_selection_json, skill_selection_digest) =
+                skill_selection.canonical_json_and_digest()?;
             transaction.execute(
                 r#"
                 INSERT INTO agent_run(
@@ -2623,6 +2635,8 @@ fn queue_camp_message_and_runs(
                     runtime_installation_generation,
                     runtime_search_environment_generation,
                     runtime_native_session_compatibility_key,
+                    skill_selection_snapshot_json,
+                    skill_selection_snapshot_digest,
                     status, wait_reason, wait_deadline_at,
                     idempotency_key, automatic_retry_count, runtime_rebind_count,
                     last_error_code, last_error_details_ref,
@@ -2638,6 +2652,7 @@ fn queue_camp_message_and_runs(
                     ?12, ?13, 'runtime_managed_v2',
                     ?15, ?16, ?17, ?18, ?19, ?20, ?19, ?20,
                     ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29,
+                    ?32, ?33,
                     'queued', NULL, NULL,
                     ?14, 0, 0, NULL, NULL, 0, NULL,
                     0, NULL, NULL, NULL, NULL, NULL, 1,
@@ -2678,6 +2693,8 @@ fn queue_camp_message_and_runs(
                     input
                         .task_admission
                         .map(|admission| admission.assignee_agent_id.as_str()),
+                    skill_selection_json,
+                    skill_selection_digest,
                 ],
             )?;
             agent_run_ids.push(agent_run_id);
@@ -4488,6 +4505,7 @@ mod tests {
         camp_attachment::CampAttachmentStore,
         camp_content::StructuredCampMessageSegment as Segment,
         command::CommandResultStatus,
+        current_input_skill::parse_skill_selection_snapshot,
         current_user::CURRENT_USER_ID,
         read_model::ReadModelService,
         runtime::ExecutionRuntimeService,
@@ -5938,6 +5956,123 @@ mod tests {
             vec!["agent_2", "agent_1"]
         );
         assert_eq!(digest, canonical_content_digest(&content).unwrap());
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn direct_user_run_atomically_freezes_structured_skill_identity() {
+        let (mut database, directory) = test_database();
+        configure_test_runtime(&database, &["agent_1"]);
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_1"]);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO skill(
+                    id, name, origin, enabled, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES (
+                    'skill-review', 'review-pr', 'imported', 1, 'active',
+                    NULL, 1, datetime('now'), datetime('now')
+                );
+                INSERT INTO skill_revision(
+                    id, skill_id, revision, name, description, source_type,
+                    source_metadata_json, content_digest, risk_summary_json,
+                    file_count, total_bytes, installed_at
+                ) VALUES (
+                    'skill-review-r1', 'skill-review', 1, 'review-pr', 'Review a PR',
+                    'local_folder', '{}', 'sha256:review-pr',
+                    '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                    1, 1, datetime('now')
+                );
+                UPDATE skill SET current_revision_id = 'skill-review-r1'
+                WHERE id = 'skill-review';
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                ) VALUES (
+                    'codex', 'skill-review', 'skill-review-r1',
+                    datetime('now'), datetime('now')
+                );
+                "#,
+            )
+            .unwrap();
+        let store = CampAttachmentStore::new(&directory);
+        let content = vec![
+            Segment::MemberMention {
+                agent_id: "agent_1".to_string(),
+            },
+            Segment::Text {
+                text: " 请用 ".to_string(),
+            },
+            Segment::SkillMention {
+                skill_id: "skill-review".to_string(),
+                name_at_send: "review-pr".to_string(),
+            },
+            Segment::Text {
+                text: " 检查".to_string(),
+            },
+        ];
+        let draft = store
+            .save_content(&mut database, &camp_id, 0, content.clone())
+            .unwrap();
+        let sent = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "structured-skill-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: Some(draft.revision),
+                        body: "ignored".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证结构化 Skill".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        let (body, stored_content, snapshot_json, snapshot_digest): (
+            String,
+            String,
+            String,
+            String,
+        ) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT message.body, message.structured_content_json,
+                       run.skill_selection_snapshot_json,
+                       run.skill_selection_snapshot_digest
+                FROM camp_message AS message
+                JOIN agent_run AS run ON run.trigger_camp_message_id = message.id
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert!(body.contains("/review-pr"));
+        assert_eq!(
+            serde_json::from_str::<StructuredCampMessageContent>(&stored_content).unwrap(),
+            content
+        );
+        let snapshot = parse_skill_selection_snapshot(&snapshot_json, &snapshot_digest).unwrap();
+        assert_eq!(snapshot.entries.len(), 1);
+        assert_eq!(snapshot.entries[0].skill_id, "skill-review");
+        assert_eq!(snapshot.entries[0].name_at_send, "review-pr");
+        assert_eq!(snapshot.entries[0].first_segment_index, 2);
+        assert!(snapshot.entries[0].eligible_at_send);
+        assert!(snapshot.entries[0].omission_reason.is_none());
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

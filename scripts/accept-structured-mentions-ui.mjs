@@ -37,10 +37,13 @@ const outputDir = suppliedOutputDir
 const acceptanceHome = join(fixtureRoot, 'home')
 const debugPort = Number(process.env.ROVAI_STRUCTURED_MENTIONS_ACCEPT_DEBUG_PORT ?? 9491)
 const skillPickerOnly = cliArguments.includes('--skill-picker-only')
+const skillContextSmoke = cliArguments.includes('--skill-context-smoke')
 const continuationOnly = cliArguments.includes('--continuation-only')
 const replyBackspaceOnly = cliArguments.includes('--reply-backspace-only')
 const databasePath = join(dataDir, 'rovai.sqlite')
-const acceptanceExecutablePath = '/usr/bin/true'
+const acceptanceExecutablePath = skillContextSmoke
+  ? join(runtimeTempDir, 'codex-acceptance-runtime.mjs')
+  : '/usr/bin/true'
 const targetMembers = [
   { agentId: 'agent_1', displayName: '叮叮', teamRole: '游学者' },
   { agentId: 'agent_2', displayName: '芝士', teamRole: '鉴定士' },
@@ -65,9 +68,6 @@ const currentUserMentionContent = [
   { kind: 'text', text: currentUserMentionText }
 ]
 const nativeDomRegressionBody = '原生输入回归'
-const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
-  .update(await readFile(acceptanceExecutablePath))
-  .digest('hex')}`
 const acceptanceModelCatalog = JSON.stringify([{
   id: 'gpt-structured-mentions-accept',
   displayName: 'Structured Mentions Acceptance Runtime',
@@ -117,6 +117,12 @@ seedCompletedOnboardingForAcceptance(dataDir)
 await mkdir(acceptanceHome, { recursive: true })
 await mkdir(runtimeTempDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
+if (skillContextSmoke) {
+  await writeFile(acceptanceExecutablePath, fakeCodexAcceptanceRuntime(), { mode: 0o755 })
+}
+const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
+  .update(await readFile(acceptanceExecutablePath))
+  .digest('hex')}`
 
 let running = null
 let clipboardArchive = null
@@ -206,8 +212,8 @@ try {
     return button?.getAttribute('aria-pressed') === 'true' && !timeline?.hidden
   })()`)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 29,
-    `Camp snapshot schema is not v29: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 30,
+    `Camp snapshot schema is not v30: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -282,18 +288,143 @@ try {
   const selectedSkillText = `/${selectableSkill.name} `
   await waitForExpression(running.cdp, `(() => {
     const editor = document.querySelector('#camp-message')
+    const token = editor?.querySelector('[data-token-kind="skill_mention"]')
     return editor?.textContent === ${JSON.stringify(`/${selectableSkill.name} `)}
       && editor.getAttribute('aria-expanded') === 'false'
       && document.activeElement === editor
-      && !editor.querySelector('[data-token-kind]')
+      && token?.getAttribute('contenteditable') === 'false'
+      && token?.getAttribute('data-skill-id') === ${JSON.stringify(selectableSkill.id)}
+      && token?.getAttribute('data-skill-name') === ${JSON.stringify(selectableSkill.name)}
   })()`)
+  const selectedSkillContent = [
+    { kind: 'skill_mention', skillId: selectableSkill.id, nameAtSend: selectableSkill.name },
+    { kind: 'text', text: ' ' }
+  ]
   const selectedSkillDraft = await waitForValue(async () =>
     request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
-    deepEqual(draft.content, [{ kind: 'text', text: selectedSkillText }]), 10_000)
+    deepEqual(draft.content, selectedSkillContent), 10_000)
   assert(selectedSkillDraft.body === selectedSkillText,
-    `Selected Skill was not persisted as plain text: ${JSON.stringify(selectedSkillDraft)}`)
+    `Selected Skill identity or body projection was not persisted: ${JSON.stringify(selectedSkillDraft)}`)
 
-  if (skillPickerOnly) {
+  if (skillContextSmoke) {
+    const smokeSuffix = '验证文件链接'
+    await focusEditorAtEnd(running.cdp)
+    await running.cdp.send('Input.insertText', { text: smokeSuffix })
+    const smokeBody = `/${selectableSkill.name} ${smokeSuffix}`
+    const smokeContent = [
+      { kind: 'skill_mention', skillId: selectableSkill.id, nameAtSend: selectableSkill.name },
+      { kind: 'text', text: ` ${smokeSuffix}` }
+    ]
+    await waitForValue(async () => request(running.cdp, 'camp.composerDraft.get', { campId }),
+      (draft) => draft.body === smokeBody && deepEqual(draft.content, smokeContent), 10_000)
+    await mouseClick(running.cdp, '.composer .composer-send')
+
+    const smokeSnapshot = await waitForValue(async () =>
+      request(running.cdp, 'camps.snapshot', { campId }), (snapshot) => {
+      const message = snapshot.messages.find((candidate) =>
+        candidate.authorType === 'user' && deepEqual(candidate.content, smokeContent))
+      const turn = message
+        ? snapshot.turns.find((candidate) => candidate.triggerId === message.id)
+        : null
+      const run = turn
+        ? snapshot.agentRuns.find((candidate) => candidate.campTurnId === turn.id)
+        : null
+      const manifest = run
+        ? snapshot.contextManifests.find((candidate) => candidate.agentRunId === run.id)
+        : null
+      return run?.status === 'succeeded'
+        && manifest?.delivery?.status === 'accepted'
+        && manifest.currentInputSkillResolution.entries.length === 1
+        && manifest.currentInputSkillResolution.entries[0].outcome === 'included'
+    }, 60_000)
+    const smokeMessage = smokeSnapshot.messages.find((candidate) =>
+      candidate.authorType === 'user' && deepEqual(candidate.content, smokeContent))
+    const smokeTurn = smokeSnapshot.turns.find((candidate) =>
+      candidate.triggerId === smokeMessage?.id)
+    const smokeRun = smokeSnapshot.agentRuns.find((candidate) =>
+      candidate.campTurnId === smokeTurn?.id)
+    const smokeManifest = smokeSnapshot.contextManifests.find((candidate) =>
+      candidate.agentRunId === smokeRun?.id)
+    assert(smokeMessage?.body === smokeBody,
+      `Structured Skill message body changed: ${JSON.stringify(smokeMessage)}`)
+    assert(smokeRun && smokeManifest,
+      `Structured Skill Run or Manifest is missing: ${JSON.stringify(smokeSnapshot)}`)
+    const resolution = smokeManifest.currentInputSkillResolution
+    const resolvedEntry = resolution.entries[0]
+    assert(
+      resolvedEntry.nameAtSend === selectableSkill.name
+        && resolvedEntry.outcome === 'included'
+        && typeof resolvedEntry.path === 'string'
+        && resolvedEntry.path.endsWith('/SKILL.md'),
+      `Structured Skill resolution is not included: ${JSON.stringify(resolution)}`
+    )
+    await access(resolvedEntry.path)
+    const sentSkillCapture = join(outputDir, 'structured-skill-context-sent.png')
+    await capture(running.cdp, sentSkillCapture)
+
+    await closeApp(running)
+    running = null
+    const manifestRows = await runSqlJson(databasePath, `
+      SELECT
+        run.skill_selection_snapshot_json AS selectionSnapshotJson,
+        run.skill_selection_snapshot_digest AS selectionSnapshotDigest,
+        manifest.current_input_skill_resolution_json AS resolutionJson,
+        manifest.current_input_skill_resolution_digest AS resolutionDigest,
+        manifest.rendered_payload_digest AS renderedPayloadDigest,
+        blob.sha256 AS blobSha256,
+        blob.storage_relative_path AS storageRelativePath
+      FROM context_manifest AS manifest
+      JOIN agent_run AS run ON run.id = manifest.agent_run_id
+      JOIN managed_blob AS blob ON blob.id = manifest.rendered_payload_blob_id
+      WHERE manifest.agent_run_id = ${sqlLiteral(smokeRun.id)};
+    `)
+    assert(manifestRows.length === 1,
+      `Structured Skill ContextManifest row is missing: ${JSON.stringify(manifestRows)}`)
+    const persisted = manifestRows[0]
+    const selection = JSON.parse(persisted.selectionSnapshotJson)
+    const persistedResolution = JSON.parse(persisted.resolutionJson)
+    assert(selection.entries.length === 1
+      && selection.entries[0].skillId === selectableSkill.id
+      && selection.entries[0].nameAtSend === selectableSkill.name
+      && selection.entries[0].eligibleAtSend === true,
+    `Send-time Skill selection is not eligible: ${JSON.stringify(selection)}`)
+    assert(deepEqual(persistedResolution, resolution),
+      `Persisted Skill resolution differs from the Read Model: ${JSON.stringify(persistedResolution)}`)
+
+    const renderedPayload = await readFile(
+      join(dataDir, 'managed-blobs', persisted.storageRelativePath),
+      'utf8'
+    )
+    const renderedPayloadSha256 = createHash('sha256').update(renderedPayload).digest('hex')
+    assert(persisted.blobSha256 === renderedPayloadSha256
+      && persisted.renderedPayloadDigest === `sha256:${renderedPayloadSha256}`,
+    `Rendered payload digest is inconsistent: ${JSON.stringify(persisted)}`)
+    const currentInput = extractTaggedJson(renderedPayload, 'CURRENT_INPUT')
+    assert(currentInput.message === smokeBody, `CURRENT_INPUT.message changed: ${JSON.stringify(currentInput)}`)
+    assert(deepEqual(currentInput.skills, [{
+      name: selectableSkill.name,
+      path: resolvedEntry.path
+    }]), `CURRENT_INPUT.skills is not the resolved sibling: ${JSON.stringify(currentInput)}`)
+
+    result = {
+      acceptance: 'composer-skill-context',
+      appPath,
+      outputDir,
+      captures: { skillPicker: skillPickerCapture, sent: sentSkillCapture },
+      campId,
+      messageId: smokeMessage.id,
+      agentRunId: smokeRun.id,
+      selectedSkillName: selectableSkill.name,
+      structuredContent: smokeMessage.content,
+      selectionSnapshotDigest: persisted.selectionSnapshotDigest,
+      resolutionDigest: persisted.resolutionDigest,
+      renderedPayloadDigest: persisted.renderedPayloadDigest,
+      currentInput,
+      clipboardItemCountBeforeTest: clipboardArchive.length,
+      clipboardRestored: false,
+      isolatedUserDataRemoved: false
+    }
+  } else if (skillPickerOnly) {
     result = {
       acceptance: 'composer-skill-picker-ui',
       appPath,
@@ -1150,8 +1281,9 @@ try {
         segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
   await waitForExpression(running.cdp, `(() => (
     document.activeElement?.id === 'camp-message'
-      && document.querySelector('.composer')?.classList.contains('suppress-reply-focus-ring')
-      && document.querySelector('.mention-target-summary')?.textContent === '发送给 @叮叮'
+      && document.querySelector('.composer')?.classList.contains('suppress-pointer-focus-ring')
+      && document.querySelector('.composer-reply-line strong')?.textContent === '回复 叮叮'
+      && !document.querySelector('.mention-target-summary')
   ))()`)
   const lightweightReplyInspection = await inspectLightweightReply(running.cdp)
   assert(
@@ -1266,7 +1398,7 @@ try {
     unresolvedReplyInspection.theme === 'night'
       && unresolvedReplyInspection.warning === '原作者当前不可接收，请选择其他成员'
       && unresolvedReplyInspection.sendDisabled === true
-      && unresolvedReplyInspection.summary.includes('Default Lead'),
+      && unresolvedReplyInspection.summary === null,
     `Unavailable reply did not block explicit sending: ${JSON.stringify(unresolvedReplyInspection)}`
   )
   const unavailableReplyCapture = join(outputDir, 'message-reply-recipient-required-night.png')
@@ -1275,26 +1407,27 @@ try {
   const messageSequenceBeforeRecipientRepair = Math.max(0,
     ...(await request(running.cdp, 'camps.snapshot', { campId })).messages
       .map((message) => message.sequence))
-  await mouseClick(running.cdp, '.reply-recipient-options button')
+  await mouseClick(running.cdp, '.reply-recipient-options button:nth-child(2)')
   const resolvedReplyDraft = await waitForValue(async () =>
     request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
     draft.replyIntent?.replyToCampMessageId === currentUserMentionMessageId
       && draft.replyIntent.recipientSelectionRequired === false
       && draft.content.some((segment) =>
-        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[1])
+        segment.kind === 'member_mention' && segment.agentId === targetMemberIds[2])
       && !draft.content.some((segment) =>
         segment.kind === 'member_mention' && segment.agentId === targetMemberIds[0]), 10_000)
   await waitForExpression(running.cdp, `(() => (
     !document.querySelector('.reply-recipient-repair')
-      && document.querySelector('.mention-target-summary')?.textContent === '发送给 @芝士'
+      && document.querySelector('.composer-reply-line strong')?.textContent === '回复 叮叮'
+      && !document.querySelector('.mention-target-summary')
       && document.querySelector('.composer-send')?.disabled === false
   ))()`)
   const continuationStartedAt = Date.now()
   await mouseClick(running.cdp, '.composer-send')
   await waitForExpression(running.cdp, `(() => {
     const continuation = document.querySelector('.composer-continuation')
-    return continuation?.getAttribute('aria-label') === '继续发给 芝士'
-      && continuation.textContent?.includes('继续发给 @芝士')
+    return continuation?.getAttribute('aria-label') === '继续发给 咕咕'
+      && continuation.textContent?.includes('继续发给 @咕咕')
       && document.querySelector('#camp-message')?.textContent === ''
   })()`, 5_000)
   const continuationVisibleAfterAcceptedSendMs = Date.now() - continuationStartedAt
@@ -1302,18 +1435,18 @@ try {
     request(running.cdp, 'camp.composerDraft.get', { campId }), (draft) =>
     draft.content.length === 0
       && draft.replyIntent === null
-      && draft.continuationIntent?.recipient.agentId === targetMemberIds[1], 5_000)
+      && draft.continuationIntent?.recipient.agentId === targetMemberIds[2], 5_000)
   const sentReplySnapshot = await waitForValue(async () =>
     request(running.cdp, 'camps.snapshot', { campId }), (snapshot) =>
     snapshot.messages.some((message) => message.sequence > messageSequenceBeforeRecipientRepair)
       && snapshot.messages.some((message) =>
         message.authorType === 'user'
           && message.replyToCampMessageId === currentUserMentionMessageId
-          && deepEqual(message.addressedAgentIds, [targetMemberIds[1]])), 30_000)
+          && deepEqual(message.addressedAgentIds, [targetMemberIds[2]])), 30_000)
   const sentReplyMessage = sentReplySnapshot.messages.find((message) =>
     message.authorType === 'user'
       && message.replyToCampMessageId === currentUserMentionMessageId
-      && deepEqual(message.addressedAgentIds, [targetMemberIds[1]]))
+      && deepEqual(message.addressedAgentIds, [targetMemberIds[2]]))
   assert(sentReplyMessage,
     `Resolved reply did not create the expected message: ${JSON.stringify(sentReplySnapshot.messages)}`)
   await waitForSelector(running.cdp,
@@ -1450,7 +1583,7 @@ try {
   await pressNativeButtonEnter(running.cdp)
   await waitForExpression(running.cdp, `(() => (
     document.activeElement?.id === 'camp-message'
-      && !document.querySelector('.composer')?.classList.contains('suppress-reply-focus-ring')
+      && !document.querySelector('.composer')?.classList.contains('suppress-pointer-focus-ring')
       && Boolean(document.querySelector('.composer-reply-line'))
   ))()`)
 
@@ -2261,7 +2394,7 @@ async function inspectLightweightReply(cdp) {
     return {
       theme: document.documentElement.dataset.theme,
       editorFocused: document.activeElement === editor,
-      focusRingSuppressed: composer.classList.contains('suppress-reply-focus-ring')
+      focusRingSuppressed: composer.classList.contains('suppress-pointer-focus-ring')
         && getComputedStyle(editor).outlineStyle === 'none',
       composerBox: {
         borderTopWidth: boxStyle.borderTopWidth,
@@ -2511,6 +2644,71 @@ function structuredClipboardPayload(archive) {
 
 function runSql(path, sql) {
   return runProcess('/usr/bin/sqlite3', [path, sql])
+}
+
+async function runSqlJson(path, sql) {
+  const raw = await runProcess('/usr/bin/sqlite3', ['-json', path, sql])
+  return JSON.parse(raw || '[]')
+}
+
+function extractTaggedJson(payload, tag) {
+  const opening = `[${tag}]\n`
+  const closing = `\n[/${tag}]`
+  const start = payload.lastIndexOf(opening)
+  assert(start >= 0, `Rendered payload has no ${tag} section`)
+  const contentStart = start + opening.length
+  const end = payload.indexOf(closing, contentStart)
+  assert(end >= 0, `Rendered payload has no closing ${tag} section`)
+  return JSON.parse(payload.slice(contentStart, end))
+}
+
+function fakeCodexAcceptanceRuntime() {
+  return `#!/usr/bin/env node
+import readline from 'node:readline'
+
+const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity })
+let turnOrdinal = 0
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n')
+
+for await (const line of lines) {
+  if (!line.trim()) continue
+  const message = JSON.parse(line)
+  if (message.id === undefined) continue
+  const method = message.method
+  if (method === 'initialize') {
+    send({ jsonrpc: '2.0', id: message.id, result: { serverInfo: { name: 'rovai-acceptance', version: '1' } } })
+    continue
+  }
+  if (method === 'config/read') {
+    send({ jsonrpc: '2.0', id: message.id, result: { config: { mcp_servers: {} }, layers: [] } })
+    continue
+  }
+  if (method === 'thread/start' || method === 'thread/resume') {
+    const threadId = message.params?.threadId ?? 'thread-structured-skill-acceptance'
+    send({ jsonrpc: '2.0', id: message.id, result: { thread: { id: threadId }, instructionSources: [] } })
+    continue
+  }
+  if (method === 'turn/start') {
+    turnOrdinal += 1
+    const threadId = message.params?.threadId ?? 'thread-structured-skill-acceptance'
+    const turnId = 'turn-structured-skill-' + turnOrdinal
+    const item = {
+      id: 'message-structured-skill-' + turnOrdinal,
+      type: 'agentMessage',
+      status: 'completed',
+      text: 'Structured Skill context acceptance completed.'
+    }
+    send({ jsonrpc: '2.0', id: message.id, result: { turn: { id: turnId } } })
+    setTimeout(() => {
+      send({ method: 'turn/started', params: { threadId, turn: { id: turnId, status: 'inProgress', items: [] } } })
+      send({ method: 'item/completed', params: { threadId, turnId, item } })
+      send({ method: 'turn/completed', params: { threadId, turn: { id: turnId, status: 'completed', items: [item] } } })
+    }, 1000)
+    continue
+  }
+  send({ jsonrpc: '2.0', id: message.id, result: {} })
+}
+`
 }
 
 function runProcess(command, args, { input } = {}) {

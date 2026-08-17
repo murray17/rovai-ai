@@ -72,6 +72,7 @@ pnpm accept:member-lifecycle-ui
 pnpm accept:notification-ui
 pnpm accept:sidebar-ui
 pnpm accept:composer-skill-picker-ui
+pnpm accept:composer-skill-context
 pnpm accept:structured-mentions-ui
 pnpm accept:task-card-ui
 pnpm accept:runtime-activity-ui
@@ -267,14 +268,20 @@ pnpm accept:structured-mentions-ui
 ```
 
 `accept:composer-skill-picker-ui` 是会话框 Skill 选择的专项成品门禁，在验证 Skill 菜单、
-明确选择与纯 Text 草稿持久化后即结束；`accept:structured-mentions-ui` 继续追加原有 Mention、
+明确选择与结构化 Skill 草稿持久化后即结束；`accept:composer-skill-context` 使用不调用模型的最小本地
+Runtime，继续证明 Picker → 发送 → send-time snapshot → Manifest resolution → exact
+`CURRENT_INPUT.skills`；`accept:structured-mentions-ui` 追加原有 Mention、
 发送、人物信息卡、原生选区与复制回归。两者都使用三位带角色的队员和无模型安全 Runtime
 fixture，并共同证明：
 
 - `/` 只在空 Composer（或完整正文替换）中打开真实 Skill 下拉；候选按当前 Lead 的
   Runtime 生效组过滤，菜单位于输入框上方且使用 Porcelain/Steel 层级；Enter 选择后写入
-  普通 `/<skill-name> `、恢复 Composer 焦点并持久化为单个 Text，既不自动发送也不创建
-  结构化 Skill Token；
+  原子 `skill_mention { skillId, nameAtSend }` 和普通尾随空格，恢复 Composer 焦点并按同一身份持久化；
+  正文仍精确投影为 `/<skill-name> `，且不会自动发送；
+- 手写、粘贴和旧 Draft 中看似 `/<skill-name>` 的内容始终保持 Text，不按当前 Skill 反解析或升级；
+- Draft 中 Skill 后来 disabled、deleted、renamed 或对当前 Lead unassigned 时，token 保留冻结 Marker 并
+  显示不可用状态；正文仍可发送，是否提供 `SKILL.md` 文件链接以发送时和 Run start-time 的 Core
+  判定为准；
 - Composer Mention 是默认无底色的蓝色、不可拆分原子行内文字，耐久 Draft 与发送后的
   Structured Content 保持同一稳定身份；
 - 从队员或所有队员候选中选中 Mention 后自动补一个普通空格，光标位于该空格之后；

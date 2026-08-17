@@ -2806,7 +2806,7 @@ fn unquote_yaml_scalar(value: &str) -> &str {
     value
 }
 
-fn validate_skill_name(name: &str) -> Result<()> {
+pub(crate) fn validate_skill_name(name: &str) -> Result<()> {
     if name.is_empty() || name.len() > 64 {
         anyhow::bail!("Skill name must contain between 1 and 64 characters");
     }

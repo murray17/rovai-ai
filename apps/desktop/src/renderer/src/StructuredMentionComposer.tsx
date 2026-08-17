@@ -21,6 +21,7 @@ import {
   deleteStructuredForward,
   insertAllMembersMentionWithTrailingSpace,
   insertMemberMentionWithTrailingSpace,
+  insertSkillMentionWithTrailingSpace as insertStructuredSkillMentionWithTrailingSpace,
   insertStructuredText,
   normalizeStructuredMentionContent,
   pasteStructuredPlainText,
@@ -220,14 +221,12 @@ export function skillQueryAfterNativeTextInput(
   )
 }
 
-export function insertSkillCommandWithTrailingSpace(
+export function insertSkillMentionWithTrailingSpace(
   state: StructuredMentionEditorState,
-  skillName: string
+  skillId: string,
+  nameAtSend: string
 ): StructuredMentionEditorState {
-  if (!skillName || /[\s/]/u.test(skillName)) {
-    throw new Error('Skill name must be a non-empty slash-command segment')
-  }
-  return insertStructuredText(state, `/${skillName} `)
+  return insertStructuredSkillMentionWithTrailingSpace(state, skillId, nameAtSend)
 }
 
 export function shouldSubmitStructuredComposerOnEnter(input: {
@@ -318,6 +317,10 @@ export function StructuredMentionComposer({
   const memberById = useMemo(
     () => new Map(members.map((member) => [member.agentId, member])),
     [members]
+  )
+  const skillById = useMemo(
+    () => new Map((skills ?? []).map((skill) => [skill.id, skill])),
+    [skills]
   )
   const mentionOptions = useMemo(
     () => query?.kind === 'mention'
@@ -455,7 +458,7 @@ export function StructuredMentionComposer({
       content,
       selection: { anchor: query.value.start, focus: query.value.end }
     }
-    const next = insertSkillCommandWithTrailingSpace(state, option.name)
+    const next = insertSkillMentionWithTrailingSpace(state, option.id, option.name)
     setQuery(null)
     emitState(next)
     window.requestAnimationFrame(() => editorRef.current?.focus())
@@ -698,6 +701,29 @@ export function StructuredMentionComposer({
               </span>
             )
           }
+          if (segment.kind === 'skill_mention') {
+            const currentSkill = skillById.get(segment.skillId)
+            const unavailable = !currentSkill || currentSkill.name !== segment.nameAtSend
+            return (
+              <span
+                className={`structured-mention-token skill-mention${unavailable ? ' is-unavailable' : ''}`}
+                contentEditable={false}
+                data-editor-segment="token"
+                data-token-kind="skill_mention"
+                data-skill-id={segment.skillId}
+                data-skill-name={segment.nameAtSend}
+                aria-label={`Skill /${segment.nameAtSend}${unavailable ? '，发送时将不提供文件链接' : ''}`}
+                aria-invalid={unavailable || undefined}
+                title={unavailable ? '该 Skill 当前不可用；正文仍可发送，但不会提供文件链接。' : undefined}
+                key={`skill-${index}-${segment.skillId}`}
+                style={unavailable
+                  ? { ...TOKEN_STYLE, textDecoration: 'line-through', textDecorationColor: 'var(--attention)' }
+                  : TOKEN_STYLE}
+              >
+                /{segment.nameAtSend}
+              </span>
+            )
+          }
           if (segment.kind === 'all_members_mention') {
             return (
               <span
@@ -911,6 +937,10 @@ function structuredContentEqual(
     if (segment.kind === 'member_mention' && candidate.kind === 'member_mention') {
       return segment.agentId === candidate.agentId
     }
+    if (segment.kind === 'skill_mention' && candidate.kind === 'skill_mention') {
+      return segment.skillId === candidate.skillId
+        && segment.nameAtSend === candidate.nameAtSend
+    }
     return segment.kind === 'all_members_mention'
   })
 }
@@ -939,6 +969,14 @@ function readStructuredContent(editor: HTMLDivElement): StructuredMentionContent
       }
       if (tokenKind === 'all_members_mention') {
         content.push({ kind: 'all_members_mention' })
+        continue
+      }
+      if (tokenKind === 'skill_mention') {
+        const skillId = element.dataset.skillId
+        const nameAtSend = element.dataset.skillName
+        if (skillId && nameAtSend) {
+          content.push({ kind: 'skill_mention', skillId, nameAtSend })
+        }
         continue
       }
       if (element.tagName === 'BR') {
@@ -970,6 +1008,11 @@ function editorDomMatchesReactProjection(
     if (element.dataset.editorSegment !== 'token') return false
     if (segment.kind === 'all_members_mention') {
       return element.dataset.tokenKind === 'all_members_mention'
+    }
+    if (segment.kind === 'skill_mention') {
+      return element.dataset.tokenKind === 'skill_mention'
+        && element.dataset.skillId === segment.skillId
+        && element.dataset.skillName === segment.nameAtSend
     }
     return element.dataset.tokenKind === 'member_mention'
       && element.dataset.agentId === segment.agentId

@@ -217,7 +217,7 @@ export function campOpenProjectionAsSnapshot(
   const totalCount = Math.max(projection.coverage.messages.totalCount, loadedCount)
   const omittedCount = Math.max(0, totalCount - loadedCount)
   return {
-    schemaVersion: 29,
+    schemaVersion: 30,
     throughGlobalSequence: projection.throughGlobalSequence,
     camp: projection.camp,
     members: projection.members,

@@ -9,13 +9,14 @@ use crate::{
     camp_attachment::managed_attachment_summary,
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     canonical_activity::CanonicalRuntimeActivity,
+    current_input_skill::CurrentInputSkillResolution,
     db::Database,
     git::GitObservation,
     mcp_projection::McpExposureSnapshot,
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 29;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 30;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
@@ -372,6 +373,8 @@ pub struct ContextManifestView {
     pub attachment_digest: String,
     pub skill_exposure: SkillExposureSnapshot,
     pub skill_exposure_digest: String,
+    pub current_input_skill_resolution: CurrentInputSkillResolution,
+    pub current_input_skill_resolution_digest: String,
     pub mcp_exposure: McpExposureSnapshot,
     pub mcp_exposure_digest: String,
     pub mcp_projection_digest: String,
@@ -2484,6 +2487,8 @@ fn load_context_manifests(
                manifest.attachment_digest,
                manifest.skill_exposure_json,
                manifest.skill_exposure_digest,
+               manifest.current_input_skill_resolution_json,
+               manifest.current_input_skill_resolution_digest,
                manifest.mcp_exposure_json,
                manifest.mcp_exposure_digest,
                manifest.mcp_projection_digest,
@@ -2569,43 +2574,45 @@ fn load_context_manifests(
                 row.get::<_, String>(14)?,
                 row.get::<_, String>(15)?,
                 row.get::<_, String>(16)?,
-                row.get::<_, i64>(17)?,
+                row.get::<_, String>(17)?,
                 row.get::<_, String>(18)?,
-                row.get::<_, String>(19)?,
-                row.get::<_, i64>(20)?,
-                row.get::<_, i64>(21)?,
+                row.get::<_, i64>(19)?,
+                row.get::<_, String>(20)?,
+                row.get::<_, String>(21)?,
                 row.get::<_, i64>(22)?,
                 row.get::<_, i64>(23)?,
-                row.get::<_, String>(24)?,
-                row.get::<_, String>(25)?,
-                row.get::<_, Option<String>>(26)?,
+                row.get::<_, i64>(24)?,
+                row.get::<_, i64>(25)?,
+                row.get::<_, String>(26)?,
                 row.get::<_, String>(27)?,
-                row.get::<_, Option<i64>>(28)?,
-                row.get::<_, Option<i64>>(29)?,
+                row.get::<_, Option<String>>(28)?,
+                row.get::<_, String>(29)?,
                 row.get::<_, Option<i64>>(30)?,
-                row.get::<_, String>(31)?,
-                row.get::<_, Option<String>>(32)?,
-                row.get::<_, Option<i64>>(33)?,
+                row.get::<_, Option<i64>>(31)?,
+                row.get::<_, Option<i64>>(32)?,
+                row.get::<_, String>(33)?,
                 row.get::<_, Option<String>>(34)?,
-                row.get::<_, Option<String>>(35)?,
-                row.get::<_, Option<i64>>(36)?,
+                row.get::<_, Option<i64>>(35)?,
+                row.get::<_, Option<String>>(36)?,
                 row.get::<_, Option<String>>(37)?,
-                row.get::<_, Option<String>>(38)?,
+                row.get::<_, Option<i64>>(38)?,
                 row.get::<_, Option<String>>(39)?,
                 row.get::<_, Option<String>>(40)?,
                 row.get::<_, Option<String>>(41)?,
-                row.get::<_, bool>(42)?,
-                row.get::<_, String>(43)?,
-                row.get::<_, String>(44)?,
+                row.get::<_, Option<String>>(42)?,
+                row.get::<_, Option<String>>(43)?,
+                row.get::<_, bool>(44)?,
                 row.get::<_, String>(45)?,
-                row.get::<_, Option<bool>>(46)?,
-                row.get::<_, Option<i64>>(47)?,
-                row.get::<_, Option<String>>(48)?,
+                row.get::<_, String>(46)?,
+                row.get::<_, String>(47)?,
+                row.get::<_, Option<bool>>(48)?,
                 row.get::<_, Option<i64>>(49)?,
-                row.get::<_, Option<i64>>(50)?,
-                row.get::<_, String>(51)?,
-                row.get::<_, String>(52)?,
+                row.get::<_, Option<String>>(50)?,
+                row.get::<_, Option<i64>>(51)?,
+                row.get::<_, Option<i64>>(52)?,
                 row.get::<_, String>(53)?,
+                row.get::<_, String>(54)?,
+                row.get::<_, String>(55)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2615,13 +2622,13 @@ fn load_context_manifests(
                 .context("ContextManifest raw message references are invalid")?;
             let run_fact_refs = serde_json::from_str::<Vec<RunFactRefView>>(&row.7)
                 .context("ContextManifest Run Fact references are invalid")?;
-            let shared_message_evidence = serde_json::from_str::<Vec<Value>>(&row.43)
+            let shared_message_evidence = serde_json::from_str::<Vec<Value>>(&row.45)
                 .context("ContextManifest Shared Message evidence is invalid")?;
-            let run_fact_payload = serde_json::from_str::<Value>(&row.45)
+            let run_fact_payload = serde_json::from_str::<Value>(&row.47)
                 .context("ContextManifest Run Fact payload is invalid")?;
-            let omission_entries = serde_json::from_str::<Vec<Value>>(&row.51)
+            let omission_entries = serde_json::from_str::<Vec<Value>>(&row.53)
                 .context("ContextManifest omission evidence is invalid")?;
-            let self_active_task_evidence = serde_json::from_str::<Value>(&row.52)
+            let self_active_task_evidence = serde_json::from_str::<Value>(&row.54)
                 .context("ContextManifest Self Active Task evidence is invalid")?;
             let current_input_source = serde_json::from_str::<Value>(&row.9)
                 .context("ContextManifest Current Input source is invalid")?;
@@ -2629,51 +2636,54 @@ fn load_context_manifests(
                 .context("ContextManifest attachment references are invalid")?;
             let skill_exposure = serde_json::from_str::<SkillExposureSnapshot>(&row.12)
                 .context("ContextManifest Skill exposure is invalid")?;
-            let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&row.14)
+            let current_input_skill_resolution =
+                serde_json::from_str::<CurrentInputSkillResolution>(&row.14)
+                    .context("ContextManifest Current Input Skill resolution is invalid")?;
+            let mcp_exposure = serde_json::from_str::<McpExposureSnapshot>(&row.16)
                 .context("ContextManifest MCP exposure is invalid")?;
-            let context_delivery_profile = serde_json::from_str(&row.24)
+            let context_delivery_profile = serde_json::from_str(&row.26)
                 .context("ContextManifest delivery profile is invalid")?;
             let originating_public_user_message_ref = row
-                .26
+                .28
                 .as_deref()
                 .map(serde_json::from_str)
                 .transpose()
                 .context("ContextManifest originating message reference is invalid")?;
-            let recent_message_count = serde_json::from_str::<Vec<Value>>(&row.27)
+            let recent_message_count = serde_json::from_str::<Vec<Value>>(&row.29)
                 .context("ContextManifest recent message references are invalid")?
                 .len();
-            let bootstrap = serde_json::from_str::<NativeSessionBootstrapEvidenceView>(&row.31)
+            let bootstrap = serde_json::from_str::<NativeSessionBootstrapEvidenceView>(&row.33)
                 .context("ContextManifest Native Session Bootstrap is invalid")?;
             let delivery = row
-                .32
+                .34
                 .clone()
                 .map(|id| {
                     Ok::<RuntimeInputDeliveryView, anyhow::Error>(RuntimeInputDeliveryView {
                         id,
                         execution_epoch: row
-                            .33
+                            .35
                             .context("Context delivery has no execution epoch")?,
-                        status: row.34.clone().context("Context delivery has no status")?,
-                        native_input_id: row.35.clone(),
+                        status: row.36.clone().context("Context delivery has no status")?,
+                        native_input_id: row.37.clone(),
                         boundary_camp_message_sequence: row
-                            .36
+                            .38
                             .context("Context delivery has no message boundary")?,
                         prepared_at: row
-                            .37
+                            .39
                             .clone()
                             .context("Context delivery has no prepared time")?,
-                        accepted_at: row.38.clone(),
-                        resolved_at: row.39.clone(),
-                        last_error: row.40.clone(),
+                        accepted_at: row.40.clone(),
+                        resolved_at: row.41.clone(),
+                        last_error: row.42.clone(),
                         updated_at: row
-                            .41
+                            .43
                             .clone()
                             .context("Context delivery has no updated time")?,
-                        bootstrap_redelivery_present: row.46.unwrap_or(false),
-                        bootstrap_redelivery_revision: row.47,
-                        bootstrap_redelivery_evidence_id: row.48.clone(),
-                        bootstrap_redelivery_envelope_version: row.49,
-                        bootstrap_redelivery_formatter_version: row.50,
+                        bootstrap_redelivery_present: row.48.unwrap_or(false),
+                        bootstrap_redelivery_revision: row.49,
+                        bootstrap_redelivery_evidence_id: row.50.clone(),
+                        bootstrap_redelivery_envelope_version: row.51,
+                        bootstrap_redelivery_formatter_version: row.52,
                     })
                 })
                 .transpose()?;
@@ -2684,24 +2694,24 @@ fn load_context_manifests(
                 native_binding_generation: row.2,
                 camp_message_boundary_sequence: row.3,
                 conversation_message_boundary_sequence: row.4,
-                history_fence_version: row.20,
-                global_public_message_boundary: row.21,
+                history_fence_version: row.22,
+                global_public_message_boundary: row.23,
                 history_camps: load_context_manifest_history_camps(transaction, &row.0)?,
                 raw_message_count: raw_message_refs.len(),
-                previous_accepted_public_boundary_sequence: row.22,
-                context_delivery_profile_version: row.23,
+                previous_accepted_public_boundary_sequence: row.24,
+                context_delivery_profile_version: row.25,
                 context_delivery_profile,
-                context_delivery_profile_digest: row.25,
+                context_delivery_profile_digest: row.27,
                 originating_public_user_message_ref,
                 recent_message_count,
-                omitted_message_count: row.28,
-                omitted_message_sequence_start: row.29,
-                omitted_message_sequence_end: row.30,
+                omitted_message_count: row.30,
+                omitted_message_sequence_start: row.31,
+                omitted_message_sequence_end: row.32,
                 omission_entries,
                 collaboration_state_digest: row.6,
-                collaboration_state_included: row.42,
+                collaboration_state_included: row.44,
                 shared_message_evidence,
-                shared_message_evidence_digest: row.44,
+                shared_message_evidence_digest: row.46,
                 run_fact_refs,
                 run_fact_payload,
                 run_fact_digest: row.8,
@@ -2710,15 +2720,17 @@ fn load_context_manifests(
                 attachment_digest: row.11,
                 skill_exposure,
                 skill_exposure_digest: row.13,
+                current_input_skill_resolution,
+                current_input_skill_resolution_digest: row.15,
                 mcp_exposure,
-                mcp_exposure_digest: row.15,
-                mcp_projection_digest: row.16,
+                mcp_exposure_digest: row.17,
+                mcp_projection_digest: row.18,
                 self_active_task_evidence,
-                self_active_task_evidence_digest: row.53,
-                formatter_version: row.17,
-                rendered_payload_digest: row.18,
+                self_active_task_evidence_digest: row.55,
+                formatter_version: row.19,
+                rendered_payload_digest: row.20,
                 delivery,
-                created_at: row.19,
+                created_at: row.21,
             })
         })
         .collect()

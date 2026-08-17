@@ -6,6 +6,7 @@ import {
   insertAllMembersMentionWithTrailingSpace,
   insertMemberMention,
   insertMemberMentionWithTrailingSpace,
+  insertSkillMentionWithTrailingSpace,
   insertStructuredText,
   normalizeStructuredMentionContent,
   pasteStructuredPlainText,
@@ -20,6 +21,11 @@ const member = (agentId: string) => ({
 })
 
 const allMembers = () => ({ kind: 'all_members_mention' as const })
+const skill = (skillId: string, nameAtSend: string) => ({
+  kind: 'skill_mention' as const,
+  skillId,
+  nameAtSend
+})
 
 describe('structured mention editing model', () => {
   it('drops empty text and merges only adjacent text without deduplicating tokens', () => {
@@ -134,6 +140,16 @@ describe('structured mention editing model', () => {
     })
   })
 
+  it('keeps Skill identity atomic while preserving ordinary trailing whitespace', () => {
+    expect(insertSkillMentionWithTrailingSpace({
+      content: [{ kind: 'text', text: '/rev next' }],
+      selection: { anchor: 0, focus: 4 }
+    }, 'skill-review', 'review-pr')).toEqual({
+      content: [skill('skill-review', 'review-pr'), { kind: 'text', text: ' next' }],
+      selection: { anchor: 2, focus: 2 }
+    })
+  })
+
   it('Backspace and Delete remove an adjacent token as one atomic unit', () => {
     const content = [
       { kind: 'text' as const, text: 'A' },
@@ -197,15 +213,15 @@ describe('structured mention editing model', () => {
     })
   })
 
-  it('pastes @ text as text without upgrading it to structured tokens', () => {
+  it('pastes @ and slash text without upgrading either to structured tokens', () => {
     const result = pasteStructuredPlainText({
       content: [member('agent-a')],
       selection: { anchor: 0, focus: 1 }
-    }, '@洛可 和 @所有队员')
+    }, '@洛可 和 @所有队员 /review-pr')
 
     expect(result).toEqual({
-      content: [{ kind: 'text', text: '@洛可 和 @所有队员' }],
-      selection: { anchor: 11, focus: 11 }
+      content: [{ kind: 'text', text: '@洛可 和 @所有队员 /review-pr' }],
+      selection: { anchor: 22, focus: 22 }
     })
     expect(result.content.every((segment) => segment.kind === 'text')).toBe(true)
   })

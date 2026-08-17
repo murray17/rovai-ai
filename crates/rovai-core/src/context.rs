@@ -27,6 +27,10 @@ use crate::{
     context_delivery::{
         ContextDeliveryProfile, body_prefix, current_context_delivery_profile, unicode_scalar_count,
     },
+    current_input_skill::{
+        CurrentInputSkillLink, SkillSelectionSnapshot, parse_skill_selection_snapshot,
+        resolve_current_input_skills, validate_persisted_resolution,
+    },
     db::Database,
     managed_blob::ManagedBlobStore,
     mcp_projection::{McpExposureSnapshot, PreparedMcpProjection},
@@ -325,8 +329,8 @@ impl ContextService {
         if let Some((snapshot_json, digest)) = existing {
             let persisted_snapshot: SkillExposureSnapshot = serde_json::from_str(&snapshot_json)
                 .context("stored ContextManifest Skill exposure is invalid")?;
-            if digest != "sha256:legacy-empty-skill-exposure"
-                && canonical_json_digest(&serde_json::to_value(&persisted_snapshot)?)? != digest
+            if persisted_snapshot.schema_version != 2
+                || canonical_json_digest(&serde_json::to_value(&persisted_snapshot)?)? != digest
             {
                 anyhow::bail!("stored ContextManifest Skill exposure digest is invalid");
             }
@@ -378,10 +382,16 @@ impl ContextService {
             blob_store,
             &snapshot,
             request.charter_delivery_mode,
+            prepared_skill_exposure,
             prepared_mcp_projection,
             max_payload_bytes,
         )? {
             return Ok(ContextMaterialization::Ready(existing));
+        }
+        if !snapshot.skill_selection_snapshot.entries.is_empty()
+            && prepared_skill_exposure.is_none()
+        {
+            anyhow::bail!("Structured Skill selection requires a prepared full Skill exposure");
         }
 
         let fallback_skill_exposure;
@@ -515,6 +525,19 @@ impl ContextService {
             .iter()
             .map(|attachment| attachment.path.clone())
             .collect::<Vec<_>>();
+        if snapshot.invocation_kind != "direct"
+            && !snapshot.skill_selection_snapshot.entries.is_empty()
+        {
+            anyhow::bail!("Non-direct AgentRun has a non-empty Skill selection snapshot");
+        }
+        let adapter_kind = run_snapshot_adapter_kind(&snapshot)?;
+        let current_input_skill_resolution = resolve_current_input_skills(
+            database.connection(),
+            &snapshot.skill_selection_snapshot,
+            &snapshot.skill_selection_snapshot_digest,
+            prepared_skill_exposure,
+            adapter_kind,
+        )?;
         let a2a_count = count_a2a_runs(database, &snapshot.camp_turn_id)?;
         let collaboration_state_section = collaboration_changed.then_some(collaboration_state);
         let run_facts =
@@ -529,7 +552,8 @@ impl ContextService {
             == CharterDeliveryMode::FirstPayload
             && bootstrap_required)
             || bootstrap_redelivery_revision.is_some();
-        let current_input_value = current_input.as_payload(&attachment_paths);
+        let current_input_value =
+            current_input.as_payload(&attachment_paths, &current_input_skill_resolution.links);
         let bootstrap_payload = if bootstrap_in_runtime_payload {
             let bootstrap = format_session_bootstrap_for_snapshot(
                 database,
@@ -748,6 +772,16 @@ impl ContextService {
             .map(|omitted| omitted.sequence_end);
         let transaction = database.connection_mut().transaction()?;
         revalidate_snapshot_for_manifest(&transaction, &snapshot, expected_binding_generation)?;
+        let revalidated_skill_resolution = resolve_current_input_skills(
+            &transaction,
+            &snapshot.skill_selection_snapshot,
+            &snapshot.skill_selection_snapshot_digest,
+            prepared_skill_exposure,
+            adapter_kind,
+        )?;
+        if revalidated_skill_resolution != current_input_skill_resolution {
+            anyhow::bail!("Current Input Skill availability changed during materialization");
+        }
         let (global_public_message_boundary, history_camps) =
             capture_cross_camp_history_fence(&transaction, &snapshot)?;
         let inserted = transaction.execute(
@@ -773,6 +807,8 @@ impl ContextService {
                 current_input_source_json,
                 attachment_refs_json, attachment_digest,
                 skill_exposure_json, skill_exposure_digest,
+                current_input_skill_resolution_json,
+                current_input_skill_resolution_digest,
                 mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
                 self_active_task_evidence_json, self_active_task_evidence_digest,
                 formatter_version,
@@ -781,7 +817,8 @@ impl ContextService {
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
                 ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
-                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41
+                ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40,
+                ?41, ?42, ?43
             )
             "#,
             params![
@@ -820,6 +857,8 @@ impl ContextService {
                 attachment_digest,
                 serde_json::to_string(&prepared_skill_exposure.snapshot)?,
                 prepared_skill_exposure.digest,
+                serde_json::to_string(&current_input_skill_resolution.resolution)?,
+                current_input_skill_resolution.digest,
                 serde_json::to_string(mcp_exposure)?,
                 mcp_exposure_digest,
                 mcp_projection_digest,
@@ -885,6 +924,7 @@ impl ContextService {
                     "runFactDigest": rendered_run_facts.digest,
                     "attachmentDigest": attachment_digest,
                     "skillExposureDigest": prepared_skill_exposure.digest,
+                    "currentInputSkillResolutionDigest": current_input_skill_resolution.digest,
                     "mcpExposureDigest": mcp_exposure_digest,
                     "selfActiveTaskEvidenceDigest": canonical_json_digest(&serde_json::to_value(&self_active_task_evidence)?)?,
                     "dynamicPayloadDigest": payload_digest,
@@ -1003,7 +1043,7 @@ impl ContextService {
             count_a2a_runs(transaction, &snapshot.camp_turn_id)?,
         )?;
         let rendered_run_facts = render_run_facts(&run_facts)?;
-        let current_input_value = current_input.as_payload(&attachment_paths);
+        let current_input_value = current_input.as_payload(&attachment_paths, &[]);
 
         // Public Delivery Runs are gated against the full Dynamic Context. A
         // FirstPayload adapter adds its already durable bootstrap in Runtime;
@@ -1711,6 +1751,8 @@ struct RunSnapshot {
     native_charter_digest: Option<String>,
     native_collaboration_state_digest: Option<String>,
     default_lead_agent_id: Option<String>,
+    skill_selection_snapshot: SkillSelectionSnapshot,
+    skill_selection_snapshot_digest: String,
 }
 
 fn prospective_delivery_snapshot(
@@ -1782,6 +1824,8 @@ fn prospective_delivery_snapshot(
         native_charter_digest: conversation.6,
         native_collaboration_state_digest: conversation.7,
         default_lead_agent_id,
+        skill_selection_snapshot: SkillSelectionSnapshot::default(),
+        skill_selection_snapshot_digest: SkillSelectionSnapshot::default().canonical_digest()?,
     })
 }
 
@@ -1818,7 +1862,9 @@ fn load_run_snapshot<R: ContextReadConnection>(
                    conversation.native_charter_digest,
                    conversation.native_collaboration_state_digest,
                    agent_run.a2a_parent_agent_run_id,
-                   agent_run.a2a_root_agent_run_id
+                   agent_run.a2a_root_agent_run_id,
+                   agent_run.skill_selection_snapshot_json,
+                   agent_run.skill_selection_snapshot_digest
             FROM agent_run
             JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
             JOIN camp ON camp.id = camp_turn.camp_id
@@ -1831,6 +1877,17 @@ fn load_run_snapshot<R: ContextReadConnection>(
             |row| {
                 let effective_config: String = row.get(15)?;
                 let workspace: String = row.get(16)?;
+                let skill_selection_json: String = row.get(30)?;
+                let skill_selection_digest: String = row.get(31)?;
+                let skill_selection_snapshot =
+                    parse_skill_selection_snapshot(&skill_selection_json, &skill_selection_digest)
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                skill_selection_json.len(),
+                                rusqlite::types::Type::Text,
+                                error.into(),
+                            )
+                        })?;
                 Ok(RunSnapshot {
                     agent_run_id: row.get(0)?,
                     camp_id: row.get(1)?,
@@ -1873,11 +1930,22 @@ fn load_run_snapshot<R: ContextReadConnection>(
                     native_charter_digest: row.get(26)?,
                     native_collaboration_state_digest: row.get(27)?,
                     default_lead_agent_id: row.get(17)?,
+                    skill_selection_snapshot,
+                    skill_selection_snapshot_digest: skill_selection_digest,
                 })
             },
         )
         .optional()
         .context("failed to load AgentRun context snapshot")
+}
+
+fn run_snapshot_adapter_kind(snapshot: &RunSnapshot) -> Result<AdapterKind> {
+    snapshot
+        .effective_config
+        .get("runtimeAdapter")
+        .and_then(Value::as_str)
+        .context("AgentRun effective configuration has no Runtime Adapter")?
+        .parse::<AdapterKind>()
 }
 
 fn build_session_charter(_snapshot: &RunSnapshot) -> String {
@@ -3770,13 +3838,21 @@ struct CurrentInput {
 }
 
 impl CurrentInput {
-    fn as_payload(&self, attachment_paths: &[String]) -> Value {
+    fn as_payload(
+        &self,
+        attachment_paths: &[String],
+        skill_links: &[CurrentInputSkillLink],
+    ) -> Value {
         let mut payload = self.payload.clone();
         if self.source_camp_message_id.is_some()
-            && !attachment_paths.is_empty()
             && let Some(payload) = payload.as_object_mut()
         {
-            payload.insert("attachments".to_string(), json!(attachment_paths));
+            if !skill_links.is_empty() {
+                payload.insert("skills".to_string(), json!(skill_links));
+            }
+            if !attachment_paths.is_empty() {
+                payload.insert("attachments".to_string(), json!(attachment_paths));
+            }
         }
         payload
     }
@@ -4484,7 +4560,9 @@ fn revalidate_snapshot_for_manifest(
             SELECT agent_run.status, agent_run.execution_epoch,
                    agent_run.initial_camp_context_through_sequence,
                    agent_run.initial_conversation_context_through_sequence,
-                   conversation.native_binding_generation
+                   conversation.native_binding_generation,
+                   agent_run.skill_selection_snapshot_json,
+                   agent_run.skill_selection_snapshot_digest
             FROM agent_run
             JOIN conversation ON conversation.id = agent_run.conversation_id
             WHERE agent_run.id = ?1
@@ -4497,17 +4575,22 @@ fn revalidate_snapshot_for_manifest(
                     row.get::<_, i64>(2)?,
                     row.get::<_, i64>(3)?,
                     row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
                 ))
             },
         )
         .optional()?
         .context("AgentRun disappeared before ContextManifest persistence")?;
     let generation_matches = state.4 == expected_binding_generation;
+    let selection_matches = state.6 == snapshot.skill_selection_snapshot_digest
+        && parse_skill_selection_snapshot(&state.5, &state.6)? == snapshot.skill_selection_snapshot;
     if state.0 != "running"
         || state.1 != snapshot.execution_epoch
         || state.2 != snapshot.camp_message_boundary_sequence
         || state.3 != snapshot.conversation_message_boundary_sequence
         || !generation_matches
+        || !selection_matches
     {
         anyhow::bail!("AgentRun changed while its ContextManifest was being built");
     }
@@ -4519,6 +4602,7 @@ fn load_existing_manifest(
     blob_store: &ManagedBlobStore,
     snapshot: &RunSnapshot,
     delivery_mode: CharterDeliveryMode,
+    prepared_skill_exposure: Option<&PreparedSkillExposure>,
     prepared_mcp_projection: Option<&PreparedMcpProjection>,
     max_payload_bytes: usize,
 ) -> Result<Option<PreparedContext>> {
@@ -4560,7 +4644,11 @@ fn load_existing_manifest(
                    manifest.run_fact_payload_json,
                    manifest.run_fact_digest,
                    manifest.self_active_task_evidence_json,
-                   manifest.self_active_task_evidence_digest
+                   manifest.self_active_task_evidence_digest,
+                   manifest.skill_exposure_json,
+                   manifest.skill_exposure_digest,
+                   manifest.current_input_skill_resolution_json,
+                   manifest.current_input_skill_resolution_digest
             FROM context_manifest AS manifest
             JOIN native_session_bootstrap_evidence AS bootstrap
               ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -4596,6 +4684,10 @@ fn load_existing_manifest(
                     row.get::<_, String>(24)?,
                     row.get::<_, String>(25)?,
                     row.get::<_, String>(26)?,
+                    row.get::<_, String>(27)?,
+                    row.get::<_, String>(28)?,
+                    row.get::<_, String>(29)?,
+                    row.get::<_, String>(30)?,
                 ))
             },
         )
@@ -4625,6 +4717,25 @@ fn load_existing_manifest(
     if canonical_json_digest(&serde_json::to_value(&self_active_task_evidence)?)? != row.26 {
         anyhow::bail!("Stored ContextManifest Self Active Task evidence digest is invalid");
     }
+    let stored_skill_exposure: SkillExposureSnapshot = serde_json::from_str(&row.27)
+        .context("Stored ContextManifest Skill exposure is invalid")?;
+    if stored_skill_exposure.schema_version != 2
+        || canonical_json_digest(&serde_json::to_value(&stored_skill_exposure)?)? != row.28
+    {
+        anyhow::bail!("Stored ContextManifest Skill exposure digest is invalid");
+    }
+    if prepared_skill_exposure.is_some_and(|prepared| {
+        prepared.snapshot != stored_skill_exposure || prepared.digest != row.28
+    }) {
+        anyhow::bail!("Stored ContextManifest Skill exposure cannot change during recovery");
+    }
+    validate_persisted_resolution(
+        &row.29,
+        &row.30,
+        &snapshot.skill_selection_snapshot,
+        &snapshot.skill_selection_snapshot_digest,
+        &row.28,
+    )?;
     let stored_profile: ContextDeliveryProfile = serde_json::from_str(&row.17)
         .context("Stored ContextManifest delivery profile is invalid")?;
     let current_profile = current_context_delivery_profile()?;
@@ -4853,6 +4964,18 @@ fn materialize_frozen_delivery_context(
     {
         return Err(ContextPayloadTooLarge { max_payload_bytes }.into());
     }
+    if snapshot.invocation_kind != "direct" && !snapshot.skill_selection_snapshot.entries.is_empty()
+    {
+        anyhow::bail!("Non-direct AgentRun has a non-empty Skill selection snapshot");
+    }
+    let adapter_kind = run_snapshot_adapter_kind(snapshot)?;
+    let current_input_skill_resolution = resolve_current_input_skills(
+        database.connection(),
+        &snapshot.skill_selection_snapshot,
+        &snapshot.skill_selection_snapshot_digest,
+        prepared_skill_exposure,
+        adapter_kind,
+    )?;
 
     let payload_digest = sha256_text(&frozen.rendered_payload);
     if payload_digest != frozen.rendered_payload_digest {
@@ -4945,6 +5068,16 @@ fn materialize_frozen_delivery_context(
     let created_at = chrono::Utc::now().to_rfc3339();
     let transaction = database.connection_mut().transaction()?;
     revalidate_snapshot_for_manifest(&transaction, snapshot, expected_binding_generation)?;
+    let revalidated_skill_resolution = resolve_current_input_skills(
+        &transaction,
+        &snapshot.skill_selection_snapshot,
+        &snapshot.skill_selection_snapshot_digest,
+        prepared_skill_exposure,
+        adapter_kind,
+    )?;
+    if revalidated_skill_resolution != current_input_skill_resolution {
+        anyhow::bail!("Current Input Skill availability changed during materialization");
+    }
     let (global_public_message_boundary, history_camps) =
         capture_cross_camp_history_fence(&transaction, snapshot)?;
     transaction.execute(
@@ -4970,6 +5103,8 @@ fn materialize_frozen_delivery_context(
             current_input_source_json,
             attachment_refs_json, attachment_digest,
             skill_exposure_json, skill_exposure_digest,
+            current_input_skill_resolution_json,
+            current_input_skill_resolution_digest,
             mcp_exposure_json, mcp_exposure_digest, mcp_projection_digest,
             self_active_task_evidence_json, self_active_task_evidence_digest,
             formatter_version,
@@ -4978,7 +5113,8 @@ fn materialize_frozen_delivery_context(
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
             ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
             ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
-            ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40, ?41
+            ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40,
+            ?41, ?42, ?43
         )
         "#,
         params![
@@ -5014,6 +5150,8 @@ fn materialize_frozen_delivery_context(
             attachment_digest,
             serde_json::to_string(&prepared_skill_exposure.snapshot)?,
             prepared_skill_exposure.digest,
+            serde_json::to_string(&current_input_skill_resolution.resolution)?,
+            current_input_skill_resolution.digest,
             serde_json::to_string(mcp_exposure)?,
             mcp_exposure_digest,
             mcp_projection_digest,
@@ -5061,6 +5199,7 @@ fn materialize_frozen_delivery_context(
             "runFactDigest": run_fact_digest,
             "attachmentDigest": attachment_digest,
             "skillExposureDigest": prepared_skill_exposure.digest,
+            "currentInputSkillResolutionDigest": current_input_skill_resolution.digest,
             "mcpExposureDigest": mcp_exposure_digest,
             "selfActiveTaskEvidenceDigest": self_active_task_evidence_digest,
             "dynamicPayloadDigest": payload_digest,
@@ -5429,11 +5568,15 @@ mod tests {
             submit_compaction_observation,
         },
         context_delivery::CONTEXT_DELIVERY_PROFILE_V3,
+        current_input_skill::{
+            CurrentInputSkillResolution, SkillSelectionEntry, SkillSelectionSnapshot,
+        },
         mcp::{
             CreateMcpServerParams, McpConfigStore, McpMutationResult, SetMcpAssignmentParams,
             SetMcpServerEnabledParams,
         },
         mcp_projection::{McpProjectionRequest, McpProjectionService},
+        read_model::{READ_MODEL_SCHEMA_VERSION, ReadModelService},
         runtime::{
             AcknowledgeAgentRunCancellationCommand, AgentRunWorkspace, BindNativeSessionCommand,
             ClaimAgentRunCommand, ExecutionRuntimeService,
@@ -5454,6 +5597,53 @@ mod tests {
         execution_epoch: i64,
         native_binding_id: String,
         binding_credential: String,
+    }
+
+    #[test]
+    fn current_input_skill_links_are_direct_user_siblings_with_canonical_bytes() {
+        let direct = CurrentInput {
+            id: "message-1".to_string(),
+            payload: json!({
+                "source": { "type": "user" },
+                "message": "/review-pr 123",
+                "mentionsCurrentUser": false,
+            }),
+            source_camp_message_id: Some("message-1".to_string()),
+            source_conversation_message_id: None,
+            source_content_digest: "sha256:content".to_string(),
+            projected_body_digest: "sha256:body".to_string(),
+            mentions_current_user: false,
+        };
+        let payload = direct.as_payload(
+            &["/repo/.rovai/camp-attachments/spec.pdf".to_string()],
+            &[CurrentInputSkillLink {
+                name: "review-pr".to_string(),
+                path: "/repo/.codex/skills/review-pr/SKILL.md".to_string(),
+            }],
+        );
+        assert_eq!(
+            serde_json::to_string(&payload).unwrap(),
+            r#"{"attachments":["/repo/.rovai/camp-attachments/spec.pdf"],"mentionsCurrentUser":false,"message":"/review-pr 123","skills":[{"name":"review-pr","path":"/repo/.codex/skills/review-pr/SKILL.md"}],"source":{"type":"user"}}"#
+        );
+        assert!(direct.as_payload(&[], &[]).get("skills").is_none());
+
+        let member_call = CurrentInput {
+            source_camp_message_id: None,
+            source_conversation_message_id: Some("conversation-message-1".to_string()),
+            ..direct
+        };
+        assert!(
+            member_call
+                .as_payload(
+                    &[],
+                    &[CurrentInputSkillLink {
+                        name: "review-pr".to_string(),
+                        path: "/repo/.codex/skills/review-pr/SKILL.md".to_string(),
+                    }]
+                )
+                .get("skills")
+                .is_none()
+        );
     }
 
     #[test]
@@ -7052,7 +7242,11 @@ mod tests {
             .replace("run_fact_payload_json", "run_notice_payload_json")
             .replace("run_fact_digest", "run_notice_digest")
             .replace(
-                "CHECK(formatter_version = 17)",
+                "current_input_skill_resolution_json TEXT NOT NULL,\n                    current_input_skill_resolution_digest TEXT NOT NULL,\n                    ",
+                "",
+            )
+            .replace(
+                "CHECK(formatter_version = 18)",
                 "CHECK(formatter_version IN (14, 15, 16))",
             );
         assert!(v88_schema.contains("run_notice_payload_json"));
@@ -7076,6 +7270,7 @@ mod tests {
         };
         let destination_columns = columns
             .iter()
+            .filter(|column| !column.starts_with("current_input_skill_resolution_"))
             .map(|column| {
                 column
                     .replace("run_fact_refs_json", "run_notice_refs_json")
@@ -7087,6 +7282,7 @@ mod tests {
             .join(", ");
         let source_columns = columns
             .iter()
+            .filter(|column| !column.starts_with("current_input_skill_resolution_"))
             .map(|column| {
                 if column == "formatter_version" {
                     "16".to_string()
@@ -8365,6 +8561,58 @@ mod tests {
                 },
             )
             .unwrap();
+        let selected_content = vec![
+            StructuredCampMessageSegment::SkillMention {
+                skill_id: official.id.clone(),
+                name_at_send: official.name.clone(),
+            },
+            StructuredCampMessageSegment::Text {
+                text: " 请检查当前改动".to_string(),
+            },
+        ];
+        let selection = SkillSelectionSnapshot {
+            schema_version: 1,
+            entries: vec![SkillSelectionEntry {
+                skill_id: official.id.clone(),
+                name_at_send: official.name.clone(),
+                first_segment_index: 0,
+                eligible_at_send: true,
+                omission_reason: None,
+            }],
+        };
+        let (selection_json, selection_digest) = selection.canonical_json_and_digest().unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_message
+                SET body = ?2, structured_content_json = ?3, content_digest = ?4
+                WHERE id = (
+                    SELECT trigger_camp_message_id FROM agent_run WHERE id = ?1
+                )
+                "#,
+                params![
+                    fixture.run_id,
+                    format!("/{} 请检查当前改动", official.name),
+                    serde_json::to_string(&selected_content).unwrap(),
+                    canonical_content_digest(&selected_content).unwrap(),
+                ],
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET skill_selection_snapshot_json = ?2,
+                    skill_selection_snapshot_digest = ?3
+                WHERE id = ?1
+                "#,
+                params![fixture.run_id, selection_json, selection_digest],
+            )
+            .unwrap();
         let prepared = ContextService
             .prepare_skill_exposure(
                 &mut fixture.database,
@@ -8415,6 +8663,63 @@ mod tests {
             exposure.snapshot
         );
         assert_eq!(persisted.1, exposure.digest);
+        let expected_skill_path = format!(
+            "{}/SKILL.md",
+            exposure.snapshot.skills[0]
+                .entry_path
+                .as_deref()
+                .expect("ready exposure needs an entry path")
+        );
+        let current_input: Value = first_context
+            .rendered_payload
+            .split_once("[CURRENT_INPUT]\n")
+            .and_then(|(_, suffix)| suffix.split_once("\n[/CURRENT_INPUT]"))
+            .map(|(json, _)| serde_json::from_str(json).unwrap())
+            .unwrap();
+        assert_eq!(
+            current_input["skills"],
+            json!([{"name": official.name, "path": expected_skill_path}])
+        );
+        assert_eq!(
+            current_input["message"],
+            format!("/{} 请检查当前改动", official.name)
+        );
+        let (resolution_json, resolution_digest): (String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT current_input_skill_resolution_json,
+                       current_input_skill_resolution_digest
+                FROM context_manifest WHERE agent_run_id = ?1
+                "#,
+                [&fixture.run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let resolution: CurrentInputSkillResolution =
+            serde_json::from_str(&resolution_json).unwrap();
+        assert_eq!(resolution.selection_snapshot_digest, selection_digest);
+        assert_eq!(resolution.skill_exposure_digest, exposure.digest);
+        assert_eq!(resolution.entries.len(), 1);
+        assert_eq!(
+            canonical_json_digest(&serde_json::to_value(&resolution).unwrap()).unwrap(),
+            resolution_digest
+        );
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        assert_eq!(snapshot.schema_version, READ_MODEL_SCHEMA_VERSION);
+        let manifest = snapshot
+            .context_manifests
+            .iter()
+            .find(|manifest| manifest.agent_run_id == fixture.run_id)
+            .unwrap();
+        assert_eq!(manifest.current_input_skill_resolution, resolution);
+        assert_eq!(
+            manifest.current_input_skill_resolution_digest,
+            resolution_digest
+        );
 
         let analyze_agent_codebase = library
             .list(&fixture.database)
@@ -8470,6 +8775,36 @@ mod tests {
         assert_eq!(
             recovered_context.rendered_payload_digest,
             first_context.rendered_payload_digest
+        );
+
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE context_manifest
+                SET current_input_skill_resolution_digest = ?2
+                WHERE agent_run_id = ?1
+                "#,
+                params![fixture.run_id, "0".repeat(64)],
+            )
+            .unwrap();
+        let tampered = ContextService.materialize_with_skill_exposure(
+            &mut fixture.database,
+            &ManagedBlobStore::new(&fixture.directory),
+            &recovered_exposure,
+            &MaterializeContextRequest {
+                agent_run_id: &fixture.run_id,
+                execution_epoch: fixture.execution_epoch,
+                charter_delivery_mode: CharterDeliveryMode::FirstPayload,
+                max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+            },
+        );
+        assert!(
+            tampered
+                .unwrap_err()
+                .to_string()
+                .contains("Skill resolution is inconsistent")
         );
     }
 

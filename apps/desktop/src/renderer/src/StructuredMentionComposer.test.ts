@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   StructuredMentionComposer,
   StructuredMentionOptionAvatar,
-  insertSkillCommandWithTrailingSpace,
+  insertSkillMentionWithTrailingSpace,
   mentionQueryAfterNativeTextInput,
   mentionQueryAfterTypedText,
   skillQueryAfterNativeTextInput,
@@ -183,14 +183,43 @@ describe('StructuredMentionComposer', () => {
     expect(structuredSkillOptions(skills, '')).toEqual(skills)
   })
 
-  it('selects a Skill as plain slash text with a writable trailing space', () => {
-    expect(insertSkillCommandWithTrailingSpace({
+  it('selects a Skill as an atomic identity token with a writable trailing space', () => {
+    expect(insertSkillMentionWithTrailingSpace({
       content: [{ kind: 'text', text: '/ana' }],
       selection: { anchor: 0, focus: 4 }
-    }, 'analyze-agent-codebase')).toEqual({
-      content: [{ kind: 'text', text: '/analyze-agent-codebase ' }],
-      selection: { anchor: 24, focus: 24 }
+    }, 'skill-analyze', 'analyze-agent-codebase')).toEqual({
+      content: [
+        {
+          kind: 'skill_mention',
+          skillId: 'skill-analyze',
+          nameAtSend: 'analyze-agent-codebase'
+        },
+        { kind: 'text', text: ' ' }
+      ],
+      selection: { anchor: 2, focus: 2 }
     })
+  })
+
+  it('renders a stored Skill marker without rewriting its send-time name', () => {
+    const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
+      id: 'skill-token-composer',
+      value: [{
+        kind: 'skill_mention',
+        skillId: 'skill-analyze',
+        nameAtSend: 'old-name'
+      }],
+      members,
+      skills,
+      ariaLabel: '写消息',
+      onChange: () => undefined,
+      onSubmit: () => undefined
+    }))
+
+    expect(markup).toContain('data-token-kind="skill_mention"')
+    expect(markup).toContain('data-skill-id="skill-analyze"')
+    expect(markup).toContain('/old-name')
+    expect(markup).toContain('aria-invalid="true"')
+    expect(markup).not.toContain('/analyze-agent-codebase')
   })
 
   it('does not submit or choose a candidate while IME composition is active', () => {

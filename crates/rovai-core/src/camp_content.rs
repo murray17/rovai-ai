@@ -24,6 +24,12 @@ pub enum StructuredCampMessageSegment {
         #[serde(rename = "userId")]
         user_id: String,
     },
+    SkillMention {
+        #[serde(rename = "skillId")]
+        skill_id: String,
+        #[serde(rename = "nameAtSend")]
+        name_at_send: String,
+    },
 }
 
 const MAX_CONTENT_SEGMENTS: usize = 4_096;
@@ -51,6 +57,15 @@ pub fn validate_content(content: &[StructuredCampMessageSegment]) -> Result<()> 
                 if user_id != CURRENT_USER_ID {
                     anyhow::bail!("Current User Mention requires the canonical local user ID");
                 }
+            }
+            StructuredCampMessageSegment::SkillMention {
+                skill_id,
+                name_at_send,
+            } => {
+                if skill_id.is_empty() || skill_id.trim() != skill_id || skill_id.len() > 256 {
+                    anyhow::bail!("Skill Mention requires a canonical Skill ID");
+                }
+                crate::skill::validate_skill_name(name_at_send)?;
             }
         }
     }
@@ -162,6 +177,10 @@ pub fn render_plain_text_with_current_user(
                     rendered.push(' ');
                 }
             }
+            StructuredCampMessageSegment::SkillMention { name_at_send, .. } => {
+                rendered.push('/');
+                rendered.push_str(name_at_send);
+            }
         }
     }
     Ok(rendered)
@@ -172,7 +191,8 @@ fn segment_projects_nonempty(segment: &StructuredCampMessageSegment) -> bool {
         StructuredCampMessageSegment::Text { text } => !text.is_empty(),
         StructuredCampMessageSegment::MemberMention { .. }
         | StructuredCampMessageSegment::AllMembersMention
-        | StructuredCampMessageSegment::CurrentUserMention { .. } => true,
+        | StructuredCampMessageSegment::CurrentUserMention { .. }
+        | StructuredCampMessageSegment::SkillMention { .. } => true,
     }
 }
 
@@ -321,6 +341,56 @@ mod tests {
         assert!(
             validate_content(&[Segment::MemberMention {
                 agent_id: " agent_2".into(),
+            }])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn skill_mentions_freeze_identity_project_slash_text_and_reject_malformed_wire() {
+        let content = vec![
+            Segment::SkillMention {
+                skill_id: "skill-review".into(),
+                name_at_send: "review-pr".into(),
+            },
+            Segment::Text {
+                text: " 123".into(),
+            },
+        ];
+        validate_user_authored_content(&content).unwrap();
+        assert_eq!(
+            render_plain_text(&content, |_| None).unwrap(),
+            "/review-pr 123"
+        );
+        assert_eq!(
+            serde_json::to_value(&content[0]).unwrap(),
+            serde_json::json!({
+                "kind": "skill_mention",
+                "skillId": "skill-review",
+                "nameAtSend": "review-pr"
+            })
+        );
+        let digest = canonical_content_digest(&content).unwrap();
+        assert!(digest.starts_with("sha256:"));
+        assert_eq!(digest.len(), 71);
+        let round_tripped: Vec<Segment> =
+            serde_json::from_value(serde_json::to_value(&content).unwrap()).unwrap();
+        assert_eq!(canonical_content_digest(&round_tripped).unwrap(), digest);
+
+        for malformed in [
+            r#"{"kind":"skill_mention","skillId":"skill-review","nameAtSend":"review-pr","path":"/tmp/SKILL.md"}"#,
+            r#"{"kind":"skill_mention","skillId":" skill-review","nameAtSend":"review-pr"}"#,
+            r#"{"kind":"skill_mention","skillId":"skill-review","nameAtSend":"Review-PR"}"#,
+            r#"{"kind":"skill_mention","skillId":"skill-review","nameAtSend":"review--pr"}"#,
+        ] {
+            if let Ok(segment) = serde_json::from_str::<Segment>(malformed) {
+                assert!(validate_content(&[segment]).is_err());
+            }
+        }
+        assert!(
+            validate_content(&[Segment::SkillMention {
+                skill_id: "技".repeat(86),
+                name_at_send: "review-pr".into(),
             }])
             .is_err()
         );

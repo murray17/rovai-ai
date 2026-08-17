@@ -2,6 +2,7 @@ export type StructuredMentionSegment =
   | { kind: 'text'; text: string }
   | { kind: 'member_mention'; agentId: string }
   | { kind: 'all_members_mention' }
+  | { kind: 'skill_mention'; skillId: string; nameAtSend: string }
 
 export type StructuredMentionContent = StructuredMentionSegment[]
 
@@ -38,6 +39,14 @@ export function normalizeStructuredMentionContent(
       normalized.push({
         kind: 'member_mention',
         agentId: segment.agentId
+      })
+      continue
+    }
+    if (segment.kind === 'skill_mention') {
+      normalized.push({
+        kind: 'skill_mention',
+        skillId: segment.skillId,
+        nameAtSend: segment.nameAtSend
       })
       continue
     }
@@ -135,6 +144,24 @@ export function insertAllMembersMentionWithTrailingSpace(
 ): StructuredMentionEditorState {
   return replaceMentionSelectionWithTrailingSpace(state, {
     kind: 'all_members_mention'
+  })
+}
+
+export function insertSkillMentionWithTrailingSpace(
+  state: StructuredMentionEditorState,
+  skillId: string,
+  nameAtSend: string
+): StructuredMentionEditorState {
+  if (!skillId || skillId.trim() !== skillId || new TextEncoder().encode(skillId).length > 256) {
+    throw new Error('Skill token is missing a canonical identity.')
+  }
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(nameAtSend) || nameAtSend.length > 64) {
+    throw new Error('Skill token has an invalid name.')
+  }
+  return replaceMentionSelectionWithTrailingSpace(state, {
+    kind: 'skill_mention',
+    skillId,
+    nameAtSend
   })
 }
 
@@ -307,9 +334,17 @@ function sliceStructuredMentionContent(
     }
 
     if (start <= segmentStart && end >= segmentEnd) {
-      sliced.push(segment.kind === 'member_mention'
-        ? { kind: 'member_mention', agentId: segment.agentId }
-        : { kind: 'all_members_mention' })
+      if (segment.kind === 'member_mention') {
+        sliced.push({ kind: 'member_mention', agentId: segment.agentId })
+      } else if (segment.kind === 'skill_mention') {
+        sliced.push({
+          kind: 'skill_mention',
+          skillId: segment.skillId,
+          nameAtSend: segment.nameAtSend
+        })
+      } else {
+        sliced.push({ kind: 'all_members_mention' })
+      }
     }
   }
   return sliced

@@ -119,6 +119,11 @@ export function createStructuredMessageClipboardData(
     if (segment.kind === 'current_user_mention') {
       return { kind: 'current_user_mention', userId: 'local_user', fallbackText: '@你' }
     }
+    if (segment.kind === 'skill_mention') {
+      // Paste is intentionally identity-free: a copied Skill token becomes
+      // ordinary slash text and can never be reverse-parsed into a selection.
+      return { kind: 'text', text: `/${segment.nameAtSend}` }
+    }
     return {
       kind: 'member_mention',
       agentId: segment.agentId,

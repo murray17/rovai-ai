@@ -750,6 +750,7 @@ export function structuredCampContentPlainText(
     if (segment.kind === 'text') return segment.text
     if (segment.kind === 'all_members_mention') return '@所有队员'
     if (segment.kind === 'current_user_mention') return '@你'
+    if (segment.kind === 'skill_mention') return `/${segment.nameAtSend}`
     return `@${names.get(segment.agentId) ?? '不可用队员'}`
   }).join('')
   return content[0]?.kind === 'current_user_mention' && content.length > 1
@@ -775,6 +776,9 @@ export function projectLeadingCurrentUserMentionMarkdownBody(
     if (segment.kind === 'all_members_mention') return escapeMarkdownLiteral('@所有队员')
     if (segment.kind === 'member_mention') {
       return escapeMarkdownLiteral(`@${names.get(segment.agentId) ?? '不可用队员'}`)
+    }
+    if (segment.kind === 'skill_mention') {
+      return escapeMarkdownLiteral(`/${segment.nameAtSend}`)
     }
     return ''
   }).join('')
@@ -4917,6 +4921,17 @@ function StructuredMessageBody({
               {index === 0 && content.slice(1).some((candidate) => (
                 candidate.kind !== 'text' || candidate.text.length > 0
               )) ? ' ' : ''}
+            </span>
+          )
+        }
+        if (segment.kind === 'skill_mention') {
+          return (
+            <span
+              className="message-mention-token skill-mention"
+              aria-label={`Skill /${segment.nameAtSend}`}
+              key={`skill-${index}-${segment.skillId}`}
+            >
+              /{segment.nameAtSend}
             </span>
           )
         }
