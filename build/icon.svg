@@ -1,6 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>Rovai AI</title>
-  <rect x="96" y="96" width="832" height="832" rx="190" fill="#000000" />
+  <defs>
+    <linearGradient id="carrier" x1="512" y1="96" x2="512" y2="928" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2B2B2C" />
+      <stop offset="0.5" stop-color="#1A1A1B" />
+      <stop offset="1" stop-color="#0C0C0D" />
+    </linearGradient>
+  </defs>
+  <rect x="96" y="96" width="832" height="832" rx="190" fill="url(#carrier)" />
   <path d="M512 214 L550 362 L700 405 L550 448 L512 596 L474 448 L324 405 L474 362 Z" fill="#E7ECEF" />
   <path d="M218 744 Q512 604 806 744" fill="none" stroke="#7897AE" stroke-width="58" stroke-linecap="round" />
 </svg>
