@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.01
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -16,6 +16,8 @@ last_updated: 2026-08-17
 > Renderer、文档治理与定向自动化已经完成，证据见[实施计划](implementation-plan.md)。
 >
 > 前置版本：[v1.00 用户确认后的 Camp 强制永久删除](../v1.00/README.md)
+>
+> 后继版本：[v1.02 Runtime Usage 补全与 Codex 公价估算](../v1.02/README.md)
 
 ## 版本目标
 
