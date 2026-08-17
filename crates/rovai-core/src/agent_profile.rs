@@ -1,5 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    os::unix::fs::PermissionsExt,
     path::Path,
     str::FromStr,
 };
@@ -1011,6 +1012,45 @@ impl AgentProfileService {
             }))
     }
 
+    pub fn mark_managed_installation_path_missing_if_current(
+        &self,
+        database: &mut Database,
+        adapter_kind: AdapterKind,
+        auth_scope: &str,
+        installation_id: &str,
+        expected_executable_path: &str,
+        search_generation: u64,
+    ) -> Result<bool> {
+        let search_generation = i64::try_from(search_generation)
+            .context("Runtime Search Environment generation overflow")?;
+        let updated_at = chrono::Utc::now().to_rfc3339();
+        Ok(database.connection_mut().execute(
+            r#"
+            UPDATE adapter_installation
+            SET path_state = 'path_missing', updated_at = ?6
+            WHERE id = ?1
+              AND adapter_kind = ?2
+              AND auth_scope = ?3
+              AND installation_class = 'managed_default'
+              AND executable_path = ?4
+              AND path_state <> 'path_missing'
+              AND EXISTS (
+                  SELECT 1
+                  FROM runtime_search_environment_state
+                  WHERE singleton = 1 AND generation = ?5
+              )
+            "#,
+            params![
+                installation_id,
+                adapter_kind.as_str(),
+                auth_scope,
+                expected_executable_path,
+                search_generation,
+                updated_at,
+            ],
+        )? == 1)
+    }
+
     pub fn verified_executable_identity(
         &self,
         database: &Database,
@@ -1443,6 +1483,8 @@ impl AgentProfileService {
         if discovered.source == InstallationSource::Custom {
             anyhow::bail!("managed Installation cannot use a custom source");
         }
+        let executable_is_usable = std::fs::metadata(&discovered.executable_path)
+            .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
         let executable_identity =
             observe_executable_file_identity(Path::new(&discovered.executable_path)).ok();
 
@@ -1477,7 +1519,7 @@ impl AgentProfileService {
             previous_path,
             previous_fingerprint,
             identity_changed,
-            preserve_ready,
+            preserve_existing,
         ) = if let Some((id, path, fingerprint, probe_status)) = existing {
             let identity_changed =
                 path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
@@ -1507,8 +1549,12 @@ impl AgentProfileService {
                     now,
                 ],
             )?;
-            let preserve_ready = !identity_changed && probe_status.as_deref() == Some("ready");
-            (id, path, fingerprint, identity_changed, preserve_ready)
+            let preserve_existing = !identity_changed
+                && (probe_status.as_deref() == Some("ready")
+                    || (probe_status.as_deref() == Some("light_ready")
+                        && discovered.snapshot.probe_status == "light_failed"
+                        && executable_is_usable));
+            (id, path, fingerprint, identity_changed, preserve_existing)
         } else {
             let id = format!("adapter-installation-{}", Uuid::new_v4());
             transaction.execute(
@@ -1535,7 +1581,7 @@ impl AgentProfileService {
             (id, String::new(), None, false, false)
         };
 
-        if !preserve_ready {
+        if !preserve_existing {
             upsert_static_capability_snapshot(
                 &transaction,
                 &installation_id,
@@ -5931,6 +5977,7 @@ mod tests {
         let service = AgentProfileService::default();
         let executable_path = directory.join("qwen");
         std::fs::write(&executable_path, b"static-qwen-fixture").unwrap();
+        std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .light_ready_snapshot(
                 AdapterKind::QwenCode,
@@ -5962,6 +6009,38 @@ mod tests {
         );
         let defaults = installation.member_runtime_defaults.unwrap();
         assert_eq!(defaults.model, ModelSelection::RuntimeDefault);
+
+        let transient_failure = AgentRuntimeAdapterRegistry::default()
+            .light_failed_snapshot(
+                AdapterKind::QwenCode,
+                None,
+                "sha256:qwen-light".to_string(),
+                chrono::Utc::now().to_rfc3339(),
+                "runtime_version_failed".to_string(),
+            )
+            .unwrap();
+        service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::QwenCode,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "qwen".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: transient_failure,
+                },
+            )
+            .unwrap();
+        let preserved = service
+            .managed_installation(&database, AdapterKind::QwenCode, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            preserved.snapshot.as_ref().unwrap().probe_status,
+            "light_ready"
+        );
+        assert_eq!(preserved.generation, installation.generation);
 
         let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
         service
@@ -6006,6 +6085,47 @@ mod tests {
                 .unwrap()
                 .map(|blocker| blocker.code),
             Some("runtime_probe_required".to_string())
+        );
+
+        std::fs::remove_file(&executable_path).unwrap();
+        database
+            .record_runtime_search_environment_generation(7, &chrono::Utc::now().to_rfc3339())
+            .unwrap();
+        assert!(
+            !service
+                .mark_managed_installation_path_missing_if_current(
+                    &mut database,
+                    AdapterKind::QwenCode,
+                    "default",
+                    &frozen.installation_id,
+                    &frozen.executable_path,
+                    6,
+                )
+                .unwrap()
+        );
+        assert!(
+            service
+                .mark_managed_installation_path_missing_if_current(
+                    &mut database,
+                    AdapterKind::QwenCode,
+                    "default",
+                    &frozen.installation_id,
+                    &frozen.executable_path,
+                    7,
+                )
+                .unwrap()
+        );
+        let missing = service
+            .managed_installation(&database, AdapterKind::QwenCode, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(missing.path_state, "path_missing");
+        assert_eq!(
+            service
+                .runtime_dispatch_blocker(&database, &frozen)
+                .unwrap()
+                .map(|blocker| blocker.code),
+            Some("runtime_path_invalid".to_string())
         );
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

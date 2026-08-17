@@ -1318,6 +1318,23 @@ impl Core {
     async fn run_runtime_discovery(&self) {
         let search = self.runtime_search_environment.read().await.clone();
         self.runtime_product_diagnostics.write().await.clear();
+        let managed_installations = {
+            let database = self.database.lock().await;
+            match AgentProfileService::default().list_installations(&database) {
+                Ok(installations) => installations
+                    .into_iter()
+                    .filter(|installation| {
+                        installation.installation_class == InstallationClass::ManagedDefault
+                            && installation.auth_scope == "default"
+                    })
+                    .map(|installation| (installation.adapter_kind, installation))
+                    .collect::<HashMap<_, _>>(),
+                Err(error) => {
+                    eprintln!("failed to load managed Runtime discovery fallbacks: {error:#}");
+                    HashMap::new()
+                }
+            }
+        };
         {
             let mut observations = self.runtime_discovery.write().await;
             for kind in rovai_core::agent_profile::AdapterKind::ALL {
@@ -1335,15 +1352,67 @@ impl Core {
         let mut path_attempts = HashMap::new();
         for kind in rovai_core::agent_profile::AdapterKind::ALL {
             let search = search.clone();
-            let handle = path_tasks.spawn_blocking(move || discover_runtime_path(kind, &search));
+            let managed_installation = managed_installations.get(&kind).cloned();
+            let handle = path_tasks.spawn_blocking(move || {
+                let mut observation = discover_runtime_path(kind, &search);
+                let mut missing_managed_installation = None;
+                if observation.discovery_status == RuntimeDiscoveryStatus::Missing
+                    && let Some(installation) = managed_installation
+                {
+                    let saved_path = PathBuf::from(&installation.executable_path);
+                    if is_executable_file(&saved_path) {
+                        let canonical = saved_path
+                            .canonicalize()
+                            .unwrap_or_else(|_| saved_path.clone());
+                        match fingerprint_executable(&canonical) {
+                            Ok(fingerprint) => {
+                                observation.discovery_status = RuntimeDiscoveryStatus::Found;
+                                observation.executable_path =
+                                    Some(canonical.to_string_lossy().to_string());
+                                observation.source = Some(installation.source);
+                                observation.executable_fingerprint = Some(fingerprint);
+                                observation.diagnostic_code = None;
+                            }
+                            Err(_) => {
+                                observation.diagnostic_code =
+                                    Some("runtime_executable_fingerprint_failed".to_string());
+                            }
+                        }
+                    } else {
+                        missing_managed_installation =
+                            Some((installation.id, installation.executable_path));
+                    }
+                }
+                (observation, missing_managed_installation)
+            });
             path_attempts.insert(handle.id(), kind);
         }
         let mut version_tasks = tokio::task::JoinSet::new();
         let mut version_attempts = HashMap::new();
         while let Some(result) = path_tasks.join_next_with_id().await {
             match result {
-                Ok((task_id, observation)) => {
+                Ok((task_id, (observation, missing_managed_installation))) => {
                     path_attempts.remove(&task_id);
+                    if let Some((installation_id, expected_executable_path)) =
+                        missing_managed_installation
+                    {
+                        let mut database = self.database.lock().await;
+                        if let Err(error) = AgentProfileService::default()
+                            .mark_managed_installation_path_missing_if_current(
+                                &mut database,
+                                observation.runtime_kind,
+                                "default",
+                                &installation_id,
+                                &expected_executable_path,
+                                observation.search_generation,
+                            )
+                        {
+                            eprintln!(
+                                "failed to mark missing managed Runtime path for {}: {error:#}",
+                                observation.runtime_kind.as_str()
+                            );
+                        }
+                    }
                     if observation.discovery_status == RuntimeDiscoveryStatus::Found {
                         let search = search.clone();
                         let fallback = observation.clone();
@@ -8836,12 +8905,32 @@ fn product_runtime_availability_status(
         if installation.path_state == "path_missing" {
             return "path_missing";
         }
-        if !checking && let Some(diagnostic) = product_diagnostic {
-            return if managed_installation_is_usable(installation) {
+        if installation
+            .snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.probe_status == "ready" && snapshot.stale_at.is_none())
+        {
+            if checking {
+                return "ready";
+            }
+            return if product_diagnostic.is_some()
+                || installation
+                    .last_probe_attempt
+                    .as_ref()
+                    .is_some_and(|attempt| {
+                        attempt.status == "failed" && attempt.failure_class == "transient"
+                    })
+            {
                 "refresh_failed_using_last_success"
             } else {
-                diagnostic.status
+                "ready"
             };
+        }
+        if checking {
+            return "checking";
+        }
+        if let Some(diagnostic) = product_diagnostic {
+            return diagnostic.status;
         }
         if installation
             .snapshot
@@ -8887,11 +8976,7 @@ fn product_runtime_availability_status(
             {
                 return "needs_attention";
             }
-            return if checking {
-                "checking"
-            } else {
-                "installed_unverified"
-            };
+            return "installed_unverified";
         }
         if installation.snapshot.as_ref().is_some_and(|snapshot| {
             snapshot.probe_status == "light_ready" && snapshot.stale_at.is_none()
@@ -8935,16 +9020,12 @@ fn product_runtime_availability_status(
             {
                 return "needs_attention";
             }
-            return if checking { "checking" } else { "light_ready" };
+            return "light_ready";
         }
         if installation.snapshot.as_ref().is_some_and(|snapshot| {
             snapshot.probe_status == "light_failed" && snapshot.stale_at.is_none()
         }) {
-            return if checking {
-                "checking"
-            } else {
-                "needs_attention"
-            };
+            return "needs_attention";
         }
         if installation
             .last_probe_attempt
@@ -8968,36 +9049,17 @@ fn product_runtime_availability_status(
         {
             return "incompatible";
         }
-        if installation
-            .snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.probe_status == "ready" && snapshot.stale_at.is_none())
-        {
-            return if installation
-                .last_probe_attempt
-                .as_ref()
-                .is_some_and(|attempt| {
-                    attempt.status == "failed" && attempt.failure_class == "transient"
-                }) {
-                "refresh_failed_using_last_success"
-            } else {
-                "ready"
-            };
-        }
-        if checking {
-            return "checking";
-        }
         return if discovery_status == RuntimeDiscoveryStatus::Found {
             "found_uninspected"
         } else {
             "missing"
         };
     }
-    if let Some(diagnostic) = product_diagnostic {
-        return diagnostic.status;
-    }
     if checking {
         return "checking";
+    }
+    if let Some(diagnostic) = product_diagnostic {
+        return diagnostic.status;
     }
     match discovery_status {
         RuntimeDiscoveryStatus::Detecting => "detecting",
@@ -14181,6 +14243,68 @@ mod tests {
         assert_eq!(
             product_runtime_availability_status(RuntimeDiscoveryStatus::Found, None, None, true,),
             "checking"
+        );
+
+        let mut light_ready = managed_runtime_fixture(&now.to_rfc3339(), None);
+        let snapshot = light_ready.snapshot.as_mut().unwrap();
+        snapshot.probe_status = "light_ready".to_string();
+        snapshot.authentication_status = "unknown".to_string();
+        snapshot.last_successful_probe_at = None;
+        light_ready.last_probe_attempt = Some(rovai_core::agent_profile::AdapterProbeAttempt {
+            id: "attempt-authentication-required".to_string(),
+            installation_id: light_ready.id.clone(),
+            status: "failed".to_string(),
+            failure_class: "authentication_required".to_string(),
+            diagnostic_code: Some("runtime_authentication_required".to_string()),
+            candidate_path: light_ready.executable_path.clone(),
+            executable_fingerprint: Some("sha256:test".to_string()),
+            attempted_at: now.to_rfc3339(),
+            retry_after: None,
+        });
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&light_ready),
+                None,
+                true,
+            ),
+            "checking"
+        );
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&light_ready),
+                None,
+                false,
+            ),
+            "authentication_required"
+        );
+
+        light_ready.last_probe_attempt = None;
+        let diagnostic = ProductRuntimeDiagnostic {
+            status: "needs_attention",
+            diagnostic_code: "runtime_probe_transient_failure".to_string(),
+            priority: 2,
+        };
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&light_ready),
+                Some(&diagnostic),
+                true,
+            ),
+            "checking"
+        );
+
+        light_ready.path_state = "path_missing".to_string();
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Missing,
+                Some(&light_ready),
+                None,
+                true,
+            ),
+            "path_missing"
         );
     }
 
