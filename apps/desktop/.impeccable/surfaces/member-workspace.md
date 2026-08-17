@@ -62,7 +62,9 @@ that Runtime. The Runtime, model and permissions save atomically through the exi
 For any `light_ready` installation, expose Runtime default model plus only permissions described by the
 static Adapter schema. Supporting copy says login, model and capability verification happens on explicit
 check or the first real task. Do not offer explicit models before a verified catalog. TRAE keeps its narrower
-`installed_unverified` state, Runtime default model and safe `permission_mode=default`.
+`installed_unverified` state and Runtime default model, while its permission draft defaults to the statically
+admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the existing compact switch pattern for
+`trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.
 
 After Runtime configuration, keep Memory Capability and the danger zone. Do not expose Installation
 IDs, executable paths or internal bindings in the ordinary profile.

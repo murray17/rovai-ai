@@ -12,9 +12,10 @@ last_updated: 2026-08-17
 [ADR-0065](../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)、
 [ADR-0066](../adr/0066-managed-product-runtime-resolution.md)与
 [ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)，Runtime 启动与延迟验证边界见
-[ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)和
-[ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)及
-[Runtime Launch and Verification v3](../contracts/runtime-launch-and-verification-v3.md)。实测版本和能力只由
+[ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
+[ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)和
+[ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)及
+[Runtime Launch and Verification v4](../contracts/runtime-launch-and-verification-v4.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 三层目录
@@ -57,7 +58,7 @@ capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 ## TRAE CLI CN 当前边界
 
 `trae-cn-cli` 通过既有 ACP v1 Host 启动 `traecli acp serve`。模型与 permission mode catalog 来自
-每次真实 Session 返回；默认只接受安全的 `default`，不默认使用 `--yolo`。Session 恢复采用
+每次真实 Session 返回；新队员默认使用已验证的 `bypass_permissions`，用户仍可改回 `default`。Session 恢复采用
 统一 ACP continuation：兼容 IdleWarm 命中时直接复用同一 Host 已持有的 Session；冷 Host 只有在
 `sessionCapabilities.resume` 存在时走 `session/resume`，否则建立 `session/new`。TRAE 的
 `session/load` 只作为历史能力证据保留，禁止用于正式 AgentRun 续跑。
@@ -67,11 +68,12 @@ health/diagnostics 与 dispatch preflight 只验证 ordinary executable、canoni
 version，不启动 `traecli`。这些证据持久化为 `installed_unverified`，不能声明登录、ACP、模型、权限或
 Session Ready；版本没有可信 `Info.plist` / Go main-module metadata 时保持 unknown。
 
-成员可以在该状态下原子保存 Runtime default model 与 `permission_mode=default`。首次真实 AgentRun 只启动
+成员可以在该状态下原子保存 Runtime default model 与 `permission_mode=default|bypass_permissions`，新 draft
+默认后者。首次真实 AgentRun 只启动
 一个 TRAE Host，从同一个 Host 的 `initialize` 与 `session/new` response 生成 Ready snapshot 后继续发送
 任务输入。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host；失败使用该 Host 已有错误分类，不启动 diagnostic
-process。相同 path/fingerprint 的
-静态复扫保留 Ready；身份变化回到 `installed_unverified`，等待下一次真实执行重新验证。
+process。相同 path/fingerprint 且 Adapter permission schema digest 相同的静态复扫保留 Ready；任一权限
+descriptor 改变时降级为静态 snapshot，身份变化回到 `installed_unverified`，等待下一次真实执行重新验证。
 
 External MCP 沿用现有 `AdditivePerRun`：当前 AgentRun 的冻结 Definition 通过
 `session/new` 参数追加；warm reuse 只允许完整 Runtime compatibility digest 相等，因此冻结 MCP Projection
@@ -83,6 +85,18 @@ TRAE 的 `append_system_prompt` 已实测为独立 system message，但正式集
 不等于模型在冲突场景中可靠服从。Rovai Skill 原生投递路径和 compaction detector 仍无合格证据，
 保持空/Disabled。Missing-Send Recovery 则只在 zero-send、accepted-send suppression 与真实
 tool→final 三条专项 Smoke 通过后启用，不从“Runtime 已支持”反向推断。
+
+## 队员最高权限默认
+
+用户显式选择 Product Runtime 时，Core 的 `memberRuntimeDefaults` 使用该 Adapter 已验证的最高权限值；
+descriptor 的保守 `recommendedValue` 不替代队员 draft。静态 descriptor 只拥有配置/admission 语义，不升级为
+认证、模型、Session 或动态 capability 证据。
+
+Kiro 暴露 Host-scoped `trust_all_tools=off|on`，新 draft 默认 `on`；真实 ACP Host 映射为
+`kiro-cli acp --agent rovai --trust-all-tools`。Probe 与 Runtime Check 不携带 trust-all，
+`CoreEnforcedV1 + read_only Workspace` 的 effective launch 也会收窄为不传该 flag。既有成员配置不由
+discovery 或迁移扩权；permission schema digest
+变化时不能保留旧 Ready，用户必须通过既有 drift 流程显式重存。
 
 ## Preview 呈现与晋升
 

@@ -434,7 +434,9 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::ClaudeCodeCli => json!({
                 "permission_mode": "bypassPermissions",
             }),
-            AdapterKind::KiroCli => json!({}),
+            AdapterKind::KiroCli => json!({
+                "trust_all_tools": "on",
+            }),
             AdapterKind::QoderCli => json!({
                 "permission_mode": "bypass_permissions",
             }),
@@ -445,7 +447,7 @@ impl AgentRuntimeAdapterRegistry {
                 "approval_mode": "yolo",
             }),
             AdapterKind::TraeCnCli => json!({
-                "permission_mode": "default",
+                "permission_mode": "bypass_permissions",
             }),
             AdapterKind::AntigravityApp => json!({
                 "mode": "accept-edits",
@@ -553,7 +555,7 @@ impl AgentRuntimeAdapterRegistry {
                     .unwrap_or_default();
                 acp_capability_snapshot(observation, permission_options)
             }
-            AdapterKind::KiroCli => acp_capability_snapshot(observation, Vec::new()),
+            AdapterKind::KiroCli => acp_capability_snapshot(observation, kiro_permission_options()),
             kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
         }
     }
@@ -606,7 +608,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
-            AdapterKind::KiroCli => Vec::new(),
+            AdapterKind::KiroCli => kiro_permission_options(),
             AdapterKind::QoderCli => qoder_permission_options(),
             AdapterKind::CodebuddyCli => codebuddy_permission_options(),
             AdapterKind::QwenCode => qwen_permission_options(),
@@ -1484,6 +1486,22 @@ fn copilot_permission_options() -> Vec<PermissionOptionDescriptor> {
     }]
 }
 
+fn kiro_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "trust_all_tools".to_string(),
+        label: "trust-all-tools".to_string(),
+        description: "Kiro CLI's native ACP trust-all mode for this Agent Host. When enabled, Kiro auto-approves all tool permission requests.".to_string(),
+        value_type: "enum".to_string(),
+        choices: vec![choice("off", "off"), choice("on", "on (auto-approve all tools)")],
+        recommended_value: json!("off"),
+        scope: RuntimeOptionScope::Host,
+        risk: "dangerous".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
 fn qoder_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
@@ -1598,10 +1616,16 @@ fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor> {
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
         description:
-            "TRAE CLI CN 的安全启动权限模式；更多模式只会在首次真实任务建立 ACP Session 后显示。"
+            "TRAE CLI CN 的静态启动权限模式；完整模式目录会在首次真实任务建立 ACP Session 后刷新。"
                 .to_string(),
         value_type: "enum".to_string(),
-        choices: vec![choice("default", "default")],
+        choices: vec![
+            choice("default", "default"),
+            choice(
+                "bypass_permissions",
+                "bypass_permissions (accept all tools)",
+            ),
+        ],
         recommended_value: json!("default"),
         scope: RuntimeOptionScope::Host,
         risk: "elevated".to_string(),
@@ -1977,7 +2001,7 @@ mod tests {
                 AdapterKind::ClaudeCodeCli,
                 json!({"permission_mode": "bypassPermissions"}),
             ),
-            (AdapterKind::KiroCli, json!({})),
+            (AdapterKind::KiroCli, json!({"trust_all_tools": "on"})),
             (
                 AdapterKind::QoderCli,
                 json!({"permission_mode": "bypass_permissions"}),
@@ -1989,7 +2013,7 @@ mod tests {
             (AdapterKind::QwenCode, json!({"approval_mode": "yolo"})),
             (
                 AdapterKind::TraeCnCli,
-                json!({"permission_mode": "default"}),
+                json!({"permission_mode": "bypass_permissions"}),
             ),
             (
                 AdapterKind::AntigravityApp,
@@ -2374,7 +2398,7 @@ mod tests {
     }
 
     #[test]
-    fn kiro_models_do_not_expose_unsupported_generic_config_options() {
+    fn kiro_models_keep_only_the_verified_native_permission_option() {
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .acp_capability_snapshot(AcpProbeObservation {
                 adapter_kind: AdapterKind::KiroCli,
@@ -2409,7 +2433,7 @@ mod tests {
 
         assert_eq!(snapshot.models[0].id, "claude-sonnet");
         assert!(snapshot.models[0].options.is_empty());
-        assert!(snapshot.permission_options.is_empty());
+        assert_eq!(snapshot.permission_options, kiro_permission_options());
         assert!(
             snapshot
                 .capabilities
@@ -2448,6 +2472,47 @@ mod tests {
                     },
                 )
                 .expect("ACP runtime should resolve")
+        };
+        let off = resolve(&off);
+        let on = resolve(&on);
+        assert_eq!(
+            off.binding_compatibility_digest,
+            on.binding_compatibility_digest
+        );
+        assert_ne!(off.host_config_digest, on.host_config_digest);
+    }
+
+    #[test]
+    fn kiro_trust_all_replaces_the_host_but_not_the_conversation_binding() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let descriptors = kiro_permission_options();
+        let protocols = vec!["acp-v1".to_string()];
+        let off = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::KiroCli,
+            schema_version: 1,
+            values: json!({"trust_all_tools": "off"}),
+        };
+        let on = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::KiroCli,
+            schema_version: 1,
+            values: json!({"trust_all_tools": "on"}),
+        };
+        let resolve = |permissions: &AdapterPermissionConfig| {
+            registry
+                .resolve_runtime(
+                    AdapterKind::KiroCli,
+                    AdapterRuntimeResolutionInput {
+                        installation_id: "kiro-local",
+                        executable_path: "/opt/bin/kiro-cli",
+                        auth_scope: "local_user",
+                        executable_fingerprint: "sha256:test",
+                        protocols: &protocols,
+                        native_session_compatibility_key: Some("kiro-cli:acp-v1"),
+                        permissions,
+                        permission_descriptors: &descriptors,
+                    },
+                )
+                .expect("Kiro ACP runtime should resolve")
         };
         let off = resolve(&off);
         let on = resolve(&on);

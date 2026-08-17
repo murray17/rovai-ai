@@ -85,7 +85,7 @@ describe('member runtime parameters', () => {
     ['qoder-cli', '权限模式', 'bypass_permissions'],
     ['codebuddy-cli', '权限模式', 'bypassPermissions'],
     ['qwen-code', '审批模式', 'yolo'],
-    ['trae-cn-cli', '权限模式', 'default']
+    ['trae-cn-cli', '权限模式', 'bypass_permissions']
   ] as const)('renders %s with its native permission value', (kind, label, value) => {
     const installation = runtimeInstallation(kind)
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
@@ -100,8 +100,8 @@ describe('member runtime parameters', () => {
     expect(markup).toContain(`value="${value}" selected`)
   })
 
-  it('uses switches for Copilot and Antigravity on/off fields', () => {
-    for (const kind of ['copilot-cli', 'antigravity-app'] as const) {
+  it('uses switches for Copilot, Kiro, and Antigravity on/off fields', () => {
+    for (const kind of ['copilot-cli', 'kiro-cli', 'antigravity-app'] as const) {
       const installation = runtimeInstallation(kind)
       const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
         adapterKind: kind,
@@ -115,7 +115,7 @@ describe('member runtime parameters', () => {
     }
   })
 
-  it('keeps Kiro limited to model policy and model selection', () => {
+  it('shows Kiro model selection and native trust-all permission', () => {
     const installation = runtimeInstallation('kiro-cli')
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
       adapterKind: 'kiro-cli',
@@ -131,7 +131,8 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('模型策略')
     expect(markup).toContain('Runtime Model')
     expect(markup).not.toContain('推理强度')
-    expect(markup).not.toContain('权限模式')
+    expect(markup).toContain('自动允许全部工具')
+    expect(markup).toContain('checked=""')
   })
 
   it('prefers saved member values until the user switches Runtime', () => {
@@ -257,7 +258,7 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'claude-code-cli':
       return { permission_mode: 'bypassPermissions' }
     case 'kiro-cli':
-      return {}
+      return { trust_all_tools: 'on' }
     case 'qoder-cli':
       return { permission_mode: 'bypass_permissions' }
     case 'codebuddy-cli':
@@ -265,7 +266,7 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
     case 'qwen-code':
       return { approval_mode: 'yolo' }
     case 'trae-cn-cli':
-      return { permission_mode: 'default' }
+      return { permission_mode: 'bypass_permissions' }
     case 'antigravity-app':
       return {
         mode: 'accept-edits',
@@ -282,7 +283,7 @@ function runtimePermissionOptions(kind: AdapterKind): PermissionOptionDescriptor
     label: key,
     description: '',
     valueType: 'enum',
-    choices: key === 'allow_all' || key === 'dangerously_skip_permissions'
+    choices: key === 'allow_all' || key === 'trust_all_tools' || key === 'dangerously_skip_permissions'
       ? [{ value: 'off', label: 'off' }, { value: 'on', label: 'on' }]
       : [{ value: String(value), label: String(value) }],
     recommendedValue: value,

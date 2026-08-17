@@ -1493,7 +1493,8 @@ impl AgentProfileService {
             .query_row(
                 r#"
                 SELECT installation.id, installation.executable_path,
-                       snapshot.executable_fingerprint, snapshot.probe_status
+                       snapshot.executable_fingerprint, snapshot.probe_status,
+                       snapshot.permission_schema_digest
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
@@ -1508,6 +1509,7 @@ impl AgentProfileService {
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
                     ))
                 },
             )
@@ -1520,7 +1522,8 @@ impl AgentProfileService {
             previous_fingerprint,
             identity_changed,
             preserve_existing,
-        ) = if let Some((id, path, fingerprint, probe_status)) = existing {
+        ) = if let Some((id, path, fingerprint, probe_status, permission_schema_digest)) = existing
+        {
             let identity_changed =
                 path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
             transaction.execute(
@@ -1550,6 +1553,8 @@ impl AgentProfileService {
                 ],
             )?;
             let preserve_existing = !identity_changed
+                && permission_schema_digest.as_deref()
+                    == Some(discovered.snapshot.permission_schema_digest.as_str())
                 && (probe_status.as_deref() == Some("ready")
                     || (probe_status.as_deref() == Some("light_ready")
                         && discovered.snapshot.probe_status == "light_failed"
@@ -2475,26 +2480,32 @@ impl AgentProfileService {
             let previous_snapshot = transaction
                 .query_row(
                     r#"
-                    SELECT executable_fingerprint, probe_status
+                    SELECT executable_fingerprint, probe_status,
+                           permission_schema_digest
                     FROM adapter_capability_snapshot
                     WHERE installation_id = ?1
                     "#,
                     [&envelope.payload.installation_id],
-                    |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
+                    |row| {
+                        Ok((
+                            row.get::<_, Option<String>>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
                 )
                 .optional()?;
             let previous_fingerprint = previous_snapshot
                 .as_ref()
-                .and_then(|(fingerprint, _)| fingerprint.clone());
+                .and_then(|(fingerprint, _, _)| fingerprint.clone());
             if is_static_snapshot_status(&snapshot.probe_status) {
-                let preserve_ready =
-                    previous_snapshot
-                        .as_ref()
-                        .is_some_and(|(fingerprint, probe_status)| {
-                            probe_status == "ready"
-                                && fingerprint.as_deref()
-                                    == snapshot.executable_fingerprint.as_deref()
-                        });
+                let preserve_ready = previous_snapshot.as_ref().is_some_and(
+                    |(fingerprint, probe_status, permission_schema_digest)| {
+                        probe_status == "ready"
+                            && fingerprint.as_deref() == snapshot.executable_fingerprint.as_deref()
+                            && permission_schema_digest == &snapshot.permission_schema_digest
+                    },
+                );
                 let identity_changed = previous_fingerprint.is_some()
                     && snapshot.executable_fingerprint.is_some()
                     && previous_fingerprint != snapshot.executable_fingerprint;
@@ -5695,7 +5706,7 @@ mod slow_tests {
         assert_eq!(defaults.model, ModelSelection::RuntimeDefault);
         assert_eq!(
             defaults.permissions.values,
-            json!({"permission_mode": "default"})
+            json!({"permission_mode": "bypass_permissions"})
         );
 
         let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
@@ -5767,7 +5778,10 @@ mod slow_tests {
                     }],
                     "modes": {
                         "currentModeId": "default",
-                        "availableModes": [{"id": "default", "name": "Default"}]
+                        "availableModes": [
+                            {"id": "default", "name": "Default"},
+                            {"id": "bypass_permissions", "name": "Accept All Tools"}
+                        ]
                     }
                 }),
                 chrono::Utc::now().to_rfc3339(),
@@ -6127,6 +6141,194 @@ mod slow_tests {
                 .map(|blocker| blocker.code),
             Some("runtime_path_invalid".to_string())
         );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn permission_descriptor_drift_does_not_preserve_ready_or_expand_saved_kiro_profiles() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let executable_path = directory.join("kiro-cli");
+        std::fs::write(&executable_path, b"static-kiro-fixture").unwrap();
+        std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut legacy_snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(crate::agent_runtime_adapter::AcpProbeObservation {
+                adapter_kind: AdapterKind::KiroCli,
+                reported_version: Some("2.15.0".to_string()),
+                executable_fingerprint: Some("sha256:kiro-static".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: Vec::new(),
+                initialize_result: Some(json!({"protocolVersion": 1})),
+                session_result: Some(json!({
+                    "sessionId": "legacy-kiro",
+                    "models": {
+                        "currentModelId": "claude-sonnet",
+                        "availableModels": [{
+                            "modelId": "claude-sonnet",
+                            "name": "Claude Sonnet"
+                        }]
+                    }
+                })),
+                attempted_at: "2026-08-16T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .unwrap();
+        legacy_snapshot.permission_options.clear();
+        legacy_snapshot.permission_schema_digest = canonical_json_digest(
+            &serde_json::to_value(&legacy_snapshot.permission_options).unwrap(),
+        )
+        .unwrap();
+
+        service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::KiroCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "kiro-cli".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: legacy_snapshot,
+                },
+            )
+            .unwrap();
+        let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+        service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "configure-legacy-kiro",
+                    SetMemberRuntimeConfigurationCommand {
+                        agent_id: profile.agent_id.clone(),
+                        expected_version: profile.version,
+                        adapter_kind: AdapterKind::KiroCli,
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: AdapterPermissionConfig {
+                            adapter_kind: AdapterKind::KiroCli,
+                            schema_version: 1,
+                            values: json!({}),
+                        },
+                    },
+                ),
+            )
+            .unwrap();
+
+        let current_snapshot = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::KiroCli,
+                Some("2.16.1".to_string()),
+                "sha256:kiro-static".to_string(),
+                "2026-08-17T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::KiroCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "kiro-cli".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: current_snapshot,
+                },
+            )
+            .unwrap();
+
+        let installation = service
+            .managed_installation(&database, AdapterKind::KiroCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            installation.snapshot.as_ref().unwrap().probe_status,
+            "light_ready"
+        );
+        assert_eq!(
+            installation
+                .member_runtime_defaults
+                .as_ref()
+                .unwrap()
+                .permissions
+                .values,
+            json!({"trust_all_tools": "on"})
+        );
+        let deferred = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            deferred
+                .runtime_configuration
+                .as_ref()
+                .unwrap()
+                .permissions
+                .values,
+            json!({}),
+            "a descriptor refresh must not silently broaden an existing member"
+        );
+        assert_eq!(
+            deferred.runtime_readiness.status,
+            RuntimeReadinessStatus::LightReady
+        );
+
+        let verified_snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(crate::agent_runtime_adapter::AcpProbeObservation {
+                adapter_kind: AdapterKind::KiroCli,
+                reported_version: Some("2.16.1".to_string()),
+                executable_fingerprint: Some("sha256:kiro-static".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: Vec::new(),
+                initialize_result: Some(json!({"protocolVersion": 1})),
+                session_result: Some(json!({
+                    "sessionId": "current-kiro",
+                    "models": {
+                        "currentModelId": "claude-sonnet",
+                        "availableModels": [{
+                            "modelId": "claude-sonnet",
+                            "name": "Claude Sonnet"
+                        }]
+                    }
+                })),
+                attempted_at: "2026-08-17T00:01:00Z".to_string(),
+                last_error: None,
+            })
+            .unwrap();
+        service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::KiroCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "kiro-cli".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: verified_snapshot,
+                },
+            )
+            .unwrap();
+        let configured = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            configured
+                .runtime_configuration
+                .as_ref()
+                .unwrap()
+                .permissions
+                .values,
+            json!({}),
+            "a deep probe must not silently broaden an existing member"
+        );
+        assert_eq!(
+            configured.runtime_readiness.status,
+            RuntimeReadinessStatus::NeedsAttention
+        );
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

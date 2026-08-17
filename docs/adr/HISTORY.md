@@ -218,4 +218,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0204](0204-on-demand-runtime-deep-verification.md) | On-Demand Runtime Deep Verification with Manager-Owned Attempts | `accepted` | `cross-version` | [v0.98](../versions/v0.98/README.md) | — |
 | [ADR-0205](0205-minimal-runtime-usage-metering.md) | Minimal Runtime Usage Metering | `accepted` | `cross-version` | [v0.99](../versions/v0.99/README.md) | — |
 | [ADR-0206](0206-user-confirmed-force-camp-deletion.md) | User-Confirmed Force Camp Deletion | `accepted` | `cross-version` | [v1.00](../versions/v1.00/README.md) | — |
+| [ADR-0207](0207-explicit-maximum-authority-member-runtime-defaults.md) | Explicit Maximum-Authority Member Runtime Defaults | `accepted` | `cross-version` | [v1.01](../versions/v1.01/README.md) | — |
 <!-- adr-history:end -->

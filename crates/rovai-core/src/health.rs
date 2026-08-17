@@ -1377,6 +1377,9 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         }
         AdapterKind::KiroCli => {
             command.args(["acp", "--agent", KIRO_ADDITIVE_AGENT_NAME]);
+            if allow_all {
+                command.arg("--trust-all-tools");
+            }
         }
         AdapterKind::QoderCli | AdapterKind::CodebuddyCli => {
             command.arg("--acp");
@@ -2245,6 +2248,21 @@ mod tests {
         assert_eq!(
             arguments(AdapterKind::KiroCli),
             ["acp", "--agent", KIRO_ADDITIVE_AGENT_NAME]
+        );
+        let mut trusted_kiro = Command::new("/usr/bin/true");
+        configure_acp_command(&mut trusted_kiro, AdapterKind::KiroCli, true);
+        assert_eq!(
+            trusted_kiro
+                .as_std()
+                .get_args()
+                .map(|value| value.to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
+            [
+                "acp",
+                "--agent",
+                KIRO_ADDITIVE_AGENT_NAME,
+                "--trust-all-tools"
+            ]
         );
     }
 

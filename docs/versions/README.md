@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.00
+current_version: v1.01
 last_updated: 2026-08-17
 ---
 
@@ -151,4 +151,5 @@ last_updated: 2026-08-17
 | v0.97 | `historical` | 持久首次训练、断点恢复与真实“初次集结”快速对话 | [v0.97/README.md](v0.97/README.md) |
 | v0.98 | `historical` | Picker 结构化 Skill 身份、发送时冻结与 `CURRENT_INPUT.skills` 文件链接 | [v0.98/README.md](v0.98/README.md) |
 | v0.99 | `historical` | 五表 clean-break Runtime Usage Metering、稀疏 Token/Cache/Cost 与单 Snapshot 页面 | [v0.99/README.md](v0.99/README.md) |
-| v1.00 | `current` | 用户确认后直接强制停止执行并物理删除 Camp 聚合 | [v1.00/README.md](v1.00/README.md) |
+| v1.00 | `historical` | 用户确认后直接强制停止执行并物理删除 Camp 聚合 | [v1.00/README.md](v1.00/README.md) |
+| v1.01 | `current` | TRAE 与 Kiro 新队员使用已验证的最高权限默认 | [v1.01/README.md](v1.01/README.md) |

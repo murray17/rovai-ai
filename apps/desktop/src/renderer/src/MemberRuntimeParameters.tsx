@@ -240,6 +240,7 @@ function KiroRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element 
   return (
     <div className="runtime-parameter-form">
       {modelFieldsFor('kiro-cli', props)}
+      <PermissionSwitch {...props} fieldKey="trust_all_tools" label="自动允许全部工具" />
     </div>
   )
 }

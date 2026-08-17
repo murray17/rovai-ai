@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.00
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -16,6 +16,8 @@ last_updated: 2026-08-17
 > Runtime cleanup 与自动化已经完成，证据见[实施计划](implementation-plan.md)。
 >
 > 前置版本：[v0.99 最小 Runtime Usage Metering](../v0.99/README.md)
+>
+> 后续版本：[v1.01 TRAE 与 Kiro 最高权限队员默认](../v1.01/README.md)
 
 ## 版本目标
 

@@ -34,7 +34,7 @@ Probe、成员选择、诊断或 AgentRun 语义。
 | 能力轴 | 实测结论 | Rovai v0.83 边界 |
 | --- | --- | --- |
 | Protocol / auth | `initialize.protocolVersion = 1`；当前登录态 `authMethods=[]`；stdout 仅合法 JSON-RPC | 明确认证错误映射 `authentication_required`；协议/shape 缺失映射 `incompatible`；I/O/timeout 保持 transient |
-| Session / model | `session/new` 返回稳定 ID、动态 model select（本次 16 项）和 `default/bypass_permissions/plan` modes；跨 Host `session/load` 通过 | Catalog 每次从 Session 建立；只要求并默认安全 `default`，不默认 `--yolo` |
+| Session / model | `session/new` 返回稳定 ID、动态 model select（本次 16 项）和 `default/bypass_permissions/plan` modes；跨 Host `session/load` 通过 | Catalog 每次从 Session 建立；v1.01 新队员默认 `bypass_permissions`，首次真实 Session 缺少该值时配置进入 needs-attention |
 | Prompt / cancel | 普通 prompt 返回 `end_turn`；tool 期间 cancel 返回 `cancelled` 且目标文件未出现 | 进入既有 ACP terminal/cancel 边界；第一版 Run 完成后停止 Host，不声称 warm reuse |
 | Tool / Approval | `toolCallId` 生命周期稳定；结构化 permission request 的 option ID 可执行 allow/reject | 映射现有 Action/Approval；拒绝后无文件，allow-once 后只有目标写入 |
 | External MCP | Session A 通过 `mcpServers` 追加 fixture 并真实调用；同 Host 未配置 Session B 不可见 | 沿用 `AdditivePerRun / RovaiWins`，不新增 Transport、全局配置副本或额外 MCP 隔离层 |
@@ -66,8 +66,21 @@ Session response 更新认证、模型、权限和 capability Ready，随后在�
 Adapter 允许且无副作用的有界版本/身份命令；只有命令成功、输出未超限并识别到基础身份才写
 `light_ready` 静态证据。深检由显式单 Runtime 检查或首次真实任务触发；Adapter policy 仍可进一步收窄目的。
 规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
-[ADR-0204](adr/0204-on-demand-runtime-deep-verification.md)与
-[Runtime Launch and Verification v3](contracts/runtime-launch-and-verification-v3.md)。
+[ADR-0204](adr/0204-on-demand-runtime-deep-verification.md)、
+[ADR-0207](adr/0207-explicit-maximum-authority-member-runtime-defaults.md)与
+[Runtime Launch and Verification v4](contracts/runtime-launch-and-verification-v4.md)。
+
+### 2026-08-17 Kiro trust-all 与 TRAE 最高权限默认复核
+
+本机 Kiro CLI 2.16.1 的 `kiro-cli acp --help` 明确输出
+`-a, --trust-all-tools  Auto-approve all tool permission requests`；正式 Host 因而使用 Host-scoped
+`trust_all_tools=on|off`，其中 `on` 精确映射 `--trust-all-tools`。Health Probe、设置页检查和 discovery
+继续不传该 flag。官方 Kiro CLI 文档同时确认 custom Agent `allowedTools` 只对列出的工具免确认、支持有限
+pattern，但不支持用全局 `*` 表示全部免确认，因此产品不通过拼接 `allowedTools` 猜测 trust-all。
+
+TRAE 当前 Ready snapshot 已广告 `bypass_permissions`，静态 descriptor 从 v1.01 起允许在
+`installed_unverified` 阶段保存该值，新队员也默认该值。该结论不把静态 Installation 升级为动态 capability
+证据；首次真实 Host 仍必须用 Session 返回的 mode catalog 重新验证，缺少保存值时阻断后续执行。
 
 ### 2026-08-17 ACP Session 隔离与 TRAE warm Host 修正
 
@@ -82,7 +95,7 @@ Adapter，且其 replay 只能在 `LoadingReplay` 阶段被隔离；对不上 Ho
 epoch、Native Session、Native Prompt 或 Delivery 的事件，不得进入 Evidence、Action、Usage、
 Missing-Send Recovery、Compaction 或 Renderer。匹配 `session/prompt` request ID 的 response 是唯一
 ACP input ACK 权威；无 Prompt correlation 的 `session/update` 与 permission request 不再提前确认。
-当前规范入口是 [Runtime Launch and Verification v3](contracts/runtime-launch-and-verification-v3.md)。
+当前规范入口是 [Runtime Launch and Verification v4](contracts/runtime-launch-and-verification-v4.md)。
 
 2026-08-17 使用本机真实 TRAE 执行 `ROVAI_ACP_SMOKE_ADAPTER=trae-cn-cli pnpm
 smoke:acp-runtime` 通过：completion、allow-once 写入与 deny 三个连续 AgentRun 使用同一

@@ -2272,7 +2272,14 @@ fn configure_runtime_command(
             let private_config_root =
                 private_config_root.context("Kiro Host isolation directory is missing")?;
             write_kiro_additive_agent_config(private_config_root, external_mcp_servers)?;
-            health::configure_acp_command(command, runtime.adapter_kind, false);
+            let trust_all_tools = values
+                .get("trust_all_tools")
+                .and_then(Value::as_str)
+                .context("Kiro Runtime requires trust_all_tools")?
+                == "on"
+                && !(permission_semantics == PermissionSemantics::CoreEnforcedV1
+                    && workspace.access == "read_only");
+            health::configure_acp_command(command, runtime.adapter_kind, trust_all_tools);
             // Kiro discovers the Rovai Agent from the Host process working
             // directory. Native mcp.json sources remain enabled and the Agent
             // adds the Rovai definitions with whole-definition precedence.
@@ -3315,6 +3322,78 @@ mod tests {
             host_config_digest: "sha256:host".to_string(),
             config_digest: "sha256:config".to_string(),
         }
+    }
+
+    fn frozen_kiro_runtime() -> FrozenAgentRuntimeConfig {
+        FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::KiroCli,
+            installation_id: "installation-kiro".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: "/usr/bin/true".to_string(),
+            auth_scope: "default".to_string(),
+            reported_version: Some("2.16.1".to_string()),
+            executable_fingerprint: "sha256:kiro".to_string(),
+            capabilities: Vec::new(),
+            protocol_version: "acp-v1".to_string(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: "kiro-cli://runtime-default".to_string(),
+                options: json!({}),
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: AdapterKind::KiroCli,
+                schema_version: 1,
+                values: json!({"trust_all_tools": "on"}),
+            },
+            native_session_compatibility_key: Some("kiro-cli:acp-v1".to_string()),
+            binding_compatibility_digest: "sha256:binding".to_string(),
+            host_config_digest: "sha256:host".to_string(),
+            config_digest: "sha256:config".to_string(),
+        }
+    }
+
+    #[test]
+    fn kiro_effective_launch_trusts_all_only_for_non_legacy_read_only_runs() {
+        let root = std::env::temp_dir().join(format!("rovai-kiro-launch-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let runtime = frozen_kiro_runtime();
+        let configure = |workspace: &AgentRunWorkspace| {
+            let mut command = Command::new("/usr/bin/true");
+            configure_runtime_command(
+                &mut command,
+                workspace,
+                PermissionSemantics::CoreEnforcedV1,
+                &runtime,
+                true,
+                &BTreeMap::new(),
+                &root,
+                Some(&root),
+                None,
+            )
+            .unwrap();
+            command
+                .as_std()
+                .get_args()
+                .map(|value| value.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+        };
+        let writable = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let mut read_only = writable.clone();
+        read_only.access = "read_only".to_string();
+
+        assert!(
+            configure(&writable)
+                .iter()
+                .any(|arg| arg == "--trust-all-tools")
+        );
+        assert!(
+            !configure(&read_only)
+                .iter()
+                .any(|arg| arg == "--trust-all-tools")
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     async fn receive_through_prompt_completion(
