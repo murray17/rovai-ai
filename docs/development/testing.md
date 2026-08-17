@@ -118,20 +118,40 @@ Main 专属模块由 staged `src/main.rs` 声明、但未由 staged `src/lib.rs`
 ### 完整 PR 验证
 
 ```bash
-pnpm test:rust:full
+cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
+cargo test -p rovai-core --lib
+cargo test -p rovai-core --features slow-tests --lib slow_tests::
 ```
 
 `.github/workflows/rust.yml` 在 pull request 时，对 Rust 源码、Cargo 文件和 Rust 构建/lint
-配置改动执行：
+配置改动并行执行三个独立 job：
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo test -p rovai-core --lib
+cargo test -p rovai-core --features slow-tests --lib slow_tests::
 ```
 
-CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。需要验证桌面构建时另行运行：
+默认 fast suite 保留 parser/serde、纯 policy、幂等冲突、权限、路径与 symlink、安全脱敏、取消和
+route/epoch/session fencing、当前 schema 与受支持 migration smoke，以及每个高风险域的代表性原子
+E2E。`slow-tests` 承担需要完整 SQLite/Camp/Runtime fixture 的扩展场景；每个测试仍使用独立数据库
+clone，不共享可写状态。
+
+`legacy-migration-tests` 会隐式启用 `slow-tests`，只在 `.github/workflows/rust-nightly.yml` 的定时或
+手动全特性门禁中运行：
+
+```bash
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-features
+```
+
+所有 feature-gated 测试因此都会在 nightly 中编译并执行；历史兼容覆盖只是移出 PR 关键路径，未被
+永久禁用。CI 使用 Cargo 缓存缩短重复构建，但测试是否通过不依赖缓存命中。三个 PR job 并行启动，
+各自恢复与其构建目标相容的既有 cache；不通过 job 间传递可写 `target` 目录制造顺序依赖。需要验证
+桌面构建时另行运行：
 
 ```bash
 pnpm build:desktop
