@@ -5,10 +5,10 @@ import {
 } from './camp-world-map-ambient-copy'
 import {
   CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY,
-  CAMP_WORLD_MAP_AMBIENT_DISPLAY_MS,
   CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY,
   CAMP_WORLD_MAP_AMBIENT_RELAXATION_TIERS,
   CampWorldMapAmbientScheduler,
+  campWorldMapAuthoritativeSpeechBlocksAmbient,
   campWorldMapCaption,
   campWorldMapAmbientAttemptDelay,
   campWorldMapAmbientInitialDelay,
@@ -341,13 +341,13 @@ describe('Camp world map ambient scheduler', () => {
     expect(campWorldMapAmbientAttemptDelay(() => 1)).toBe(CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY.maximum)
   })
 
-  it('schedules the first event at 6 seconds, displays 5.6 seconds and retries 22 seconds start-to-start', () => {
+  it('schedules the first event at 6 seconds, preserves its 5.6-second display and retries every 4 seconds', () => {
     const clock = new FakeClock()
     const events: (CampWorldMapAmbientDisplayedEvent | null)[] = []
     const scheduler = new CampWorldMapAmbientScheduler({
       clock,
       random: () => 0,
-      select: () => FIXED_SELECTION,
+      select: () => events.at(-1) ? null : FIXED_SELECTION,
       onDisplayed: () => undefined,
       onEventChange: (event) => events.push(event)
     })
@@ -356,11 +356,14 @@ describe('Camp world map ambient scheduler', () => {
     expect(clock.pending().map((timer) => timer.dueAt)).toEqual([6_000])
     clock.advanceBy(6_000)
     expect(events.at(-1)?.beatId).toBe('research-01')
-    expect(clock.pending().map((timer) => timer.dueAt).sort((a, b) => a - b)).toEqual([11_600, 28_000])
-    clock.advanceBy(CAMP_WORLD_MAP_AMBIENT_DISPLAY_MS)
+    expect(clock.pending().map((timer) => timer.dueAt).sort((a, b) => a - b)).toEqual([10_000, 11_600])
+    clock.advanceBy(4_000)
+    expect(events.at(-1)?.startedAt).toBe(6_000)
+    expect(clock.pending().map((timer) => timer.dueAt).sort((a, b) => a - b)).toEqual([11_600, 14_000])
+    clock.advanceBy(1_600)
     expect(events.at(-1)).toBeNull()
-    clock.advanceBy(16_400)
-    expect(events.at(-1)?.startedAt).toBe(28_000)
+    clock.advanceBy(2_400)
+    expect(events.at(-1)?.startedAt).toBe(14_000)
   })
 
   it('waits a full subsequent interval after a no-candidate attempt or resume', () => {
@@ -379,13 +382,13 @@ describe('Camp world map ambient scheduler', () => {
     clock.advanceBy(6_000)
     expect(events).toEqual([])
     canSelect = true
-    clock.advanceBy(21_999)
+    clock.advanceBy(3_999)
     expect(events).toEqual([])
     clock.advanceBy(1)
-    expect(events.at(-1)?.startedAt).toBe(28_000)
+    expect(events.at(-1)?.startedAt).toBe(10_000)
     scheduler.suspend()
     scheduler.start('subsequent')
-    expect(clock.pending().some((timer) => timer.dueAt === 50_000)).toBe(true)
+    expect(clock.pending().some((timer) => timer.dueAt === 14_000)).toBe(true)
   })
 
   it('rejects stale schedule and expiry callbacks after suspension or a replacement event', () => {
@@ -410,7 +413,7 @@ describe('Camp world map ambient scheduler', () => {
     const firstEventId = events.at(-1)?.eventId
     const staleExpiryId = clock.pending().find((timer) => timer.dueAt === clock.now() + 5_600)?.id
     scheduler.cancelCurrentAndReschedule()
-    clock.advanceBy(22_000)
+    clock.advanceBy(4_000)
     expect(events.at(-1)?.eventId).not.toBe(firstEventId)
     if (staleExpiryId) clock.fireEvenIfCleared(staleExpiryId)
     expect(events.at(-1)?.eventId).not.toBe(firstEventId)
@@ -468,5 +471,22 @@ describe('Camp world map caption arbitration', () => {
       interactive: false,
       label: '闲时 · 环境预设'
     })
+  })
+
+  it('keeps ambient scheduling available for idle agents beside authoritative speech', () => {
+    expect(campWorldMapAuthoritativeSpeechBlocksAmbient([
+      agent('running', 'real'),
+      agent('idle', null)
+    ])).toBe(false)
+    expect(campWorldMapAuthoritativeSpeechBlocksAmbient([
+      agent('waiting', 'waiting'),
+      agent('idle', null)
+    ])).toBe(false)
+    expect(campWorldMapAuthoritativeSpeechBlocksAmbient([
+      agent('running', 'real')
+    ])).toBe(true)
+    expect(campWorldMapAuthoritativeSpeechBlocksAmbient([
+      agent('idle', null)
+    ])).toBe(false)
   })
 })

@@ -17,7 +17,7 @@ import {
 } from './camp-world-map-model'
 
 export const CAMP_WORLD_MAP_AMBIENT_INITIAL_DELAY = { minimum: 6_000, maximum: 12_000 } as const
-export const CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY = { minimum: 22_000, maximum: 34_000 } as const
+export const CAMP_WORLD_MAP_AMBIENT_ATTEMPT_DELAY = { minimum: 4_000, maximum: 6_000 } as const
 export const CAMP_WORLD_MAP_AMBIENT_DISPLAY_MS = 5_600
 export const CAMP_WORLD_MAP_AMBIENT_PARTICIPANT_COOLDOWN_MS = 55_000
 export const CAMP_WORLD_MAP_AMBIENT_PAIR_COOLDOWN_MS = 120_000
@@ -184,6 +184,13 @@ export function campWorldMapCaption(
         text: ambientEvent.text
       }
     : null
+}
+
+export function campWorldMapAuthoritativeSpeechBlocksAmbient(
+  agents: readonly CampWorldMapAgent[]
+): boolean {
+  return agents.some((agent) => agent.speech !== null)
+    && !agents.some((agent) => agent.mode === 'idle')
 }
 
 function normalizedRandom(random: CampWorldMapAmbientRandom): number {

@@ -2307,7 +2307,6 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
   })()`)
   assert(staticPresentation.agentCount === worldMapVisibleRuntimeCount
     && staticPresentation.realSpeechCount === 1
-    && staticPresentation.ambientSpeechCount === 0
     && staticPresentation.isStatic
     && staticPresentation.routesPressed === 'false'
     && staticPresentation.routeCount === 15
@@ -2346,13 +2345,19 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }]
   })
   await waitForExpression(cdp, `!document.querySelector('.camp-world-map')?.classList.contains('is-static')`)
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-world-map')?.dataset.ambientKind !== 'none'`, 14_000)
   const livePresentation = await evaluate(cdp, `(() => ({
     ambientKind: document.querySelector('.camp-world-map')?.dataset.ambientKind ?? null,
-    realSpeechCount: document.querySelectorAll('.camp-world-map-speech.is-real').length
+    realSpeechCount: document.querySelectorAll('.camp-world-map-speech.is-real').length,
+    ambientBubbleCount: document.querySelectorAll(
+      '.camp-world-map-speech.is-ambient, .camp-world-map-ambient-encounter'
+    ).length
   }))()`)
-  assert(livePresentation.ambientKind === 'none'
-    && livePresentation.realSpeechCount === 1,
-  `Authoritative world map speech did not suppress ambient output: ${JSON.stringify(livePresentation)}`)
+  assert(livePresentation.ambientKind !== 'none'
+    && livePresentation.realSpeechCount === 1
+    && livePresentation.ambientBubbleCount === 1,
+  `Real and unrelated ambient world map speech did not coexist: ${JSON.stringify(livePresentation)}`)
   const liveDayCapture = join(capturesDirectory, 'camp-world-map-live-day-1440x920.png')
   await capture(cdp, liveDayCapture)
 
@@ -2512,7 +2517,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
       keyboardViewSwitch: true,
       supplied2kAsset: true,
       realAgentRunSpeech: true,
-      labeledIdlePreset: true,
+      realAndAmbientSpeechCoexist: livePresentation,
       fixedRouteToggle: true,
       reducedMotionKeepsRealText: true,
       reducedMotionKeepsAmbientText: ambientAcceptance.reducedMotionKeepsAmbientText,
