@@ -119,7 +119,11 @@ Bash、Read、Edit、Write 等只映射到既有 Canonical Activity kind，Bash 
 或明确的 `stdout`/`stderr`。最终 `result`、Usage 与 Session 校验路径没有改变。确定性 stream fixture
 已证明 partial/full 去重、start/terminal 关联、command marker 可见及私有字段不泄露。真实 smoke 还会
 强制原生 `Bash` 执行固定 `printf`，并要求 marker 从对应 `runtime.action.payload.output` 取得、原生
-tool-use ID 存在且 Session/Conversation 连续。
+tool-use ID 存在且 Session/Conversation 连续。公开 `text_delta` 现在另行投影为 `agent.text.delta`；若整次
+Run 没有该公开 delta，只用通过 Session/terminal 校验的 success `result` 生成一次 narration fallback。
+原始 `thinking_delta`、失败 result 与 provider metadata 不进入 Evidence，最终 Camp Message 仍由 terminal
+result 独立结算。真实 smoke 的两次无工具回复同时要求 narration marker 可见，避免“最终消息存在但处理
+过程为空”的 Claude-only 缺口回归。
 
 Antigravity 的健康探测仅在 `--help` 同时声明 `--output-format` 与 `stream-json` 时发布可选
 `output.stream_json` capability；冻结为支持的 AgentRun 才追加 `--output-format stream-json`，从 NDJSON
