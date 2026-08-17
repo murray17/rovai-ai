@@ -4097,7 +4097,6 @@ pub fn parse_claude_result_usage(result: &Value) -> Vec<ParsedRuntimeUsage> {
 mod tests {
     use super::*;
     use crate::{
-        agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
             TestCampMessageAddress, TestCampMessageCommand,
@@ -4155,13 +4154,9 @@ mod tests {
     }
 
     fn claimed_monitoring_run() -> (PathBuf, Database, AgentRunExecution) {
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-runtime-monitoring-service-test-{}",
-            Uuid::new_v4()
-        ));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -4192,7 +4187,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,

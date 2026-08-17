@@ -3009,7 +3009,7 @@ mod slow_tests {
             "rovai-read-model-structured-message-{}",
             Uuid::new_v4()
         ));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         let collaboration = CollaborationService::default();
         let created = collaboration
             .create_camp(
@@ -3144,7 +3144,7 @@ mod slow_tests {
         ));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         configure_test_runtime(&database, &["agent_1"]);
         let created = CollaborationService::default()
             .create_test_camp_conversation(
@@ -3225,7 +3225,7 @@ mod slow_tests {
             "rovai-read-model-message-around-{}",
             Uuid::new_v4()
         ));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         let collaboration = CollaborationService::default();
         let created = collaboration
             .create_camp(
@@ -3524,7 +3524,7 @@ mod slow_tests {
             std::env::temp_dir().join(format!("rovai-navigation-groups-test-{}", Uuid::new_v4()));
         let quick_chat_root = directory.join("quick-chat");
         let project_root = directory.join("rovai-ai");
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         let collaboration = CollaborationService::default();
         for index in 0..6 {
             create_navigation_camp(
@@ -3585,7 +3585,7 @@ mod slow_tests {
     fn navigation_completion_marker_is_persistent_and_view_ack_is_monotonic() {
         let directory =
             std::env::temp_dir().join(format!("rovai-navigation-marker-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         configure_test_runtime(&database, &["agent_1"]);
         let collaboration = CollaborationService::default();
         let created = collaboration
@@ -3718,7 +3718,7 @@ mod slow_tests {
             std::env::temp_dir().join(format!("rovai-read-model-test-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -3842,7 +3842,7 @@ mod slow_tests {
             std::env::temp_dir().join(format!("rovai-evidence-page-test-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         configure_test_runtime(&database, &["agent_1"]);
         let created = CollaborationService::default()
             .create_test_camp_conversation(
@@ -4026,7 +4026,7 @@ mod slow_tests {
             std::env::temp_dir().join(format!("rovai-evidence-batch-test-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         configure_test_runtime(&database, &["agent_1"]);
         let created = CollaborationService::default()
             .create_test_camp_conversation(
@@ -4134,7 +4134,7 @@ mod slow_tests {
     fn event_reader_requests_snapshot_after_retention_gap() {
         let directory =
             std::env::temp_dir().join(format!("rovai-read-gap-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         for sequence in 0..6 {
             database
                 .connection()

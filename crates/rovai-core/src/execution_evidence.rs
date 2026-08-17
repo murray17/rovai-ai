@@ -1018,7 +1018,6 @@ fn canonical_activity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Canonical
 mod tests {
     use super::*;
     use crate::{
-        agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
             TestCampMessageAddress, TestCampMessageCommand,
@@ -1172,12 +1171,9 @@ mod tests {
 
     #[test]
     fn evidence_is_durable_blob_backed_agent_inaccessible_and_cancel_fenced() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-execution-evidence-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(

@@ -5809,11 +5809,9 @@ mod slow_tests {
     }
 
     fn fixture() -> Fixture {
-        let directory = std::env::temp_dir().join(format!("rovai-context-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&directory).unwrap();
+        let (mut database, directory) = crate::test_support::fresh_schema_database();
         let executable = directory.join("codex");
         std::fs::write(&executable, b"context-test-runtime").unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let profile_service = AgentProfileService::default();
         let now = chrono::Utc::now().to_rfc3339();
         profile_service

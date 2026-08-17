@@ -4517,10 +4517,7 @@ mod slow_tests {
     };
 
     fn test_database() -> (Database, std::path::PathBuf) {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-collaboration-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
-        (database, directory)
+        crate::test_support::fresh_schema_database()
     }
 
     fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {

@@ -3486,7 +3486,6 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     use crate::read_model::ReadModelService;
     use crate::{
-        agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
             TestCampMessageAddress, TestCampMessageCommand,
@@ -3534,10 +3533,9 @@ mod tests {
     }
 
     fn fixture(policy_effect: &str) -> Fixture {
-        let directory = std::env::temp_dir().join(format!("rovai-action-test-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let created = collaboration
             .create_camp(
@@ -3571,7 +3569,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let turn = collaboration
             .send_test_camp_message(
                 &mut database,

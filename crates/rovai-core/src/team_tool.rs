@@ -1881,8 +1881,19 @@ fn rejected(code: &str, message: &str) -> CommandHandlerResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "slow-tests")]
     use crate::{
         agent_profile::configure_test_runtime,
+        collaboration::end_camp_membership,
+        context::ContextMaterialization,
+        memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
+        memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
+        message_delivery::{
+            DeliveryDispatchTrigger, RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
+        },
+        runtime::{CancelCampTurnCommand, FailAgentRunCommand},
+    };
+    use crate::{
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
             ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
@@ -1907,17 +1918,6 @@ mod tests {
             BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
             MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, SucceedAgentRunCommand,
         },
-    };
-    #[cfg(feature = "slow-tests")]
-    use crate::{
-        collaboration::end_camp_membership,
-        context::ContextMaterialization,
-        memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
-        memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
-        message_delivery::{
-            DeliveryDispatchTrigger, RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
-        },
-        runtime::{CancelCampTurnCommand, FailAgentRunCommand},
     };
 
     fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {
@@ -1982,12 +1982,9 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let directory =
-                std::env::temp_dir().join(format!("rovai-team-tool-test-{}", Uuid::new_v4()));
+            let (mut database, directory) = crate::test_support::seeded_runtime_database();
             let workspace = directory.join("workspace");
             std::fs::create_dir_all(&workspace).expect("workspace should exist");
-            let mut database = Database::open(&directory).expect("database should open");
-            configure_test_runtime(&database, &["agent_1", "agent_2", "agent_3"]);
             let collaboration = CollaborationService::default();
             let camp = collaboration
                 .create_camp(
