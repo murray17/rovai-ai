@@ -1294,6 +1294,19 @@ fn acp_capability_snapshot(
     };
     let permission_schema_digest =
         canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+    let native_session_compatibility_key = if ready {
+        Some(if adapter_kind == AdapterKind::TraeCnCli {
+            let fingerprint = observation
+                .executable_fingerprint
+                .as_deref()
+                .context("ready TRAE snapshot has no executable fingerprint")?;
+            format!("{}:acp-v1:{fingerprint}", adapter_kind.as_str())
+        } else {
+            format!("{}:acp-v1", adapter_kind.as_str())
+        })
+    } else {
+        None
+    };
     Ok(AdapterCapabilitySnapshot {
         reported_version: observation.reported_version,
         executable_fingerprint: observation.executable_fingerprint,
@@ -1314,8 +1327,7 @@ fn acp_capability_snapshot(
         last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
         stale_at: (!ready).then_some(observation.attempted_at),
         last_error: observation.last_error,
-        native_session_compatibility_key: ready
-            .then(|| format!("{}:acp-v1", adapter_kind.as_str())),
+        native_session_compatibility_key,
     })
 }
 
@@ -2310,6 +2322,10 @@ mod tests {
         assert_eq!(
             snapshot.permission_options[0].recommended_value,
             json!("default")
+        );
+        assert_eq!(
+            snapshot.native_session_compatibility_key.as_deref(),
+            Some("trae-cn-cli:acp-v1:sha256:trae")
         );
         assert!(
             snapshot.permission_options[0]

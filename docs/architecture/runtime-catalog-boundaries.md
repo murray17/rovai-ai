@@ -15,8 +15,9 @@ last_updated: 2026-08-18
 [ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
 [ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)和
 [ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
-[ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)及
-[Runtime Launch and Verification v5](../contracts/runtime-launch-and-verification-v5.md)。实测版本和能力只由
+[ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)、
+[ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)及
+[Runtime Launch and Verification v6](../contracts/runtime-launch-and-verification-v6.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 三层目录
@@ -60,9 +61,10 @@ capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 
 `trae-cn-cli` 通过既有 ACP v1 Host 启动 `traecli acp serve`。模型与 permission mode catalog 来自
 每次真实 Session 返回；新队员默认使用已验证的 `bypass_permissions`，用户仍可改回 `default`。Session 恢复采用
-统一 ACP continuation：兼容 IdleWarm 命中时直接复用同一 Host 已持有的 Session；冷 Host 只有在
-`sessionCapabilities.resume` 存在时走 `session/resume`，否则建立 `session/new`。TRAE 的
-`session/load` 只作为历史能力证据保留，禁止用于正式 AgentRun 续跑。
+有界 continuation：兼容 IdleWarm 命中时直接复用同一 Host 已持有的 Session；冷 Host 优先使用声明的
+`session/resume`。本机 `0.120.52` 的 exact-ID Provider Resume 协议 Probe 不合格，因此当前下一层为
+`session/load` HistoryRestore；所有 load replay 在当前 prompt 前进入独立 quarantine，失败才建立
+`session/new`。禁止 `--resume AUTO`、私有 Session 文件解析和最近 Session 扫描。
 
 TRAE 参加正常 light discovery：启动和显式 rescan 通过统一 Probe process owner 执行有界
 `traecli --version`，成功持久化 `light_ready` 并在设置页显示“可用”，失败持久化 `light_failed`。轻检仍只
@@ -80,6 +82,12 @@ Installation refresh、health/diagnostics 与 dispatch preflight 继续不启动
 任务输入。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host；失败使用该 Host 已有错误分类，不启动 diagnostic
 process。相同 path/fingerprint 且 Adapter permission schema digest 相同的轻检复扫保留 Ready；任一权限
 descriptor 改变时降级为 light snapshot，等待显式检查或下一次真实执行重新验证。
+
+冷 Host HistoryRestore 只在 executable fingerprint、installation/protocol、Host config、canonical workspace、
+workspace access/isolation、模型和权限均兼容时尝试。Host initialize 后先把精确 Session route 标为
+`LoadingReplay`，再调用 `session/load`；匹配成功 response 是进入 `Ready` 和发送当前 prompt 的唯一 barrier。
+恢复期 assistant/tool/permission/usage/server request 均静默隔离，受 4096 event、8 MiB 和 30 秒上限约束；
+异常持久记录 continuity lost、停止失败 Host、轮换 Binding 后才以新 Session 继续。
 
 External MCP 沿用现有 `AdditivePerRun`：当前 AgentRun 的冻结 Definition 通过
 `session/new` 参数追加；warm reuse 只允许完整 Runtime compatibility digest 相等，因此冻结 MCP Projection

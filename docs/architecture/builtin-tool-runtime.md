@@ -226,8 +226,11 @@ Native Session binding。
 
 TRAE 不具有 Kiro 的 Host 排除条件。兼容 Host 在 Run 完成且进程静默后进入 IdleWarm；
 后继 Run 获取它时先轮换 lease，再直接复用该 Host 已持有的 Native Session。冷 Host 优先使用
-ACP `session/resume`；上游未声明 resume 能力时创建 `session/new`，正常续跑不使用会重放历史的
-`session/load`。每次重新绑定仍要满足 Runtime/解析后 MCP Server 集合/cwd/权限 compatibility
+ACP `session/resume`；当前构建未声明 resume，exact-ID Provider Resume Probe 也不合格，因此进入受控
+`session/load` HistoryRestore。Host 在 load 前以 `LoadingReplay` 独占精确 Session route，成功 response 后才
+进入 Ready 并发送当前 prompt；所有 replay 在 Evidence、Action/Approval、Usage、Missing-Send、Renderer
+和最终输出之前隔离，并受事件/字节/时间上限约束。恢复失败先持久记录 continuity lost、停止 Host、轮换
+Binding，再以 `session/new` 继续。每次重新绑定仍要满足 Runtime/解析后 MCP Server 集合/cwd/权限 compatibility
 digest；只含 AgentRun ID 的投影文件 digest 不是 Host 输入。旧 lease、旧 Prompt
 与迟到 Session event 在任何 Evidence、Action 或 Renderer 副作用前 fail closed。
 

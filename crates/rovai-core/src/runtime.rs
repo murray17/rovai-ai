@@ -721,6 +721,42 @@ impl ExecutionRuntimeService {
         Ok(())
     }
 
+    pub fn record_native_session_continuity_lost(
+        &self,
+        database: &mut Database,
+        execution: &AgentRunExecution,
+        continuation: &str,
+        failure: NativeSessionResumeFailure,
+    ) -> Result<()> {
+        let transaction = database.connection_mut().transaction()?;
+        append_domain_event(
+            &transaction,
+            "agent_run.native_session_continuity_lost",
+            &execution.camp_id,
+            ("agent_run", &execution.agent_run_id),
+            &ActorRef::System {
+                component_id: "runtime-adapter:session-continuation".to_string(),
+            },
+            Some(execution.execution_epoch),
+            &json!({
+                "agentRunId": execution.agent_run_id,
+                "conversationId": execution.conversation_id,
+                "executionEpoch": execution.execution_epoch,
+                "adapterKind": execution.runtime.adapter_kind,
+                "adapterInstallationId": execution.runtime.installation_id,
+                "previousNativeSessionId": execution.native_session_id,
+                "continuation": continuation,
+                "failure": match failure {
+                    NativeSessionResumeFailure::Incompatible => "incompatible",
+                    NativeSessionResumeFailure::Ambiguous => "ambiguous",
+                },
+                "fallback": "new_session",
+            }),
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn expire_elapsed_camp_turn_execution_budgets(
         &self,
         database: &mut Database,
@@ -5437,6 +5473,31 @@ mod tests {
                 .unwrap(),
             NativeSessionResumeDisposition::New
         );
+        service
+            .record_native_session_continuity_lost(
+                &mut database,
+                &generation_three,
+                "acp_history_restore",
+                NativeSessionResumeFailure::Incompatible,
+            )
+            .unwrap();
+        let continuity_event: String = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT payload_json FROM event_log
+                WHERE event_type = 'agent_run.native_session_continuity_lost'
+                  AND entity_id = 'run-resume'
+                  AND execution_epoch = 1
+                "#,
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let continuity_event: Value = serde_json::from_str(&continuity_event).unwrap();
+        assert_eq!(continuity_event["continuation"], "acp_history_restore");
+        assert_eq!(continuity_event["failure"], "incompatible");
+        assert_eq!(continuity_event["fallback"], "new_session");
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }

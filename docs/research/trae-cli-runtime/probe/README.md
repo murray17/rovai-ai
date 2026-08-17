@@ -1,7 +1,7 @@
 ---
 document_type: runtime-probe-record
 runtime: trae-cn-cli
-observed_at: 2026-08-15
+observed_at: 2026-08-18
 status: verified-local
 ---
 
@@ -31,6 +31,21 @@ status: verified-local
 - Session 的 mode catalog 实际包含 `default`、`bypass_permissions`、`plan`。
 - 同一真实模型配置通过 `session/set_config_option` round-trip。
 - 第二个 Host 对首个 Host 创建的 Session 执行 `session/load` 成功，后续 prompt 能恢复上一轮 marker。
+
+## 2026-08-18 exact-ID Provider Resume 复核
+
+为排除 `--resume string[="AUTO"]` 的可选参数解析歧义，本轮只使用同一次 ACP `session/new` 返回的精确
+Session ID，并显式用 `=` 赋值：
+
+| 命令 | initialize 结果 |
+| --- | --- |
+| `traecli acp serve --permission-mode default` | 约 0.9 秒成功 |
+| `traecli --resume=<exact-id> acp serve --permission-mode default` | 30 秒内无 response；stderr 空 |
+| `traecli acp serve --resume=<exact-id> --permission-mode default` | 30 秒内无 response；stderr 空 |
+
+两种 resume 进程均保持存活，但不能完成 ACP initialize；没有使用空格赋值、`AUTO`、普通 TUI Session ID 或
+最近 Session。当前 `0.120.52` 的顶层 Provider Resume 因而不能与 ACP server 组合，正式实现继续使用
+`session/load`，但将其定义为独立、有界的 HistoryRestore，而非普通 Resume。
 
 ## System Prompt 实测
 
@@ -75,8 +90,10 @@ AgentRun 的 Definition 放进 `session/new` / `session/load`。不新增 TRAE �
 - `ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS=trae-cn-cli pnpm smoke:mcp-projection` 真实调用
   `rovai_smoke` 并返回 `rovai-projection:trae_cn`，冻结 exposure 为 Ready。
 
-这些结果也暴露并修复了非复用 Host 的终态竞态：TRAE 与 Kiro 一样，必须在 durable terminal
-对后继 Run 可见前完成 Host teardown，再由新 Host `session/load` 同一 Native Session。
+早期结果暴露并修复了非复用 Host 的终态竞态。当前实现进一步允许 TRAE 兼容 Host 在 terminal 后进入
+IdleWarm；warm successor 直接复用同一 Host Session。Host 被回收或 Core 重启时，新 Host 在当前 prompt 前
+执行受控 `session/load`：历史 replay 不进入 Evidence、Action/Approval、Usage、Missing-Send、Renderer 或
+最终输出，失败则记录 continuity lost 并轮换 Binding 后建立新 Session。
 
 ## 分类结论
 
@@ -96,8 +113,8 @@ AgentRun 的 Definition 放进 `session/new` / `session/load`。不新增 TRAE �
 - 不传 `--yolo`；默认保存的 native permission mode 为 `default`。
 - TRAE 会读取其原生的用户级 instruction 文件。这是 Runtime 自有行为，不构成 Rovai Skill
   projection 证据；第一版 Skill discovery 仍为空且标记 documentation-only。
-- 第一版 AgentRun 完成后停止 Host，不声称 warm reuse；Native Session 连续性通过新 Host 的
-  `session/load` 保留。
+- 当前兼容 AgentRun 完成后允许 warm Host/Session 复用；cold continuation 使用 exact persisted ID 的受控
+  HistoryRestore。禁止 `--resume AUTO`、最近 Session 扫描和 TRAE 私有 `events.jsonl` 解析。
 - Missing-Send Recovery 只接受 `end_turn` 后最后一个无歧义 assistant suffix，并已通过 zero-send、
   accepted-send suppression 与真实 tool→final 三条正式 Smoke；ordinary public output mode 仍为
   `explicit_send_only`。

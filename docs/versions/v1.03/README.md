@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.03
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -16,6 +16,8 @@ last_updated: 2026-08-18
 > [计划](implementation-plan.md)完成。
 >
 > 前置版本：[v1.02 Runtime Usage 补全与 Codex 公价估算](../v1.02/README.md)
+>
+> 后继版本：[v1.04 TRAE Cold Resume 与历史重放隔离](../v1.04/README.md)
 
 ## 版本目标
 

@@ -157,8 +157,8 @@ use rovai_core::{
     read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
-        BindNativeSessionCommand, CampRuntimeCleanupTarget, CancelCampTurnCommand,
-        ClaimAgentRunCommand, ExecutionRuntimeService, FailAgentRunCommand,
+        AgentRunWorkspace, BindNativeSessionCommand, CampRuntimeCleanupTarget,
+        CancelCampTurnCommand, ClaimAgentRunCommand, ExecutionRuntimeService, FailAgentRunCommand,
         MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, NativeSessionResumeDisposition,
         NativeSessionResumeFailure, PermissionSemantics, PlannedShutdownAbortiveTerminal,
         RebindAgentRunRuntimeCommand, RecordCancelledAgentRunEndingGitObservationCommand,
@@ -5165,7 +5165,10 @@ impl Core {
                 return;
             }
         };
-        match self.prepare_runtime_for_dispatch(&candidate, runtime).await {
+        match self
+            .prepare_runtime_for_dispatch(&candidate, runtime, &workspace)
+            .await
+        {
             Ok((_runtime, effective_version)) => candidate.version = effective_version,
             Err(failure) => {
                 if let Some(effective_version) = failure.effective_version {
@@ -6770,6 +6773,7 @@ impl Core {
         &self,
         candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
         runtime: FrozenAgentRuntimeConfig,
+        workspace: &AgentRunWorkspace,
     ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
         let blocker = {
             let database = self.database.lock().await;
@@ -6783,7 +6787,12 @@ impl Core {
         if let Some(blocker) = blocker {
             if runtime_blocker_is_refreshable(&blocker.code) {
                 return self
-                    .refresh_rebind_and_revalidate_runtime(candidate, runtime, &blocker.code)
+                    .refresh_rebind_and_revalidate_runtime(
+                        candidate,
+                        runtime,
+                        workspace,
+                        &blocker.code,
+                    )
                     .await;
             }
             return Err(RuntimeDispatchFailure {
@@ -6800,9 +6809,28 @@ impl Core {
                 error,
                 effective_version: None,
             })? {
-            RuntimeIntegrityPreflight::Verified => Ok((runtime, candidate.version)),
+            RuntimeIntegrityPreflight::Verified => {
+                let effective_runtime =
+                    acp::freeze_history_restore_compatibility(runtime.clone(), workspace).map_err(
+                        |error| RuntimeDispatchFailure {
+                            code: "runtime_configuration_invalid".to_string(),
+                            error,
+                            effective_version: None,
+                        },
+                    )?;
+                if effective_runtime == runtime {
+                    Ok((runtime, candidate.version))
+                } else {
+                    self.persist_dispatch_runtime_rebind(
+                        candidate,
+                        effective_runtime,
+                        "runtime_session_compatibility_frozen",
+                    )
+                    .await
+                }
+            }
             RuntimeIntegrityPreflight::DriftDetected(detail) => {
-                self.refresh_rebind_and_revalidate_runtime(candidate, runtime, &detail)
+                self.refresh_rebind_and_revalidate_runtime(candidate, runtime, workspace, &detail)
                     .await
             }
         }
@@ -6812,6 +6840,7 @@ impl Core {
         &self,
         candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
         frozen_runtime: FrozenAgentRuntimeConfig,
+        workspace: &AgentRunWorkspace,
         drift_reason: &str,
     ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
         let installation = {
@@ -6978,7 +7007,25 @@ impl Core {
             error: anyhow::anyhow!("{}", blocker.payload),
             effective_version: None,
         })?;
+        let effective_runtime =
+            acp::freeze_history_restore_compatibility(effective_runtime, workspace).map_err(
+                |error| RuntimeDispatchFailure {
+                    code: "runtime_configuration_invalid".to_string(),
+                    error,
+                    effective_version: None,
+                },
+            )?;
 
+        self.persist_dispatch_runtime_rebind(candidate, effective_runtime, drift_reason)
+            .await
+    }
+
+    async fn persist_dispatch_runtime_rebind(
+        &self,
+        candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+        effective_runtime: FrozenAgentRuntimeConfig,
+        drift_reason: &str,
+    ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
         let rebound = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().rebind_agent_run_runtime(
@@ -8375,16 +8422,17 @@ impl Core {
                 .any(|capability| capability == "session.load"),
         };
         let mut binding_credential = initial_binding;
+        let mut session_continuation = runtime
+            .session_continuation(
+                binding_credential.native_session_id.as_deref(),
+                session_capabilities,
+            )
+            .await;
         if binding_credential.native_session_id.is_some()
-            && runtime
-                .session_continuation(
-                    binding_credential.native_session_id.as_deref(),
-                    session_capabilities,
-                )
-                .await
-                == acp::AcpSessionContinuation::New
+            && session_continuation == acp::AcpSessionContinuation::New
         {
             binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
+            session_continuation = acp::AcpSessionContinuation::New;
         }
         self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
             .await?;
@@ -8401,13 +8449,15 @@ impl Core {
             .await;
         let session_id = match session {
             Ok(session_id) => session_id,
-            Err(error)
-                if resumable_session_id.is_some()
-                    && !(execution.runtime.adapter_kind == AdapterKind::TraeCnCli
-                        && execution.runtime.model.model_id == TRAE_RUNTIME_DEFAULT_MODEL_ID) =>
-            {
+            Err(error) if resumable_session_id.is_some() => {
+                let failure = classify_native_resume_failure(&error);
+                eprintln!(
+                    "{} Native Session {:?} failed for AgentRun {}; continuity is lost and a new Session will be created: {error:#}",
+                    execution.runtime.adapter_kind.as_str(),
+                    session_continuation,
+                    execution.agent_run_id,
+                );
                 if resume_disposition != NativeSessionResumeDisposition::New {
-                    let failure = classify_native_resume_failure(&error);
                     let mut database = self.database.lock().await;
                     if resume_disposition == NativeSessionResumeDisposition::Controlled {
                         ExecutionRuntimeService::default().record_native_session_resume_failure(
@@ -8416,6 +8466,20 @@ impl Core {
                             failure,
                         )?;
                     }
+                }
+                {
+                    let mut database = self.database.lock().await;
+                    ExecutionRuntimeService::default().record_native_session_continuity_lost(
+                        &mut database,
+                        execution,
+                        match session_continuation {
+                            acp::AcpSessionContinuation::ReuseSameHost => "same_host_reuse",
+                            acp::AcpSessionContinuation::Resume => "acp_session_resume",
+                            acp::AcpSessionContinuation::HistoryRestore => "acp_history_restore",
+                            acp::AcpSessionContinuation::New => "new_session",
+                        },
+                        failure,
+                    )?;
                 }
                 adapter
                     .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)

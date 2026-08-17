@@ -10,7 +10,7 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, Result, bail};
@@ -190,11 +190,27 @@ struct AcpSessionRoute {
 
 #[derive(Debug, Clone)]
 enum AcpSessionPhase {
-    LoadingReplay { replay_event_count: u64 },
+    LoadingReplay {
+        replay_event_count: u64,
+        replay_byte_count: u64,
+        started_at: Instant,
+    },
     Ready,
     PromptActive(AcpActivePrompt),
     PromptCompleted(AcpActivePrompt),
-    ProtocolViolated { reason: String },
+    ProtocolViolated {
+        reason: String,
+    },
+}
+
+impl AcpSessionPhase {
+    fn loading_replay() -> Self {
+        Self::LoadingReplay {
+            replay_event_count: 0,
+            replay_byte_count: 0,
+            started_at: Instant::now(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -209,7 +225,7 @@ pub(crate) enum AcpSessionContinuation {
     ReuseSameHost,
     Resume,
     New,
-    LoadHistory,
+    HistoryRestore,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -224,8 +240,30 @@ enum AcpSessionMessageRoute {
         active_prompt: AcpActivePrompt,
         sequence: u64,
     },
+    ReplayQuarantined,
     Quarantined(String),
+    ReplayRejected(String),
     Missing,
+}
+
+const ACP_HISTORY_RESTORE_MAX_EVENTS: u64 = 4_096;
+const ACP_HISTORY_RESTORE_MAX_BYTES: u64 = 8 * 1024 * 1024;
+const ACP_HISTORY_RESTORE_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn replay_budget_violation(
+    event_count: u64,
+    byte_count: u64,
+    elapsed: Duration,
+) -> Option<&'static str> {
+    if event_count > ACP_HISTORY_RESTORE_MAX_EVENTS {
+        Some("ACP History Restore exceeded its replay event limit")
+    } else if byte_count > ACP_HISTORY_RESTORE_MAX_BYTES {
+        Some("ACP History Restore exceeded its replay byte limit")
+    } else if elapsed > ACP_HISTORY_RESTORE_TIMEOUT {
+        Some("ACP History Restore exceeded its replay time limit")
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -278,7 +316,10 @@ pub struct ObservedAcpToolContext {
 }
 
 enum PendingRpc {
-    Response(oneshot::Sender<std::result::Result<Value, String>>),
+    Response {
+        method: String,
+        sender: oneshot::Sender<std::result::Result<Value, String>>,
+    },
     Prompt {
         owner: AcpRuntimeOwner,
         session_id: String,
@@ -496,9 +537,14 @@ impl AcpHost {
                         let message = match serde_json::from_str::<Value>(&line) {
                             Ok(message) => message,
                             Err(error) => {
-                                host.send_host_diagnostic(format!(
-                                    "ACP Host emitted invalid protocol JSON: {error}"
-                                ));
+                                let reason =
+                                    format!("ACP Host emitted invalid protocol JSON: {error}");
+                                if host.has_loading_replay().await {
+                                    host.reject_loading_replay(reason.clone()).await;
+                                    eprintln!("{reason}");
+                                    continue;
+                                }
+                                host.send_host_diagnostic(reason);
                                 continue;
                             }
                         };
@@ -515,7 +561,9 @@ impl AcpHost {
                             .and_then(Value::as_str)
                             .map(str::to_string);
                         let route = match session_id.as_deref() {
-                            Some(session_id) => host.route_session_message(session_id).await,
+                            Some(session_id) => {
+                                host.route_session_message(session_id, line.len()).await
+                            }
                             None => AcpSessionMessageRoute::Missing,
                         };
                         match route {
@@ -538,6 +586,21 @@ impl AcpHost {
                                     message,
                                 ));
                             }
+                            AcpSessionMessageRoute::ReplayQuarantined => {
+                                if message.get("id").is_some() {
+                                    let id = message.get("id").cloned().unwrap_or(Value::Null);
+                                    let _ = host
+                                        .send(json!({
+                                            "jsonrpc": "2.0",
+                                            "id": id,
+                                            "error": {
+                                                "code": -32602,
+                                                "message": "Rovai-ai quarantined an ACP History Restore request"
+                                            }
+                                        }))
+                                        .await;
+                                }
+                            }
                             AcpSessionMessageRoute::Quarantined(reason) => {
                                 host.send_host_diagnostic(format!(
                                     "ACP Session message was quarantined: {reason}"
@@ -553,8 +616,21 @@ impl AcpHost {
                                                 "message": "Rovai-ai has no active prompt for this ACP Session"
                                             }
                                         }))
-                                        .await;
+                                    .await;
                                 }
+                            }
+                            AcpSessionMessageRoute::ReplayRejected(reason) => {
+                                eprintln!("ACP Session replay was rejected: {reason}");
+                                host.reject_loading_replay(reason).await;
+                            }
+                            AcpSessionMessageRoute::Missing
+                                if session_id.is_some() && host.has_loading_replay().await =>
+                            {
+                                let reason =
+                                    "ACP History Restore emitted an event for another Session"
+                                        .to_string();
+                                eprintln!("{reason}");
+                                host.reject_loading_replay(reason).await;
                             }
                             AcpSessionMessageRoute::Missing if message.get("id").is_some() => {
                                 let id = message.get("id").cloned().unwrap_or(Value::Null);
@@ -582,7 +658,7 @@ impl AcpHost {
             }
             host.alive.store(false, Ordering::Release);
             for (_, pending) in host.pending.lock().await.drain() {
-                if let PendingRpc::Response(sender) = pending {
+                if let PendingRpc::Response { sender, .. } = pending {
                     let _ = sender.send(Err("ACP Host exited".to_string()));
                 }
             }
@@ -605,7 +681,7 @@ impl AcpHost {
             Ok(message.get("result").cloned().unwrap_or(Value::Null))
         };
         match pending {
-            PendingRpc::Response(sender) => {
+            PendingRpc::Response { sender, .. } => {
                 let _ = sender.send(response);
             }
             PendingRpc::Prompt {
@@ -736,7 +812,11 @@ impl AcpHost {
         Ok(())
     }
 
-    async fn route_session_message(&self, session_id: &str) -> AcpSessionMessageRoute {
+    async fn route_session_message(
+        &self,
+        session_id: &str,
+        message_bytes: usize,
+    ) -> AcpSessionMessageRoute {
         let mut routes = self.routes.write().await;
         let Some(route) = routes.get_mut(session_id) else {
             return AcpSessionMessageRoute::Missing;
@@ -750,11 +830,27 @@ impl AcpHost {
                     sequence: route.sequence,
                 }
             }
-            AcpSessionPhase::LoadingReplay { replay_event_count } => {
-                *replay_event_count = replay_event_count.saturating_add(1);
-                AcpSessionMessageRoute::Quarantined(format!(
-                    "ACP continuation replay event #{replay_event_count}"
-                ))
+            AcpSessionPhase::LoadingReplay {
+                replay_event_count,
+                replay_byte_count,
+                started_at,
+            } => {
+                let event_count = replay_event_count.saturating_add(1);
+                let byte_count = replay_byte_count
+                    .saturating_add(u64::try_from(message_bytes).unwrap_or(u64::MAX));
+                if let Some(reason) =
+                    replay_budget_violation(event_count, byte_count, started_at.elapsed())
+                {
+                    let reason = reason.to_string();
+                    route.phase = AcpSessionPhase::ProtocolViolated {
+                        reason: reason.clone(),
+                    };
+                    self.protocol_violated.store(true, Ordering::Release);
+                    return AcpSessionMessageRoute::ReplayRejected(reason);
+                }
+                *replay_event_count = event_count;
+                *replay_byte_count = byte_count;
+                AcpSessionMessageRoute::ReplayQuarantined
             }
             AcpSessionPhase::Ready => {
                 let reason = "session-scoped message arrived without an active prompt".to_string();
@@ -774,6 +870,50 @@ impl AcpHost {
             }
             AcpSessionPhase::ProtocolViolated { reason } => {
                 AcpSessionMessageRoute::Quarantined(reason.clone())
+            }
+        }
+    }
+
+    async fn has_loading_replay(&self) -> bool {
+        self.routes
+            .read()
+            .await
+            .values()
+            .any(|route| matches!(route.phase, AcpSessionPhase::LoadingReplay { .. }))
+    }
+
+    async fn reject_loading_replay(&self, reason: String) {
+        {
+            let mut routes = self.routes.write().await;
+            for route in routes.values_mut() {
+                if matches!(route.phase, AcpSessionPhase::LoadingReplay { .. }) {
+                    route.phase = AcpSessionPhase::ProtocolViolated {
+                        reason: reason.clone(),
+                    };
+                }
+            }
+        }
+        self.protocol_violated.store(true, Ordering::Release);
+        let rejected = {
+            let mut pending = self.pending.lock().await;
+            let ids = pending
+                .iter()
+                .filter_map(|(id, request)| match request {
+                    PendingRpc::Response { method, .. }
+                        if matches!(method.as_str(), "session/load" | "session/resume") =>
+                    {
+                        Some(*id)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            ids.into_iter()
+                .filter_map(|id| pending.remove(&id))
+                .collect::<Vec<_>>()
+        };
+        for request in rejected {
+            if let PendingRpc::Response { sender, .. } = request {
+                let _ = sender.send(Err(reason.clone()));
             }
         }
     }
@@ -990,15 +1130,28 @@ impl AcpHost {
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {
+        self.rpc_with_timeout(method, params, Duration::from_secs(45))
+            .await
+    }
+
+    async fn rpc_with_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        deadline: Duration,
+    ) -> Result<Value> {
         if !self.is_alive() {
             bail!("ACP Host is not alive");
         }
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = oneshot::channel();
-        self.pending
-            .lock()
-            .await
-            .insert(id, PendingRpc::Response(sender));
+        self.pending.lock().await.insert(
+            id,
+            PendingRpc::Response {
+                method: method.to_string(),
+                sender,
+            },
+        );
         if let Err(error) = self
             .send(json!({"jsonrpc": "2.0", "method": method, "id": id, "params": params}))
             .await
@@ -1006,7 +1159,7 @@ impl AcpHost {
             self.pending.lock().await.remove(&id);
             return Err(error);
         }
-        let response = match timeout(Duration::from_secs(45), receiver).await {
+        let response = match timeout(deadline, receiver).await {
             Ok(response) => {
                 response.with_context(|| format!("ACP response channel closed: {method}"))?
             }
@@ -1291,16 +1444,13 @@ fn select_acp_session_continuation(
     if capabilities.can_resume {
         return AcpSessionContinuation::Resume;
     }
-    if adapter_kind == AdapterKind::TraeCnCli {
-        return AcpSessionContinuation::New;
-    }
-    if capabilities.can_load_history && legacy_load_continuation_allowed(adapter_kind) {
-        return AcpSessionContinuation::LoadHistory;
+    if capabilities.can_load_history && history_restore_allowed(adapter_kind) {
+        return AcpSessionContinuation::HistoryRestore;
     }
     AcpSessionContinuation::New
 }
 
-fn legacy_load_continuation_allowed(adapter_kind: AdapterKind) -> bool {
+fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
     matches!(
         adapter_kind,
         AdapterKind::OpencodeCli
@@ -1309,6 +1459,7 @@ fn legacy_load_continuation_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::QoderCli
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
+            | AdapterKind::TraeCnCli
     )
 }
 
@@ -1395,16 +1546,14 @@ impl AcpRuntime {
                     .to_string(),
                 false,
             ),
-            AcpSessionContinuation::Resume | AcpSessionContinuation::LoadHistory => {
+            AcpSessionContinuation::Resume | AcpSessionContinuation::HistoryRestore => {
                 let existing_session_id =
                     existing_session_id.context("cross-Host ACP continuation has no Session ID")?;
                 self.host
                     .bind_session(
                         existing_session_id,
                         &self.owner,
-                        AcpSessionPhase::LoadingReplay {
-                            replay_event_count: 0,
-                        },
+                        AcpSessionPhase::loading_replay(),
                     )
                     .await?;
                 let method = if continuation == AcpSessionContinuation::Resume {
@@ -1414,7 +1563,7 @@ impl AcpRuntime {
                 };
                 let result = match self
                     .host
-                    .rpc(
+                    .rpc_with_timeout(
                         method,
                         json!({
                             "sessionId": existing_session_id,
@@ -1422,6 +1571,7 @@ impl AcpRuntime {
                             "mcpServers": mcp_servers,
                             "additionalDirectories": additional_directories,
                         }),
+                        ACP_HISTORY_RESTORE_TIMEOUT,
                     )
                     .await
                 {
@@ -1444,13 +1594,7 @@ impl AcpRuntime {
                         .unbind_session(existing_session_id, &self.owner)
                         .await;
                     self.host
-                        .bind_session(
-                            &session_id,
-                            &self.owner,
-                            AcpSessionPhase::LoadingReplay {
-                                replay_event_count: 0,
-                            },
-                        )
+                        .bind_session(&session_id, &self.owner, AcpSessionPhase::loading_replay())
                         .await?;
                 }
                 (session_id, true)
@@ -2175,6 +2319,48 @@ pub(crate) fn runtime_compatibility_digest(
         "mcpProjectionDigest": mcp_projection_compatibility_digest,
         "attachmentAccessRoot": attachment_access_root,
     }))
+}
+
+pub(crate) fn freeze_history_restore_compatibility(
+    mut frozen_runtime: FrozenAgentRuntimeConfig,
+    workspace: &AgentRunWorkspace,
+) -> Result<FrozenAgentRuntimeConfig> {
+    if frozen_runtime.adapter_kind != AdapterKind::TraeCnCli {
+        return Ok(frozen_runtime);
+    }
+    let execution_root = PathBuf::from(&workspace.execution_root)
+        .canonicalize()
+        .with_context(|| {
+            format!(
+                "failed to resolve TRAE History Restore workspace {}",
+                workspace.execution_root
+            )
+        })?;
+    let compatibility_digest = canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "adapterKind": frozen_runtime.adapter_kind,
+        "installationId": &frozen_runtime.installation_id,
+        "protocolVersion": &frozen_runtime.protocol_version,
+        "executableFingerprint": &frozen_runtime.executable_fingerprint,
+        "hostConfigDigest": &frozen_runtime.host_config_digest,
+        "workspace": {
+            "executionRoot": execution_root,
+            "access": &workspace.access,
+            "isolation": &workspace.isolation,
+        },
+        "model": &frozen_runtime.model,
+        "permissions": &frozen_runtime.permissions,
+    }))?;
+    let compatibility_key = format!("trae-cn-cli:history-restore-v1:{compatibility_digest}");
+    if frozen_runtime.native_session_compatibility_key.as_deref()
+        == Some(compatibility_key.as_str())
+    {
+        return Ok(frozen_runtime);
+    }
+    frozen_runtime.native_session_compatibility_key = Some(compatibility_key);
+    frozen_runtime.config_digest.clear();
+    frozen_runtime.config_digest = canonical_json_digest(&serde_json::to_value(&frozen_runtime)?)?;
+    Ok(frozen_runtime)
 }
 
 fn prepare_private_host_config(
@@ -3494,7 +3680,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn resume_replay_is_quarantined_and_prompt_response_is_the_only_ack() {
+    async fn history_restore_replay_is_quarantined_and_prompt_response_is_the_only_ack() {
         let root = std::env::temp_dir().join(format!(
             "rovai-acp-resume-quarantine-{}",
             uuid::Uuid::new_v4()
@@ -3512,6 +3698,10 @@ printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCap
 IFS= read -r resume || exit 1
 printf '%s\n' "$resume" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"historical"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"tool_call","toolCallId":"historical-tool","kind":"execute","title":"historical"}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"usage_update","used":999}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{{"sessionId":"session-old","toolCall":{{"toolCallId":"historical-tool"}},"options":[]}}}}'
+IFS= read -r quarantined_permission || exit 1
 printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}'
 IFS= read -r prompt || exit 1
 printf '%s\n' "$prompt" >> '{}'
@@ -3559,7 +3749,7 @@ while IFS= read -r ignored; do :; done
             .start_or_resume_session(
                 Some("session-old"),
                 AcpSessionCapabilities {
-                    can_resume: true,
+                    can_resume: false,
                     can_load_history: true,
                 },
                 TRAE_RUNTIME_DEFAULT_MODEL_ID,
@@ -3569,11 +3759,6 @@ while IFS= read -r ignored; do :; done
             .await
             .unwrap();
         assert_eq!(session_id, "session-old");
-        assert!(matches!(
-            receiver.recv().await,
-            Some(AcpIncoming::HostDiagnostic { text, .. })
-                if text.contains("ACP continuation replay")
-        ));
         assert!(receiver.try_recv().is_err());
 
         let prompt_id = runtime
@@ -3622,8 +3807,78 @@ while IFS= read -r ignored; do :; done
         host.shutdown().await;
 
         let protocol = std::fs::read_to_string(&protocol_log).unwrap();
-        assert!(protocol.contains("\"method\":\"session/resume\""));
-        assert!(!protocol.contains("\"method\":\"session/load\""));
+        assert!(protocol.contains("\"method\":\"session/load\""));
+        assert!(!protocol.contains("\"method\":\"session/resume\""));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn history_restore_protocol_anomaly_rejects_the_pending_load() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-history-restore-protocol-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        make_executable(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}'
+IFS= read -r load || exit 1
+printf '%s\n' 'not-json-history'
+while IFS= read -r ignored; do :; done
+"#,
+        );
+
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            None,
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "agent-run-history-anomaly".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            None,
+            "runtime_managed".to_string(),
+        );
+        let error = runtime
+            .start_or_resume_session(
+                Some("session-old"),
+                AcpSessionCapabilities {
+                    can_resume: false,
+                    can_load_history: true,
+                },
+                TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("invalid protocol JSON"));
+        assert!(host.protocol_violated.load(Ordering::Acquire));
+        assert!(receiver.try_recv().is_err());
+        assert!(runtime.session_id().await.is_none());
+        host.shutdown().await;
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -3956,7 +4211,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn continuation_prefers_same_host_then_resume_and_never_loads_trae() {
+    fn continuation_prefers_same_host_then_resume_then_history_restore() {
         let load_only = AcpSessionCapabilities {
             can_resume: false,
             can_load_history: true,
@@ -3991,7 +4246,7 @@ while IFS= read -r ignored; do :; done
                 Some("session-1"),
                 load_only,
             ),
-            AcpSessionContinuation::New
+            AcpSessionContinuation::HistoryRestore
         );
         assert_eq!(
             select_acp_session_continuation(
@@ -4000,11 +4255,39 @@ while IFS= read -r ignored; do :; done
                 Some("session-1"),
                 load_only,
             ),
-            AcpSessionContinuation::LoadHistory
+            AcpSessionContinuation::HistoryRestore
         );
         assert_eq!(
             select_acp_session_continuation(AdapterKind::TraeCnCli, false, None, resume_and_load,),
             AcpSessionContinuation::New
+        );
+    }
+
+    #[test]
+    fn history_restore_budget_rejects_events_bytes_and_elapsed_time_independently() {
+        assert!(
+            replay_budget_violation(
+                ACP_HISTORY_RESTORE_MAX_EVENTS,
+                ACP_HISTORY_RESTORE_MAX_BYTES,
+                ACP_HISTORY_RESTORE_TIMEOUT,
+            )
+            .is_none()
+        );
+        assert_eq!(
+            replay_budget_violation(
+                ACP_HISTORY_RESTORE_MAX_EVENTS + 1,
+                ACP_HISTORY_RESTORE_MAX_BYTES,
+                Duration::ZERO,
+            ),
+            Some("ACP History Restore exceeded its replay event limit")
+        );
+        assert_eq!(
+            replay_budget_violation(1, ACP_HISTORY_RESTORE_MAX_BYTES + 1, Duration::ZERO,),
+            Some("ACP History Restore exceeded its replay byte limit")
+        );
+        assert_eq!(
+            replay_budget_violation(1, 1, ACP_HISTORY_RESTORE_TIMEOUT + Duration::from_nanos(1),),
+            Some("ACP History Restore exceeded its replay time limit")
         );
     }
 
@@ -4085,6 +4368,53 @@ while IFS= read -r ignored; do :; done
         )
         .unwrap();
         assert_ne!(changed_host, first);
+
+        let history_key = freeze_history_restore_compatibility(frozen.clone(), &workspace)
+            .unwrap()
+            .native_session_compatibility_key
+            .unwrap();
+        let same_history_key = freeze_history_restore_compatibility(frozen.clone(), &workspace)
+            .unwrap()
+            .native_session_compatibility_key
+            .unwrap();
+        assert_eq!(same_history_key, history_key);
+
+        let other_root = root.join("other-workspace");
+        std::fs::create_dir_all(&other_root).unwrap();
+        let other_workspace =
+            AgentRunWorkspace::runtime_managed_path(other_root.to_string_lossy().to_string());
+        let other_workspace_key =
+            freeze_history_restore_compatibility(frozen.clone(), &other_workspace)
+                .unwrap()
+                .native_session_compatibility_key
+                .unwrap();
+        assert_ne!(other_workspace_key, history_key);
+
+        let mut changed_model = frozen.clone();
+        changed_model.model.model_id = "another-model".to_string();
+        let changed_model_key = freeze_history_restore_compatibility(changed_model, &workspace)
+            .unwrap()
+            .native_session_compatibility_key
+            .unwrap();
+        assert_ne!(changed_model_key, history_key);
+
+        let mut changed_permissions = frozen.clone();
+        changed_permissions.permissions.values = json!({"permission_mode": "plan"});
+        let changed_permissions_key =
+            freeze_history_restore_compatibility(changed_permissions, &workspace)
+                .unwrap()
+                .native_session_compatibility_key
+                .unwrap();
+        assert_ne!(changed_permissions_key, history_key);
+
+        let mut changed_executable = frozen;
+        changed_executable.executable_fingerprint = "sha256:changed".to_string();
+        let changed_executable_key =
+            freeze_history_restore_compatibility(changed_executable, &workspace)
+                .unwrap()
+                .native_session_compatibility_key
+                .unwrap();
+        assert_ne!(changed_executable_key, history_key);
         std::fs::remove_dir_all(root).unwrap();
     }
 

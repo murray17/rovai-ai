@@ -143,6 +143,29 @@ smoke:acp-runtime` 通过：completion、allow-once 写入与 deny 三个连续 
 TRAE terminal 后进入 LRU、后继 Run 直接复用 warm Session，以及历史 replay 未进入后继 Run 的
 Evidence、Action 或最终输出。
 
+### 2026-08-18 TRAE exact-ID Provider Resume 与 cold HistoryRestore
+
+使用同一次 ACP `session/new` 返回的精确 Session ID 重新执行三组有界协议 Probe。普通
+`traecli acp serve --permission-mode default` 在约 0.9 秒内响应 initialize；
+`traecli --resume=<exact-id> acp serve --permission-mode default` 与
+`traecli acp serve --resume=<exact-id> --permission-mode default` 均在 30 秒内没有响应 initialize，stderr
+为空且进程仍存活。两组均使用 `=` 显式赋值，没有使用 `AUTO`，因此已排除 pflag `NoOptDefVal` 把 Session ID
+解析成位置参数的可能。当前 `0.120.52` 不能启用 Provider Resume。
+
+同一构建既有跨 Host `session/load` marker Probe 仍为正向证据。当前实现因此按
+[ADR-0209](adr/0209-bounded-trae-cold-session-history-restore.md)选择 same Host、ACP resume、受控
+HistoryRestore、New；load 前 route 为 `LoadingReplay`，成功 response 后才发送当前 prompt。历史
+assistant/tool/permission/usage/server request 全部静默隔离，并受 4096 event、8 MiB、30 秒限制。
+workspace、模型、权限、Host config 或 executable fingerprint 不兼容时不尝试 load；错误 ID、协议异常或
+超限持久记录 continuity lost、停止 Host、轮换 Binding 并建立新 Session。当前规范入口为
+[Runtime Launch and Verification v6](contracts/runtime-launch-and-verification-v6.md)。
+
+隔离 Core smoke `pnpm smoke:trae-cold-resume` 进一步通过：首个 Host 的工具读取随机私密 marker 后删除
+源文件并重启 Core；新 Host 使用同一 Native Session ID 恢复 marker，Host ID 明确变化，恢复 Run 投影的
+Action/Approval 均为 0。恢复后的新文件工具与 Approval 成功，运行中 cancel 收敛为 cancelled 且目标文件
+不存在。随后把隔离数据库中的 Session ID 改为不存在值再次重启，Core 持久记录一次 continuity lost，换用
+新的 Session ID 并成功完成当前请求。
+
 ### 2026-08-17 Runtime command output 协议修正
 
 通用 ACP Adapter 现在消费标准嵌套 `type: "content"` Text block，并把 Terminal block 视为展示边界，

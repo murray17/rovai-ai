@@ -1263,6 +1263,27 @@ mod tests {
         }
     }
 
+    fn fake_host(process_id: &str) -> RuntimeProcessHost {
+        RuntimeProcessHost::Fake(Arc::new(FakeRuntimeProcessHost {
+            process_id: process_id.to_string(),
+            shutdown_delay: Duration::ZERO,
+            reaped: std::sync::atomic::AtomicBool::new(false),
+        }))
+    }
+
+    fn acquire_request(run: &str, camp: &str) -> FleetAcquireRequest {
+        FleetAcquireRequest {
+            agent_run_id: run.to_string(),
+            execution_epoch: 1,
+            adapter_kind: AdapterKind::TraeCnCli,
+            compatibility: RuntimeCompatibilityKey {
+                camp_id: camp.to_string(),
+                agent_id: "agent-1".to_string(),
+                runtime_compatibility_digest: "digest-1".to_string(),
+            },
+        }
+    }
+
     async fn insert_fake_process(
         fleet: &AgentRuntimeFleetManager,
         process_id: &str,
@@ -1316,6 +1337,41 @@ mod tests {
         assert!(FleetProcessState::IdleWarm.is_resident());
         assert!(FleetProcessState::Stopping.is_resident());
         assert!(!FleetProcessState::BusyBurst.is_resident());
+    }
+
+    #[tokio::test]
+    async fn warm_hosts_never_cross_camp_compatibility_keys() {
+        let fleet = AgentRuntimeFleetManager::new(test_config(Duration::from_secs(1)));
+        let camp_a = fleet
+            .acquire(acquire_request("run-a1", "camp-a"), || async {
+                Ok(fake_host("host-a"))
+            })
+            .await
+            .unwrap();
+        assert_eq!(camp_a.host.process_id(), "host-a");
+        fleet
+            .release("run-a1", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        let camp_b = fleet
+            .acquire(acquire_request("run-b1", "camp-b"), || async {
+                Ok(fake_host("host-b"))
+            })
+            .await
+            .unwrap();
+        assert_eq!(camp_b.host.process_id(), "host-b");
+        fleet
+            .release("run-b1", 1, FleetReleaseDisposition::Reusable)
+            .await;
+
+        let camp_a_again = fleet
+            .acquire(acquire_request("run-a2", "camp-a"), || async {
+                Ok(fake_host("unexpected-host"))
+            })
+            .await
+            .unwrap();
+        assert_eq!(camp_a_again.host.process_id(), "host-a");
+        fleet.shutdown_all().await;
     }
 
     #[tokio::test]
