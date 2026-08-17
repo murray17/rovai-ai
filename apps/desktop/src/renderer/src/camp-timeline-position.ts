@@ -3,6 +3,11 @@ export type CampTimelineReadingPosition = {
   followingLatest: boolean
 }
 
+export type CampTimelineContentMarker = {
+  itemId: string | null
+  itemCount: number
+}
+
 type StoredCampTimelineReadingPosition = CampTimelineReadingPosition & {
   campId: string
   updatedAt: number
@@ -89,6 +94,13 @@ export function followLatestCampTimeline(
   const scrollTop = Math.max(0, scroll.scrollHeight - scroll.clientHeight)
   scroll.scrollTop = scrollTop
   return { scrollTop, followingLatest: true }
+}
+
+export function campTimelineContentChanged(
+  previous: CampTimelineContentMarker,
+  next: CampTimelineContentMarker
+): boolean {
+  return previous.itemId !== next.itemId || previous.itemCount !== next.itemCount
 }
 
 export function restoredCampTimelineScrollTop(

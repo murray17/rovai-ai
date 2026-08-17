@@ -146,6 +146,7 @@ try {
     }, null, 2))
   } else {
   await selectCampConversationView(app.cdp, 'conversation')
+  const timelineFollowLatest = await verifyTimelineFollowsLatestAcrossViewportResize(app.cdp)
   const conversationPresentation = await collectConversationPresentation(app.cdp)
   assert(conversationPresentation.articleCount === runtimes.length
     && conversationPresentation.articleBackgrounds.length === 1
@@ -653,6 +654,7 @@ try {
       claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
       conversationPresentation,
+      timelineFollowLatest,
       messageAuthorProfileTriggers,
       agentLevelProcessDock: agentDock,
       executionSidecar,
@@ -1121,6 +1123,47 @@ async function collectHandoffFooter(cdp) {
       compactDeliveryCount: document.querySelectorAll('.delivery-status-list.is-compact').length
     }
   })()`)
+}
+
+async function verifyTimelineFollowsLatestAcrossViewportResize(cdp) {
+  const prepared = await evaluate(cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    const dock = document.querySelector('.run-pulse[aria-label="Agent 执行台"]')
+    if (!timeline || !dock) return null
+    dock.dataset.acceptanceDisplay = dock.style.display
+    dock.style.display = 'none'
+    timeline.scrollTop = timeline.scrollHeight
+    return {
+      clientHeight: timeline.clientHeight,
+      scrollHeight: timeline.scrollHeight,
+      scrollTop: timeline.scrollTop,
+      maxScroll: Math.max(0, timeline.scrollHeight - timeline.clientHeight)
+    }
+  })()`)
+  assert(prepared, 'Timeline follow-latest acceptance could not find the timeline and Agent dock')
+
+  const resized = await evaluate(cdp, `(async () => {
+    const timeline = document.querySelector('.camp-timeline')
+    const dock = document.querySelector('.run-pulse[aria-label="Agent 执行台"]')
+    if (!timeline || !dock) return null
+    dock.style.display = dock.dataset.acceptanceDisplay ?? ''
+    delete dock.dataset.acceptanceDisplay
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    const maxScroll = Math.max(0, timeline.scrollHeight - timeline.clientHeight)
+    return {
+      clientHeight: timeline.clientHeight,
+      scrollHeight: timeline.scrollHeight,
+      scrollTop: timeline.scrollTop,
+      maxScroll,
+      distanceFromBottom: Math.abs(maxScroll - timeline.scrollTop)
+    }
+  })()`, true)
+  assert(resized, 'Timeline follow-latest acceptance lost the timeline and Agent dock')
+  assert(resized.clientHeight < prepared.clientHeight,
+    `Agent dock did not shrink the timeline viewport: ${JSON.stringify({ prepared, resized })}`)
+  assert(resized.distanceFromBottom <= 1,
+    `Timeline did not remain at the latest message after its viewport shrank: ${JSON.stringify({ prepared, resized })}`)
+  return { prepared, resized }
 }
 
 async function collectConversationPresentation(cdp) {

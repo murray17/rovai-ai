@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  campTimelineContentChanged,
   campTimelineIsNearBottom,
   campTimelineReadingPositionFromStoredValue,
   followLatestCampTimeline,
@@ -84,5 +85,26 @@ describe('Camp timeline reading positions', () => {
       followingLatest: true
     })
     expect(scroll.scrollTop).toBe(700)
+  })
+
+  it('detects inserted timeline content even when a later tail item keeps the same id', () => {
+    expect(campTimelineContentChanged(
+      { itemId: 'stop:latest', itemCount: 2 },
+      { itemId: 'stop:latest', itemCount: 3 }
+    )).toBe(true)
+    expect(campTimelineContentChanged(
+      { itemId: 'stop:latest', itemCount: 3 },
+      { itemId: 'stop:latest', itemCount: 3 }
+    )).toBe(false)
+  })
+
+  it('moves to the new bottom when the visible timeline height shrinks', () => {
+    const scroll = { scrollTop: 700, scrollHeight: 1_000, clientHeight: 180 }
+
+    expect(followLatestCampTimeline(scroll)).toEqual({
+      scrollTop: 820,
+      followingLatest: true
+    })
+    expect(scroll.scrollTop).toBe(820)
   })
 })
