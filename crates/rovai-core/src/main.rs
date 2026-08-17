@@ -42,7 +42,7 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AdapterInstallationView, AdapterKind, AgentProfileService,
+        AdapterInstallationView, AdapterKind, AdapterProbeAttempt, AgentProfileService,
         ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
         CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
         InstallationClass, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
@@ -1799,6 +1799,8 @@ impl Core {
                             && installation.auth_scope == "default"
                     });
                     let product_diagnostic = product_diagnostics.get(&kind);
+                    let relevant_probe_attempt = installation
+                        .and_then(relevant_failed_runtime_probe_attempt);
                     let is_checking = checking.get(&kind).is_some_and(|activity| {
                         activity.runtime_kind == kind && activity.deadline > chrono::Utc::now()
                     });
@@ -1820,8 +1822,7 @@ impl Core {
                             .or_else(|| observations
                                 .get(&kind)
                                 .and_then(|observation| observation.reported_version.as_deref())),
-                        "diagnosticCode": installation
-                            .and_then(|installation| installation.last_probe_attempt.as_ref())
+                        "diagnosticCode": relevant_probe_attempt
                             .and_then(|attempt| attempt.diagnostic_code.as_deref())
                             .or_else(|| product_diagnostic.map(|diagnostic| diagnostic.diagnostic_code.as_str()))
                             .or(discovery.diagnostic_code.as_deref()),
@@ -8976,6 +8977,7 @@ fn product_runtime_availability_status(
     checking: bool,
 ) -> &'static str {
     if let Some(installation) = installation {
+        let failed_attempt = relevant_failed_runtime_probe_attempt(installation);
         if !installation.enabled {
             return "disabled";
         }
@@ -8991,12 +8993,7 @@ fn product_runtime_availability_status(
                 return "ready";
             }
             return if product_diagnostic.is_some()
-                || installation
-                    .last_probe_attempt
-                    .as_ref()
-                    .is_some_and(|attempt| {
-                        attempt.status == "failed" && attempt.failure_class == "transient"
-                    })
+                || failed_attempt.is_some_and(|attempt| attempt.failure_class == "transient")
             {
                 "refresh_failed_using_last_success"
             } else {
@@ -9018,39 +9015,24 @@ fn product_runtime_availability_status(
                 .snapshot
                 .as_ref()
                 .and_then(|snapshot| snapshot.executable_fingerprint.as_deref());
-            if installation
-                .last_probe_attempt
-                .as_ref()
-                .is_some_and(|attempt| {
-                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
-                        && attempt.status == "failed"
-                        && attempt.failure_class == "authentication_required"
-                })
-            {
+            if failed_attempt.is_some_and(|attempt| {
+                attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                    && attempt.failure_class == "authentication_required"
+            }) {
                 return "authentication_required";
             }
-            if installation
-                .last_probe_attempt
-                .as_ref()
-                .is_some_and(|attempt| {
-                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
-                        && attempt.status == "failed"
-                        && matches!(
-                            attempt.failure_class.as_str(),
-                            "incompatible" | "identity_changed"
-                        )
-                })
-            {
+            if failed_attempt.is_some_and(|attempt| {
+                attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                    && matches!(
+                        attempt.failure_class.as_str(),
+                        "incompatible" | "identity_changed"
+                    )
+            }) {
                 return "incompatible";
             }
-            if installation
-                .last_probe_attempt
-                .as_ref()
-                .is_some_and(|attempt| {
-                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
-                        && attempt.status == "failed"
-                })
-            {
+            if failed_attempt.is_some_and(|attempt| {
+                attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+            }) {
                 return "needs_attention";
             }
             return "installed_unverified";
@@ -9062,39 +9044,24 @@ fn product_runtime_availability_status(
                 .snapshot
                 .as_ref()
                 .and_then(|snapshot| snapshot.executable_fingerprint.as_deref());
-            if installation
-                .last_probe_attempt
-                .as_ref()
-                .is_some_and(|attempt| {
-                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
-                        && attempt.status == "failed"
-                        && attempt.failure_class == "authentication_required"
-                })
-            {
+            if failed_attempt.is_some_and(|attempt| {
+                attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                    && attempt.failure_class == "authentication_required"
+            }) {
                 return "authentication_required";
             }
-            if installation
-                .last_probe_attempt
-                .as_ref()
-                .is_some_and(|attempt| {
-                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
-                        && attempt.status == "failed"
-                        && matches!(
-                            attempt.failure_class.as_str(),
-                            "incompatible" | "identity_changed"
-                        )
-                })
-            {
+            if failed_attempt.is_some_and(|attempt| {
+                attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+                    && matches!(
+                        attempt.failure_class.as_str(),
+                        "incompatible" | "identity_changed"
+                    )
+            }) {
                 return "incompatible";
             }
-            if installation
-                .last_probe_attempt
-                .as_ref()
-                .is_some_and(|attempt| {
-                    attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
-                        && attempt.status == "failed"
-                })
-            {
+            if failed_attempt.is_some_and(|attempt| {
+                attempt.executable_fingerprint.as_deref() == snapshot_fingerprint
+            }) {
                 return "needs_attention";
             }
             return "light_ready";
@@ -9104,26 +9071,16 @@ fn product_runtime_availability_status(
         }) {
             return "needs_attention";
         }
-        if installation
-            .last_probe_attempt
-            .as_ref()
-            .is_some_and(|attempt| {
-                attempt.status == "failed" && attempt.failure_class == "authentication_required"
-            })
+        if failed_attempt.is_some_and(|attempt| attempt.failure_class == "authentication_required")
         {
             return "authentication_required";
         }
-        if installation
-            .last_probe_attempt
-            .as_ref()
-            .is_some_and(|attempt| {
-                attempt.status == "failed"
-                    && matches!(
-                        attempt.failure_class.as_str(),
-                        "incompatible" | "identity_changed"
-                    )
-            })
-        {
+        if failed_attempt.is_some_and(|attempt| {
+            matches!(
+                attempt.failure_class.as_str(),
+                "incompatible" | "identity_changed"
+            )
+        }) {
             return "incompatible";
         }
         return if discovery_status == RuntimeDiscoveryStatus::Found {
@@ -9143,6 +9100,48 @@ fn product_runtime_availability_status(
         RuntimeDiscoveryStatus::Found => "found_uninspected",
         RuntimeDiscoveryStatus::Missing => "missing",
     }
+}
+
+fn relevant_failed_runtime_probe_attempt(
+    installation: &AdapterInstallationView,
+) -> Option<&AdapterProbeAttempt> {
+    // Probe attempts outlive discovery snapshots. Only failures that still describe
+    // the current executable and have not been superseded may affect public status.
+    let attempt = installation
+        .last_probe_attempt
+        .as_ref()
+        .filter(|attempt| attempt.status == "failed")?;
+    if installation.adapter_kind == AdapterKind::TraeCnCli
+        && attempt
+            .diagnostic_code
+            .as_deref()
+            .is_some_and(|code| code.starts_with("runtime_version_"))
+    {
+        return None;
+    }
+    if let Some(snapshot) = installation.snapshot.as_ref() {
+        if attempt.executable_fingerprint.as_deref() != snapshot.executable_fingerprint.as_deref() {
+            return None;
+        }
+        if snapshot
+            .last_successful_probe_at
+            .as_deref()
+            .is_some_and(|last_success| runtime_attempt_precedes(attempt, last_success))
+        {
+            return None;
+        }
+    }
+    Some(attempt)
+}
+
+fn runtime_attempt_precedes(attempt: &AdapterProbeAttempt, timestamp: &str) -> bool {
+    let Ok(attempted_at) = chrono::DateTime::parse_from_rfc3339(&attempt.attempted_at) else {
+        return false;
+    };
+    let Ok(last_successful_at) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
+        return false;
+    };
+    attempted_at < last_successful_at
 }
 
 fn managed_runtime_is_ready(database: &Database, kind: AdapterKind) -> Result<bool> {
@@ -14628,6 +14627,56 @@ mod tests {
                 false,
             ),
             "installed_unverified"
+        );
+
+        installation.last_probe_attempt = Some(rovai_core::agent_profile::AdapterProbeAttempt {
+            id: "legacy-trae-version-timeout".to_string(),
+            installation_id: installation.id.clone(),
+            status: "failed".to_string(),
+            failure_class: "transient".to_string(),
+            diagnostic_code: Some("runtime_version_timed_out".to_string()),
+            candidate_path: installation.executable_path.clone(),
+            executable_fingerprint: Some("sha256:test".to_string()),
+            attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
+            retry_after: None,
+        });
+        assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&installation),
+                None,
+                false,
+            ),
+            "installed_unverified"
+        );
+    }
+
+    #[test]
+    fn later_success_supersedes_an_older_failed_attempt_for_every_runtime() {
+        let now = chrono::Utc::now();
+        let mut installation = managed_runtime_fixture(&now.to_rfc3339(), None);
+        installation.last_probe_attempt = Some(rovai_core::agent_profile::AdapterProbeAttempt {
+            id: "attempt-before-success".to_string(),
+            installation_id: installation.id.clone(),
+            status: "failed".to_string(),
+            failure_class: "transient".to_string(),
+            diagnostic_code: Some("runtime_probe_timed_out".to_string()),
+            candidate_path: installation.executable_path.clone(),
+            executable_fingerprint: Some("sha256:test".to_string()),
+            attempted_at: (now - chrono::Duration::seconds(1)).to_rfc3339(),
+            retry_after: None,
+        });
+
+        assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&installation),
+                None,
+                false,
+            ),
+            "ready"
         );
     }
 
