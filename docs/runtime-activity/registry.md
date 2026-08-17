@@ -12,18 +12,38 @@ last_updated: 2026-08-17
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；command/file 无工具名时用 `commandActions` / `changes` 生成有界 presentation hint，未知命令回退 Core domain hint | 受控 fixture 通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；新版标题 post-fix smoke 待运行 |
-| `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；command-output smoke 本轮未运行 |
-| `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn + MCP projection 通过；command-output smoke 本轮未运行 |
+| `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；`1.18.15` 真实 command-output 与完整 allow/deny smoke 通过 |
+| `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 command-output smoke 通过 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | 受控 fixture 通过 | ACP session + Skill turn + MCP projection 通过 |
 | `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
-| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；实际 Probe 已证明稳定 `toolCallId`、结构化 permission request 与 started→terminal lifecycle；Terminal content 只作 display anchor | 受控 fixture 与固定 `printf` smoke 断言已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；command-output smoke 本轮未运行 |
-| `claude-code-cli` | Claude Code | Claude stream-json | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind，仅 Bash tool result 的公开 stdout/stderr 进入 output | partial + complete message 去重、started→terminal、敏感字段 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；command-output 真实 smoke 本轮未运行 |
-| `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json lifecycle/output 与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；本机 `agy 1.1.13` help probe 声明 stream-json，真实 command-output smoke 本轮未运行 |
+| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；实际 Probe 已证明稳定 `toolCallId`、结构化 permission request 与 started→terminal lifecycle；Terminal content 只作 display anchor | 受控 fixture 与固定 `printf` smoke 断言已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；当前安装真实 command-output smoke 通过，静态版本按 v0.87 边界保持 `null` |
+| `claude-code-cli` | Claude Code | Claude stream-json | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind，仅 Bash tool result 的公开 stdout/stderr 进入 output | partial + complete message 去重、started→terminal、敏感字段 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output 与 Session continuation smoke 通过 |
+| `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json lifecycle/output 与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
 该运行不能因为产品基线为 `fine_grained` 就补写工具调用。
+
+## 2026-08-17 command output 真实 smoke 记录
+
+- OpenCode `1.18.15` / `opencode/big-pickle`：公开 output 为
+  `ROVAI_OPENCODE_CLI_PRINTF_OK\n`；修正 smoke 未应用自身 `permission=ask` 的配置漂移后，完整
+  allow-once/deny 回归也通过，拒绝目标文件未创建；
+- GitHub Copilot CLI `1.0.79` / `claude-sonnet-5`：公开 output 包含
+  `ROVAI_COPILOT_CLI_PRINTF_OK\n` 与结构化 shell terminal 状态；`allow_all=off` 下实际解析 1 次审批；
+- TRAE CLI CN 当前安装 / runtime default：公开 output 为 `ROVAI_TRAE_CN_CLI_PRINTF_OK\n`，实际解析
+  1 次审批；按 v0.87 静态/执行期验证边界，`reportedVersion=null` 不视为失败；
+- Claude Code `2.1.220` / runtime default：原生 `Bash` tool result 公开
+  `ROVAI_CLAUDE_PRINTF_OK`，保留原生 tool-use ID，第三次 AgentRun 继续复用同一 Native Session 与
+  logical Conversation；
+- Antigravity `agy 1.1.13` / runtime default：`output.stream_json` capability 下原生 `run_command`
+  step 公开 `ROVAI_AGY_PRINTF_OK\n`，使用结构化 step identity；同一 AGY Session 续接、后续换绑 Codex
+  和私有日志清理同时通过。
+
+五组 smoke 均使用临时 Core data-dir、managed Skill Library 与 Git workspace；没有启动、停止或替换
+`/Applications/Rovai AI.app`，也没有读写日常数据库。以上只证明各 Runtime 在本次真实调用中的公开
+command output 与生命周期投影，不把一次 pass 扩大为所有模型、版本或未执行工具的能力结论。
 
 ## 2026-08-05 真实联网 smoke 记录
 

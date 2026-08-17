@@ -82,11 +82,37 @@ try {
       || !snapshot.models.some((model) => model.id === 'gemini-3.6-flash-high')
       || !snapshot.models.some((model) => model.id === 'antigravity://runtime-default' && model.isDefault)
       || !['mode', 'sandbox', 'dangerously_skip_permissions'].every((key) => permissionKeys.includes(key))
+      || !snapshot.capabilities.includes('output.stream_json')
       || snapshot.capabilities.includes('structured_permission_request')) {
     throw new Error(`Antigravity capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await request('members.get', { agentId: 'agent_1' })
+  let profile = await request('members.get', { agentId: 'agent_1' })
+  const permissionsConfigured = await request('members.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentId: profile.agentId,
+      expectedVersion: profile.version,
+      adapterKind: 'antigravity-app',
+      model: profile.runtimeConfiguration.model,
+      permissions: {
+        adapterKind: 'antigravity-app',
+        schemaVersion: 1,
+        values: {
+          mode: 'accept-edits',
+          sandbox: 'on',
+          dangerously_skip_permissions: 'on'
+        }
+      }
+    }
+  })
+  if (permissionsConfigured.status !== 'applied') {
+    throw new Error(`Antigravity smoke permissions were rejected: ${JSON.stringify(permissionsConfigured)}`)
+  }
+  profile = await request('members.get', { agentId: profile.agentId })
+  if (profile.runtimeConfiguration?.permissions?.values?.dangerously_skip_permissions !== 'on') {
+    throw new Error(`Antigravity smoke permissions drifted: ${JSON.stringify(profile.runtimeConfiguration)}`)
+  }
 
   const first = await executeToken(
     request,
@@ -110,6 +136,18 @@ try {
   )
   if (secondBound?.params?.nativeThreadId !== nativeSessionId) {
     throw new Error(`Antigravity Conversation did not resume its Native Session: ${JSON.stringify({ firstBound, secondBound })}`)
+  }
+  const command = await executeCommandOutput(request, camp, profile.agentId, events)
+  const commandBound = events.find((event) =>
+    event.method === 'agent_run.native_session_bound' && event.params?.agentRunId === command.agentRunId
+  )
+  if (commandBound?.params?.nativeThreadId !== nativeSessionId
+      || command.agentRun.conversationId !== first.agentRun.conversationId) {
+    throw new Error(`Antigravity command output did not remain on the same Conversation: ${JSON.stringify({
+      command: command.agentRun,
+      commandBound,
+      firstBound
+    })}`)
   }
   await configureCodexRuntime(request, health, [profile.agentId])
   const handoff = await executeToken(request, camp, profile.agentId, 'ROVAI_ANTIGRAVITY_TO_CODEX_HANDOFF')
@@ -150,6 +188,12 @@ try {
     },
     firstOutput: first.output,
     secondOutput: second.output,
+    commandOutput: {
+      marker: command.marker,
+      output: command.output,
+      toolName: command.toolName,
+      toolCallId: command.toolCallId
+    },
     structuredApprovalClaimed: false,
     privateLogCleanup: true
   }, null, 2))
@@ -199,6 +243,60 @@ async function executeToken(request, camp, agentId, token, workspace = null) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 250))
   }
   throw new Error(`Antigravity AgentRun timed out: ${agentRunId}`)
+}
+
+async function executeCommandOutput(request, camp, agentId, events) {
+  const marker = 'ROVAI_AGY_PRINTF_OK'
+  const sent = await sendCampMessage(
+    request,
+    camp.id,
+    agentId,
+    `Use the run_command tool exactly once to run this command without changing files: printf '%s\\n' '${marker}'. Do not call any other tool. Then immediately reply exactly ROVAI_ANTIGRAVITY_COMMAND_OUTPUT_OK.`,
+    'Verify Antigravity run_command output projection'
+  )
+  const commandResult = sent.commandResult ?? sent
+  const agentRunId = commandResult.payload?.agentRunIds?.[0]
+  if (commandResult.status !== 'accepted' || !agentRunId) {
+    throw new Error(`Antigravity command-output intake failed: ${JSON.stringify(sent)}`)
+  }
+  const deadline = Date.now() + 180_000
+  while (Date.now() < deadline) {
+    const snapshot = await request('camps.snapshot', { campId: camp.id })
+    const agentRun = snapshot.agentRuns.find((value) => value.id === agentRunId)
+    if (agentRun?.status === 'succeeded') {
+      const commandOutputEvent = events.find((event) =>
+        event.method === 'runtime.action'
+          && event.params?.agentRunId === agentRunId
+          && String(event.params?.payload?.output ?? '').includes(marker)
+      )
+      if (!commandOutputEvent) {
+        throw new Error(`Antigravity run_command output was not projected: ${JSON.stringify({
+          agentRun,
+          marker,
+          runtimeActions: events.filter((event) =>
+            event.method === 'runtime.action' && event.params?.agentRunId === agentRunId
+          )
+        })}`)
+      }
+      return {
+        agentRunId,
+        agentRun,
+        marker,
+        output: commandOutputEvent.params.payload.output,
+        toolName: commandOutputEvent.params.payload.toolName,
+        toolCallId: commandOutputEvent.params.payload.toolCallId
+      }
+    }
+    if (agentRun?.status === 'failed' || agentRun?.status === 'cancelled') {
+      throw new Error(`Antigravity command-output AgentRun entered ${agentRun.status}: ${JSON.stringify({
+        agentRun,
+        actions: snapshot.actions.filter((action) => action.agentRunId === agentRunId),
+        events: events.filter((event) => event.params?.agentRunId === agentRunId).slice(-30)
+      })}`)
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+  }
+  throw new Error(`Antigravity command-output AgentRun timed out: ${agentRunId}`)
 }
 
 async function sendCampMessage(request, campId, agentId, body, purpose) {

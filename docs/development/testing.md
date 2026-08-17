@@ -174,8 +174,8 @@ pnpm build:desktop
 | --- | --- | --- |
 | `pnpm smoke:intake` | Codex | 创建 Git fixture；验证 Camp 消息、连续 Conversation、重启和删除 |
 | `pnpm smoke:acp-runtime` | OpenCode + Copilot + TRAE | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个；三者都执行固定 `printf` 并断言公开 command output 进入 `runtime.action.payload.output`；TRAE 使用 `traecli acp serve` 与动态 Session capability，并覆盖 completion、后继 Run 复用同一 warm Host/Session、allow-once 与 deny；冷 Host 续跑不得回退 `session/load` |
-| `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume |
-| `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 包含 Antigravity 到 Codex 换绑 |
+| `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume；强制 `Bash` 固定 `printf`，断言公开 output、原生 tool-use ID 与同 Session/Conversation 关联 |
+| `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 要求 `output.stream_json`，强制原生 `run_command` 固定 `printf` 并断言公开 output/step ID；另覆盖同 Session 续接、私有日志清理和 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
 | `pnpm smoke:builtin-cli` | 全部十种正式 Runtime | 每个真实 AgentRun 只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一选中 Runtime 缺失、未认证或漏项即失败 |
@@ -221,6 +221,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | 环境变量 | 使用者 |
 | --- | --- |
 | `ROVAI_ACP_SMOKE_ADAPTER` | `smoke:acp-runtime` |
+| `ROVAI_ACP_COMMAND_OUTPUT_ONLY=1` | `smoke:acp-runtime` 在固定 `printf` output 断言后停止；不替代默认完整 write/deny 回归 |
 | `ROVAI_SKILL_SMOKE_ADAPTERS` | Skill Runtime 列表或 `all` |
 | `ROVAI_SKILL_SMOKE_MODEL` | Skill Smoke 只选一种 Runtime 时要显式验证的模型 ID |
 | `ROVAI_MCP_SMOKE_ADAPTERS` | MCP Runtime 列表 |
