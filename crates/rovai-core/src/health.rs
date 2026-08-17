@@ -6,6 +6,9 @@ use std::{
     time::Duration,
 };
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 use anyhow::{Context, Result, bail};
 use rovai_core::{
     agent_profile::AdapterKind,
@@ -27,6 +30,15 @@ use tokio::{
 };
 
 const CODEX_RUNTIME_KIND: &str = "codex-cli";
+const ACP_PROBE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
+
+struct ProbeRootCleanup(PathBuf);
+
+impl Drop for ProbeRootCleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
 
 fn runtime_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = Command::new(executable);
@@ -961,6 +973,7 @@ async fn run_acp_probe(
     }
     let probe_root = env::temp_dir().join(format!("rovai-acp-probe-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&probe_root)?;
+    let _probe_root_cleanup = ProbeRootCleanup(probe_root.clone());
     if kind == AdapterKind::KiroCli {
         write_kiro_additive_agent_config(&probe_root, &Default::default())?;
     }
@@ -985,18 +998,22 @@ async fn run_acp_probe(
         // disposable probe Sessions stay out of the persistent Kiro home.
         command.env("KIRO_HOME", probe_root.join("kiro-home"));
     }
-    let mut child = command
+    command
         .current_dir(&probe_root)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    #[cfg(unix)]
+    command.as_std_mut().process_group(0);
+    let mut child = command
         .spawn()
         .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
+    let process_group_id = child.id().and_then(|pid| i32::try_from(pid).ok());
     let mut stdin = child.stdin.take().context("ACP stdin was unavailable")?;
     let stdout = child.stdout.take().context("ACP stdout was unavailable")?;
     let mut stderr = child.stderr.take().context("ACP stderr was unavailable")?;
-    let stderr_task = tokio::spawn(async move {
+    let mut stderr_task = tokio::spawn(async move {
         let mut output = Vec::new();
         stderr.read_to_end(&mut output).await?;
         Ok::<_, std::io::Error>(output)
@@ -1106,13 +1123,28 @@ async fn run_acp_probe(
         Ok(result) => result,
         Err(_) => Err(anyhow::anyhow!("ACP probe timed out")),
     };
-    let _ = child.kill().await;
-    let _ = child.wait().await;
-    let stderr = stderr_task
-        .await
-        .context("ACP stderr reader failed")?
-        .context("ACP stderr could not be read")?;
-    let _ = std::fs::remove_dir_all(&probe_root);
+    drop(stdin);
+    drop(lines);
+    terminate_acp_probe_process(&mut child, process_group_id).await;
+    let stderr = match timeout(ACP_PROBE_CLEANUP_TIMEOUT, &mut stderr_task).await {
+        Ok(stderr) => Some(
+            stderr
+                .context("ACP stderr reader failed")?
+                .context("ACP stderr could not be read")?,
+        ),
+        Err(_) => {
+            stderr_task.abort();
+            let _ = stderr_task.await;
+            None
+        }
+    };
+    if stderr.is_none() {
+        return match result {
+            Ok(_) => Err(anyhow::anyhow!("ACP probe cleanup timed out")),
+            Err(error) => Err(error.context("ACP probe cleanup timed out")),
+        };
+    }
+    let stderr = stderr.expect("ACP stderr was checked above");
     match result {
         Ok(result) => Ok(result),
         Err(error) if stderr.iter().any(|byte| !byte.is_ascii_whitespace()) => {
@@ -1122,6 +1154,27 @@ async fn run_acp_probe(
         }
         Err(error) => Err(error),
     }
+}
+
+async fn terminate_acp_probe_process(
+    child: &mut tokio::process::Child,
+    process_group_id: Option<i32>,
+) {
+    #[cfg(unix)]
+    if let Some(process_group_id) =
+        process_group_id.filter(|process_group_id| *process_group_id > 1)
+    {
+        // SAFETY: this is the PID of the child placed in its own process group immediately before
+        // spawn. It cannot identify Rovai, the caller's shell, or another inherited process group.
+        unsafe {
+            libc::killpg(process_group_id, libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = process_group_id;
+
+    let _ = child.start_kill();
+    let _ = timeout(ACP_PROBE_CLEANUP_TIMEOUT, child.wait()).await;
 }
 
 fn encode_string_slice_item(value: &str) -> String {
@@ -2294,7 +2347,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
-    use std::os::unix::fs::PermissionsExt;
+    use std::{os::unix::fs::PermissionsExt, time::Instant};
 
     #[test]
     fn additive_acp_launch_shapes_match_the_verified_cli_contracts() {
@@ -2441,6 +2494,75 @@ mod tests {
             Some("runtime_launch_disallowed_for_health_probe")
         );
         assert!(!marker.exists(), "health probe must not execute TRAE");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn acp_probe_terminates_descendants_that_keep_stdio_open() {
+        let directory =
+            env::temp_dir().join(format!("rovai-acp-process-group-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let descendant_pid_path = directory.join("descendant.pid");
+        let runtime = directory.join("qwen");
+        std::fs::write(
+            &runtime,
+            format!(
+                r#"#!/bin/sh
+sleep 10 &
+printf '%s' "$!" > '{}'
+IFS= read -r _request
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1}}}}'
+exit 0
+"#,
+                descendant_pid_path.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&runtime).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&runtime, permissions).unwrap();
+
+        let started = Instant::now();
+        let (initialize, session, behavioral_evidence) = timeout(
+            Duration::from_secs(3),
+            run_acp_probe(&runtime, AdapterKind::QwenCode, false),
+        )
+        .await
+        .expect("probe cleanup must remain bounded")
+        .expect("the fixture must complete the ACP initialize handshake");
+        assert_eq!(initialize["protocolVersion"], 1);
+        assert!(session.is_none());
+        assert!(behavioral_evidence.is_none());
+        assert!(started.elapsed() < Duration::from_secs(3));
+
+        let descendant_pid = std::fs::read_to_string(&descendant_pid_path)
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+        let descendant_gone = timeout(Duration::from_secs(2), async {
+            loop {
+                // SAFETY: signal 0 only checks the exact PID written by this test fixture.
+                if unsafe { libc::kill(descendant_pid, 0) } == -1
+                    && std::io::Error::last_os_error().raw_os_error() == Some(libc::ESRCH)
+                {
+                    break true;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap_or(false);
+        if !descendant_gone {
+            // SAFETY: cleanup is limited to the exact PID created by the fixture.
+            unsafe {
+                libc::kill(descendant_pid, libc::SIGKILL);
+            }
+        }
+        assert!(
+            descendant_gone,
+            "the inherited ACP descendant must be reaped"
+        );
         std::fs::remove_dir_all(directory).unwrap();
     }
 
