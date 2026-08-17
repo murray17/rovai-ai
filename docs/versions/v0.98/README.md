@@ -4,7 +4,7 @@ version: v0.98
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: true
 last_updated: 2026-08-17
 ---
@@ -12,8 +12,9 @@ last_updated: 2026-08-17
 # Rovai-ai v0.98：结构化 Skill 文件链接
 
 > 当前状态：开发者已在实现前确认
-> [核心模型上下文变更 revision 1](model-context-change.md)；长期决定、合同、架构、UI 与版本路由已建立，
-> Core、Renderer、Migration、测试、打包和安装验收正在实施。
+> [核心模型上下文变更 revision 1](model-context-change.md)；Core、Renderer、Migration、测试、隔离打包
+> 验收与 `/Applications/Rovai AI.app` 安装验收均已完成。实现与发布证据见
+> [实施计划](implementation-plan.md#实施结果)。
 >
 > 前置版本：[v0.97 持久首次训练与“初次集结”](../v0.97/README.md)
 

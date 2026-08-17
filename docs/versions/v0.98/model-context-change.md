@@ -614,7 +614,21 @@ confirmed_at: 2026-08-17
 - 从隔离 userData 启动打包 App，完成 Picker -> send -> current-input evidence 的真实 smoke；
 - 最终只从 `/Applications/Rovai AI.app` 启动安装版验收，并确认 main/origin/main 指向同一验收提交。
 
-## 实施后填写
+## 实施结果
 
-本节在 revision 1 获得确认并完成实现后追加真实提交、测试数量、打包产物、安装备份与验收结果；不得借此
-改写已确认的“变更前”“变更后”或“明确不变”。
+revision 1 已由实现提交 `d95b17940689665299ee632f2dedce688248ecda` 完成；本节只记录实施证据，未改写
+已确认的“变更前”“变更后”或“明确不变”。
+
+- Rust 全量 602 项通过、3 项手工 Runtime smoke 按设计 ignored；最终 `main` monitoring 增量另有 19 项
+  library 与 79 项 Core binary 测试通过；Vitest 388 项、Node 187 项、TypeScript、docs、skills、fmt、
+  Clippy 与 diff 门禁通过；
+- 打包 App 的隔离 smoke 从 Picker 生成 `skill_mention`，accepted Run 的 selection/resolution/rendered payload
+  digest 可复现，最终 `CURRENT_INPUT` 同级输出 `message` 与 `skills[{name,path}]`，其中 path 为绝对
+  `SKILL.md`；
+- 最终 arm64 包严格 codesign 通过；app.asar/Core/CLI SHA-256 分别为
+  `d9f70f812d25122ec7337bef191b99e561e6cf45c69cbd79416c3996300e0bc3`、
+  `dc8cd896265bc5cefa1ddd4621e3c91bd4be83662c4e2ce081c9107de3492f4e`、
+  `d6c721598e34aee7c3ac91abe3cb648dd47f83807cda888e5476742ce39d418a`；
+- `/Applications/Rovai AI.app` 已替换并只从该路径稳定启动，日常数据库已进入 v0.98/schema 46/Migration
+  91 且 foreign-key check 为空；原 v0.97 可恢复备份位于
+  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.97-20260817-122925`。

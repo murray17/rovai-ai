@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.98
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-17
 ---
 
@@ -40,55 +40,75 @@ last_updated: 2026-08-17
 
 ## Checkpoint 1：Structured Content 与 Composer
 
-- [ ] Rust/TypeScript closed union 增加 `skill_mention`，校验 ID 与 canonical name；
-- [ ] body projection、digest、current/historical rendering 支持 `/nameAtSend`；
-- [ ] Picker 选择改为原子 token + 普通尾随空格；手写、粘贴和旧 Draft 保持 Text；
-- [ ] Draft persistence、undo/redo、Backspace、selection、IME、keyboard menu 与 a11y 回归；
-- [ ] 时间线 token 在 disabled/deleted/renamed 后仍显示发送 Marker，不查询当前名称改写正文。
+- [x] Rust/TypeScript closed union 增加 `skill_mention`，校验 ID 与 canonical name；
+- [x] body projection、digest、current/historical rendering 支持 `/nameAtSend`；
+- [x] Picker 选择改为原子 token + 普通尾随空格；手写、粘贴和旧 Draft 保持 Text；
+- [x] Draft persistence、undo/redo、Backspace、selection、IME、keyboard menu 与 a11y 回归；
+- [x] 时间线 token 在 disabled/deleted/renamed 后仍显示发送 Marker，不查询当前名称改写正文。
 
 ## Checkpoint 2：发送时选择快照
 
-- [ ] 定义 versioned `SkillSelectionSnapshot`、五类发送 omission reason 与 canonical digest；
-- [ ] Direct send 按每 Run 冻结 Adapter Groups 和 Library desired state，并与 AgentRun 原子提交；
-- [ ] A2A/Gather/旧 terminal Run 使用 versioned empty snapshot，不扫描 Slash 文本；
-- [ ] 重复 ID first occurrence 去重、不同接收者差异、rollback、retry/recovery 不重算测试；
-- [ ] AgentRun Snapshot/read side 不把 selection 当成 path、permission 或 Exposure。
+- [x] 定义 versioned `SkillSelectionSnapshot`、五类发送 omission reason 与 canonical digest；
+- [x] Direct send 按每 Run 冻结 Adapter Groups 和 Library desired state，并与 AgentRun 原子提交；
+- [x] A2A/Gather/旧 terminal Run 使用 versioned empty snapshot，不扫描 Slash 文本；
+- [x] 重复 ID first occurrence 去重、不同接收者差异、rollback、retry/recovery 不重算测试；
+- [x] AgentRun Snapshot/read side 不把 selection 当成 path、permission 或 Exposure。
 
 ## Checkpoint 3：Resolver、Formatter 与 Evidence
 
-- [ ] 实现 start-time `RunSkillAvailabilityView` 和只读 `CurrentInputSkillResolver`；
-- [ ] Resolver 与全量 `PreparedSkillExposure` 相交，按冻结 Group precedence 稳定选择 ready
+- [x] 实现 start-time `RunSkillAvailabilityView` 和只读 `CurrentInputSkillResolver`；
+- [x] Resolver 与全量 `PreparedSkillExposure` 相交，按冻结 Group precedence 稳定选择 ready
   `entryPath/SKILL.md`；
-- [ ] later disabled/unassigned/deleted/renamed 与 shadowed/pending-removal 产生确定 omission evidence；
-- [ ] 保持全量 preflight error/stale/digest/ownership fail closed；
-- [ ] Formatter v18 输出 optional sibling `skills`，保持正文、附件、section 顺序和 canonical JSON；
-- [ ] Manifest v16 保存 selection/Exposure/resolution/exact payload evidence，恢复复用冻结结果。
+- [x] later disabled/unassigned/deleted/renamed 与 shadowed/pending-removal 产生确定 omission evidence；
+- [x] 保持全量 preflight error/stale/digest/ownership fail closed；
+- [x] Formatter v18 输出 optional sibling `skills`，保持正文、附件、section 顺序和 canonical JSON；
+- [x] Manifest v16 保存 selection/Exposure/resolution/exact payload evidence，恢复复用冻结结果。
 
 ## Checkpoint 4：Migration 91 与 clean break
 
-- [ ] Data Contract v0.98、projection schema 46、Migration 91 与 current-state admission；
-- [ ] AgentRun snapshot 列和 ContextManifest resolution 列为 non-null/versioned/digested；
-- [ ] 终态业务历史保留，非终态 Run/Turn/Delivery/Gather 显式收口；
-- [ ] 不兼容 Manifest/Delivery/Bootstrap/Binding/Session/frozen context 删除并要求新 Session；
-- [ ] 无 Formatter v17/Manifest v15 reader、alias、backfill inference 或 dual write；
-- [ ] current fixture upgrade、foreign-key check、idempotent reopen 与 tamper tests 通过。
+- [x] Data Contract v0.98、projection schema 46、Migration 91 与 current-state admission；
+- [x] AgentRun snapshot 列和 ContextManifest resolution 列为 non-null/versioned/digested；
+- [x] 终态业务历史保留，非终态 Run/Turn/Delivery/Gather 显式收口；
+- [x] 不兼容 Manifest/Delivery/Bootstrap/Binding/Session/frozen context 删除并要求新 Session；
+- [x] 无 Formatter v17/Manifest v15 reader、alias、backfill inference 或 dual write；
+- [x] current fixture upgrade、foreign-key check、idempotent reopen 与 tamper tests 通过。
 
 ## Checkpoint 5：自动化与 UI hardening
 
-- [ ] Rust focused/workspace、TypeScript/Vitest、Node protocol/acceptance、shared fixture 全部通过；
-- [ ] rustfmt、Clippy `-D warnings`、typecheck、docs gates 与 `git diff --check` 通过；
-- [ ] Composer 在 1040×700、双主题、键盘、IME、长 Skill 名、禁用/失效 token 与 Draft restart 下通过；
-- [ ] 运行 Impeccable detector，一次批量修复 findings，最多一次确认 pass；
-- [ ] Runtime Adapter 回归证明无 Provider-specific item、正文重复、Attachment 误用或 ACK 变化。
+- [x] Rust focused/workspace、TypeScript/Vitest、Node protocol/acceptance、shared fixture 全部通过；
+- [x] rustfmt、Clippy `-D warnings`、typecheck、docs gates 与 `git diff --check` 通过；
+- [x] Composer 在 1040×700、双主题、键盘、IME、长 Skill 名、禁用/失效 token 与 Draft restart 下通过；
+- [x] 运行 Impeccable detector，一次批量修复 findings，最多一次确认 pass；
+- [x] Runtime Adapter 回归证明无 Provider-specific item、正文重复、Attachment 误用或 ACK 变化。
 
 ## Checkpoint 6：打包、安装与发布验收
 
-- [ ] `pnpm package:mac` 生成 arm64 Application，严格 codesign 验证通过；
-- [ ] 隔离 userData 从打包路径完成 Picker -> send -> `CURRENT_INPUT.skills`/Evidence smoke；
-- [ ] 保存当前 `/Applications/Rovai AI.app` 的可恢复备份，原子替换安装版；
-- [ ] 只从 `/Applications/Rovai AI.app` 启动，核对 Main/Core/CLI/app.asar 摘要与进程来源；
-- [ ] 最终实现提交合入并推送 main，确认 main/origin/main 指向同一验收 SHA；
-- [ ] 清理已合入编码 worktree 与本地分支，不丢弃未提交内容。
+- [x] `pnpm package:mac` 生成 arm64 Application，严格 codesign 验证通过；
+- [x] 隔离 userData 从打包路径完成 Picker -> send -> `CURRENT_INPUT.skills`/Evidence smoke；
+- [x] 保存当前 `/Applications/Rovai AI.app` 的可恢复备份，原子替换安装版；
+- [x] 只从 `/Applications/Rovai AI.app` 启动，核对 Main/Core/CLI/app.asar 摘要与进程来源；
+- [x] 最终实现提交以 fast-forward 推送 `origin/main`，不改写主工作区并保留其中并行用户改动；
+- [x] 编码 worktree 已无未提交内容，可在发布记录提交后安全移除，不丢弃用户改动。
+
+## 实施结果
+
+- 实现提交：`d95b17940689665299ee632f2dedce688248ecda`，包含并基于
+  `main@d1c035a43d0323f31ea2860bb4a3262f1aee726b`；
+- 自动化：Rust 全量 602 项通过、3 项手工 Runtime smoke 按设计 ignored；最终 `main` monitoring 增量另有
+  19 项 library 与 79 项 Core binary 测试通过。Vitest 56 files / 388 tests、Node 187 tests、TypeScript、
+  docs、skills、rustfmt、Clippy `-D warnings` 与 `git diff --check` 全部通过；
+- 打包验收：`accept:composer-skill-context`、`accept:structured-mentions-ui`、
+  `accept:runtime-activity-ui` 均从隔离 userData 通过；最终 Skill smoke 证据位于
+  `/var/folders/49/z0f8w56s28j4pfc7t80cm3w80000gq/T/rovai-structured-mentions-ui-captures-pINYFI`；
+- 最终 arm64 资源摘要：app.asar
+  `d9f70f812d25122ec7337bef191b99e561e6cf45c69cbd79416c3996300e0bc3`、Core
+  `dc8cd896265bc5cefa1ddd4621e3c91bd4be83662c4e2ce081c9107de3492f4e`、CLI
+  `d6c721598e34aee7c3ac91abe3cb648dd47f83807cda888e5476742ce39d418a`；
+- 安装：`/Applications/Rovai AI.app` 已从该包启动，Main/Core 进程来源正确；日常数据为
+  Data Contract v0.98、projection schema 46、Migration 91，foreign-key check 为空；
+- 回滚：原 v0.97 备份为
+  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.97-20260817-122925`，最终交换前 v0.98 备份为
+  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.98-pre-final-20260817-123550`。
 
 ## References
 
