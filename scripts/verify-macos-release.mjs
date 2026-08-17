@@ -137,6 +137,14 @@ function signatureDetails(label, targetPath) {
   return { details, designatedRequirement }
 }
 
+function assertCertificateRoot(label, designatedRequirement) {
+  const normalized = designatedRequirement.toLowerCase()
+  const expected = `certificate root = h"${EXPECTED_CERTIFICATE_ROOT}"`
+  if (!normalized.includes(expected)) {
+    throw new Error(`${label} designated requirement has the wrong certificate root`)
+  }
+}
+
 function detachDmg() {
   if (!mounted) return
 
@@ -216,12 +224,13 @@ try {
   if (!normalizedRequirement.includes(`identifier "${EXPECTED_APP_ID}"`)) {
     throw new Error('App designated requirement has the wrong identifier')
   }
-  if (!normalizedRequirement.includes(`certificate root = h"${EXPECTED_CERTIFICATE_ROOT}"`)) {
-    throw new Error('App designated requirement has the wrong certificate root')
-  }
+  assertCertificateRoot('App', appSignature.designatedRequirement)
 
-  signatureDetails('rovai-core', corePath)
-  signatureDetails('rovai', cliPath)
+  const coreSignature = signatureDetails('rovai-core', corePath)
+  assertCertificateRoot('rovai-core', coreSignature.designatedRequirement)
+
+  const cliSignature = signatureDetails('rovai', cliPath)
+  assertCertificateRoot('rovai', cliSignature.designatedRequirement)
   report.push('CDHash-only signature found: no')
   report.push('Result: passed')
 } catch (error) {

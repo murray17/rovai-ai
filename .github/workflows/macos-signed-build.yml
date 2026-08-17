@@ -7,7 +7,20 @@ permissions:
   contents: read
 
 jobs:
+  require-main:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require main branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "Signed builds may only run from main."
+            exit 1
+          fi
+
   build:
+    needs: require-main
     name: macOS ${{ matrix.arch }} signed build
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -25,10 +38,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 26
 
@@ -102,6 +115,7 @@ jobs:
           sudo security add-trusted-cert \
             -d \
             -r trustRoot \
+            -p codeSign \
             -k /Library/Keychains/System.keychain \
             "$CERT_DER"
           touch "$TRUST_MARKER"
