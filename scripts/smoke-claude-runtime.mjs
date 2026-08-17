@@ -86,6 +86,14 @@ try {
       : null
   }, 'first Claude Code AgentRun')
   const firstRun = camp.agentRuns[0]
+  const firstNarration = runtimeNarration(core.events, firstRun.id)
+  if (!firstNarration.includes('ROVAI_CLAUDE_RUN_ONE')) {
+    throw new Error(`Claude Code first final text was not projected as narration: ${JSON.stringify({
+      firstRun,
+      firstNarration,
+      events: core.events.filter((event) => event.params?.agentRunId === firstRun.id)
+    })}`)
+  }
   const firstBinding = core.events.find((event) =>
     event.method === 'agent_run.native_session_bound'
       && event.params?.agentRunId === firstRun.id
@@ -129,6 +137,14 @@ try {
   )
   if (!secondRun) {
     throw new Error(`Claude Code follow-up AgentRun was not found: ${JSON.stringify(camp)}`)
+  }
+  const secondNarration = runtimeNarration(core.events, secondRun.id)
+  if (!secondNarration.includes('ROVAI_CLAUDE_RUN_TWO')) {
+    throw new Error(`Claude Code resumed final text was not projected as narration: ${JSON.stringify({
+      secondRun,
+      secondNarration,
+      events: core.events.filter((event) => event.params?.agentRunId === secondRun.id)
+    })}`)
   }
   const secondBinding = core.events.find((event) =>
     event.method === 'agent_run.native_session_bound'
@@ -204,6 +220,7 @@ try {
     nativeSessionId,
     nativeSessionContinued: true,
     conversationId: firstRun.conversationId,
+    narrationProjected: true,
     commandOutput: {
       marker: commandMarker,
       output: commandOutputEvent.params.payload.output,
@@ -276,6 +293,16 @@ async function waitFor(probe, label) {
 function isUuid(value) {
   return typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function runtimeNarration(events, agentRunId) {
+  return events
+    .filter((event) =>
+      event.method === 'agent.text.delta'
+        && event.params?.agentRunId === agentRunId
+    )
+    .map((event) => String(event.params?.payload?.delta ?? ''))
+    .join('')
 }
 
 async function sendCampMessage(request, campId, body, execution) {

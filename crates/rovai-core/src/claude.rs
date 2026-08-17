@@ -483,6 +483,9 @@ struct ClaudeCodeStreamCapture {
 struct ClaudeCodeStreamState {
     final_result: Option<ClaudeCodeJsonResult>,
     acceptance_emitted: bool,
+    message_ordinal: u64,
+    text_delta_emitted: bool,
+    partial_text_items: HashMap<u64, String>,
     tool_names: HashMap<String, String>,
     partial_tools: HashMap<u64, (String, String)>,
     started_tools: HashSet<String>,
@@ -590,13 +593,31 @@ fn normalize_claude_runtime_events(
     let mut normalized = Vec::new();
     match event.get("type").and_then(Value::as_str) {
         Some("stream_event")
+            if event.pointer("/event/type").and_then(Value::as_str) == Some("message_start") =>
+        {
+            validate_claude_stream_session(event, expected_session_id)?;
+            state.message_ordinal = state.message_ordinal.saturating_add(1);
+            state.partial_text_items.clear();
+        }
+        Some("stream_event")
             if event.pointer("/event/type").and_then(Value::as_str)
                 == Some("content_block_start") =>
         {
             let Some(block) = event.pointer("/event/content_block") else {
                 return Ok(normalized);
             };
-            if block.get("type").and_then(Value::as_str) != Some("tool_use") {
+            let block_type = block.get("type").and_then(Value::as_str);
+            if block_type == Some("text") {
+                validate_claude_stream_session(event, expected_session_id)?;
+                if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
+                    state.partial_text_items.insert(
+                        index,
+                        format!("claude-text-{}-{index}", state.message_ordinal),
+                    );
+                }
+                return Ok(normalized);
+            }
+            if block_type != Some("tool_use") {
                 return Ok(normalized);
             }
             validate_claude_stream_session(event, expected_session_id)?;
@@ -617,11 +638,49 @@ fn normalize_claude_runtime_events(
         }
         Some("stream_event")
             if event.pointer("/event/type").and_then(Value::as_str)
+                == Some("content_block_delta") =>
+        {
+            let Some(delta) = event.pointer("/event/delta") else {
+                return Ok(normalized);
+            };
+            if delta.get("type").and_then(Value::as_str) != Some("text_delta") {
+                return Ok(normalized);
+            }
+            let Some(text) = delta
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty())
+            else {
+                return Ok(normalized);
+            };
+            validate_claude_stream_session(event, expected_session_id)?;
+            let index = event
+                .pointer("/event/index")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            let message_ordinal = state.message_ordinal;
+            let item_id = state
+                .partial_text_items
+                .entry(index)
+                .or_insert_with(|| format!("claude-text-{message_ordinal}-{index}"))
+                .clone();
+            state.text_delta_emitted = true;
+            normalized.push(ClaudeCodeRuntimeEvent {
+                event_type: "agent.text.delta",
+                payload: serde_json::json!({
+                    "itemId": item_id,
+                    "delta": text,
+                }),
+            });
+        }
+        Some("stream_event")
+            if event.pointer("/event/type").and_then(Value::as_str)
                 == Some("content_block_stop") =>
         {
             validate_claude_stream_session(event, expected_session_id)?;
             if let Some(index) = event.pointer("/event/index").and_then(Value::as_u64) {
                 state.partial_tools.remove(&index);
+                state.partial_text_items.remove(&index);
             }
         }
         Some("assistant") => {
@@ -692,6 +751,31 @@ fn normalize_claude_runtime_events(
                 });
             }
         }
+        Some("result") => {
+            if state.text_delta_emitted
+                || event.get("subtype").and_then(Value::as_str) != Some("success")
+                || event.get("is_error").and_then(Value::as_bool) == Some(true)
+            {
+                return Ok(normalized);
+            }
+            let Some(result) = event
+                .get("result")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|result| !result.is_empty())
+            else {
+                return Ok(normalized);
+            };
+            validate_claude_stream_session(event, expected_session_id)?;
+            state.text_delta_emitted = true;
+            normalized.push(ClaudeCodeRuntimeEvent {
+                event_type: "agent.text.delta",
+                payload: serde_json::json!({
+                    "itemId": "claude-final",
+                    "delta": result,
+                }),
+            });
+        }
         _ => {}
     }
     Ok(normalized)
@@ -744,7 +828,7 @@ fn validate_claude_stream_session(event: &Value, expected_session_id: &str) -> R
     let observed_session_id = event
         .get("session_id")
         .and_then(Value::as_str)
-        .context("Claude Code tool event omitted session_id")?;
+        .context("Claude Code public stream event omitted session_id")?;
     validate_session_id(observed_session_id)?;
     if observed_session_id != expected_session_id {
         anyhow::bail!(
@@ -1012,6 +1096,153 @@ mod tests {
         assert!(error.downcast_ref::<ClaudeCodeDeliveredFailure>().is_none());
     }
 
+    #[test]
+    fn public_text_streams_and_success_fallback_create_narration_without_thinking() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut streamed_state = ClaudeCodeStreamState::default();
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "stream_event",
+                    "session_id": session_id,
+                    "event": {"type": "message_start"}
+                }),
+                session_id,
+                &mut streamed_state,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "stream_event",
+                    "session_id": session_id,
+                    "event": {
+                        "type": "content_block_start",
+                        "index": 0,
+                        "content_block": {"type": "text", "text": ""}
+                    }
+                }),
+                session_id,
+                &mut streamed_state,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "stream_event",
+                    "session_id": session_id,
+                    "event": {
+                        "type": "content_block_delta",
+                        "index": 0,
+                        "delta": {
+                            "type": "thinking_delta",
+                            "thinking": "CLAUDE_PRIVATE_THINKING_MUST_NOT_LEAK"
+                        }
+                    }
+                }),
+                session_id,
+                &mut streamed_state,
+            )
+            .unwrap()
+            .is_empty()
+        );
+        let first = normalize_claude_runtime_events(
+            &json!({
+                "type": "stream_event",
+                "session_id": session_id,
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "public"}
+                }
+            }),
+            session_id,
+            &mut streamed_state,
+        )
+        .unwrap();
+        let second = normalize_claude_runtime_events(
+            &json!({
+                "type": "stream_event",
+                "session_id": session_id,
+                "event": {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": " reply"}
+                }
+            }),
+            session_id,
+            &mut streamed_state,
+        )
+        .unwrap();
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].event_type, "agent.text.delta");
+        assert_eq!(first[0].payload["itemId"], "claude-text-1-0");
+        assert_eq!(first[0].payload["delta"], "public");
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].payload["itemId"], "claude-text-1-0");
+        assert_eq!(second[0].payload["delta"], " reply");
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "result",
+                    "subtype": "success",
+                    "is_error": false,
+                    "result": "public reply",
+                    "session_id": session_id
+                }),
+                session_id,
+                &mut streamed_state,
+            )
+            .unwrap()
+            .is_empty(),
+            "the terminal result must not duplicate streamed public text"
+        );
+        assert!(
+            !serde_json::to_string(&[&first[0].payload, &second[0].payload])
+                .unwrap()
+                .contains("CLAUDE_PRIVATE_THINKING_MUST_NOT_LEAK")
+        );
+
+        let mut fallback_state = ClaudeCodeStreamState::default();
+        let fallback = normalize_claude_runtime_events(
+            &json!({
+                "type": "result",
+                "subtype": "success",
+                "is_error": false,
+                "result": "  fallback final  ",
+                "session_id": session_id
+            }),
+            session_id,
+            &mut fallback_state,
+        )
+        .unwrap();
+        assert_eq!(fallback.len(), 1);
+        assert_eq!(fallback[0].event_type, "agent.text.delta");
+        assert_eq!(fallback[0].payload["itemId"], "claude-final");
+        assert_eq!(fallback[0].payload["delta"], "fallback final");
+
+        let mut failure_state = ClaudeCodeStreamState::default();
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "result",
+                    "subtype": "error",
+                    "is_error": true,
+                    "result": "CLAUDE_PROVIDER_ERROR_MUST_NOT_LEAK",
+                    "session_id": session_id
+                }),
+                session_id,
+                &mut failure_state,
+            )
+            .unwrap()
+            .is_empty()
+        );
+    }
+
     #[tokio::test]
     async fn stream_reports_acceptance_before_the_terminal_result() {
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
@@ -1132,6 +1363,14 @@ mod tests {
         let captured = capture_task.await.unwrap().unwrap();
         assert_eq!(captured.final_result.unwrap().result, "done");
         writer_task.await.unwrap();
+        let fallback_narration = runtime_event_receiver
+            .recv()
+            .await
+            .expect("the success result should provide a public narration fallback");
+        assert_eq!(fallback_narration.event_type, "agent.text.delta");
+        assert_eq!(fallback_narration.payload["itemId"], "claude-final");
+        assert_eq!(fallback_narration.payload["delta"], "done");
+        assert!(runtime_event_receiver.try_recv().is_err());
         assert!(accepted_receiver.try_recv().is_err());
         assert_eq!(claude_tool_kind("Bash"), "execute");
         assert_eq!(claude_tool_kind("Read"), "read");
