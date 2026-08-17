@@ -4240,10 +4240,6 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .camp-action-dialog > .dialog-close { position: absolute; top: 14px; right: 14px; }
 .camp-action-dialog h2 { margin: 0 40px 6px 0; font: 700 19px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; }
 .camp-action-dialog [data-radix-dialog-description] { margin: 0 0 16px; color: var(--muted); font-size: 12px; line-height: 1.55; }
-.delete-blockers { margin-top: 14px; padding: 11px 12px; border: 1px solid color-mix(in srgb, var(--attention) 36%, var(--line)); border-radius: 7px; color: var(--attention); background: var(--attention-soft); }
-.delete-blockers strong { font-size: 12px; }
-.delete-blockers p { margin: 4px 0; font-size: 11px; line-height: 1.45; }
-.delete-blockers ul { margin: 6px 0 0; padding-left: 18px; font-size: 11px; line-height: 1.55; }
 .inline-error { margin-top: 12px; padding: 9px 11px; border-left: 3px solid var(--danger); color: var(--danger); background: var(--danger-soft); font-size: 12px; }
 /* Members and local runtimes */
 .member-hero { margin-bottom: 18px; }

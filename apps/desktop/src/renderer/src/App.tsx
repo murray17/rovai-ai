@@ -58,7 +58,6 @@ import {
 } from './CampWorkspace'
 import {
   CampNavigation,
-  type CampDeleteAttempt,
   type NavigationSettingsSection
 } from './CampNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
@@ -1957,23 +1956,15 @@ export function App(): React.JSX.Element {
     }
   }
 
-  const deleteCamp = async (camp: NavigationCampItem): Promise<CampDeleteAttempt> => {
+  const deleteCamp = async (camp: NavigationCampItem): Promise<void> => {
     setBusy(`delete-camp-${camp.id}`)
     setError(null)
     try {
       const result = await window.rovai.request<StoredCommandResult>('camps.delete', {
         commandId: crypto.randomUUID(),
-        command: {
-          campId: camp.id,
-          expectedVersion: camp.version
-        }
+        command: campDeleteCommand(camp)
       })
-      if (result.status === 'rejected') {
-        if (result.code === 'camp.delete_blocked') {
-          return { deleted: false, blockers: campDeleteBlockers(result.payload) }
-        }
-        throw new Error(commandFailureMessage(result))
-      }
+      if (result.status === 'rejected') throw new Error(commandFailureMessage(result))
       campSnapshotCache.current.delete(camp.id)
       if (activeCampId === camp.id) {
         cancelPendingCampActivation()
@@ -1983,7 +1974,6 @@ export function App(): React.JSX.Element {
         setView('compose')
       }
       await loadNavigation()
-      return { deleted: true, blockers: [] }
     } finally {
       setBusy(null)
     }
@@ -2513,7 +2503,6 @@ export function App(): React.JSX.Element {
         }}
         onRename={renameCamp}
         onDelete={deleteCamp}
-        onStop={stopCampRuns}
         onError={(nextError) => setError(errorMessage(nextError))}
       />
       {!startupGateVisible && view === 'camp' && <AppHeader
@@ -3170,6 +3159,16 @@ export function commandFailureMessage(result: StoredCommandResult): string {
   return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `操作未完成：${result.code}`)
 }
 
+export function campDeleteCommand(
+  camp: Pick<NavigationCampItem, 'id' | 'version'>
+): { campId: string; expectedVersion: number; force: true } {
+  return {
+    campId: camp.id,
+    expectedVersion: camp.version,
+    force: true
+  }
+}
+
 export function runtimeRecoveryFromCommandResult(
   campId: string,
   result: StoredCommandResult
@@ -3182,17 +3181,6 @@ export function runtimeRecoveryFromCommandResult(
     campId,
     targets: [{ agentId, blockerCode }]
   }
-}
-
-function campDeleteBlockers(payload: Record<string, unknown>): Array<{ code: string; count: number }> {
-  const blockers = payload.blockers
-  if (!Array.isArray(blockers)) return []
-  return blockers.flatMap((value) => {
-    const blocker = asRecord(value)
-    const code = stringField(blocker, 'code')
-    const count = typeof blocker.count === 'number' ? blocker.count : null
-    return code && count !== null ? [{ code, count }] : []
-  })
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -51,6 +51,7 @@ Related: Camp content、Evidence 与 Renderer 可分别回到其 primary 主题�
 | [ADR-0185](0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md) | Durable Composer Reply Intent and Explicit Recipient Resolution |
 | [ADR-0187](0187-durable-composer-recipient-continuation.md) | Durable Composer Recipient Continuation |
 | [ADR-0202](0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md) | Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning |
+| [ADR-0206](0206-user-confirmed-force-camp-deletion.md) | User-Confirmed Force Camp Deletion |
 <!-- adr-current-primary:end -->
 
 Related: Session bootstrap、public delivery 与 product surface 仍从各自 primary 主题进入。

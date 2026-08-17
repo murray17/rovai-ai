@@ -186,6 +186,8 @@ impl DomainCommand for ReconcileDefaultLeadCommand {
 pub struct DeleteCampCommand {
     pub camp_id: String,
     pub expected_version: i64,
+    #[serde(default)]
+    pub force: bool,
 }
 
 impl sealed::Sealed for DeleteCampCommand {}
@@ -1088,17 +1090,22 @@ impl CollaborationService {
             }
 
             let blockers = camp_delete_blockers(transaction, &envelope.payload.camp_id)?;
-            if !blockers.is_empty() {
+            if !blockers.is_empty() && !envelope.payload.force {
                 return Ok(CommandHandlerResult::rejected(
                     "camp.delete_blocked",
                     json!({ "campId": envelope.payload.camp_id, "blockers": blockers }),
                 ));
             }
 
+            let forced = !blockers.is_empty();
             delete_camp_aggregate(transaction, &envelope.payload.camp_id)?;
             Ok(CommandHandlerResult::applied(
                 "camp.deleted",
-                json!({ "campId": envelope.payload.camp_id }),
+                json!({
+                    "campId": envelope.payload.camp_id,
+                    "forced": forced,
+                    "bypassedBlockers": if forced { blockers } else { Vec::new() },
+                }),
                 None,
             ))
         })
@@ -4505,7 +4512,9 @@ fn camp_is_pending(transaction: &Connection, camp_id: &str) -> Result<bool> {
 mod slow_tests {
     use super::*;
     use crate::{
-        agent_profile::{AgentProfileService, RemoveMemberCommand, configure_test_runtime},
+        agent_profile::{
+            AdapterKind, AgentProfileService, RemoveMemberCommand, configure_test_runtime,
+        },
         camp_attachment::CampAttachmentStore,
         camp_content::StructuredCampMessageSegment as Segment,
         command::CommandResultStatus,
@@ -5706,6 +5715,7 @@ mod slow_tests {
             DeleteCampCommand {
                 camp_id: camp_id.clone(),
                 expected_version: delete_version,
+                force: false,
             },
         );
         let delete = service
@@ -5734,7 +5744,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn camp_delete_reports_running_work_without_removing_any_rows() {
+    fn camp_delete_blocks_by_default_and_force_removes_running_work() {
         let (mut database, directory) = test_database();
         configure_test_runtime(&database, &["agent_1"]);
         let service = CollaborationService::default();
@@ -5768,6 +5778,7 @@ mod slow_tests {
                     DeleteCampCommand {
                         camp_id: camp_id.clone(),
                         expected_version: delete_version,
+                        force: false,
                     },
                 ),
             )
@@ -5785,6 +5796,48 @@ mod slow_tests {
         assert_eq!(row_count(&database, "camp"), 1);
         assert_eq!(row_count(&database, "camp_turn"), 1);
         assert_eq!(row_count(&database, "agent_run"), 1);
+        let cleanup_targets = ExecutionRuntimeService::default()
+            .list_camp_runtime_cleanup_targets(&database, &camp_id)
+            .expect("force deletion should capture the active Runtime identity");
+        assert_eq!(cleanup_targets.len(), 1);
+        assert_eq!(cleanup_targets[0].adapter_kind, AdapterKind::CodexCli);
+        let forced = service
+            .delete_camp(
+                &mut database,
+                &user_envelope(
+                    "force-delete-running-camp",
+                    Some(&camp_id),
+                    DeleteCampCommand {
+                        camp_id: camp_id.clone(),
+                        expected_version: delete_version,
+                        force: true,
+                    },
+                ),
+            )
+            .expect("forced delete should commit");
+
+        assert_eq!(forced.result.status, CommandResultStatus::Applied);
+        assert_eq!(forced.result.code, "camp.deleted");
+        assert_eq!(forced.result.payload["forced"], true);
+        assert!(
+            forced.result.payload["bypassedBlockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|blocker| blocker["code"] == "nonterminal_agent_run")
+        );
+        assert_eq!(row_count(&database, "camp"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        assert_eq!(row_count(&database, "conversation"), 0);
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        let foreign_key_violations: i64 = database
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");

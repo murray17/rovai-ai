@@ -393,6 +393,13 @@ pub struct AgentRunCancellationCandidate {
     pub adapter_kind: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CampRuntimeCleanupTarget {
+    pub agent_run_id: String,
+    pub execution_epoch: i64,
+    pub adapter_kind: AdapterKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CampTurnExecutionBudgetExpiry {
@@ -775,6 +782,43 @@ impl ExecutionRuntimeService {
         }
         transaction.commit()?;
         Ok(expired)
+    }
+
+    pub fn list_camp_runtime_cleanup_targets(
+        &self,
+        database: &Database,
+        camp_id: &str,
+    ) -> Result<Vec<CampRuntimeCleanupTarget>> {
+        let mut statement = database.connection().prepare(
+            r#"
+            SELECT agent_run.id, agent_run.execution_epoch,
+                   agent_run.runtime_adapter_kind
+            FROM agent_run
+            JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+            WHERE camp_turn.camp_id = ?1
+              AND agent_run.status IN ('queued', 'running', 'waiting')
+            ORDER BY agent_run.id
+            "#,
+        )?;
+        let rows = statement
+            .query_map([camp_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(agent_run_id, execution_epoch, adapter_kind)| {
+                Some(CampRuntimeCleanupTarget {
+                    agent_run_id,
+                    execution_epoch,
+                    adapter_kind: adapter_kind?.parse::<AdapterKind>().ok()?,
+                })
+            })
+            .collect())
     }
 
     pub fn list_cancellation_candidates(

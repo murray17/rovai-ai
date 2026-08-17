@@ -21,11 +21,6 @@ import { writeClipboardText } from './clipboard'
 import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
 import { allNavigationCamps } from './ui-model'
 
-export interface CampDeleteAttempt {
-  deleted: boolean
-  blockers: Array<{ code: string; count: number }>
-}
-
 export type NavigationSettingsSection = SettingsSection
 
 type NavigationAction = {
@@ -200,7 +195,6 @@ export function CampNavigation({
   onCampIdCopied = () => undefined,
   onRename,
   onDelete,
-  onStop,
   onError
 }: {
   view: 'compose' | 'camp' | 'members' | 'memory' | 'settings'
@@ -229,8 +223,7 @@ export function CampNavigation({
   onRemoveProject(project: ProjectNavigationGroup): Promise<void>
   onCampIdCopied?(): void
   onRename(camp: NavigationCampItem, title: string): Promise<void>
-  onDelete(camp: NavigationCampItem): Promise<CampDeleteAttempt>
-  onStop(camp: NavigationCampItem): Promise<void>
+  onDelete(camp: NavigationCampItem): Promise<void>
   onError(error: unknown): void
 }): JSX.Element {
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => new Set())
@@ -238,7 +231,6 @@ export function CampNavigation({
   const [loadingGroups, setLoadingGroups] = useState<Set<string>>(() => new Set())
   const [action, setAction] = useState<NavigationAction>(null)
   const [renameTitle, setRenameTitle] = useState('')
-  const [deleteBlockers, setDeleteBlockers] = useState<Array<{ code: string; count: number }>>([])
   const [actionBusy, setActionBusy] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [sidebarFocusRequest, setSidebarFocusRequest] = useState<{ id: number; target: string } | null>(null)
@@ -427,19 +419,16 @@ export function CampNavigation({
     dialogReturnFocusTargetRef.current = `camp:${camp.id}`
     setAction({ kind, camp })
     setRenameTitle(camp.title)
-    setDeleteBlockers([])
   }
 
   const openProjectRemoval = (project: ProjectNavigationGroup): void => {
     dialogReturnFocusTargetRef.current = `project:${project.projectKey}`
     setAction({ kind: 'remove_project', project })
-    setDeleteBlockers([])
   }
 
   const closeAction = (): void => {
     if (actionBusy) return
     setAction(null)
-    setDeleteBlockers([])
   }
 
   const submitRename = async (event: FormEvent): Promise<void> => {
@@ -460,21 +449,16 @@ export function CampNavigation({
     if (!action || action.kind !== 'delete' || actionBusy) return
     setActionBusy(true)
     try {
-      const result = await onDelete(action.camp)
-      if (result.deleted) {
-        const nextPagination = Object.fromEntries(
-          Object.entries(paginationByGroupRef.current).map(([groupKey, pagination]) => [
-            groupKey,
-            removeNavigationCampFromPagination(pagination, action.camp.id)
-          ])
-        )
-        paginationByGroupRef.current = nextPagination
-        setPaginationByGroup(nextPagination)
-        setAction(null)
-        setDeleteBlockers([])
-      } else {
-        setDeleteBlockers(result.blockers)
-      }
+      await onDelete(action.camp)
+      const nextPagination = Object.fromEntries(
+        Object.entries(paginationByGroupRef.current).map(([groupKey, pagination]) => [
+          groupKey,
+          removeNavigationCampFromPagination(pagination, action.camp.id)
+        ])
+      )
+      paginationByGroupRef.current = nextPagination
+      setPaginationByGroup(nextPagination)
+      setAction(null)
     } catch (error) {
       onError(error)
     } finally {
@@ -490,21 +474,6 @@ export function CampNavigation({
       dialogReturnFocusTargetRef.current = 'project-row:quick-chat'
       setAction(null)
       requestSidebarFocus('project-row:quick-chat')
-    } catch (error) {
-      onError(error)
-    } finally {
-      setActionBusy(false)
-    }
-  }
-
-  const stopBlockingRuns = async (): Promise<void> => {
-    if (!action || action.kind !== 'delete' || actionBusy) return
-    setActionBusy(true)
-    try {
-      await onStop(action.camp)
-      onCamp(action.camp)
-      setAction(null)
-      setDeleteBlockers([])
     } catch (error) {
       onError(error)
     } finally {
@@ -743,15 +712,8 @@ export function CampNavigation({
             ) : action?.kind === 'delete' ? (
               <div>
                 <Dialog.Title>永久删除“{action.camp.title}”？</Dialog.Title>
-                <Dialog.Description>这会删除该会话的消息、队员连续性、运行记录和关联数据。此操作不能撤销，也不会删除本地项目目录。</Dialog.Description>
-                {deleteBlockers.length > 0 && (
-                  <div className="delete-blockers" role="alert">
-                    <strong>当前还不能删除</strong>
-                    <p>请先打开该对话，停止运行并处理未决审批或动作，然后重试。</p>
-                    <ul>{deleteBlockers.map((blocker) => <li key={blocker.code}>{deleteBlockerLabel(blocker.code)}（{blocker.count}）</li>)}</ul>
-                  </div>
-                )}
-                <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>{deleteBlockers.some((blocker) => blocker.code === 'nonterminal_agent_run' || blocker.code === 'nonterminal_camp_turn') && <button className="quiet-button" type="button" onClick={() => void stopBlockingRuns()} disabled={actionBusy}>{actionBusy ? '正在请求停止…' : '停止运行'}</button>}{deleteBlockers.length > 0 && <button className="quiet-button" type="button" onClick={() => { onCamp(action.camp); setAction(null) }}>打开对话</button>}<button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '检查中…' : deleteBlockers.length > 0 ? '重新检查并删除' : '永久删除'}</button></div>
+                <Dialog.Description>这会立即停止仍在运行的执行，并物理删除该会话的消息、队员连续性、运行记录、未决审批和关联数据。此操作不能撤销，也不会删除本地项目目录。</Dialog.Description>
+                <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close><button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '正在永久删除…' : '永久删除'}</button></div>
               </div>
             ) : action?.kind === 'remove_project' ? (
               <div>
@@ -1268,18 +1230,4 @@ function SidebarMenuIcon({ kind, filled = false }: {
 
 function projectKey(project: ProjectNavigationGroup): string {
   return project.projectKey
-}
-
-function deleteBlockerLabel(code: string): string {
-  return ({
-    nonterminal_agent_run: '仍有 Agent 正在执行或等待',
-    nonterminal_camp_turn: '本轮协作仍未结束',
-    pending_approval: '仍有待处理审批',
-    unsettled_action: '仍有未收敛动作',
-    pending_message_delivery: '仍有公共消息投递未完成',
-    pending_runtime_delivery: '仍有 Agent 运行时结果待确认',
-    active_worker_lease: '仍有执行器持有租约',
-    unfinished_membership_change: '仍有队员变更未完成',
-    unfinished_task_cancellation: '仍有任务取消未完成'
-  } as Record<string, string>)[code] ?? code
 }

@@ -157,13 +157,13 @@ use rovai_core::{
     read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
-        BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-        ExecutionRuntimeService, FailAgentRunCommand, MissingSendRecoveryBoundary,
-        MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
-        PermissionSemantics, PlannedShutdownAbortiveTerminal, RebindAgentRunRuntimeCommand,
-        RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
-        ResolveAcceptedInputRecoveryBlockerCommand, RestartNativeSessionCommand,
-        SucceedAgentRunCommand,
+        BindNativeSessionCommand, CampRuntimeCleanupTarget, CancelCampTurnCommand,
+        ClaimAgentRunCommand, ExecutionRuntimeService, FailAgentRunCommand,
+        MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, NativeSessionResumeDisposition,
+        NativeSessionResumeFailure, PermissionSemantics, PlannedShutdownAbortiveTerminal,
+        RebindAgentRunRuntimeCommand, RecordCancelledAgentRunEndingGitObservationCommand,
+        RejectAgentRunDispatchCommand, ResolveAcceptedInputRecoveryBlockerCommand,
+        RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeLaunchPurpose,
@@ -1289,6 +1289,66 @@ impl Core {
 
     async fn forget_deleted_camp_runtimes(&self, camp_id: &str) {
         self.codex_cli.forget_camp(camp_id).await;
+    }
+
+    async fn stop_deleted_camp_runtime_kind(
+        &self,
+        targets: &[CampRuntimeCleanupTarget],
+        adapter_kind: AdapterKind,
+    ) {
+        for target in targets
+            .iter()
+            .filter(|target| target.adapter_kind == adapter_kind)
+        {
+            match adapter_kind {
+                AdapterKind::CodexCli => {
+                    self.codex_cli
+                        .forget_agent_run(&target.agent_run_id, target.execution_epoch)
+                        .await;
+                }
+                kind if kind.uses_acp() => {
+                    if let Some(adapter) = self.acp_adapter(kind) {
+                        adapter
+                            .forget_agent_run(&target.agent_run_id, target.execution_epoch)
+                            .await;
+                    }
+                }
+                AdapterKind::ClaudeCodeCli => {
+                    self.claude_code_cli
+                        .interrupt(&target.agent_run_id, target.execution_epoch)
+                        .await;
+                }
+                AdapterKind::AntigravityApp => {
+                    self.antigravity_app
+                        .interrupt(&target.agent_run_id, target.execution_epoch)
+                        .await;
+                }
+                _ => unreachable!("all Adapter kinds are handled"),
+            }
+        }
+    }
+
+    async fn stop_deleted_camp_runtimes(&self, targets: &[CampRuntimeCleanupTarget]) {
+        tokio::join!(
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CodexCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::OpencodeCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CopilotCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::ClaudeCodeCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::AntigravityApp),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::KiroCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::QoderCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CodebuddyCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::QwenCode),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::TraeCnCli),
+        );
+        for target in targets {
+            self.planned_shutdown
+                .remove_active(&ActiveExecutionKey::new(
+                    &target.agent_run_id,
+                    target.execution_epoch,
+                ))
+                .await;
+        }
     }
 
     async fn expire_elapsed_execution_budgets(&self, output: &mpsc::UnboundedSender<String>) {
@@ -4144,7 +4204,14 @@ impl Core {
                 let params: UserCommandParams<DeleteCampCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
+                let force = params.command.force;
                 let mut database = self.database.lock().await;
+                let runtime_cleanup_targets = if force {
+                    ExecutionRuntimeService::default()
+                        .list_camp_runtime_cleanup_targets(&database, &camp_id)?
+                } else {
+                    Vec::new()
+                };
                 let execution = CollaborationService::default().delete_camp(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
@@ -4162,8 +4229,18 @@ impl Core {
                     .map(str::to_string);
                 drop(database);
                 if should_remove_attachments && let Some(camp_id) = deleted_camp_id {
+                    if force {
+                        self.stop_deleted_camp_runtimes(&runtime_cleanup_targets)
+                            .await;
+                    }
                     self.forget_deleted_camp_runtimes(&camp_id).await;
-                    CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
+                    if let Err(error) =
+                        CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)
+                    {
+                        eprintln!(
+                            "Camp {camp_id} was deleted but managed attachment cleanup failed: {error:#}"
+                        );
+                    }
                 }
                 Ok(serde_json::to_value(execution.result)?)
             }

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v0.99
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-17
 > clean-break 迁移与 `/Applications` 安装验收已经完成，证据见[实施计划](implementation-plan.md)。
 >
 > 前置版本：[v0.98 结构化 Skill 文件链接](../v0.98/README.md)
+>
+> 后续版本：[v1.00 用户确认后的 Camp 强制永久删除](../v1.00/README.md)
 
 ## 版本目标
 

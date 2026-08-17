@@ -24,6 +24,7 @@ import {
   allNavigationCamps,
   campActivationPreview,
   campActivationStateForCreation,
+  campDeleteCommand,
   campViewIsVisibleForReadAcknowledgement,
   campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
@@ -202,6 +203,14 @@ describe('cold startup route presentation', () => {
 })
 
 describe('Camp snapshot cache', () => {
+  it('authorizes physical deletion from the destructive confirmation', () => {
+    expect(campDeleteCommand({ id: 'camp-delete', version: 7 })).toEqual({
+      campId: 'camp-delete',
+      expectedVersion: 7,
+      force: true
+    })
+  })
+
   it('retains the current workspace until an uncached Camp projection is ready', () => {
     const snapshot = (campId: string): CampSnapshot => ({
       camp: { id: campId }
@@ -1443,8 +1452,7 @@ describe('task event projections', () => {
       onCamp: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
-      onDelete: async () => ({ deleted: true, blockers: [] }),
-      onStop: async () => undefined,
+      onDelete: async () => undefined,
       onError: () => undefined
     }))
 
@@ -1524,8 +1532,7 @@ describe('task event projections', () => {
       onCamp: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
-      onDelete: async () => ({ deleted: true, blockers: [] }),
-      onStop: async () => undefined,
+      onDelete: async () => undefined,
       onError: () => undefined
     }))
 
@@ -1578,8 +1585,7 @@ describe('task event projections', () => {
       onCamp: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
-      onDelete: async () => ({ deleted: true, blockers: [] }),
-      onStop: async () => undefined,
+      onDelete: async () => undefined,
       onError: () => undefined
     }))
 
@@ -1633,8 +1639,7 @@ describe('task event projections', () => {
       onCamp: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
-      onDelete: async () => ({ deleted: true, blockers: [] }),
-      onStop: async () => undefined,
+      onDelete: async () => undefined,
       onError: () => undefined
     }))
 
@@ -1806,8 +1811,7 @@ describe('task event projections', () => {
       onCamp: () => undefined,
       onRemoveProject: async () => undefined,
       onRename: async () => undefined,
-      onDelete: async () => ({ deleted: true, blockers: [] }),
-      onStop: async () => undefined,
+      onDelete: async () => undefined,
       onError: () => undefined
     }))
 
