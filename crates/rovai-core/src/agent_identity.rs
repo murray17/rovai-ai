@@ -66,6 +66,15 @@ mod tests {
         assert_eq!(parse_agent_id("agent_0"), None);
         assert_eq!(parse_agent_id("agent_01"), None);
         assert_eq!(parse_agent_id("agent_-1"), None);
+        assert_eq!(parse_agent_id("agent_9223372036854775807"), Some(i64::MAX));
+        assert_eq!(parse_agent_id("agent_9223372036854775808"), None);
+        assert_eq!(
+            parse_agent_id(&format!("agent_{}", "9".repeat(4_096))),
+            None
+        );
+        assert_eq!(parse_agent_id("agent_1 "), None);
+        assert_eq!(parse_agent_id(" agent_1"), None);
+        assert_eq!(parse_agent_id("agent_1_suffix"), None);
         assert_eq!(parse_agent_id("agent-luoke"), None);
     }
 }

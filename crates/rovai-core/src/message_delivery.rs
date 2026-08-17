@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{
+    agent_identity::parse_agent_id,
     agent_profile::{AdapterKind, resolve_frozen_runtime},
     camp_content::{
         StructuredCampMessageSegment, canonical_content_digest, normalize_content,
@@ -600,7 +601,7 @@ pub fn persist_public_a2a_message(
         .collect::<Vec<_>>();
 
     for value in &explicit_order {
-        if !is_canonical_agent_id(value) {
+        if parse_agent_id(value).is_none() {
             offenders.push(AddressingOffender {
                 source: "--to",
                 value: value.clone(),
@@ -613,7 +614,7 @@ pub fn persist_public_a2a_message(
     candidate_sources.extend(
         explicit_order
             .iter()
-            .filter(|value| is_canonical_agent_id(value))
+            .filter(|value| parse_agent_id(value).is_some())
             .cloned()
             .map(|value| ("--to", value)),
     );
@@ -2900,15 +2901,6 @@ fn stable_unique(values: impl IntoIterator<Item = String>) -> Vec<String> {
         .collect()
 }
 
-fn is_canonical_agent_id(value: &str) -> bool {
-    let Some(ordinal) = value.strip_prefix("agent_") else {
-        return false;
-    };
-    !ordinal.is_empty()
-        && !ordinal.starts_with('0')
-        && ordinal.bytes().all(|byte| byte.is_ascii_digit())
-}
-
 fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> InlineAddressing {
     let bytes = body.as_bytes();
     let mut occurrences = Vec::new();
@@ -2955,7 +2947,7 @@ fn parse_inline_addressing(body: &str, active_agents: &[ActiveCampAgent]) -> Inl
                 end += 1;
             }
             let value = body[index + 1..end].to_string();
-            if is_canonical_agent_id(&value) {
+            if parse_agent_id(&value).is_some() {
                 occurrences.push(InlineAddressingOccurrence {
                     agent_id: value,
                     start_byte: index,
@@ -3265,12 +3257,7 @@ https://example.test/@agent_7
     }
 
     #[test]
-    fn canonical_agent_ids_are_opaque_positive_decimal_identities() {
-        assert!(is_canonical_agent_id("agent_2"));
-        assert!(is_canonical_agent_id("agent_104"));
-        assert!(!is_canonical_agent_id("agent_02"));
-        assert!(!is_canonical_agent_id("agent_two"));
-
+    fn canonical_agent_ids_are_routed_as_opaque_identities() {
         let mut values = vec!["agent_9".to_string(), "agent_104".to_string()];
         values.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
         assert_eq!(values, vec!["agent_104", "agent_9"]);

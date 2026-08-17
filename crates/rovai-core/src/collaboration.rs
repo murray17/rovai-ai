@@ -4554,42 +4554,6 @@ mod tests {
     }
 
     #[test]
-    fn plain_at_text_never_becomes_member_routing() {
-        let (mut database, directory) = test_database();
-        configure_test_runtime(&database, &["agent_2"]);
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_profile SET profile_status = 'away' WHERE id = 'agent_1'",
-                [],
-            )
-            .expect("member should become away");
-        let service = CollaborationService::default();
-        let result = service
-            .create_test_camp_conversation(
-                &mut database,
-                &user_envelope(
-                    "mention-away-member",
-                    None,
-                    TestCampConversationCommand {
-                        project_path: directory.join("workspace").to_string_lossy().to_string(),
-                        project_binding_kind: ProjectBindingKind::Directory,
-                        body: "@luoke 请回答；邮箱 dev@muwa.example 不属于 mention。".to_string(),
-                        address: TestCampMessageAddress::Default,
-                        purpose: "验证普通文本".to_string(),
-                    },
-                ),
-            )
-            .expect("plain text should not be parsed as a mention");
-        assert_eq!(result.result.status, CommandResultStatus::Accepted);
-        assert_eq!(row_count(&database, "camp"), 1);
-        assert_eq!(row_count(&database, "agent_run"), 1);
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
     fn camp_entry_reconciles_default_lead_by_member_order_without_runtime_fallback() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
@@ -5862,6 +5826,34 @@ mod tests {
         let camp_id =
             create_camp_with_members(&service, &mut database, &directory, &["agent_2", "agent_1"]);
         let store = CampAttachmentStore::new(&directory);
+        let plain_content = vec![Segment::Text {
+            text: "普通文字 @luoke；邮箱 dev@muwa.example 不属于 mention。".to_string(),
+        }];
+        let plain_draft = store
+            .save_content(&mut database, &camp_id, 0, plain_content)
+            .unwrap();
+        let plain = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "plain-at-control-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: Some(plain_draft.revision),
+                        body: "ignored".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(plain.result.status, CommandResultStatus::Applied);
+        assert_eq!(row_count(&database, "message_delivery"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+
         let content = vec![
             Segment::Text {
                 text: "普通文字 @luoke；请 ".to_string(),
@@ -5909,7 +5901,7 @@ mod tests {
             .unwrap();
         assert_eq!(sent.result.status, CommandResultStatus::Accepted);
         assert!(replay.replayed);
-        assert_eq!(row_count(&database, "camp_message"), 1);
+        assert_eq!(row_count(&database, "camp_message"), 2);
         assert_eq!(row_count(&database, "agent_run"), 2);
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
 
@@ -5926,8 +5918,9 @@ mod tests {
                 SELECT body, structured_content_json, address_mode,
                        addressed_agent_ids_json, content_digest
                 FROM camp_message
+                WHERE id = ?1
                 "#,
-                [],
+                [sent.result.payload["campMessageId"].as_str().unwrap()],
                 |row| {
                     Ok((
                         row.get(0)?,

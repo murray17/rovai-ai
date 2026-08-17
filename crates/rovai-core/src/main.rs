@@ -9821,12 +9821,13 @@ fn prepare_codex_delta_batch(
         if !evidence.is_inline_delta_batchable() {
             return Ok(None);
         }
-        total_bytes = total_bytes
-            .checked_add(evidence.content_byte_count())
-            .context("Codex Evidence batch size overflow")?;
-        if total_bytes > RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES {
+        let next_bytes = evidence.content_byte_count();
+        if !runtime_delta_batch_accepts_next(prepared.len(), total_bytes, next_bytes) {
             return Ok(None);
         }
+        total_bytes = total_bytes
+            .checked_add(next_bytes)
+            .context("Codex Evidence batch size overflow")?;
         prepared.push(PreparedRuntimeDeltaMessage {
             native_method,
             params,
@@ -9858,12 +9859,13 @@ fn prepare_acp_delta_batch(
         if !evidence.is_inline_delta_batchable() {
             return Ok(None);
         }
-        total_bytes = total_bytes
-            .checked_add(evidence.content_byte_count())
-            .context("ACP Evidence batch size overflow")?;
-        if total_bytes > RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES {
+        let next_bytes = evidence.content_byte_count();
+        if !runtime_delta_batch_accepts_next(prepared.len(), total_bytes, next_bytes) {
             return Ok(None);
         }
+        total_bytes = total_bytes
+            .checked_add(next_bytes)
+            .context("ACP Evidence batch size overflow")?;
         prepared.push(PreparedRuntimeDeltaMessage {
             native_method,
             params,
@@ -9871,6 +9873,17 @@ fn prepare_acp_delta_batch(
         });
     }
     Ok(Some(prepared))
+}
+
+fn runtime_delta_batch_accepts_next(
+    current_items: usize,
+    current_bytes: usize,
+    next_bytes: usize,
+) -> bool {
+    current_items < RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS
+        && current_bytes
+            .checked_add(next_bytes)
+            .is_some_and(|total| total <= RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES)
 }
 
 async fn process_codex_events(
@@ -13403,55 +13416,83 @@ mod tests {
 
     #[test]
     fn runtime_delta_batching_is_bounded_and_stops_at_durable_boundaries() {
-        assert_eq!(
-            RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW,
-            Duration::from_millis(25)
-        );
-        assert_eq!(RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS, 32);
+        fn codex_message(host: &str, run: &str, epoch: i64, method: &str) -> CodexIncoming {
+            CodexIncoming::Message {
+                host_instance_id: host.to_string(),
+                agent_run_id: run.to_string(),
+                execution_epoch: epoch,
+                message: json!({
+                    "method": method,
+                    "params": {"itemId": "message-1", "delta": "hello"}
+                }),
+            }
+        }
 
-        let codex_delta = CodexIncoming::Message {
-            host_instance_id: "codex-host".to_string(),
-            agent_run_id: "run-1".to_string(),
-            execution_epoch: 2,
-            message: json!({
-                "method": "item/agentMessage/delta",
-                "params": {"itemId": "message-1", "delta": "hello"}
-            }),
-        };
+        type AcpRoute<'a> = (
+            AdapterKind,
+            &'a str,
+            &'a str,
+            i64,
+            &'a str,
+            &'a str,
+            &'a str,
+        );
+
+        fn acp_message(route: AcpRoute<'_>, update: &str) -> AcpIncoming {
+            let (adapter, host, run, epoch, session, prompt, delivery) = route;
+            AcpIncoming::Message {
+                adapter_kind: adapter,
+                host_instance_id: host.to_string(),
+                agent_run_id: run.to_string(),
+                execution_epoch: epoch,
+                native_session_id: session.to_string(),
+                native_prompt_id: prompt.to_string(),
+                delivery_id: delivery.to_string(),
+                sequence: 4,
+                message: json!({
+                    "method": "session/update",
+                    "params": {
+                        "update": {
+                            "sessionUpdate": update,
+                            "content": {"type": "text", "text": "world"},
+                            "toolCallId": "tool-1",
+                            "status": "completed"
+                        }
+                    }
+                }),
+            }
+        }
+
+        let codex_delta = codex_message("codex-host", "run-1", 2, "item/agentMessage/delta");
         assert_eq!(
             codex_delta_batch_identity(&codex_delta),
             Some(("codex-host", "run-1", 2))
         );
-        let codex_terminal = CodexIncoming::Message {
-            host_instance_id: "codex-host".to_string(),
-            agent_run_id: "run-1".to_string(),
-            execution_epoch: 2,
-            message: json!({
-                "method": "item/completed",
-                "params": {"item": {"id": "message-1", "type": "agentMessage"}}
-            }),
-        };
+        for different_route in [
+            codex_message("other-host", "run-1", 2, "item/agentMessage/delta"),
+            codex_message("codex-host", "run-2", 2, "item/agentMessage/delta"),
+            codex_message("codex-host", "run-1", 3, "item/agentMessage/delta"),
+        ] {
+            assert_ne!(
+                codex_delta_batch_identity(&different_route),
+                codex_delta_batch_identity(&codex_delta)
+            );
+        }
+        let codex_terminal = codex_message("codex-host", "run-1", 2, "item/completed");
         assert!(codex_delta_batch_identity(&codex_terminal).is_none());
 
-        let acp_delta = AcpIncoming::Message {
-            adapter_kind: AdapterKind::OpencodeCli,
-            host_instance_id: "acp-host".to_string(),
-            agent_run_id: "run-2".to_string(),
-            execution_epoch: 3,
-            native_session_id: "session-1".to_string(),
-            native_prompt_id: "prompt-1".to_string(),
-            delivery_id: "delivery-1".to_string(),
-            sequence: 4,
-            message: json!({
-                "method": "session/update",
-                "params": {
-                    "update": {
-                        "sessionUpdate": "agent_message_chunk",
-                        "content": {"type": "text", "text": "world"}
-                    }
-                }
-            }),
-        };
+        let acp_delta = acp_message(
+            (
+                AdapterKind::OpencodeCli,
+                "acp-host",
+                "run-2",
+                3,
+                "session-1",
+                "prompt-1",
+                "delivery-1",
+            ),
+            "agent_message_chunk",
+        );
         assert_eq!(
             acp_delta_batch_identity(&acp_delta),
             Some((
@@ -13464,27 +13505,196 @@ mod tests {
                 "delivery-1"
             ))
         );
-        let acp_tool_terminal = AcpIncoming::Message {
-            adapter_kind: AdapterKind::OpencodeCli,
-            host_instance_id: "acp-host".to_string(),
-            agent_run_id: "run-2".to_string(),
-            execution_epoch: 3,
-            native_session_id: "session-1".to_string(),
-            native_prompt_id: "prompt-1".to_string(),
-            delivery_id: "delivery-1".to_string(),
-            sequence: 5,
-            message: json!({
-                "method": "session/update",
-                "params": {
-                    "update": {
-                        "sessionUpdate": "tool_call_update",
-                        "toolCallId": "tool-1",
-                        "status": "completed"
-                    }
-                }
-            }),
-        };
+        for different_route in [
+            acp_message(
+                (
+                    AdapterKind::CopilotCli,
+                    "acp-host",
+                    "run-2",
+                    3,
+                    "session-1",
+                    "prompt-1",
+                    "delivery-1",
+                ),
+                "agent_message_chunk",
+            ),
+            acp_message(
+                (
+                    AdapterKind::OpencodeCli,
+                    "other-host",
+                    "run-2",
+                    3,
+                    "session-1",
+                    "prompt-1",
+                    "delivery-1",
+                ),
+                "agent_message_chunk",
+            ),
+            acp_message(
+                (
+                    AdapterKind::OpencodeCli,
+                    "acp-host",
+                    "run-3",
+                    3,
+                    "session-1",
+                    "prompt-1",
+                    "delivery-1",
+                ),
+                "agent_message_chunk",
+            ),
+            acp_message(
+                (
+                    AdapterKind::OpencodeCli,
+                    "acp-host",
+                    "run-2",
+                    4,
+                    "session-1",
+                    "prompt-1",
+                    "delivery-1",
+                ),
+                "agent_message_chunk",
+            ),
+            acp_message(
+                (
+                    AdapterKind::OpencodeCli,
+                    "acp-host",
+                    "run-2",
+                    3,
+                    "session-2",
+                    "prompt-1",
+                    "delivery-1",
+                ),
+                "agent_message_chunk",
+            ),
+            acp_message(
+                (
+                    AdapterKind::OpencodeCli,
+                    "acp-host",
+                    "run-2",
+                    3,
+                    "session-1",
+                    "prompt-2",
+                    "delivery-1",
+                ),
+                "agent_message_chunk",
+            ),
+            acp_message(
+                (
+                    AdapterKind::OpencodeCli,
+                    "acp-host",
+                    "run-2",
+                    3,
+                    "session-1",
+                    "prompt-1",
+                    "delivery-2",
+                ),
+                "agent_message_chunk",
+            ),
+        ] {
+            assert_ne!(
+                acp_delta_batch_identity(&different_route),
+                acp_delta_batch_identity(&acp_delta)
+            );
+        }
+        let acp_tool_terminal = acp_message(
+            (
+                AdapterKind::OpencodeCli,
+                "acp-host",
+                "run-2",
+                3,
+                "session-1",
+                "prompt-1",
+                "delivery-1",
+            ),
+            "tool_call_update",
+        );
         assert!(acp_delta_batch_identity(&acp_tool_terminal).is_none());
+
+        let CodexIncoming::Message { message, .. } = codex_delta else {
+            unreachable!()
+        };
+        let mut item_bounded_batch = vec![message; RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS];
+        assert!(
+            prepare_codex_delta_batch(&item_bounded_batch)
+                .unwrap()
+                .is_some()
+        );
+        item_bounded_batch.push(item_bounded_batch[0].clone());
+        assert!(
+            prepare_codex_delta_batch(&item_bounded_batch)
+                .unwrap()
+                .is_none()
+        );
+
+        let oversized_delta = json!({
+            "method": "item/agentMessage/delta",
+            "params": {
+                "itemId": "message-oversized",
+                "delta": "x".repeat(RUNTIME_EVIDENCE_DELTA_BATCH_MAX_BYTES)
+            }
+        });
+        assert!(
+            prepare_codex_delta_batch(&[oversized_delta])
+                .unwrap()
+                .is_none()
+        );
+        let CodexIncoming::Message {
+            message: terminal_message,
+            ..
+        } = codex_terminal
+        else {
+            unreachable!()
+        };
+        assert!(
+            prepare_codex_delta_batch(&[terminal_message])
+                .unwrap()
+                .is_none()
+        );
+
+        let AcpIncoming::Message {
+            native_session_id,
+            native_prompt_id,
+            delivery_id,
+            sequence,
+            message,
+            ..
+        } = acp_delta
+        else {
+            unreachable!()
+        };
+        assert!(
+            prepare_acp_delta_batch(&[AcpRuntimeDeltaMessage {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence,
+                message,
+            }])
+            .unwrap()
+            .is_some()
+        );
+        let AcpIncoming::Message {
+            native_session_id,
+            native_prompt_id,
+            delivery_id,
+            sequence,
+            message,
+            ..
+        } = acp_tool_terminal
+        else {
+            unreachable!()
+        };
+        assert!(
+            prepare_acp_delta_batch(&[AcpRuntimeDeltaMessage {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence,
+                message,
+            }])
+            .unwrap()
+            .is_none()
+        );
     }
 
     #[test]

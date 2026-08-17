@@ -814,20 +814,28 @@ mod tests {
     }
 
     #[test]
-    fn known_catalog_has_exactly_ten_stable_products() {
+    fn known_catalog_covers_each_adapter_kind_exactly_once() {
         let entries = catalog_entries();
-        assert_eq!(entries.len(), 10);
-        assert_eq!(entries[0]["runtimeKind"], "codex-cli");
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry["runtimeKind"] == "qwen-code")
-        );
-        assert!(
-            entries
-                .iter()
-                .any(|entry| entry["runtimeKind"] == "trae-cn-cli")
-        );
+        let expected = AdapterKind::ALL
+            .into_iter()
+            .map(AdapterKind::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        let actual = entries
+            .iter()
+            .map(|entry| entry["runtimeKind"])
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(entries.len(), expected.len());
+        assert_eq!(actual.len(), entries.len(), "runtimeKind must be unique");
+        assert_eq!(actual, expected, "catalog must not omit or invent products");
+        for entry in &entries {
+            let kind = entry["runtimeKind"]
+                .parse::<AdapterKind>()
+                .expect("every runtimeKind must parse as a known AdapterKind");
+            assert_eq!(kind.as_str(), entry["runtimeKind"]);
+            assert!(!entry["displayName"].trim().is_empty());
+            assert!(!entry["commandName"].trim().is_empty());
+        }
     }
 
     #[test]
