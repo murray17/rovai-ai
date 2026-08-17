@@ -3736,6 +3736,8 @@ describe('task event projections', () => {
     expect(markup).toContain('kiro-cli 1.0.0')
     expect(markup).not.toContain('runtime-blockers')
     expect(markup).not.toContain('需要探测 Agent 运行时')
+    expect(markup).not.toContain('runtime-status-refresh')
+    expect(markup).not.toContain('重新检查')
   })
 
   it('keeps all product checks visible without exposing diagnostic or installation details', () => {

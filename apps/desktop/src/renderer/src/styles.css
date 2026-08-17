@@ -5250,9 +5250,6 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .member-runtime-primary .runtime-installation-primary { flex-wrap: wrap; gap: 7px; }
 .member-runtime-primary .runtime-status-detail,
 .member-runtime-primary .runtime-installation-action { flex: 1 0 100%; }
-.runtime-status-refresh { padding: 2px 0; border: 0; color: var(--brand-ink); background: transparent; cursor: pointer; font-size: 10px; font-weight: 650; }
-.runtime-status-refresh:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 3px; }
-.runtime-status-refresh:disabled { cursor: default; opacity: .58; }
 .member-runtime-help { margin-top: -7px; line-height: 1.5; }
 .member-runtime-form > .member-form-actions { min-height: 58px; align-items: center; justify-content: space-between; gap: 16px; margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
 .member-runtime-form > .member-form-actions > div { display: flex; gap: 7px; }
