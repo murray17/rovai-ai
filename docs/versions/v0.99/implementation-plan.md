@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v0.99
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-17
 ---
 
@@ -20,7 +20,7 @@ last_updated: 2026-08-17
 - [x] 开启唯一 current v0.99、冻结 v0.98；
 - [x] 接受 ADR-0205，替代 ADR-0201；
 - [x] 建立 Runtime Usage Monitoring v2、Architecture、UI brief 与文档路由；
-- [ ] 生成 ADR HISTORY 并通过全部文档门禁。
+- [x] 生成 ADR HISTORY 并通过全部文档门禁。
 
 ## Checkpoint 1：五表 Usage persistence
 
@@ -46,14 +46,46 @@ last_updated: 2026-08-17
 
 ## Checkpoint 4：自动化与打包验收
 
-- [ ] Rust focused/workspace、TypeScript/Vitest、Node、docs、skills、fmt、Clippy 与 diff 门禁通过；
-- [ ] `pnpm package:mac` 与隔离 `accept:runtime-monitoring-ui` 通过；
-- [ ] `/Applications/Rovai AI.app` 可恢复替换，从安装路径启动并核对 Main/Core/CLI/app.asar；
-- [ ] 最终提交 fast-forward 推送 `origin/main`，worktree 无未保存内容并按治理规则清理。
+- [x] Rust focused/workspace、TypeScript/Vitest、Node、docs、skills、fmt、Clippy 与 diff 门禁通过；
+- [x] `pnpm package:mac` 与隔离 `accept:runtime-monitoring-ui` 通过；
+- [x] `/Applications/Rovai AI.app` 可恢复替换，从安装路径启动并核对 Main/Core/CLI/app.asar；
+- [x] 最终提交 fast-forward 推送 `origin/main`，worktree 无未保存内容并按治理规则清理。
 
 ## 实施结果
 
-待自动化、打包、安装和推送全部完成后记录不可变 SHA、测试计数、产物摘要、备份与安装验收。
+### 实现与自动化
+
+- Usage-only 实现提交：`c99bf8c3`；Data Contract 为 `v0.99`、projection schema 47、Migration 92；
+- `cargo test --workspace -- --quiet --test-threads=2`：608 passed、0 failed、3 ignored；此前默认全并发下的
+  Runtime probe timeout 经低并发全量重跑证明为资源竞争，不是功能失败；
+- `pnpm test`：ADR 21、Skill 3、Vitest 398、Node/Protocol 187 项全部通过；
+- `pnpm typecheck`、`cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、
+  `git diff --check`、`DOCS_BASE_REF=origin/main pnpm docs:check:ci` 全部通过。
+
+### 打包与隔离验收
+
+- `pnpm package:mac` 成功生成 ad-hoc signed arm64 `dist/mac-arm64/Rovai-ai.app`；App、Core、CLI 均通过
+  `codesign --verify --strict`；
+- `accept:runtime-monitoring-ui` 通过 Renderer-to-Core、clean-break empty state、Usage-only 五筛选、日夜主题、
+  compact/reduced-motion、200% 缩放与无横向溢出；capture 位于
+  `/var/folders/49/z0f8w56s28j4pfc7t80cm3w80000gq/T/rovai-monitoring-ui-captures-GU6KA0`；
+- SHA-256：`app.asar` = `2ef7587a361048c3a0cee6bc749c30da26eae6b0941c6a74f394275f03b1f3ef`，
+  `rovai-core` = `c4899164441f297fbc66a6fd64861064d6976544046e4315ac38743666c6a4b8`，
+  `rovai` = `605adf4a82ed328ebedbb48bc90f4e79fbbb1785ae2aabeda56ccffaa7c4c8f1`。
+
+### 日常安装与 clean break
+
+- 旧 App 可恢复备份：`/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.98-pre-v0.99-20260817-180707`；
+- 新 App 安装到 `/Applications/Rovai AI.app`，安装后 Main、Core、CLI 从该路径启动，三项 hash 与打包产物一致；
+- 安装验收与另一个已授权的数据恢复任务短暂重叠；最终由恢复任务独占 SQLite restore/WAL 收口后再做本版验收，
+  未用开发 fixture 或空库覆盖恢复结果；首次 stale-WAL 尝试保留在
+  `restore-attempt-stale-wal-20260817-182751/`，恢复前空库保留为
+  `rovai.sqlite.pre-full-restore-20260817-182409.backup`；
+- 完整备份经当前安装 v0.99 Core 正式迁移后，日常 `rovai.sqlite` 为 Data Contract `v0.99`、schema 47、
+  Migration 92；`integrity_check=ok`、外键检查无行，10 个 Agent Profile、14 个 Camp、46 个 Camp Member、
+  137 条 Camp Message 和 22 个 Conversation 均保留；
+- Monitoring persistence 精确只含五张 Usage 表，Run Summary 与 Checkpoint 均为 0，证明旧 Monitoring 数据
+  未补算，同时 Core 历史未被 Monitoring clean break 删除。
 
 ## References
 
@@ -63,4 +95,3 @@ last_updated: 2026-08-17
 - [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)
 - [本地 Runtime 工作流](../../development/local-workflow.md)
 - [桌面 UI 验收](../../development/ui-acceptance.md)
-

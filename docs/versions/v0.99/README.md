@@ -4,15 +4,15 @@ version: v0.99
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-08-17
 ---
 
 # Rovai-ai v0.99：最小 Runtime Usage Metering
 
-> 当前状态：长期边界已由 [ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md)接受；实现与验收
-> 正在按[实施计划](implementation-plan.md)收口。
+> 当前状态：长期边界已由 [ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md)接受；实现、打包、
+> clean-break 迁移与 `/Applications` 安装验收已经完成，证据见[实施计划](implementation-plan.md)。
 >
 > 前置版本：[v0.98 结构化 Skill 文件链接](../v0.98/README.md)
 
