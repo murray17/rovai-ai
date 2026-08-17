@@ -16,9 +16,9 @@ const upgradeDataDir = join(fixtureRoot, 'upgrade-v014')
 const outputDir = process.env.ROVAI_MEMBER_LIFECYCLE_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-member-lifecycle-ui-captures-'))
 const firstPort = Number(process.env.ROVAI_MEMBER_LIFECYCLE_ACCEPT_DEBUG_PORT ?? 9471)
-const acceptanceExecutablePath = '/usr/bin/true'
-const acceptanceExecutableFingerprint = `sha256:${createHash('sha256')
-  .update(await readFile(acceptanceExecutablePath))
+const fallbackAcceptanceExecutablePath = '/usr/bin/true'
+const fallbackAcceptanceExecutableFingerprint = `sha256:${createHash('sha256')
+  .update(await readFile(fallbackAcceptanceExecutablePath))
   .digest('hex')}`
 const acceptanceModelCatalog = JSON.stringify([{
   id: 'gpt-lifecycle-accept',
@@ -72,6 +72,13 @@ const acceptancePermissionOptions = JSON.stringify([
     unsupportedReason: null
   }
 ])
+const fallbackAcceptanceRuntime = {
+  executablePath: fallbackAcceptanceExecutablePath,
+  commandName: 'codex',
+  executableFingerprint: fallbackAcceptanceExecutableFingerprint,
+  permissionSchemaDigest: canonicalJsonDigest(JSON.parse(acceptancePermissionOptions)),
+  permissionOptions: JSON.parse(acceptancePermissionOptions)
+}
 
 await mkdir(freshDataDir, { recursive: true })
 await mkdir(upgradeDataDir, { recursive: true })
@@ -493,12 +500,29 @@ try {
     'runtime-settings-ten-products-one-preview-night-1040x700.png'
   )
   await capture(running.cdp, captures.runtimeSettings)
+  const discoveredCodex = (await request(running.cdp, 'runtime.installations.list'))
+    .find((installation) => installation.adapterKind === 'codex-cli'
+      && installation.installationClass === 'managed_default'
+      && installation.pathState === 'valid'
+      && installation.snapshot?.executableFingerprint
+      && installation.snapshot?.permissionSchemaDigest
+      && installation.snapshot?.permissionOptions?.length > 0)
+  const acceptanceRuntime = discoveredCodex
+    ? {
+        executablePath: discoveredCodex.executablePath,
+        commandName: discoveredCodex.commandName,
+        executableFingerprint: discoveredCodex.snapshot.executableFingerprint,
+        permissionSchemaDigest: discoveredCodex.snapshot.permissionSchemaDigest,
+        permissionOptions: discoveredCodex.snapshot.permissionOptions
+      }
+    : fallbackAcceptanceRuntime
   await closeApp(running)
   running = null
 
   await installAcceptanceRuntime(
     join(freshDataDir, 'rovai.sqlite'),
-    ['agent_1', 'agent_3', 'agent_4']
+    ['agent_1', 'agent_3', 'agent_4'],
+    acceptanceRuntime
   )
   await mkdir(join(freshDataDir, 'quick-chat'), { recursive: true })
   campId = 'camp-lifecycle-accept'
@@ -1171,9 +1195,17 @@ async function captureThemeMatrix(cdp, prefix, selectedName, directory) {
   return result
 }
 
-async function installAcceptanceRuntime(databasePath, agentIds) {
+async function installAcceptanceRuntime(
+  databasePath,
+  agentIds,
+  runtimeIdentity = fallbackAcceptanceRuntime
+) {
   const modelCatalog = sqlLiteral(acceptanceModelCatalog)
-  const permissionOptions = sqlLiteral(acceptancePermissionOptions)
+  const permissionOptions = sqlLiteral(JSON.stringify(runtimeIdentity.permissionOptions))
+  const executablePath = sqlLiteral(runtimeIdentity.executablePath)
+  const commandName = sqlLiteral(runtimeIdentity.commandName)
+  const executableFingerprint = sqlLiteral(runtimeIdentity.executableFingerprint)
+  const permissionSchemaDigest = sqlLiteral(runtimeIdentity.permissionSchemaDigest)
   const ids = agentIds.map(sqlLiteral).join(', ')
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
@@ -1186,8 +1218,8 @@ async function installAcceptanceRuntime(databasePath, agentIds) {
       installation_class, source, auth_scope, enabled,
       generation, path_state, version, created_at, updated_at
     ) VALUES (
-      'adapter-lifecycle-accept', 'codex-cli', '${acceptanceExecutablePath}',
-      'codex', 'managed_default', 'known_location', 'default', 1,
+      'adapter-lifecycle-accept', 'codex-cli', ${executablePath},
+      ${commandName}, 'managed_default', 'known_location', 'default', 1,
       1, 'valid', 1, datetime('now'), datetime('now')
     );
     INSERT INTO adapter_capability_snapshot(
@@ -1198,8 +1230,8 @@ async function installAcceptanceRuntime(databasePath, agentIds) {
       last_attempted_at, last_successful_probe_at, stale_at, last_error,
       native_session_compatibility_key
     ) VALUES (
-      'adapter-lifecycle-accept', 'acceptance', '${acceptanceExecutableFingerprint}',
-      'authenticated', 'ready', 1, 'sha256:acceptance-permissions', '[]', '[]',
+      'adapter-lifecycle-accept', 'acceptance', ${executableFingerprint},
+      'authenticated', 'ready', 1, ${permissionSchemaDigest}, '[]', '[]',
       ${modelCatalog}, ${permissionOptions},
       datetime('now'), datetime('now'), datetime('now'), NULL, NULL,
       'codex-app-server-v2'
@@ -1212,6 +1244,22 @@ async function installAcceptanceRuntime(databasePath, agentIds) {
           '{"adapterKind":"codex-cli","schemaVersion":1,"values":{"sandbox_mode":"workspace-write","approval_policy":"on-request"}}'
     WHERE id IN (${ids});
   `)
+}
+
+function canonicalJsonDigest(value) {
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalizeJson(value)))
+    .digest('hex')
+}
+
+function canonicalizeJson(value) {
+  if (Array.isArray(value)) return value.map(canonicalizeJson)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => [key, canonicalizeJson(entry)])
+  )
 }
 
 async function createCampFixture(
