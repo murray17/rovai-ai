@@ -138,8 +138,8 @@ use rovai_core::{
     },
     monitoring::{
         MonitoringFilter, MonitoringService, NativeSessionOutcome, ParsedRuntimeUsage,
-        RuntimeUsageBuffer, RuntimeUsageFlushTarget, parse_acp_usage_message,
-        parse_claude_result_usage, parse_codex_usage_message,
+        RuntimeUsageBuffer, RuntimeUsageFlushTarget, codex_usage_source_identity,
+        parse_acp_usage_message, parse_claude_result_usage, parse_codex_usage_message,
     },
     notification::{
         AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
@@ -853,6 +853,7 @@ struct ClaudeInputAcceptanceTarget<'a> {
 struct Core {
     database: Mutex<Database>,
     runtime_usage: Mutex<RuntimeUsageBuffer>,
+    runtime_usage_flush: Mutex<()>,
     output: mpsc::UnboundedSender<String>,
     runtime_search_environment: RwLock<Arc<RuntimeSearchEnvironment>>,
     runtime_discovery:
@@ -9053,6 +9054,7 @@ async fn run_core(
     let core = Arc::new(Core {
         database: Mutex::new(database),
         runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
+        runtime_usage_flush: Mutex::new(()),
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
         runtime_discovery: RwLock::new(
@@ -11117,7 +11119,17 @@ async fn flush_runtime_usage(
     target: RuntimeUsageFlushTarget,
     reason: &'static str,
 ) -> Result<usize> {
-    let batches = core.runtime_usage.lock().await.drain(target);
+    // A terminal flush must observe the result of any periodic flush that
+    // already drained this Run before deciding that its bookkeeping is idle.
+    let _flush_guard = core.runtime_usage_flush.lock().await;
+    let batches = {
+        let mut usage = core.runtime_usage.lock().await;
+        let batches = usage.drain(target.clone());
+        if batches.is_empty() {
+            usage.finish_idle_target_after_flush(&target);
+        }
+        batches
+    };
     if batches.is_empty() {
         return Ok(0);
     }
@@ -11127,7 +11139,10 @@ async fn flush_runtime_usage(
     };
     match persistence {
         Ok(inserted) => {
-            core.runtime_usage.lock().await.complete(&batches);
+            let mut usage = core.runtime_usage.lock().await;
+            usage.complete(&batches);
+            usage.finish_idle_target_after_flush(&target);
+            drop(usage);
             if inserted > 0 {
                 emit(
                     &core.output,
@@ -11254,7 +11269,8 @@ async fn process_agent_run_codex_message(
             core,
             agent_run_id,
             execution_epoch,
-            &canonical_json_digest(&message)
+            &codex_usage_source_identity(&params)
+                .or_else(|_| canonical_json_digest(&message))
                 .unwrap_or_else(|_| format!("codex:{method}:{agent_run_id}:{execution_epoch}")),
             &usage,
         )

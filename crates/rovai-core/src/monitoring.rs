@@ -405,6 +405,38 @@ impl RuntimeUsageBuffer {
         self.seen_source_identities
             .retain(|(key, _)| !completed.contains(&key.run));
     }
+
+    /// Release terminal/shutdown bookkeeping after the target has no data left
+    /// to persist. Callers must only invoke this after a successful flush (or
+    /// after `drain` proves that the target was already idle).
+    pub fn finish_idle_target_after_flush(&mut self, target: &RuntimeUsageFlushTarget) {
+        let candidates: BTreeSet<MonitoringRunKey> = match target {
+            RuntimeUsageFlushTarget::Run {
+                agent_run_id,
+                execution_epoch,
+            } => [MonitoringRunKey {
+                agent_run_id: agent_run_id.clone(),
+                execution_epoch: *execution_epoch,
+            }]
+            .into_iter()
+            .collect(),
+            RuntimeUsageFlushTarget::All => self.runs.keys().cloned().collect(),
+            RuntimeUsageFlushTarget::Periodic | RuntimeUsageFlushTarget::Due { .. } => return,
+        };
+        let completed = candidates
+            .into_iter()
+            .filter(|run| {
+                !self.pending_since.contains_key(run)
+                    && !self.pending.keys().any(|key| &key.run == run)
+            })
+            .collect::<BTreeSet<_>>();
+        if completed.is_empty() {
+            return;
+        }
+        self.runs.retain(|run, _| !completed.contains(run));
+        self.seen_source_identities
+            .retain(|(key, _)| !completed.contains(&key.run));
+    }
 }
 
 fn merge_buffered_record(
@@ -609,7 +641,11 @@ impl MonitoringService {
         if parse_time(&run_created_at)? < parse_time(&collection_started_at)? {
             return Ok(false);
         }
-        let support = support_snapshot(execution.runtime.adapter_kind, compaction_observable);
+        let support = support_snapshot(
+            execution.runtime.adapter_kind,
+            execution.runtime.reported_version.as_deref(),
+            compaction_observable,
+        );
         let tool_duration_capability = match support["toolDurationCoverage"].as_str() {
             Some("fine_grained") => "fine_grained",
             Some("run_level") => "covered_only",
@@ -3561,11 +3597,24 @@ fn support_snapshot_field(snapshot: &Value, field: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn support_snapshot(adapter_kind: AdapterKind, compaction_observable: bool) -> Value {
+fn support_snapshot(
+    adapter_kind: AdapterKind,
+    runtime_version: Option<&str>,
+    compaction_observable: bool,
+) -> Value {
     let (dialect_id, native_fields, tool_duration_coverage) = match adapter_kind {
         AdapterKind::CodexCli => (
             Some("codex-thread-token-usage-v1"),
-            [true, true, true, true, true, true, true, false],
+            [
+                true,
+                true,
+                true,
+                true,
+                codex_cache_write_supported(runtime_version),
+                true,
+                true,
+                false,
+            ],
             "fine_grained",
         ),
         AdapterKind::ClaudeCodeCli => (
@@ -3606,6 +3655,29 @@ fn support_snapshot(adapter_kind: AdapterKind, compaction_observable: bool) -> V
         "toolDurationCoverage": tool_duration_coverage,
         "compactionObservable": compaction_observable,
     })
+}
+
+fn codex_cache_write_supported(runtime_version: Option<&str>) -> bool {
+    // Upstream first shipped this field in the stable 0.145.0 schema. Keep the
+    // adapter-level default when no parseable version was reported, but do not
+    // claim the field for known older installations.
+    runtime_version
+        .and_then(parse_reported_version)
+        .is_none_or(|version| version >= [0, 145, 0])
+}
+
+fn parse_reported_version(value: &str) -> Option<[u64; 3]> {
+    value
+        .split(|character: char| !character.is_ascii_digit() && character != '.')
+        .filter(|part| !part.is_empty())
+        .find_map(|part| {
+            let mut components = part.split('.');
+            Some([
+                components.next()?.parse().ok()?,
+                components.next()?.parse().ok()?,
+                components.next()?.parse().ok()?,
+            ])
+        })
 }
 
 fn safe_integer(value: Option<&Value>) -> Option<i64> {
@@ -3694,6 +3766,24 @@ pub fn parse_codex_usage_message(method: &str, params: &Value) -> Vec<ParsedRunt
         })
     })
     .collect()
+}
+
+pub fn codex_usage_source_identity(params: &Value) -> Result<String> {
+    let thread_id = params
+        .get("threadId")
+        .and_then(Value::as_str)
+        .context("Codex Usage notification is missing threadId")?;
+    let total = params
+        .pointer("/tokenUsage/total")
+        .context("Codex Usage notification is missing tokenUsage.total")?;
+    // Codex can re-emit `last` when only rate-limit metadata changes. The
+    // cumulative snapshot is the semantic Usage event boundary; envelope-only
+    // changes must not turn the same `last` value into another delta.
+    crate::command::canonical_json_digest(&json!({
+        "dialectId": "codex-thread-token-usage-v1",
+        "threadId": thread_id,
+        "total": total,
+    }))
 }
 
 pub fn parse_acp_usage_message(
@@ -4077,6 +4167,101 @@ mod tests {
         let normalized = normalize_usage(&parsed[0]);
         assert_eq!(normalized.fields.input_tokens, Some(70));
         assert_eq!(normalized.status, "complete");
+
+        let old_support = support_snapshot(AdapterKind::CodexCli, Some("0.144.1"), false);
+        assert_eq!(old_support["nativeFields"]["cacheWrite"], false);
+        let first_supported =
+            support_snapshot(AdapterKind::CodexCli, Some("codex-cli 0.145.0"), false);
+        assert_eq!(first_supported["nativeFields"]["cacheWrite"], true);
+        let current_support =
+            support_snapshot(AdapterKind::CodexCli, Some("codex-cli 0.147.0"), false);
+        assert_eq!(current_support["nativeFields"]["cacheWrite"], true);
+        let unknown_support = support_snapshot(AdapterKind::CodexCli, None, false);
+        assert_eq!(unknown_support["nativeFields"]["cacheWrite"], true);
+    }
+
+    #[test]
+    fn codex_rate_limit_only_rebroadcast_does_not_repeat_last_delta() {
+        let event = fixture("codex");
+        let mut rebroadcast = event.clone();
+        rebroadcast["params"]["rateLimits"] = json!({
+            "primary": { "usedPercent": 42 }
+        });
+        assert_eq!(
+            codex_usage_source_identity(&event["params"]).unwrap(),
+            codex_usage_source_identity(&rebroadcast["params"]).unwrap(),
+            "rate-limit-only changes must retain the cumulative Usage identity"
+        );
+        let mut advanced = event.clone();
+        advanced["params"]["tokenUsage"]["total"]["inputTokens"] = json!(321);
+        assert_ne!(
+            codex_usage_source_identity(&event["params"]).unwrap(),
+            codex_usage_source_identity(&advanced["params"]).unwrap(),
+            "an advancing cumulative snapshot must receive a new Usage identity"
+        );
+
+        let (directory, mut database, execution) = claimed_monitoring_run();
+        MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
+        let started = Instant::now();
+        let mut buffer = RuntimeUsageBuffer::default();
+        for notification in [&event, &rebroadcast] {
+            buffer
+                .observe(
+                    &execution,
+                    &codex_usage_source_identity(&notification["params"]).unwrap(),
+                    &parse_codex_usage_message(
+                        notification["method"].as_str().unwrap(),
+                        &notification["params"],
+                    ),
+                    started,
+                )
+                .unwrap();
+        }
+        let terminal = buffer.drain(RuntimeUsageFlushTarget::All);
+        assert_eq!(
+            MonitoringService::record_usage_batches(&mut database, &terminal).unwrap(),
+            2,
+            "the semantic event should persist one last and one total observation"
+        );
+        let (raw_count, input, output, reasoning, cache_read, cache_write): (
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+            i64,
+        ) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM runtime_usage_raw_observation),
+                    input_tokens, output_tokens, reasoning_output_tokens,
+                    cache_read_input_tokens, cache_write_input_tokens
+                FROM runtime_usage_run_rollup
+                WHERE agent_run_id = ?1 AND execution_epoch = ?2
+                "#,
+                params![execution.agent_run_id, execution.execution_epoch],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(raw_count, 2);
+        assert_eq!(
+            (input, output, reasoning, cache_read, cache_write),
+            (70, 30, 8, 40, 10)
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -4417,6 +4602,47 @@ mod tests {
                 .unwrap();
         assert_eq!((raw_count, source_count), (2, 3));
         assert_eq!((input, cache_read, cache_write), (210, 75, 45));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn usage_buffer_terminal_cleanup_removes_idle_state_after_periodic_flush() {
+        let (directory, mut database, execution) = claimed_monitoring_run();
+        MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
+        let observation = parse_claude_result_usage(&fixture("claude"))
+            .into_iter()
+            .next()
+            .unwrap();
+        let mut buffer = RuntimeUsageBuffer::default();
+        buffer
+            .observe(
+                &execution,
+                "source-before-terminal",
+                &[observation],
+                Instant::now(),
+            )
+            .unwrap();
+        let periodic = buffer.drain(RuntimeUsageFlushTarget::Periodic);
+        assert_eq!(
+            MonitoringService::record_usage_batches(&mut database, &periodic).unwrap(),
+            1
+        );
+        buffer.complete(&periodic);
+        assert!(buffer.pending.is_empty());
+        assert!(buffer.pending_since.is_empty());
+        assert_eq!(buffer.runs.len(), 1);
+        assert_eq!(buffer.seen_source_identities.len(), 1);
+
+        buffer.finish_idle_target_after_flush(&RuntimeUsageFlushTarget::Run {
+            agent_run_id: execution.agent_run_id,
+            execution_epoch: execution.execution_epoch,
+        });
+        assert!(buffer.runs.is_empty());
+        assert!(buffer.pending.is_empty());
+        assert!(buffer.pending_since.is_empty());
+        assert!(buffer.seen_source_identities.is_empty());
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
