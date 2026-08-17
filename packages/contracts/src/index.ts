@@ -1814,6 +1814,7 @@ export interface OnboardingApi {
 export interface WindowControlsApi {
   getResetCapability(): Promise<WindowResetCapability>
   resetBounds(): Promise<WindowResetResult>
+  onPageZoomChanged(listener: (percentage: number) => void): () => void
 }
 
 export interface NavigationPin {

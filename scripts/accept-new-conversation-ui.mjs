@@ -100,6 +100,20 @@ try {
           && !text.includes('协作方式'),
         saysRecommended: text.includes('推荐'),
         optionalShell: Boolean(dialog?.querySelector('.new-camp-optional-shell')),
+        defaultsAttentionRemoved: !text.includes('默认配置已失效')
+          && !text.includes('已保存配置曾失效')
+          && !text.includes('以上调整只用于本次创建'),
+        dropdownIcons: (() => {
+          const icons = [...dialog.querySelectorAll('.new-camp-chevron')]
+          const rightEdges = icons.map((icon) => icon.getBoundingClientRect().right)
+          return {
+            count: icons.length,
+            allSvg: icons.every((icon) => icon.tagName === 'svg'),
+            rightEdgeSpread: rightEdges.length > 0
+              ? Math.max(...rightEdges) - Math.min(...rightEdges)
+              : null
+          }
+        })(),
         selectedMembers: ${JSON.stringify(memberSelectionValue.selected)},
         memberCount: ${JSON.stringify(memberSelectionValue.count)},
         focusedProject: document.activeElement?.classList.contains('new-camp-picker-trigger'),
@@ -129,6 +143,10 @@ try {
     || value?.collaborationRemoved !== true
     || value?.saysRecommended !== false
     || value?.optionalShell !== true
+    || value?.defaultsAttentionRemoved !== true
+    || value?.dropdownIcons?.count !== 4
+    || value?.dropdownIcons?.allSvg !== true
+    || value?.dropdownIcons?.rightEdgeSpread > 1
     || value?.memberCount < 1
     || value?.selectedMembers !== value?.memberCount
     || value?.focusedProject !== true
@@ -197,6 +215,7 @@ try {
       5_000
     )
   }
+
   process.stdout.write(`${output}\n`)
 } finally {
   cdp.close()

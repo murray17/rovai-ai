@@ -23,6 +23,9 @@ raised theme surface, strong boundary and 3px Steel top edge; semantic errors ke
 Header: eyebrow `NEW CAMP`, title “创建新对话”, description “确定这段对话的工作环境与队员”, and an
 accessibly named close button.
 
+Workspace, teammate, Lead and optional-configuration controls share one 16px stroke chevron and one
+right-edge inset. Native select styling must not introduce a second platform-specific arrow.
+
 ## Field order
 
 1. **工作目录 · 可选** — default Quick Chat, a known canonical Project or “选择工作目录…”. Preserve
@@ -30,7 +33,8 @@ accessibly named close button.
    ordinary directory is usable before Git detection completes; do not run `git init`.
 2. **队员与 Lead** — default to the saved valid team configuration, otherwise all active teammates.
    The set is non-empty and Lead remains inside it. Runtime availability is guidance, not a structural
-   selector.
+   selector. Unavailable saved members are filtered while initializing the draft without adding a
+   separate “默认配置已失效” warning block.
 3. **可选配置 / 对话名称** — collapsed by default. Expansion focuses the input. Normalize and count
    Unicode scalars up to 80; empty means “未命名对话” and is not delegated to a Runtime/LLM.
 

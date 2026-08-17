@@ -446,6 +446,19 @@ try {
         focusedProject: document.activeElement?.classList.contains('new-camp-picker-trigger'),
         collaborationRemoved: !document.querySelector('.new-camp-dialog')?.textContent?.includes('协作方式')
           && !document.querySelector('.new-camp-dialog')?.textContent?.includes('暂未开放'),
+        defaultsAttentionRemoved: !document.querySelector('.new-camp-dialog')?.textContent?.includes('默认配置已失效'),
+        dropdownIcons: (() => {
+          const dialog = document.querySelector('.new-camp-dialog')
+          const icons = [...(dialog?.querySelectorAll('.new-camp-chevron') ?? [])]
+          const rightEdges = icons.map((icon) => icon.getBoundingClientRect().right)
+          return {
+            count: icons.length,
+            allSvg: icons.every((icon) => icon.tagName === 'svg'),
+            rightEdgeSpread: rightEdges.length > 0
+              ? Math.max(...rightEdges) - Math.min(...rightEdges)
+              : null
+          }
+        })(),
         horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
       })`,
       returnByValue: true
@@ -456,6 +469,10 @@ try {
         || !quickChatEntryState?.createEnabled
         || !quickChatEntryState?.focusedProject
         || !quickChatEntryState?.collaborationRemoved
+        || !quickChatEntryState?.defaultsAttentionRemoved
+        || quickChatEntryState?.dropdownIcons?.count !== 4
+        || !quickChatEntryState?.dropdownIcons?.allSvg
+        || quickChatEntryState?.dropdownIcons?.rightEdgeSpread > 1
         || quickChatEntryState?.horizontalOverflow) {
       throw new Error(`New conversation did not open the configured Camp Dialog: ${JSON.stringify(quickChatEntryState)}`)
     }

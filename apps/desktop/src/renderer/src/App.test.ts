@@ -96,7 +96,6 @@ import {
   taskCreationBlocksSubmittedRunAutoFocus
 } from './CampWorkspace'
 import {
-  describeInitialCampSelectionAdjustments,
   initialCampSelection,
   limitDraftNameInput,
   normalizeDraftName,
@@ -1214,7 +1213,7 @@ describe('task event projections', () => {
     })).toEqual({ memberIds: ['agent-b'], leadId: 'agent-b' })
   })
 
-  it('explains invalid saved members and a temporary Lead without changing the saved defaults', () => {
+  it('silently filters unavailable saved members and picks an available Lead', () => {
     const preflight = {
       admissible: true,
       presentMembers: [
@@ -1227,26 +1226,11 @@ describe('task event projections', () => {
       memberAgentIds: ['agent-a', 'agent-b'],
       defaultLeadAgentId: 'agent-b'
     }
-    const agents = [
-      { ...agentProfile(), agentId: 'agent-a', displayName: '洛可' },
-      { ...agentProfile(), agentId: 'agent-b', displayName: '沐瓦', presence: 'away' as const }
-    ]
     const plan = planInitialCampSelection(preflight, preferred)
 
-    expect(plan).toMatchObject({
+    expect(plan).toEqual({
       memberIds: ['agent-a'],
-      leadId: 'agent-a',
-      excludedMemberIds: ['agent-b'],
-      usedPresentMembersFallback: false,
-      leadChanged: true
-    })
-    expect(describeInitialCampSelectionAdjustments(plan, preferred, agents)).toEqual({
-      items: [
-        '沐瓦已暂时离队，本次未加入',
-        '原默认负责人 沐瓦已暂时离队',
-        '本次暂时选择洛可作为负责人'
-      ],
-      note: '以上调整只用于本次创建，不会修改“设置 → 通用”中保存的默认配置。'
+      leadId: 'agent-a'
     })
     expect(preferred).toEqual({
       memberAgentIds: ['agent-a', 'agent-b'],
@@ -1254,7 +1238,7 @@ describe('task event projections', () => {
     })
   })
 
-  it('explains a latched invalid configuration that is currently selectable', () => {
+  it('reuses a currently valid saved configuration without extra dialog state', () => {
     const preflight = {
       admissible: true,
       presentMembers: [
@@ -1264,17 +1248,13 @@ describe('task event projections', () => {
       blockers: []
     }
     const preferred = { memberAgentIds: ['agent-a'], defaultLeadAgentId: 'agent-a' }
-    const explanation = describeInitialCampSelectionAdjustments(
-      planInitialCampSelection(preflight, preferred),
-      preferred,
-      [{ ...agentProfile(), agentId: 'agent-a', displayName: '洛可' }]
-    )
-    expect(explanation?.items).toEqual([
-      '已保存配置曾失效，本次仍按当前可用的保存值预选，请确认后创建'
-    ])
+    expect(planInitialCampSelection(preflight, preferred)).toEqual({
+      memberIds: ['agent-a'],
+      leadId: 'agent-a'
+    })
   })
 
-  it('explains when every saved member is replaced in the dialog draft', () => {
+  it('falls back to every present member when all saved members are unavailable', () => {
     const preflight = {
       admissible: true,
       presentMembers: [
@@ -1284,22 +1264,10 @@ describe('task event projections', () => {
       blockers: []
     }
     const preferred = { memberAgentIds: ['agent-b'], defaultLeadAgentId: 'agent-b' }
-    const agents = [
-      { ...agentProfile(), agentId: 'agent-a', displayName: '洛可' },
-      { ...agentProfile(), agentId: 'agent-b', displayName: '沐瓦', presence: 'removed' as const, removedAt: '2026-08-09T00:00:00Z' }
-    ]
-    const explanation = describeInitialCampSelectionAdjustments(
-      planInitialCampSelection(preflight, preferred),
-      preferred,
-      agents
-    )
-
-    expect(explanation?.items).toEqual([
-      '沐瓦已永久移除，本次未加入',
-      '默认队员均不可用，本次暂时选择全部当前在队队员：洛可',
-      '原默认负责人 沐瓦已永久移除',
-      '本次暂时选择洛可作为负责人'
-    ])
+    expect(planInitialCampSelection(preflight, preferred)).toEqual({
+      memberIds: ['agent-a'],
+      leadId: 'agent-a'
+    })
   })
 
   it('protects the last member, switches a removed Lead, and preserves a manual Lead', () => {

@@ -420,7 +420,6 @@ export function App(): React.JSX.Element {
   const [newConversationInitialWorkspace, setNewConversationInitialWorkspace] = useState<WorkspaceSelection | null>(null)
   const [newConversationInitialSelection, setNewConversationInitialSelection] = useState<GeneralPreferencesSnapshot['newConversationDefaults']>(null)
   const [newConversationAttention, setNewConversationAttention] = useState<string | null>(null)
-  const [explainNewConversationSelectionAdjustments, setExplainNewConversationSelectionAdjustments] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
@@ -1569,8 +1568,7 @@ export function App(): React.JSX.Element {
 
   const openNewConversation = (
     workspace: WorkspaceSelection | null,
-    attentionMessage: string | null = null,
-    explainInitialSelectionAdjustments = false
+    attentionMessage: string | null = null
   ): void => {
     newConversationReturnFocus.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -1578,7 +1576,6 @@ export function App(): React.JSX.Element {
     setNewConversationInitialWorkspace(workspace)
     setNewConversationInitialSelection(generalPreferences?.newConversationDefaults ?? null)
     setNewConversationAttention(attentionMessage)
-    setExplainNewConversationSelectionAdjustments(explainInitialSelectionAdjustments)
     setNewConversationOpen(true)
   }
 
@@ -1606,10 +1603,7 @@ export function App(): React.JSX.Element {
         return 'dialog'
       }
     }
-    const explainInitialSelectionAdjustments = Boolean(
-      generalPreferences?.newConversationDefaults && !defaults
-    )
-    openNewConversation(workspace, null, explainInitialSelectionAdjustments)
+    openNewConversation(workspace)
     return 'dialog'
   }
 
@@ -2710,7 +2704,6 @@ export function App(): React.JSX.Element {
         initialWorkspace={newConversationInitialWorkspace}
         initialSelection={newConversationInitialSelection}
         attentionMessage={newConversationAttention}
-        explainInitialSelectionAdjustments={explainNewConversationSelectionAdjustments}
         projects={visibleNavigation?.projects ?? []}
         preflight={campCreationPreflight}
         agents={agents}

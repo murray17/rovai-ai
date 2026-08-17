@@ -62,6 +62,11 @@ Project/Camp 行、菜单、临时提醒和设置返回均可键盘操作，Icon
 未读状态不能只靠颜色。Camp 行“有新回复”只在真正打开该会话、窗口可见且拥有焦点后消除；后台
 Snapshot 刷新、设置/记忆页和应用失焦均不得提前清除。
 
+页面缩放继续使用标准 `CommandOrControl + / - / 0` 快捷键；App 拦截 Electron 的默认倍率阶梯，
+将键盘放大和缩小固定为每次增减 10 个百分点，`CommandOrControl 0` 重置为 100%。键盘调整后，
+App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，并通过 polite live region 播报同一文字。
+浮层使用双主题语义 Token，在首次训练和所有一级页面上保持同一位置与行为。
+
 ## References
 
 - [ADR-0074: Quick Chat 全栈切换](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md)

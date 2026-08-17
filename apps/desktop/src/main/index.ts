@@ -48,6 +48,7 @@ import { RestorableLocationStore, parseRestorableLocation } from './restorable-l
 import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
+import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -281,6 +282,31 @@ function createWindow(): void {
     restorableLocations.get()
   )
 
+  let pageZoomFeedbackTimer: ReturnType<typeof setTimeout> | null = null
+  const publishPageZoom = (): void => {
+    if (window.isDestroyed() || window.webContents.isDestroyed()) return
+    const percentage = pageZoomPercentage(window.webContents.getZoomFactor())
+    if (percentage !== null) window.webContents.send('rovai:page-zoom-changed', percentage)
+  }
+  const queuePageZoomFeedback = (): void => {
+    if (pageZoomFeedbackTimer !== null) clearTimeout(pageZoomFeedbackTimer)
+    pageZoomFeedbackTimer = setTimeout(() => {
+      pageZoomFeedbackTimer = null
+      publishPageZoom()
+    }, 0)
+  }
+  window.webContents.on('before-input-event', (event, input) => {
+    const action = pageZoomAction(input, process.platform)
+    if (action === null) return
+
+    event.preventDefault()
+    const percentage = nextPageZoomPercentage(window.webContents.getZoomFactor(), action)
+    if (percentage === null) return
+    window.webContents.setZoomFactor(percentage / 100)
+    window.webContents.send('rovai:page-zoom-changed', percentage)
+  })
+  window.webContents.on('zoom-changed', queuePageZoomFeedback)
+
   let persistBoundsTimer: ReturnType<typeof setTimeout> | null = null
   const flushBounds = (): void => {
     if (window.isDestroyed()) return
@@ -301,6 +327,8 @@ function createWindow(): void {
     flushBounds()
   })
   window.on('closed', () => {
+    if (pageZoomFeedbackTimer !== null) clearTimeout(pageZoomFeedbackTimer)
+    pageZoomFeedbackTimer = null
     desktopSessions.delete(webContentsId)
     if (mainWindow === window) mainWindow = null
   })

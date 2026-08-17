@@ -113,6 +113,13 @@ const api: RovaiApi = {
     },
     resetBounds() {
       return ipcRenderer.invoke('rovai:window-reset-bounds')
+    },
+    onPageZoomChanged(listener) {
+      const handler = (_event: Electron.IpcRendererEvent, percentage: unknown): void => {
+        if (typeof percentage === 'number' && Number.isFinite(percentage)) listener(percentage)
+      }
+      ipcRenderer.on('rovai:page-zoom-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:page-zoom-changed', handler)
     }
   },
   navigationPreferences: {

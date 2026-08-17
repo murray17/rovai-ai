@@ -21,7 +21,6 @@ export function NewConversationDialog({
   initialWorkspace,
   initialSelection,
   attentionMessage,
-  explainInitialSelectionAdjustments = false,
   projects,
   preflight,
   agents,
@@ -36,7 +35,6 @@ export function NewConversationDialog({
   initialWorkspace: WorkspaceSelection | null
   initialSelection?: NewConversationDefaults | null
   attentionMessage?: string | null
-  explainInitialSelectionAdjustments?: boolean
   projects: ProjectNavigationGroup[]
   preflight: CampCreationPreflight
   agents: AgentProfile[]
@@ -67,12 +65,6 @@ export function NewConversationDialog({
   const initialSelectionPlan = useMemo(
     () => planInitialCampSelection(preflight, preferredInitialSelection),
     [preferredInitialSelection, preflight.presentMembers]
-  )
-  const initialSelectionAttention = useMemo(
-    () => explainInitialSelectionAdjustments
-      ? describeInitialCampSelectionAdjustments(initialSelectionPlan, preferredInitialSelection, agents)
-      : null,
-    [agents, explainInitialSelectionAdjustments, initialSelectionPlan, preferredInitialSelection]
   )
   const selectedMembers = preflight.presentMembers.filter((member) =>
     selectedMemberIds.includes(member.agentId)
@@ -217,15 +209,6 @@ export function NewConversationDialog({
 
             <div className="new-camp-dialog-body">
               {attentionMessage && <p className="new-camp-attention" role="status">{attentionMessage}</p>}
-              {initialSelectionAttention && (
-                <div className="new-camp-attention new-camp-defaults-attention" role="status">
-                  <strong>默认配置已失效</strong>
-                  <ul>
-                    {initialSelectionAttention.items.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}
-                  </ul>
-                  <p>{initialSelectionAttention.note}</p>
-                </div>
-              )}
               <section className="new-camp-section">
                 <SectionHeading step="01" title="工作目录" optional detail="选择任意安全、可读目录；不选择则创建在快速对话。" />
                 <div className="new-camp-picker">
@@ -252,7 +235,7 @@ export function NewConversationDialog({
                         <i aria-hidden="true" />{gitPresentation.label}
                       </span>
                     )}
-                    <span className="new-camp-chevron" aria-hidden="true">⌄</span>
+                    <DropdownChevron />
                   </button>
                   {projectMenuOpen && (
                     <div className="new-camp-picker-menu" role="listbox" aria-label="选择工作目录">
@@ -331,7 +314,7 @@ export function NewConversationDialog({
                               })}
                             </span>
                             <span><strong>已选择 {selectedMembers.length} 位队员</strong><small>{selectedMembers.map((member) => member.displayName).join('、')}</small></span>
-                            <span className="new-camp-chevron" aria-hidden="true">⌄</span>
+                            <DropdownChevron />
                           </button>
                           {memberMenuOpen && (
                             <div className="new-camp-picker-menu member-menu" role="listbox" aria-label="选择队员" aria-multiselectable="true">
@@ -367,13 +350,16 @@ export function NewConversationDialog({
                         {memberError && <p className="new-camp-field-error" role="alert">{memberError}</p>}
                         <label className="new-camp-lead-field">
                           <span>负责人</span>
-                          <select value={leadId} disabled={busy} onChange={(event) => setLeadId(event.target.value)}>
-                            {selectedMembers.map((member) => (
-                              <option key={member.agentId} value={member.agentId}>
-                                {member.displayName} · {readinessLabel(member.runtimeReadiness)}
-                              </option>
-                            ))}
-                          </select>
+                          <span className="new-camp-select-shell">
+                            <select value={leadId} disabled={busy} onChange={(event) => setLeadId(event.target.value)}>
+                              {selectedMembers.map((member) => (
+                                <option key={member.agentId} value={member.agentId}>
+                                  {member.displayName} · {readinessLabel(member.runtimeReadiness)}
+                                </option>
+                              ))}
+                            </select>
+                            <DropdownChevron />
+                          </span>
                         </label>
                       </>
                     )}
@@ -396,7 +382,7 @@ export function NewConversationDialog({
                     <span aria-hidden="true">☷</span>
                     <span><strong>可选配置</strong><small>补充对话名称，不影响上面的结构配置。</small></span>
                     <em>{normalizedName || '未设置'}</em>
-                    <span className="new-camp-chevron" aria-hidden="true">⌄</span>
+                    <DropdownChevron />
                   </button>
                   {optionalOpen && (
                     <div className="new-camp-optional-panel" id="new-camp-optional-panel">
@@ -469,6 +455,14 @@ function SectionHeading({ step, title, detail, optional = false, suffix }: {
       <span>{step}</span>
       <div><strong>{title}{optional && <em> · 可选</em>}{suffix && <em> · {suffix}</em>}</strong><small>{detail}</small></div>
     </div>
+  )
+}
+
+function DropdownChevron(): React.JSX.Element {
+  return (
+    <svg className="new-camp-chevron" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="m4.25 6.25 3.75 3.5 3.75-3.5" />
+    </svg>
   )
 }
 
@@ -583,9 +577,6 @@ export function initialCampSelection(
 export interface InitialCampSelectionPlan {
   memberIds: string[]
   leadId: string
-  excludedMemberIds: string[]
-  usedPresentMembersFallback: boolean
-  leadChanged: boolean
 }
 
 export function planInitialCampSelection(
@@ -606,76 +597,7 @@ export function planInitialCampSelection(
     )?.agentId ?? memberIds[0] ?? ''
   return {
     memberIds,
-    leadId,
-    excludedMemberIds: preferred?.memberAgentIds.filter((agentId) =>
-      !presentMemberIds.includes(agentId)
-    ) ?? [],
-    usedPresentMembersFallback: preferred !== null && preferredMemberIds.length === 0,
-    leadChanged: preferred !== null && preferred.defaultLeadAgentId !== leadId
-  }
-}
-
-export interface InitialCampSelectionAttention {
-  items: string[]
-  note: string
-}
-
-export function describeInitialCampSelectionAdjustments(
-  plan: InitialCampSelectionPlan,
-  preferred: NewConversationDefaults | null,
-  agents: AgentProfile[]
-): InitialCampSelectionAttention | null {
-  if (!preferred) return null
-  const profileById = new Map(agents.map((agent) => [agent.agentId, agent]))
-  const displayName = (agentId: string): string => profileById.get(agentId)?.displayName ?? agentId
-  const items = plan.excludedMemberIds.map((agentId) => {
-    const agent = profileById.get(agentId)
-    if (!agent) return `默认队员“${agentId}”当前不存在，本次未加入`
-    if (agent.presence === 'removed' || agent.removedAt !== null) {
-      return `${agent.displayName}已永久移除，本次未加入`
-    }
-    if (agent.presence === 'away') return `${agent.displayName}已暂时离队，本次未加入`
-    return `${agent.displayName}当前不在可选队员中，本次未加入`
-  })
-
-  if (plan.usedPresentMembersFallback) {
-    const selectedNames = plan.memberIds.map(displayName).join('、')
-    if (preferred.memberAgentIds.length === 0) {
-      items.push(selectedNames
-        ? `未保存有效的默认队员，本次暂时选择全部当前在队队员：${selectedNames}`
-        : '未保存有效的默认队员，当前也没有可选队员')
-    } else {
-      items.push(selectedNames
-        ? `默认队员均不可用，本次暂时选择全部当前在队队员：${selectedNames}`
-        : '默认队员均不可用，当前也没有可选队员')
-    }
-  }
-
-  if (plan.leadChanged) {
-    const originalLead = profileById.get(preferred.defaultLeadAgentId)
-    if (!originalLead) {
-      items.push(preferred.defaultLeadAgentId
-        ? `原默认负责人“${preferred.defaultLeadAgentId}”当前不存在`
-        : '未保存有效的默认负责人')
-    } else if (originalLead.presence === 'removed' || originalLead.removedAt !== null) {
-      items.push(`原默认负责人 ${originalLead.displayName}已永久移除`)
-    } else if (originalLead.presence === 'away') {
-      items.push(`原默认负责人 ${originalLead.displayName}已暂时离队`)
-    } else {
-      items.push(`原默认负责人 ${originalLead.displayName}当前不可用`)
-    }
-    items.push(plan.leadId
-      ? `本次暂时选择${displayName(plan.leadId)}作为负责人`
-      : '当前没有可用队员可作为负责人')
-  }
-
-  if (items.length === 0) {
-    items.push('已保存配置曾失效，本次仍按当前可用的保存值预选，请确认后创建')
-  }
-
-  return {
-    items,
-    note: '以上调整只用于本次创建，不会修改“设置 → 通用”中保存的默认配置。'
+    leadId
   }
 }
 
