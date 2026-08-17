@@ -506,10 +506,16 @@ Approval 与 Tool interval 的 count/P95/sum/union 都在 SQL CTE/window/aggrega
 connection 不属于 v1；如规模需要，须另立并发决策。
 
 Renderer 仅在 monitoring surface mounted 且 `document.hidden = false` 时轮询，间隔固定 12 秒（必须保持在
-10～15 秒范围）。`monitoring.changed`/`agent_run.terminal` 使用 300ms debounce 触发同一个 snapshot refresh；
-同一时刻最多一个 snapshot request 在途，poll/event/manual/filter 触发合并为下一次刷新。隐藏或卸载时取消
-interval、debounce 与 subscription。页面 open/refresh 只能读已保存 cost/reconciliation，
-不得触发 Provider API 或价格同步。
+10～15 秒范围）。普通四秒 Usage Flush 只持久化，不发送即时 `monitoring.changed`；下一次轮询读取已保存
+结果。其他 `monitoring.changed` 使用 300ms debounce，且距上次成功 snapshot 不足 10 秒时延后到该边界；
+`agent_run.terminal` 与页面重新可见可绕过这一最短间隔并在 debounce 后立即刷新。同一时刻最多一个 snapshot
+request 在途，poll/event/manual/filter 触发合并为下一次刷新。隐藏或卸载时取消 interval、debounce 与
+subscription。页面 open/refresh 只能读已保存 cost/reconciliation，不得触发 Provider API 或价格同步。
+
+Execution Evidence admission 只在 `firstVisibleActivityAt IS NULL` 时立即写该标量。`evidenceCount` 在内存中
+按 `(agentRunId, executionEpoch)` 累计，普通运行随四秒节拍批量增加；terminal、Runtime Host exit 和 Core
+shutdown 强制 Flush，其中 Run terminal/Host exit 必须从带索引的 Evidence key 精确对齐最终计数。Snapshot
+只读 Enrollment 标量，不扫描 Evidence。
 
 ## Errors and privacy
 

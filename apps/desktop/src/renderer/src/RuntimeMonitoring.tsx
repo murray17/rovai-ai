@@ -20,9 +20,29 @@ type MetricKind = 'integer' | 'percent' | 'duration' | 'ratio'
 
 export const MONITORING_POLL_INTERVAL_MS = 12_000
 export const MONITORING_EVENT_DEBOUNCE_MS = 300
+export const MONITORING_BACKGROUND_MIN_INTERVAL_MS = 10_000
 
 export function shouldRefreshMonitoringEvent(method: string): boolean {
   return method === 'monitoring.changed' || method === 'agent_run.terminal'
+}
+
+export function shouldStartMonitoringBackgroundRefresh(
+  now: number,
+  lastSuccessfulSnapshotAt: number | null
+): boolean {
+  return lastSuccessfulSnapshotAt === null
+    || now - lastSuccessfulSnapshotAt >= MONITORING_BACKGROUND_MIN_INTERVAL_MS
+}
+
+export function monitoringEventRefreshDelay(
+  now: number,
+  lastSuccessfulSnapshotAt: number | null,
+  urgent: boolean
+): number {
+  if (urgent || lastSuccessfulSnapshotAt === null) return MONITORING_EVENT_DEBOUNCE_MS
+  const remaining = MONITORING_BACKGROUND_MIN_INTERVAL_MS
+    - (now - lastSuccessfulSnapshotAt)
+  return Math.max(MONITORING_EVENT_DEBOUNCE_MS, remaining)
 }
 
 export function nextMonitoringTabIndex(currentIndex: number, key: string): number | null {
@@ -68,9 +88,10 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
   const snapshotRef = useRef<MonitoringSnapshot | null>(null)
   const requestSequenceRef = useRef(0)
   const inFlightRef = useRef(false)
-  const pendingForegroundRef = useRef<boolean | null>(null)
+  const pendingRequestRef = useRef<{ foreground: boolean; urgent: boolean } | null>(null)
+  const lastSuccessfulSnapshotAtRef = useRef<number | null>(null)
   const filterRef = useRef(filter)
-  const loadSnapshotRef = useRef<(foreground: boolean) => void>(() => undefined)
+  const loadSnapshotRef = useRef<(foreground: boolean, urgent?: boolean) => void>(() => undefined)
   filterRef.current = filter
 
   useEffect(() => {
@@ -80,9 +101,17 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
     }
   }, [])
 
-  const loadSnapshot = useCallback(async (foreground: boolean) => {
+  const loadSnapshot = useCallback(async (foreground: boolean, urgent = false) => {
+    if (!foreground && !urgent && !shouldStartMonitoringBackgroundRefresh(
+      performance.now(),
+      lastSuccessfulSnapshotAtRef.current
+    )) return
     if (inFlightRef.current) {
-      pendingForegroundRef.current = (pendingForegroundRef.current ?? false) || foreground
+      const pending = pendingRequestRef.current
+      pendingRequestRef.current = {
+        foreground: (pending?.foreground ?? false) || foreground,
+        urgent: (pending?.urgent ?? false) || urgent
+      }
       if (foreground) {
         setLoading(true)
         setError(null)
@@ -102,6 +131,7 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       if (!mountedRef.current || requestSequence !== requestSequenceRef.current
         || !sameMonitoringFilter(requestedFilter, filterRef.current)) return
       snapshotRef.current = result
+      lastSuccessfulSnapshotAtRef.current = performance.now()
       setSnapshot(result)
       setError(null)
       setRefreshError(null)
@@ -116,16 +146,21 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       }
     } finally {
       inFlightRef.current = false
-      const pendingForeground = pendingForegroundRef.current
-      pendingForegroundRef.current = null
-      if (mountedRef.current && pendingForeground !== null && !document.hidden) {
-        queueMicrotask(() => loadSnapshotRef.current(pendingForeground))
+      const pendingRequest = pendingRequestRef.current
+      pendingRequestRef.current = null
+      if (mountedRef.current && pendingRequest !== null && !document.hidden) {
+        queueMicrotask(() => loadSnapshotRef.current(
+          pendingRequest.foreground,
+          pendingRequest.urgent
+        ))
       } else if (mountedRef.current && requestSequence === requestSequenceRef.current) {
         setLoading(false)
       }
     }
   }, [filter])
-  loadSnapshotRef.current = (foreground) => { void loadSnapshot(foreground) }
+  loadSnapshotRef.current = (foreground, urgent = false) => {
+    void loadSnapshot(foreground, urgent)
+  }
 
   useEffect(() => {
     void loadSnapshot(true)
@@ -134,6 +169,7 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
   useEffect(() => {
     let pollTimer: ReturnType<typeof setInterval> | null = null
     let eventTimer: ReturnType<typeof setTimeout> | null = null
+    let eventRefreshUrgent = false
     const stopPoll = (): void => {
       if (pollTimer !== null) clearInterval(pollTimer)
       pollTimer = null
@@ -143,27 +179,36 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       if (document.hidden) return
       pollTimer = setInterval(() => void loadSnapshot(false), MONITORING_POLL_INTERVAL_MS)
     }
-    const scheduleEventRefresh = (): void => {
+    const scheduleEventRefresh = (urgent = false): void => {
       if (document.hidden) return
       if (eventTimer !== null) clearTimeout(eventTimer)
+      eventRefreshUrgent = eventRefreshUrgent || urgent
+      const delay = monitoringEventRefreshDelay(
+        performance.now(),
+        lastSuccessfulSnapshotAtRef.current,
+        eventRefreshUrgent
+      )
       eventTimer = setTimeout(() => {
+        const refreshUrgent = eventRefreshUrgent
         eventTimer = null
-        void loadSnapshot(false)
-      }, MONITORING_EVENT_DEBOUNCE_MS)
+        eventRefreshUrgent = false
+        void loadSnapshot(false, refreshUrgent)
+      }, delay)
     }
     const handleVisibilityChange = (): void => {
       if (document.hidden) {
         stopPoll()
         if (eventTimer !== null) clearTimeout(eventTimer)
         eventTimer = null
+        eventRefreshUrgent = false
         return
       }
       startPoll()
-      scheduleEventRefresh()
+      scheduleEventRefresh(true)
     }
     const unsubscribe = window.rovai.onEvent((event) => {
       if (shouldRefreshMonitoringEvent(event.method)) {
-        scheduleEventRefresh()
+        scheduleEventRefresh(event.method === 'agent_run.terminal')
       }
     })
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -173,6 +218,7 @@ export function RuntimeMonitoring({ agents }: { agents: AgentProfile[] }): React
       document.removeEventListener('visibilitychange', handleVisibilityChange)
       stopPoll()
       if (eventTimer !== null) clearTimeout(eventTimer)
+      eventRefreshUrgent = false
     }
   }, [loadSnapshot])
 

@@ -11,7 +11,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     future::Future,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex as StdMutex},
     time::Instant,
 };
 
@@ -107,7 +107,9 @@ use rovai_core::{
         database_integrity_check, diagnostics_export_v5,
     },
     execution_budget::camp_turn_execution_budget_now,
-    execution_evidence::{AgentRunExecutionEvidence, ExecutionEvidenceService},
+    execution_evidence::{
+        AgentRunExecutionEvidence, ExecutionEvidenceService, RecordedExecutionEvidence,
+    },
     git,
     managed_blob::ManagedBlobStore,
     mcp::{
@@ -137,9 +139,10 @@ use rovai_core::{
         runtime_waiting_recipients,
     },
     monitoring::{
-        MonitoringFilter, MonitoringService, NativeSessionOutcome, ParsedRuntimeUsage,
-        RuntimeUsageBuffer, RuntimeUsageFlushTarget, codex_usage_source_identity,
-        parse_acp_usage_message, parse_claude_result_usage, parse_codex_usage_message,
+        MonitoringEvidenceCountBuffer, MonitoringEvidenceCountFlushTarget, MonitoringFilter,
+        MonitoringService, NativeSessionOutcome, ParsedRuntimeUsage, RuntimeUsageBuffer,
+        RuntimeUsageFlushTarget, codex_usage_source_identity, parse_acp_usage_message,
+        parse_claude_result_usage, parse_codex_usage_message,
     },
     notification::{
         AcknowledgeNotificationEpisodeCommand, AcknowledgeVisibleNotificationSourcesCommand,
@@ -854,6 +857,8 @@ struct Core {
     database: Mutex<Database>,
     runtime_usage: Mutex<RuntimeUsageBuffer>,
     runtime_usage_flush: Mutex<()>,
+    monitoring_evidence_counts: StdMutex<MonitoringEvidenceCountBuffer>,
+    monitoring_evidence_flush: Mutex<()>,
     output: mpsc::UnboundedSender<String>,
     runtime_search_environment: RwLock<Arc<RuntimeSearchEnvironment>>,
     runtime_discovery:
@@ -1187,6 +1192,22 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    fn observe_monitoring_evidence(&self, recorded: &RecordedExecutionEvidence) {
+        if !recorded.inserted {
+            return;
+        }
+        let mut buffer = self
+            .monitoring_evidence_counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Err(error) = buffer.observe(&recorded.agent_run_id, recorded.execution_epoch) {
+            eprintln!(
+                "failed to buffer Monitoring Evidence count for AgentRun {}: {error:#}",
+                recorded.agent_run_id
+            );
+        }
+    }
+
     fn known_agent_ids(database: &Database) -> Result<BTreeSet<String>> {
         AgentProfileService::default().all_profile_ids(database)
     }
@@ -2668,7 +2689,7 @@ impl Core {
                 "receiptId": null,
                 "operationProjection": operation_projection,
             });
-            ExecutionEvidenceService
+            let started_evidence = ExecutionEvidenceService
                 .record_builtin_tool_started(
                     &mut database,
                     &ManagedBlobStore::new(&self.data_dir),
@@ -2677,6 +2698,7 @@ impl Core {
                     &started_evidence,
                 )?
                 .context("Built-in Tool start evidence was not durably admitted")?;
+            self.observe_monitoring_evidence(&started_evidence);
             let operation_result = match request.tool_name.as_str() {
                 CAMP_MESSAGE_SEND_TOOL_NAME => {
                     let input = serde_json::from_value::<CampMessageSendInput>(request.input)
@@ -3043,8 +3065,12 @@ impl Core {
                     &evidence,
                 )
             };
-            if let Err(error) = evidence_result {
-                eprintln!("failed to record Built-in Tool result evidence: {error:#}");
+            match evidence_result {
+                Ok(Some(recorded)) => self.observe_monitoring_evidence(&recorded),
+                Ok(None) => {}
+                Err(error) => {
+                    eprintln!("failed to record Built-in Tool result evidence: {error:#}");
+                }
             }
         }
         match result {
@@ -4404,8 +4430,22 @@ impl Core {
             "diagnostics.check" => Ok(serde_json::to_value(self.diagnostics_report().await)?),
             "monitoring.snapshot" => {
                 let filter: MonitoringFilter = serde_json::from_value(request.params.clone())?;
+                let lock_wait_started = Instant::now();
                 let mut database = self.database.lock().await;
-                MonitoringService::snapshot(&mut database, &filter)
+                let lock_wait_millis = lock_wait_started.elapsed().as_millis();
+                let query_started = Instant::now();
+                let result = MonitoringService::snapshot(&mut database, &filter);
+                let query_millis = query_started.elapsed().as_millis();
+                drop(database);
+                eprintln!(
+                    "[monitoring] operation=snapshot range={} lock_wait_ms={} query_ms={} total_ms={} outcome={}",
+                    filter.range,
+                    lock_wait_millis,
+                    query_millis,
+                    lock_wait_millis + query_millis,
+                    if result.is_ok() { "ok" } else { "error" },
+                );
+                result
             }
             "diagnostics.export" => {
                 let report = self.diagnostics_report().await;
@@ -7437,7 +7477,7 @@ impl Core {
         missing_send_recovery_candidate: &MissingSendRecoveryCandidate,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<()> {
-        if let Err(error) = flush_runtime_usage_run(
+        if let Err(error) = flush_runtime_monitoring_run(
             self,
             &execution.agent_run_id,
             execution.execution_epoch,
@@ -7446,7 +7486,7 @@ impl Core {
         .await
         {
             eprintln!(
-                "failed to flush Runtime Usage before terminal settlement for AgentRun {}: {error:#}",
+                "failed to flush Runtime monitoring before terminal settlement for AgentRun {}: {error:#}",
                 execution.agent_run_id
             );
         }
@@ -8318,7 +8358,7 @@ impl Core {
         error: &anyhow::Error,
         runtime_terminal_observed: bool,
     ) {
-        if let Err(flush_error) = flush_runtime_usage_run(
+        if let Err(flush_error) = flush_runtime_monitoring_run(
             self,
             &execution.agent_run_id,
             execution.execution_epoch,
@@ -8327,7 +8367,7 @@ impl Core {
         .await
         {
             eprintln!(
-                "failed to flush Runtime Usage before failing AgentRun {}: {flush_error:#}",
+                "failed to flush Runtime monitoring before failing AgentRun {}: {flush_error:#}",
                 execution.agent_run_id
             );
         }
@@ -9055,6 +9095,8 @@ async fn run_core(
         database: Mutex::new(database),
         runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
         runtime_usage_flush: Mutex::new(()),
+        monitoring_evidence_counts: StdMutex::new(MonitoringEvidenceCountBuffer::default()),
+        monitoring_evidence_flush: Mutex::new(()),
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
         runtime_discovery: RwLock::new(
@@ -10184,9 +10226,9 @@ async fn process_agent_run_acp_message(
         return;
     }
     if let Err(error) =
-        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "terminal_flush").await
+        flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "terminal_flush").await
     {
-        eprintln!("failed to flush ACP Usage for AgentRun {agent_run_id}: {error:#}");
+        eprintln!("failed to flush ACP monitoring for AgentRun {agent_run_id}: {error:#}");
     }
     if let Err(error) = persist_acp_prompt_completion(
         core,
@@ -10327,14 +10369,20 @@ async fn persist_runtime_evidence(
         return Ok(None);
     }
     let mut database = core.database.lock().await;
-    ExecutionEvidenceService.record_runtime_event(
+    let recorded = ExecutionEvidenceService.record_runtime_event(
         &mut database,
         &ManagedBlobStore::new(&core.data_dir),
         agent_run_id,
         execution_epoch,
         event_type,
         payload,
-    )
+    )?;
+    if let Some(recorded) = recorded {
+        core.observe_monitoring_evidence(&recorded);
+        Ok(Some(recorded.into_evidence()))
+    } else {
+        Ok(None)
+    }
 }
 
 async fn process_agent_run_acp_approval_request(
@@ -11013,10 +11061,10 @@ async fn process_acp_agent_run_exit(
         return;
     }
     if let Err(error) =
-        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "host_exit_flush").await
+        flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "host_exit_flush").await
     {
         eprintln!(
-            "failed to flush ACP Usage after Host exit for AgentRun {agent_run_id}: {error:#}"
+            "failed to flush ACP monitoring after Host exit for AgentRun {agent_run_id}: {error:#}"
         );
     }
     if acp_runtime_on_host(
@@ -11118,6 +11166,7 @@ async fn flush_runtime_usage(
     core: &Core,
     target: RuntimeUsageFlushTarget,
     reason: &'static str,
+    notify_monitoring: bool,
 ) -> Result<usize> {
     // A terminal flush must observe the result of any periodic flush that
     // already drained this Run before deciding that its bookkeeping is idle.
@@ -11143,7 +11192,7 @@ async fn flush_runtime_usage(
             usage.complete(&batches);
             usage.finish_idle_target_after_flush(&target);
             drop(usage);
-            if inserted > 0 {
+            if inserted > 0 && notify_monitoring {
                 emit(
                     &core.output,
                     "monitoring.changed",
@@ -11159,21 +11208,79 @@ async fn flush_runtime_usage(
     }
 }
 
-async fn flush_runtime_usage_run(
+async fn flush_monitoring_evidence_counts(
+    core: &Core,
+    target: MonitoringEvidenceCountFlushTarget,
+) -> Result<usize> {
+    let _flush_guard = core.monitoring_evidence_flush.lock().await;
+    let needs_flush = core
+        .monitoring_evidence_counts
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .needs_flush(&target);
+    if !needs_flush {
+        return Ok(0);
+    }
+    // Evidence admission records the durable row while holding the Database
+    // Mutex, then increments this in-memory buffer. Preserve the same lock
+    // order here so an exact terminal reconciliation cannot include a newer
+    // Evidence row while leaving its buffered increment pending for a second
+    // application.
+    let mut database = core.database.lock().await;
+    let flush = {
+        core.monitoring_evidence_counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .drain(target)
+    };
+    if flush.is_empty() {
+        return Ok(0);
+    }
+    let persistence = MonitoringService::record_evidence_count_flush(&mut database, &flush);
+    match persistence {
+        Ok(changed) => Ok(changed),
+        Err(error) => {
+            core.monitoring_evidence_counts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .restore(flush)?;
+            Err(error)
+        }
+    }
+}
+
+async fn flush_runtime_monitoring_run(
     core: &Core,
     agent_run_id: &str,
     execution_epoch: i64,
     reason: &'static str,
-) -> Result<usize> {
-    flush_runtime_usage(
+) -> Result<(usize, usize)> {
+    let usage = flush_runtime_usage(
         core,
         RuntimeUsageFlushTarget::Run {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
         },
         reason,
+        true,
     )
-    .await
+    .await;
+    let evidence = flush_monitoring_evidence_counts(
+        core,
+        MonitoringEvidenceCountFlushTarget::Run {
+            agent_run_id: agent_run_id.to_string(),
+            execution_epoch,
+        },
+    )
+    .await;
+    match (usage, evidence) {
+        (Ok(usage), Ok(evidence)) => Ok((usage, evidence)),
+        (Err(usage), Ok(_)) => Err(usage),
+        (Ok(_), Err(evidence)) => Err(evidence),
+        (Err(usage), Err(evidence)) => Err(anyhow::anyhow!(
+            "Runtime Usage flush failed: {usage:#}; Monitoring Evidence count flush failed: {evidence:#}"
+        )),
+    }
 }
 
 async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::Receiver<()>) {
@@ -11189,8 +11296,15 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     &core,
                     RuntimeUsageFlushTarget::Periodic,
                     "usage_flush",
+                    false,
                 ).await {
                     eprintln!("periodic Runtime Usage flush failed: {error:#}");
+                }
+                if let Err(error) = flush_monitoring_evidence_counts(
+                    &core,
+                    MonitoringEvidenceCountFlushTarget::Periodic,
+                ).await {
+                    eprintln!("periodic Monitoring Evidence count flush failed: {error:#}");
                 }
             }
             _ = &mut shutdown => {
@@ -11198,8 +11312,15 @@ async fn process_runtime_usage_flusher(core: Arc<Core>, mut shutdown: oneshot::R
                     &core,
                     RuntimeUsageFlushTarget::All,
                     "shutdown_flush",
+                    false,
                 ).await {
                     eprintln!("terminal Runtime Usage shutdown flush failed: {error:#}");
+                }
+                if let Err(error) = flush_monitoring_evidence_counts(
+                    &core,
+                    MonitoringEvidenceCountFlushTarget::All,
+                ).await {
+                    eprintln!("terminal Monitoring Evidence count shutdown flush failed: {error:#}");
                 }
                 break;
             }
@@ -11405,9 +11526,9 @@ async fn process_agent_run_codex_message(
         return;
     }
     if let Err(error) =
-        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "terminal_flush").await
+        flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "terminal_flush").await
     {
-        eprintln!("failed to flush Codex Usage for AgentRun {agent_run_id}: {error:#}");
+        eprintln!("failed to flush Codex monitoring for AgentRun {agent_run_id}: {error:#}");
     }
     let missing_send_recovery_candidate = completed.final_agent_message.clone().map(|body| {
         MissingSendRecoveryCandidate::new(MissingSendRecoveryBoundary::CodexCompletedTurn, body)
@@ -11973,10 +12094,10 @@ async fn process_agent_run_exit(
         return;
     }
     if let Err(error) =
-        flush_runtime_usage_run(core, agent_run_id, execution_epoch, "host_exit_flush").await
+        flush_runtime_monitoring_run(core, agent_run_id, execution_epoch, "host_exit_flush").await
     {
         eprintln!(
-            "failed to flush Codex Usage after Host exit for AgentRun {agent_run_id}: {error:#}"
+            "failed to flush Codex monitoring after Host exit for AgentRun {agent_run_id}: {error:#}"
         );
     }
     if core

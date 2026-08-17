@@ -31,7 +31,7 @@ clean-break enrollment 与成本 grain 由 [ADR-0201](../adr/0201-sparse-runtime
 | Runtime Fleet Snapshot | 提供当前 active/warm/burst Host 的 data-minimized 计数；历史只从 cutover 后明确样本开始 |
 | Provider Billing Integration | 后续以独立后台同步边界写 Provider Billing Bucket；看板只读已保存结果，open/refresh 永不触发对账 |
 | Electron Main / Preload | 只 allowlist `monitoring.snapshot` 和用户发起的脱敏导出；导出复用同一快照，不直读 SQLite/日志/凭据 |
-| Renderer Monitoring Surface | 展示同一快照的三个 Tab；可见时每 12 秒轮询，持久化事件 300ms debounce，隐藏/卸载即停止 |
+| Renderer Monitoring Surface | 展示同一快照的三个 Tab；可见时每 12 秒轮询，普通持久化事件同时受 300ms debounce 与 10 秒成功请求间隔约束，终态事件可立即刷新，隐藏/卸载即停止 |
 
 ## Collection and parsing flow
 
@@ -141,6 +141,9 @@ Core currently owns one Database Mutex. Monitoring therefore keeps database crit
 - Runtime event handling only performs a scalar enrollment lookup before buffering; it does not write on each update;
 - a single global four-second tick flushes all pending Usage in one transaction, while a terminal boundary bypasses the
   cadence and forces that Run's pending batch;
+- Execution Evidence keeps first-visible activity durable in the admitting transaction, but only while that scalar is
+  still `NULL`; Evidence count increments are coalesced in memory, flushed on the same four-second cadence, and replaced
+  with an exact indexed count at terminal/Host-exit boundaries;
 - enrollment projects Usage capability booleans, first-visible activity and Evidence counts so snapshot assembly does
   not parse per-Run capability JSON or scan immutable Evidence;
 - trend queries read `monitoring_run_rollup_hourly`; lifecycle/P95 and Usage/Context return scalar aggregates, while
@@ -150,12 +153,15 @@ Core currently owns one Database Mutex. Monitoring therefore keeps database crit
 - no monitoring critical section reads a Managed Blob, parses a Runtime Transcript, performs a network request or
   starts Provider reconciliation.
 
-The Renderer owns one 12-second visible-page interval regardless of the number of cards. `monitoring.changed` and
-`agent_run.terminal` share a 300ms debounce, so the forced Usage flush and terminal event normally collapse into one
-refresh. A single-flight gate coalesces overlapping poll/event/manual/filter triggers instead of queueing concurrent
-Database Mutex work. `visibilitychange` stops/restarts polling, and component unmount cancels timers/subscription. A
-future separate SQLite read connection is not implied by this design; it requires profiling and its own concurrency
-contract.
+The Renderer owns one 12-second visible-page interval regardless of the number of cards. A periodic four-second Usage
+flush advances stored facts without emitting an immediate `monitoring.changed`; the next visible-page poll reads it.
+Other non-terminal persisted-fact events use a 300ms debounce and may not start a background snapshot less than 10
+seconds after the last successful request. `agent_run.terminal` and visibility restoration may bypass that interval so
+terminal and stale foreground state converge promptly. A single-flight gate coalesces overlapping
+poll/event/manual/filter triggers instead of queueing concurrent Database Mutex work. `visibilitychange` stops/restarts
+polling, and component unmount cancels timers/subscription. Core emits structured snapshot timing with Database Mutex
+wait and query duration so a separate SQLite read connection is considered only from measured need and its own
+concurrency contract.
 
 ## Cost and billing composition
 

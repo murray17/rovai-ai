@@ -439,6 +439,114 @@ impl RuntimeUsageBuffer {
     }
 }
 
+#[derive(Debug, Clone)]
+struct MonitoringEvidenceCountUpdate {
+    run: MonitoringRunKey,
+    increment: i64,
+}
+
+#[derive(Debug, Clone)]
+pub enum MonitoringEvidenceCountFlushTarget {
+    Periodic,
+    Run {
+        agent_run_id: String,
+        execution_epoch: i64,
+    },
+    All,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct MonitoringEvidenceCountFlush {
+    updates: Vec<MonitoringEvidenceCountUpdate>,
+    reconcile: BTreeSet<MonitoringRunKey>,
+}
+
+impl MonitoringEvidenceCountFlush {
+    pub fn is_empty(&self) -> bool {
+        self.updates.is_empty() && self.reconcile.is_empty()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct MonitoringEvidenceCountBuffer {
+    pending: BTreeMap<MonitoringRunKey, i64>,
+}
+
+impl MonitoringEvidenceCountBuffer {
+    pub fn needs_flush(&self, target: &MonitoringEvidenceCountFlushTarget) -> bool {
+        match target {
+            MonitoringEvidenceCountFlushTarget::Periodic
+            | MonitoringEvidenceCountFlushTarget::All => !self.pending.is_empty(),
+            MonitoringEvidenceCountFlushTarget::Run { .. } => true,
+        }
+    }
+
+    pub fn observe(&mut self, agent_run_id: &str, execution_epoch: i64) -> Result<()> {
+        let pending = self
+            .pending
+            .entry(MonitoringRunKey {
+                agent_run_id: agent_run_id.to_string(),
+                execution_epoch,
+            })
+            .or_default();
+        *pending = pending
+            .checked_add(1)
+            .context("Monitoring Evidence count overflow while buffering")?;
+        Ok(())
+    }
+
+    pub fn drain(
+        &mut self,
+        target: MonitoringEvidenceCountFlushTarget,
+    ) -> MonitoringEvidenceCountFlush {
+        let reconcile = match &target {
+            MonitoringEvidenceCountFlushTarget::Periodic => BTreeSet::new(),
+            MonitoringEvidenceCountFlushTarget::Run {
+                agent_run_id,
+                execution_epoch,
+            } => [MonitoringRunKey {
+                agent_run_id: agent_run_id.clone(),
+                execution_epoch: *execution_epoch,
+            }]
+            .into_iter()
+            .collect(),
+            MonitoringEvidenceCountFlushTarget::All => self.pending.keys().cloned().collect(),
+        };
+        let selected: BTreeSet<MonitoringRunKey> = match target {
+            MonitoringEvidenceCountFlushTarget::Periodic
+            | MonitoringEvidenceCountFlushTarget::All => self.pending.keys().cloned().collect(),
+            MonitoringEvidenceCountFlushTarget::Run {
+                agent_run_id,
+                execution_epoch,
+            } => [MonitoringRunKey {
+                agent_run_id,
+                execution_epoch,
+            }]
+            .into_iter()
+            .collect(),
+        };
+        let updates = selected
+            .into_iter()
+            .filter_map(|run| {
+                self.pending
+                    .remove(&run)
+                    .map(|increment| MonitoringEvidenceCountUpdate { run, increment })
+            })
+            .collect();
+        MonitoringEvidenceCountFlush { updates, reconcile }
+    }
+
+    pub fn restore(&mut self, flush: MonitoringEvidenceCountFlush) -> Result<()> {
+        for update in flush.updates {
+            let pending = self.pending.entry(update.run).or_default();
+            *pending = pending
+                .checked_add(update.increment)
+                .context("Monitoring Evidence count overflow while restoring")?;
+        }
+        Ok(())
+    }
+}
+
 fn merge_buffered_record(
     pending: &mut BTreeMap<BufferedUsageKey, BufferedUsageRecord>,
     incoming: BufferedUsageRecord,
@@ -854,6 +962,51 @@ impl MonitoringService {
         }
         transaction.commit()?;
         Ok(inserted)
+    }
+
+    pub fn record_evidence_count_flush(
+        database: &mut Database,
+        flush: &MonitoringEvidenceCountFlush,
+    ) -> Result<usize> {
+        if flush.is_empty() {
+            return Ok(0);
+        }
+        let transaction = database.connection_mut().transaction()?;
+        let mut changed = 0;
+        for update in &flush.updates {
+            if flush.reconcile.contains(&update.run) {
+                continue;
+            }
+            changed += transaction.execute(
+                r#"
+                UPDATE monitoring_run_enrollment
+                SET evidence_count = evidence_count + ?3
+                WHERE agent_run_id = ?1 AND execution_epoch = ?2
+                "#,
+                params![
+                    update.run.agent_run_id,
+                    update.run.execution_epoch,
+                    update.increment,
+                ],
+            )?;
+        }
+        for run in &flush.reconcile {
+            changed += transaction.execute(
+                r#"
+                UPDATE monitoring_run_enrollment
+                SET evidence_count = (
+                    SELECT COUNT(*)
+                    FROM agent_run_execution_evidence evidence
+                    WHERE evidence.agent_run_id = ?1
+                      AND evidence.execution_epoch = ?2
+                )
+                WHERE agent_run_id = ?1 AND execution_epoch = ?2
+                "#,
+                params![run.agent_run_id, run.execution_epoch],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(changed)
     }
 
     pub fn record_session_decision(
@@ -3950,6 +4103,8 @@ mod tests {
             TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
+        execution_evidence::ExecutionEvidenceService,
+        managed_blob::ManagedBlobStore,
         runtime::{AgentRunWorkspace, ClaimAgentRunCommand, ExecutionRuntimeService},
     };
     use std::path::PathBuf;
@@ -4474,6 +4629,98 @@ mod tests {
             )
             .unwrap();
         assert_eq!(aggregate, "1000.015");
+    }
+
+    #[test]
+    fn evidence_count_buffer_batches_hot_path_and_terminal_reconciles() {
+        let (directory, mut database, execution) = claimed_monitoring_run();
+        MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
+        let blob_store = ManagedBlobStore::new(&directory);
+        let mut buffer = MonitoringEvidenceCountBuffer::default();
+        for delta in ["first", "second"] {
+            let recorded = ExecutionEvidenceService
+                .record_runtime_event(
+                    &mut database,
+                    &blob_store,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                    "agent.text.delta",
+                    &json!({ "delta": delta }),
+                )
+                .unwrap()
+                .unwrap();
+            assert!(recorded.inserted);
+            buffer
+                .observe(&recorded.agent_run_id, recorded.execution_epoch)
+                .unwrap();
+        }
+
+        let (first_visible, count_before_flush): (Option<String>, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT first_visible_activity_at, evidence_count
+                FROM monitoring_run_enrollment
+                WHERE agent_run_id = ?1 AND execution_epoch = ?2
+                "#,
+                params![execution.agent_run_id, execution.execution_epoch],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(first_visible.is_some());
+        assert_eq!(count_before_flush, 0);
+
+        let periodic = buffer.drain(MonitoringEvidenceCountFlushTarget::Periodic);
+        assert_eq!(periodic.updates.len(), 1);
+        assert_eq!(periodic.updates[0].increment, 2);
+        assert_eq!(
+            MonitoringService::record_evidence_count_flush(&mut database, &periodic).unwrap(),
+            1
+        );
+
+        let third = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &blob_store,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                "agent.text.delta",
+                &json!({ "delta": "third" }),
+            )
+            .unwrap()
+            .unwrap();
+        buffer
+            .observe(&third.agent_run_id, third.execution_epoch)
+            .unwrap();
+        let terminal = buffer.drain(MonitoringEvidenceCountFlushTarget::Run {
+            agent_run_id: execution.agent_run_id.clone(),
+            execution_epoch: execution.execution_epoch,
+        });
+        assert_eq!(
+            MonitoringService::record_evidence_count_flush(&mut database, &terminal).unwrap(),
+            1
+        );
+        let final_count: i64 = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT evidence_count
+                FROM monitoring_run_enrollment
+                WHERE agent_run_id = ?1 AND execution_epoch = ?2
+                "#,
+                params![execution.agent_run_id, execution.execution_epoch],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(final_count, 3);
+        assert!(
+            buffer
+                .drain(MonitoringEvidenceCountFlushTarget::All)
+                .is_empty()
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

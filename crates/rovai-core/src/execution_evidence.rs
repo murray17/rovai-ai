@@ -1,3 +1,5 @@
+use std::ops::Deref;
+
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, TransactionBehavior, params};
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,26 @@ pub struct AgentRunExecutionEvidence {
     pub canonical: Option<CanonicalRuntimeActivity>,
 }
 
+#[derive(Debug, Clone)]
+pub struct RecordedExecutionEvidence {
+    pub evidence: AgentRunExecutionEvidence,
+    pub inserted: bool,
+}
+
+impl RecordedExecutionEvidence {
+    pub fn into_evidence(self) -> AgentRunExecutionEvidence {
+        self.evidence
+    }
+}
+
+impl Deref for RecordedExecutionEvidence {
+    type Target = AgentRunExecutionEvidence;
+
+    fn deref(&self) -> &Self::Target {
+        &self.evidence
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct ExecutionEvidenceService;
 
@@ -60,7 +82,7 @@ impl ExecutionEvidenceService {
         execution_epoch: i64,
         event_type: &str,
         payload: &Value,
-    ) -> Result<Option<AgentRunExecutionEvidence>> {
+    ) -> Result<Option<RecordedExecutionEvidence>> {
         self.record_runtime_event_with_fence_policy(
             database,
             blob_store,
@@ -79,7 +101,7 @@ impl ExecutionEvidenceService {
         agent_run_id: &str,
         execution_epoch: i64,
         payload: &Value,
-    ) -> Result<Option<AgentRunExecutionEvidence>> {
+    ) -> Result<Option<RecordedExecutionEvidence>> {
         if !payload
             .get("status")
             .and_then(Value::as_str)
@@ -105,7 +127,7 @@ impl ExecutionEvidenceService {
         agent_run_id: &str,
         execution_epoch: i64,
         payload: &Value,
-    ) -> Result<Option<AgentRunExecutionEvidence>> {
+    ) -> Result<Option<RecordedExecutionEvidence>> {
         if payload.get("status").and_then(Value::as_str) != Some("started") {
             anyhow::bail!("Built-in Tool start evidence must be started");
         }
@@ -130,7 +152,7 @@ impl ExecutionEvidenceService {
         event_type: &str,
         payload: &Value,
         allow_fenced_terminal_tool_result: bool,
-    ) -> Result<Option<AgentRunExecutionEvidence>> {
+    ) -> Result<Option<RecordedExecutionEvidence>> {
         let Some((kind, phase)) = evidence_classification(event_type, payload) else {
             return Ok(None);
         };
@@ -187,7 +209,10 @@ impl ExecutionEvidenceService {
             let mut existing = existing;
             existing.canonical = load_canonical_for_evidence(&transaction, &existing.id)?;
             transaction.commit()?;
-            return Ok(Some(existing));
+            return Ok(Some(RecordedExecutionEvidence {
+                evidence: existing,
+                inserted: false,
+            }));
         }
 
         let still_current: bool = transaction.query_row(
@@ -257,11 +282,9 @@ impl ExecutionEvidenceService {
         transaction.execute(
             r#"
             UPDATE monitoring_run_enrollment
-            SET first_visible_activity_at = COALESCE(
-                    first_visible_activity_at, ?3
-                ),
-                evidence_count = evidence_count + 1
+            SET first_visible_activity_at = ?3
             WHERE agent_run_id = ?1 AND execution_epoch = ?2
+              AND first_visible_activity_at IS NULL
             "#,
             params![agent_run_id, execution_epoch, occurred_at],
         )?;
@@ -284,20 +307,23 @@ impl ExecutionEvidenceService {
             &facts,
         )?;
         transaction.commit()?;
-        Ok(Some(AgentRunExecutionEvidence {
-            id,
-            agent_run_id: agent_run_id.to_string(),
-            execution_epoch,
-            sequence,
-            event_type: event_type.to_string(),
-            kind: kind.to_string(),
-            phase: phase.to_string(),
-            payload: preview,
-            content_blob_id,
-            content_byte_count: encoded.len() as i64,
-            is_truncated,
-            occurred_at,
-            canonical,
+        Ok(Some(RecordedExecutionEvidence {
+            evidence: AgentRunExecutionEvidence {
+                id,
+                agent_run_id: agent_run_id.to_string(),
+                execution_epoch,
+                sequence,
+                event_type: event_type.to_string(),
+                kind: kind.to_string(),
+                phase: phase.to_string(),
+                payload: preview,
+                content_blob_id,
+                content_byte_count: encoded.len() as i64,
+                is_truncated,
+                occurred_at,
+                canonical,
+            },
+            inserted: true,
         }))
     }
 
@@ -1074,6 +1100,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
+        assert!(evidence.inserted);
         assert!(evidence.is_truncated);
         assert!(evidence.content_blob_id.is_some());
         assert_eq!(evidence.sequence, 1);
@@ -1114,6 +1141,7 @@ mod tests {
             )
             .unwrap()
             .expect("a Built-in Tool start must be durable before execution");
+        assert!(started_tool.inserted);
         assert_eq!(started_tool.sequence, 2);
 
         let materialized = ContextService
@@ -1193,6 +1221,7 @@ mod tests {
             )
             .unwrap()
             .expect("terminal Team Tool result must survive the Turn fence");
+        assert!(failed.inserted);
         assert_eq!(failed.sequence, 3);
         assert_eq!(
             failed.payload["errorCode"],
@@ -1209,6 +1238,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
+        assert!(!duplicate.inserted);
         assert_eq!(duplicate.id, failed.id);
 
         let mut replay_tool_result = failed_tool_result.clone();
@@ -1223,6 +1253,7 @@ mod tests {
             )
             .unwrap()
             .expect("the first replay observation must remain visible");
+        assert!(replay.inserted);
         assert_eq!(replay.sequence, 4);
         assert_eq!(replay.payload["idempotentReplay"], true);
 
@@ -1236,6 +1267,7 @@ mod tests {
             )
             .unwrap()
             .unwrap();
+        assert!(replay_duplicate.inserted);
         assert_ne!(replay_duplicate.id, replay.id);
         assert_eq!(replay_duplicate.sequence, 5);
 

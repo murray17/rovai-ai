@@ -3,12 +3,15 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { MonitoringMetric } from '@contracts'
 import {
+  MONITORING_BACKGROUND_MIN_INTERVAL_MS,
   MONITORING_EVENT_DEBOUNCE_MS,
   MONITORING_POLL_INTERVAL_MS,
   RuntimeMonitoring,
   availabilityLabel,
   formatMetricValue,
+  monitoringEventRefreshDelay,
   nextMonitoringTabIndex,
+  shouldStartMonitoringBackgroundRefresh,
   shouldRefreshMonitoringEvent
 } from './RuntimeMonitoring'
 
@@ -88,9 +91,17 @@ describe('RuntimeMonitoring', () => {
   it('uses one bounded visible-page poll and debounced persisted-fact events', () => {
     expect(MONITORING_POLL_INTERVAL_MS).toBeGreaterThanOrEqual(10_000)
     expect(MONITORING_POLL_INTERVAL_MS).toBeLessThanOrEqual(15_000)
+    expect(MONITORING_BACKGROUND_MIN_INTERVAL_MS).toBeGreaterThanOrEqual(10_000)
+    expect(MONITORING_BACKGROUND_MIN_INTERVAL_MS).toBeLessThanOrEqual(12_000)
     expect(MONITORING_EVENT_DEBOUNCE_MS).toBeGreaterThan(0)
     expect(shouldRefreshMonitoringEvent('monitoring.changed')).toBe(true)
     expect(shouldRefreshMonitoringEvent('agent_run.terminal')).toBe(true)
     expect(shouldRefreshMonitoringEvent('runtime.usage')).toBe(false)
+    expect(shouldStartMonitoringBackgroundRefresh(20_000, 10_000)).toBe(true)
+    expect(shouldStartMonitoringBackgroundRefresh(19_999, 10_000)).toBe(false)
+    expect(monitoringEventRefreshDelay(15_000, 10_000, false)).toBe(5_000)
+    expect(monitoringEventRefreshDelay(15_000, 10_000, true)).toBe(
+      MONITORING_EVENT_DEBOUNCE_MS
+    )
   })
 })
