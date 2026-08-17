@@ -95,16 +95,17 @@ writes after conflict and refreshes.
 ## Agent 运行时与诊断
 
 Runtime settings always show the complete Product Runtime Catalog. User-facing states are limited to
-checking, installed but awaiting first-run verification, available, needs login, not installed,
-unsupported, unavailable and temporarily unknown;
-do not expose internal “found/not checked” stages. Use recent Core cache immediately and request
-asynchronous refresh. Executable path, fingerprint, backoff and audit remain inside the advanced
-diagnostic disclosure.
+checking, installed but awaiting first-run verification, available, needs handling, needs login, not
+installed, unsupported, unavailable and temporarily unknown. A successful bounded light launch and identity
+result reads “可用” and means the executable can be selected and tried; supporting copy says login, models and
+capabilities are confirmed by explicit check or first task. A path-only result remains temporarily unknown,
+never synthetic checking. Do not expose internal “found/not checked”, fingerprint or
+attempt stages. Executable path, fingerprint, backoff and audit remain inside advanced diagnostics.
 
-TRAE is the static-inspection exception: its row says “已安装” after path/fingerprint detection, explains
-that login and ACP capabilities will be verified by the first real task, and labels its action “重新扫描安装”.
-That action may refresh static identity but must not be described as an active availability check. Other
-Runtime rows retain “检查可用性” and their existing active-check behavior.
+TRAE remains the static-inspection exception: its row says “已安装” after path/fingerprint detection and
+explains that login and ACP capabilities will be verified by the first real task. Other Runtime rows retain
+“检查可用性”; that action starts a deep check only for the clicked Runtime. Startup, rescan, page entry and
+selection changes never start deep checks.
 
 The Runtime settings list may append a separately typed presentation-only preview row after supported
 products. A preview must say `待支持` and `尚未接入 AgentRun`, expose no health/configuration action and

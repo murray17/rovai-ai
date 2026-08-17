@@ -6,9 +6,6 @@ use std::{
     time::Duration,
 };
 
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-
 use anyhow::{Context, Result, bail};
 use rovai_core::{
     agent_profile::AdapterKind,
@@ -19,18 +16,18 @@ use rovai_core::{
         RuntimeLaunchPurpose, configure_active_runtime_command, discover_static_runtime_version,
         runtime_launch_allowed,
     },
+    runtime_probe_process::{
+        BoundedCommandOutput, BoundedLineReader, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT,
+        DEFAULT_LINE_LIMIT, ProbeCommandLimits, RuntimeProbeProcess, run_bounded_command,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
-    process::Command,
-    time::timeout,
-};
+use tokio::{io::AsyncWriteExt, process::Command, time::timeout};
 
 const CODEX_RUNTIME_KIND: &str = "codex-cli";
-const ACP_PROBE_CLEANUP_TIMEOUT: Duration = Duration::from_secs(2);
+const ACP_STDOUT_LIMIT: usize = 4 * 1024 * 1024;
 
 struct ProbeRootCleanup(PathBuf);
 
@@ -44,6 +41,19 @@ fn runtime_command(executable: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = Command::new(executable);
     configure_active_runtime_command(&mut command);
     command
+}
+
+async fn bounded_output(command: &mut Command, deadline: Duration) -> Result<BoundedCommandOutput> {
+    run_bounded_command(
+        command,
+        ProbeCommandLimits {
+            deadline,
+            stdout_bytes: DEFAULT_CAPTURE_LIMIT,
+            stderr_bytes: DEFAULT_CAPTURE_LIMIT,
+            cleanup_timeout: DEFAULT_CLEANUP_TIMEOUT,
+        },
+    )
+    .await
 }
 
 const REQUIRED_CODEX_CAPABILITIES: &[(&str, &str, &str)] = &[
@@ -194,20 +204,14 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
-    let version = timeout(
-        Duration::from_secs(15),
-        runtime_command(&canonical)
-            .arg("--version")
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
+    let mut version_command = runtime_command(&canonical);
+    version_command.arg("--version");
+    let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
     let reported_version = match version {
-        Ok(Ok(output)) if output.status.success() => {
-            first_nonempty_line(&output.stdout, &output.stderr)
+        Ok(output) if output.status.success() => {
+            first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
         }
-        Ok(Ok(output)) => {
+        Ok(output) => {
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
@@ -216,12 +220,12 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
                 format!(
                     "Claude Code version check failed with {} (outputDigest={})",
                     output.status,
-                    probe_output_digest(&output.stdout, &output.stderr)
+                    probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
                 ),
                 probed_at,
             );
         }
-        Ok(Err(error)) => {
+        Err(error) => {
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
@@ -231,50 +235,24 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
                 probed_at,
             );
         }
-        Err(_) => {
-            return claude_code_probe_failure(
-                path_text,
-                fingerprint,
-                None,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                "Claude Code version check timed out".to_string(),
-                probed_at,
-            );
-        }
     };
 
-    let help = timeout(
-        Duration::from_secs(15),
-        runtime_command(&canonical)
-            .arg("--help")
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
+    let mut help_command = runtime_command(&canonical);
+    help_command.arg("--help");
+    let help = bounded_output(&mut help_command, Duration::from_secs(15)).await;
     let help = match help {
-        Ok(Ok(output)) => format!(
+        Ok(output) => format!(
             "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&output.stdout.bytes),
+            String::from_utf8_lossy(&output.stderr.bytes)
         ),
-        Ok(Err(error)) => {
+        Err(error) => {
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Claude Code capabilities: {error}"),
-                probed_at,
-            );
-        }
-        Err(_) => {
-            return claude_code_probe_failure(
-                path_text,
-                fingerprint,
-                reported_version,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                "Claude Code capability check timed out".to_string(),
                 probed_at,
             );
         }
@@ -320,18 +298,12 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         };
     }
 
-    let auth = timeout(
-        Duration::from_secs(15),
-        runtime_command(&canonical)
-            .args(["auth", "status"])
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
+    let mut auth_command = runtime_command(&canonical);
+    auth_command.args(["auth", "status"]);
+    let auth = bounded_output(&mut auth_command, Duration::from_secs(15)).await;
     let authenticated = match auth {
-        Ok(Ok(output)) if output.status.success() => {
-            serde_json::from_slice::<Value>(&output.stdout)
+        Ok(output) if output.status.success() => {
+            serde_json::from_slice::<Value>(&output.stdout.bytes)
                 .ok()
                 .and_then(|value| value.get("loggedIn").and_then(Value::as_bool))
                 // Older/newer Claude Code releases may render a successful
@@ -339,24 +311,14 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
                 // still the installed CLI's authoritative auth result.
                 .unwrap_or(true)
         }
-        Ok(Ok(_)) => false,
-        Ok(Err(error)) => {
+        Ok(_) => false,
+        Err(error) => {
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Claude Code authentication: {error}"),
-                probed_at,
-            );
-        }
-        Err(_) => {
-            return claude_code_probe_failure(
-                path_text,
-                fingerprint,
-                reported_version,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                "Claude Code authentication check timed out".to_string(),
                 probed_at,
             );
         }
@@ -413,20 +375,14 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
-    let version = timeout(
-        Duration::from_secs(15),
-        runtime_command(&canonical)
-            .arg("--version")
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
+    let mut version_command = runtime_command(&canonical);
+    version_command.arg("--version");
+    let version = bounded_output(&mut version_command, Duration::from_secs(15)).await;
     let reported_version = match version {
-        Ok(Ok(output)) if output.status.success() => {
-            first_nonempty_line(&output.stdout, &output.stderr)
+        Ok(output) if output.status.success() => {
+            first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
         }
-        Ok(Ok(output)) => {
+        Ok(output) => {
             return antigravity_probe_failure(
                 path_text,
                 fingerprint,
@@ -435,12 +391,12 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
                 format!(
                     "Antigravity companion version check failed with {} (outputDigest={})",
                     output.status,
-                    probe_output_digest(&output.stdout, &output.stderr)
+                    probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
                 ),
                 probed_at,
             );
         }
-        Ok(Err(error)) => {
+        Err(error) => {
             return antigravity_probe_failure(
                 path_text,
                 fingerprint,
@@ -450,50 +406,24 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
                 probed_at,
             );
         }
-        Err(_) => {
-            return antigravity_probe_failure(
-                path_text,
-                fingerprint,
-                None,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                "Antigravity companion version check timed out".to_string(),
-                probed_at,
-            );
-        }
     };
 
-    let help = timeout(
-        Duration::from_secs(15),
-        runtime_command(&canonical)
-            .arg("--help")
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
+    let mut help_command = runtime_command(&canonical);
+    help_command.arg("--help");
+    let help = bounded_output(&mut help_command, Duration::from_secs(15)).await;
     let help = match help {
-        Ok(Ok(output)) => format!(
+        Ok(output) => format!(
             "{}\n{}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
+            String::from_utf8_lossy(&output.stdout.bytes),
+            String::from_utf8_lossy(&output.stderr.bytes)
         ),
-        Ok(Err(error)) => {
+        Err(error) => {
             return antigravity_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Antigravity companion capabilities: {error}"),
-                probed_at,
-            );
-        }
-        Err(_) => {
-            return antigravity_probe_failure(
-                path_text,
-                fingerprint,
-                reported_version,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                "Antigravity companion capability check timed out".to_string(),
                 probed_at,
             );
         }
@@ -537,18 +467,12 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
         };
     }
 
-    let model_output = timeout(
-        Duration::from_secs(60),
-        runtime_command(&canonical)
-            .arg("models")
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await;
+    let mut model_command = runtime_command(&canonical);
+    model_command.arg("models");
+    let model_output = bounded_output(&mut model_command, Duration::from_secs(60)).await;
     match model_output {
-        Ok(Ok(output)) if output.status.success() => {
-            let models = String::from_utf8_lossy(&output.stdout)
+        Ok(output) if output.status.success() => {
+            let models = String::from_utf8_lossy(&output.stdout.bytes)
                 .lines()
                 .filter_map(antigravity_model_identifier_from_line)
                 .collect::<Vec<_>>();
@@ -579,11 +503,11 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
                 models,
             }
         }
-        Ok(Ok(output)) => {
+        Ok(output) => {
             let raw_detail = format!(
                 "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
+                String::from_utf8_lossy(&output.stdout.bytes),
+                String::from_utf8_lossy(&output.stderr.bytes)
             );
             let lower = raw_detail.to_ascii_lowercase();
             let status = if lower.contains("auth")
@@ -597,7 +521,7 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
             let detail = format!(
                 "Antigravity model discovery failed with {} (outputDigest={})",
                 output.status,
-                probe_output_digest(&output.stdout, &output.stderr)
+                probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
             );
             antigravity_probe_failure(
                 path_text,
@@ -608,20 +532,12 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
                 probed_at,
             )
         }
-        Ok(Err(error)) => antigravity_probe_failure(
+        Err(error) => antigravity_probe_failure(
             path_text,
             fingerprint,
             reported_version,
             AgentRuntimeProbeStatus::ProbeFailed,
             format!("failed to discover Antigravity models: {error}"),
-            probed_at,
-        ),
-        Err(_) => antigravity_probe_failure(
-            path_text,
-            fingerprint,
-            reported_version,
-            AgentRuntimeProbeStatus::ProbeFailed,
-            "Antigravity model discovery timed out".to_string(),
             probed_at,
         ),
     }
@@ -825,18 +741,11 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
             session_result: None,
         };
     }
-    let version_output = match timeout(
-        Duration::from_secs(15),
-        runtime_command(&canonical)
-            .arg("--version")
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    {
-        Ok(Ok(output)) if output.status.success() => output,
-        Ok(Ok(output)) => {
+    let mut version_command = runtime_command(&canonical);
+    version_command.arg("--version");
+    let version_output = match bounded_output(&mut version_command, Duration::from_secs(15)).await {
+        Ok(output) if output.status.success() => output,
+        Ok(output) => {
             return AcpCapabilityProbe {
                 result: agent_probe_result(
                     kind.as_str(),
@@ -847,8 +756,8 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                     Vec::new(),
                     acp_required_capabilities(kind),
                     Some(command_detail(
-                        &output.stdout,
-                        &output.stderr,
+                        &output.stdout.bytes,
+                        &output.stderr.bytes,
                         "Runtime version check failed",
                     )),
                     probed_at,
@@ -857,7 +766,7 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 session_result: None,
             };
         }
-        Ok(Err(error)) => {
+        Err(error) => {
             return AcpCapabilityProbe {
                 result: agent_probe_result(
                     kind.as_str(),
@@ -874,25 +783,9 @@ async fn acp_probe_at(path: &Path, kind: AdapterKind, include_session: bool) -> 
                 session_result: None,
             };
         }
-        Err(_) => {
-            return AcpCapabilityProbe {
-                result: agent_probe_result(
-                    kind.as_str(),
-                    Some(path_text),
-                    None,
-                    fingerprint,
-                    AgentRuntimeProbeStatus::ProbeFailed,
-                    Vec::new(),
-                    acp_required_capabilities(kind),
-                    Some("Runtime version check timed out".to_string()),
-                    probed_at,
-                ),
-                initialize_result: None,
-                session_result: None,
-            };
-        }
     };
-    let reported_version = first_nonempty_line(&version_output.stdout, &version_output.stderr);
+    let reported_version =
+        first_nonempty_line(&version_output.stdout.bytes, &version_output.stderr.bytes);
     let probe = run_acp_probe(&canonical, kind, include_session).await;
     match probe {
         Ok((initialize_result, session_result, behavioral_evidence)) => {
@@ -998,183 +891,143 @@ async fn run_acp_probe(
         // disposable probe Sessions stay out of the persistent Kiro home.
         command.env("KIRO_HOME", probe_root.join("kiro-home"));
     }
-    command
-        .current_dir(&probe_root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    #[cfg(unix)]
-    command.as_std_mut().process_group(0);
-    let mut child = command
-        .spawn()
-        .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
-    let process_group_id = child.id().and_then(|pid| i32::try_from(pid).ok());
-    let mut stdin = child.stdin.take().context("ACP stdin was unavailable")?;
-    let stdout = child.stdout.take().context("ACP stdout was unavailable")?;
-    let mut stderr = child.stderr.take().context("ACP stderr was unavailable")?;
-    let mut stderr_task = tokio::spawn(async move {
-        let mut output = Vec::new();
-        stderr.read_to_end(&mut output).await?;
-        Ok::<_, std::io::Error>(output)
-    });
-    let mut lines = BufReader::new(stdout).lines();
-    let exchange = async {
-        write_json_line(
-            &mut stdin,
-            &json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": 1,
-                    "clientCapabilities": {
-                        "fs": {"readTextFile": true, "writeTextFile": true},
-                        "terminal": false
-                    },
-                    "clientInfo": {
-                        "name": "rovai_probe",
-                        "title": "Rovai-ai Runtime Probe",
-                        "version": env!("CARGO_PKG_VERSION")
-                    }
-                }
-            }),
-        )
-        .await?;
-        let initialize = read_rpc_result(&mut lines, 1).await?;
-        if initialize.get("protocolVersion").and_then(Value::as_u64) != Some(1) {
-            bail!("Runtime did not negotiate ACP v1");
-        }
-        if !include_session {
-            return Ok::<_, anyhow::Error>((initialize, None, None));
-        }
-        write_json_line(
-            &mut stdin,
-            &json!({
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "session/new",
-                "params": {"cwd": probe_root, "mcpServers": []}
-            }),
-        )
-        .await?;
-        let session = read_rpc_result(&mut lines, 2).await?;
-        let session_id = session
-            .get("sessionId")
-            .and_then(Value::as_str)
-            .context("ACP session/new did not return sessionId")?;
-        if kind == AdapterKind::KiroCli {
-            let current_model = session
-                .pointer("/models/currentModelId")
-                .and_then(Value::as_str)
-                .or_else(|| {
-                    session
-                        .get("configOptions")
-                        .and_then(Value::as_array)
-                        .and_then(|options| {
-                            options.iter().find(|option| {
-                                option.get("id").and_then(Value::as_str) == Some("model")
-                            })
-                        })
-                        .and_then(|option| option.get("currentValue"))
-                        .and_then(Value::as_str)
-                })
-                .context("Kiro ACP Session did not report its current model")?;
-            write_json_line(
-                &mut stdin,
-                &json!({
-                    "jsonrpc": "2.0",
-                    "id": 3,
-                    "method": "session/set_model",
-                    "params": {
-                        "sessionId": session_id,
-                        "modelId": current_model
-                    }
-                }),
-            )
-            .await?;
-            read_rpc_result(&mut lines, 3).await?;
-        }
-        let behavioral_evidence = if kind == AdapterKind::TraeCnCli {
-            Some(
-                run_trae_behavioral_probe(
-                    &mut stdin,
-                    &mut lines,
-                    session_id,
-                    &session,
-                    &probe_root,
-                    trae_native_append_marker
-                        .as_deref()
-                        .expect("TRAE marker must exist"),
-                )
-                .await?,
-            )
-        } else {
-            None
-        };
-        Ok((initialize, Some(session), behavioral_evidence))
-    };
+    command.current_dir(&probe_root).stdin(Stdio::piped());
+    let mut process = RuntimeProbeProcess::spawn(
+        &mut command,
+        ACP_STDOUT_LIMIT,
+        DEFAULT_CAPTURE_LIMIT,
+        DEFAULT_LINE_LIMIT,
+        DEFAULT_CLEANUP_TIMEOUT,
+    )
+    .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
     let deadline = if kind == AdapterKind::TraeCnCli {
         Duration::from_secs(180)
     } else {
         Duration::from_secs(30)
     };
-    let result = match timeout(deadline, exchange).await {
-        Ok(result) => result,
-        Err(_) => Err(anyhow::anyhow!("ACP probe timed out")),
-    };
-    drop(stdin);
-    drop(lines);
-    terminate_acp_probe_process(&mut child, process_group_id).await;
-    let stderr = match timeout(ACP_PROBE_CLEANUP_TIMEOUT, &mut stderr_task).await {
-        Ok(stderr) => Some(
-            stderr
-                .context("ACP stderr reader failed")?
-                .context("ACP stderr could not be read")?,
-        ),
-        Err(_) => {
-            stderr_task.abort();
-            let _ = stderr_task.await;
-            None
+    let result = {
+        let (stdin, lines) = process.split_io()?;
+        let exchange = async {
+            write_json_line(
+                stdin,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": 1,
+                        "clientCapabilities": {
+                            "fs": {"readTextFile": true, "writeTextFile": true},
+                            "terminal": false
+                        },
+                        "clientInfo": {
+                            "name": "rovai_probe",
+                            "title": "Rovai-ai Runtime Probe",
+                            "version": env!("CARGO_PKG_VERSION")
+                        }
+                    }
+                }),
+            )
+            .await?;
+            let initialize = read_rpc_result(lines, 1).await?;
+            if initialize.get("protocolVersion").and_then(Value::as_u64) != Some(1) {
+                bail!("Runtime did not negotiate ACP v1");
+            }
+            if !include_session {
+                return Ok::<_, anyhow::Error>((initialize, None, None));
+            }
+            write_json_line(
+                stdin,
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "session/new",
+                    "params": {"cwd": probe_root, "mcpServers": []}
+                }),
+            )
+            .await?;
+            let session = read_rpc_result(lines, 2).await?;
+            let session_id = session
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .context("ACP session/new did not return sessionId")?;
+            if kind == AdapterKind::KiroCli {
+                let current_model = session
+                    .pointer("/models/currentModelId")
+                    .and_then(Value::as_str)
+                    .or_else(|| {
+                        session
+                            .get("configOptions")
+                            .and_then(Value::as_array)
+                            .and_then(|options| {
+                                options.iter().find(|option| {
+                                    option.get("id").and_then(Value::as_str) == Some("model")
+                                })
+                            })
+                            .and_then(|option| option.get("currentValue"))
+                            .and_then(Value::as_str)
+                    })
+                    .context("Kiro ACP Session did not report its current model")?;
+                write_json_line(
+                    stdin,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "session/set_model",
+                        "params": {
+                            "sessionId": session_id,
+                            "modelId": current_model
+                        }
+                    }),
+                )
+                .await?;
+                read_rpc_result(lines, 3).await?;
+            }
+            let behavioral_evidence = if kind == AdapterKind::TraeCnCli {
+                Some(
+                    run_trae_behavioral_probe(
+                        stdin,
+                        lines,
+                        session_id,
+                        &session,
+                        &probe_root,
+                        trae_native_append_marker
+                            .as_deref()
+                            .expect("TRAE marker must exist"),
+                    )
+                    .await?,
+                )
+            } else {
+                None
+            };
+            Ok((initialize, Some(session), behavioral_evidence))
+        };
+        match timeout(deadline, exchange).await {
+            Ok(result) => result,
+            Err(_) => Err(anyhow::anyhow!("ACP probe timed out")),
         }
     };
-    if stderr.is_none() {
-        return match result {
-            Ok(_) => Err(anyhow::anyhow!("ACP probe cleanup timed out")),
-            Err(error) => Err(error.context("ACP probe cleanup timed out")),
-        };
-    }
-    let stderr = stderr.expect("ACP stderr was checked above");
+    let stderr = match process.finish().await {
+        Ok(stderr) => stderr,
+        Err(cleanup_error) => {
+            return match result {
+                Ok(_) => Err(cleanup_error.context("ACP probe cleanup failed")),
+                Err(error) => {
+                    Err(error.context(format!("ACP probe cleanup failed: {cleanup_error:#}")))
+                }
+            };
+        }
+    };
     match result {
         Ok(result) => Ok(result),
-        Err(error) if stderr.iter().any(|byte| !byte.is_ascii_whitespace()) => {
-            let detail = String::from_utf8_lossy(&stderr);
+        Err(error) if stderr.bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
+            let detail = String::from_utf8_lossy(&stderr.bytes);
             let bounded = detail.chars().take(4096).collect::<String>();
-            Err(error.context(format!("ACP stderr: {bounded}")))
+            let truncation = if stderr.truncated { " [truncated]" } else { "" };
+            Err(error.context(format!("ACP stderr{truncation}: {bounded}")))
         }
         Err(error) => Err(error),
     }
-}
-
-async fn terminate_acp_probe_process(
-    child: &mut tokio::process::Child,
-    process_group_id: Option<i32>,
-) {
-    #[cfg(unix)]
-    if let Some(process_group_id) =
-        process_group_id.filter(|process_group_id| *process_group_id > 1)
-    {
-        // SAFETY: this is the PID of the child placed in its own process group immediately before
-        // spawn. It cannot identify Rovai, the caller's shell, or another inherited process group.
-        unsafe {
-            libc::killpg(process_group_id, libc::SIGKILL);
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = process_group_id;
-
-    let _ = child.start_kill();
-    let _ = timeout(ACP_PROBE_CLEANUP_TIMEOUT, child.wait()).await;
 }
 
 fn encode_string_slice_item(value: &str) -> String {
@@ -1201,7 +1054,7 @@ struct TraePromptProbeObservation {
 
 async fn run_trae_behavioral_probe(
     stdin: &mut tokio::process::ChildStdin,
-    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    lines: &mut BoundedLineReader<tokio::process::ChildStdout>,
     session_id: &str,
     session: &Value,
     probe_root: &Path,
@@ -1331,7 +1184,7 @@ async fn run_trae_behavioral_probe(
 
 async fn run_trae_prompt_probe(
     stdin: &mut tokio::process::ChildStdin,
-    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    lines: &mut BoundedLineReader<tokio::process::ChildStdout>,
     session_id: &str,
     request_id: u64,
     prompt: &str,
@@ -1705,87 +1558,86 @@ fn classify_acp_probe_failure(detail: &str) -> AgentRuntimeProbeStatus {
 }
 
 pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
-    let mut child = runtime_command(path)
-        .args(["app-server", "--listen", "stdio://"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("failed to start {} app-server", path.display()))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("app-server stdin was unavailable")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("app-server stdout was unavailable")?;
-
-    let query = async {
-        write_json_line(
-            &mut stdin,
-            &json!({
-                "method": "initialize",
-                "id": 1,
-                "params": {
-                    "clientInfo": {
-                        "name": "rovai_probe",
-                        "title": "Rovai-ai Runtime Probe",
-                        "version": env!("CARGO_PKG_VERSION")
-                    }
-                }
-            }),
-        )
-        .await?;
-        let mut lines = BufReader::new(stdout).lines();
-        read_rpc_result(&mut lines, 1).await?;
-        write_json_line(&mut stdin, &json!({"method": "initialized", "params": {}})).await?;
-
-        let mut models = Vec::new();
-        let mut cursor: Option<String> = None;
-        let mut request_id = 2_u64;
-        loop {
+    let mut command = runtime_command(path);
+    command.args(["app-server", "--listen", "stdio://"]);
+    let mut process = RuntimeProbeProcess::spawn(
+        &mut command,
+        ACP_STDOUT_LIMIT,
+        DEFAULT_CAPTURE_LIMIT,
+        DEFAULT_LINE_LIMIT,
+        DEFAULT_CLEANUP_TIMEOUT,
+    )
+    .with_context(|| format!("failed to start {} app-server", path.display()))?;
+    let result = {
+        let (stdin, lines) = process.split_io()?;
+        let query = async {
             write_json_line(
-                &mut stdin,
+                stdin,
                 &json!({
-                    "method": "model/list",
-                    "id": request_id,
+                    "method": "initialize",
+                    "id": 1,
                     "params": {
-                        "cursor": cursor,
-                        "includeHidden": true,
-                        "limit": 100
+                        "clientInfo": {
+                            "name": "rovai_probe",
+                            "title": "Rovai-ai Runtime Probe",
+                            "version": env!("CARGO_PKG_VERSION")
+                        }
                     }
                 }),
             )
             .await?;
-            let result = read_rpc_result(&mut lines, request_id).await?;
-            let page = result
-                .get("data")
-                .and_then(Value::as_array)
-                .context("model/list result did not include data")?;
-            models.extend(page.iter().cloned());
-            cursor = result
-                .get("nextCursor")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            if cursor.is_none() {
-                break;
-            }
-            request_id += 1;
-            if request_id > 101 {
-                bail!("model/list exceeded the pagination safety limit");
-            }
-        }
-        Ok::<_, anyhow::Error>(json!({"data": models}))
-    };
+            read_rpc_result(lines, 1).await?;
+            write_json_line(stdin, &json!({"method": "initialized", "params": {}})).await?;
 
-    let result = timeout(Duration::from_secs(30), query)
-        .await
-        .context("model/list timed out")?;
-    let _ = child.kill().await;
-    let _ = child.wait().await;
-    result
+            let mut models = Vec::new();
+            let mut cursor: Option<String> = None;
+            let mut request_id = 2_u64;
+            loop {
+                write_json_line(
+                    stdin,
+                    &json!({
+                        "method": "model/list",
+                        "id": request_id,
+                        "params": {
+                            "cursor": cursor,
+                            "includeHidden": true,
+                            "limit": 100
+                        }
+                    }),
+                )
+                .await?;
+                let result = read_rpc_result(lines, request_id).await?;
+                let page = result
+                    .get("data")
+                    .and_then(Value::as_array)
+                    .context("model/list result did not include data")?;
+                models.extend(page.iter().cloned());
+                cursor = result
+                    .get("nextCursor")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                if cursor.is_none() {
+                    break;
+                }
+                request_id += 1;
+                if request_id > 101 {
+                    bail!("model/list exceeded the pagination safety limit");
+                }
+            }
+            Ok::<_, anyhow::Error>(json!({"data": models}))
+        };
+        timeout(Duration::from_secs(30), query)
+            .await
+            .context("model/list timed out")?
+    };
+    let stderr = process.finish().await?;
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) if stderr.bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
+            Err(error.context(format!("app-server stderr: {}", stderr.lossy_text())))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 async fn write_json_line(stdin: &mut tokio::process::ChildStdin, value: &Value) -> Result<()> {
@@ -1798,7 +1650,7 @@ async fn write_json_line(stdin: &mut tokio::process::ChildStdin, value: &Value) 
 }
 
 async fn read_rpc_result(
-    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    lines: &mut BoundedLineReader<tokio::process::ChildStdout>,
     request_id: u64,
 ) -> Result<Value> {
     while let Some(line) = lines.next_line().await? {
@@ -1834,7 +1686,9 @@ async fn codex_runtime_probe_uncached(
     fingerprint: Option<String>,
     probed_at: String,
 ) -> AgentRuntimeProbeResult {
-    let version_output = match runtime_command(&path).arg("--version").output().await {
+    let mut version_command = runtime_command(&path);
+    version_command.arg("--version");
+    let version_output = match bounded_output(&mut version_command, Duration::from_secs(15)).await {
         Ok(output) if output.status.success() => output,
         Ok(output) => {
             return probe_result(
@@ -1845,8 +1699,8 @@ async fn codex_runtime_probe_uncached(
                 Vec::new(),
                 required_capability_names(),
                 Some(command_detail(
-                    &output.stdout,
-                    &output.stderr,
+                    &output.stdout.bytes,
+                    &output.stderr.bytes,
                     "Codex version check failed",
                 )),
                 probed_at,
@@ -1866,16 +1720,14 @@ async fn codex_runtime_probe_uncached(
         }
     };
     let reported_version = Some(
-        String::from_utf8_lossy(&version_output.stdout)
+        String::from_utf8_lossy(&version_output.stdout.bytes)
             .trim()
             .to_string(),
     );
 
-    match runtime_command(&path)
-        .args(["login", "status"])
-        .output()
-        .await
-    {
+    let mut auth_command = runtime_command(&path);
+    auth_command.args(["login", "status"]);
+    match bounded_output(&mut auth_command, Duration::from_secs(15)).await {
         Ok(output) if output.status.success() => {}
         Ok(output) => {
             return probe_result(
@@ -1886,8 +1738,8 @@ async fn codex_runtime_probe_uncached(
                 Vec::new(),
                 required_capability_names(),
                 Some(command_detail(
-                    &output.stdout,
-                    &output.stderr,
+                    &output.stdout.bytes,
+                    &output.stderr.bytes,
                     "Codex authentication is required",
                 )),
                 probed_at,
@@ -1961,100 +1813,95 @@ async fn codex_runtime_probe_uncached(
 }
 
 async fn probe_initialize_handshake(path: &Path) -> Result<()> {
-    let mut child = runtime_command(path)
-        .args(["app-server", "--listen", "stdio://"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .with_context(|| format!("failed to start {} app-server", path.display()))?;
-    let mut stdin = child
-        .stdin
-        .take()
-        .context("app-server stdin was unavailable")?;
-    let stdout = child
-        .stdout
-        .take()
-        .context("app-server stdout was unavailable")?;
-
-    let handshake = async {
-        let initialize = json!({
-            "method": "initialize",
-            "id": 1,
-            "params": {
-                "clientInfo": {
-                    "name": "rovai_probe",
-                    "title": "Rovai-ai Runtime Probe",
-                    "version": env!("CARGO_PKG_VERSION")
-                },
-                "capabilities": {
-                    "experimentalApi": true
+    let mut command = runtime_command(path);
+    command.args(["app-server", "--listen", "stdio://"]);
+    let mut process = RuntimeProbeProcess::spawn(
+        &mut command,
+        ACP_STDOUT_LIMIT,
+        DEFAULT_CAPTURE_LIMIT,
+        DEFAULT_LINE_LIMIT,
+        DEFAULT_CLEANUP_TIMEOUT,
+    )
+    .with_context(|| format!("failed to start {} app-server", path.display()))?;
+    let result = {
+        let (stdin, lines) = process.split_io()?;
+        let handshake = async {
+            let initialize = json!({
+                "method": "initialize",
+                "id": 1,
+                "params": {
+                    "clientInfo": {
+                        "name": "rovai_probe",
+                        "title": "Rovai-ai Runtime Probe",
+                        "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "capabilities": {
+                        "experimentalApi": true
+                    }
                 }
-            }
-        });
-        stdin
-            .write_all(serde_json::to_string(&initialize)?.as_bytes())
-            .await?;
-        stdin.write_all(b"\n").await?;
-        stdin.flush().await?;
-
-        let mut lines = BufReader::new(stdout).lines();
-        while let Some(line) = lines.next_line().await? {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let message: Value = serde_json::from_str(&line)
-                .with_context(|| format!("invalid initialize response: {line}"))?;
-            if message.get("id").and_then(Value::as_u64) != Some(1) {
-                continue;
-            }
-            if let Some(error) = message.get("error") {
-                bail!("initialize was rejected: {error}");
-            }
-            let result = message
-                .get("result")
-                .context("initialize result was missing")?;
-            if result.get("userAgent").and_then(Value::as_str).is_none() {
-                bail!("initialize result did not include userAgent");
-            }
+            });
             stdin
-                .write_all(
-                    serde_json::to_string(&json!({"method": "initialized", "params": {}}))?
-                        .as_bytes(),
-                )
+                .write_all(serde_json::to_string(&initialize)?.as_bytes())
                 .await?;
             stdin.write_all(b"\n").await?;
             stdin.flush().await?;
-            return Ok(());
-        }
-        bail!("app-server exited before initialize completed")
-    };
 
-    let result = timeout(Duration::from_secs(15), handshake)
-        .await
-        .context("initialize timed out")?;
-    let _ = child.kill().await;
-    let _ = child.wait().await;
-    result
+            while let Some(line) = lines.next_line().await? {
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let message: Value = serde_json::from_str(&line)
+                    .with_context(|| format!("invalid initialize response: {line}"))?;
+                if message.get("id").and_then(Value::as_u64) != Some(1) {
+                    continue;
+                }
+                if let Some(error) = message.get("error") {
+                    bail!("initialize was rejected: {error}");
+                }
+                let result = message
+                    .get("result")
+                    .context("initialize result was missing")?;
+                if result.get("userAgent").and_then(Value::as_str).is_none() {
+                    bail!("initialize result did not include userAgent");
+                }
+                stdin
+                    .write_all(
+                        serde_json::to_string(&json!({"method": "initialized", "params": {}}))?
+                            .as_bytes(),
+                    )
+                    .await?;
+                stdin.write_all(b"\n").await?;
+                stdin.flush().await?;
+                return Ok(());
+            }
+            bail!("app-server exited before initialize completed")
+        };
+        timeout(Duration::from_secs(15), handshake)
+            .await
+            .context("initialize timed out")?
+    };
+    let stderr = process.finish().await?;
+    match result {
+        Ok(()) => Ok(()),
+        Err(error) if stderr.bytes.iter().any(|byte| !byte.is_ascii_whitespace()) => {
+            Err(error.context(format!("app-server stderr: {}", stderr.lossy_text())))
+        }
+        Err(error) => Err(error),
+    }
 }
 
 async fn probe_schema_capabilities(path: &Path) -> Result<(Vec<String>, Vec<String>)> {
     let schema_dir =
         env::temp_dir().join(format!("rovai-codex-schema-probe-{}", uuid::Uuid::new_v4()));
-    let output = timeout(
-        Duration::from_secs(20),
-        runtime_command(path)
-            .args(["app-server", "generate-json-schema", "--out"])
-            .arg(&schema_dir)
-            .output(),
-    )
-    .await
-    .context("schema generation timed out")??;
+    let mut command = runtime_command(path);
+    command
+        .args(["app-server", "generate-json-schema", "--out"])
+        .arg(&schema_dir);
+    let output = bounded_output(&mut command, Duration::from_secs(20)).await?;
     if !output.status.success() {
         let detail = command_detail(
-            &output.stdout,
-            &output.stderr,
+            &output.stdout.bytes,
+            &output.stderr.bytes,
             "generate-json-schema failed",
         );
         let _ = std::fs::remove_dir_all(&schema_dir);
@@ -2178,10 +2025,16 @@ fn required_capability_names() -> Vec<String> {
 
 async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> CommandHealth {
     let executable = path.unwrap_or_else(|| PathBuf::from(command));
-    match runtime_command(&executable).args(args).output().await {
+    let mut command = runtime_command(&executable);
+    command.args(args);
+    match bounded_output(&mut command, Duration::from_secs(15)).await {
         Ok(output) if output.status.success() => CommandHealth {
             installed: true,
-            version: Some(String::from_utf8_lossy(&output.stdout).trim().to_string()),
+            version: Some(
+                String::from_utf8_lossy(&output.stdout.bytes)
+                    .trim()
+                    .to_string(),
+            ),
             authenticated: None,
             detail: None,
             path: Some(executable.to_string_lossy().to_string()),
@@ -2191,8 +2044,8 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
             version: None,
             authenticated: None,
             detail: Some(command_detail(
-                &output.stdout,
-                &output.stderr,
+                &output.stdout.bytes,
+                &output.stderr.bytes,
                 "command failed",
             )),
             path: None,

@@ -54,6 +54,7 @@ import {
   memberRuntimePresentation,
   runtimeAvailabilityPresentation,
 } from './runtime-status'
+import { requestProductRuntimeCheck } from './runtime-check'
 import {
   type PendingRuntimeSubmission,
   persistedRuntimeChangeDisposition,
@@ -268,10 +269,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   }
 
   const ensureRuntime = useCallback((adapterKind: AdapterKind): void => {
-    const method = adapterKind === 'trae-cn-cli'
-      ? 'runtime.product.check'
-      : 'runtime.product.ensure'
-    void window.rovai.request(method, { runtimeKind: adapterKind })
+    void window.rovai.request('runtime.product.ensure', { runtimeKind: adapterKind })
       .catch((nextError) => setError(errorMessage(nextError)))
   }, [])
 
@@ -1454,7 +1452,7 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
     setBusy(`check-${runtimeKind}`)
     setError(null)
     try {
-      await window.rovai.request('runtime.product.check', { runtimeKind })
+      await requestProductRuntimeCheck(runtimeKind)
       await onReload()
     } catch (nextError) {
       setError(errorMessage(nextError))

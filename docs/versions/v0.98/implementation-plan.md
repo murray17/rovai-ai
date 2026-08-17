@@ -129,6 +129,6 @@ last_updated: 2026-08-17
 - [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
 - [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
 - [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
-- [Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)
+- [Runtime Launch and Verification v3](../../contracts/runtime-launch-and-verification-v3.md)
 - [本地 Runtime 工作流](../../development/local-workflow.md)
 - [桌面 UI 验收](../../development/ui-acceptance.md)

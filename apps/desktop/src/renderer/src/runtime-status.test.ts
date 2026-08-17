@@ -14,11 +14,13 @@ import {
 describe('Runtime user status projection', () => {
   it.each([
     ['detecting', '正在检查…'],
-    ['found_uninspected', '正在检查…'],
+    ['found_uninspected', '暂时无法确认'],
+    ['light_ready', '可用'],
     ['installed_unverified', '已安装'],
     ['checking', '正在检查…'],
     ['ready', '可用'],
     ['authentication_required', '需要登录'],
+    ['needs_attention', '需要处理'],
     ['missing', '未安装'],
     ['path_missing', '未安装'],
     ['incompatible', '版本不支持'],
@@ -44,14 +46,18 @@ describe('Runtime user status projection', () => {
     })
   })
 
-  it('uses an unknown result for a failed unregistered check instead of exposing discovery state', () => {
+  it('does not project an uninspected executable as checking or light-ready', () => {
     const result = runtimeAvailabilityPresentation({
       ...availability('found_uninspected'),
       checking: false,
       diagnosticCode: 'runtime_probe_transient_failure'
     })
 
-    expect(result.label).toBe('暂时无法确认')
+    expect(result).toEqual({
+      status: 'unknown',
+      label: '暂时无法确认',
+      detail: '已找到可执行文件，但轻度启动验证尚未形成有效结果。'
+    })
   })
 
   it('keeps an unsaved editor selection in product availability state', () => {
@@ -78,6 +84,7 @@ describe('Runtime user status projection', () => {
     expect(runtimeReadinessLabel('ready')).toBe('可用')
     expect(runtimeReadinessLabel('runtime_not_configured')).toBe('未配置 Agent 运行时')
     expect(runtimeReadinessLabel('needs_attention')).toBe('不可用')
+    expect(runtimeReadinessLabel('light_ready')).toBe('可用')
     expect(runtimeReadinessLabel('installed_unverified')).toBe('已安装，待首次运行验证')
   })
 

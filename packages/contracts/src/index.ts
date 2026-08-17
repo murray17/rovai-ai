@@ -59,6 +59,8 @@ export interface AdapterCapabilitySnapshot {
   authenticationStatus: string
   probeStatus:
     | 'ready'
+    | 'light_ready'
+    | 'light_failed'
     | 'installed_unverified'
     | 'not_installed'
     | 'authentication_required'
@@ -170,6 +172,7 @@ export interface MemberRuntimeConfiguration {
 export type RuntimeReadinessStatus =
   | 'runtime_not_configured'
   | 'needs_attention'
+  | 'light_ready'
   | 'installed_unverified'
   | 'ready'
 
@@ -318,11 +321,13 @@ export type ProductRuntimeAvailabilityStatus =
   | 'detecting'
   | 'missing'
   | 'found_uninspected'
+  | 'light_ready'
   | 'installed_unverified'
   | 'checking'
   | 'ready'
   | 'authentication_required'
   | 'incompatible'
+  | 'needs_attention'
   | 'path_missing'
   | 'disabled'
   | 'refresh_failed_using_last_success'

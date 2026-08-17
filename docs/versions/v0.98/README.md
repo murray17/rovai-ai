@@ -83,6 +83,16 @@ Session replay 隔离与 Prompt response-only ACK。
   才能产生业务副作用；
 - ACP v1 只有匹配 `session/prompt` request ID 的 response 可以结算 input ACK。
 
+### 同期 Runtime 检查架构修正
+
+- 启动和重扫只建立 path、权限、fingerprint 与无副作用的有界 one-shot 身份证据；非 TRAE 只有命令成功、
+  输出未超限且识别到基础身份才写入 `light_ready`，不自动启动 ACP、Session、认证或模型枚举；
+- `core ready` 先于后台 discovery，Runtime 深检只由单 Runtime“检查可用性”或首次真实 AgentRun 发起；
+- Runtime Check Manager 统一拥有 attempt/task/deadline、每 Runtime 单飞、全局并发二和所有终态 finalize；
+- 版本、ACP、Codex initialize/model/schema 等短命进程统一使用固定输出容量、truncation、整进程组清理和
+  bounded reader/child wait；
+- fingerprint/search generation 变化只替换静态证据并 fence 旧 attempt，不触发后台深检。
+
 ## 明确不做
 
 - 不内联 Skill 文件内容，不创建 Provider-specific Skill input item；
@@ -112,8 +122,8 @@ Session replay 隔离与 Prompt response-only ACK。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.97 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[确认说明](model-context-change.md)、版本索引与前后链接建立唯一 current v0.98。 |
-| ADR | 已更新 | [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)冻结结构化选择、双时点资格、Core-owned 解析、非 fallback 指针与四层 Evidence 边界。 |
-| Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 Skill wire/Evidence；[Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)定义 ACP continuation、replay quarantine、Prompt fence 与 TRAE warm Host。 |
+| ADR | 已更新 | [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)冻结结构化 Skill 选择边界；[ADR-0204](../../adr/0204-on-demand-runtime-deep-verification.md)冻结 light discovery、显式/首次执行深检、manager-owned attempt 与受限 Probe process。 |
+| Contracts | 已更新 | [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与 [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)定义 Skill wire/Evidence；[Runtime Launch and Verification v3](../../contracts/runtime-launch-and-verification-v3.md)继承 ACP continuation 并新增 light discovery、按需深检、attempt manager 与 Probe process owner。 |
 | Architecture | 已更新 | [Structured Current Input Skill Links](../../architecture/structured-current-input-skill-links.md)与 [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)定义 Skill Module seam；[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 TRAE LRU 与 ACP 输入隔离。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)把 Picker 从普通 Text 改为结构化 token，同时保持现有 Composer 视觉、键盘和正文 Marker。 |
 | Runtime Activity | 确认无需更新 | 本版不新增 Runtime Activity kind 或映射；Skill 文件指针不产生 Tool/Activity 或读取 receipt。 |
@@ -128,7 +138,7 @@ Session replay 隔离与 Prompt response-only ACK。
 - [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
 - [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
 - [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
-- [Runtime Launch and Verification v2](../../contracts/runtime-launch-and-verification-v2.md)
+- [Runtime Launch and Verification v3](../../contracts/runtime-launch-and-verification-v3.md)
 - [Structured Current Input Skill Links 架构](../../architecture/structured-current-input-skill-links.md)
 - [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)

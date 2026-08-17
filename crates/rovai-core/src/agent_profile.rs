@@ -502,6 +502,7 @@ pub struct MemberCampMembershipView {
 pub enum RuntimeReadinessStatus {
     RuntimeNotConfigured,
     NeedsAttention,
+    LightReady,
     InstalledUnverified,
     Ready,
 }
@@ -1434,10 +1435,10 @@ impl AgentProfileService {
         validate_installation(&discovered.executable_path, &discovered.auth_scope)?;
         validate_command_name(&discovered.command_name)?;
         validate_snapshot(&discovered.snapshot)?;
-        if discovered.snapshot.probe_status != "installed_unverified"
+        if !is_static_snapshot_status(&discovered.snapshot.probe_status)
             || discovered.snapshot.executable_fingerprint.is_none()
         {
-            anyhow::bail!("static managed Installation requires installed_unverified evidence");
+            anyhow::bail!("static managed Installation requires bounded discovery evidence");
         }
         if discovered.source == InstallationSource::Custom {
             anyhow::bail!("managed Installation cannot use a custom source");
@@ -2388,7 +2389,7 @@ impl AgentProfileService {
         validate_snapshot(&envelope.payload.snapshot)?;
         let executable_identity = if matches!(
             envelope.payload.snapshot.probe_status.as_str(),
-            "ready" | "installed_unverified"
+            "ready" | "light_ready" | "light_failed" | "installed_unverified"
         ) {
             database
                 .connection()
@@ -2439,7 +2440,7 @@ impl AgentProfileService {
             let previous_fingerprint = previous_snapshot
                 .as_ref()
                 .and_then(|(fingerprint, _)| fingerprint.clone());
-            if snapshot.probe_status == "installed_unverified" {
+            if is_static_snapshot_status(&snapshot.probe_status) {
                 let preserve_ready =
                     previous_snapshot
                         .as_ref()
@@ -2969,8 +2970,8 @@ fn upsert_static_capability_snapshot(
     installation_id: &str,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<()> {
-    if snapshot.probe_status != "installed_unverified" {
-        anyhow::bail!("only installed_unverified evidence can replace a static snapshot");
+    if !is_static_snapshot_status(&snapshot.probe_status) {
+        anyhow::bail!("only bounded discovery evidence can replace a static snapshot");
     }
     transaction.execute(
         r#"
@@ -2983,14 +2984,14 @@ fn upsert_static_capability_snapshot(
             last_successful_probe_at, stale_at, last_error,
             native_session_compatibility_key
         ) VALUES (
-            ?1, ?2, ?3, ?4, 'installed_unverified', ?5, ?6, ?7, ?8, ?9,
-            ?10, ?11, ?12, NULL, NULL, NULL, NULL
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, NULL, NULL, ?14, NULL
         )
         ON CONFLICT(installation_id) DO UPDATE SET
             reported_version = excluded.reported_version,
             executable_fingerprint = excluded.executable_fingerprint,
             authentication_status = excluded.authentication_status,
-            probe_status = 'installed_unverified',
+            probe_status = excluded.probe_status,
             permission_schema_version = excluded.permission_schema_version,
             permission_schema_digest = excluded.permission_schema_digest,
             capabilities_json = excluded.capabilities_json,
@@ -3001,7 +3002,7 @@ fn upsert_static_capability_snapshot(
             last_attempted_at = excluded.last_attempted_at,
             last_successful_probe_at = NULL,
             stale_at = NULL,
-            last_error = NULL,
+            last_error = excluded.last_error,
             native_session_compatibility_key = NULL
         "#,
         params![
@@ -3009,6 +3010,7 @@ fn upsert_static_capability_snapshot(
             snapshot.reported_version,
             snapshot.executable_fingerprint,
             snapshot.authentication_status,
+            snapshot.probe_status,
             snapshot.permission_schema_version,
             snapshot.permission_schema_digest,
             serde_json::to_string(&snapshot.capabilities)?,
@@ -3017,9 +3019,37 @@ fn upsert_static_capability_snapshot(
             serde_json::to_string(&snapshot.permission_options)?,
             snapshot.observed_at,
             snapshot.last_attempted_at,
+            snapshot.last_error,
         ],
     )?;
     Ok(())
+}
+
+fn is_static_snapshot_status(probe_status: &str) -> bool {
+    matches!(
+        probe_status,
+        "light_ready" | "light_failed" | "installed_unverified"
+    )
+}
+
+fn is_execution_deferred_status(adapter_kind: AdapterKind, probe_status: Option<&str>) -> bool {
+    probe_status == Some("light_ready")
+        || (adapter_kind == AdapterKind::TraeCnCli && probe_status == Some("installed_unverified"))
+}
+
+fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
+    match adapter_kind {
+        AdapterKind::CodexCli => "codex-app-server-v2",
+        AdapterKind::ClaudeCodeCli => "claude-code-print-v1",
+        AdapterKind::AntigravityApp => "antigravity-app-cli-v1",
+        AdapterKind::OpencodeCli
+        | AdapterKind::CopilotCli
+        | AdapterKind::KiroCli
+        | AdapterKind::QoderCli
+        | AdapterKind::CodebuddyCli
+        | AdapterKind::QwenCode
+        | AdapterKind::TraeCnCli => "acp-v1",
+    }
 }
 
 fn upsert_runtime_executable_identity(
@@ -3341,8 +3371,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
             json!({ "installationId": installation_id }),
         )));
     }
-    let execution_deferred = adapter_kind == AdapterKind::TraeCnCli
-        && probe_status.as_deref() == Some("installed_unverified")
+    let execution_deferred = is_execution_deferred_status(adapter_kind, probe_status.as_deref())
         && authentication_status.as_deref() == Some("unknown");
     if probe_status.as_deref() != Some("ready") && !execution_deferred {
         return Ok(Err(runtime_blocker(
@@ -3381,7 +3410,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
                 json!({ "installationId": installation_id }),
             )));
         }
-        serde_json::to_string(&deferred_trae_models())?
+        serde_json::to_string(&deferred_runtime_models(adapter_kind))?
     } else {
         models_json
     };
@@ -3405,7 +3434,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
     capabilities.sort();
     capabilities.dedup();
     let protocols: Vec<String> = if execution_deferred {
-        vec!["acp-v1".to_string()]
+        vec![provisional_runtime_protocol(adapter_kind).to_string()]
     } else {
         serde_json::from_str(&protocols_json).context("invalid Adapter protocols")?
     };
@@ -3724,9 +3753,13 @@ fn runtime_readiness(
     let Some(probe_status) = probe_status else {
         return Ok(needs_attention("runtime_probe_required", None));
     };
-    if adapter_kind == AdapterKind::TraeCnCli && probe_status == "installed_unverified" {
+    if is_execution_deferred_status(adapter_kind, Some(&probe_status)) {
         return Ok(RuntimeReadiness {
-            status: RuntimeReadinessStatus::InstalledUnverified,
+            status: if probe_status == "light_ready" {
+                RuntimeReadinessStatus::LightReady
+            } else {
+                RuntimeReadinessStatus::InstalledUnverified
+            },
             blockers: vec![RuntimeReadinessBlocker {
                 code: "runtime_verification_deferred".to_string(),
                 detail: None,
@@ -3806,6 +3839,9 @@ fn configurable_managed_runtime_snapshot(
                     (snapshot.probe_status = 'ready'
                      AND snapshot.authentication_status = 'authenticated')
                     OR
+                    (snapshot.probe_status = 'light_ready'
+                     AND snapshot.authentication_status = 'unknown')
+                    OR
                     (?1 = 'trae-cn-cli'
                      AND snapshot.probe_status = 'installed_unverified'
                      AND snapshot.authentication_status = 'unknown')
@@ -3813,11 +3849,13 @@ fn configurable_managed_runtime_snapshot(
             "#,
             [adapter_kind.as_str()],
             |row| {
-                let execution_deferred = row.get::<_, String>(4)? == "installed_unverified";
+                let probe_status = row.get::<_, String>(4)?;
+                let execution_deferred =
+                    is_execution_deferred_status(adapter_kind, Some(probe_status.as_str()));
                 Ok(ConfigurableManagedRuntimeSnapshot {
                     installation_id: row.get(0)?,
                     permission_schema_version: row.get(1)?,
-                    models_json: if adapter_kind == AdapterKind::TraeCnCli {
+                    models_json: if execution_deferred {
                         let stored = row.get::<_, String>(2)?;
                         let models: Vec<ModelDescriptor> =
                             serde_json::from_str(&stored).map_err(|error| {
@@ -3828,9 +3866,9 @@ fn configurable_managed_runtime_snapshot(
                                 )
                             })?;
                         if execution_deferred && models.is_empty() {
-                            serde_json::to_string(&deferred_trae_models()).map_err(|error| {
-                                rusqlite::Error::ToSqlConversionFailure(Box::new(error))
-                            })?
+                            serde_json::to_string(&deferred_runtime_models(adapter_kind)).map_err(
+                                |error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)),
+                            )?
                         } else {
                             stored
                         }
@@ -4125,11 +4163,11 @@ fn member_runtime_defaults_for_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<Option<MemberRuntimeConfiguration>> {
-    let execution_deferred = adapter_kind == AdapterKind::TraeCnCli
-        && snapshot.probe_status == "installed_unverified"
-        && snapshot.authentication_status == "unknown"
-        && snapshot.executable_fingerprint.is_some()
-        && snapshot.stale_at.is_none();
+    let execution_deferred =
+        is_execution_deferred_status(adapter_kind, Some(snapshot.probe_status.as_str()))
+            && snapshot.authentication_status == "unknown"
+            && snapshot.executable_fingerprint.is_some()
+            && snapshot.stale_at.is_none();
     let ready = snapshot.probe_status == "ready"
         && snapshot.authentication_status == "authenticated"
         && snapshot.stale_at.is_none();
@@ -4149,7 +4187,7 @@ fn member_runtime_defaults_for_snapshot(
         permissions: permissions.clone(),
     };
     let models_json = if execution_deferred {
-        serde_json::to_string(&deferred_trae_models())?
+        serde_json::to_string(&deferred_runtime_models(adapter_kind))?
     } else {
         serde_json::to_string(&snapshot.models)?
     };
@@ -4171,10 +4209,14 @@ fn member_runtime_defaults_for_snapshot(
     }))
 }
 
-fn deferred_trae_models() -> Vec<ModelDescriptor> {
+fn deferred_runtime_models(adapter_kind: AdapterKind) -> Vec<ModelDescriptor> {
     vec![ModelDescriptor {
-        id: TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
-        display_name: "TRAE CLI runtime default".to_string(),
+        id: if adapter_kind == AdapterKind::TraeCnCli {
+            TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string()
+        } else {
+            format!("{}://runtime-default", adapter_kind.as_str())
+        },
+        display_name: format!("{} runtime default", adapter_kind.as_str()),
         is_default: true,
         hidden: false,
         deprecated: false,
@@ -4219,6 +4261,8 @@ fn validate_snapshot(snapshot: &AdapterCapabilitySnapshot) -> Result<()> {
     if !matches!(
         snapshot.probe_status.as_str(),
         "ready"
+            | "light_ready"
+            | "light_failed"
             | "installed_unverified"
             | "not_installed"
             | "authentication_required"
@@ -4256,7 +4300,7 @@ fn validate_snapshot(snapshot: &AdapterCapabilitySnapshot) -> Result<()> {
             anyhow::bail!("Ready Adapter snapshot requires an available default model");
         }
     }
-    if snapshot.probe_status == "installed_unverified" {
+    if is_static_snapshot_status(&snapshot.probe_status) {
         if snapshot.observed_at.is_none()
             || snapshot
                 .executable_fingerprint
@@ -4264,20 +4308,26 @@ fn validate_snapshot(snapshot: &AdapterCapabilitySnapshot) -> Result<()> {
                 .is_none_or(str::is_empty)
         {
             anyhow::bail!(
-                "Installed-unverified Adapter snapshot requires static observation and fingerprint"
+                "Light-ready Adapter snapshot requires static observation and fingerprint"
             );
         }
         if snapshot.authentication_status != "unknown"
             || snapshot.last_successful_probe_at.is_some()
             || snapshot.stale_at.is_some()
-            || snapshot.last_error.is_some()
         {
-            anyhow::bail!("Installed-unverified Adapter snapshot cannot claim probe evidence");
+            anyhow::bail!("Static Adapter snapshot cannot claim deep-probe evidence");
+        }
+        if snapshot.probe_status == "light_failed" {
+            if snapshot.last_error.as_deref().is_none_or(str::is_empty) {
+                anyhow::bail!("Light-failed Adapter snapshot requires lastError");
+            }
+        } else if snapshot.last_error.is_some() {
+            anyhow::bail!("Successful static Adapter snapshot cannot contain lastError");
         }
     }
     if !matches!(
         snapshot.probe_status.as_str(),
-        "ready" | "installed_unverified"
+        "ready" | "light_ready" | "installed_unverified"
     ) && snapshot.last_error.is_none()
     {
         anyhow::bail!("Failed Adapter snapshot requires lastError");
@@ -5872,6 +5922,137 @@ mod tests {
             RuntimeReadinessStatus::RuntimeNotConfigured
         );
         drop(reopened);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn light_ready_runtime_is_configurable_but_requires_deep_check_before_dispatch() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let executable_path = directory.join("qwen");
+        std::fs::write(&executable_path, b"static-qwen-fixture").unwrap();
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::QwenCode,
+                Some("0.9.0".to_string()),
+                "sha256:qwen-light".to_string(),
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        let installation_id = service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::QwenCode,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "qwen".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot,
+                },
+            )
+            .unwrap();
+        let installation = service
+            .managed_installation(&database, AdapterKind::QwenCode, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            installation.snapshot.as_ref().unwrap().probe_status,
+            "light_ready"
+        );
+        let defaults = installation.member_runtime_defaults.unwrap();
+        assert_eq!(defaults.model, ModelSelection::RuntimeDefault);
+
+        let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+        service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "configure-light-qwen",
+                    SetMemberRuntimeConfigurationCommand {
+                        agent_id: profile.agent_id.clone(),
+                        expected_version: profile.version,
+                        adapter_kind: AdapterKind::QwenCode,
+                        model: defaults.model.clone(),
+                        permissions: defaults.permissions.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        let configured = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            configured.runtime_readiness.status,
+            RuntimeReadinessStatus::LightReady
+        );
+
+        let frozen = resolve_frozen_runtime_binding(
+            database.connection(),
+            &ResolvedRuntimeBinding {
+                adapter_kind: AdapterKind::QwenCode,
+                installation_id,
+                model: ModelSelection::RuntimeDefault,
+                permissions: defaults.permissions,
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(frozen.model.model_id, "qwen-code://runtime-default");
+        assert_eq!(
+            service
+                .runtime_dispatch_blocker(&database, &frozen)
+                .unwrap()
+                .map(|blocker| blocker.code),
+            Some("runtime_probe_required".to_string())
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn failed_light_probe_invalidates_selection_and_retains_its_diagnostic() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let executable_path = directory.join("qwen");
+        std::fs::write(&executable_path, b"static-qwen-fixture").unwrap();
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .light_failed_snapshot(
+                AdapterKind::QwenCode,
+                None,
+                "sha256:qwen-light-failed".to_string(),
+                chrono::Utc::now().to_rfc3339(),
+                "runtime_version_failed".to_string(),
+            )
+            .unwrap();
+        service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::QwenCode,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "qwen".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot,
+                },
+            )
+            .unwrap();
+
+        let installation = service
+            .managed_installation(&database, AdapterKind::QwenCode, "default")
+            .unwrap()
+            .unwrap();
+        let snapshot = installation.snapshot.as_ref().unwrap();
+        assert_eq!(snapshot.probe_status, "light_failed");
+        assert_eq!(
+            snapshot.last_error.as_deref(),
+            Some("runtime_version_failed")
+        );
+        assert!(installation.member_runtime_defaults.is_none());
+
+        drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 

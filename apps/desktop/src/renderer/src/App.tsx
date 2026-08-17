@@ -689,22 +689,7 @@ export function App(): React.JSX.Element {
         setOnboardingRuntimePhase('discovering')
         await window.rovai.request('runtime.discovery.rescan', { interactiveShell: true })
 
-        setOnboardingRuntimePhase('checking')
-        let nextHealth = await window.rovai.request<HealthStatus>('health.check')
-        const runtimesToInspect = nextHealth.runtimeAvailability.filter((runtime) =>
-          runtime.status === 'found_uninspected'
-          || runtime.status === 'checking'
-          || runtime.status === 'detecting'
-        )
-        await Promise.allSettled(runtimesToInspect.map((runtime) =>
-          window.rovai.request(
-            runtime.runtimeKind === 'trae-cn-cli'
-              ? 'runtime.product.check'
-              : 'runtime.product.ensure',
-            { runtimeKind: runtime.runtimeKind }
-          )
-        ))
-        nextHealth = await window.rovai.request<HealthStatus>('health.check')
+        const nextHealth = await window.rovai.request<HealthStatus>('health.check')
         setHealth(nextHealth)
         setHealthAttempted(true)
 
@@ -3146,7 +3131,10 @@ export function campCreationPreflightFromAgents(
   const initialLeadAgentId = presentMembers
     .find((member) => member.runtimeReadiness === 'ready')
     ?.agentId ?? presentMembers
-    .find((member) => member.runtimeReadiness === 'installed_unverified')
+    .find((member) => (
+      member.runtimeReadiness === 'light_ready'
+      || member.runtimeReadiness === 'installed_unverified'
+    ))
     ?.agentId ?? presentMembers[0]?.agentId ?? null
   const blockers: CampCreationPreflight['blockers'] = presentMembers.length === 0
     ? [{ code: 'no_present_members', detail: '当前没有在队的队员。' }]

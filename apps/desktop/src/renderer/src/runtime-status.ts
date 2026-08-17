@@ -55,9 +55,15 @@ export function runtimeAvailabilityPresentation(
     case 'checking':
       return presentation('checking')
     case 'found_uninspected':
-      return availability.checking || availability.diagnosticCode === null
-        ? presentation('checking')
-        : presentation('unknown', '最近一次后台检查未能确认可用性，请稍后重试。')
+      return presentation(
+        'unknown',
+        '已找到可执行文件，但轻度启动验证尚未形成有效结果。'
+      )
+    case 'light_ready':
+      return presentation(
+        'available',
+        '已通过轻度启动验证；登录、模型与运行能力将在检查或首次任务时确认。'
+      )
     case 'installed_unverified':
       return presentation(
         'installed_unverified',
@@ -75,6 +81,12 @@ export function runtimeAvailabilityPresentation(
       )
     case 'authentication_required':
       return presentation('authentication_required', '请先完成该 Agent 运行时的登录。')
+    case 'needs_attention':
+      return {
+        status: 'unavailable',
+        label: '需要处理',
+        detail: '最近一次 Runtime 验证未完成，请重试扫描或检查，并按诊断提示处理。'
+      }
     case 'missing':
     case 'path_missing':
       return presentation('not_installed', '本机未找到可用的 Agent 运行时入口。')
@@ -118,6 +130,21 @@ export function memberRuntimePresentation(
       availabilityStatus.status === 'checking'
         ? '正在后台刷新最近一次检查结果。'
         : availabilityStatus.detail
+    )
+  }
+
+  if (agent.runtimeReadiness.status === 'light_ready') {
+    if (
+      availabilityStatus.status === 'authentication_required'
+      || availabilityStatus.status === 'not_installed'
+      || availabilityStatus.status === 'version_unsupported'
+      || availabilityStatus.status === 'unavailable'
+    ) {
+      return availabilityStatus
+    }
+    return presentation(
+      'available',
+      '当前配置可用于发起任务；登录、模型与运行能力将在首次任务时确认。'
     )
   }
 
@@ -182,6 +209,7 @@ export function runtimeReadinessLabel(
   return ({
     runtime_not_configured: '未配置 Agent 运行时',
     needs_attention: '不可用',
+    light_ready: '可用',
     installed_unverified: '已安装，待首次运行验证',
     ready: '可用'
   })[status]

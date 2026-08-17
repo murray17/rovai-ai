@@ -62,9 +62,12 @@ Session response 更新认证、模型、权限和 capability Ready，随后在�
 诊断或 replacement TRAE process。上游 executable identity 改变时，静态 preflight 先回到
 `installed_unverified`，下一次真实 AgentRun 再完成验证。
 
-该规则不撤销上方 `0.120.52` 的准入结论，只改变产品何时重取本机动态证据；其他 Runtime 仍按各自 policy
-执行后台主动检查。规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
-与 [Runtime Launch and Verification v1](contracts/runtime-launch-and-verification-v1.md)。
+该规则不撤销上方 `0.120.52` 的准入结论，只改变产品何时重取本机动态证据。其他 Runtime 的启动/重扫执行
+Adapter 允许且无副作用的有界版本/身份命令；只有命令成功、输出未超限并识别到基础身份才写
+`light_ready` 静态证据。深检由显式单 Runtime 检查或首次真实任务触发；Adapter policy 仍可进一步收窄目的。
+规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
+[ADR-0204](adr/0204-on-demand-runtime-deep-verification.md)与
+[Runtime Launch and Verification v3](contracts/runtime-launch-and-verification-v3.md)。
 
 ### 2026-08-17 ACP Session 隔离与 TRAE warm Host 修正
 
@@ -79,7 +82,7 @@ Adapter，且其 replay 只能在 `LoadingReplay` 阶段被隔离；对不上 Ho
 epoch、Native Session、Native Prompt 或 Delivery 的事件，不得进入 Evidence、Action、Usage、
 Missing-Send Recovery、Compaction 或 Renderer。匹配 `session/prompt` request ID 的 response 是唯一
 ACP input ACK 权威；无 Prompt correlation 的 `session/update` 与 permission request 不再提前确认。
-当前规范入口是 [Runtime Launch and Verification v2](contracts/runtime-launch-and-verification-v2.md)。
+当前规范入口是 [Runtime Launch and Verification v3](contracts/runtime-launch-and-verification-v3.md)。
 
 2026-08-17 使用本机真实 TRAE 执行 `ROVAI_ACP_SMOKE_ADAPTER=trae-cn-cli pnpm
 smoke:acp-runtime` 通过：completion、allow-once 写入与 deny 三个连续 AgentRun 使用同一
