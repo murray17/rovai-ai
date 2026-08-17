@@ -91,8 +91,10 @@
     "smoke:missing-send-recovery": "pnpm core:build:debug && node scripts/smoke-missing-send-recovery.mjs",
     "experiment:p1:copilot-native-turn": "node scripts/experiment-copilot-native-turn-reconciliation.mjs",
     "test:p1:copilot-native-turn-evidence": "node --test scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs",
-    "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",
-    "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64"
+    "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=-",
+    "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 -c.mac.identity=-",
+    "dist:mac:release:arm64": "pnpm build && electron-builder --mac dmg --arm64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
+    "dist:mac:release:x64": "pnpm build && electron-builder --mac dmg --x64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.19",
@@ -144,7 +146,10 @@
     "afterPack": "scripts/after-pack.cjs",
     "mac": {
       "icon": "build/icon.png",
-      "identity": "-",
+      "binaries": [
+        "Contents/Resources/bin/rovai-core",
+        "Contents/Resources/bin/rovai"
+      ],
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
