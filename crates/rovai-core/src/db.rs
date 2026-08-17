@@ -82,6 +82,7 @@ const V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.52";
 const V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 28;
 const V043_CLASSIFIER_VERSION: &str = "activity-v1";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct CurrentMigrationState {
     v66: bool,
     v67: bool,
@@ -479,7 +480,19 @@ fn has_current_data_contract(path: &Path) -> bool {
         [],
         |row| row.get(0),
     );
-    let migration_state: rusqlite::Result<CurrentMigrationState> = connection.query_row(
+    let migration_state = load_current_migration_state(&connection);
+    matches!(
+        (marker, projection_exists, migration_state),
+        (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
+            if classifier == V043_CLASSIFIER_VERSION
+                && migrations.admits(&contract, schema)
+    )
+}
+
+fn load_current_migration_state(
+    connection: &Connection,
+) -> rusqlite::Result<CurrentMigrationState> {
+    connection.query_row(
         r#"
         SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 66),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 67),
@@ -531,12 +544,6 @@ fn has_current_data_contract(path: &Path) -> bool {
                 v91: row.get(21)?,
             })
         },
-    );
-    matches!(
-        (marker, projection_exists, migration_state),
-        (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
-            if classifier == V043_CLASSIFIER_VERSION
-                && migrations.admits(&contract, schema)
     )
 }
 
@@ -15582,307 +15589,289 @@ impl Database {
 mod tests {
     use super::*;
 
+    fn assert_schema_objects(
+        connection: &Connection,
+        object_type: &str,
+        names: &[&str],
+        should_exist: bool,
+    ) {
+        for name in names {
+            let exists: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = ?1 AND name = ?2)",
+                    params![object_type, name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, should_exist, "unexpected {object_type} {name}");
+        }
+    }
+
+    fn assert_table_columns(
+        connection: &Connection,
+        table: &str,
+        required: &[&str],
+        forbidden: &[&str],
+    ) {
+        let columns = table_columns(connection, table).unwrap();
+        for column in required {
+            assert!(
+                columns.iter().any(|candidate| candidate == column),
+                "missing {table}.{column}"
+            );
+        }
+        for column in forbidden {
+            assert!(
+                !columns.iter().any(|candidate| candidate == column),
+                "legacy column remains: {table}.{column}"
+            );
+        }
+    }
+
+    fn assert_migrations_applied(connection: &Connection, versions: &[i64]) {
+        for version in versions {
+            let applied: bool = connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = ?1)",
+                    [version],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(applied, "migration {version} marker is missing");
+        }
+    }
+
+    fn migration_state_through(version: i64) -> CurrentMigrationState {
+        CurrentMigrationState {
+            v66: version >= 66,
+            v67: version >= 67,
+            v68: version >= 68,
+            v69: version >= 69,
+            v70: version >= 70,
+            v71: version >= 71,
+            v76: version >= 76,
+            v77: version >= 77,
+            v78: version >= 78,
+            v79: version >= 79,
+            v80: version >= 80,
+            v81: version >= 81,
+            v82: version >= 82,
+            v83: version >= 83,
+            v84: version >= 84,
+            v85: version >= 85,
+            v86: version >= 86,
+            v87: version >= 87,
+            v88: version >= 88,
+            v89: version >= 89,
+            v90: version >= 90,
+            v91: version >= 91,
+        }
+    }
+
     #[test]
-    fn current_data_contract_accepts_current_and_exact_upgrade_sources() {
+    fn current_migration_state_admission_matrix() {
+        let supported = [
+            (
+                "current",
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                91,
+            ),
+            (
+                "v0.96/schema-45",
+                V091_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V091_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                90,
+            ),
+            (
+                "v0.94/schema-44",
+                V090_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V090_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                89,
+            ),
+            (
+                "v0.90/schema-43",
+                V089_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V089_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                88,
+            ),
+            (
+                "v0.89/schema-42",
+                V088_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V088_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                87,
+            ),
+            (
+                "v0.83/schema-41",
+                V087_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V087_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                86,
+            ),
+            (
+                "v0.80/schema-40",
+                V086_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V086_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                85,
+            ),
+            (
+                "v0.78/schema-39",
+                V085_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V085_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                84,
+            ),
+            (
+                "v0.77/schema-38",
+                V084_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V084_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                83,
+            ),
+            (
+                "v0.73/schema-37",
+                V083_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V083_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                82,
+            ),
+            (
+                "v0.71/schema-36",
+                V082_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V082_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                81,
+            ),
+            (
+                "v0.71/schema-35",
+                V081_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V081_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                80,
+            ),
+            (
+                "v0.71/schema-34",
+                V080_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V080_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                79,
+            ),
+            (
+                "v0.67/schema-33",
+                V071_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V071_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                78,
+            ),
+            (
+                "v0.66/schema-32",
+                V067_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V067_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                77,
+            ),
+            (
+                "v0.62/schema-31",
+                V066_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V066_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                76,
+            ),
+            (
+                "v0.54/schema-30",
+                V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V062_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                71,
+            ),
+            (
+                "v0.54/schema-29",
+                V062_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V054_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                70,
+            ),
+            (
+                "v0.52/schema-28",
+                V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                69,
+            ),
+        ];
+        for (name, contract, schema, through) in supported {
+            assert!(
+                migration_state_through(through).admits(contract, schema),
+                "{name} must remain an explicit upgrade source"
+            );
+        }
+
+        let current = migration_state_through(91);
+        let v091_source = migration_state_through(90);
+        let mut missing_intermediate = current;
+        missing_intermediate.v84 = false;
+        let rejected = [
+            (
+                "source contract with wrong schema",
+                v091_source,
+                V091_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V090_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+            ),
+            (
+                "source schema with wrong contract",
+                v091_source,
+                V090_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V091_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+            ),
+            (
+                "intermediate marker missing",
+                missing_intermediate,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+            ),
+            (
+                "one marker beyond source",
+                current,
+                V091_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V091_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+            ),
+            (
+                "future contract",
+                current,
+                "v99.0",
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+            ),
+            (
+                "future schema",
+                current,
+                CURRENT_DATA_CONTRACT_VERSION,
+                CURRENT_PROJECTION_SCHEMA_VERSION + 1,
+            ),
+        ];
+        for (name, state, contract, schema) in rejected {
+            assert!(!state.admits(contract, schema), "{name} must fail closed");
+        }
+
+        let mut missing_required_base = migration_state_through(69);
+        missing_required_base.v68 = false;
+        assert!(!missing_required_base.admits(
+            V052_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+            V052_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        ));
+    }
+
+    #[test]
+    fn database_loads_current_migration_state_for_admission() {
         let directory =
-            std::env::temp_dir().join(format!("rovai-current-contract-test-{}", Uuid::new_v4()));
+            std::env::temp_dir().join(format!("rovai-current-contract-smoke-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
-        let path = directory.join("rovai.sqlite");
-
-        assert!(has_current_data_contract(&path));
-
-        database
+        let state = load_current_migration_state(database.connection())
+            .expect("current migration markers should load");
+        let (contract, schema): (String, i64) = database
             .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.96', projection_schema_version = 45
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 91;
-                "#,
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.96/schema-45 marker without migration 91 is an upgrade source"
-        );
+            .expect("current contract marker should load");
 
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.94', projection_schema_version = 44
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 90;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.94/schema-44 marker without migration 90 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.90', projection_schema_version = 43
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 89;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.90/schema-43 marker without migration 89 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.89', projection_schema_version = 42
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 88;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.89/schema-42 marker without migration 88 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.83', projection_schema_version = 41
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 87;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.83/schema-41 marker without migration 87 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.78', projection_schema_version = 39
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 87;
-                DELETE FROM schema_migration WHERE version = 86;
-                DELETE FROM schema_migration WHERE version = 85;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.78/schema-39 marker without migration 85 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.77', projection_schema_version = 38
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 84;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.77/schema-38 marker without migration 84 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.73', projection_schema_version = 37
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 84;
-                DELETE FROM schema_migration WHERE version = 83;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.73/schema-37 marker without migration 83 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.71', projection_schema_version = 35
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 83;
-                DELETE FROM schema_migration WHERE version = 81;
-                DELETE FROM schema_migration WHERE version = 82;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.71/schema-35 marker without migration 81 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.71', projection_schema_version = 34
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 80;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.71/schema-34 marker without migration 80 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.67', projection_schema_version = 33
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 79;
-                DELETE FROM schema_migration WHERE version = 80;
-                DELETE FROM schema_migration WHERE version = 81;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.67/schema-33 marker without migration 79 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.66', projection_schema_version = 32
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 78;
-                DELETE FROM schema_migration WHERE version = 79;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.66/schema-32 marker without migration 78 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.62', projection_schema_version = 31
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 77;
-                DELETE FROM schema_migration WHERE version = 78;
-                DELETE FROM schema_migration WHERE version = 79;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.62/schema-31 marker without migrations 77 and 78 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.54', projection_schema_version = 30
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 76;
-                DELETE FROM schema_migration WHERE version = 77;
-                DELETE FROM schema_migration WHERE version = 78;
-                DELETE FROM schema_migration WHERE version = 79;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.54/schema-30 marker without migration 76 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.54', projection_schema_version = 29
-                WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 71;
-                DELETE FROM schema_migration WHERE version = 77;
-                DELETE FROM schema_migration WHERE version = 78;
-                DELETE FROM schema_migration WHERE version = 79;
-                "#,
-            )
-            .unwrap();
-        assert!(
-            has_current_data_contract(&path),
-            "the exact v0.54/schema-29 marker without migration 71 is an upgrade source"
-        );
-
-        database
-            .connection()
-            .execute("DELETE FROM schema_migration WHERE version = 70", [])
-            .unwrap();
-        assert!(
-            !has_current_data_contract(&path),
-            "the v0.54/schema-29 source requires migration 70"
-        );
-
-        database
-            .connection()
-            .execute_batch(
-                r#"
-                UPDATE rovai_data_contract
-                SET contract_version = 'v0.52', projection_schema_version = 28
-                WHERE singleton = 1;
-                "#,
-            )
-            .unwrap();
-        assert!(has_current_data_contract(&path));
-
-        database
-            .connection()
-            .execute("DELETE FROM schema_migration WHERE version = 69", [])
-            .unwrap();
-        assert!(
-            !has_current_data_contract(&path),
-            "the exact v0.52/schema-28 source requires migrations 66 through 69"
-        );
+        assert_eq!(state, migration_state_through(91));
+        assert!(state.admits(&contract, schema));
+        assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
-
     #[test]
-    fn runtime_monitoring_v90_starts_a_clean_collection_without_backfill() {
+    fn current_schema_initializes_clean_monitoring_collection_state() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-runtime-monitoring-v90-test-{}",
             Uuid::new_v4()
@@ -15904,6 +15893,9 @@ mod tests {
         assert!(Uuid::parse_str(&epoch).is_ok());
         assert!(chrono::DateTime::parse_from_rfc3339(&started_at).is_ok());
         assert_eq!(parser_version, 1);
+        // This is a current-schema initialization smoke, not a historical v0.94
+        // database fixture. Historical no-backfill coverage belongs to a real
+        // source-schema fixture rather than a current DB with rewritten markers.
         let enrollment_count: i64 = database
             .connection()
             .query_row(
@@ -15914,7 +15906,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             enrollment_count, 0,
-            "migration must not manufacture enrollment for historical Runs"
+            "a fresh current database must not manufacture Run enrollment"
         );
         let contract: (String, i64) = database
             .connection()
@@ -16041,9 +16033,13 @@ mod tests {
     }
 
     #[test]
-    fn v71_upgrades_the_exact_v052_source_without_compatibility_rows() {
+    fn v052_marker_state_is_admitted_without_compatibility_rows() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v71-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
+        // This intentionally exercises admission of the supported marker state.
+        // It is not a real v0.52 schema fixture: the underlying schema is current.
+        // A real historical fixture must be generated from an authoritative v0.52
+        // database or SQL snapshot rather than reconstructed from memory here.
         database
             .connection()
             .execute_batch(
@@ -20026,52 +20022,6 @@ mod tests {
     }
 
     #[test]
-    fn v58_requires_structured_content_and_sets_the_reset_marker() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v58-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
-        let contract: (i64, i64) = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 58)
-                FROM rovai_data_contract WHERE singleton = 1
-                "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(contract, (CURRENT_PROJECTION_SCHEMA_VERSION, 1));
-        let error = database
-            .connection()
-            .execute(
-                "INSERT INTO camp_message(id, structured_content_json) VALUES ('null-content', NULL)",
-                [],
-            )
-            .expect_err("CampMessage without Structured Content must be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("CampMessage Structured Content is required")
-        );
-        let runtime_error = database
-            .connection()
-            .execute(
-                "UPDATE agent_profile SET selected_runtime_adapter_kind = 'codex-cli' WHERE id = 'agent_1'",
-                [],
-            )
-            .expect_err("partial Member Runtime Configuration must be rejected");
-        assert!(
-            runtime_error
-                .to_string()
-                .contains("Member Runtime Configuration must be complete or absent")
-        );
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
     fn v52_migrates_legacy_ids_to_uuid_keyed_profiles_and_one_monotonic_namespace() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v52-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&directory).expect("temporary database directory should exist");
@@ -20267,75 +20217,92 @@ mod tests {
     }
 
     #[test]
-    fn v59_installs_raw_context_schema_and_removes_summary_storage() {
+    fn current_schema_contains_required_contract_objects() {
         let directory =
-            std::env::temp_dir().join(format!("rovai-v59-schema-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).unwrap();
-        let migration_applied: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 59",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(migration_applied, 1);
-        let stable_collaboration_migration_applied: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 60",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(stable_collaboration_migration_applied, 1);
-        let obsolete_tables: i64 = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT COUNT(*) FROM sqlite_master
-                WHERE type IN ('table', 'view') AND name IN (
-                    'camp_summary', 'camp_summary_frontier',
-                    'context_compaction_attempt', 'context_compaction_waiter',
-                    'context_summary_config', 'camp_summary_fts'
-                )
-                "#,
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(obsolete_tables, 0);
-        let conversation_columns = table_columns(database.connection(), "conversation").unwrap();
-        assert!(conversation_columns.contains(&"last_accepted_public_boundary_sequence".into()));
-        assert!(
-            !conversation_columns.contains(&"native_read_through_camp_message_sequence".into())
+            std::env::temp_dir().join(format!("rovai-current-schema-test-{}", Uuid::new_v4()));
+        let database = Database::open(&directory).expect("database should open");
+        let connection = database.connection();
+
+        assert_migrations_applied(connection, &[58, 59, 60, 61, 62, 67, 88, 89, 90, 91]);
+        assert_schema_objects(
+            connection,
+            "table",
+            &[
+                "message_delivery",
+                "message_delivery_attempt",
+                "message_delivery_retry",
+                "context_manifest",
+                "runtime_input_delivery",
+                "monitoring_collection_state",
+                "monitoring_run_enrollment",
+            ],
+            true,
         );
-        let manifest_columns = table_columns(database.connection(), "context_manifest").unwrap();
-        for required in [
-            "previous_accepted_public_boundary_sequence",
-            "context_delivery_profile_version",
-            "context_delivery_profile_json",
-            "context_delivery_profile_digest",
-            "originating_public_user_message_ref_json",
-            "recent_message_refs_json",
-            "omitted_message_count",
-            "omitted_message_sequence_start",
-            "omitted_message_sequence_end",
-            "shared_message_evidence_json",
-            "shared_message_evidence_digest",
-            "run_fact_payload_json",
-            "run_fact_refs_json",
-            "run_fact_digest",
-        ] {
-            assert!(
-                manifest_columns.contains(&required.to_string()),
-                "missing {required}"
-            );
-        }
-        assert!(!manifest_columns.contains(&"camp_summary_ids_json".into()));
-        assert!(!manifest_columns.contains(&"coverage_baseline_sequence".into()));
-        let manifest_schema: String = database
-            .connection()
+        let legacy_objects = [
+            "camp_summary",
+            "camp_summary_frontier",
+            "context_compaction_attempt",
+            "context_compaction_waiter",
+            "context_summary_config",
+            "camp_summary_fts",
+            "message_delivery_context_manifest",
+        ];
+        assert_schema_objects(connection, "table", &legacy_objects, false);
+        assert_schema_objects(connection, "view", &legacy_objects, false);
+        assert_schema_objects(
+            connection,
+            "index",
+            &["message_delivery_gather_capture_source_idx"],
+            true,
+        );
+
+        assert_table_columns(
+            connection,
+            "conversation",
+            &["last_accepted_public_boundary_sequence"],
+            &["native_read_through_camp_message_sequence"],
+        );
+        assert_table_columns(
+            connection,
+            "context_manifest",
+            &[
+                "previous_accepted_public_boundary_sequence",
+                "context_delivery_profile_version",
+                "context_delivery_profile_json",
+                "context_delivery_profile_digest",
+                "originating_public_user_message_ref_json",
+                "recent_message_refs_json",
+                "omitted_message_count",
+                "omitted_message_sequence_start",
+                "omitted_message_sequence_end",
+                "shared_message_evidence_json",
+                "shared_message_evidence_digest",
+                "run_fact_payload_json",
+                "run_fact_refs_json",
+                "run_fact_digest",
+            ],
+            &["camp_summary_ids_json", "coverage_baseline_sequence"],
+        );
+        assert_table_columns(
+            connection,
+            "camp_message",
+            &[
+                "structured_content_json",
+                "effective_recipient_ids_json",
+                "recipient_set_digest",
+                "recipient_presentation_json",
+                "source_operation_id",
+            ],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "camp",
+            &["activation_state"],
+            &["status", "archived_at"],
+        );
+
+        let manifest_schema: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
                 [],
@@ -20345,35 +20312,7 @@ mod tests {
         assert!(manifest_schema.contains("formatter_version = 18"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
-        let v88_applied: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 88",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(v88_applied, 1);
-        let v89_applied: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 89",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(v89_applied, 1);
-        let capture_index_exists: bool = database
-            .connection()
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'message_delivery_gather_capture_source_idx')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(capture_index_exists);
-        let delivery_schema: String = database
-            .connection()
+        let delivery_schema: String = connection
             .query_row(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'runtime_input_delivery'",
                 [],
@@ -20382,8 +20321,8 @@ mod tests {
             .unwrap();
         assert!(delivery_schema.contains("CHECK(bootstrap_redelivery_envelope_version = 2)"));
         assert!(delivery_schema.contains("CHECK(bootstrap_redelivery_formatter_version = 2)"));
-        let contract: (String, i64) = database
-            .connection()
+
+        let contract: (String, i64) = connection
             .query_row(
                 "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
                 [],
@@ -20397,109 +20336,66 @@ mod tests {
                 CURRENT_PROJECTION_SCHEMA_VERSION
             )
         );
-        let public_a2a_migration_applied: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 61",
-                [],
-                |row| row.get(0),
-            )
+        let foreign_key_violations: i64 = connection
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
             .unwrap();
-        assert_eq!(public_a2a_migration_applied, 1);
-        let single_context_authority_migration_applied: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 62",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(single_context_authority_migration_applied, 1);
-        let obsolete_delivery_manifest: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery_context_manifest'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(obsolete_delivery_manifest, 0);
-        for table in [
-            "message_delivery",
-            "message_delivery_attempt",
-            "message_delivery_retry",
-        ] {
-            let exists: i64 = database
-                .connection()
-                .query_row(
-                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1",
-                    [table],
-                    |row| row.get(0),
-                )
-                .unwrap();
-            assert_eq!(exists, 1, "missing {table}");
-        }
-        let message_columns = table_columns(database.connection(), "camp_message").unwrap();
-        for required in [
-            "effective_recipient_ids_json",
-            "recipient_set_digest",
-            "recipient_presentation_json",
-            "source_operation_id",
-        ] {
-            assert!(
-                message_columns.contains(&required.to_string()),
-                "missing {required}"
-            );
-        }
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
+        assert_eq!(foreign_key_violations, 0);
 
-    #[test]
-    fn v67_adds_pending_camp_activation_without_reclassifying_existing_creation() {
-        let directory = std::env::temp_dir().join(format!("rovai-db-v67-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
-        let migration_applied: i64 = database
-            .connection()
-            .query_row(
-                "SELECT COUNT(*) FROM schema_migration WHERE version = 67",
+        let structured_content_error = connection
+            .execute(
+                "INSERT INTO camp_message(id, structured_content_json) VALUES ('null-content', NULL)",
                 [],
-                |row| row.get(0),
             )
-            .unwrap();
-        assert_eq!(migration_applied, 1);
-        database
-            .connection()
+            .expect_err("CampMessage without Structured Content must be rejected");
+        assert!(
+            structured_content_error
+                .to_string()
+                .contains("CampMessage Structured Content is required")
+        );
+        let runtime_error = connection
+            .execute(
+                "UPDATE agent_profile SET selected_runtime_adapter_kind = 'codex-cli' WHERE id = 'agent_1'",
+                [],
+            )
+            .expect_err("partial Member Runtime Configuration must be rejected");
+        assert!(
+            runtime_error
+                .to_string()
+                .contains("Member Runtime Configuration must be complete or absent")
+        );
+
+        connection
             .execute(
                 r#"
                 INSERT INTO camp(
                     id, title, project_binding_kind, project_path, created_at, updated_at
                 ) VALUES (
-                    'v67-default-active', 'Existing creation', 'quick_chat', '/quick-chat',
+                    'current-default-active', 'Existing creation', 'quick_chat', '/quick-chat',
                     '2026-08-09T00:00:00Z', '2026-08-09T00:00:00Z'
                 )
                 "#,
                 [],
             )
             .unwrap();
-        let activation_state: String = database
-            .connection()
+        let activation_state: String = connection
             .query_row(
-                "SELECT activation_state FROM camp WHERE id = 'v67-default-active'",
+                "SELECT activation_state FROM camp WHERE id = 'current-default-active'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
         assert_eq!(activation_state, "active");
         assert!(
-            database
-                .connection()
+            connection
                 .execute(
-                    "UPDATE camp SET activation_state = 'unknown' WHERE id = 'v67-default-active'",
+                    "UPDATE camp SET activation_state = 'unknown' WHERE id = 'current-default-active'",
                     [],
                 )
                 .is_err()
         );
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
