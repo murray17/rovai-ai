@@ -2529,86 +2529,81 @@ mod tests {
     #[test]
     fn adapters_declare_their_skill_delivery_groups() {
         let registry = AgentRuntimeAdapterRegistry::default();
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::CodexCli)
-                .delivery_groups,
-            [SkillDeliveryGroupKey::Codex]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::OpencodeCli)
-                .delivery_groups,
-            [
-                SkillDeliveryGroupKey::Opencode,
-                SkillDeliveryGroupKey::ClaudeCompatible,
-            ]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::OpencodeCli)
-                .verification,
-            SkillDiscoveryVerification::Verified
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::CopilotCli)
-                .delivery_groups,
-            [
-                SkillDeliveryGroupKey::Copilot,
-                SkillDeliveryGroupKey::ClaudeCompatible,
-            ]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::ClaudeCodeCli)
-                .delivery_groups,
-            [SkillDeliveryGroupKey::ClaudeCompatible]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::AntigravityApp)
-                .delivery_groups,
-            [SkillDeliveryGroupKey::Antigravity]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::KiroCli)
-                .delivery_groups,
-            [SkillDeliveryGroupKey::Kiro]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::QoderCli)
-                .delivery_groups,
-            [SkillDeliveryGroupKey::Qoder]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::CodebuddyCli)
-                .delivery_groups,
-            [SkillDeliveryGroupKey::Codebuddy]
-        );
-        assert_eq!(
-            registry
-                .skill_discovery(AdapterKind::QwenCode)
-                .delivery_groups,
-            [SkillDeliveryGroupKey::Qwen]
-        );
-        let trae = registry.skill_discovery(AdapterKind::TraeCnCli);
-        assert!(trae.delivery_groups.is_empty());
-        assert_eq!(
-            trae.verification,
-            SkillDiscoveryVerification::DocumentationOnly
-        );
-        for kind in AdapterKind::ALL
-            .into_iter()
-            .filter(|kind| *kind != AdapterKind::TraeCnCli)
-        {
-            assert_eq!(
-                registry.skill_discovery(kind).verification,
+        let cases: &[(
+            AdapterKind,
+            &[SkillDeliveryGroupKey],
+            SkillDiscoveryVerification,
+        )] = &[
+            (
+                AdapterKind::CodexCli,
+                &[SkillDeliveryGroupKey::Codex],
                 SkillDiscoveryVerification::Verified,
-                "{} Skill discovery must remain backed by a real Runtime smoke",
+            ),
+            (
+                AdapterKind::OpencodeCli,
+                &[
+                    SkillDeliveryGroupKey::Opencode,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::CopilotCli,
+                &[
+                    SkillDeliveryGroupKey::Copilot,
+                    SkillDeliveryGroupKey::ClaudeCompatible,
+                ],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::ClaudeCodeCli,
+                &[SkillDeliveryGroupKey::ClaudeCompatible],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::AntigravityApp,
+                &[SkillDeliveryGroupKey::Antigravity],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::KiroCli,
+                &[SkillDeliveryGroupKey::Kiro],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::QoderCli,
+                &[SkillDeliveryGroupKey::Qoder],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::CodebuddyCli,
+                &[SkillDeliveryGroupKey::Codebuddy],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::QwenCode,
+                &[SkillDeliveryGroupKey::Qwen],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
+                AdapterKind::TraeCnCli,
+                &[],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+        ];
+        assert_eq!(cases.len(), AdapterKind::ALL.len());
+        for (kind, delivery_groups, verification) in cases {
+            let discovery = registry.skill_discovery(*kind);
+            assert_eq!(
+                discovery.delivery_groups,
+                *delivery_groups,
+                "{} Skill delivery groups changed",
+                kind.as_str()
+            );
+            assert_eq!(
+                discovery.verification,
+                *verification,
+                "{} Skill discovery verification changed",
                 kind.as_str()
             );
         }

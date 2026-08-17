@@ -8144,12 +8144,20 @@ Use this exact public input @agent_2";
             super::missing_send_recovery_publishes_one_literal_recipient_free_message();
         }
         #[test]
-        fn accepted_recipient_free_send_suppresses_missing_send_recovery() {
-            super::accepted_recipient_free_send_suppresses_missing_send_recovery();
-        }
-        #[test]
-        fn accepted_addressed_send_also_suppresses_missing_send_recovery() {
-            super::accepted_addressed_send_also_suppresses_missing_send_recovery();
+        fn accepted_send_suppresses_missing_send_recovery_for_recipient_matrix() {
+            let cases: [(&str, fn()); 2] = [
+                (
+                    "recipient-free",
+                    super::accepted_recipient_free_send_suppresses_missing_send_recovery,
+                ),
+                (
+                    "addressed",
+                    super::accepted_addressed_send_also_suppresses_missing_send_recovery,
+                ),
+            ];
+            for (_name, run) in cases {
+                run();
+            }
         }
         #[test]
         fn a2a_target_run_recovers_independently_from_the_source_send() {
