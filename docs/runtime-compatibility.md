@@ -96,22 +96,39 @@ Evidence、Action 或最终输出。
 不把 `terminalId`、Diff 或未知结构投影成 command output。只有没有公开 Content Text 时，才从
 `rawOutput` 顶层白名单字段 `stdout`、`stderr`、`output`、`text` 提取文本；其他字段仍只参与私有摘要，
 不得进入 `runtime.action.payload.output`。OpenCode、GitHub Copilot 与 TRAE 的固定 `printf` smoke
-断言已加入 `smoke:acp-runtime`，本轮只完成确定性 parser 测试，没有再次调用真实模型，不能把脚本
-覆盖冒充三种 Runtime 的本机实测 pass。
+断言已加入 `smoke:acp-runtime`；`ROVAI_ACP_COMMAND_OUTPUT_ONLY=1` 可在 command output 结算后停止，
+仍保留默认完整 approval/write/deny 回归。脚本现在会在 Run 前显式应用自身声明的 `ask/off/default`
+权限；此前只声明但未写入成员配置的漂移已修正，OpenCode 完整 allow/deny 回归随后通过。
 
 Claude Code 保持 `--output-format stream-json --include-partial-messages`，但现在同时消费 partial
 `tool_use`、完整 assistant tool block 与对应 `tool_result`。生命周期直接使用 Claude 原生 tool-use ID；
 Bash、Read、Edit、Write 等只映射到既有 Canonical Activity kind，Bash result 仅公开标准 Content Text
 或明确的 `stdout`/`stderr`。最终 `result`、Usage 与 Session 校验路径没有改变。确定性 stream fixture
-已证明 partial/full 去重、start/terminal 关联、command marker 可见及私有字段不泄露；本轮未运行真实
-Claude 模型 smoke。
+已证明 partial/full 去重、start/terminal 关联、command marker 可见及私有字段不泄露。真实 smoke 还会
+强制原生 `Bash` 执行固定 `printf`，并要求 marker 从对应 `runtime.action.payload.output` 取得、原生
+tool-use ID 存在且 Session/Conversation 连续。
 
 Antigravity 的健康探测仅在 `--help` 同时声明 `--output-format` 与 `stream-json` 时发布可选
 `output.stream_json` capability；冻结为支持的 AgentRun 才追加 `--output-format stream-json`，从 NDJSON
 `init`、`step_update`、`result` 事件建立 native step 生命周期。command step 只公开 `tool_info` 中的
 `stdout`、`stderr`、`output`，不使用私有日志、workspace diff 或最终文本猜测内部工具。旧版或未声明
 能力的安装继续走原有 text/run-level 路径。本机 `agy 1.1.13 --help` 的只读检查确认当前安装声明该能力；
-结构化与旧版回退两条独立进程 fixture 均通过，但本轮没有启动真实 AGY 模型任务。
+结构化与旧版回退两条独立进程 fixture 均通过。真实 smoke 还会强制原生 `run_command` 执行固定
+`printf`，并验证结构化 step identity、同一 AGY Session 续接、AGY→Codex 换绑和私有日志清理。
+
+同日使用隔离 Core data-dir、managed Skill Library 和 Git workspace 完成五组真实模型复核：
+
+| Runtime | 实测版本 / model | 原生工具与固定输出 | 关联与结论 |
+| --- | --- | --- | --- |
+| OpenCode | `1.18.15` / `opencode/big-pickle` | terminal/Bash；`ROVAI_OPENCODE_CLI_PRINTF_OK\n` | command output pass；完整 ask/allow/deny pass |
+| GitHub Copilot CLI | `1.0.79` / `claude-sonnet-5` | shell；`ROVAI_COPILOT_CLI_PRINTF_OK\n`，另含 exit-code terminal 状态 | `allow_all=off` 下审批 1 次；pass |
+| TRAE CLI CN | 当前安装、静态版本按策略为 `null` / runtime default | Bash；`ROVAI_TRAE_CN_CLI_PRINTF_OK\n` | 审批 1 次；pass |
+| Claude Code | `2.1.220` / runtime default | `Bash`；`ROVAI_CLAUDE_PRINTF_OK` | 原生 tool-use ID 与同 Session/Conversation continuation；pass |
+| Antigravity | `1.1.13` / runtime default | `run_command`；`ROVAI_AGY_PRINTF_OK\n` | 结构化 step ID、同 Session continuation、AGY→Codex handoff；pass |
+
+这些结果直接来自真实 Runtime 的公开协议事件和 canonical `runtime.action`，没有使用私有日志、workspace
+diff 或最终回复文本补猜 command output。验收未启动、停止或替换 `/Applications/Rovai AI.app`，也未接触
+日常数据库；一次实测不扩大为其他版本、模型或未上报事件的能力结论。
 
 ### v0.89 Transport v13 当前基线
 

@@ -10,6 +10,7 @@ const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
+const commandOutputOnly = process.env.ROVAI_ACP_COMMAND_OUTPUT_ONLY === '1'
 let core
 let shuttingDown = false
 
@@ -108,7 +109,36 @@ try {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
 
-    const profile = await request('members.get', { agentId })
+    let profile = await request('members.get', { agentId })
+    const permissionsConfigured = await request('members.runtime.set', {
+      commandId: crypto.randomUUID(),
+      command: {
+        agentId: profile.agentId,
+        expectedVersion: profile.version,
+        adapterKind: specification.adapterKind,
+        model: profile.runtimeConfiguration.model,
+        permissions: {
+          adapterKind: specification.adapterKind,
+          schemaVersion: installation.snapshot.permissionSchemaVersion,
+          values: specification.permissionValues
+        }
+      }
+    })
+    if (permissionsConfigured.status !== 'applied') {
+      throw new Error(`ACP smoke permissions were rejected: ${JSON.stringify({
+        adapterKind: specification.adapterKind,
+        permissionsConfigured
+      })}`)
+    }
+    profile = await request('members.get', { agentId })
+    if (JSON.stringify(profile.runtimeConfiguration?.permissions?.values)
+        !== JSON.stringify(specification.permissionValues)) {
+      throw new Error(`ACP smoke permissions drifted: ${JSON.stringify({
+        adapterKind: specification.adapterKind,
+        expected: specification.permissionValues,
+        actual: profile.runtimeConfiguration?.permissions
+      })}`)
+    }
     const body = `Do not call tools or inspect files. Reply with exactly ${specification.token} and nothing else.`
     const purpose = `Verify the ${specification.adapterKind} ACP execution path without tools`
     const sent = camp
@@ -247,6 +277,7 @@ try {
         output: commandOutputEvent.params.payload.output,
         approvalCount: commandApprovals.size
       }
+      if (commandOutputOnly) continue
 
       const writeToken = 'ROVAI_ACP_APPROVED_WRITE'
       const adapterFileStem = ({

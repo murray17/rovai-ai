@@ -36,11 +36,33 @@ try {
       || !snapshot.permissionOptions.some((option) =>
         option.key === 'permission_mode' && option.recommendedValue === 'acceptEdits'
       )
-      || !snapshot.capabilities.includes('team_tool.call_member')) {
+      || !snapshot.capabilities.includes('team_tool.mcp_config')
+      || !snapshot.capabilities.includes('team_tool.allow')) {
     throw new Error(`Claude Code capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 
-  const profile = await core.request('members.get', { agentId: 'agent_1' })
+  let profile = await core.request('members.get', { agentId: 'agent_1' })
+  const permissionsConfigured = await core.request('members.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentId: profile.agentId,
+      expectedVersion: profile.version,
+      adapterKind: 'claude-code-cli',
+      model: profile.runtimeConfiguration.model,
+      permissions: {
+        adapterKind: 'claude-code-cli',
+        schemaVersion: 1,
+        values: { permission_mode: 'bypassPermissions' }
+      }
+    }
+  })
+  if (permissionsConfigured.status !== 'applied') {
+    throw new Error(`Claude Code smoke permissions were rejected: ${JSON.stringify(permissionsConfigured)}`)
+  }
+  profile = await core.request('members.get', { agentId: profile.agentId })
+  if (profile.runtimeConfiguration?.permissions?.values?.permission_mode !== 'bypassPermissions') {
+    throw new Error(`Claude Code smoke permissions drifted: ${JSON.stringify(profile.runtimeConfiguration)}`)
+  }
 
   const workspace = await core.request('workspaces.inspect', { path: projectRoot })
   const first = await createConfiguredCampAndSend(core.request, {
@@ -73,17 +95,16 @@ try {
     throw new Error(`Claude Code Native Session was not bound: ${JSON.stringify(firstBinding)}`)
   }
 
-  const followUp = await core.request('camp.messages.send', {
-    commandId: crypto.randomUUID(),
+  const followUp = await sendCampMessage(
+    core.request,
     campId,
-    body: 'Reply with exactly ROVAI_CLAUDE_RUN_TWO and nothing else. Do not call tools.',
-    address: { mode: 'default' },
-    execution: {
+    'Reply with exactly ROVAI_CLAUDE_RUN_TWO and nothing else. Do not call tools.',
+    {
       taskId: null,
       purpose: 'Verify Claude Code Native Session resume.',
       completionRole: 'required'
     }
-  })
+  )
   if (followUp.commandResult?.status !== 'accepted') {
     throw new Error(`Claude Code follow-up failed: ${JSON.stringify(followUp)}`)
   }
@@ -123,6 +144,57 @@ try {
     })}`)
   }
 
+  const commandMarker = 'ROVAI_CLAUDE_PRINTF_OK'
+  const commandRequest = await sendCampMessage(
+    core.request,
+    campId,
+    `Use the Bash tool exactly once to run this command without changing files: printf '%s\\n' '${commandMarker}'. Do not call any other tool. Then immediately reply exactly ROVAI_CLAUDE_COMMAND_OUTPUT_OK.`,
+    {
+      taskId: null,
+      purpose: 'Verify Claude Code Bash output projection.',
+      completionRole: 'required'
+    }
+  )
+  const commandRunId = commandRequest.commandResult?.payload?.agentRunIds?.[0]
+  if (commandRequest.commandResult?.status !== 'accepted' || !commandRunId) {
+    throw new Error(`Claude Code command-output intake failed: ${JSON.stringify(commandRequest)}`)
+  }
+  camp = await waitFor(async () => {
+    const value = await core.request('camps.snapshot', { campId })
+    const commandRun = value.agentRuns.find((agentRun) => agentRun.id === commandRunId)
+    if (commandRun?.status === 'failed' || commandRun?.status === 'cancelled') {
+      throw new Error(`Claude Code command-output AgentRun entered ${commandRun.status}: ${JSON.stringify({
+        commandRun,
+        actions: value.actions.filter((action) => action.agentRunId === commandRunId),
+        events: core.events.filter((event) => event.params?.agentRunId === commandRunId).slice(-30)
+      })}`)
+    }
+    return commandRun?.status === 'succeeded' ? value : null
+  }, 'Claude Code Bash AgentRun')
+  const commandRun = camp.agentRuns.find((agentRun) => agentRun.id === commandRunId)
+  const commandOutputEvent = core.events.find((event) =>
+    event.method === 'runtime.action'
+      && event.params?.agentRunId === commandRunId
+      && String(event.params?.payload?.output ?? '').includes(commandMarker)
+  )
+  const commandBinding = core.events.find((event) =>
+    event.method === 'agent_run.native_session_bound'
+      && event.params?.agentRunId === commandRunId
+  )
+  if (!commandRun
+      || !commandOutputEvent
+      || commandBinding?.params?.nativeThreadId !== nativeSessionId
+      || commandRun.conversationId !== firstRun.conversationId) {
+    throw new Error(`Claude Code Bash output was not projected on the resumed Conversation: ${JSON.stringify({
+      commandRun,
+      commandBinding,
+      marker: commandMarker,
+      runtimeActions: core.events.filter((event) =>
+        event.method === 'runtime.action' && event.params?.agentRunId === commandRunId
+      )
+    })}`)
+  }
+
   console.log(JSON.stringify({
     ok: true,
     runtime: snapshot.reportedVersion,
@@ -132,6 +204,12 @@ try {
     nativeSessionId,
     nativeSessionContinued: true,
     conversationId: firstRun.conversationId,
+    commandOutput: {
+      marker: commandMarker,
+      output: commandOutputEvent.params.payload.output,
+      toolName: commandOutputEvent.params.payload.toolName,
+      toolCallId: commandOutputEvent.params.payload.toolCallId
+    },
     teamToolAdvertised: true
   }, null, 2))
 } finally {
@@ -198,6 +276,21 @@ async function waitFor(probe, label) {
 function isUuid(value) {
   return typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+async function sendCampMessage(request, campId, body, execution) {
+  const draft = await request('camp.composerDraft.get', { campId })
+  const saved = await request('camp.composerDraft.save', {
+    campId,
+    expectedRevision: draft.revision,
+    content: [{ kind: 'text', text: body }]
+  })
+  return request('camp.messages.send', {
+    commandId: crypto.randomUUID(),
+    campId,
+    draftRevision: saved.revision,
+    execution
+  })
 }
 
 async function run(command, args, cwd) {
