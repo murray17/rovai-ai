@@ -104,7 +104,7 @@ async function assertEmptyMonitoring(cdp, context) {
   assert(state.description === '汇总 Runtime 实际上报的 Token、Cache 与成本；未上报字段显示为未知。',
     context + ' did not use the concise page description')
   assert(!state.hasBoundaryNotice, context + ' retained the collection boundary notice')
-  assert(state.empty.includes('暂无 Usage 数据') && state.empty.includes('新 AgentRun 上报 Token、Cache 或成本后'),
+  assert(state.empty.includes('暂无运行数据') && state.empty.includes('新 AgentRun 纳管后'),
     context + ' did not render the real empty state')
   assert(!/(Clean break|历史 Run 不补算|当前采集边界|采集从)/.test(state.description + state.empty),
     context + ' retained redundant cutover copy')

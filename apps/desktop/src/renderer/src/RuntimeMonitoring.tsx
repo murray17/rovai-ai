@@ -532,11 +532,12 @@ function MonitoringLoading(): React.JSX.Element {
 }
 
 export function RuntimeUsageEmpty(): React.JSX.Element {
-  return <section className="monitoring-state is-empty"><span aria-hidden="true" /><div><h2>暂无 Usage 数据</h2><p>新 AgentRun 上报 Token、Cache 或成本后会显示在这里。</p></div></section>
+  return <section className="monitoring-state is-empty"><span aria-hidden="true" /><div><h2>暂无运行数据</h2><p>新 AgentRun 纳管后会显示在这里。</p></div></section>
 }
 
 export function hasRuntimeUsage(snapshot: RuntimeUsageSnapshot): boolean {
-  return snapshot.summary.promptInputTotalTokens !== null
+  return snapshot.byRuntime.length > 0
+    || snapshot.summary.promptInputTotalTokens !== null
     || snapshot.summary.uncachedInputTokens !== null
     || snapshot.summary.outputTokens !== null
     || snapshot.summary.cacheReadTokens !== null

@@ -114,7 +114,7 @@ describe('RuntimeMonitoring', () => {
     expect(markup).not.toContain('尚未上报')
   })
 
-  it('recognizes and renders the empty state', () => {
+  it('keeps an enrolled Runtime visible when every Usage field is unknown', () => {
     const value = snapshot()
     value.summary = {
       promptInputTotalTokens: null,
@@ -127,10 +127,45 @@ describe('RuntimeMonitoring', () => {
       requestCacheHitRate: null,
       cost: null
     }
+    value.byRuntime = [{
+      ...value.byRuntime[0],
+      runtimeKind: 'trae-cn-cli',
+      promptInputTotalTokens: null,
+      uncachedInputTokens: null,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      cacheReadShare: null,
+      requestCacheHitRate: null,
+      coverage: { eligibleRuns: 2, observedRuns: 0 }
+    }]
+    expect(hasRuntimeUsage(value)).toBe(true)
+    const markup = renderToStaticMarkup(createElement(RuntimeUsageView, { snapshot: value }))
+    expect(markup).toContain('TRAE')
+    expect(markup).toContain('—')
+    expect(markup).toContain('0/2')
+  })
+
+  it('recognizes and renders the empty state before any Run is enrolled', () => {
+    const value = snapshot()
+    value.summary = {
+      promptInputTotalTokens: null,
+      uncachedInputTokens: null,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+      outputTokens: null,
+      reasoningOutputTokens: null,
+      cacheReadShare: null,
+      requestCacheHitRate: null,
+      cost: null
+    }
+    value.byRuntime = []
+    value.byModel = []
     expect(hasRuntimeUsage(value)).toBe(false)
     const markup = renderToStaticMarkup(createElement(RuntimeUsageEmpty))
-    expect(markup).toContain('暂无 Usage 数据')
-    expect(markup).toContain('新 AgentRun 上报 Token、Cache 或成本后')
+    expect(markup).toContain('暂无运行数据')
+    expect(markup).toContain('新 AgentRun 纳管后')
   })
 
   it('uses one bounded visible-page poll and throttles non-terminal events', () => {
