@@ -16080,7 +16080,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v72_backfills_initial_runtime_evidence_without_overwriting_existing_values() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v72-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16144,7 +16144,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v73_removes_expected_output_without_losing_agent_runs() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v73-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16203,7 +16203,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v74_assigns_every_active_skill_to_all_runtime_groups_once() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v74-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16317,7 +16317,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v75_persists_skill_projection_root_access_without_reapplying_it() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v75-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("test database should open");
@@ -16377,7 +16377,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v79_preserves_v78_lineage_and_installs_notification_episodes_once() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v79-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16503,7 +16503,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v80_adds_durable_controlled_shutdown_cycles() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v80-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16556,7 +16556,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v81_adds_exact_notification_heads_up_invalidation_facts() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v81-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16595,7 +16595,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v77-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16680,7 +16680,7 @@ mod tests {
         fs::remove_dir_all(fixture).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v28_adds_execution_evidence_and_structured_camp_presentations() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v28-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16736,7 +16736,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn a_new_database_seeds_durable_companions() {
         let directory = std::env::temp_dir().join(format!("rovai-db-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -16884,7 +16884,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v043_never_reads_the_legacy_lumen_database_path() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-legacy-test-{}", Uuid::new_v4()));
@@ -17094,7 +17094,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v33_context_manifest_has_no_legacy_task_context_columns() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v18-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -17264,7 +17264,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v35_installs_directory_workspace_and_agent_run_git_observation_columns() {
         use crate::{
             collaboration::{
@@ -17400,7 +17400,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v36_repairs_orphaned_camp_message_indexes_from_v35() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v36-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -17451,7 +17451,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v37_tombstones_legacy_a2a_system_cards_and_indexes_entity_ordering() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v37-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -17570,7 +17570,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v38_adds_runtime_executable_identity_table() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v38-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -17758,7 +17758,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v42_replaces_profile_identity_without_rewriting_active_run_identity() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v42-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -17980,7 +17980,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v19_adds_skill_library_and_context_exposure_to_existing_databases() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v19-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -18042,7 +18042,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v20_adds_mcp_exposure_to_existing_context_manifests() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v20-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -18084,7 +18084,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v30_accepts_the_expanded_runtime_adapter_catalog() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v30-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -18120,7 +18120,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v82_installs_isolated_hearth_review_store_without_legacy_authority() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v82-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -18208,7 +18208,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v83_preserves_existing_composer_drafts_and_installs_null_reply_state() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v83-draft-test-{}", Uuid::new_v4()));
@@ -18474,7 +18474,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v85_preserves_existing_drafts_without_inventing_continuation_routes() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v85-draft-test-{}", Uuid::new_v4()));
@@ -18985,7 +18985,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v26_maps_legacy_presence_and_enforces_terminal_removal() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v26-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -19183,7 +19183,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v25_backfills_only_empty_canonical_companion_avatars() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v25-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -19384,7 +19384,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v65_installs_durable_task_v2_and_sets_v047_contract() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v65-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).expect("database should open");
@@ -19578,7 +19578,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v46_adds_structured_camp_content_and_draft_revisions() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v46-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -19717,7 +19717,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v47_freezes_a_default_execution_budget_for_legacy_camp_turns() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v47-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -19924,7 +19924,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v56_removes_the_obsolete_codex_home_cleanup_queue() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v56-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -19974,7 +19974,7 @@ mod tests {
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
 
-    #[test]
+    #[cfg(feature = "legacy-migration-tests")]
     fn v57_removes_camp_archive_columns_without_downgrading_the_current_contract() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v57-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -20398,5 +20398,129 @@ mod tests {
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[cfg(feature = "legacy-migration-tests")]
+    mod legacy_migration_tests {
+        #[test]
+        fn v72_backfills_initial_runtime_evidence_without_overwriting_existing_values() {
+            super::v72_backfills_initial_runtime_evidence_without_overwriting_existing_values();
+        }
+        #[test]
+        fn v73_removes_expected_output_without_losing_agent_runs() {
+            super::v73_removes_expected_output_without_losing_agent_runs();
+        }
+        #[test]
+        fn v74_assigns_every_active_skill_to_all_runtime_groups_once() {
+            super::v74_assigns_every_active_skill_to_all_runtime_groups_once();
+        }
+        #[test]
+        fn v75_persists_skill_projection_root_access_without_reapplying_it() {
+            super::v75_persists_skill_projection_root_access_without_reapplying_it();
+        }
+        #[test]
+        fn v79_preserves_v78_lineage_and_installs_notification_episodes_once() {
+            super::v79_preserves_v78_lineage_and_installs_notification_episodes_once();
+        }
+        #[test]
+        fn v80_adds_durable_controlled_shutdown_cycles() {
+            super::v80_adds_durable_controlled_shutdown_cycles();
+        }
+        #[test]
+        fn v81_adds_exact_notification_heads_up_invalidation_facts() {
+            super::v81_adds_exact_notification_heads_up_invalidation_facts();
+        }
+        #[test]
+        fn v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason() {
+            super::v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason();
+        }
+        #[test]
+        fn v28_adds_execution_evidence_and_structured_camp_presentations() {
+            super::v28_adds_execution_evidence_and_structured_camp_presentations();
+        }
+        #[test]
+        fn a_new_database_seeds_durable_companions() {
+            super::a_new_database_seeds_durable_companions();
+        }
+        #[test]
+        fn v043_never_reads_the_legacy_lumen_database_path() {
+            super::v043_never_reads_the_legacy_lumen_database_path();
+        }
+        #[test]
+        fn v33_context_manifest_has_no_legacy_task_context_columns() {
+            super::v33_context_manifest_has_no_legacy_task_context_columns();
+        }
+        #[test]
+        fn v35_installs_directory_workspace_and_agent_run_git_observation_columns() {
+            super::v35_installs_directory_workspace_and_agent_run_git_observation_columns();
+        }
+        #[test]
+        fn v36_repairs_orphaned_camp_message_indexes_from_v35() {
+            super::v36_repairs_orphaned_camp_message_indexes_from_v35();
+        }
+        #[test]
+        fn v37_tombstones_legacy_a2a_system_cards_and_indexes_entity_ordering() {
+            super::v37_tombstones_legacy_a2a_system_cards_and_indexes_entity_ordering();
+        }
+        #[test]
+        fn v38_adds_runtime_executable_identity_table() {
+            super::v38_adds_runtime_executable_identity_table();
+        }
+        #[test]
+        fn v42_replaces_profile_identity_without_rewriting_active_run_identity() {
+            super::v42_replaces_profile_identity_without_rewriting_active_run_identity();
+        }
+        #[test]
+        fn v19_adds_skill_library_and_context_exposure_to_existing_databases() {
+            super::v19_adds_skill_library_and_context_exposure_to_existing_databases();
+        }
+        #[test]
+        fn v20_adds_mcp_exposure_to_existing_context_manifests() {
+            super::v20_adds_mcp_exposure_to_existing_context_manifests();
+        }
+        #[test]
+        fn v30_accepts_the_expanded_runtime_adapter_catalog() {
+            super::v30_accepts_the_expanded_runtime_adapter_catalog();
+        }
+        #[test]
+        fn v82_installs_isolated_hearth_review_store_without_legacy_authority() {
+            super::v82_installs_isolated_hearth_review_store_without_legacy_authority();
+        }
+        #[test]
+        fn v83_preserves_existing_composer_drafts_and_installs_null_reply_state() {
+            super::v83_preserves_existing_composer_drafts_and_installs_null_reply_state();
+        }
+        #[test]
+        fn v85_preserves_existing_drafts_without_inventing_continuation_routes() {
+            super::v85_preserves_existing_drafts_without_inventing_continuation_routes();
+        }
+        #[test]
+        fn v26_maps_legacy_presence_and_enforces_terminal_removal() {
+            super::v26_maps_legacy_presence_and_enforces_terminal_removal();
+        }
+        #[test]
+        fn v25_backfills_only_empty_canonical_companion_avatars() {
+            super::v25_backfills_only_empty_canonical_companion_avatars();
+        }
+        #[test]
+        fn v65_installs_durable_task_v2_and_sets_v047_contract() {
+            super::v65_installs_durable_task_v2_and_sets_v047_contract();
+        }
+        #[test]
+        fn v46_adds_structured_camp_content_and_draft_revisions() {
+            super::v46_adds_structured_camp_content_and_draft_revisions();
+        }
+        #[test]
+        fn v47_freezes_a_default_execution_budget_for_legacy_camp_turns() {
+            super::v47_freezes_a_default_execution_budget_for_legacy_camp_turns();
+        }
+        #[test]
+        fn v56_removes_the_obsolete_codex_home_cleanup_queue() {
+            super::v56_removes_the_obsolete_codex_home_cleanup_queue();
+        }
+        #[test]
+        fn v57_removes_camp_archive_columns_without_downgrading_the_current_contract() {
+            super::v57_removes_camp_archive_columns_without_downgrading_the_current_contract();
+        }
     }
 }

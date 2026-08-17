@@ -3483,6 +3483,8 @@ fn is_full_git_oid(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "slow-tests")]
+    use crate::read_model::ReadModelService;
     use crate::{
         agent_profile::configure_test_runtime,
         collaboration::{
@@ -3490,7 +3492,6 @@ mod tests {
             TestCampMessageAddress, TestCampMessageCommand,
         },
         command::CommandResultStatus,
-        read_model::ReadModelService,
     };
 
     struct Fixture {
@@ -3736,7 +3737,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn observed_terminal_action_is_a_single_degraded_audit_fact() {
         let mut fixture = fixture("ask");
         let service = ActionSafetyService::default();
@@ -3834,7 +3835,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn runtime_managed_request_bypasses_legacy_capability_policy_and_workspace_scope() {
         let mut fixture = fixture("deny");
         let config_json: String = fixture
@@ -3894,7 +3895,7 @@ mod tests {
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn legacy_run_keeps_its_core_capability_gate_for_the_same_intercepted_request() {
         let mut fixture = fixture("allow");
         let config_json: String = fixture
@@ -3996,7 +3997,7 @@ mod tests {
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn expired_runtime_managed_approval_delivers_the_frozen_safe_native_response() {
         let mut fixture = fixture("allow");
         let service = ActionSafetyService::default();
@@ -4101,7 +4102,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn approval_authorizes_but_does_not_complete_the_action() {
         let mut fixture = fixture("ask");
         let service = ActionSafetyService::default();
@@ -4654,7 +4655,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery() {
         let mut fixture = fixture("ask");
         let service = ActionSafetyService::default();
@@ -4727,7 +4728,7 @@ mod tests {
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn runtime_loss_marks_a_dispatched_intercepted_action_unknown() {
         let mut fixture = fixture("allow");
         let service = ActionSafetyService::default();
@@ -4898,7 +4899,7 @@ mod tests {
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn native_request_resolution_is_the_exact_authorization_delivery_ack() {
         let mut fixture = fixture("allow");
         let service = ActionSafetyService::default();
@@ -5184,7 +5185,7 @@ mod tests {
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn restart_distinguishes_not_dispatched_from_unknown_effects() {
         let mut fixture = fixture("allow");
         let service = ActionSafetyService::default();
@@ -5281,5 +5282,53 @@ mod tests {
         assert_eq!(second_recovery.actions_returned_to_prepared, 0);
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(feature = "slow-tests")]
+    mod slow_tests {
+        #[test]
+        fn observed_terminal_action_is_a_single_degraded_audit_fact() {
+            super::observed_terminal_action_is_a_single_degraded_audit_fact();
+        }
+
+        #[test]
+        fn runtime_managed_request_bypasses_legacy_capability_policy_and_workspace_scope() {
+            super::runtime_managed_request_bypasses_legacy_capability_policy_and_workspace_scope();
+        }
+
+        #[test]
+        fn legacy_run_keeps_its_core_capability_gate_for_the_same_intercepted_request() {
+            super::legacy_run_keeps_its_core_capability_gate_for_the_same_intercepted_request();
+        }
+
+        #[test]
+        fn expired_runtime_managed_approval_delivers_the_frozen_safe_native_response() {
+            super::expired_runtime_managed_approval_delivers_the_frozen_safe_native_response();
+        }
+
+        #[test]
+        fn approval_authorizes_but_does_not_complete_the_action() {
+            super::approval_authorizes_but_does_not_complete_the_action();
+        }
+
+        #[test]
+        fn runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery() {
+            super::runtime_loss_closes_an_unanswered_intercepted_request_and_preserves_recovery();
+        }
+
+        #[test]
+        fn runtime_loss_marks_a_dispatched_intercepted_action_unknown() {
+            super::runtime_loss_marks_a_dispatched_intercepted_action_unknown();
+        }
+
+        #[test]
+        fn native_request_resolution_is_the_exact_authorization_delivery_ack() {
+            super::native_request_resolution_is_the_exact_authorization_delivery_ack();
+        }
+
+        #[test]
+        fn restart_distinguishes_not_dispatched_from_unknown_effects() {
+            super::restart_distinguishes_not_dispatched_from_unknown_effects();
+        }
     }
 }

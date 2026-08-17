@@ -1885,35 +1885,39 @@ mod tests {
         agent_profile::configure_test_runtime,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
-            ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand, end_camp_membership,
+            ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{CommandGatewayError, CommandResultStatus},
         context::{
-            CharterDeliveryMode, ContextMaterialization, ContextService,
-            DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest,
+            CharterDeliveryMode, ContextService, DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+            MaterializeContextRequest,
         },
         managed_blob::ManagedBlobStore,
         memory::{
             AcceptHearthReviewItemCommand, CreateMemoryCommand, ForgetMemoryCommand,
-            MEMORY_AGENT_MUTATIONS_PER_RUN, MEMORY_BODY_MAX_BYTES, MemoryCreationOrigin,
-            MemoryKind, MemoryScopeKind, MemoryService, MemoryTarget,
-            RejectHearthReviewItemCommand, RelationshipDirection, RetireMemoryCommand,
-            ReviseMemoryCommand,
+            MEMORY_BODY_MAX_BYTES, MemoryKind, MemoryScopeKind, MemoryService, MemoryTarget,
+            RejectHearthReviewItemCommand, RelationshipDirection, ReviseMemoryCommand,
         },
         memory_retrieval::{
-            MemoryCacheState, MemoryReadInput, MemoryRetrievalInvocation, MemoryRetrievalService,
-            MemorySearchInput, MemoryViewInput, MemoryViewOutput,
+            MemoryRetrievalInvocation, MemoryRetrievalService, MemoryViewInput, MemoryViewOutput,
         },
         memory_tool::{MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation},
-        message_delivery::{
-            CancelMessageDeliveryCommand, DeliveryDispatchTrigger, MessageDeliveryService,
-            RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
-        },
+        message_delivery::{CancelMessageDeliveryCommand, MessageDeliveryService},
         runtime::{
-            BindNativeSessionCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
-            ExecutionRuntimeService, FailAgentRunCommand, MissingSendRecoveryBoundary,
-            MissingSendRecoveryCandidate, SucceedAgentRunCommand,
+            BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
+            MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, SucceedAgentRunCommand,
         },
+    };
+    #[cfg(feature = "slow-tests")]
+    use crate::{
+        collaboration::end_camp_membership,
+        context::ContextMaterialization,
+        memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
+        memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
+        message_delivery::{
+            DeliveryDispatchTrigger, RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
+        },
+        runtime::{CancelCampTurnCommand, FailAgentRunCommand},
     };
 
     fn user_envelope<P>(command_id: &str, camp_id: Option<&str>, payload: P) -> CommandEnvelope<P> {
@@ -1969,6 +1973,7 @@ mod tests {
         database: Database,
         directory: std::path::PathBuf,
         camp_id: String,
+        #[cfg(feature = "slow-tests")]
         task_id: String,
         source_run_id: String,
         source_epoch: i64,
@@ -2133,6 +2138,7 @@ mod tests {
                 database,
                 directory,
                 camp_id,
+                #[cfg(feature = "slow-tests")]
                 task_id,
                 source_run_id,
                 source_epoch,
@@ -2376,6 +2382,7 @@ mod tests {
             self.succeed_run_with_candidate(agent_run_id, execution_epoch, output, None);
         }
 
+        #[cfg(feature = "slow-tests")]
         fn fail_run(
             &mut self,
             agent_run_id: &str,
@@ -2465,7 +2472,7 @@ mod tests {
         }
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn public_send_schema_teaches_alias_boundary_and_canonical_to_values() {
         let schema = TeamToolService::camp_message_send_input_schema();
         let body_description = schema["properties"]["body"]["description"]
@@ -2718,7 +2725,7 @@ mod tests {
 
     /// Admission owner: one Gather atomically freezes one request, canonical Items,
     /// optional forward responsibilities and the separately reserved completion slot.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn gather_acceptance_persists_unified_deliveries_and_split_budget() {
         let mut fixture = Fixture::new();
         let invocation = fixture.gather_invocation(
@@ -2776,7 +2783,7 @@ mod tests {
 
     /// Barrier owner: an exact member return stays public but cannot materialize
     /// the Lead; the member terminal creates one FIFO completion continuation.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn gather_captures_public_return_and_materializes_one_completion() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -3077,7 +3084,7 @@ mod tests {
     /// Fallback owner: a successful member with no captured return freezes a
     /// scalar-safe bounded summary and retains the original initiator route even
     /// when the Camp Default Lead changes before the Barrier.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn gather_freezes_bounded_fallback_on_the_original_initiator_route() {
         let mut fixture = Fixture::new();
         let invocation = fixture.gather_invocation(
@@ -3372,7 +3379,7 @@ mod tests {
 
     /// Barrier race owner: both final member terminals use independent SQLite
     /// connections; exactly one serialized transaction may create completion.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn concurrent_last_member_terminals_create_one_completion_delivery() {
         let mut fixture = Fixture::new();
         let invocation = fixture.gather_invocation(
@@ -3492,7 +3499,7 @@ mod tests {
     /// Stop-vs-Barrier race owner: regardless of which immediate transaction
     /// serializes first, the durable final state is one cancelled Gather with no
     /// active or materialized completion.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn camp_turn_stop_racing_last_gather_member_cancels_completion() {
         let mut fixture = Fixture::new();
         let invocation =
@@ -3634,7 +3641,7 @@ mod tests {
     /// Membership lifecycle owner: once the frozen initiator leaves, later
     /// member completion cannot create or reroute a completion to the successor
     /// Default Lead.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn gather_is_cancelled_when_original_initiator_leaves() {
         let mut fixture = Fixture::new();
         let invocation = fixture.gather_invocation(
@@ -3712,7 +3719,7 @@ mod tests {
 
     /// FIFO owner: a newer Gather completion cannot overtake an older pending
     /// completion when Runtime readiness changes between their Barrier commits.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn multiple_gather_completions_share_original_lead_fifo() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -3873,7 +3880,7 @@ mod tests {
     /// Retry owner: a failed materialized member responsibility may reuse its
     /// Delivery/Item with a new generation while collecting, but the same failed
     /// Delivery cannot reopen the Gather after another Item commits the Barrier.
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn gather_forward_retry_reuses_item_and_ready_wins() {
         let mut fixture = Fixture::new();
         let invocation = fixture.gather_invocation(
@@ -4062,7 +4069,7 @@ mod tests {
         assert_eq!(final_state, ("ready".into(), "failed".into(), 1, 1));
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn public_send_resolves_active_member_display_name_alias_before_delivery() {
         let mut fixture = Fixture::new();
         fixture
@@ -4119,7 +4126,7 @@ mod tests {
         assert_eq!(delivery_count, 1);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn public_send_keeps_mid_line_display_name_alias_as_public_text() {
         let mut fixture = Fixture::new();
         fixture
@@ -4165,7 +4172,7 @@ mod tests {
         assert_eq!(delivery_count, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn public_only_send_consumes_no_a2a_slot() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -4330,7 +4337,7 @@ mod tests {
         assert_eq!(notification_count, 1);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn current_user_text_lookalikes_do_not_create_attention() {
         let mut fixture = Fixture::new();
         let invocation = fixture.public_send_invocation(
@@ -4353,7 +4360,7 @@ mod tests {
         assert_eq!(notification_count, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn task_linkage_ignores_current_user_attention_for_recipient_cardinality() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -4481,7 +4488,7 @@ mod tests {
         assert_eq!(after.3, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn agent_send_rejects_a_tombstoned_trigger_message() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -4520,7 +4527,7 @@ mod tests {
         assert_eq!(persisted, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn a2a_send_rejects_a_missing_trigger_delivery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -4579,7 +4586,7 @@ mod tests {
         assert_eq!(persisted, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn addressing_the_immediate_caller_deduplicates_into_a_return_delivery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -4734,7 +4741,7 @@ mod tests {
         assert_eq!(returned_run.3, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn a_non_immediate_ancestor_remains_rejected() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -4904,7 +4911,7 @@ mod tests {
         assert_eq!(final_edge.3, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn public_delivery_runtime_consumes_the_pre_run_frozen_context_bytes() {
         let mut fixture = Fixture::new();
         fixture
@@ -5112,7 +5119,7 @@ Use this exact public input @agent_2";
         );
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn task_linked_public_delivery_reuses_exact_run_fact_bytes() {
         let mut fixture = Fixture::new();
         let created = CollaborationService::default()
@@ -5207,7 +5214,7 @@ Use this exact public input @agent_2";
         );
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn missing_send_recovery_publishes_one_literal_recipient_free_message() {
         let mut fixture = Fixture::new();
         let body = "Recovered final with literal @agent_2";
@@ -5289,7 +5296,7 @@ Use this exact public input @agent_2";
         );
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn accepted_recipient_free_send_suppresses_missing_send_recovery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -5380,7 +5387,7 @@ Use this exact public input @agent_2";
         );
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn accepted_addressed_send_also_suppresses_missing_send_recovery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -5457,7 +5464,7 @@ Use this exact public input @agent_2";
         assert!(automatic_reply.is_none());
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn a2a_target_run_recovers_independently_from_the_source_send() {
         let mut fixture = Fixture::new();
         let invocation = fixture.public_send_invocation(
@@ -5514,7 +5521,7 @@ Use this exact public input @agent_2";
         assert_eq!(recovery_fact, (target_run_id, "[]".to_string(), 0));
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn missing_send_recovery_failures_do_not_change_run_success() {
         let cases = vec![
             (None, "skipped_no_candidate"),
@@ -5580,7 +5587,7 @@ Use this exact public input @agent_2";
         }
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn rejected_send_does_not_suppress_recovery_but_tombstoned_accepted_send_does() {
         let service = TeamToolService::default();
 
@@ -5783,7 +5790,7 @@ Use this exact public input @agent_2";
         assert_eq!(after, before);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn task_tool_schemas_use_cross_adapter_assignee_controls() {
         assert!(
             TeamToolService::update_task_input_schema()
@@ -5947,7 +5954,7 @@ Use this exact public input @agent_2";
         assert_eq!(execution_count_after, execution_count_before);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn task_tool_reads_are_camp_wide_without_audit_writes() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -6023,7 +6030,7 @@ Use this exact public input @agent_2";
         assert_eq!(forbidden.result.code, "task.create_forbidden");
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -6096,7 +6103,7 @@ Use this exact public input @agent_2";
         assert_eq!(stale.result.payload["currentVersion"], current_version);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn memory_read_reports_revision_inactive_and_deleted_without_returning_stale_body() {
         let mut fixture = Fixture::new();
         let service = MemoryService::default();
@@ -6285,7 +6292,7 @@ Use this exact public input @agent_2";
         assert!(deleted.memories.iter().all(|memory| memory.body.is_none()));
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn memory_search_and_read_identify_relationship_counterparties() {
         let mut fixture = Fixture::new();
         let service = MemoryService::default();
@@ -6399,7 +6406,7 @@ Use this exact public input @agent_2";
         );
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn memory_view_returns_complete_exact_scope_targets_in_deterministic_order() {
         let mut fixture = Fixture::new();
         let service = MemoryService::default();
@@ -6808,7 +6815,7 @@ Use this exact public input @agent_2";
         assert_eq!(evidence, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn hearth_review_acceptance_checks_body_quota_and_replays_the_first_rejection() {
         let mut fixture = Fixture::new();
         let service = MemoryService::default();
@@ -6911,7 +6918,7 @@ Use this exact public input @agent_2";
         assert_eq!(accepted.result.status, CommandResultStatus::Applied);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn agent_companion_write_is_effective_while_hearth_requires_user_acceptance() {
         let mut fixture = Fixture::new();
         let tools = MemoryToolService;
@@ -7299,7 +7306,7 @@ Use this exact public input @agent_2";
         );
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn agent_memory_domain_rejections_are_durable_across_state_changes_and_retries() {
         let mut fixture = Fixture::new();
         fixture
@@ -7381,7 +7388,7 @@ Use this exact public input @agent_2";
         assert_eq!(quota_replay.result, quota.result);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn hearth_review_terminalizes_candidates_and_reconciles_exact_publication() {
         let mut fixture = Fixture::new();
         let tools = MemoryToolService;
@@ -7516,7 +7523,7 @@ Use this exact public input @agent_2";
         assert_eq!(leaked_event_rows, 0);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn pending_hearth_review_is_unreadable_stale_is_reject_only_and_forget_closes_history() {
         let mut fixture = Fixture::new();
         let service = MemoryService::default();
@@ -8006,12 +8013,12 @@ Use this exact public input @agent_2";
         assert!(!TEAM_TOOL_NAMES.contains(&"team.call_member"));
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn recipient_completion_without_another_call_never_contacts_the_source() {
         assert!(!TEAM_TOOL_NAMES.contains(&"team.call_member"));
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn reverse_member_call_is_an_independent_forward_edge() {
         assert!(!TEAM_TOOL_NAMES.contains(&"team.call_member"));
     }
@@ -8051,5 +8058,165 @@ Use this exact public input @agent_2";
             fixture.credential.native_binding_id
         );
         assert_eq!(resumed.native_session_id.as_deref(), Some("native-source"));
+    }
+
+    #[cfg(feature = "slow-tests")]
+    mod slow_tests {
+        #[test]
+        fn public_send_schema_teaches_alias_boundary_and_canonical_to_values() {
+            super::public_send_schema_teaches_alias_boundary_and_canonical_to_values();
+        }
+        #[test]
+        fn gather_acceptance_persists_unified_deliveries_and_split_budget() {
+            super::gather_acceptance_persists_unified_deliveries_and_split_budget();
+        }
+        #[test]
+        fn gather_captures_public_return_and_materializes_one_completion() {
+            super::gather_captures_public_return_and_materializes_one_completion();
+        }
+        #[test]
+        fn gather_freezes_bounded_fallback_on_the_original_initiator_route() {
+            super::gather_freezes_bounded_fallback_on_the_original_initiator_route();
+        }
+        #[test]
+        fn concurrent_last_member_terminals_create_one_completion_delivery() {
+            super::concurrent_last_member_terminals_create_one_completion_delivery();
+        }
+        #[test]
+        fn camp_turn_stop_racing_last_gather_member_cancels_completion() {
+            super::camp_turn_stop_racing_last_gather_member_cancels_completion();
+        }
+        #[test]
+        fn gather_is_cancelled_when_original_initiator_leaves() {
+            super::gather_is_cancelled_when_original_initiator_leaves();
+        }
+        #[test]
+        fn multiple_gather_completions_share_original_lead_fifo() {
+            super::multiple_gather_completions_share_original_lead_fifo();
+        }
+        #[test]
+        fn gather_forward_retry_reuses_item_and_ready_wins() {
+            super::gather_forward_retry_reuses_item_and_ready_wins();
+        }
+        #[test]
+        fn public_send_resolves_active_member_display_name_alias_before_delivery() {
+            super::public_send_resolves_active_member_display_name_alias_before_delivery();
+        }
+        #[test]
+        fn public_send_keeps_mid_line_display_name_alias_as_public_text() {
+            super::public_send_keeps_mid_line_display_name_alias_as_public_text();
+        }
+        #[test]
+        fn public_only_send_consumes_no_a2a_slot() {
+            super::public_only_send_consumes_no_a2a_slot();
+        }
+        #[test]
+        fn current_user_text_lookalikes_do_not_create_attention() {
+            super::current_user_text_lookalikes_do_not_create_attention();
+        }
+        #[test]
+        fn task_linkage_ignores_current_user_attention_for_recipient_cardinality() {
+            super::task_linkage_ignores_current_user_attention_for_recipient_cardinality();
+        }
+        #[test]
+        fn agent_send_rejects_a_tombstoned_trigger_message() {
+            super::agent_send_rejects_a_tombstoned_trigger_message();
+        }
+        #[test]
+        fn a2a_send_rejects_a_missing_trigger_delivery() {
+            super::a2a_send_rejects_a_missing_trigger_delivery();
+        }
+        #[test]
+        fn addressing_the_immediate_caller_deduplicates_into_a_return_delivery() {
+            super::addressing_the_immediate_caller_deduplicates_into_a_return_delivery();
+        }
+        #[test]
+        fn a_non_immediate_ancestor_remains_rejected() {
+            super::a_non_immediate_ancestor_remains_rejected();
+        }
+        #[test]
+        fn public_delivery_runtime_consumes_the_pre_run_frozen_context_bytes() {
+            super::public_delivery_runtime_consumes_the_pre_run_frozen_context_bytes();
+        }
+        #[test]
+        fn task_linked_public_delivery_reuses_exact_run_fact_bytes() {
+            super::task_linked_public_delivery_reuses_exact_run_fact_bytes();
+        }
+        #[test]
+        fn missing_send_recovery_publishes_one_literal_recipient_free_message() {
+            super::missing_send_recovery_publishes_one_literal_recipient_free_message();
+        }
+        #[test]
+        fn accepted_recipient_free_send_suppresses_missing_send_recovery() {
+            super::accepted_recipient_free_send_suppresses_missing_send_recovery();
+        }
+        #[test]
+        fn accepted_addressed_send_also_suppresses_missing_send_recovery() {
+            super::accepted_addressed_send_also_suppresses_missing_send_recovery();
+        }
+        #[test]
+        fn a2a_target_run_recovers_independently_from_the_source_send() {
+            super::a2a_target_run_recovers_independently_from_the_source_send();
+        }
+        #[test]
+        fn missing_send_recovery_failures_do_not_change_run_success() {
+            super::missing_send_recovery_failures_do_not_change_run_success();
+        }
+        #[test]
+        fn rejected_send_does_not_suppress_recovery_but_tombstoned_accepted_send_does() {
+            super::rejected_send_does_not_suppress_recovery_but_tombstoned_accepted_send_does();
+        }
+        #[test]
+        fn task_tool_schemas_use_cross_adapter_assignee_controls() {
+            super::task_tool_schemas_use_cross_adapter_assignee_controls();
+        }
+        #[test]
+        fn task_tool_reads_are_camp_wide_without_audit_writes() {
+            super::task_tool_reads_are_camp_wide_without_audit_writes();
+        }
+        #[test]
+        fn task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing() {
+            super::task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing();
+        }
+        #[test]
+        fn memory_read_reports_revision_inactive_and_deleted_without_returning_stale_body() {
+            super::memory_read_reports_revision_inactive_and_deleted_without_returning_stale_body();
+        }
+        #[test]
+        fn memory_search_and_read_identify_relationship_counterparties() {
+            super::memory_search_and_read_identify_relationship_counterparties();
+        }
+        #[test]
+        fn memory_view_returns_complete_exact_scope_targets_in_deterministic_order() {
+            super::memory_view_returns_complete_exact_scope_targets_in_deterministic_order();
+        }
+        #[test]
+        fn hearth_review_acceptance_checks_body_quota_and_replays_the_first_rejection() {
+            super::hearth_review_acceptance_checks_body_quota_and_replays_the_first_rejection();
+        }
+        #[test]
+        fn agent_companion_write_is_effective_while_hearth_requires_user_acceptance() {
+            super::agent_companion_write_is_effective_while_hearth_requires_user_acceptance();
+        }
+        #[test]
+        fn agent_memory_domain_rejections_are_durable_across_state_changes_and_retries() {
+            super::agent_memory_domain_rejections_are_durable_across_state_changes_and_retries();
+        }
+        #[test]
+        fn hearth_review_terminalizes_candidates_and_reconciles_exact_publication() {
+            super::hearth_review_terminalizes_candidates_and_reconciles_exact_publication();
+        }
+        #[test]
+        fn pending_hearth_review_is_unreadable_stale_is_reject_only_and_forget_closes_history() {
+            super::pending_hearth_review_is_unreadable_stale_is_reject_only_and_forget_closes_history();
+        }
+        #[test]
+        fn recipient_completion_without_another_call_never_contacts_the_source() {
+            super::recipient_completion_without_another_call_never_contacts_the_source();
+        }
+        #[test]
+        fn reverse_member_call_is_an_independent_forward_edge() {
+            super::reverse_member_call_is_an_independent_forward_edge();
+        }
     }
 }

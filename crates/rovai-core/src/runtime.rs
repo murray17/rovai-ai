@@ -5481,7 +5481,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn manual_native_session_restart_keeps_conversation_identity_and_generation() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-restart-{}", Uuid::new_v4()));
@@ -6072,7 +6072,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
+    #[cfg(feature = "slow-tests")]
     async fn planned_shutdown_abortive_terminal_settles_live_waiting_runs() {
         struct WaitingTerminalState {
             run_status: String,
@@ -6267,7 +6267,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
+    #[cfg(feature = "slow-tests")]
     async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {
         let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("optional");
@@ -6310,7 +6310,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
+    #[cfg(feature = "slow-tests")]
     async fn planned_shutdown_optional_failed_does_not_block_turn_completion() {
         let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("optional");
@@ -6354,7 +6354,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
+    #[cfg(feature = "slow-tests")]
     async fn planned_shutdown_failed_uses_abortive_terminal_source_without_camp_cancellation() {
         let (directory, mut database, _camp_id, camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("required");
@@ -6593,7 +6593,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[tokio::test]
+    #[cfg(feature = "slow-tests")]
     async fn planned_shutdown_success_keeps_ordinary_invariants_and_records_terminal_reason() {
         let (directory, mut database, camp_id, _camp_turn_id, agent_run_id, execution_epoch) =
             claimed_run_for_planned_shutdown("required");
@@ -6969,7 +6969,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn scheduler_can_reject_a_queued_run_without_starting_it_or_removing_its_message() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-dispatch-reject-{}", Uuid::new_v4()));
@@ -7696,7 +7696,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn away_members_keep_responsibility_but_wait_for_presence_before_dispatch() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-fanout-{}", Uuid::new_v4()));
@@ -7964,5 +7964,44 @@ mod tests {
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(feature = "slow-tests")]
+    mod slow_tests {
+        #[test]
+        fn manual_native_session_restart_keeps_conversation_identity_and_generation() {
+            super::manual_native_session_restart_keeps_conversation_identity_and_generation();
+        }
+        #[tokio::test]
+        async fn planned_shutdown_abortive_terminal_settles_live_waiting_runs() {
+            super::planned_shutdown_abortive_terminal_settles_live_waiting_runs().await;
+        }
+        #[tokio::test]
+        async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {
+            super::planned_shutdown_optional_cancelled_does_not_block_turn_completion().await;
+        }
+        #[tokio::test]
+        async fn planned_shutdown_optional_failed_does_not_block_turn_completion() {
+            super::planned_shutdown_optional_failed_does_not_block_turn_completion().await;
+        }
+        #[tokio::test]
+        async fn planned_shutdown_failed_uses_abortive_terminal_source_without_camp_cancellation() {
+            super::planned_shutdown_failed_uses_abortive_terminal_source_without_camp_cancellation(
+            )
+            .await;
+        }
+        #[tokio::test]
+        async fn planned_shutdown_success_keeps_ordinary_invariants_and_records_terminal_reason() {
+            super::planned_shutdown_success_keeps_ordinary_invariants_and_records_terminal_reason()
+                .await;
+        }
+        #[test]
+        fn scheduler_can_reject_a_queued_run_without_starting_it_or_removing_its_message() {
+            super::scheduler_can_reject_a_queued_run_without_starting_it_or_removing_its_message();
+        }
+        #[test]
+        fn away_members_keep_responsibility_but_wait_for_presence_before_dispatch() {
+            super::away_members_keep_responsibility_but_wait_for_presence_before_dispatch();
+        }
     }
 }

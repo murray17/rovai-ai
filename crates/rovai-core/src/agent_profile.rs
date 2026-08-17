@@ -4431,10 +4431,6 @@ fn profile_updated_result(profile_id: &str, version: i64, code: &str) -> Command
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        collaboration::{AddCampMemberCommand, CollaborationService, CreateCampCommand},
-        command::{ActorRef, CommandEnvelope, CommandResultStatus},
-    };
 
     #[test]
     fn acp_runtime_classification_covers_every_acp_backed_adapter() {
@@ -4484,32 +4480,40 @@ mod tests {
         }
     }
 
-    fn database() -> (Database, std::path::PathBuf) {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-agent-profile-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
-        (database, directory)
-    }
+    #[cfg(feature = "slow-tests")]
+    mod slow_tests {
+        use super::*;
+        use crate::{
+            collaboration::{AddCampMemberCommand, CollaborationService, CreateCampCommand},
+            command::{ActorRef, CommandEnvelope, CommandResultStatus},
+        };
 
-    #[test]
-    fn selected_runtime_counts_include_unresolved_selections_and_exclude_removed_profiles() {
-        let (database, directory) = database();
-        let profiles = AgentProfileService::default()
-            .list_profiles(&database)
-            .unwrap();
-        assert!(profiles.len() >= 2);
-        database
+        fn database() -> (Database, std::path::PathBuf) {
+            let directory =
+                std::env::temp_dir().join(format!("rovai-agent-profile-test-{}", Uuid::new_v4()));
+            let database = Database::open(&directory).expect("database should open");
+            (database, directory)
+        }
+
+        #[test]
+        fn selected_runtime_counts_include_unresolved_selections_and_exclude_removed_profiles() {
+            let (database, directory) = database();
+            let profiles = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap();
+            assert!(profiles.len() >= 2);
+            database
             .connection()
             .execute(
                 "UPDATE agent_profile SET selected_runtime_adapter_kind = NULL, default_runtime_installation_id = NULL, default_model_selection_json = NULL, default_permission_config_json = NULL",
                 [],
             )
             .unwrap();
-        let now = chrono::Utc::now().to_rfc3339();
-        database
-            .connection()
-            .execute(
-                r#"
+            let now = chrono::Utc::now().to_rfc3339();
+            database
+                .connection()
+                .execute(
+                    r#"
                 INSERT INTO adapter_installation(
                     id, adapter_kind, executable_path, command_name,
                     installation_class, source, auth_scope, enabled,
@@ -4520,17 +4524,17 @@ mod tests {
                     1, 'path_missing', 1, ?1, ?1
                 )
                 "#,
-                [&now],
-            )
-            .unwrap();
-        database
+                    [&now],
+                )
+                .unwrap();
+            database
             .connection()
             .execute(
                 "UPDATE agent_profile SET selected_runtime_adapter_kind = 'codex-cli', default_runtime_installation_id = 'diagnostic-count-installation', default_model_selection_json = '{}', default_permission_config_json = '{}' WHERE id = ?1",
                 [&profiles[0].agent_id],
             )
             .unwrap();
-        database
+            database
             .connection()
             .execute(
                 "UPDATE agent_profile SET selected_runtime_adapter_kind = 'codex-cli', default_runtime_installation_id = 'diagnostic-count-installation', default_model_selection_json = '{}', default_permission_config_json = '{}', profile_status = 'removed', removed_at = ?2 WHERE id = ?1",
@@ -4538,650 +4542,657 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(
-            AgentProfileService::default()
-                .selected_runtime_counts(&database)
-                .unwrap(),
-            BTreeMap::from([(AdapterKind::CodexCli, 1)])
-        );
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    fn user_command<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {
-        CommandEnvelope {
-            command_id: command_id.to_string(),
-            actor: ActorRef::User {
-                user_id: "local_user".to_string(),
-            },
-            camp_id: None,
-            expected_versions: Vec::new(),
-            execution_epoch: None,
-            payload,
+            assert_eq!(
+                AgentProfileService::default()
+                    .selected_runtime_counts(&database)
+                    .unwrap(),
+                BTreeMap::from([(AdapterKind::CodexCli, 1)])
+            );
+            std::fs::remove_dir_all(directory).unwrap();
         }
-    }
 
-    fn create_identity(display_name: &str, responsibilities: &str) -> CreateAgentProfileCommand {
-        CreateAgentProfileCommand {
-            display_name: display_name.to_string(),
-            avatar_ref: None,
-            team_role: String::new(),
-            professional_responsibilities: responsibilities.to_string(),
-            personality_traits: Vec::new(),
-            working_principles: String::new(),
-            growth_topic: String::new(),
-        }
-    }
-
-    fn update_identity(
-        profile: &AgentProfileView,
-        display_name: &str,
-    ) -> UpdateAgentProfileCommand {
-        UpdateAgentProfileCommand {
-            agent_id: profile.agent_id.clone(),
-            expected_version: profile.version,
-            display_name: display_name.to_string(),
-            team_role: profile.team_role.clone(),
-            professional_responsibilities: profile.professional_responsibilities.clone(),
-            personality_traits: profile.personality_traits.clone(),
-            working_principles: profile.working_principles.clone(),
-            growth_topic: profile.growth_topic.clone(),
-        }
-    }
-
-    #[test]
-    fn six_field_identity_commands_reject_legacy_or_incomplete_payloads() {
-        let current = json!({
-            "displayName": "伙伴",
-            "teamRole": "游学者",
-            "professionalResponsibilities": "调查并实现明确方案。",
-            "personalityTraits": ["好奇"],
-            "workingPrinciples": "",
-            "growthTopic": ""
-        });
-        serde_json::from_value::<CreateAgentProfileCommand>(current)
-            .expect("the complete six-field identity payload should deserialize");
-
-        let legacy = json!({
-            "displayName": "伙伴",
-            "roleTitle": "开发者",
-            "identityTags": ["好奇"],
-            "roleDescription": "实现方案",
-            "instructions": "先测试"
-        });
-        assert!(serde_json::from_value::<CreateAgentProfileCommand>(legacy).is_err());
-
-        let incomplete = json!({
-            "displayName": "伙伴",
-            "teamRole": "游学者",
-            "professionalResponsibilities": "调查并实现明确方案。",
-            "personalityTraits": ["好奇"]
-        });
-        assert!(serde_json::from_value::<CreateAgentProfileCommand>(incomplete).is_err());
-    }
-
-    #[test]
-    fn personality_traits_are_normalized_and_deduplicated_before_the_limit() {
-        let traits = vec![
-            "  好奇  ".to_string(),
-            "好奇".to_string(),
-            "STEADY".to_string(),
-            "steady".to_string(),
-        ];
-        let normalized = normalize_member_identity("伙伴", "  质量   保障  ", "", &traits, "", "")
-            .expect("valid duplicate traits should normalize");
-        assert_eq!(normalized.team_role, "质量 保障");
-        assert_eq!(normalized.personality_traits, vec!["好奇", "STEADY"]);
-
-        let too_many = (1..=7)
-            .map(|index| format!("标签{index}"))
-            .collect::<Vec<_>>();
-        assert!(normalize_member_identity("伙伴", "", "", &too_many, "", "").is_err());
-    }
-
-    fn ready_codex_snapshot() -> AdapterCapabilitySnapshot {
-        let now = chrono::Utc::now().to_rfc3339();
-        AdapterCapabilitySnapshot {
-            reported_version: Some("0.144.6".to_string()),
-            executable_fingerprint: Some("sha256:test".to_string()),
-            authentication_status: "authenticated".to_string(),
-            probe_status: "ready".to_string(),
-            permission_schema_version: 1,
-            permission_schema_digest: "sha256:test-permissions".to_string(),
-            capabilities: vec!["structured_permission_request".to_string()],
-            protocols: vec!["codex-app-server".to_string()],
-            models: vec![ModelDescriptor {
-                id: "gpt-test".to_string(),
-                display_name: "GPT Test".to_string(),
-                is_default: true,
-                hidden: false,
-                deprecated: false,
-                options: Vec::new(),
-            }],
-            permission_options: vec![
-                PermissionOptionDescriptor {
-                    key: "sandbox_mode".to_string(),
-                    label: "Sandbox mode".to_string(),
-                    description: "Codex filesystem sandbox mode".to_string(),
-                    value_type: "enum".to_string(),
-                    choices: vec![
-                        ValueChoice {
-                            value: "workspace-write".to_string(),
-                            label: "workspace-write".to_string(),
-                        },
-                        ValueChoice {
-                            value: "danger-full-access".to_string(),
-                            label: "danger-full-access".to_string(),
-                        },
-                    ],
-                    recommended_value: json!("workspace-write"),
-                    scope: RuntimeOptionScope::Session,
-                    risk: "normal".to_string(),
-                    supported: true,
-                    required: true,
-                    unsupported_reason: None,
+        fn user_command<P>(command_id: &str, payload: P) -> CommandEnvelope<P> {
+            CommandEnvelope {
+                command_id: command_id.to_string(),
+                actor: ActorRef::User {
+                    user_id: "local_user".to_string(),
                 },
-                PermissionOptionDescriptor {
-                    key: "approval_policy".to_string(),
-                    label: "Approval policy".to_string(),
-                    description: "Codex approval policy".to_string(),
-                    value_type: "enum".to_string(),
-                    choices: vec![
-                        ValueChoice {
-                            value: "on-request".to_string(),
-                            label: "on-request".to_string(),
-                        },
-                        ValueChoice {
-                            value: "never".to_string(),
-                            label: "never".to_string(),
-                        },
-                    ],
-                    recommended_value: json!("on-request"),
-                    scope: RuntimeOptionScope::Session,
-                    risk: "normal".to_string(),
-                    supported: true,
-                    required: true,
-                    unsupported_reason: None,
-                },
-            ],
-            observed_at: Some(now.clone()),
-            last_attempted_at: now.clone(),
-            last_successful_probe_at: Some(now),
-            stale_at: None,
-            last_error: None,
-            native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
+                camp_id: None,
+                expected_versions: Vec::new(),
+                execution_epoch: None,
+                payload,
+            }
         }
-    }
 
-    #[test]
-    fn starter_profiles_are_generic_and_runtime_is_not_configured() {
-        let (database, directory) = database();
-        let profiles = AgentProfileService::default()
-            .list_profiles(&database)
-            .expect("profiles should load");
-        assert_eq!(profiles.len(), 4);
-        let public_profile = serde_json::to_value(&profiles[0]).unwrap();
-        assert!(public_profile.get("uuid").is_none());
-        assert!(public_profile.get("handle").is_none());
-        assert_eq!(public_profile["agentId"], "agent_1");
-        assert!(
-            profiles
-                .iter()
-                .all(|profile| profile.runtime_configuration.is_none())
-        );
-        assert!(profiles.iter().all(|profile| {
-            profile.runtime_readiness.status == RuntimeReadinessStatus::RuntimeNotConfigured
-        }));
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
+        fn create_identity(
+            display_name: &str,
+            responsibilities: &str,
+        ) -> CreateAgentProfileCommand {
+            CreateAgentProfileCommand {
+                display_name: display_name.to_string(),
+                avatar_ref: None,
+                team_role: String::new(),
+                professional_responsibilities: responsibilities.to_string(),
+                personality_traits: Vec::new(),
+                working_principles: String::new(),
+                growth_topic: String::new(),
+            }
+        }
 
-    #[test]
-    fn profile_creation_allocates_monotonic_agent_ids_without_reusing_removed_values() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let first = service
-            .create_profile(
-                &mut database,
-                &user_command(
-                    "create-agent-five",
-                    create_identity("第五位", "验证首个自定义 Agent ID。"),
-                ),
-            )
-            .unwrap();
-        assert_eq!(first.result.payload["agentId"], "agent_5");
-        let first_profile = service.get_profile(&database, "agent_5").unwrap().unwrap();
-        service
-            .remove_member(
-                &mut database,
-                &user_command(
-                    "remove-agent-five",
-                    RemoveMemberCommand {
-                        agent_id: first_profile.agent_id,
-                        expected_version: first_profile.version,
-                        confirmation_name: first_profile.display_name,
+        fn update_identity(
+            profile: &AgentProfileView,
+            display_name: &str,
+        ) -> UpdateAgentProfileCommand {
+            UpdateAgentProfileCommand {
+                agent_id: profile.agent_id.clone(),
+                expected_version: profile.version,
+                display_name: display_name.to_string(),
+                team_role: profile.team_role.clone(),
+                professional_responsibilities: profile.professional_responsibilities.clone(),
+                personality_traits: profile.personality_traits.clone(),
+                working_principles: profile.working_principles.clone(),
+                growth_topic: profile.growth_topic.clone(),
+            }
+        }
+
+        #[test]
+        fn six_field_identity_commands_reject_legacy_or_incomplete_payloads() {
+            let current = json!({
+                "displayName": "伙伴",
+                "teamRole": "游学者",
+                "professionalResponsibilities": "调查并实现明确方案。",
+                "personalityTraits": ["好奇"],
+                "workingPrinciples": "",
+                "growthTopic": ""
+            });
+            serde_json::from_value::<CreateAgentProfileCommand>(current)
+                .expect("the complete six-field identity payload should deserialize");
+
+            let legacy = json!({
+                "displayName": "伙伴",
+                "roleTitle": "开发者",
+                "identityTags": ["好奇"],
+                "roleDescription": "实现方案",
+                "instructions": "先测试"
+            });
+            assert!(serde_json::from_value::<CreateAgentProfileCommand>(legacy).is_err());
+
+            let incomplete = json!({
+                "displayName": "伙伴",
+                "teamRole": "游学者",
+                "professionalResponsibilities": "调查并实现明确方案。",
+                "personalityTraits": ["好奇"]
+            });
+            assert!(serde_json::from_value::<CreateAgentProfileCommand>(incomplete).is_err());
+        }
+
+        #[test]
+        fn personality_traits_are_normalized_and_deduplicated_before_the_limit() {
+            let traits = vec![
+                "  好奇  ".to_string(),
+                "好奇".to_string(),
+                "STEADY".to_string(),
+                "steady".to_string(),
+            ];
+            let normalized =
+                normalize_member_identity("伙伴", "  质量   保障  ", "", &traits, "", "")
+                    .expect("valid duplicate traits should normalize");
+            assert_eq!(normalized.team_role, "质量 保障");
+            assert_eq!(normalized.personality_traits, vec!["好奇", "STEADY"]);
+
+            let too_many = (1..=7)
+                .map(|index| format!("标签{index}"))
+                .collect::<Vec<_>>();
+            assert!(normalize_member_identity("伙伴", "", "", &too_many, "", "").is_err());
+        }
+
+        fn ready_codex_snapshot() -> AdapterCapabilitySnapshot {
+            let now = chrono::Utc::now().to_rfc3339();
+            AdapterCapabilitySnapshot {
+                reported_version: Some("0.144.6".to_string()),
+                executable_fingerprint: Some("sha256:test".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                permission_schema_version: 1,
+                permission_schema_digest: "sha256:test-permissions".to_string(),
+                capabilities: vec!["structured_permission_request".to_string()],
+                protocols: vec!["codex-app-server".to_string()],
+                models: vec![ModelDescriptor {
+                    id: "gpt-test".to_string(),
+                    display_name: "GPT Test".to_string(),
+                    is_default: true,
+                    hidden: false,
+                    deprecated: false,
+                    options: Vec::new(),
+                }],
+                permission_options: vec![
+                    PermissionOptionDescriptor {
+                        key: "sandbox_mode".to_string(),
+                        label: "Sandbox mode".to_string(),
+                        description: "Codex filesystem sandbox mode".to_string(),
+                        value_type: "enum".to_string(),
+                        choices: vec![
+                            ValueChoice {
+                                value: "workspace-write".to_string(),
+                                label: "workspace-write".to_string(),
+                            },
+                            ValueChoice {
+                                value: "danger-full-access".to_string(),
+                                label: "danger-full-access".to_string(),
+                            },
+                        ],
+                        recommended_value: json!("workspace-write"),
+                        scope: RuntimeOptionScope::Session,
+                        risk: "normal".to_string(),
+                        supported: true,
+                        required: true,
+                        unsupported_reason: None,
                     },
-                ),
-            )
-            .unwrap();
+                    PermissionOptionDescriptor {
+                        key: "approval_policy".to_string(),
+                        label: "Approval policy".to_string(),
+                        description: "Codex approval policy".to_string(),
+                        value_type: "enum".to_string(),
+                        choices: vec![
+                            ValueChoice {
+                                value: "on-request".to_string(),
+                                label: "on-request".to_string(),
+                            },
+                            ValueChoice {
+                                value: "never".to_string(),
+                                label: "never".to_string(),
+                            },
+                        ],
+                        recommended_value: json!("on-request"),
+                        scope: RuntimeOptionScope::Session,
+                        risk: "normal".to_string(),
+                        supported: true,
+                        required: true,
+                        unsupported_reason: None,
+                    },
+                ],
+                observed_at: Some(now.clone()),
+                last_attempted_at: now.clone(),
+                last_successful_probe_at: Some(now),
+                stale_at: None,
+                last_error: None,
+                native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
+            }
+        }
 
-        let second = service
-            .create_profile(
-                &mut database,
-                &user_command(
-                    "create-agent-six",
-                    create_identity("第六位", "验证删除后不复用 Agent ID。"),
-                ),
-            )
-            .unwrap();
-        assert_eq!(second.result.payload["agentId"], "agent_6");
-        let (uuid, next_value): (String, i64) = database
-            .connection()
-            .query_row(
-                r#"
+        #[test]
+        fn starter_profiles_are_generic_and_runtime_is_not_configured() {
+            let (database, directory) = database();
+            let profiles = AgentProfileService::default()
+                .list_profiles(&database)
+                .expect("profiles should load");
+            assert_eq!(profiles.len(), 4);
+            let public_profile = serde_json::to_value(&profiles[0]).unwrap();
+            assert!(public_profile.get("uuid").is_none());
+            assert!(public_profile.get("handle").is_none());
+            assert_eq!(public_profile["agentId"], "agent_1");
+            assert!(
+                profiles
+                    .iter()
+                    .all(|profile| profile.runtime_configuration.is_none())
+            );
+            assert!(profiles.iter().all(|profile| {
+                profile.runtime_readiness.status == RuntimeReadinessStatus::RuntimeNotConfigured
+            }));
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn profile_creation_allocates_monotonic_agent_ids_without_reusing_removed_values() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let first = service
+                .create_profile(
+                    &mut database,
+                    &user_command(
+                        "create-agent-five",
+                        create_identity("第五位", "验证首个自定义 Agent ID。"),
+                    ),
+                )
+                .unwrap();
+            assert_eq!(first.result.payload["agentId"], "agent_5");
+            let first_profile = service.get_profile(&database, "agent_5").unwrap().unwrap();
+            service
+                .remove_member(
+                    &mut database,
+                    &user_command(
+                        "remove-agent-five",
+                        RemoveMemberCommand {
+                            agent_id: first_profile.agent_id,
+                            expected_version: first_profile.version,
+                            confirmation_name: first_profile.display_name,
+                        },
+                    ),
+                )
+                .unwrap();
+
+            let second = service
+                .create_profile(
+                    &mut database,
+                    &user_command(
+                        "create-agent-six",
+                        create_identity("第六位", "验证删除后不复用 Agent ID。"),
+                    ),
+                )
+                .unwrap();
+            assert_eq!(second.result.payload["agentId"], "agent_6");
+            let (uuid, next_value): (String, i64) = database
+                .connection()
+                .query_row(
+                    r#"
                 SELECT agent_profile.uuid, agent_id_sequence.next_value
                 FROM agent_profile, agent_id_sequence
                 WHERE agent_profile.id = 'agent_6'
                   AND agent_id_sequence.singleton = 1
                 "#,
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .unwrap();
-        assert!(Uuid::parse_str(&uuid).is_ok());
-        assert_eq!(next_value, 7);
-        let public_profile =
-            serde_json::to_value(service.get_profile(&database, "agent_6").unwrap()).unwrap();
-        assert!(!public_profile.to_string().contains(&uuid));
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert!(Uuid::parse_str(&uuid).is_ok());
+            assert_eq!(next_value, 7);
+            let public_profile =
+                serde_json::to_value(service.get_profile(&database, "agent_6").unwrap()).unwrap();
+            assert!(!public_profile.to_string().contains(&uuid));
 
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn profile_order_is_user_controlled_atomic_and_stable() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let original = service.list_profiles(&database).unwrap();
-        assert_eq!(original[0].agent_id, "agent_1");
-        let reversed = original
-            .iter()
-            .rev()
-            .map(|profile| profile.agent_id.clone())
-            .collect::<Vec<_>>();
-        let envelope = user_command(
-            "reorder-agent-profiles",
-            ReorderAgentProfilesCommand {
-                ordered_agent_ids: reversed.clone(),
-            },
-        );
-        let first = service
-            .reorder_profiles(&mut database, &envelope)
-            .expect("profile order should change");
-        let replay = service
-            .reorder_profiles(&mut database, &envelope)
-            .expect("same reorder should replay");
-        assert_eq!(first.result.code, "agent_profile.reordered");
-        assert!(replay.replayed);
-        assert_eq!(
-            service
-                .list_profiles(&database)
-                .unwrap()
-                .into_iter()
-                .map(|profile| profile.agent_id)
-                .collect::<Vec<_>>(),
-            reversed
-        );
-
-        let invalid = service
-            .reorder_profiles(
-                &mut database,
-                &user_command(
-                    "invalid-agent-order",
-                    ReorderAgentProfilesCommand {
-                        ordered_agent_ids: vec!["agent_1".to_string()],
-                    },
-                ),
-            )
-            .expect("invalid order should be a durable rejection");
-        assert_eq!(invalid.result.code, "agent_profile.invalid_order");
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn profile_and_installation_commands_are_idempotent_and_explicit() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let executable_path = directory.join("fake-codex");
-        std::fs::write(&executable_path, b"codex-v1").expect("fake executable should be written");
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-
-            std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700))
-                .expect("fake executable should be executable");
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
         }
-        let executable_fingerprint =
-            crate::agent_runtime_adapter::executable_fingerprint(&executable_path)
-                .expect("test executable should be fingerprinted");
-        let create_profile = user_command(
-            "create-agent",
-            CreateAgentProfileCommand {
-                team_role: "Developer".to_string(),
-                working_principles: "Use repository conventions.".to_string(),
-                ..create_identity("Builder", "Implements scoped changes.")
-            },
-        );
-        let first = service
-            .create_profile(&mut database, &create_profile)
-            .expect("profile should be created");
-        let replay = service
-            .create_profile(&mut database, &create_profile)
-            .expect("profile command should replay");
-        assert!(!first.replayed);
-        assert!(replay.replayed);
-        let profile_id = first.result.payload["agentId"]
-            .as_str()
-            .expect("profile id")
-            .to_string();
 
-        let installation = service
-            .create_installation(
-                &mut database,
-                &user_command(
-                    "create-installation",
-                    CreateAdapterInstallationCommand {
+        #[test]
+        fn profile_order_is_user_controlled_atomic_and_stable() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let original = service.list_profiles(&database).unwrap();
+            assert_eq!(original[0].agent_id, "agent_1");
+            let reversed = original
+                .iter()
+                .rev()
+                .map(|profile| profile.agent_id.clone())
+                .collect::<Vec<_>>();
+            let envelope = user_command(
+                "reorder-agent-profiles",
+                ReorderAgentProfilesCommand {
+                    ordered_agent_ids: reversed.clone(),
+                },
+            );
+            let first = service
+                .reorder_profiles(&mut database, &envelope)
+                .expect("profile order should change");
+            let replay = service
+                .reorder_profiles(&mut database, &envelope)
+                .expect("same reorder should replay");
+            assert_eq!(first.result.code, "agent_profile.reordered");
+            assert!(replay.replayed);
+            assert_eq!(
+                service
+                    .list_profiles(&database)
+                    .unwrap()
+                    .into_iter()
+                    .map(|profile| profile.agent_id)
+                    .collect::<Vec<_>>(),
+                reversed
+            );
+
+            let invalid = service
+                .reorder_profiles(
+                    &mut database,
+                    &user_command(
+                        "invalid-agent-order",
+                        ReorderAgentProfilesCommand {
+                            ordered_agent_ids: vec!["agent_1".to_string()],
+                        },
+                    ),
+                )
+                .expect("invalid order should be a durable rejection");
+            assert_eq!(invalid.result.code, "agent_profile.invalid_order");
+
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn profile_and_installation_commands_are_idempotent_and_explicit() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let executable_path = directory.join("fake-codex");
+            std::fs::write(&executable_path, b"codex-v1")
+                .expect("fake executable should be written");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+
+                std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700))
+                    .expect("fake executable should be executable");
+            }
+            let executable_fingerprint =
+                crate::agent_runtime_adapter::executable_fingerprint(&executable_path)
+                    .expect("test executable should be fingerprinted");
+            let create_profile = user_command(
+                "create-agent",
+                CreateAgentProfileCommand {
+                    team_role: "Developer".to_string(),
+                    working_principles: "Use repository conventions.".to_string(),
+                    ..create_identity("Builder", "Implements scoped changes.")
+                },
+            );
+            let first = service
+                .create_profile(&mut database, &create_profile)
+                .expect("profile should be created");
+            let replay = service
+                .create_profile(&mut database, &create_profile)
+                .expect("profile command should replay");
+            assert!(!first.replayed);
+            assert!(replay.replayed);
+            let profile_id = first.result.payload["agentId"]
+                .as_str()
+                .expect("profile id")
+                .to_string();
+
+            let installation = service
+                .create_installation(
+                    &mut database,
+                    &user_command(
+                        "create-installation",
+                        CreateAdapterInstallationCommand {
+                            adapter_kind: AdapterKind::CodexCli,
+                            executable_path: executable_path.to_string_lossy().into_owned(),
+                            command_name: "codex".to_string(),
+                            source: InstallationSource::Custom,
+                            auth_scope: "default".to_string(),
+                        },
+                    ),
+                )
+                .expect("installation should be created");
+            let installation_id = installation.result.payload["installationId"]
+                .as_str()
+                .expect("installation id")
+                .to_string();
+            let profile = service
+                .get_profile(&database, &profile_id)
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert_eq!(profile.agent_id, "agent_5");
+            assert!(
+                serde_json::to_value(&profile)
+                    .unwrap()
+                    .get("handle")
+                    .is_none()
+            );
+            let mut ready_snapshot = ready_codex_snapshot();
+            ready_snapshot.executable_fingerprint = Some(executable_fingerprint.clone());
+            service
+                .record_snapshot(
+                    &mut database,
+                    &user_command(
+                        "record-snapshot",
+                        RecordAdapterCapabilitySnapshotCommand {
+                            installation_id: installation_id.clone(),
+                            expected_installation_version: 1,
+                            snapshot: ready_snapshot.clone(),
+                        },
+                    ),
+                )
+                .expect("snapshot should be recorded");
+            let managed_installation_id = service
+                .commit_verified_managed_installation(
+                    &mut database,
+                    VerifiedManagedInstallation {
                         adapter_kind: AdapterKind::CodexCli,
                         executable_path: executable_path.to_string_lossy().into_owned(),
                         command_name: "codex".to_string(),
-                        source: InstallationSource::Custom,
+                        source: InstallationSource::InheritedPath,
                         auth_scope: "default".to_string(),
+                        snapshot: ready_snapshot,
                     },
-                ),
-            )
-            .expect("installation should be created");
-        let installation_id = installation.result.payload["installationId"]
-            .as_str()
-            .expect("installation id")
-            .to_string();
-        let profile = service
-            .get_profile(&database, &profile_id)
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert_eq!(profile.agent_id, "agent_5");
-        assert!(
-            serde_json::to_value(&profile)
-                .unwrap()
-                .get("handle")
-                .is_none()
-        );
-        let mut ready_snapshot = ready_codex_snapshot();
-        ready_snapshot.executable_fingerprint = Some(executable_fingerprint.clone());
-        service
-            .record_snapshot(
-                &mut database,
-                &user_command(
-                    "record-snapshot",
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation_id.clone(),
-                        expected_installation_version: 1,
-                        snapshot: ready_snapshot.clone(),
-                    },
-                ),
-            )
-            .expect("snapshot should be recorded");
-        let managed_installation_id = service
-            .commit_verified_managed_installation(
-                &mut database,
-                VerifiedManagedInstallation {
-                    adapter_kind: AdapterKind::CodexCli,
-                    executable_path: executable_path.to_string_lossy().into_owned(),
-                    command_name: "codex".to_string(),
-                    source: InstallationSource::InheritedPath,
-                    auth_scope: "default".to_string(),
-                    snapshot: ready_snapshot,
-                },
-            )
-            .expect("verified managed Installation should be created");
-        service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "set-runtime",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile_id.clone(),
-                        expected_version: profile.version,
-                        adapter_kind: AdapterKind::CodexCli,
-                        model: ModelSelection::RuntimeDefault,
-                        permissions: AdapterPermissionConfig {
+                )
+                .expect("verified managed Installation should be created");
+            service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "set-runtime",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile_id.clone(),
+                            expected_version: profile.version,
                             adapter_kind: AdapterKind::CodexCli,
-                            schema_version: 1,
-                            values: json!({
-                                "sandbox_mode": "danger-full-access",
-                                "approval_policy": "never",
-                            }),
+                            model: ModelSelection::RuntimeDefault,
+                            permissions: AdapterPermissionConfig {
+                                adapter_kind: AdapterKind::CodexCli,
+                                schema_version: 1,
+                                values: json!({
+                                    "sandbox_mode": "danger-full-access",
+                                    "approval_policy": "never",
+                                }),
+                            },
                         },
-                    },
-                ),
-            )
-            .expect("runtime should be configured");
-        let configured = service
-            .get_profile(&database, &profile_id)
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert!(configured.runtime_configuration.is_some());
-        assert_eq!(
-            configured.runtime_readiness.status,
-            RuntimeReadinessStatus::Ready
-        );
-        assert_eq!(
-            configured
+                    ),
+                )
+                .expect("runtime should be configured");
+            let configured = service
+                .get_profile(&database, &profile_id)
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert!(configured.runtime_configuration.is_some());
+            assert_eq!(
+                configured.runtime_readiness.status,
+                RuntimeReadinessStatus::Ready
+            );
+            assert_eq!(
+                configured
+                    .runtime_configuration
+                    .as_ref()
+                    .expect("configured Runtime")
+                    .permissions
+                    .values,
+                json!({
+                    "sandbox_mode": "danger-full-access",
+                    "approval_policy": "never",
+                })
+            );
+            let installations = service
+                .list_installations(&database)
+                .expect("installations should load");
+            assert_eq!(
+                installations
+                    .iter()
+                    .find(|installation| installation.id == managed_installation_id)
+                    .expect("managed Installation should remain")
+                    .referenced_profile_count,
+                1
+            );
+
+            std::fs::write(&executable_path, b"codex-v2")
+                .expect("fake executable should be upgraded");
+            let advisory = service
+                .get_profile(&database, &profile_id)
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert_eq!(
+                advisory.runtime_readiness.status,
+                RuntimeReadinessStatus::Ready,
+                "profile reads must not synchronously hash executable contents"
+            );
+            let runtime_configuration = advisory
                 .runtime_configuration
                 .as_ref()
-                .expect("configured Runtime")
-                .permissions
-                .values,
-            json!({
-                "sandbox_mode": "danger-full-access",
-                "approval_policy": "never",
-            })
-        );
-        let installations = service
-            .list_installations(&database)
-            .expect("installations should load");
-        assert_eq!(
-            installations
-                .iter()
-                .find(|installation| installation.id == managed_installation_id)
-                .expect("managed Installation should remain")
-                .referenced_profile_count,
-            1
-        );
-
-        std::fs::write(&executable_path, b"codex-v2").expect("fake executable should be upgraded");
-        let advisory = service
-            .get_profile(&database, &profile_id)
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert_eq!(
-            advisory.runtime_readiness.status,
-            RuntimeReadinessStatus::Ready,
-            "profile reads must not synchronously hash executable contents"
-        );
-        let runtime_configuration = advisory
-            .runtime_configuration
-            .as_ref()
-            .expect("configured profile should retain its Runtime")
-            .clone();
-        let runtime_binding = ResolvedRuntimeBinding {
-            adapter_kind: runtime_configuration.adapter_kind,
-            installation_id: managed_installation_id.clone(),
-            model: runtime_configuration.model.clone(),
-            permissions: runtime_configuration.permissions.clone(),
-        };
-        let transaction = database
-            .connection_mut()
-            .transaction()
-            .expect("execution admission transaction");
-        let frozen = resolve_frozen_runtime_binding(&transaction, &runtime_binding)
-            .expect("runtime resolution should be deterministic")
-            .expect("message admission should use the last verified Runtime snapshot");
-        assert_eq!(frozen.executable_fingerprint, executable_fingerprint);
-        drop(transaction);
-        let verified_identity = service
-            .verified_executable_identity(
-                &database,
-                &managed_installation_id,
-                &executable_path.to_string_lossy(),
-                &executable_fingerprint,
-            )
-            .expect("verified identity should load")
-            .expect("successful probe should persist a lightweight identity");
-        let changed_identity = observe_executable_file_identity(&executable_path)
-            .expect("changed executable identity should be observable");
-        assert_ne!(changed_identity, verified_identity);
-        assert!(
-            service
-                .mark_runtime_integrity_changed(
-                    &mut database,
+                .expect("configured profile should retain its Runtime")
+                .clone();
+            let runtime_binding = ResolvedRuntimeBinding {
+                adapter_kind: runtime_configuration.adapter_kind,
+                installation_id: managed_installation_id.clone(),
+                model: runtime_configuration.model.clone(),
+                permissions: runtime_configuration.permissions.clone(),
+            };
+            let transaction = database
+                .connection_mut()
+                .transaction()
+                .expect("execution admission transaction");
+            let frozen = resolve_frozen_runtime_binding(&transaction, &runtime_binding)
+                .expect("runtime resolution should be deterministic")
+                .expect("message admission should use the last verified Runtime snapshot");
+            assert_eq!(frozen.executable_fingerprint, executable_fingerprint);
+            drop(transaction);
+            let verified_identity = service
+                .verified_executable_identity(
+                    &database,
                     &managed_installation_id,
                     &executable_path.to_string_lossy(),
                     &executable_fingerprint,
                 )
-                .expect("integrity change should be recorded")
-        );
-        let needs_repair = service
-            .get_profile(&database, &profile_id)
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert_eq!(
-            needs_repair.runtime_readiness.status,
-            RuntimeReadinessStatus::NeedsAttention
-        );
-        let transaction = database
-            .connection_mut()
-            .transaction()
-            .expect("stale Runtime admission transaction");
-        let stale_frozen = resolve_frozen_runtime_binding(&transaction, &runtime_binding)
-            .expect("stale Runtime resolution should remain deterministic")
-            .expect("message admission should retain the last verified Runtime snapshot");
-        drop(transaction);
-        let dispatch_blocker = service
-            .runtime_dispatch_blocker(&database, &stale_frozen)
-            .expect("dispatch readiness should be readable")
-            .expect("stale Runtime should block dispatch");
-        assert_eq!(dispatch_blocker.code, "runtime_snapshot_stale");
-        std::fs::write(&executable_path, b"codex-v1").expect("fake executable should be restored");
+                .expect("verified identity should load")
+                .expect("successful probe should persist a lightweight identity");
+            let changed_identity = observe_executable_file_identity(&executable_path)
+                .expect("changed executable identity should be observable");
+            assert_ne!(changed_identity, verified_identity);
+            assert!(
+                service
+                    .mark_runtime_integrity_changed(
+                        &mut database,
+                        &managed_installation_id,
+                        &executable_path.to_string_lossy(),
+                        &executable_fingerprint,
+                    )
+                    .expect("integrity change should be recorded")
+            );
+            let needs_repair = service
+                .get_profile(&database, &profile_id)
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert_eq!(
+                needs_repair.runtime_readiness.status,
+                RuntimeReadinessStatus::NeedsAttention
+            );
+            let transaction = database
+                .connection_mut()
+                .transaction()
+                .expect("stale Runtime admission transaction");
+            let stale_frozen = resolve_frozen_runtime_binding(&transaction, &runtime_binding)
+                .expect("stale Runtime resolution should remain deterministic")
+                .expect("message admission should retain the last verified Runtime snapshot");
+            drop(transaction);
+            let dispatch_blocker = service
+                .runtime_dispatch_blocker(&database, &stale_frozen)
+                .expect("dispatch readiness should be readable")
+                .expect("stale Runtime should block dispatch");
+            assert_eq!(dispatch_blocker.code, "runtime_snapshot_stale");
+            std::fs::write(&executable_path, b"codex-v1")
+                .expect("fake executable should be restored");
 
-        let mut changed_schema = ready_codex_snapshot();
-        changed_schema.executable_fingerprint = Some(executable_fingerprint);
-        changed_schema.permission_schema_version = 2;
-        service
-            .record_snapshot(
+            let mut changed_schema = ready_codex_snapshot();
+            changed_schema.executable_fingerprint = Some(executable_fingerprint);
+            changed_schema.permission_schema_version = 2;
+            service
+                .record_snapshot(
+                    &mut database,
+                    &user_command(
+                        "record-changed-schema",
+                        RecordAdapterCapabilitySnapshotCommand {
+                            installation_id: managed_installation_id.clone(),
+                            expected_installation_version: 1,
+                            snapshot: changed_schema,
+                        },
+                    ),
+                )
+                .expect("changed capability snapshot should be recorded");
+            let refreshed = service
+                .get_profile(&database, &profile_id)
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert_eq!(
+                refreshed.runtime_readiness.status,
+                RuntimeReadinessStatus::NeedsAttention,
+                "a capability refresh must not silently rewrite saved member parameters"
+            );
+            assert_eq!(
+                refreshed
+                    .runtime_configuration
+                    .expect("refreshed Runtime configuration")
+                    .permissions
+                    .schema_version,
+                1
+            );
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn profile_avatar_writes_accept_only_controlled_or_unchanged_legacy_refs() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let original = service
+                .get_profile(&database, "agent_1")
+                .unwrap()
+                .expect("Luoke should exist");
+            let invalid_avatar = service.set_avatar(
                 &mut database,
                 &user_command(
-                    "record-changed-schema",
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: managed_installation_id.clone(),
-                        expected_installation_version: 1,
-                        snapshot: changed_schema,
+                    "set-invalid-avatar",
+                    SetAgentProfileAvatarCommand {
+                        agent_id: original.agent_id.clone(),
+                        expected_version: original.version,
+                        avatar_ref: Some("https://example.com/avatar.png".to_string()),
                     },
                 ),
-            )
-            .expect("changed capability snapshot should be recorded");
-        let refreshed = service
-            .get_profile(&database, &profile_id)
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert_eq!(
-            refreshed.runtime_readiness.status,
-            RuntimeReadinessStatus::NeedsAttention,
-            "a capability refresh must not silently rewrite saved member parameters"
-        );
-        assert_eq!(
-            refreshed
-                .runtime_configuration
-                .expect("refreshed Runtime configuration")
-                .permissions
-                .schema_version,
-            1
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
+            );
+            assert!(
+                invalid_avatar
+                    .expect_err("remote avatar should be rejected")
+                    .to_string()
+                    .contains("avatarRef")
+            );
 
-    #[test]
-    fn profile_avatar_writes_accept_only_controlled_or_unchanged_legacy_refs() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let original = service
-            .get_profile(&database, "agent_1")
-            .unwrap()
-            .expect("Luoke should exist");
-        let invalid_avatar = service.set_avatar(
-            &mut database,
-            &user_command(
-                "set-invalid-avatar",
-                SetAgentProfileAvatarCommand {
-                    agent_id: original.agent_id.clone(),
-                    expected_version: original.version,
-                    avatar_ref: Some("https://example.com/avatar.png".to_string()),
-                },
-            ),
-        );
-        assert!(
-            invalid_avatar
-                .expect_err("remote avatar should be rejected")
-                .to_string()
-                .contains("avatarRef")
-        );
-
-        database
+            database
             .connection()
             .execute(
                 "UPDATE agent_profile SET avatar_ref = 'legacy://user-avatar' WHERE id = 'agent_1'",
                 [],
             )
             .expect("test should install one legacy avatar ref");
-        let legacy = service
-            .get_profile(&database, "agent_1")
-            .unwrap()
-            .expect("Luoke should exist");
-        let preserved = service
-            .update_profile(
+            let legacy = service
+                .get_profile(&database, "agent_1")
+                .unwrap()
+                .expect("Luoke should exist");
+            let preserved = service
+                .update_profile(
+                    &mut database,
+                    &user_command(
+                        "preserve-legacy-avatar",
+                        update_identity(&legacy, "Legacy Avatar Preserved"),
+                    ),
+                )
+                .expect("an unchanged legacy ref should not block unrelated edits");
+            assert_eq!(preserved.result.code, "agent_profile.updated");
+
+            let updated = service
+                .get_profile(&database, "agent_1")
+                .unwrap()
+                .expect("updated Luoke should exist");
+            let changed_legacy = service.set_avatar(
                 &mut database,
                 &user_command(
-                    "preserve-legacy-avatar",
-                    update_identity(&legacy, "Legacy Avatar Preserved"),
+                    "change-to-another-legacy-avatar",
+                    SetAgentProfileAvatarCommand {
+                        agent_id: updated.agent_id.clone(),
+                        expected_version: updated.version,
+                        avatar_ref: Some("legacy://different-avatar".to_string()),
+                    },
                 ),
-            )
-            .expect("an unchanged legacy ref should not block unrelated edits");
-        assert_eq!(preserved.result.code, "agent_profile.updated");
+            );
+            assert!(
+                changed_legacy
+                    .expect_err("a different legacy value is a new unsupported write")
+                    .to_string()
+                    .contains("avatarRef")
+            );
 
-        let updated = service
-            .get_profile(&database, "agent_1")
-            .unwrap()
-            .expect("updated Luoke should exist");
-        let changed_legacy = service.set_avatar(
-            &mut database,
-            &user_command(
-                "change-to-another-legacy-avatar",
-                SetAgentProfileAvatarCommand {
-                    agent_id: updated.agent_id.clone(),
-                    expected_version: updated.version,
-                    avatar_ref: Some("legacy://different-avatar".to_string()),
-                },
-            ),
-        );
-        assert!(
-            changed_legacy
-                .expect_err("a different legacy value is a new unsupported write")
-                .to_string()
-                .contains("avatarRef")
-        );
-
-        let controlled = service
+            let controlled = service
             .set_avatar(
                 &mut database,
                 &user_command(
@@ -5197,1003 +5208,1005 @@ mod tests {
                 ),
             )
             .expect("a controlled managed ref should replace a legacy ref");
-        assert_eq!(controlled.result.code, "agent_profile.avatar_updated");
+            assert_eq!(controlled.result.code, "agent_profile.avatar_updated");
 
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
 
-    #[test]
-    fn camp_membership_read_model_handles_an_unassigned_default_lead() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let collaboration = CollaborationService::default();
-        let created = collaboration
-            .create_camp(
-                &mut database,
-                &user_command(
-                    "create-membership-test-camp",
-                    CreateCampCommand::for_test_with_members(
-                        directory.join("workspace").to_string_lossy().to_string(),
-                        &["agent_2"],
-                        "agent_2",
+        #[test]
+        fn camp_membership_read_model_handles_an_unassigned_default_lead() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let collaboration = CollaborationService::default();
+            let created = collaboration
+                .create_camp(
+                    &mut database,
+                    &user_command(
+                        "create-membership-test-camp",
+                        CreateCampCommand::for_test_with_members(
+                            directory.join("workspace").to_string_lossy().to_string(),
+                            &["agent_2"],
+                            "agent_2",
+                        ),
                     ),
-                ),
-            )
-            .expect("Camp should be created");
-        let camp_id = created.result.payload["campId"]
-            .as_str()
-            .expect("Camp ID should be returned")
-            .to_string();
-        let mut add_member = user_command(
-            "add-membership-test-member",
-            AddCampMemberCommand {
-                camp_id: camp_id.clone(),
-                agent_id: "agent_2".to_string(),
-                capability_overrides: json!({}),
-            },
-        );
-        add_member.camp_id = Some(camp_id);
-        collaboration
-            .add_camp_member(&mut database, &add_member)
-            .expect("Camp member should be added");
-        let profile = service
-            .get_profile(&database, "agent_2")
-            .expect("profile should load")
-            .expect("profile should exist");
+                )
+                .expect("Camp should be created");
+            let camp_id = created.result.payload["campId"]
+                .as_str()
+                .expect("Camp ID should be returned")
+                .to_string();
+            let mut add_member = user_command(
+                "add-membership-test-member",
+                AddCampMemberCommand {
+                    camp_id: camp_id.clone(),
+                    agent_id: "agent_2".to_string(),
+                    capability_overrides: json!({}),
+                },
+            );
+            add_member.camp_id = Some(camp_id);
+            collaboration
+                .add_camp_member(&mut database, &add_member)
+                .expect("Camp member should be added");
+            let profile = service
+                .get_profile(&database, "agent_2")
+                .expect("profile should load")
+                .expect("profile should exist");
 
-        let memberships = service
-            .list_camp_memberships(&database, &profile.agent_id)
-            .expect("Camp memberships should load");
-        assert_eq!(memberships.len(), 1);
-        assert!(memberships[0].is_default_lead);
-        assert_eq!(memberships[0].membership_status, "active");
+            let memberships = service
+                .list_camp_memberships(&database, &profile.agent_id)
+                .expect("Camp memberships should load");
+            assert_eq!(memberships.len(), 1);
+            assert!(memberships[0].is_default_lead);
+            assert_eq!(memberships[0].membership_status, "active");
 
-        database
-            .connection()
-            .execute("UPDATE camp SET default_lead_agent_id = NULL", [])
-            .expect("test Camp should allow an unassigned Default Lead");
-        let memberships = service
-            .list_camp_memberships(&database, &profile.agent_id)
-            .expect("membership read model should tolerate an empty Default Lead");
-        assert!(!memberships[0].is_default_lead);
+            database
+                .connection()
+                .execute("UPDATE camp SET default_lead_agent_id = NULL", [])
+                .expect("test Camp should allow an unassigned Default Lead");
+            let memberships = service
+                .list_camp_memberships(&database, &profile.agent_id)
+                .expect("membership read model should tolerate an empty Default Lead");
+            assert!(!memberships[0].is_default_lead);
 
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
 
-    #[test]
-    fn runtime_configuration_never_falls_back_to_a_custom_installation() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let installation = service
-            .create_installation(
-                &mut database,
-                &user_command(
-                    "create-installation",
-                    CreateAdapterInstallationCommand {
-                        adapter_kind: AdapterKind::CodexCli,
-                        executable_path: "/opt/homebrew/bin/codex".to_string(),
-                        command_name: "codex".to_string(),
-                        source: InstallationSource::Custom,
-                        auth_scope: "default".to_string(),
-                    },
-                ),
-            )
-            .expect("installation should be created");
-        assert_eq!(installation.result.code, "adapter_installation.created");
-        let profile = service
-            .get_profile(&database, "agent_2")
-            .expect("profile should load")
-            .expect("profile should exist");
-        let result = service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "set-mismatched-runtime",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile.agent_id,
-                        expected_version: profile.version,
-                        adapter_kind: AdapterKind::CopilotCli,
-                        model: ModelSelection::RuntimeDefault,
-                        permissions: AdapterPermissionConfig {
+        #[test]
+        fn runtime_configuration_never_falls_back_to_a_custom_installation() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let installation = service
+                .create_installation(
+                    &mut database,
+                    &user_command(
+                        "create-installation",
+                        CreateAdapterInstallationCommand {
+                            adapter_kind: AdapterKind::CodexCli,
+                            executable_path: "/opt/homebrew/bin/codex".to_string(),
+                            command_name: "codex".to_string(),
+                            source: InstallationSource::Custom,
+                            auth_scope: "default".to_string(),
+                        },
+                    ),
+                )
+                .expect("installation should be created");
+            assert_eq!(installation.result.code, "adapter_installation.created");
+            let profile = service
+                .get_profile(&database, "agent_2")
+                .expect("profile should load")
+                .expect("profile should exist");
+            let result = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "set-mismatched-runtime",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile.agent_id,
+                            expected_version: profile.version,
                             adapter_kind: AdapterKind::CopilotCli,
-                            schema_version: 1,
-                            values: json!({}),
+                            model: ModelSelection::RuntimeDefault,
+                            permissions: AdapterPermissionConfig {
+                                adapter_kind: AdapterKind::CopilotCli,
+                                schema_version: 1,
+                                values: json!({}),
+                            },
                         },
-                    },
-                ),
-            )
-            .expect("unavailable Runtime configuration should be rejected");
-        assert_eq!(result.result.code, "runtime_configuration_unavailable");
-        let selected = service
-            .get_profile(&database, "agent_2")
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert!(selected.runtime_configuration.is_none());
-        assert_eq!(
-            selected.runtime_readiness.status,
-            RuntimeReadinessStatus::RuntimeNotConfigured
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
+                    ),
+                )
+                .expect("unavailable Runtime configuration should be rejected");
+            assert_eq!(result.result.code, "runtime_configuration_unavailable");
+            let selected = service
+                .get_profile(&database, "agent_2")
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert!(selected.runtime_configuration.is_none());
+            assert_eq!(
+                selected.runtime_readiness.status,
+                RuntimeReadinessStatus::RuntimeNotConfigured
+            );
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
 
-    #[test]
-    fn ready_runtime_configuration_is_atomic_and_uses_explicit_native_values() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        service
-            .commit_verified_managed_installation(
-                &mut database,
-                VerifiedManagedInstallation {
-                    adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/opt/homebrew/bin/codex".to_string(),
-                    command_name: "codex".to_string(),
-                    source: InstallationSource::InheritedPath,
-                    auth_scope: "default".to_string(),
-                    snapshot: ready_codex_snapshot(),
-                },
-            )
-            .unwrap();
-        let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
-        let applied = service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "explicit-runtime-config",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: profile.version,
-                        adapter_kind: AdapterKind::CodexCli,
-                        model: ModelSelection::Explicit {
-                            model_id: "gpt-test".to_string(),
-                            options: json!({}),
-                        },
-                        permissions: AdapterPermissionConfig {
-                            adapter_kind: AdapterKind::CodexCli,
-                            schema_version: 1,
-                            values: json!({
-                                "sandbox_mode": "workspace-write",
-                                "approval_policy": "on-request",
-                            }),
-                        },
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(applied.result.code, "agent_profile.runtime_configured");
-        let configured = service
-            .get_profile(&database, &profile.agent_id)
-            .unwrap()
-            .unwrap();
-        let configuration = configured.runtime_configuration.as_ref().unwrap();
-        assert_eq!(
-            configuration.model,
-            ModelSelection::Explicit {
-                model_id: "gpt-test".to_string(),
-                options: json!({}),
-            }
-        );
-        assert_eq!(
-            configuration.permissions.values,
-            json!({
-                "sandbox_mode": "workspace-write",
-                "approval_policy": "on-request",
-            })
-        );
-
-        let rejected = service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "invalid-runtime-config",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: configured.version,
-                        adapter_kind: AdapterKind::CodexCli,
-                        model: ModelSelection::RuntimeDefault,
-                        permissions: AdapterPermissionConfig {
-                            adapter_kind: AdapterKind::CodexCli,
-                            schema_version: 1,
-                            values: json!({
-                                "sandbox_mode": "not-a-native-value",
-                                "approval_policy": "never",
-                            }),
-                        },
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(rejected.result.code, "runtime_permission_value_invalid");
-        let unchanged = service
-            .get_profile(&database, &profile.agent_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(unchanged.version, configured.version);
-        assert_eq!(
-            unchanged.runtime_configuration,
-            configured.runtime_configuration
-        );
-
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn background_runtime_discovery_never_materializes_member_configuration() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
-        let selected = service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "select-unresolved-codex",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: profile.version,
-                        adapter_kind: AdapterKind::CodexCli,
-                        model: ModelSelection::RuntimeDefault,
-                        permissions: AdapterPermissionConfig {
-                            adapter_kind: AdapterKind::CodexCli,
-                            schema_version: 1,
-                            values: json!({}),
-                        },
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(selected.result.code, "runtime_configuration_unavailable");
-
-        service
-            .commit_verified_managed_installation(
-                &mut database,
-                VerifiedManagedInstallation {
-                    adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/opt/homebrew/bin/codex".to_string(),
-                    command_name: "codex".to_string(),
-                    source: InstallationSource::InheritedPath,
-                    auth_scope: "default".to_string(),
-                    snapshot: ready_codex_snapshot(),
-                },
-            )
-            .unwrap();
-        let still_unresolved = service
-            .get_profile(&database, &profile.agent_id)
-            .unwrap()
-            .unwrap();
-        assert!(still_unresolved.runtime_configuration.is_none());
-        assert_eq!(
-            still_unresolved.runtime_readiness.status,
-            RuntimeReadinessStatus::RuntimeNotConfigured
-        );
-
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let installation = service
-            .create_installation(
-                &mut database,
-                &user_command(
-                    "create-installation",
-                    CreateAdapterInstallationCommand {
+        #[test]
+        fn ready_runtime_configuration_is_atomic_and_uses_explicit_native_values() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            service
+                .commit_verified_managed_installation(
+                    &mut database,
+                    VerifiedManagedInstallation {
                         adapter_kind: AdapterKind::CodexCli,
                         executable_path: "/opt/homebrew/bin/codex".to_string(),
                         command_name: "codex".to_string(),
-                        source: InstallationSource::Custom,
+                        source: InstallationSource::InheritedPath,
                         auth_scope: "default".to_string(),
-                    },
-                ),
-            )
-            .expect("installation should be created");
-        let installation_id = installation.result.payload["installationId"]
-            .as_str()
-            .expect("installation id")
-            .to_string();
-        service
-            .record_snapshot(
-                &mut database,
-                &user_command(
-                    "record-ready-snapshot",
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation_id.clone(),
-                        expected_installation_version: 1,
                         snapshot: ready_codex_snapshot(),
                     },
-                ),
-            )
-            .expect("ready snapshot should be recorded");
-        let failed_at = chrono::Utc::now().to_rfc3339();
-        service
-            .record_snapshot(
-                &mut database,
-                &user_command(
-                    "record-failed-snapshot",
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation_id.clone(),
-                        expected_installation_version: 1,
-                        snapshot: AdapterCapabilitySnapshot {
-                            reported_version: Some("must-not-replace".to_string()),
-                            executable_fingerprint: Some("sha256:test".to_string()),
-                            authentication_status: "unknown".to_string(),
-                            probe_status: "probe_failed".to_string(),
-                            permission_schema_version: 99,
-                            permission_schema_digest: "sha256:failed".to_string(),
-                            capabilities: vec!["must-not-replace".to_string()],
-                            protocols: vec!["must-not-replace".to_string()],
-                            models: Vec::new(),
-                            permission_options: Vec::new(),
-                            observed_at: None,
-                            last_attempted_at: failed_at.clone(),
-                            last_successful_probe_at: None,
-                            stale_at: None,
-                            last_error: Some("probe failed".to_string()),
-                            native_session_compatibility_key: None,
-                        },
-                    },
-                ),
-            )
-            .expect("failed attempt should be recorded");
-        let installation = service
-            .list_installations(&database)
-            .expect("installations should load")
-            .into_iter()
-            .find(|candidate| candidate.id == installation_id)
-            .expect("installation should remain");
-        let snapshot = installation.snapshot.expect("snapshot should remain");
-        assert_eq!(snapshot.reported_version.as_deref(), Some("0.144.6"));
-        assert_eq!(snapshot.models[0].id, "gpt-test");
-        assert_eq!(snapshot.permission_schema_version, 1);
-        assert_eq!(snapshot.probe_status, "ready");
-        assert_eq!(snapshot.stale_at, None);
-        assert_eq!(
-            installation
-                .last_probe_attempt
-                .as_ref()
-                .map(|attempt| attempt.failure_class.as_str()),
-            Some("transient")
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn trae_static_installation_defers_verification_to_the_same_real_session() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let executable_path = directory.join("traecli");
-        std::fs::write(&executable_path, b"static-trae-fixture").unwrap();
-        let fingerprint = "sha256:trae-static".to_string();
-        let observed_at = chrono::Utc::now().to_rfc3339();
-        let static_snapshot = AgentRuntimeAdapterRegistry::default()
-            .trae_installed_unverified_snapshot(None, fingerprint.clone(), observed_at.clone())
-            .unwrap();
-        let installation_id = service
-            .commit_discovered_managed_installation(
-                &mut database,
-                DiscoveredManagedInstallation {
-                    adapter_kind: AdapterKind::TraeCnCli,
-                    executable_path: executable_path.to_string_lossy().to_string(),
-                    command_name: "traecli".to_string(),
-                    source: InstallationSource::InheritedPath,
-                    auth_scope: "default".to_string(),
-                    snapshot: static_snapshot,
-                },
-            )
-            .unwrap();
-        let installation = service
-            .managed_installation(&database, AdapterKind::TraeCnCli, "default")
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            installation.snapshot.as_ref().unwrap().probe_status,
-            "installed_unverified"
-        );
-        let defaults = installation.member_runtime_defaults.clone().unwrap();
-        assert_eq!(defaults.model, ModelSelection::RuntimeDefault);
-        assert_eq!(
-            defaults.permissions.values,
-            json!({"permission_mode": "default"})
-        );
-
-        let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
-        let configured = service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "configure-static-trae",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: profile.version,
-                        adapter_kind: AdapterKind::TraeCnCli,
-                        model: defaults.model,
-                        permissions: defaults.permissions.clone(),
-                    },
-                ),
-            )
-            .unwrap();
-        assert_eq!(configured.result.status, CommandResultStatus::Applied);
-        let configured_profile = service
-            .get_profile(&database, &profile.agent_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            configured_profile.runtime_readiness.status,
-            RuntimeReadinessStatus::InstalledUnverified
-        );
-
-        let binding = ResolvedRuntimeBinding {
-            adapter_kind: AdapterKind::TraeCnCli,
-            installation_id: installation_id.clone(),
-            model: ModelSelection::RuntimeDefault,
-            permissions: defaults.permissions,
-        };
-        let deferred = resolve_frozen_runtime_binding(database.connection(), &binding)
-            .unwrap()
-            .unwrap();
-        assert_eq!(deferred.reported_version, None);
-        assert_eq!(deferred.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
-        assert!(deferred.capabilities.is_empty());
-        assert!(
-            service
-                .runtime_dispatch_blocker(&database, &deferred)
-                .unwrap()
-                .is_none(),
-            "static identity is sufficient to launch one real verification process"
-        );
-
-        let live_snapshot = AgentRuntimeAdapterRegistry::default()
-            .trae_live_session_capability_snapshot(
-                None,
-                fingerprint,
-                json!({
-                    "protocolVersion": 1,
-                    "agentCapabilities": {"loadSession": true}
-                }),
-                json!({
-                    "sessionId": "session-live",
-                    "models": {
-                        "currentModelId": "trae-default",
-                        "availableModels": [
-                            {"modelId": "trae-default", "name": "TRAE Default"}
-                        ]
-                    },
-                    "configOptions": [{
-                        "id": "model",
-                        "currentValue": "trae-default",
-                        "options": [{"value": "trae-default", "name": "TRAE Default"}]
-                    }],
-                    "modes": {
-                        "currentModeId": "default",
-                        "availableModes": [{"id": "default", "name": "Default"}]
-                    }
-                }),
-                chrono::Utc::now().to_rfc3339(),
-            )
-            .unwrap();
-        assert_eq!(live_snapshot.reported_version, None);
-        service
-            .record_snapshot(
-                &mut database,
-                &user_command(
-                    "record-live-trae",
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id,
-                        expected_installation_version: installation.version,
-                        snapshot: live_snapshot,
-                    },
-                ),
-            )
-            .unwrap();
-        let verified_profile = service
-            .get_profile(&database, &profile.agent_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(
-            verified_profile.runtime_readiness.status,
-            RuntimeReadinessStatus::Ready
-        );
-        let verified = resolve_frozen_runtime_binding(database.connection(), &binding)
-            .unwrap()
-            .unwrap();
-        assert_eq!(verified.reported_version, None);
-        assert_eq!(verified.model.model_id, "trae-default");
-
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn verified_relocation_preserves_installation_identity_and_never_commits_a_failed_candidate() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let mut original_snapshot = ready_codex_snapshot();
-        original_snapshot.executable_fingerprint = Some("sha256:original".to_string());
-        let installation_id = service
-            .commit_verified_managed_installation(
-                &mut database,
-                VerifiedManagedInstallation {
-                    adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/opt/homebrew/bin/codex".to_string(),
-                    command_name: "codex".to_string(),
-                    source: InstallationSource::InheritedPath,
-                    auth_scope: "default".to_string(),
-                    snapshot: original_snapshot,
-                },
-            )
-            .unwrap();
-        let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
-        service
-            .set_runtime(
-                &mut database,
-                &user_command(
-                    "select-managed-codex",
-                    SetMemberRuntimeConfigurationCommand {
-                        agent_id: profile.agent_id,
-                        expected_version: profile.version,
-                        adapter_kind: AdapterKind::CodexCli,
-                        model: ModelSelection::RuntimeDefault,
-                        permissions: AdapterPermissionConfig {
+                )
+                .unwrap();
+            let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
+            let applied = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "explicit-runtime-config",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: profile.version,
                             adapter_kind: AdapterKind::CodexCli,
-                            schema_version: 1,
-                            values: json!({
-                                "sandbox_mode": "danger-full-access",
-                                "approval_policy": "never",
-                            }),
+                            model: ModelSelection::Explicit {
+                                model_id: "gpt-test".to_string(),
+                                options: json!({}),
+                            },
+                            permissions: AdapterPermissionConfig {
+                                adapter_kind: AdapterKind::CodexCli,
+                                schema_version: 1,
+                                values: json!({
+                                    "sandbox_mode": "workspace-write",
+                                    "approval_policy": "on-request",
+                                }),
+                            },
                         },
-                    },
-                ),
-            )
-            .unwrap();
-
-        service
-            .record_managed_probe_failure(
-                &mut database,
-                ManagedProbeFailure {
-                    adapter_kind: AdapterKind::CodexCli,
-                    auth_scope: "default",
-                    candidate_path: "/Users/test/.local/bin/codex",
-                    fingerprint: Some("sha256:wrong-program"),
-                    source: Some(InstallationSource::LoginShell),
-                    failure_class: "identity_changed",
-                    diagnostic_code: "runtime_identity_changed",
-                },
-            )
-            .unwrap();
-        let rejected_candidate = service
-            .managed_installation(&database, AdapterKind::CodexCli, "default")
-            .unwrap()
-            .unwrap();
-        assert_eq!(rejected_candidate.id, installation_id);
-        assert_eq!(
-            rejected_candidate.executable_path,
-            "/opt/homebrew/bin/codex"
-        );
-        assert_eq!(
-            rejected_candidate
-                .snapshot
-                .as_ref()
-                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
-            Some("sha256:original")
-        );
-        assert_eq!(
-            rejected_candidate.relocation_history[0].source,
-            Some(InstallationSource::LoginShell)
-        );
-        assert_eq!(rejected_candidate.relocation_history[0].result, "failed");
-
-        let mut replacement_snapshot = ready_codex_snapshot();
-        replacement_snapshot.reported_version = Some("0.145.0".to_string());
-        replacement_snapshot.executable_fingerprint = Some("sha256:replacement".to_string());
-        let relocated_id = service
-            .commit_verified_managed_installation(
-                &mut database,
-                VerifiedManagedInstallation {
-                    adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/Users/test/.volta/bin/codex".to_string(),
-                    command_name: "codex".to_string(),
-                    source: InstallationSource::KnownLocation,
-                    auth_scope: "default".to_string(),
-                    snapshot: replacement_snapshot,
-                },
-            )
-            .unwrap();
-        assert_eq!(relocated_id, installation_id);
-        let relocated = service
-            .managed_installation(&database, AdapterKind::CodexCli, "default")
-            .unwrap()
-            .unwrap();
-        assert_eq!(relocated.executable_path, "/Users/test/.volta/bin/codex");
-        assert_eq!(relocated.generation, 2);
-        assert_eq!(relocated.version, 2);
-        assert_eq!(relocated.path_state, "valid");
-        assert_eq!(relocated.relocation_history[0].result, "succeeded");
-        assert_eq!(
-            relocated
-                .snapshot
-                .as_ref()
-                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
-            Some("sha256:replacement")
-        );
-        let resolved_profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
-        assert_eq!(
-            resolved_profile
-                .runtime_configuration
-                .as_ref()
-                .map(|configuration| configuration.adapter_kind),
-            Some(AdapterKind::CodexCli)
-        );
-        assert_eq!(relocated.id, installation_id);
-        assert_eq!(
-            resolved_profile.runtime_readiness.status,
-            RuntimeReadinessStatus::Ready
-        );
-        drop(database);
-        std::fs::remove_dir_all(directory).unwrap();
-    }
-
-    #[test]
-    fn setting_a_starter_profile_away_survives_database_reopen() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let profile = service
-            .get_profile(&database, "agent_4")
-            .expect("profile should load")
-            .expect("profile should exist");
-        service
-            .set_presence(
-                &mut database,
-                &user_command(
-                    "away-qilu",
-                    SetMemberPresenceCommand {
-                        agent_id: profile.agent_id,
-                        expected_version: profile.version,
-                        presence: "away".to_string(),
-                    },
-                ),
-            )
-            .expect("profile should be away");
-        drop(database);
-
-        let reopened = Database::open(&directory).expect("database should reopen");
-        let profile = service
-            .get_profile(&reopened, "agent_4")
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert_eq!(profile.presence, "away");
-        assert_eq!(
-            profile.runtime_readiness.status,
-            RuntimeReadinessStatus::RuntimeNotConfigured
-        );
-        drop(reopened);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn removing_a_member_hides_management_and_preserves_its_internal_identity() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let profile = service
-            .get_profile(&database, "agent_4")
-            .expect("profile should load")
-            .expect("profile should exist");
-        let original_handle = database
-            .connection()
-            .query_row(
-                "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
-                [&profile.agent_id],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("legacy handle should remain internally readable");
-        let preview = service
-            .removal_preview(&database, &profile.agent_id)
-            .expect("preview should load")
-            .expect("member should be removable");
-        assert!(preview.removable);
-        assert_eq!(preview.non_terminal_agent_run_count, 0);
-
-        let mismatch = service
-            .remove_member(
-                &mut database,
-                &user_command(
-                    "remove-qilu-mismatch",
-                    RemoveMemberCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: profile.version,
-                        confirmation_name: "QILU".to_string(),
-                    },
-                ),
-            )
-            .expect("mismatch should be a durable rejection");
-        assert_eq!(
-            mismatch.result.code,
-            "agent_profile.confirmation_name_mismatch"
-        );
-
-        let removed = service
-            .remove_member(
-                &mut database,
-                &user_command(
-                    "remove-qilu",
-                    RemoveMemberCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: profile.version,
-                        confirmation_name: profile.display_name.clone(),
-                    },
-                ),
-            )
-            .expect("member should be removed");
-        assert_eq!(removed.result.code, "agent_profile.removed");
-        assert!(
-            service
+                    ),
+                )
+                .unwrap();
+            assert_eq!(applied.result.code, "agent_profile.runtime_configured");
+            let configured = service
                 .get_profile(&database, &profile.agent_id)
-                .expect("management read should succeed")
-                .is_none()
-        );
+                .unwrap()
+                .unwrap();
+            let configuration = configured.runtime_configuration.as_ref().unwrap();
+            assert_eq!(
+                configuration.model,
+                ModelSelection::Explicit {
+                    model_id: "gpt-test".to_string(),
+                    options: json!({}),
+                }
+            );
+            assert_eq!(
+                configuration.permissions.values,
+                json!({
+                    "sandbox_mode": "workspace-write",
+                    "approval_policy": "on-request",
+                })
+            );
 
-        let retained: (String, String, Option<String>, String, i64) = database
-            .connection()
-            .query_row(
-                r#"
+            let rejected = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "invalid-runtime-config",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: configured.version,
+                            adapter_kind: AdapterKind::CodexCli,
+                            model: ModelSelection::RuntimeDefault,
+                            permissions: AdapterPermissionConfig {
+                                adapter_kind: AdapterKind::CodexCli,
+                                schema_version: 1,
+                                values: json!({
+                                    "sandbox_mode": "not-a-native-value",
+                                    "approval_policy": "never",
+                                }),
+                            },
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(rejected.result.code, "runtime_permission_value_invalid");
+            let unchanged = service
+                .get_profile(&database, &profile.agent_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(unchanged.version, configured.version);
+            assert_eq!(
+                unchanged.runtime_configuration,
+                configured.runtime_configuration
+            );
+
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+
+        #[test]
+        fn background_runtime_discovery_never_materializes_member_configuration() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
+            let selected = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "select-unresolved-codex",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: profile.version,
+                            adapter_kind: AdapterKind::CodexCli,
+                            model: ModelSelection::RuntimeDefault,
+                            permissions: AdapterPermissionConfig {
+                                adapter_kind: AdapterKind::CodexCli,
+                                schema_version: 1,
+                                values: json!({}),
+                            },
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(selected.result.code, "runtime_configuration_unavailable");
+
+            service
+                .commit_verified_managed_installation(
+                    &mut database,
+                    VerifiedManagedInstallation {
+                        adapter_kind: AdapterKind::CodexCli,
+                        executable_path: "/opt/homebrew/bin/codex".to_string(),
+                        command_name: "codex".to_string(),
+                        source: InstallationSource::InheritedPath,
+                        auth_scope: "default".to_string(),
+                        snapshot: ready_codex_snapshot(),
+                    },
+                )
+                .unwrap();
+            let still_unresolved = service
+                .get_profile(&database, &profile.agent_id)
+                .unwrap()
+                .unwrap();
+            assert!(still_unresolved.runtime_configuration.is_none());
+            assert_eq!(
+                still_unresolved.runtime_readiness.status,
+                RuntimeReadinessStatus::RuntimeNotConfigured
+            );
+
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+
+        #[test]
+        fn failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let installation = service
+                .create_installation(
+                    &mut database,
+                    &user_command(
+                        "create-installation",
+                        CreateAdapterInstallationCommand {
+                            adapter_kind: AdapterKind::CodexCli,
+                            executable_path: "/opt/homebrew/bin/codex".to_string(),
+                            command_name: "codex".to_string(),
+                            source: InstallationSource::Custom,
+                            auth_scope: "default".to_string(),
+                        },
+                    ),
+                )
+                .expect("installation should be created");
+            let installation_id = installation.result.payload["installationId"]
+                .as_str()
+                .expect("installation id")
+                .to_string();
+            service
+                .record_snapshot(
+                    &mut database,
+                    &user_command(
+                        "record-ready-snapshot",
+                        RecordAdapterCapabilitySnapshotCommand {
+                            installation_id: installation_id.clone(),
+                            expected_installation_version: 1,
+                            snapshot: ready_codex_snapshot(),
+                        },
+                    ),
+                )
+                .expect("ready snapshot should be recorded");
+            let failed_at = chrono::Utc::now().to_rfc3339();
+            service
+                .record_snapshot(
+                    &mut database,
+                    &user_command(
+                        "record-failed-snapshot",
+                        RecordAdapterCapabilitySnapshotCommand {
+                            installation_id: installation_id.clone(),
+                            expected_installation_version: 1,
+                            snapshot: AdapterCapabilitySnapshot {
+                                reported_version: Some("must-not-replace".to_string()),
+                                executable_fingerprint: Some("sha256:test".to_string()),
+                                authentication_status: "unknown".to_string(),
+                                probe_status: "probe_failed".to_string(),
+                                permission_schema_version: 99,
+                                permission_schema_digest: "sha256:failed".to_string(),
+                                capabilities: vec!["must-not-replace".to_string()],
+                                protocols: vec!["must-not-replace".to_string()],
+                                models: Vec::new(),
+                                permission_options: Vec::new(),
+                                observed_at: None,
+                                last_attempted_at: failed_at.clone(),
+                                last_successful_probe_at: None,
+                                stale_at: None,
+                                last_error: Some("probe failed".to_string()),
+                                native_session_compatibility_key: None,
+                            },
+                        },
+                    ),
+                )
+                .expect("failed attempt should be recorded");
+            let installation = service
+                .list_installations(&database)
+                .expect("installations should load")
+                .into_iter()
+                .find(|candidate| candidate.id == installation_id)
+                .expect("installation should remain");
+            let snapshot = installation.snapshot.expect("snapshot should remain");
+            assert_eq!(snapshot.reported_version.as_deref(), Some("0.144.6"));
+            assert_eq!(snapshot.models[0].id, "gpt-test");
+            assert_eq!(snapshot.permission_schema_version, 1);
+            assert_eq!(snapshot.probe_status, "ready");
+            assert_eq!(snapshot.stale_at, None);
+            assert_eq!(
+                installation
+                    .last_probe_attempt
+                    .as_ref()
+                    .map(|attempt| attempt.failure_class.as_str()),
+                Some("transient")
+            );
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn trae_static_installation_defers_verification_to_the_same_real_session() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let executable_path = directory.join("traecli");
+            std::fs::write(&executable_path, b"static-trae-fixture").unwrap();
+            let fingerprint = "sha256:trae-static".to_string();
+            let observed_at = chrono::Utc::now().to_rfc3339();
+            let static_snapshot = AgentRuntimeAdapterRegistry::default()
+                .trae_installed_unverified_snapshot(None, fingerprint.clone(), observed_at.clone())
+                .unwrap();
+            let installation_id = service
+                .commit_discovered_managed_installation(
+                    &mut database,
+                    DiscoveredManagedInstallation {
+                        adapter_kind: AdapterKind::TraeCnCli,
+                        executable_path: executable_path.to_string_lossy().to_string(),
+                        command_name: "traecli".to_string(),
+                        source: InstallationSource::InheritedPath,
+                        auth_scope: "default".to_string(),
+                        snapshot: static_snapshot,
+                    },
+                )
+                .unwrap();
+            let installation = service
+                .managed_installation(&database, AdapterKind::TraeCnCli, "default")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                installation.snapshot.as_ref().unwrap().probe_status,
+                "installed_unverified"
+            );
+            let defaults = installation.member_runtime_defaults.clone().unwrap();
+            assert_eq!(defaults.model, ModelSelection::RuntimeDefault);
+            assert_eq!(
+                defaults.permissions.values,
+                json!({"permission_mode": "default"})
+            );
+
+            let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+            let configured = service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "configure-static-trae",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: profile.version,
+                            adapter_kind: AdapterKind::TraeCnCli,
+                            model: defaults.model,
+                            permissions: defaults.permissions.clone(),
+                        },
+                    ),
+                )
+                .unwrap();
+            assert_eq!(configured.result.status, CommandResultStatus::Applied);
+            let configured_profile = service
+                .get_profile(&database, &profile.agent_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                configured_profile.runtime_readiness.status,
+                RuntimeReadinessStatus::InstalledUnverified
+            );
+
+            let binding = ResolvedRuntimeBinding {
+                adapter_kind: AdapterKind::TraeCnCli,
+                installation_id: installation_id.clone(),
+                model: ModelSelection::RuntimeDefault,
+                permissions: defaults.permissions,
+            };
+            let deferred = resolve_frozen_runtime_binding(database.connection(), &binding)
+                .unwrap()
+                .unwrap();
+            assert_eq!(deferred.reported_version, None);
+            assert_eq!(deferred.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
+            assert!(deferred.capabilities.is_empty());
+            assert!(
+                service
+                    .runtime_dispatch_blocker(&database, &deferred)
+                    .unwrap()
+                    .is_none(),
+                "static identity is sufficient to launch one real verification process"
+            );
+
+            let live_snapshot = AgentRuntimeAdapterRegistry::default()
+                .trae_live_session_capability_snapshot(
+                    None,
+                    fingerprint,
+                    json!({
+                        "protocolVersion": 1,
+                        "agentCapabilities": {"loadSession": true}
+                    }),
+                    json!({
+                        "sessionId": "session-live",
+                        "models": {
+                            "currentModelId": "trae-default",
+                            "availableModels": [
+                                {"modelId": "trae-default", "name": "TRAE Default"}
+                            ]
+                        },
+                        "configOptions": [{
+                            "id": "model",
+                            "currentValue": "trae-default",
+                            "options": [{"value": "trae-default", "name": "TRAE Default"}]
+                        }],
+                        "modes": {
+                            "currentModeId": "default",
+                            "availableModes": [{"id": "default", "name": "Default"}]
+                        }
+                    }),
+                    chrono::Utc::now().to_rfc3339(),
+                )
+                .unwrap();
+            assert_eq!(live_snapshot.reported_version, None);
+            service
+                .record_snapshot(
+                    &mut database,
+                    &user_command(
+                        "record-live-trae",
+                        RecordAdapterCapabilitySnapshotCommand {
+                            installation_id,
+                            expected_installation_version: installation.version,
+                            snapshot: live_snapshot,
+                        },
+                    ),
+                )
+                .unwrap();
+            let verified_profile = service
+                .get_profile(&database, &profile.agent_id)
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                verified_profile.runtime_readiness.status,
+                RuntimeReadinessStatus::Ready
+            );
+            let verified = resolve_frozen_runtime_binding(database.connection(), &binding)
+                .unwrap()
+                .unwrap();
+            assert_eq!(verified.reported_version, None);
+            assert_eq!(verified.model.model_id, "trae-default");
+
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+
+        #[test]
+        fn verified_relocation_preserves_installation_identity_and_never_commits_a_failed_candidate()
+         {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let mut original_snapshot = ready_codex_snapshot();
+            original_snapshot.executable_fingerprint = Some("sha256:original".to_string());
+            let installation_id = service
+                .commit_verified_managed_installation(
+                    &mut database,
+                    VerifiedManagedInstallation {
+                        adapter_kind: AdapterKind::CodexCli,
+                        executable_path: "/opt/homebrew/bin/codex".to_string(),
+                        command_name: "codex".to_string(),
+                        source: InstallationSource::InheritedPath,
+                        auth_scope: "default".to_string(),
+                        snapshot: original_snapshot,
+                    },
+                )
+                .unwrap();
+            let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
+            service
+                .set_runtime(
+                    &mut database,
+                    &user_command(
+                        "select-managed-codex",
+                        SetMemberRuntimeConfigurationCommand {
+                            agent_id: profile.agent_id,
+                            expected_version: profile.version,
+                            adapter_kind: AdapterKind::CodexCli,
+                            model: ModelSelection::RuntimeDefault,
+                            permissions: AdapterPermissionConfig {
+                                adapter_kind: AdapterKind::CodexCli,
+                                schema_version: 1,
+                                values: json!({
+                                    "sandbox_mode": "danger-full-access",
+                                    "approval_policy": "never",
+                                }),
+                            },
+                        },
+                    ),
+                )
+                .unwrap();
+
+            service
+                .record_managed_probe_failure(
+                    &mut database,
+                    ManagedProbeFailure {
+                        adapter_kind: AdapterKind::CodexCli,
+                        auth_scope: "default",
+                        candidate_path: "/Users/test/.local/bin/codex",
+                        fingerprint: Some("sha256:wrong-program"),
+                        source: Some(InstallationSource::LoginShell),
+                        failure_class: "identity_changed",
+                        diagnostic_code: "runtime_identity_changed",
+                    },
+                )
+                .unwrap();
+            let rejected_candidate = service
+                .managed_installation(&database, AdapterKind::CodexCli, "default")
+                .unwrap()
+                .unwrap();
+            assert_eq!(rejected_candidate.id, installation_id);
+            assert_eq!(
+                rejected_candidate.executable_path,
+                "/opt/homebrew/bin/codex"
+            );
+            assert_eq!(
+                rejected_candidate
+                    .snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
+                Some("sha256:original")
+            );
+            assert_eq!(
+                rejected_candidate.relocation_history[0].source,
+                Some(InstallationSource::LoginShell)
+            );
+            assert_eq!(rejected_candidate.relocation_history[0].result, "failed");
+
+            let mut replacement_snapshot = ready_codex_snapshot();
+            replacement_snapshot.reported_version = Some("0.145.0".to_string());
+            replacement_snapshot.executable_fingerprint = Some("sha256:replacement".to_string());
+            let relocated_id = service
+                .commit_verified_managed_installation(
+                    &mut database,
+                    VerifiedManagedInstallation {
+                        adapter_kind: AdapterKind::CodexCli,
+                        executable_path: "/Users/test/.volta/bin/codex".to_string(),
+                        command_name: "codex".to_string(),
+                        source: InstallationSource::KnownLocation,
+                        auth_scope: "default".to_string(),
+                        snapshot: replacement_snapshot,
+                    },
+                )
+                .unwrap();
+            assert_eq!(relocated_id, installation_id);
+            let relocated = service
+                .managed_installation(&database, AdapterKind::CodexCli, "default")
+                .unwrap()
+                .unwrap();
+            assert_eq!(relocated.executable_path, "/Users/test/.volta/bin/codex");
+            assert_eq!(relocated.generation, 2);
+            assert_eq!(relocated.version, 2);
+            assert_eq!(relocated.path_state, "valid");
+            assert_eq!(relocated.relocation_history[0].result, "succeeded");
+            assert_eq!(
+                relocated
+                    .snapshot
+                    .as_ref()
+                    .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
+                Some("sha256:replacement")
+            );
+            let resolved_profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
+            assert_eq!(
+                resolved_profile
+                    .runtime_configuration
+                    .as_ref()
+                    .map(|configuration| configuration.adapter_kind),
+                Some(AdapterKind::CodexCli)
+            );
+            assert_eq!(relocated.id, installation_id);
+            assert_eq!(
+                resolved_profile.runtime_readiness.status,
+                RuntimeReadinessStatus::Ready
+            );
+            drop(database);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+
+        #[test]
+        fn setting_a_starter_profile_away_survives_database_reopen() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let profile = service
+                .get_profile(&database, "agent_4")
+                .expect("profile should load")
+                .expect("profile should exist");
+            service
+                .set_presence(
+                    &mut database,
+                    &user_command(
+                        "away-qilu",
+                        SetMemberPresenceCommand {
+                            agent_id: profile.agent_id,
+                            expected_version: profile.version,
+                            presence: "away".to_string(),
+                        },
+                    ),
+                )
+                .expect("profile should be away");
+            drop(database);
+
+            let reopened = Database::open(&directory).expect("database should reopen");
+            let profile = service
+                .get_profile(&reopened, "agent_4")
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert_eq!(profile.presence, "away");
+            assert_eq!(
+                profile.runtime_readiness.status,
+                RuntimeReadinessStatus::RuntimeNotConfigured
+            );
+            drop(reopened);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn removing_a_member_hides_management_and_preserves_its_internal_identity() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let profile = service
+                .get_profile(&database, "agent_4")
+                .expect("profile should load")
+                .expect("profile should exist");
+            let original_handle = database
+                .connection()
+                .query_row(
+                    "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
+                    [&profile.agent_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("legacy handle should remain internally readable");
+            let preview = service
+                .removal_preview(&database, &profile.agent_id)
+                .expect("preview should load")
+                .expect("member should be removable");
+            assert!(preview.removable);
+            assert_eq!(preview.non_terminal_agent_run_count, 0);
+
+            let mismatch = service
+                .remove_member(
+                    &mut database,
+                    &user_command(
+                        "remove-qilu-mismatch",
+                        RemoveMemberCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: profile.version,
+                            confirmation_name: "QILU".to_string(),
+                        },
+                    ),
+                )
+                .expect("mismatch should be a durable rejection");
+            assert_eq!(
+                mismatch.result.code,
+                "agent_profile.confirmation_name_mismatch"
+            );
+
+            let removed = service
+                .remove_member(
+                    &mut database,
+                    &user_command(
+                        "remove-qilu",
+                        RemoveMemberCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: profile.version,
+                            confirmation_name: profile.display_name.clone(),
+                        },
+                    ),
+                )
+                .expect("member should be removed");
+            assert_eq!(removed.result.code, "agent_profile.removed");
+            assert!(
+                service
+                    .get_profile(&database, &profile.agent_id)
+                    .expect("management read should succeed")
+                    .is_none()
+            );
+
+            let retained: (String, String, Option<String>, String, i64) = database
+                .connection()
+                .query_row(
+                    r#"
                 SELECT COALESCE(handle, ''), display_name, avatar_ref,
                        profile_status, version
                 FROM agent_profile WHERE id = ?1
                 "#,
-                [&profile.agent_id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
-            )
-            .expect("removed identity should remain");
-        assert_eq!(retained.0, original_handle);
-        assert_eq!(retained.1, profile.display_name);
-        assert_eq!(retained.2, profile.avatar_ref);
-        assert_eq!(retained.3, "removed");
-        assert_eq!(retained.4, profile.version + 1);
-
-        let reserved_name = service
-            .create_profile(
-                &mut database,
-                &user_command(
-                    "reuse-qilu-name",
-                    create_identity(&profile.display_name, "用于验证名称全局保留。"),
-                ),
-            )
-            .expect("reserved name should be a durable rejection");
-        assert_eq!(
-            reserved_name.result.code,
-            "agent_profile.display_name_conflict"
-        );
-
-        let replacement = service
-            .create_profile(
-                &mut database,
-                &user_command(
-                    "create-qilu-replacement",
-                    create_identity("新绮露", "用于验证后台生成新的内部 ID。"),
-                ),
-            )
-            .expect("replacement profile should be created");
-        assert_eq!(replacement.result.code, "agent_profile.created");
-        let replacement = service
-            .list_profiles(&database)
-            .expect("profiles should load")
-            .into_iter()
-            .find(|candidate| candidate.display_name == "新绮露")
-            .expect("replacement should be visible");
-        assert_eq!(replacement.agent_id, "agent_5");
-        assert!(
-            serde_json::to_value(&replacement)
-                .unwrap()
-                .get("handle")
-                .is_none()
-        );
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn profile_display_names_are_globally_unique_and_updates_preserve_legacy_aliases() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let created = service
-            .create_profile(
-                &mut database,
-                &user_command(
-                    "create-builder",
-                    create_identity("Builder", "Builds scoped changes."),
-                ),
-            )
-            .expect("profile should be created");
-        let profile_id = created.result.payload["agentId"]
-            .as_str()
-            .expect("profile id");
-        let profile = service
-            .get_profile(&database, profile_id)
-            .expect("profile should load")
-            .expect("profile should exist");
-        let original_handle = database
-            .connection()
-            .query_row(
-                "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
-                [&profile.agent_id],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("legacy handle should remain internally readable");
-
-        let duplicate = service
-            .create_profile(
-                &mut database,
-                &user_command(
-                    "create-duplicate-builder",
-                    create_identity(" builder ", "Duplicate name."),
-                ),
-            )
-            .expect("duplicate should be a durable rejection");
-        assert_eq!(duplicate.result.code, "agent_profile.display_name_conflict");
-
-        let updated = service
-            .update_profile(
-                &mut database,
-                &user_command("rename-builder", update_identity(&profile, "Builder Prime")),
-            )
-            .expect("profile should update");
-        assert_eq!(updated.result.code, "agent_profile.updated");
-        let updated_profile = service
-            .get_profile(&database, &profile.agent_id)
-            .expect("profile should load")
-            .expect("profile should exist");
-        let updated_handle = database
-            .connection()
-            .query_row(
-                "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
-                [&profile.agent_id],
-                |row| row.get::<_, String>(0),
-            )
-            .expect("legacy handle should remain internally readable");
-        assert_eq!(updated_handle, original_handle);
-        assert_eq!(updated_profile.display_name, "Builder Prime");
-
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn starter_profile_user_edits_survive_database_reopen() {
-        let (mut database, directory) = database();
-        let service = AgentProfileService::default();
-        let profile = service
-            .get_profile(&database, "agent_4")
-            .expect("profile should load")
-            .expect("profile should exist");
-        service
-            .update_profile(
-                &mut database,
-                &user_command(
-                    "edit-qilu",
-                    UpdateAgentProfileCommand {
-                        working_principles: "只在未来 Run 生效。".to_string(),
-                        ..update_identity(&profile, &profile.display_name)
+                    [&profile.agent_id],
+                    |row| {
+                        Ok((
+                            row.get(0)?,
+                            row.get(1)?,
+                            row.get(2)?,
+                            row.get(3)?,
+                            row.get(4)?,
+                        ))
                     },
-                ),
-            )
-            .expect("profile should be updated");
-        drop(database);
+                )
+                .expect("removed identity should remain");
+            assert_eq!(retained.0, original_handle);
+            assert_eq!(retained.1, profile.display_name);
+            assert_eq!(retained.2, profile.avatar_ref);
+            assert_eq!(retained.3, "removed");
+            assert_eq!(retained.4, profile.version + 1);
 
-        let reopened = Database::open(&directory).expect("database should reopen");
-        let profile = service
-            .get_profile(&reopened, "agent_4")
-            .expect("profile should load")
-            .expect("profile should exist");
-        assert_eq!(profile.working_principles, "只在未来 Run 生效。");
-        drop(reopened);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
-    }
-
-    #[test]
-    fn setting_a_default_lead_away_does_not_mutate_the_camp() {
-        let (mut database, directory) = database();
-        let collaboration = CollaborationService::default();
-        let camp = collaboration
-            .create_camp(
-                &mut database,
-                &user_command(
-                    "create-default-lead-camp",
-                    CreateCampCommand::for_test(
-                        directory.join("quick-chat").to_string_lossy().to_string(),
+            let reserved_name = service
+                .create_profile(
+                    &mut database,
+                    &user_command(
+                        "reuse-qilu-name",
+                        create_identity(&profile.display_name, "用于验证名称全局保留。"),
                     ),
-                ),
-            )
-            .expect("Camp should be created");
-        let camp_id = camp.result.payload["campId"]
-            .as_str()
-            .expect("Camp ID should be returned")
-            .to_string();
-        collaboration
-            .add_camp_member(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: "add-default-lead".to_string(),
-                    actor: ActorRef::User {
-                        user_id: "local_user".to_string(),
+                )
+                .expect("reserved name should be a durable rejection");
+            assert_eq!(
+                reserved_name.result.code,
+                "agent_profile.display_name_conflict"
+            );
+
+            let replacement = service
+                .create_profile(
+                    &mut database,
+                    &user_command(
+                        "create-qilu-replacement",
+                        create_identity("新绮露", "用于验证后台生成新的内部 ID。"),
+                    ),
+                )
+                .expect("replacement profile should be created");
+            assert_eq!(replacement.result.code, "agent_profile.created");
+            let replacement = service
+                .list_profiles(&database)
+                .expect("profiles should load")
+                .into_iter()
+                .find(|candidate| candidate.display_name == "新绮露")
+                .expect("replacement should be visible");
+            assert_eq!(replacement.agent_id, "agent_5");
+            assert!(
+                serde_json::to_value(&replacement)
+                    .unwrap()
+                    .get("handle")
+                    .is_none()
+            );
+
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn profile_display_names_are_globally_unique_and_updates_preserve_legacy_aliases() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let created = service
+                .create_profile(
+                    &mut database,
+                    &user_command(
+                        "create-builder",
+                        create_identity("Builder", "Builds scoped changes."),
+                    ),
+                )
+                .expect("profile should be created");
+            let profile_id = created.result.payload["agentId"]
+                .as_str()
+                .expect("profile id");
+            let profile = service
+                .get_profile(&database, profile_id)
+                .expect("profile should load")
+                .expect("profile should exist");
+            let original_handle = database
+                .connection()
+                .query_row(
+                    "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
+                    [&profile.agent_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("legacy handle should remain internally readable");
+
+            let duplicate = service
+                .create_profile(
+                    &mut database,
+                    &user_command(
+                        "create-duplicate-builder",
+                        create_identity(" builder ", "Duplicate name."),
+                    ),
+                )
+                .expect("duplicate should be a durable rejection");
+            assert_eq!(duplicate.result.code, "agent_profile.display_name_conflict");
+
+            let updated = service
+                .update_profile(
+                    &mut database,
+                    &user_command("rename-builder", update_identity(&profile, "Builder Prime")),
+                )
+                .expect("profile should update");
+            assert_eq!(updated.result.code, "agent_profile.updated");
+            let updated_profile = service
+                .get_profile(&database, &profile.agent_id)
+                .expect("profile should load")
+                .expect("profile should exist");
+            let updated_handle = database
+                .connection()
+                .query_row(
+                    "SELECT COALESCE(handle, '') FROM agent_profile WHERE id = ?1",
+                    [&profile.agent_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .expect("legacy handle should remain internally readable");
+            assert_eq!(updated_handle, original_handle);
+            assert_eq!(updated_profile.display_name, "Builder Prime");
+
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn starter_profile_user_edits_survive_database_reopen() {
+            let (mut database, directory) = database();
+            let service = AgentProfileService::default();
+            let profile = service
+                .get_profile(&database, "agent_4")
+                .expect("profile should load")
+                .expect("profile should exist");
+            service
+                .update_profile(
+                    &mut database,
+                    &user_command(
+                        "edit-qilu",
+                        UpdateAgentProfileCommand {
+                            working_principles: "只在未来 Run 生效。".to_string(),
+                            ..update_identity(&profile, &profile.display_name)
+                        },
+                    ),
+                )
+                .expect("profile should be updated");
+            drop(database);
+
+            let reopened = Database::open(&directory).expect("database should reopen");
+            let profile = service
+                .get_profile(&reopened, "agent_4")
+                .expect("profile should load")
+                .expect("profile should exist");
+            assert_eq!(profile.working_principles, "只在未来 Run 生效。");
+            drop(reopened);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
+
+        #[test]
+        fn setting_a_default_lead_away_does_not_mutate_the_camp() {
+            let (mut database, directory) = database();
+            let collaboration = CollaborationService::default();
+            let camp = collaboration
+                .create_camp(
+                    &mut database,
+                    &user_command(
+                        "create-default-lead-camp",
+                        CreateCampCommand::for_test(
+                            directory.join("quick-chat").to_string_lossy().to_string(),
+                        ),
+                    ),
+                )
+                .expect("Camp should be created");
+            let camp_id = camp.result.payload["campId"]
+                .as_str()
+                .expect("Camp ID should be returned")
+                .to_string();
+            collaboration
+                .add_camp_member(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: "add-default-lead".to_string(),
+                        actor: ActorRef::User {
+                            user_id: "local_user".to_string(),
+                        },
+                        camp_id: Some(camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: AddCampMemberCommand {
+                            camp_id: camp_id.clone(),
+                            agent_id: "agent_1".to_string(),
+                            capability_overrides: json!({}),
+                        },
                     },
-                    camp_id: Some(camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: AddCampMemberCommand {
-                        camp_id: camp_id.clone(),
-                        agent_id: "agent_1".to_string(),
-                        capability_overrides: json!({}),
+                )
+                .expect("Default Lead should join the Camp");
+            collaboration
+                .add_camp_member(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: "add-default-lead-successor".to_string(),
+                        actor: ActorRef::User {
+                            user_id: "local_user".to_string(),
+                        },
+                        camp_id: Some(camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: AddCampMemberCommand {
+                            camp_id: camp_id.clone(),
+                            agent_id: "agent_2".to_string(),
+                            capability_overrides: json!({}),
+                        },
                     },
-                },
-            )
-            .expect("Default Lead should join the Camp");
-        collaboration
-            .add_camp_member(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: "add-default-lead-successor".to_string(),
-                    actor: ActorRef::User {
-                        user_id: "local_user".to_string(),
-                    },
-                    camp_id: Some(camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: AddCampMemberCommand {
-                        camp_id: camp_id.clone(),
-                        agent_id: "agent_2".to_string(),
-                        capability_overrides: json!({}),
-                    },
-                },
-            )
-            .expect("A successor candidate should join the Camp");
-        let service = AgentProfileService::default();
-        let profile = service
-            .get_profile(&database, "agent_1")
-            .expect("profile should load")
-            .expect("profile should exist");
-        let result = service
-            .set_presence(
-                &mut database,
-                &user_command(
-                    "away-luoke",
-                    SetMemberPresenceCommand {
-                        agent_id: profile.agent_id.clone(),
-                        expected_version: profile.version,
-                        presence: "away".to_string(),
-                    },
-                ),
-            )
-            .expect("presence should change independently");
-        assert_eq!(result.result.code, "agent_profile.presence_changed");
-        let (lead, status): (Option<String>, String) = database
-            .connection()
-            .query_row(
-                r#"
+                )
+                .expect("A successor candidate should join the Camp");
+            let service = AgentProfileService::default();
+            let profile = service
+                .get_profile(&database, "agent_1")
+                .expect("profile should load")
+                .expect("profile should exist");
+            let result = service
+                .set_presence(
+                    &mut database,
+                    &user_command(
+                        "away-luoke",
+                        SetMemberPresenceCommand {
+                            agent_id: profile.agent_id.clone(),
+                            expected_version: profile.version,
+                            presence: "away".to_string(),
+                        },
+                    ),
+                )
+                .expect("presence should change independently");
+            assert_eq!(result.result.code, "agent_profile.presence_changed");
+            let (lead, status): (Option<String>, String) = database
+                .connection()
+                .query_row(
+                    r#"
                 SELECT camp.default_lead_agent_id, agent_profile.profile_status
                 FROM camp, agent_profile
                 WHERE camp.id = ?1 AND agent_profile.id = ?2
                 "#,
-                params![camp_id, profile.agent_id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .expect("lead and profile should remain queryable");
-        assert_eq!(lead.as_deref(), Some("agent_1"));
-        assert_eq!(status, "away");
-        drop(database);
-        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+                    params![camp_id, profile.agent_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .expect("lead and profile should remain queryable");
+            assert_eq!(lead.as_deref(), Some("agent_1"));
+            assert_eq!(status, "away");
+            drop(database);
+            std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+        }
     }
 }

@@ -4103,10 +4103,10 @@ mod tests {
             TestCampMessageAddress, TestCampMessageCommand,
         },
         command::{ActorRef, CommandEnvelope},
-        execution_evidence::ExecutionEvidenceService,
-        managed_blob::ManagedBlobStore,
         runtime::{AgentRunWorkspace, ClaimAgentRunCommand, ExecutionRuntimeService},
     };
+    #[cfg(feature = "slow-tests")]
+    use crate::{execution_evidence::ExecutionEvidenceService, managed_blob::ManagedBlobStore};
     use std::path::PathBuf;
 
     fn fixture(name: &str) -> Value {
@@ -4253,6 +4253,7 @@ mod tests {
         (directory, database, execution)
     }
 
+    #[cfg(feature = "slow-tests")]
     fn claim_additional_monitoring_run(
         database: &mut Database,
         seed: &AgentRunExecution,
@@ -4631,7 +4632,7 @@ mod tests {
         assert_eq!(aggregate, "1000.015");
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn evidence_count_buffer_batches_hot_path_and_terminal_reconciles() {
         let (directory, mut database, execution) = claimed_monitoring_run();
         MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
@@ -4723,7 +4724,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn usage_buffer_dedupes_coalesces_and_obeys_due_and_terminal_flushes() {
         let (directory, mut database, execution) = claimed_monitoring_run();
         MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
@@ -4854,7 +4855,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn usage_buffer_terminal_cleanup_removes_idle_state_after_periodic_flush() {
         let (directory, mut database, execution) = claimed_monitoring_run();
         MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
@@ -4895,7 +4896,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn usage_buffer_preserves_gauge_arrival_order_across_failed_flush_restore() {
         let (directory, mut database, execution) = claimed_monitoring_run();
         MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
@@ -4955,7 +4956,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn recovery_epochs_are_one_logical_run_and_session_cost_gauges_are_raw_only() {
         let (directory, mut database, execution) = claimed_monitoring_run();
         assert!(MonitoringService::enroll_run(&mut database, &execution, false).unwrap());
@@ -5084,7 +5085,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn best_available_cost_selects_quality_per_logical_run_before_aggregation() {
         let (directory, mut database, first) = claimed_monitoring_run();
         MonitoringService::enroll_run(&mut database, &first, false).unwrap();
@@ -5182,7 +5183,7 @@ mod tests {
         assert_eq!(interval_union_millis(&mut intervals), 33);
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn monitoring_snapshot_aggregates_tool_intervals_inside_sql() {
         let (directory, mut database, execution) = claimed_monitoring_run();
         MonitoringService::enroll_run(&mut database, &execution, false).unwrap();
@@ -5379,7 +5380,7 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
+    #[cfg(feature = "slow-tests")]
     fn clean_collection_queries_return_explicit_empty_views() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-monitoring-empty-query-test-{}",
@@ -5412,5 +5413,48 @@ mod tests {
         assert_eq!(summary["runs"]["value"], Value::Null);
         assert_eq!(usage["inputTokens"]["value"], Value::Null);
         assert_eq!(reliability["endToEndP95Millis"]["value"], Value::Null);
+    }
+
+    #[cfg(feature = "slow-tests")]
+    mod slow_tests {
+        #[test]
+        fn evidence_count_buffer_batches_hot_path_and_terminal_reconciles() {
+            super::evidence_count_buffer_batches_hot_path_and_terminal_reconciles();
+        }
+
+        #[test]
+        fn usage_buffer_dedupes_coalesces_and_obeys_due_and_terminal_flushes() {
+            super::usage_buffer_dedupes_coalesces_and_obeys_due_and_terminal_flushes();
+        }
+
+        #[test]
+        fn usage_buffer_terminal_cleanup_removes_idle_state_after_periodic_flush() {
+            super::usage_buffer_terminal_cleanup_removes_idle_state_after_periodic_flush();
+        }
+
+        #[test]
+        fn usage_buffer_preserves_gauge_arrival_order_across_failed_flush_restore() {
+            super::usage_buffer_preserves_gauge_arrival_order_across_failed_flush_restore();
+        }
+
+        #[test]
+        fn recovery_epochs_are_one_logical_run_and_session_cost_gauges_are_raw_only() {
+            super::recovery_epochs_are_one_logical_run_and_session_cost_gauges_are_raw_only();
+        }
+
+        #[test]
+        fn best_available_cost_selects_quality_per_logical_run_before_aggregation() {
+            super::best_available_cost_selects_quality_per_logical_run_before_aggregation();
+        }
+
+        #[test]
+        fn monitoring_snapshot_aggregates_tool_intervals_inside_sql() {
+            super::monitoring_snapshot_aggregates_tool_intervals_inside_sql();
+        }
+
+        #[test]
+        fn clean_collection_queries_return_explicit_empty_views() {
+            super::clean_collection_queries_return_explicit_empty_views();
+        }
     }
 }

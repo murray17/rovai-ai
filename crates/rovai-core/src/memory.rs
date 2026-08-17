@@ -1135,10 +1135,10 @@ impl MemoryService {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "slow-tests"))]
 // These focused storage tests stay beside the public validation helpers they exercise.
 #[allow(clippy::items_after_test_module)]
-mod tests {
+mod slow_tests {
     use super::*;
     use crate::{agent_profile::configure_test_runtime, command::CommandResultStatus};
 

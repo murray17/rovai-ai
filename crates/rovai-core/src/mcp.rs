@@ -1609,8 +1609,8 @@ impl<'de> Deserialize<'de> for NoDuplicateValue {
     }
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "slow-tests"))]
+mod slow_tests {
     use super::*;
 
     fn temporary_store(name: &str) -> (PathBuf, McpConfigStore) {

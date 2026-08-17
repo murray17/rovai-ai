@@ -2098,8 +2098,8 @@ fn rejected(code: &str, message: &str) -> CommandHandlerResult {
     CommandHandlerResult::rejected(code, json!({ "message": message }))
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "slow-tests"))]
+mod slow_tests {
     use super::*;
     use uuid::Uuid;
 

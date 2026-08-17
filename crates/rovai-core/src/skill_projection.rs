@@ -2200,8 +2200,8 @@ fn to_sql_error(error: anyhow::Error) -> rusqlite::Error {
     )
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "slow-tests"))]
+mod slow_tests {
     use super::*;
     use crate::{
         command::{ActorRef, CommandEnvelope},

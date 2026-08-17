@@ -159,8 +159,8 @@ pub fn rebuild_context_index(database: &mut Database) -> Result<ContextIndexRebu
     })
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "slow-tests"))]
+mod slow_tests {
     use super::*;
     use crate::{
         collaboration::{

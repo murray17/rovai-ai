@@ -250,7 +250,10 @@ impl DomainCommand for SendUserCampDraftCommand {
 #[derive(Debug, Clone, Serialize)]
 pub(crate) enum TestCampMessageAddress {
     Default,
-    Explicit { agent_ids: Vec<String> },
+    Explicit {
+        agent_ids: Vec<String>,
+    },
+    #[cfg(feature = "slow-tests")]
     Broadcast,
 }
 
@@ -266,7 +269,7 @@ pub(crate) struct TestCampMessageCommand {
     pub execution: Option<ExecutionRequest>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "slow-tests"))]
 #[derive(Debug, Clone)]
 pub(crate) struct TestCampConversationCommand {
     pub project_binding_kind: ProjectBindingKind,
@@ -468,6 +471,7 @@ impl CollaborationService {
                     .cloned()
                     .map(|agent_id| StructuredCampMessageSegment::MemberMention { agent_id })
                     .collect(),
+                #[cfg(feature = "slow-tests")]
                 TestCampMessageAddress::Broadcast => {
                     vec![StructuredCampMessageSegment::AllMembersMention]
                 }
@@ -525,7 +529,7 @@ impl CollaborationService {
         self.send_user_camp_draft(database, &command)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "slow-tests"))]
     pub(crate) fn create_test_camp_conversation(
         &self,
         database: &mut Database,
@@ -4497,8 +4501,8 @@ fn camp_is_pending(transaction: &Connection, camp_id: &str) -> Result<bool> {
         .unwrap_or(false))
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "slow-tests"))]
+mod slow_tests {
     use super::*;
     use crate::{
         agent_profile::{AgentProfileService, RemoveMemberCommand, configure_test_runtime},

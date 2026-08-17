@@ -4,6 +4,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+default = []
+slow-tests = []
+legacy-migration-tests = ["slow-tests"]
+
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }

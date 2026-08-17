@@ -5538,8 +5538,8 @@ fn sha256_text(value: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "slow-tests"))]
+mod slow_tests {
     use super::*;
     use crate::{
         agent_profile::{

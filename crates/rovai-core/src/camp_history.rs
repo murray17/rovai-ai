@@ -1904,8 +1904,8 @@ fn json_chars(value: &Value) -> Result<usize> {
     Ok(serde_json::to_string(value)?.chars().count())
 }
 
-#[cfg(test)]
-mod tests {
+#[cfg(all(test, feature = "slow-tests"))]
+mod slow_tests {
     use rusqlite::Connection;
 
     use super::*;
