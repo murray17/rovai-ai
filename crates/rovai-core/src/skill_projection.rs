@@ -2331,15 +2331,12 @@ mod slow_tests {
         library: &SkillLibraryService,
         group_keys: &[SkillDeliveryGroupKey],
     ) -> SkillView {
-        library.install_bundled_skills(database).unwrap();
-        let installed = library.list(database).unwrap();
+        let skill = library
+            .install_bundled_skill_for_test(database, "analyze-agent-codebase")
+            .unwrap();
         database
             .connection()
             .execute("DELETE FROM skill_group_assignment", [])
-            .unwrap();
-        let skill = installed
-            .into_iter()
-            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
         assign_skill_to_groups(
             database,
