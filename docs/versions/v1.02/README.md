@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 
 # Rovai-ai v1.02：Runtime Usage 补全与 Codex 公价估算
 
-> 当前状态：沿用 [ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md) 的五表最小模型；
+> 当前状态：沿用 [ADR-0205](../v0.99/decisions.md#adr-0205) 的五表最小模型；
 > [Runtime Usage Monitoring v3](../../contracts/runtime-usage-monitoring-v3.md) 已接受，实施与验收已按
 > [计划](implementation-plan.md)完成。
 >
@@ -71,7 +71,7 @@ Token bucket 生成版本化 OpenAI API public-price equivalent。
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md)
+- [ADR-0205](../v0.99/decisions.md#adr-0205)
 - [Runtime Usage Monitoring v3](../../contracts/runtime-usage-monitoring-v3.md)
 - [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)
 - [Runtime 兼容性清单](../../runtime-compatibility.md)

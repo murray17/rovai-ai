@@ -222,7 +222,7 @@ export function campOpenProjectionAsSnapshot(
   const totalCount = Math.max(projection.coverage.messages.totalCount, loadedCount)
   const omittedCount = Math.max(0, totalCount - loadedCount)
   return {
-    schemaVersion: 30,
+    schemaVersion: 32,
     throughGlobalSequence: projection.throughGlobalSequence,
     camp: projection.camp,
     members: projection.members,
@@ -329,6 +329,43 @@ export function effectiveCancellingTurnIds(
   return next
 }
 
+export function reconcileRunCancellationIds(
+  current: ReadonlySet<string>,
+  snapshot: {
+    agentRuns: Pick<AgentRunView, 'id' | 'status' | 'cancelRequestedAt'>[]
+  }
+): Set<string> {
+  const runById = new Map(snapshot.agentRuns.map((run) => [run.id, run]))
+  const next = new Set([...current].filter((runId) => {
+    const run = runById.get(runId)
+    return Boolean(
+      run
+      && CANCELLABLE_RUN_STATUSES.has(run.status)
+      && run.cancelRequestedAt === null
+    )
+  }))
+  if (next.size === current.size && [...next].every((runId) => current.has(runId))) {
+    return current instanceof Set ? current : next
+  }
+  return next
+}
+
+export function effectiveCancellingRunIds(
+  local: ReadonlySet<string>,
+  snapshot: {
+    agentRuns: Pick<AgentRunView, 'id' | 'status' | 'cancelRequestedAt'>[]
+  }
+): Set<string> {
+  const runIds = new Set(snapshot.agentRuns.map((run) => run.id))
+  const next = new Set([...local].filter((runId) => runIds.has(runId)))
+  for (const run of snapshot.agentRuns) {
+    if (CANCELLABLE_RUN_STATUSES.has(run.status) && run.cancelRequestedAt !== null) {
+      next.add(run.id)
+    }
+  }
+  return next
+}
+
 export function shouldLoadRuntimeHealth(
   view: View,
   settingsSection: SettingsSection,
@@ -395,6 +432,8 @@ export function App(): React.JSX.Element {
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
   const [cancellingTurnIds, setCancellingTurnIds] = useState<Set<string>>(() => new Set())
+  const [cancellingRunIds, setCancellingRunIds] = useState<Set<string>>(() => new Set())
+  const [confirmingRunIds, setConfirmingRunIds] = useState<Set<string>>(() => new Set())
   const [state, setState] = useState<LoadState>('loading')
   const [shuttingDown, setShuttingDown] = useState(false)
   const [startupSnapshot, setStartupSnapshot] = useState<DesktopStartupSnapshot | null>(null)
@@ -508,7 +547,7 @@ export function App(): React.JSX.Element {
           command: { campId }
         })
       : await window.rovai.request<CampOpenProjection>('camps.open', { traceId, campId })
-    if (projection.schemaVersion !== 1) throw new Error('会话打开数据版本不兼容。')
+    if (projection.schemaVersion !== 3) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
       + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)} `
@@ -923,6 +962,7 @@ export function App(): React.JSX.Element {
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
     campEventSequenceMarker.current = snapshot.throughGlobalSequence
     setCampSnapshot(snapshot)
+    setConfirmingRunIds(new Set())
   }, [requestCampProjection, setCampSnapshot])
 
   const loadEarlierCampMessages = useCallback(async (): Promise<void> => {
@@ -1429,10 +1469,17 @@ export function App(): React.JSX.Element {
           void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
         }, 80)
       }
-      if (event.method === 'agent_run.cancelled' || event.method === 'agent_run.recovery_blocker_resolved') {
+      if (
+        event.method === 'agent_run.cancelled'
+        || event.method === 'agent_run.recovery_blocker_resolved'
+        || event.method === 'agent_run.runtime_model_observed'
+      ) {
         const eventCampId = stringField(params, 'campId')
         const campId = activeCampIdRef.current
-        if (campId && (!eventCampId || eventCampId === campId)) {
+        const targetsActiveCamp = event.method === 'agent_run.runtime_model_observed'
+          ? eventCampId === campId
+          : !eventCampId || eventCampId === campId
+        if (campId && targetsActiveCamp) {
           void refreshActiveCampSnapshot(campId).catch((nextError) => {
             if (activeCampIdRef.current === campId) setError(errorMessage(nextError))
           })
@@ -1440,6 +1487,16 @@ export function App(): React.JSX.Element {
       }
     })
   }, [loadHealth, loadMemberData, loadOverview, refreshActiveCampSnapshot])
+
+  useEffect(() => {
+    if (!campSnapshot) {
+      setCancellingRunIds(new Set())
+      setConfirmingRunIds(new Set())
+      return
+    }
+    setCancellingRunIds((current) => reconcileRunCancellationIds(current, campSnapshot))
+    setConfirmingRunIds((current) => reconcileRunCancellationIds(current, campSnapshot))
+  }, [campSnapshot])
 
   const displayNavigation = navigationIncludingCurrentWorkspace(
     visibleNavigation,
@@ -1476,6 +1533,18 @@ export function App(): React.JSX.Element {
     [activeCampId, campSnapshot, cancellingTurnIds]
   )
   const activeCampStopping = activeCancellingTurnIds.size > 0
+  const activeCancellingRunIds = useMemo(
+    () => campSnapshot?.camp.id === activeCampId
+      ? effectiveCancellingRunIds(cancellingRunIds, campSnapshot)
+      : new Set<string>(),
+    [activeCampId, campSnapshot, cancellingRunIds]
+  )
+  const activeConfirmingRunIds = useMemo(
+    () => campSnapshot?.camp.id === activeCampId
+      ? reconcileRunCancellationIds(confirmingRunIds, campSnapshot)
+      : new Set<string>(),
+    [activeCampId, campSnapshot, confirmingRunIds]
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -1489,6 +1558,7 @@ export function App(): React.JSX.Element {
       if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
       campEventSequenceMarker.current = snapshot.throughGlobalSequence
       setCampSnapshot(snapshot)
+      setConfirmingRunIds((current) => reconcileRunCancellationIds(current, snapshot))
     }
 
     const poll = async (): Promise<void> => {
@@ -2050,6 +2120,77 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const cancelAgentRun = async (run: AgentRunView): Promise<void> => {
+    const campId = activeCampId
+    if (!campId || campSnapshotRef.current?.camp.id !== campId) return
+    setError(null)
+    setConfirmingRunIds((current) => {
+      const next = new Set(current)
+      next.delete(run.id)
+      return next
+    })
+    setCancellingRunIds((current) => new Set(current).add(run.id))
+
+    let result: StoredCommandResult
+    try {
+      result = await window.rovai.request<StoredCommandResult>('agentRuns.cancel', {
+        commandId: crypto.randomUUID(),
+        command: {
+          campId,
+          agentRunId: run.id,
+          expectedVersion: run.version
+        }
+      })
+    } catch {
+      setCancellingRunIds((current) => {
+        const next = new Set(current)
+        next.delete(run.id)
+        return next
+      })
+      setConfirmingRunIds((current) => new Set(current).add(run.id))
+      try {
+        const { snapshot } = await requestCampProjection(campId, 'open')
+        if (activeCampIdRef.current === campId) {
+          campEventSequenceMarker.current = Math.max(
+            campEventSequenceMarker.current,
+            snapshot.throughGlobalSequence
+          )
+          setCampSnapshot(snapshot)
+        }
+        setConfirmingRunIds((current) => reconcileRunCancellationIds(current, snapshot))
+      } catch {
+        // Keep the uncertainty projection until a later authoritative Camp refresh converges it.
+      }
+      return
+    }
+
+    if (result.status === 'rejected') {
+      setCancellingRunIds((current) => {
+        const next = new Set(current)
+        next.delete(run.id)
+        return next
+      })
+      setConfirmingRunIds((current) => {
+        const next = new Set(current)
+        next.delete(run.id)
+        return next
+      })
+      try {
+        await refreshActiveCampSnapshot(campId)
+      } catch {
+        // The deterministic command result remains authoritative even if this refresh fails.
+      }
+      setError(commandFailureMessage(result))
+      return
+    }
+
+    try {
+      await refreshActiveCampSnapshot(campId)
+    } catch {
+      // The accepted/applied result is known; retain the local stopping projection until polling catches up.
+    }
+  }
+
   const changeDefaultLead = async (agentId: string): Promise<void> => {
     if (!activeCampId || campSnapshot?.camp.id !== activeCampId) return
     setBusy('change-default-lead')
@@ -2583,6 +2724,9 @@ export function App(): React.JSX.Element {
             }}
             onResolveRecoveryBlocker={resolveAgentRunRecoveryBlocker}
             cancellingTurnIds={activeCancellingTurnIds}
+            cancellingRunIds={activeCancellingRunIds}
+            confirmingRunIds={activeConfirmingRunIds}
+            onCancelAgentRun={cancelAgentRun}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
@@ -3138,10 +3282,7 @@ export function campCreationPreflightFromAgents(
   const initialLeadAgentId = presentMembers
     .find((member) => member.runtimeReadiness === 'ready')
     ?.agentId ?? presentMembers
-    .find((member) => (
-      member.runtimeReadiness === 'light_ready'
-      || member.runtimeReadiness === 'installed_unverified'
-    ))
+    .find((member) => member.runtimeReadiness === 'light_ready')
     ?.agentId ?? presentMembers[0]?.agentId ?? null
   const blockers: CampCreationPreflight['blockers'] = presentMembers.length === 0
     ? [{ code: 'no_present_members', detail: '当前没有在队的队员。' }]

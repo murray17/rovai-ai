@@ -11,9 +11,9 @@ last_updated: 2026-08-13
 
 > 版本范围：[README.md](README.md)
 >
-> 内置工具对等：[ADR-0089](../../adr/0089-attested-built-in-mcp-tool-parity.md)
+> 内置工具对等：[ADR-0089](decisions.md#adr-0089)
 >
-> 资格证据边界：[ADR-0090](../../adr/0090-team-delivery-qualification-evidence-boundary.md)
+> 资格证据边界：[ADR-0090](decisions.md#adr-0090)
 >
 > 实施与验收状态：[implementation-plan.md](implementation-plan.md)
 

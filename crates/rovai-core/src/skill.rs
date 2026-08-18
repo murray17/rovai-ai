@@ -161,8 +161,8 @@ const DOMAIN_MODELING_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/domain-modeling.md");
 const CONTEXT_FORMAT_REFERENCE: &str =
     include_str!("../../../skills/grill-duo-with-docs/references/context-format.md");
-const ADR_FORMAT_REFERENCE: &str =
-    include_str!("../../../skills/grill-duo-with-docs/references/adr-format.md");
+const DECISION_ROUTING_REFERENCE: &str =
+    include_str!("../../../skills/grill-duo-with-docs/references/decision-routing.md");
 const REVIEW_DUO_RULES: &str = include_str!("../../../skills/review-duo/SKILL.md");
 const REVIEW_DUO_NOTICE: &str = include_str!("../../../skills/review-duo/NOTICE");
 const REVIEW_DUO_OPENAI: &str = include_str!("../../../skills/review-duo/agents/openai.yaml");
@@ -572,7 +572,11 @@ const GRILL_DUO_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
         CONTEXT_FORMAT_REFERENCE,
         0o644,
     ),
-    ("references/adr-format.md", ADR_FORMAT_REFERENCE, 0o644),
+    (
+        "references/decision-routing.md",
+        DECISION_ROUTING_REFERENCE,
+        0o644,
+    ),
 ];
 
 const REVIEW_DUO_FILES: &[(&str, &str, u32)] = &[

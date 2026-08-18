@@ -207,8 +207,8 @@ authority; no family-level teaching alias is added.
 
 ## References
 
-- [ADR-0182: Core-Resolved Current-Camp Display-Name Inline Addressing Alias](../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)
-- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)
+- [ADR-0182: Core-Resolved Current-Camp Display-Name Inline Addressing Alias](../versions/v0.75/decisions.md#adr-0182)
+- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../versions/v0.62/decisions.md#adr-0163)
 - [Current User Attention v3](current-user-attention-v3.md)
 - [Message Delivery v2](message-delivery-v2.md)
 - [Built-in Tool Transport v10](builtin-tool-transport-v10.md)

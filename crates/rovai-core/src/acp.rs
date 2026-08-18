@@ -19,7 +19,10 @@ use rovai_core::{
         RuntimePermissionOption,
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
-    agent_runtime_adapter::{acp_model_catalog_from_session, write_kiro_additive_agent_config},
+    agent_runtime_adapter::{
+        acp_model_catalog_from_session, acp_runtime_model_id_from_session,
+        write_kiro_additive_agent_config,
+    },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
@@ -1705,7 +1708,16 @@ impl AcpRuntime {
         Ok(session_id)
     }
 
-    pub async fn verification_evidence(&self) -> Option<(Value, Value)> {
+    pub async fn observed_model_id(&self) -> Option<String> {
+        self.session_result
+            .read()
+            .await
+            .as_ref()
+            .and_then(acp_runtime_model_id_from_session)
+    }
+
+    #[cfg(test)]
+    async fn verification_evidence(&self) -> Option<(Value, Value)> {
         let initialize = self.host.initialize_result.read().await.clone()?;
         let session = self.session_result.read().await.clone()?;
         Some((initialize, session))
@@ -3638,7 +3650,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deferred_trae_verification_reuses_the_only_agent_process() {
+    async fn trae_agent_execution_starts_one_session_process_without_a_diagnostic_child() {
         let root =
             std::env::temp_dir().join(format!("rovai-trae-agent-process-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();

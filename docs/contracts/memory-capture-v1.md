@@ -10,7 +10,7 @@ last_updated: 2026-08-13
 
 本合同拥有在线 Agent Memory 捕获、actor-bounded mutation、Hearth Review Item、审核并发、候选隔离与
 清除的字段级语义。Memory Search/Read 的 Entrypoint、授权、cache state、FTS fail-closed 与 guessed-ID
-anti-oracle 继续由 [ADR-0068](../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)拥有；Agent CLI
+anti-oracle 继续由 [ADR-0068](../versions/v0.21/decisions.md#adr-0068)拥有；Agent CLI
 presentation 与 stdout 由 [Built-in Tool Transport v9](builtin-tool-transport-v9.md)拥有。
 
 `accepted` 表示设计成立，不表示 v0.73 已完成实现。当前交付事实只从
@@ -374,9 +374,9 @@ revise 或 Forget，但 v0.73 之后 Agent mutation guard 禁止继续修改。
 
 ## References
 
-- [ADR-0178: Best-Effort Online Memory Capture](../adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)
-- [ADR-0179: Normalized Memory Store v3](../adr/0179-normalized-memory-store-v3-with-isolated-hearth-review.md)
-- [ADR-0180: Single Agent Memory Write Command](../adr/0180-single-agent-memory-write-command.md)
+- [ADR-0178: Best-Effort Online Memory Capture](../versions/v0.73/decisions.md#adr-0178)
+- [ADR-0179: Normalized Memory Store v3](../versions/v0.73/decisions.md#adr-0179)
+- [ADR-0180: Single Agent Memory Write Command](../versions/v0.73/decisions.md#adr-0180)
 - [Built-in Tool Transport v9](builtin-tool-transport-v9.md)
 - [Online Memory Capture architecture](../architecture/online-memory-capture.md)
 - [v0.73 implementation plan](../versions/v0.73/implementation-plan.md)

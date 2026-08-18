@@ -10,7 +10,7 @@ last_updated: 2026-08-18
 
 ## 计划状态与使用方式
 
-本计划实现 [ADR-0215](../../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)、
+本计划实现 [ADR-0215](decisions.md#adr-0215)、
 [Camp History Retrieval v1](../../contracts/camp-history-v1.md)与
 [Built-in Tool Agent Output Projection v1](../../contracts/builtin-tool-agent-output-projection-v1.md)。Rust 测试遵守
 [准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)。本版不启动日常 App、Core 或真实
@@ -97,6 +97,6 @@ Runtime，也不把 v1.05 未完成的 Windows 范围并入验收。
 ## References
 
 - [v1.06 版本概览](README.md)
-- [ADR-0215](../../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)
+- [ADR-0215](decisions.md#adr-0215)
 - [Camp History Retrieval v1](../../contracts/camp-history-v1.md)
 - [Built-in Tool Agent Output Projection v1](../../contracts/builtin-tool-agent-output-projection-v1.md)

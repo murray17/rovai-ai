@@ -90,7 +90,7 @@ ordered typed fact references, exact compact JSON bytes and their SHA-256 digest
 
 ## References
 
-- [ADR-0200](../adr/0200-compact-context-projection-and-structured-run-facts.md)
+- [ADR-0200](../versions/v0.94/decisions.md#adr-0200)
 - [ContextManifest Evidence v16](context-manifest-evidence-v16.md)
 - [Gather v2](gather-v2.md)
 - [Message Delivery v4](message-delivery-v4.md)

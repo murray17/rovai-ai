@@ -46,6 +46,6 @@ Failure to write diagnostics never expands Agent stdout or changes the safe erro
 
 ## References
 
-- [ADR-0135: Compact Agent Output](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
+- [ADR-0135: Compact Agent Output](../versions/v0.46/decisions.md#adr-0135)
 - [Built-in Tool Runtime architecture](../architecture/builtin-tool-runtime.md)
 - [Camp History Retrieval v1](camp-history-v1.md)

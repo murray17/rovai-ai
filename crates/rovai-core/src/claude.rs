@@ -780,6 +780,7 @@ struct ClaudeCodeStreamCapture {
 struct ClaudeCodeStreamState {
     final_result: Option<ClaudeCodeJsonResult>,
     acceptance_emitted: bool,
+    model_observation_emitted: bool,
     message_ordinal: u64,
     text_delta_emitted: bool,
     partial_text_items: HashMap<u64, String>,
@@ -903,6 +904,24 @@ fn normalize_claude_runtime_events(
 ) -> Result<Vec<ClaudeCodeRuntimeEvent>> {
     let mut normalized = Vec::new();
     match event.get("type").and_then(Value::as_str) {
+        Some("system") if event.get("subtype").and_then(Value::as_str) == Some("init") => {
+            validate_claude_stream_session(event, expected_session_id)?;
+            let model_id = event
+                .get("model")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|model_id| !model_id.is_empty())
+                .map(str::to_string);
+            if !state.model_observation_emitted
+                && let Some(model_id) = model_id
+            {
+                state.model_observation_emitted = true;
+                normalized.push(ClaudeCodeRuntimeEvent {
+                    event_type: "runtime.model.observed",
+                    payload: serde_json::json!({"modelId": model_id}),
+                });
+            }
+        }
         Some("stream_event")
             if event.pointer("/event/type").and_then(Value::as_str) == Some("message_start") =>
         {
@@ -1585,6 +1604,71 @@ mod tests {
             )
             .unwrap()
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn system_init_emits_only_the_first_identity_matched_runtime_model() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut state = ClaudeCodeStreamState::default();
+        let first = normalize_claude_runtime_events(
+            &json!({
+                "type": "system",
+                "subtype": "init",
+                "session_id": session_id,
+                "model": " claude-sonnet-4-5 "
+            }),
+            session_id,
+            &mut state,
+        )
+        .expect("identity-matched init should normalize");
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].event_type, "runtime.model.observed");
+        assert_eq!(first[0].payload["modelId"], "claude-sonnet-4-5");
+
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": session_id,
+                    "model": "claude-opus-4-1"
+                }),
+                session_id,
+                &mut state,
+            )
+            .expect("later init should remain valid")
+            .is_empty(),
+            "a Run keeps the first observed model"
+        );
+
+        let mut missing = ClaudeCodeStreamState::default();
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": session_id
+                }),
+                session_id,
+                &mut missing,
+            )
+            .expect("model omission is best-effort")
+            .is_empty()
+        );
+        assert!(
+            normalize_claude_runtime_events(
+                &json!({
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": "5ade59ac-f87e-4827-8cf2-0e1f3ba720ea",
+                    "model": "claude-sonnet-4-5"
+                }),
+                session_id,
+                &mut ClaudeCodeStreamState::default(),
+            )
+            .is_err(),
+            "another Session must be fenced"
         );
     }
 

@@ -7,13 +7,13 @@ last_updated: 2026-08-15
 # Runtime Activity Mapping 维护指南
 
 本目录长期管理十个 Agent Runtime 的“结构化事件如何进入 Canonical Runtime Activity”。它回答
-“当前有哪些规则、证据来自哪里、怎样安全修改”，不替代 ADR 的架构边界，也不冒充代码实施事实。
+“当前有哪些规则、证据来自哪里、怎样安全修改”，不替代 Architecture 的架构边界，也不冒充代码实施事实。
 
 ## 权威关系
 
 | 问题 | 真源 |
 |---|---|
-| 能否从未报告行为推断活动 | 有效 ADR-0111～ADR-0117、ADR-0122 |
+| 能否从未报告行为推断活动 | [Evidence 与 Canonical Activity 当前架构](../architecture/foundational-invariants.md#evidence-canonical-activity) |
 | 当前 Runtime/协议/字段/coverage 清单 | [Mapping Registry](registry.md) |
 | 实际分类实现 | `crates/rovai-core/src/runtime_activity_mapping.rs` |
 | Evidence 归一化与 Projection 写入 | `execution_evidence.rs`、各 Runtime event normalizer |
@@ -37,7 +37,7 @@ last_updated: 2026-08-15
 
 - 只改本地化文案：Renderer presentation 变更，不升级 classifier；
 - 新增同一结构化字段的语义映射：升级 classifier，增加 fixture；
-- 改变 operationId 来源或 Evidence 分组：必须先立新 ADR；
+- 改变 operationId 来源或 Evidence 分组：必须同步更新当前 Architecture/Contract，并在唯一 current 版本记录决定理由；
 - 推断 Runtime 未报告行为：禁止；
 - 新增 Runtime：先以 `unknown`/`run_level` 接入，再凭结构化证据升级 coverage。
 

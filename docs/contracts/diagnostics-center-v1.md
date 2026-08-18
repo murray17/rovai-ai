@@ -10,7 +10,7 @@ last_updated: 2026-08-18
 # Diagnostics Center v1
 
 本文冻结设置诊断中心的 Core Read Model、状态分类、显式修复映射与 v5 导出边界。决策理由见
-[ADR-0148](../adr/0148-read-only-diagnostics-and-data-minimized-export.md)。
+[ADR-0148](../versions/v0.51/decisions.md#adr-0148)。
 
 ## 1. `diagnostics.check`
 

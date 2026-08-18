@@ -50,4 +50,4 @@ reader that accepts old Camp UUID targets and no output alias.
 - [Camp Identity v1](camp-identity-v1.md)
 - [ContextManifest Evidence v18](context-manifest-evidence-v18.md)
 - [Built-in Tool Transport v16](builtin-tool-transport-v16.md)
-- [ADR-0219](../adr/0219-single-namespaced-camp-identity.md)
+- [ADR-0219 的迁移后决定正文](../versions/v1.10/decisions.md#adr-0219)

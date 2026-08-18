@@ -8,9 +8,9 @@ last_updated: 2026-08-18
 
 # 持久 Gather Barrier 架构
 
-本架构组合 [ADR-0193](../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)、
-[ADR-0195](../adr/0195-generation-scoped-last-gather-return.md)、
-[ADR-0196](../adr/0196-self-contained-gather-completion-request.md)、[Gather v3](../contracts/gather-v3.md)
+本架构组合 [Gather 不变量](foundational-invariants.md#collaboration-gather)、
+[Gather 不变量](foundational-invariants.md#collaboration-gather)、
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、[Gather v3](../contracts/gather-v3.md)
 与 [Message Delivery v4](../contracts/message-delivery-v4.md)。
 
 ## 组件与权威

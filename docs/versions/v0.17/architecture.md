@@ -11,16 +11,16 @@ last_updated: 2026-07-28
 > 版本范围：[README.md](README.md)
 >
 > 跨版本约束：
-> [ADR-0061](../../adr/0061-durable-agent-inaccessible-execution-evidence.md) ·
-> [ADR-0062](../../adr/0062-interruptible-runs-and-unsettled-external-effects.md) ·
-> [ADR-0063](../../adr/0063-minimal-a2a-turn-envelope-and-reply-correlation.md)
+> [ADR-0061](decisions.md#adr-0061) ·
+> [ADR-0062](decisions.md#adr-0062) ·
+> [ADR-0063](decisions.md#adr-0063)
 >
 > 相关既有约束：
-> [ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md) ·
-> [ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md) ·
-> [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md) ·
-> [ADR-0049](../../adr/0049-reproducible-context-delivery-v2.md) ·
-> [ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md)
+> [ADR-0013](../v0.06/decisions.md#adr-0013) ·
+> [ADR-0014](../v0.06/decisions.md#adr-0014) ·
+> [ADR-0016](../v0.06/decisions.md#adr-0016) ·
+> [ADR-0049](../v0.12/decisions.md#adr-0049) ·
+> [ADR-0058](../v0.15/decisions.md#adr-0058)
 >
 > 当时 UI 约束：Meridian（文件已删除，原文见 Git 历史；当前规范见
 > [Arctic Dawn](../../ui/README.md)）

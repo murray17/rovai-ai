@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 
 本合同继承 v4 的 launch purpose、light discovery、manager-owned attempt、execution-deferred AgentRun、
 TRAE/Kiro 最高权限队员默认、permission schema digest fence、ACP continuation、Prompt fence 与 input ACK，
-并按 [ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)让 TRAE 参与正常轻检与
+并按 [ADR-0208](../versions/v1.03/decisions.md#adr-0208)让 TRAE 参与正常轻检与
 用户显式可用性检查。
 
 ## 1. TRAE light discovery
@@ -86,6 +86,6 @@ schema 与静态 descriptor 的差异会在同一次检查中覆盖刚写入的 
 ## References
 
 - [Runtime Launch and Verification v4（历史）](runtime-launch-and-verification-v4.md)
-- [ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)
+- [ADR-0208](../versions/v1.03/decisions.md#adr-0208)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime compatibility evidence](../runtime-compatibility.md)

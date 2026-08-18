@@ -69,7 +69,7 @@ brief 只拥有具体 surface 的信息优先级和构图；它不能覆盖全�
 
 ## 权威边界
 
-1. 有效 ADR、Architecture 和 Contract 决定领域、安全、持久化、Runtime 与可执行语义。
+1. Architecture 和 Contract 决定领域、安全、持久化、Runtime 与可执行语义；Version Decisions 只解释理由。
 2. 当前版本文档决定本版本范围、进度和验收结论。
 3. `DESIGN.md` 决定跨页面视觉系统；主题文档决定完整 Token；组件文档决定复杂呈现合同；
    surface brief 决定单一页面局部策略。

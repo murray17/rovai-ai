@@ -46,8 +46,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.11";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 51;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.14";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 52;
+const V097_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.13";
+const V097_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 51;
 const V096_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.10";
 const V096_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 50;
 const V095_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.10";
@@ -129,6 +131,7 @@ struct CurrentMigrationState {
     v94: bool,
     v95: bool,
     v96: bool,
+    v97: bool,
 }
 
 impl CurrentMigrationState {
@@ -138,6 +141,37 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97;
+        }
+        if self.v97 {
+            return false;
+        }
+        if contract == V097_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V097_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -667,7 +701,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 93),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 94),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 95),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 96)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 96),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 97)
         "#,
         [],
         |row| {
@@ -699,6 +734,7 @@ fn load_current_migration_state(
                 v94: row.get(24)?,
                 v95: row.get(25)?,
                 v96: row.get(26)?,
+                v97: row.get(27)?,
             })
         },
     )
@@ -1851,7 +1887,10 @@ impl Database {
                 self.migrate_camp_identity_v95()?;
             }
             if !self.schema_migration_applied(96)? {
-                self.migrate_windows_skill_projection_operation_v96()?;
+                self.migrate_agent_run_runtime_model_v96()?;
+            }
+            if !self.schema_migration_applied(97)? {
+                self.migrate_windows_skill_projection_operation_v97()?;
             }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
@@ -2189,7 +2228,10 @@ impl Database {
             self.migrate_camp_identity_v95()?;
         }
         if !self.schema_migration_applied(96)? {
-            self.migrate_windows_skill_projection_operation_v96()?;
+            self.migrate_agent_run_runtime_model_v96()?;
+        }
+        if !self.schema_migration_applied(97)? {
+            self.migrate_windows_skill_projection_operation_v97()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -11569,24 +11611,51 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_windows_skill_projection_operation_v96(&mut self) -> Result<()> {
+    fn migrate_agent_run_runtime_model_v96(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_observed_model_id",
+            "runtime_observed_model_id TEXT",
+        )?;
         let transaction = self
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
         transaction.execute_batch(
             r#"
-            ALTER TABLE skill_projection_observation ADD COLUMN
-                operation_id TEXT
-                CHECK(operation_id IS NULL OR length(operation_id) = 36);
-            ALTER TABLE skill_projection_observation ADD COLUMN
-                entry_identity TEXT
-                CHECK(entry_identity IS NULL OR length(entry_identity) = 49);
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.13', projection_schema_version = 51,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
 
-            CREATE UNIQUE INDEX skill_projection_operation_unique
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (96, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_windows_skill_projection_operation_v97(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "skill_projection_observation",
+            "operation_id",
+            "operation_id TEXT CHECK(operation_id IS NULL OR length(operation_id) = 36)",
+        )?;
+        self.add_column_if_missing(
+            "skill_projection_observation",
+            "entry_identity",
+            "entry_identity TEXT CHECK(entry_identity IS NULL OR length(entry_identity) = 49)",
+        )?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE UNIQUE INDEX IF NOT EXISTS skill_projection_operation_unique
                 ON skill_projection_observation(operation_id)
                 WHERE operation_id IS NOT NULL;
 
-            CREATE TABLE skill_projection_run_registration (
+            CREATE TABLE IF NOT EXISTS skill_projection_run_registration (
                 agent_run_id TEXT PRIMARY KEY
                     REFERENCES agent_run(id) ON DELETE CASCADE,
                 execution_epoch INTEGER NOT NULL CHECK(execution_epoch >= 1),
@@ -11594,16 +11663,16 @@ impl Database {
                 root_identity TEXT NOT NULL CHECK(length(root_identity) = 49),
                 registered_at TEXT NOT NULL
             );
-            CREATE INDEX skill_projection_run_registration_root_idx
+            CREATE INDEX IF NOT EXISTS skill_projection_run_registration_root_idx
                 ON skill_projection_run_registration(root_identity, registered_at);
 
             UPDATE rovai_data_contract
-            SET contract_version = 'v1.11', projection_schema_version = 51,
+            SET contract_version = 'v1.14', projection_schema_version = 52,
                 reset_reason = NULL, updated_at = datetime('now')
             WHERE singleton = 1;
 
             INSERT INTO schema_migration(version, applied_at)
-            VALUES (96, datetime('now'));
+            VALUES (97, datetime('now'));
             "#,
         )?;
         transaction.commit()?;
@@ -16096,6 +16165,7 @@ mod tests {
             v94: version >= 94,
             v95: version >= 95,
             v96: version >= 96,
+            v97: version >= 97,
         }
     }
 
@@ -16106,6 +16176,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                97,
+            ),
+            (
+                "v1.13/schema-51",
+                V097_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V097_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 96,
             ),
             (
@@ -16248,7 +16324,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(96);
+        let current = migration_state_through(97);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -16318,12 +16394,72 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(96));
+        assert_eq!(state, migration_state_through(97));
         assert!(state.admits(&contract, schema));
         assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v96_adds_nullable_agent_run_runtime_model_observation() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-agent-run-runtime-model-v96-{}",
+            Uuid::new_v4()
+        ));
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE skill_projection_run_registration;
+                DROP INDEX skill_projection_operation_unique;
+                ALTER TABLE skill_projection_observation DROP COLUMN operation_id;
+                ALTER TABLE skill_projection_observation DROP COLUMN entry_identity;
+                ALTER TABLE agent_run DROP COLUMN runtime_observed_model_id;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.10', projection_schema_version = 50
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 97;
+                DELETE FROM schema_migration WHERE version = 96;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v1.10/schema-50 should migrate to v96");
+        assert!(
+            table_columns(reopened.connection(), "agent_run")
+                .unwrap()
+                .contains(&"runtime_observed_model_id".to_string())
+        );
+        let contract: (String, i64, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 96),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 97)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+            )
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -16462,6 +16598,8 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.10', projection_schema_version = 49
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 97;
+                DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -16471,19 +16609,28 @@ mod tests {
         drop(database);
 
         let reopened = Database::open(&source_directory).expect("v94 source should migrate to v95");
-        let contract: (String, i64, i64) = reopened
+        let contract: (String, i64, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 95)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 95),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 96)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+            )
+        );
         let manifest_schema: String = reopened
             .connection()
             .query_row(
@@ -16538,9 +16685,9 @@ mod tests {
     }
 
     #[test]
-    fn v96_adds_windows_projection_operation_and_run_registration() {
+    fn v97_adds_windows_projection_operation_and_run_registration() {
         let directory = std::env::temp_dir().join(format!(
-            "rovai-windows-skill-projection-v96-{}",
+            "rovai-windows-skill-projection-v97-{}",
             Uuid::new_v4()
         ));
         let database = crate::test_support::fresh_schema_database_at(&directory);
@@ -16553,9 +16700,9 @@ mod tests {
                 DROP INDEX skill_projection_operation_unique;
                 ALTER TABLE skill_projection_observation DROP COLUMN operation_id;
                 ALTER TABLE skill_projection_observation DROP COLUMN entry_identity;
-                DELETE FROM schema_migration WHERE version = 96;
+                DELETE FROM schema_migration WHERE version = 97;
                 UPDATE rovai_data_contract
-                SET contract_version = 'v1.10', projection_schema_version = 50
+                SET contract_version = 'v1.13', projection_schema_version = 51
                 WHERE singleton = 1;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -16563,20 +16710,20 @@ mod tests {
             .unwrap();
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v1.10/schema50 should migrate to v96");
+        let reopened = Database::open(&directory).expect("v1.13/schema51 should migrate to v97");
         let state: (String, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 96)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 97)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(state, ("v1.11".to_string(), 51, 1));
+        assert_eq!(state, ("v1.14".to_string(), 52, 1));
         assert_table_columns(
             reopened.connection(),
             "skill_projection_observation",
@@ -16820,6 +16967,8 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 97;
+                DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
                 DELETE FROM schema_migration WHERE version = 94;
                 DELETE FROM schema_migration WHERE version = 93;
@@ -16863,7 +17012,14 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+            )
+        );
         assert_eq!(
             reopened
                 .connection()
@@ -21089,7 +21245,9 @@ mod tests {
 
         assert_migrations_applied(
             connection,
-            &[58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96],
+            &[
+                58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97,
+            ],
         );
         assert_schema_objects(
             connection,
@@ -21175,6 +21333,7 @@ mod tests {
             &["activation_state"],
             &["status", "archived_at"],
         );
+        assert_table_columns(connection, "agent_run", &["runtime_observed_model_id"], &[]);
         assert_table_columns(
             connection,
             "skill_projection_observation",

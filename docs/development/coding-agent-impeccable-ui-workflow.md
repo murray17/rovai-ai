@@ -103,7 +103,7 @@ Impeccable 是工作流工具，不是 RovAI 的产品或架构真源。
 
 | 问题类型 | 权威来源 |
 |---|---|
-| 长期领域、安全、持久化、Runtime 边界 | 有效 ADR、当前 Architecture、当前 Contract |
+| 长期领域、安全、持久化、Runtime 边界 | 当前 Architecture、当前 Contract 与适用的 `CONTEXT.md` 词条 |
 | 当前版本范围、进度和验收 | `docs/versions/README.md` 指向的当前版本文档 |
 | 仓库实际实现 | 代码、Migration、测试和可复现验收证据 |
 | 稳定产品事实、用户、用途、术语 | 根目录 `PRODUCT.md`，但不得复制架构和版本状态 |
@@ -1122,7 +1122,6 @@ git diff --check
 pnpm docs:test
 pnpm docs:check
 DOCS_BASE_REF=<目标分支-base-SHA> pnpm docs:check:ci
-pnpm docs:adr:generate -- --check
 ```
 
 如果只修改文档和 `.gitignore`，以上为最低验证。若同时修改 Renderer 代码，继续按
@@ -1180,7 +1179,6 @@ typecheck、测试、构建与截图验收。
 - `pnpm docs:test`：
 - `pnpm docs:check`：
 - `pnpm docs:check:ci`：
-- `pnpm docs:adr:generate -- --check`：
 - 其他：
 
 ## 漂移或未决问题

@@ -196,7 +196,7 @@ Journal 具有 durable floor；截断后旧 cursor 必须 reset。可重新出�
 
 ## References
 
-- [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
+- [ADR-0175](../versions/v0.71/decisions.md#adr-0175)
 - [Current User Attention v3](current-user-attention-v3.md)
-- [ADR-0087](../adr/0087-core-owned-durable-in-app-notification-inbox.md)
-- [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)
+- [ADR-0087](../versions/v0.28/decisions.md#adr-0087)
+- [ADR-0165](../versions/v0.65/decisions.md#adr-0165)

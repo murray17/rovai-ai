@@ -295,7 +295,7 @@ v0.47 不接受或翻译：
 - Agent-facing discovery、generic invoke alias、Envelope output mode 或旧 send Camp input。
 
 Rovai-owned App data 按
-[ADR-0118](../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md)执行一次受管
+[ADR-0118](../versions/v0.41/decisions.md#adr-0118)执行一次受管
 clean reset；用户 workspace、外部 Runtime Home/config/credentials 与外部 MCP state 不在
 清理范围。
 
@@ -321,6 +321,6 @@ v3/v4 混跑。外部 MCP 继续经 Runtime-native Projection，永不进入 Bui
 - [Durable Task v2](durable-task-v2.md)
 - [Built-in Tool Transport v3 (historical)](builtin-tool-transport-v3.md)
 - [Camp Message Send v2](camp-message-send-v2.md)
-- [ADR-0135: Compact Agent Output over Canonical Built-in Tool Envelope](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
-- [ADR-0124: CLI-Only Transport for Rovai Built-in Operations](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)
+- [ADR-0135: Compact Agent Output over Canonical Built-in Tool Envelope](../versions/v0.46/decisions.md#adr-0135)
+- [ADR-0124: CLI-Only Transport for Rovai Built-in Operations](../versions/v0.42/decisions.md#adr-0124)
 - [v0.47 version overview](../versions/v0.47/README.md)

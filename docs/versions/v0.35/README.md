@@ -16,7 +16,7 @@ last_updated: 2026-08-04
 >
 > 前置版本：[v0.34 Benchmark Evidence & Semantic Judge](../v0.34/README.md)
 >
-> 跨版本决策：[ADR-0100](../../adr/0100-latest-member-identity-native-session-bootstrap.md)
+> 跨版本决策：[ADR-0100](decisions.md#adr-0100)
 >
 > 实施设计：[architecture.md](architecture.md)
 >

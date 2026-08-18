@@ -20,4 +20,4 @@ fields or another send outcome.
 - [Camp Message Send v4](camp-message-send-v4.md)
 - [Current User Attention v2](current-user-attention-v2.md)
 - [Built-in Tool Transport v7 Errata](builtin-tool-transport-v7-errata.md)
-- [ADR-0170](../adr/0170-current-run-committed-self-write-exact-read.md)
+- [ADR-0170](../versions/v0.67/decisions.md#adr-0170)

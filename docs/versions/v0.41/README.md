@@ -14,7 +14,7 @@ last_updated: 2026-08-06
 >
 > 前置版本：[v0.40 Camp 历史检索工具收敛](../v0.40/README.md)
 >
-> 有效决策：[ADR-0111](../../adr/0111-core-owned-canonical-runtime-activity.md)～[ADR-0118](../../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md)、[ADR-0122](../../adr/0122-current-canonical-activity-projection-and-deferred-identity-replay.md)。ADR-0119～ADR-0121 已被 ADR-0122 替代，仅作历史记录。
+> 有效决策：[ADR-0111](decisions.md#adr-0111)～[ADR-0118](decisions.md#adr-0118)、[ADR-0122](decisions.md#adr-0122)。ADR-0119～ADR-0121 已被 ADR-0122 替代，仅作历史记录。
 
 ## 版本目标
 

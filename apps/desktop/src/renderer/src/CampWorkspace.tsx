@@ -105,6 +105,42 @@ type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
 type ReplyFocusModality = 'pointer' | 'keyboard'
 type ConversationFindStatus = 'idle' | 'searching' | 'loading_target' | 'ready' | 'error'
 
+export function canStopAgentRun(
+  run: Pick<AgentRunView, 'status' | 'waitReason' | 'cancelRequestedAt'>,
+  turn: Pick<CampSnapshot['turns'][number], 'cancelRequestedAt'> | null
+): boolean {
+  return NON_TERMINAL_RUNS.has(run.status)
+    && run.cancelRequestedAt === null
+    && run.waitReason !== 'recovery_blocked'
+    && turn?.cancelRequestedAt === null
+}
+
+export function agentRunStopConfirmation(
+  completionRole: AgentRunView['completionRole']
+): string {
+  return completionRole === 'required'
+    ? '仅停止此运行，其他已接受的运行继续。此运行停止后将视为必要职责未完成；本轮会在其余职责收敛后以“必要职责未完成”失败。'
+    : '仅停止此运行，其他已接受的运行继续。如果其余必要职责正常完成，本轮仍可完成。'
+}
+
+export type AgentRunStopViewState =
+  | 'available'
+  | 'stopping'
+  | 'confirming'
+  | 'stopped'
+  | 'hidden'
+
+export function agentRunStopViewState(
+  run: Pick<AgentRunView, 'status' | 'waitReason' | 'cancelRequestedAt'>,
+  turn: Pick<CampSnapshot['turns'][number], 'cancelRequestedAt'> | null,
+  local: { cancelling: boolean; confirming: boolean; turnCancelling: boolean }
+): AgentRunStopViewState {
+  if (run.status === 'cancelled') return 'stopped'
+  if (run.cancelRequestedAt !== null || local.cancelling || local.turnCancelling) return 'stopping'
+  if (local.confirming) return 'confirming'
+  return canStopAgentRun(run, turn) ? 'available' : 'hidden'
+}
+
 interface ConversationFindState {
   open: boolean
   query: string
@@ -221,6 +257,15 @@ export type AgentExecutionProcess = {
 
 export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'waitReason'>): boolean {
   return NON_TERMINAL_RUNS.has(run.status) && run.waitReason !== 'recovery_blocked'
+}
+
+export function agentRunRuntimeModelPresentation(
+  runtimeModel: AgentRunView['runtimeModel']
+): { modelId: string; observed: boolean } | null {
+  if (!runtimeModel) return null
+  return runtimeModel.modelId
+    ? { modelId: runtimeModel.modelId, observed: true }
+    : { modelId: 'Agent 运行时默认', observed: false }
 }
 
 export type CampMessageSendReceipt = {
@@ -866,14 +911,6 @@ export function emptyCampRuntimeSummary(
     || profile?.runtimeReadiness.status === 'light_ready'
   )).length
   if (readyCount === activeMembers.length) return 'Agent 运行时可用'
-  const deferredCount = profiles.filter(
-    (profile) => profile?.runtimeReadiness.status === 'installed_unverified'
-  ).length
-  if (readyCount + deferredCount === activeMembers.length && deferredCount > 0) {
-    return deferredCount === activeMembers.length
-      ? 'Agent 运行时已安装，将在首次运行时验证'
-      : `${readyCount}/${activeMembers.length} 个可用，其余将在首次运行时验证`
-  }
   if (readyCount === 0) return 'Agent 运行时不可用'
   return `${readyCount}/${activeMembers.length} 个 Agent 运行时可用`
 }
@@ -947,6 +984,9 @@ export function CampWorkspace({
   onResolveApproval,
   onResolveRecoveryBlocker = async () => undefined,
   cancellingTurnIds = new Set<string>(),
+  cancellingRunIds = new Set<string>(),
+  confirmingRunIds = new Set<string>(),
+  onCancelAgentRun = async () => undefined,
   stopping,
   onStop,
   inspectorVisible = true,
@@ -979,6 +1019,9 @@ export function CampWorkspace({
   onResolveApproval(approval: ActionApprovalView, optionId: string): void
   onResolveRecoveryBlocker?(run: AgentRunView): Promise<void>
   cancellingTurnIds?: ReadonlySet<string>
+  cancellingRunIds?: ReadonlySet<string>
+  confirmingRunIds?: ReadonlySet<string>
+  onCancelAgentRun?(run: AgentRunView): Promise<void>
   stopping: boolean
   onStop(): void
   inspectorVisible?: boolean
@@ -2910,16 +2953,20 @@ export function CampWorkspace({
       profile={executionDrawerProfile}
       installation={executionDrawerInstallation}
       deliveries={snapshot.messageDeliveries}
+      turns={snapshot.turns}
       progressByRunId={executionProgressByRunId}
       campId={snapshot.camp.id}
       truncatedEvidenceByRunId={truncatedEvidenceByRunId}
       loadedEvidenceCountByRunId={loadedEvidenceCountByRunId}
       runHistoryComplete={openCoverage?.agentRuns.complete ?? true}
       cancellingTurnIds={cancellingTurnIds}
+      cancellingRunIds={cancellingRunIds}
+      confirmingRunIds={confirmingRunIds}
       focusedRunId={executionDrawerFocusedRunId}
       focusRequest={executionDrawerFocusRequest}
       onClose={closeExecutionProcess}
       onResolveRecoveryBlocker={resolveRecoveryBlocker}
+      onCancelAgentRun={onCancelAgentRun}
       resolvingRecoveryBlockerId={resolvingRecoveryBlockerId}
       memberById={memberById}
     />
@@ -3984,16 +4031,20 @@ function ExecutionDrawer({
   profile,
   installation,
   deliveries,
+  turns,
   progressByRunId,
   campId,
   truncatedEvidenceByRunId,
   loadedEvidenceCountByRunId,
   runHistoryComplete,
   cancellingTurnIds,
+  cancellingRunIds,
+  confirmingRunIds,
   focusedRunId,
   focusRequest,
   onClose,
   onResolveRecoveryBlocker,
+  onCancelAgentRun,
   resolvingRecoveryBlockerId,
   memberById
 }: {
@@ -4003,16 +4054,20 @@ function ExecutionDrawer({
   profile: AgentProfile | null
   installation: AdapterInstallation | null
   deliveries: MessageDeliveryView[]
+  turns: CampSnapshot['turns']
   progressByRunId: Map<string, LiveExecutionProgress>
   campId: string
   truncatedEvidenceByRunId: Map<string, AgentRunExecutionEvidenceView[]>
   loadedEvidenceCountByRunId: Map<string, number>
   runHistoryComplete: boolean
   cancellingTurnIds: ReadonlySet<string>
+  cancellingRunIds: ReadonlySet<string>
+  confirmingRunIds: ReadonlySet<string>
   focusedRunId: string | null
   focusRequest: ExecutionDrawerFocusRequest
   onClose(): void
   onResolveRecoveryBlocker(run: AgentRunView): Promise<void>
+  onCancelAgentRun(run: AgentRunView): Promise<void>
   resolvingRecoveryBlockerId: string | null
   memberById: Map<string, CampSnapshot['members'][number]>
 }): JSX.Element {
@@ -4028,11 +4083,39 @@ function ExecutionDrawer({
   const [preferredHeight, setPreferredHeight] = useState<number | null>(storedExecutionDrawerHeight)
   const [measuredHeight, setMeasuredHeight] = useState<number | null>(null)
   const [resizing, setResizing] = useState(false)
+  const [stopConfirmationRunId, setStopConfirmationRunId] = useState<string | null>(null)
+  const [submittingStop, setSubmittingStop] = useState(false)
   const processRef = useRef(process)
   processRef.current = process
   const resolvedFocusedRun = process.runs.find((run) => run.id === focusedRunId)
     ?? preferredAgentProcessRun(process.runs)
   const resolvedFocusedRunId = resolvedFocusedRun?.id ?? null
+  const owningTurn = resolvedFocusedRun
+    ? turns.find((turn) => turn.id === resolvedFocusedRun.campTurnId) ?? null
+    : null
+  const turnStopping = Boolean(
+    resolvedFocusedRun && cancellingTurnIds.has(resolvedFocusedRun.campTurnId)
+  )
+  const runStopping = Boolean(
+    resolvedFocusedRun
+    && (
+      cancellingRunIds.has(resolvedFocusedRun.id)
+      || resolvedFocusedRun.cancelRequestedAt !== null
+    )
+  )
+  const runStopConfirming = Boolean(
+    resolvedFocusedRun && confirmingRunIds.has(resolvedFocusedRun.id)
+  )
+  const stopViewState = resolvedFocusedRun
+    ? agentRunStopViewState(resolvedFocusedRun, owningTurn, {
+        cancelling: runStopping,
+        confirming: runStopConfirming,
+        turnCancelling: turnStopping
+      })
+    : 'hidden'
+  const confirmationRun = stopConfirmationRunId
+    ? process.runs.find((run) => run.id === stopConfirmationRunId) ?? null
+    : null
   const focusedProgress = resolvedFocusedRunId
     ? progressByRunId.get(resolvedFocusedRunId)
     : undefined
@@ -4202,6 +4285,25 @@ function ExecutionDrawer({
     }
   }, [onClose])
 
+  useEffect(() => {
+    if (!confirmationRun) return
+    const confirmationTurn = turns.find((turn) => turn.id === confirmationRun.campTurnId) ?? null
+    if (
+      !canStopAgentRun(confirmationRun, confirmationTurn)
+      || cancellingTurnIds.has(confirmationRun.campTurnId)
+      || cancellingRunIds.has(confirmationRun.id)
+      || confirmingRunIds.has(confirmationRun.id)
+    ) {
+      setStopConfirmationRunId(null)
+    }
+  }, [
+    cancellingRunIds,
+    cancellingTurnIds,
+    confirmationRun,
+    confirmingRunIds,
+    turns
+  ])
+
   useLayoutEffect(() => {
     const requestedRunId = focusedRunId
       && processRef.current.runs.some((run) => run.id === focusedRunId)
@@ -4320,7 +4422,75 @@ function ExecutionDrawer({
               </p>
             </div>
           </div>
-          <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
+          <div className="execution-drawer-actions">
+            {stopViewState === 'stopped' ? (
+              <span className="execution-run-stop-state tone-neutral" role="status">已停止</span>
+            ) : stopViewState === 'stopping' ? (
+              <span className="execution-run-stop-state tone-attention" role="status">正在停止…</span>
+            ) : stopViewState === 'confirming' ? (
+              <span className="execution-run-stop-state tone-attention" role="status">正在确认停止状态</span>
+            ) : null}
+            <Dialog.Root
+              open={stopConfirmationRunId !== null}
+              onOpenChange={(open) => {
+                if (!submittingStop) {
+                  setStopConfirmationRunId(open ? resolvedFocusedRunId : null)
+                }
+              }}
+            >
+              {stopViewState === 'available' && (
+                <Dialog.Trigger asChild>
+                  <button
+                    type="button"
+                    className="quiet-button compact danger-text execution-run-stop-button"
+                    aria-label="停止当前运行"
+                  >
+                    停止
+                  </button>
+                </Dialog.Trigger>
+              )}
+              {confirmationRun && (
+                <Dialog.Portal>
+                  <Dialog.Overlay className="dialog-overlay" />
+                  <Dialog.Content className="dialog-content agent-run-stop-dialog">
+                    <div className="dialog-heading">
+                      <Dialog.Title>停止此运行？</Dialog.Title>
+                      <Dialog.Close asChild>
+                        <button className="dialog-close" type="button" aria-label="关闭" disabled={submittingStop}>×</button>
+                      </Dialog.Close>
+                    </div>
+                    <Dialog.Description>
+                      {agentRunStopConfirmation(confirmationRun.completionRole)}
+                    </Dialog.Description>
+                    <div className="agent-run-stop-fact">
+                      <span>运行</span>
+                      <code>{shortIdentity(confirmationRun.id)}</code>
+                    </div>
+                    <div className="dialog-actions">
+                      <Dialog.Close asChild>
+                        <button className="quiet-button" type="button" disabled={submittingStop}>继续运行</button>
+                      </Dialog.Close>
+                      <button
+                        className="danger-button"
+                        type="button"
+                        disabled={submittingStop}
+                        onClick={() => {
+                          setSubmittingStop(true)
+                          void onCancelAgentRun(confirmationRun).finally(() => {
+                            setSubmittingStop(false)
+                            setStopConfirmationRunId(null)
+                          })
+                        }}
+                      >
+                        {submittingStop ? '正在提交…' : '停止此运行'}
+                      </button>
+                    </div>
+                  </Dialog.Content>
+                </Dialog.Portal>
+              )}
+            </Dialog.Root>
+            <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
+          </div>
         </header>
         <div
           ref={drawerBodyRef}
@@ -4345,6 +4515,7 @@ function ExecutionDrawer({
                 && NON_TERMINAL_RUNS.has(run.status)
               const focused = run.id === resolvedFocusedRunId
               const state = agentRunPresentation(run, cancelling)
+              const runtimeModel = agentRunRuntimeModelPresentation(run.runtimeModel)
               const runDeliveries = deliveries.filter((delivery) =>
                 delivery.targetAgentRunId === run.id
                 || (delivery.targetAgentRunId === null && delivery.campTurnId === run.campTurnId)
@@ -4380,6 +4551,27 @@ function ExecutionDrawer({
                           </span>
                           {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
                           <span>本轮 <code>{shortIdentity(run.campTurnId)}</code></span>
+                          {runtimeModel && (
+                            <span
+                              className={`execution-run-model${runtimeModel.observed ? ' is-observed' : ' is-waiting'}`}
+                              role="status"
+                              aria-live="polite"
+                              aria-atomic="true"
+                              aria-label={runtimeModel.observed
+                                ? `${displayName}，${runIntervalLabel(run)}，实际模型 ${runtimeModel.modelId}，默认策略`
+                                : `${displayName}，${runIntervalLabel(run)}，实际模型尚未由 Agent 运行时报告，默认策略`}
+                            >
+                              模型{' '}
+                              <code
+                                dir="ltr"
+                                tabIndex={0}
+                                title={runtimeModel.modelId}
+                              >
+                                {runtimeModel.modelId}
+                              </code>
+                              {runtimeModel.observed && <small>· 默认</small>}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </header>

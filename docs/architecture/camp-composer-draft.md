@@ -10,10 +10,10 @@ last_updated: 2026-08-14
 
 Camp Composer Draft 是用户下一条 Camp 消息的唯一持久编辑真源。字段、命令和错误见
 [Camp Composer Draft v2](../contracts/camp-composer-draft-v2.md)；长期取舍见
-[ADR-0080](../adr/0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)、
-[ADR-0128](../adr/0128-structured-draft-only-user-message-submission.md)与
-[ADR-0185](../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)与
-[ADR-0187](../adr/0187-durable-composer-recipient-continuation.md)。
+[Composer Draft 不变量](foundational-invariants.md#camp-composer)、
+[Composer Draft 不变量](foundational-invariants.md#camp-composer)与
+[Composer Draft 不变量](foundational-invariants.md#camp-composer)与
+[Composer Draft 不变量](foundational-invariants.md#camp-composer)。
 
 ## Component authority
 

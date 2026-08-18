@@ -54,7 +54,7 @@ last_updated: 2026-08-16
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.92 冻结为 historical；本概览、[实施计划](implementation-plan.md)与版本索引建立唯一 current v0.93。 |
-| ADR | 已更新 | [ADR-0199](../../adr/0199-session-semantic-four-message-review-duo.md)局部替代 ADR-0191 继承的 Review Duo 包装与结果传输语义。 |
+| ADR | 已更新 | [ADR-0199](decisions.md#adr-0199)局部替代 ADR-0191 继承的 Review Duo 包装与结果传输语义。 |
 | Contracts | 确认无需更新 | 继续使用既有 `rovai send`、公开消息、显式收件人和 Core-managed reply；不增加 wire 字段、持久对象或错误语义。 |
 | Architecture | 已更新 | Built-in Tool Runtime 记录 Review Duo 四消息会话语义和 Grill Duo 集中 CLI 教学。 |
 | UI | 确认无需更新 | 仅同步 existing Skill 的列表文案，不改变 Renderer 交互或稳定 UI 合同。 |
@@ -66,6 +66,6 @@ last_updated: 2026-08-16
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0199](../../adr/0199-session-semantic-four-message-review-duo.md)
+- [ADR-0199](decisions.md#adr-0199)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)
 - [Skill 编写与 description 路由规范](../../development/skill-authoring.md)

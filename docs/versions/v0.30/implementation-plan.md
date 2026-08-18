@@ -11,7 +11,7 @@ last_updated: 2026-08-01
 
 > 生产合同：[architecture.md](architecture.md)
 >
-> 跨版本决策：[ADR-0088](../../adr/0088-attested-native-team-gateway-attachment.md)
+> 跨版本决策：[ADR-0088](decisions.md#adr-0088)
 
 用户在文档确认后另行明确授权“实施”。Core、Runtime Adapter、专用 Bridge、受管 Plugin、
 窄权限、Renderer 状态与真实账户 Smoke 已完成。以下清单记录完成事实；其中用户级 JSON

@@ -137,7 +137,7 @@ Runtime and non-public A2A events never qualify. No migration or event-log backf
 
 ## References
 
-- [ADR-0215](../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)
+- [ADR-0215](../versions/v1.06/decisions.md#adr-0215)
 - [Built-in Tool Runtime architecture](../architecture/builtin-tool-runtime.md)
 - [Public A2A Message and Message Delivery architecture](../architecture/public-a2a-message-delivery.md)
 - [Camp Attachment v1](camp-attachment-v1.md)

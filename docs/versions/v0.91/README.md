@@ -52,7 +52,7 @@ last_updated: 2026-08-16
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.90 冻结为 historical；本概览、[实施计划](implementation-plan.md)与版本索引建立唯一 current v0.91。 |
-| ADR | 已更新 | [ADR-0197](../../adr/0197-empty-user-owned-mcp-library.md)局部替代 ADR-0103 的 reviewed built-in definitions。 |
+| ADR | 已更新 | [ADR-0197](decisions.md#adr-0197)局部替代 ADR-0103 的 reviewed built-in definitions。 |
 | Contracts | 已更新 | `McpServerView` 删除 `presetId` 与 `builtin` source；其余 MCP IPC shape 不变。 |
 | Architecture | 已更新 | Built-in Tool Runtime 明确外部 MCP Library 空默认与用户创建/确认导入来源。 |
 | UI | 已更新 | 设置页 MCP Library 空状态收敛为手动添加和本机配置导入两个入口。 |
@@ -64,5 +64,5 @@ last_updated: 2026-08-16
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0197](../../adr/0197-empty-user-owned-mcp-library.md)
+- [ADR-0197](decisions.md#adr-0197)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

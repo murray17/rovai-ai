@@ -98,6 +98,6 @@ same audience through ContextManifest v17 `messageProjectionAudience=agent_v1` a
 
 ## References
 
-- [ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)
+- [ADR-0218](../versions/v1.07/decisions.md#adr-0218)
 - [Camp History Retrieval v1 (accepted predecessor)](camp-history-v1.md)
 - [ContextManifest Evidence v17](context-manifest-evidence-v17.md)

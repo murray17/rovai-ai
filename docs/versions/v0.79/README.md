@@ -45,14 +45,14 @@ last_updated: 2026-08-14
   Core 的串行 main queue，并等待二者；随后还在 `setCampSnapshot` 前等待 directory project
   navigation restore；
 - Desktop 启动恢复路径直接调用 `camps.snapshot`，没有复用点击进入路径，形成
-  [ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md) 所要求“进入后先
+  [ADR-0058](../v0.15/decisions.md#adr-0058) 所要求“进入后先
   reconcile、再读 snapshot”的文档—实现漂移；
 - 当前 `CampSnapshot` 在一个事务中读取 Camp、成员、Task、最近 1000 条消息、Delivery、Turn、
   AgentRun、最多 1200 条 Execution Evidence、全部 Context Manifest、Approval、Action，以及最近
   500 条 Timeline event；
 - Delivery、Turn、AgentRun、Context Manifest、Approval 与 Action 当前没有首屏用途驱动的历史上界；
   普通事件刷新也会重新请求完整 `camps.snapshot`；
-- [ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md) 要求 Renderer 权威状态来自 SQLite
+- [ADR-0013](../v0.06/decisions.md#adr-0013) 要求 Renderer 权威状态来自 SQLite
   Read Side，snapshot 捕获 `throughGlobalSequence`，Renderer 不得靠 event replay 自建第二真源；
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md) 已要求世界地图消费有界只读投影，
   过程 Evidence 按需读取，并为 Loading、Partial、Error 与 Recovery 保留诚实状态。
@@ -62,7 +62,7 @@ last_updated: 2026-08-14
 ### Default Lead reconcile 不能移到首屏之后
 
 原始止血建议中“先显示 snapshot，再后台 reconcile”不能直接采用。
-[ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md) 明确要求进入已有 Camp 时先执行
+[ADR-0058](../v0.15/decisions.md#adr-0058) 明确要求进入已有 Camp 时先执行
 幂等 `camp.default_lead.reconcile`，再读取权威 snapshot；`camps.snapshot` 仍必须是纯读。
 
 本版本采用一个 Desktop 内部 enter/read 流程（最终 method 名由 Contract 冻结）：
@@ -203,8 +203,8 @@ hydration、serialization / IPC 与 React commit / paint，不能只给一个总
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0013: Managed Content and Read Side v2](../../adr/0013-managed-content-and-read-side-v2.md)
-- [ADR-0058: Collaboration v4 Presence-Aware Admission](../../adr/0058-collaboration-v4-presence-aware-admission.md)
+- [ADR-0013: Managed Content and Read Side v2](../v0.06/decisions.md#adr-0013)
+- [ADR-0058: Collaboration v4 Presence-Aware Admission](../v0.15/decisions.md#adr-0058)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
 - [Run Process Detail Surface v5](../../contracts/run-process-detail-surface-v5.md)
 - [Current User Attention v4](../../contracts/current-user-attention-v4.md)

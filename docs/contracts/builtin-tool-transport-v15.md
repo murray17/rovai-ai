@@ -130,7 +130,7 @@ Socket/IPC2. Windows requires the same matrix over its secured Named Pipe for ea
 
 ## References
 
-- [ADR-0217](../adr/0217-transport-v15-inherits-cross-platform-v14.md)
+- [ADR-0217](../versions/v1.07/decisions.md#adr-0217)
 - [Built-in Tool Transport v14 (accepted predecessor)](builtin-tool-transport-v14.md)
 - [Camp Message Send v10](camp-message-send-v10.md)
 - [Built-in Tool Agent Output Projection v1](builtin-tool-agent-output-projection-v1.md)

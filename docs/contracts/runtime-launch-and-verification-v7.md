@@ -99,6 +99,6 @@ HistoryRestore/ACP resume 失败且当前 prompt 尚未发送时，Core 必须�
 ## References
 
 - [Runtime Launch and Verification v6（历史）](runtime-launch-and-verification-v6.md)
-- [ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)
+- [ADR-0209](../versions/v1.04/decisions.md#adr-0209)
 - [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
 - [TRAE ACP Probe](../research/trae-cli-runtime/probe/README.md)

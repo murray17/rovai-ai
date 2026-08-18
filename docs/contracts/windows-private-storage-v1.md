@@ -9,7 +9,7 @@ last_updated: 2026-08-18
 # Windows Private Storage v1
 
 本合同拥有 Windows data-root 布局、存储准入、创建时 DACL、对象身份和长路径降级语义。决策理由见
-[ADR-0213](../adr/0213-windows-local-private-storage.md)。
+[ADR-0213](../versions/v1.05/decisions.md#adr-0213)。
 
 ## 1. Data-root layout
 
@@ -87,7 +87,7 @@ per-directory case sensitivity, deep paths, replace-in-place identity changes an
 
 ## References
 
-- [ADR-0213](../adr/0213-windows-local-private-storage.md)
+- [ADR-0213](../versions/v1.05/decisions.md#adr-0213)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Microsoft: File Security and Access Rights](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights)
 - [Microsoft: Maximum Path Length Limitation](https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation)

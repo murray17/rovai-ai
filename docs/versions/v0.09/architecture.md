@@ -13,13 +13,13 @@ last_updated: 2026-07-25
 > 版本范围：[README.md](README.md)
 >
 > 跨版本边界：
-> [ADR-0018](../../adr/0018-file-backed-mcp-library-runtime-projection.md)
+> [ADR-0018](decisions.md#adr-0018)
 >
 > 相关约束：
-> [ADR-0009](../../adr/0009-reproducible-context-delivery.md)、
-> [ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md)、
-> [ADR-0015](../../adr/0015-action-safety-v2.md)、
-> [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md)
+> [ADR-0009](../v0.05/decisions.md#adr-0009)、
+> [ADR-0014](../v0.06/decisions.md#adr-0014)、
+> [ADR-0015](../v0.06/decisions.md#adr-0015)、
+> [ADR-0016](../v0.06/decisions.md#adr-0016)
 
 ## 1. 目标与非目标
 

@@ -84,7 +84,7 @@ CampTurn/AgentRun；详细 JSON/Markdown 位于 `reports/<run-id>/`。旧的一 
 
 - [v0.53 architecture](architecture.md)
 - [v0.53 实施与验收计划](implementation-plan.md)
-- [ADR-0151](../../adr/0151-versioned-benchmark-protocol-and-axis-comparability.md)
+- [ADR-0151](decisions.md#adr-0151)
 - [Benchmark Protocol v3](../../contracts/benchmark-protocol-v3.md)
 - [Benchmark Protocol architecture](../../architecture/benchmark-protocol.md)
 - [公开 Demo Case 目录](../../../qualification/demo/README.md)

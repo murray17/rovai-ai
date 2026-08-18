@@ -10,7 +10,7 @@ last_updated: 2026-08-17
 
 精确字段与方法见 [Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)。长期最小化、
 稀疏语义、clean break 与 Cost grain 由
-[ADR-0205](../adr/0205-minimal-runtime-usage-metering.md)拥有。本架构只说明 Usage Transport、内存归一化、
+[Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)拥有。本架构只说明 Usage Transport、内存归一化、
 Projection/Rollup、Read Side 和 Renderer 如何组合。
 
 ## Component authority
@@ -95,9 +95,9 @@ epoch、Database contract `v0.99` 与 projection schema `47`。不存在回填�
 
 ## References
 
-- [ADR-0205](../adr/0205-minimal-runtime-usage-metering.md)
+- [Evidence 与 Usage 不变量](foundational-invariants.md#evidence-usage)
 - [Runtime Usage Monitoring v3](../contracts/runtime-usage-monitoring-v3.md)
 - [v0.99 implementation plan](../versions/v0.99/implementation-plan.md)
 - [Runtime monitoring feasibility audit](../research/runtime-monitoring/README.md)
-- [ADR-0013](../adr/0013-managed-content-and-read-side-v2.md)
-- [ADR-0117](../adr/0117-observation-capability-coverage-levels-across-runtime-adapters.md)
+- [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
+- [Canonical Activity 不变量](foundational-invariants.md#evidence-canonical-activity)

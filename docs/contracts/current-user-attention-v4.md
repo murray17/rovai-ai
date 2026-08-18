@@ -47,5 +47,5 @@ acknowledgement，导航失败不回滚；普通 `open_camp` 仍不代表任何�
 
 - [Current User Attention v3 (historical)](current-user-attention-v3.md)
 - [Notification Episode v4](notification-episode-v4.md)
-- [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)
-- [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
+- [ADR-0165](../versions/v0.65/decisions.md#adr-0165)
+- [ADR-0175](../versions/v0.71/decisions.md#adr-0175)

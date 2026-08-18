@@ -218,8 +218,8 @@ With an authoritative message locator, callers may verify the boolean through ex
 
 ## References
 
-- [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)
+- [ADR-0165](../versions/v0.65/decisions.md#adr-0165)
 - [Camp Message Send v4](camp-message-send-v4.md)
-- [ADR-0087: Durable In-App Notification Inbox](../adr/0087-core-owned-durable-in-app-notification-inbox.md)
+- [ADR-0087: Durable In-App Notification Inbox](../versions/v0.28/decisions.md#adr-0087)
 - [Current User Mention UI contract](../ui/components/structured-mentions.md#current-user-mention)
 - [v0.65 implementation specification](../versions/v0.65/implementation-spec.md)

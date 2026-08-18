@@ -1063,6 +1063,11 @@ export interface CampTurnExecutionBudgetView {
   exhaustionCommandId: string | null
 }
 
+export type AgentRunCancelReasonCode =
+  | 'camp_turn_cancelled'
+  | 'execution_budget_exhausted'
+  | 'user_requested_agent_run_stop'
+
 export interface AgentRunView {
   id: string
   campTurnId: string
@@ -1075,6 +1080,9 @@ export interface AgentRunView {
   completionRole: 'required' | 'optional'
   status: 'queued' | 'running' | 'waiting' | 'succeeded' | 'failed' | 'cancelled'
   waitReason: string | null
+  cancelRequestedAt: string | null
+  cancelReasonCode: AgentRunCancelReasonCode | null
+  cancelAcknowledgedAt: string | null
   terminalResolutionSource: 'runtime_terminal' | null
   terminalReasonCode:
     | 'planned_shutdown_completed'
@@ -1082,6 +1090,7 @@ export interface AgentRunView {
     | 'planned_shutdown_cancelled'
     | null
   failure: RuntimeFailureView | null
+  runtimeModel: { modelId: string | null } | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
   invocationKind: 'direct' | 'a2a' | 'gather_completion'
@@ -1370,7 +1379,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 30
+  schemaVersion: 32
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1410,7 +1419,7 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 1
+  schemaVersion: 3
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]
@@ -2396,6 +2405,7 @@ export type CoreMethod =
   | 'camps.open'
   | 'camps.delete'
   | 'campTurns.cancel'
+  | 'agentRuns.cancel'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
   | 'camp.messages.page'

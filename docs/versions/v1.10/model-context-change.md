@@ -185,7 +185,7 @@ timeline storage 升至 v2，navigation/onboarding/pin/restorable state 只恢�
 ## References
 
 - [v1.10 版本概览](README.md)
-- [ADR-0219](../../adr/0219-single-namespaced-camp-identity.md)
+- [ADR-0219 的迁移后决定正文](decisions.md#adr-0219)
 - [Camp Identity v1](../../contracts/camp-identity-v1.md)
 - [ContextManifest Evidence v18](../../contracts/context-manifest-evidence-v18.md)
 - [Camp History Retrieval v3](../../contracts/camp-history-v3.md)

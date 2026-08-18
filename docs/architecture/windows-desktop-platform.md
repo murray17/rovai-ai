@@ -96,8 +96,8 @@ Signed release qualification requires real Windows 10 22H2 and Windows 11 machin
 ## References
 
 - [v1.05 overview](../versions/v1.05/README.md)
-- [ADR-0210: Runtime Platform Admission](../adr/0210-platform-qualified-product-runtime-admission.md)
-- [ADR-0211: Atomic Windows Managed Process Launch](../adr/0211-atomic-windows-managed-process-launch.md)
-- [ADR-0212: Built-in Tool Transport v14](../adr/0212-cross-platform-local-ipc-transport-v14.md)
-- [ADR-0213: Windows Local Private Storage](../adr/0213-windows-local-private-storage.md)
-- [ADR-0214: Windows Skill Projection](../adr/0214-crash-recoverable-windows-skill-projection.md)
+- [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)
+- [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)
+- [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)
+- [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)
+- [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)

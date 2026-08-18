@@ -14,8 +14,8 @@ last_updated: 2026-07-27
 >
 > 前置版本：[v0.12 公共消息层检索与渐进摘要上下文治理](../v0.12/README.md)
 >
-> 跨版本决策：[ADR-0052](../../adr/0052-explicit-memory-revision-authority.md) ·
-> [ADR-0055](../../adr/0055-explicit-opt-in-provisional-companion-lessons.md)
+> 跨版本决策：[ADR-0052](decisions.md#adr-0052) ·
+> [ADR-0055](decisions.md#adr-0055)
 >
 > 详细设计：[architecture.md](architecture.md)
 >

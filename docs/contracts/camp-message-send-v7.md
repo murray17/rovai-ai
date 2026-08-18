@@ -147,8 +147,8 @@ authority; no family-level alias or Skill parser is added.
 
 ## References
 
-- [ADR-0184: Line-Leading Display-Name Inline Addressing Alias](../adr/0184-line-leading-display-name-inline-addressing-alias.md)
-- [ADR-0182: Core-Resolved Current-Camp Display-Name Inline Addressing Alias](../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)
+- [ADR-0184: Line-Leading Display-Name Inline Addressing Alias](../versions/v0.76/decisions.md#adr-0184)
+- [ADR-0182: Core-Resolved Current-Camp Display-Name Inline Addressing Alias](../versions/v0.75/decisions.md#adr-0182)
 - [Current User Attention v3](current-user-attention-v3.md)
 - [Message Delivery v2](message-delivery-v2.md)
 - [Built-in Tool Transport v10](builtin-tool-transport-v10.md)

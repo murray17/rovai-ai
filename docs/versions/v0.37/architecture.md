@@ -130,4 +130,4 @@ Core 按 Runtime 声明的项目原生目录投影受管 symlink：Codex、OpenC
 compatible、Antigravity、Kiro、Qoder、CodeBuddy、Qwen。它不读取或接管 `.agents/skills`，不覆盖
 普通文件、目录或非 Rovai link；同名目标记录为 `shadowed`。活跃 AgentRun 使用中的投影不原地
 切换，新 Run 冻结实际可见 Revision 与路径。完整 identity、重叠 discovery 和删除语义以
-[ADR-0105](../../adr/0105-runtime-group-assigned-skill-delivery.md) 为准。
+[ADR-0105](decisions.md#adr-0105) 为准。

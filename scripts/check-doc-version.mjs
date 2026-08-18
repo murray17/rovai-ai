@@ -254,7 +254,7 @@ check(
 
 const requiredImpactScopes = [
   "Version lifecycle",
-  "ADR",
+  "Decisions",
   "Contracts",
   "Architecture",
   "UI",

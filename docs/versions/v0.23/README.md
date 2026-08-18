@@ -14,9 +14,9 @@ last_updated: 2026-07-30
 >
 > 前置版本：[v0.22 配置式 Camp 创建与延迟 Conversation](../v0.22/README.md)
 >
-> 跨版本决策：[ADR-0072](../../adr/0072-directory-workspace-and-dynamic-git-capability.md) ·
-> [ADR-0071](../../adr/0071-configured-camp-creation-and-lazy-conversations.md) ·
-> [ADR-0059](../../adr/0059-runtime-owned-resource-permissions.md)
+> 跨版本决策：[ADR-0072](decisions.md#adr-0072) ·
+> [ADR-0071](../v0.22/decisions.md#adr-0071) ·
+> [ADR-0059](../v0.16/decisions.md#adr-0059)
 >
 > 详细设计：[architecture.md](architecture.md)
 >

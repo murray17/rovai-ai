@@ -100,6 +100,6 @@ cascade 和 Journal trigger 收口。
 
 ## References
 
-- [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
+- [通知事实与投影](foundational-invariants.md#core-notifications)
 - [Notification Episode v4](../contracts/notification-episode-v4.md)
 - [Current User Attention v4](../contracts/current-user-attention-v4.md)

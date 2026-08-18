@@ -14,8 +14,8 @@ last_updated: 2026-07-31
 >
 > 前置版本：[v0.24 Arctic Dawn V3](../v0.24/README.md)
 >
-> 跨版本决策：[ADR-0080](../../adr/0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md) ·
-> [ADR-0081](../../adr/0081-camp-public-attachment-paths-and-frozen-discovery.md)
+> 跨版本决策：[ADR-0080](decisions.md#adr-0080) ·
+> [ADR-0081](decisions.md#adr-0081)
 >
 > 生产设计：[production-design.md](production-design.md)
 >

@@ -36,7 +36,7 @@ last_updated: 2026-08-06
 
 本段只纠正历史归档的范围歧义，不改写 v0.33 当时的侧栏目标。当前权威分别为：
 
-- Mention 内容、稳定身份与派生寻址：[ADR-0096](../../adr/0096-core-owned-structured-mentions-and-derived-addressing.md)；
+- Mention 内容、稳定身份与派生寻址：[ADR-0096](decisions.md#adr-0096)；
 - Mention 视觉与点击行为：[Arctic Dawn 的不得回退合同](../../ui/components/structured-mentions.md#不得回退的交互合同)；
 - 真实 App 回归门禁：[桌面 UI 验收](../../development/ui-acceptance.md#结构化-mention-门禁)。
 

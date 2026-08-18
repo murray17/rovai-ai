@@ -118,7 +118,7 @@ Budget cost is frozen as: Gather forward `acceptedA2a=1/runResponsibility=1`; or
 
 ## References
 
-- [ADR-0193](../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)
-- [ADR-0194](../adr/0194-mandatory-typed-gather-completion-current-input.md)
+- [ADR-0193](../versions/v0.89/decisions.md#adr-0193)
+- [ADR-0194](../versions/v0.89/decisions.md#adr-0194)
 - [Message Delivery v3](message-delivery-v3.md)
 - [ContextManifest Evidence v13](context-manifest-evidence-v13.md)

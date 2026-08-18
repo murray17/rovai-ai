@@ -19,7 +19,7 @@ last_updated: 2026-08-05
 - [x] 冻结 `auth.json` 软链接、共享插件例外和 `rovai_team` runtime-only credential；
 - [x] 冻结 per-AgentRun app-server：不再全局复用，三个 Run 终态关闭，后续 Run 新进程 resume；
 - [x] 冻结 Camp 生命周期、Camp delete cleanup record 和 72 小时孤儿 GC；
-- [x] 接受 [ADR-0107](../../adr/0107-camp-member-isolated-codex-home-and-agentrun-app-server.md)
+- [x] 接受 [ADR-0107](decisions.md#adr-0107)
   并发布[实施合同](codex-home-isolation.md)。
 
 ## Checkpoint 1：Home Manager 与持久协议

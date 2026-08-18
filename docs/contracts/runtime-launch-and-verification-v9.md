@@ -4,14 +4,14 @@ name: Runtime Launch and Verification
 version: v9
 status: accepted
 source_version: v1.11
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Runtime Launch and Verification v9
 
-本合同完整继承 [v8](runtime-launch-and-verification-v8.md) 的 purpose-scoped launch、Availability、
-execution-deferred verification、TRAE continuation/HistoryRestore、公开 Runtime failure 与 fencing，并增加
-统一模型目录缓存和 AgentRun 最终模型验证。v9 不新增 Migration；Data Contract 保持 `v1.10`、projection
+本合同继承 [v8](runtime-launch-and-verification-v8.md) 的 purpose-scoped launch、Availability、
+TRAE continuation/HistoryRestore、公开 Runtime failure 与 fencing，并以统一 Dispatch Preflight 取代 TRAE-only
+execution-deferred verification，同时增加统一模型目录缓存和 AgentRun 最终模型验证。v9 不新增 Migration；Data Contract 保持 `v1.10`、projection
 schema 50、migration 95。
 
 ## 1. Model catalog cache
@@ -76,6 +76,11 @@ acknowledgement 或 manager supervision failure 不能被吞掉。
 manager timeout/panic/join failure 在存在 Installation 时写入 transient failed Probe Attempt；该 attempt 保留
 last-known-good，不使 Runtime 失败冒充目录失效。显式检查开始前不清空成功目录。
 
+搜索路径中的备用 executable candidate 失败只能形成 candidate-local transient attempt，不得把当前
+Installation snapshot 标记 stale。只有 candidate canonical path 与当前 Installation 相同，且它自身的
+fingerprint 确定变化时，才允许记录 `identity_changed` 并使当前目录失效；备用 candidate 必须完整 deep probe
+成功并正式采用后，才能替换 Installation、推进 generation 和失效旧目录。
+
 ## 4. Invalidation
 
 以下确定证据可以不等待 TTL 直接使模型目录 `invalidated`：
@@ -116,8 +121,10 @@ explicit selection 在目录不可用、过期或暂未包含它时保持原值�
 ## 7. TRAE and acceptance
 
 TRAE 使用同一 cache status、Picker-open、60 秒/24 小时、Availability Check、失败保留和 AgentRun 验证合同。
-ADR-0208 的 purpose-scoped 启动限制仍有效：Picker 只通过用户打开动作授权的 Availability Check，不把普通
-页面进入或 Runtime 切换变成启动。
+它也使用与其他 Runtime 相同的 Installation Refresh、Health Probe 与 Dispatch Preflight。`light_ready` 可以
+保存 runtime-default 与静态 permission descriptor，但所有 Runtime 都必须在正式 AgentRun 前达到 `ready`；
+旧 `installed_unverified` 只可读取，不可配置或执行。Picker 只通过用户打开动作授权 Availability Check，普通
+页面进入或 Runtime 切换仍不启动 Runtime。
 
 需要启动真实 TRAE 的 acceptance/smoke 必须串行执行，避免多个本机进程竞争第三方密钥或状态文件。测试
 串行化不是 Runtime wire 或产品状态分支。
@@ -132,14 +139,15 @@ ADR-0208 的 purpose-scoped 启动限制仍有效：Picker 只通过用户打开
 - runtime default 在无目录时可保存/冻结，且 Codex、ACP、Claude、Antigravity 均不收到显式 sentinel；
 - ACP/Codex 真实目录缺少 explicit model 时 typed fail closed，不创建 silent fallback；
 - TRAE 产品行为使用统一合同，真实进程用例串行执行。
+- 当前 Installation 的 LKG 不会被任一未采用备用 candidate 的失败标记失效。
 
 ## References
 
 - [Runtime Launch and Verification v8（历史）](runtime-launch-and-verification-v8.md)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
-- [ADR-0127](../adr/0127-atomic-member-runtime-configuration.md)
-- [ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
-- [ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)
-- [ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)
-- [ADR-0220](../adr/0220-runtime-model-catalog-stale-while-revalidate.md)
+- [ADR-0127 的迁移后决定正文](../versions/v0.43/decisions.md#adr-0127)
+- [ADR-0192 的迁移后决定正文](../versions/v0.87/decisions.md#adr-0192)
+- [ADR-0204 的迁移后决定正文](../versions/v0.98/decisions.md#adr-0204)
+- [ADR-0208 的迁移后决定正文](../versions/v1.03/decisions.md#adr-0208)
+- [ADR-0220 的迁移后决定正文](../versions/v1.11/decisions.md#adr-0220)
 - [v1.11 版本范围](../versions/v1.11/README.md)

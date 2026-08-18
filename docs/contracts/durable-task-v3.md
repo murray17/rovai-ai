@@ -9,7 +9,7 @@ last_updated: 2026-08-11
 # Durable Task v3
 
 本合同冻结 v0.54 起当前 Task authority、字段 mutation 与 Camp-wide read wire shape。领域理由见
-[ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)。v2 仅保留
+[ADR-0152](../versions/v0.54/decisions.md#adr-0152)。v2 仅保留
 historical 解释，不是当前 Runtime、CLI 或恢复兼容入口。
 
 ## Task 定位
@@ -25,7 +25,7 @@ Task-linked responsibility admission 只冻结 Task identity、version 与 Assig
 全文。触发 CampMessage 或 ConversationMessage 的正文是该 AgentRun 唯一的自然语言执行指令，并以
 `CURRENT_INPUT` 交付；`purpose` 只保留为 Core 审计与责任描述。AgentRun 不保存或暴露
 `expectedOutput`，也不根据自由文本输出条件判断成功。该边界由
-[ADR-0157](../adr/0157-message-owned-agentrun-instruction-without-expected-output.md)局部替代
+[ADR-0157](../versions/v0.58/decisions.md#adr-0157)局部替代
 ADR-0137 的旧 instruction ownership 条款。
 
 ## Create

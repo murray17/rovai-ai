@@ -2,8 +2,8 @@ import { defineBenchmarkProfile } from '../execution/suite.mjs'
 import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
-  version: 'v1.11',
-  projectionSchemaVersion: 51
+  version: 'v1.14',
+  projectionSchemaVersion: 52
 })
 
 const criteria = [
@@ -46,7 +46,7 @@ const criteria = [
       test('crates/rovai-core/src/db.rs', 'current_schema_contains_required_contract_objects')
     ]
   ),
-  criterion('CCC-012', 'CampSnapshot schema is 29', [
+  criterion('CCC-012', 'CampSnapshot schema is 32', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
   criterion('CCC-013', 'Production admission accepts only the exact current contract and quarantines incompatible managed state', [
@@ -80,7 +80,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.12.0',
+  version: '1.14.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -98,8 +98,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.12-current-contract',
-    version: '1.12.0',
+    id: 'rovai-v1.14-current-contract',
+    version: '1.14.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

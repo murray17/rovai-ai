@@ -75,7 +75,7 @@ mode、Session 恢复和 MCP 能力全部按目标安装的实际返回建立，
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.82 冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.83。 |
-| ADR | 已更新 | [ADR-0189](../../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)允许严格 presentation-only 的设置页待支持预告，同时保留 executable catalog 的实证准入边界。 |
+| ADR | 已更新 | [ADR-0189](decisions.md#adr-0189)允许严格 presentation-only 的设置页待支持预告，同时保留 executable catalog 的实证准入边界。 |
 | Contracts | 已更新 | TypeScript/Rust closed `AdapterKind` 与 [Diagnostics Center v1](../../contracts/diagnostics-center-v1.md)扩展为全部受支持目录项；DeepSeek 不进入合同。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录 Product Runtime、Availability 与 Settings Preview 的权威分层。 |
 | UI | 已更新 | [Settings workspace brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)记录受支持 Runtime 与 disabled preview 的视觉、交互和状态边界。 |
@@ -89,4 +89,4 @@ mode、Session 恢复和 MCP 能力全部按目标安装的实际返回建立，
 - [实施与验收计划](implementation-plan.md)
 - [TRAE CLI Runtime Research](../../research/trae-cli-runtime/README.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
-- [ADR-0189](../../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)
+- [ADR-0189](decisions.md#adr-0189)

@@ -13,16 +13,16 @@ last_updated: 2026-07-29
 > 版本范围：[README.md](README.md)
 >
 > 当前决策：
-> [ADR-0071](../../adr/0071-configured-camp-creation-and-lazy-conversations.md)
+> [ADR-0071](decisions.md#adr-0071)
 >
 > 继续适用：
-> [ADR-0001](../../adr/0001-core-transaction.md) ·
-> [ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md) ·
-> [ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md) ·
-> [ADR-0059](../../adr/0059-runtime-owned-resource-permissions.md) ·
-> [ADR-0060](../../adr/0060-opaque-member-routing-identity.md) ·
-> [ADR-0066](../../adr/0066-managed-product-runtime-resolution.md) ·
-> [ADR-0067](../../adr/0067-native-session-bootstrap-and-agentrun-context-v3.md)
+> [ADR-0001](../v0.02/decisions.md#adr-0001) ·
+> [ADR-0013](../v0.06/decisions.md#adr-0013) ·
+> [ADR-0058](../v0.15/decisions.md#adr-0058) ·
+> [ADR-0059](../v0.16/decisions.md#adr-0059) ·
+> [ADR-0060](../v0.16/decisions.md#adr-0060) ·
+> [ADR-0066](../v0.20/decisions.md#adr-0066) ·
+> [ADR-0067](../v0.21/decisions.md#adr-0067)
 
 ## 1. 当前实现基线与冲突
 

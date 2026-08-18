@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 
 # Rovai-ai v1.03：TRAE 轻检与显式可用性验证
 
-> 当前状态：[ADR-0208](../../adr/0208-user-authorized-trae-light-and-availability-verification.md)与
+> 当前状态：[ADR-0208](decisions.md#adr-0208)与
 > [Runtime Launch and Verification v5](../../contracts/runtime-launch-and-verification-v5.md)已经接受；实施与验收已按
 > [计划](implementation-plan.md)完成。
 >
@@ -65,6 +65,6 @@ last_updated: 2026-08-18
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0208](../../adr/0208-user-authorized-trae-light-and-availability-verification.md)
+- [ADR-0208](decisions.md#adr-0208)
 - [Runtime Launch and Verification v5](../../contracts/runtime-launch-and-verification-v5.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)

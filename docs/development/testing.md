@@ -84,16 +84,15 @@ pnpm test:rust:staged
 ```
 
 `pnpm test` 首先显式执行 `pnpm docs:test`、`pnpm docs:check`、`pnpm skills:test` 和
-`pnpm skills:check`。`docs:test` 覆盖 YAML/Markdown 解析、直接替代图、CURRENT/HISTORY、链接、
-legacy exception、amendment 和 diff freeze fixture；`docs:check` 验证当前版本唯一性以及真实仓库的
-ADR/Architecture/链接快照。Skill 检查覆盖通用 authoring fixture、
+`pnpm skills:check`。`docs:test` 覆盖 Manifest 和历史正文篡改、迁移目标缺失/重复、
+当前权威覆盖、数字 ADR 禁止、版本内 ID 与稳定锚点；`docs:check` 验证当前版本唯一性、
+Version Decisions、Architecture 索引与全仓 Markdown 链接。Skill 检查覆盖通用 authoring fixture、
 frontmatter、界面元数据和 bundle 内相对链接，不用自然语言逐字断言代替协作场景验收。文档治理改动至少单独运行：
 
 ```bash
 pnpm docs:test
 pnpm docs:check
 DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
-pnpm docs:adr:generate -- --check
 ```
 
 `docs:check:ci` 缺少 base SHA 或无法读取 base object 时必须失败，不能退回本地 `origin/main`。

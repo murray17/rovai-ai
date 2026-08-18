@@ -11,7 +11,7 @@ last_updated: 2026-07-28
 > 版本范围：[README.md](README.md)
 >
 > 跨版本约束：
-> [ADR-0064](../../adr/0064-default-on-bounded-automatic-partner-memory.md)
+> [ADR-0064](decisions.md#adr-0064)
 >
 > 当时长期记忆 UI 规范已删除，原文见 Git 历史；当前规范见
 > [Arctic Dawn 记忆](../../../apps/desktop/.impeccable/surfaces/memory-workspace.md)

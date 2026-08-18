@@ -11,10 +11,10 @@ detector transport 与输入时序。detector 基线实施和目标 Runtime smok
 [v0.48](../versions/v0.48/README.md)及[Runtime 兼容性清单](../runtime-compatibility.md)为准；当前
 Redelivery v2 实施状态以 [v0.50](../versions/v0.50/README.md)为准。
 Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
-[ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)与
+[成员投影不变量](foundational-invariants.md#member-projection)与
 [Collaboration State v2](../contracts/collaboration-state-v2.md)。Redelivery Envelope/Formatter v2 和
 模型投影/Evidence 分层见
-[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)。
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)。
 
 ## 两个独立生命周期
 
@@ -160,11 +160,11 @@ Gate 后到达的更高 requested revision。
 
 ## 长期约束
 
-- [ADR-0138](../adr/0138-durable-bootstrap-redelivery-requirement.md)：durable revision 与 ACK；
-- [ADR-0139](../adr/0139-version-owned-bootstrap-redelivery-runtime-policy.md)：版本 policy 与首次启用；
-- [ADR-0140](../adr/0140-runtime-specific-compaction-signal-admission-point.md)：exact signal 与 cutoff；
-- [ADR-0141](../adr/0141-atomic-bootstrap-redelivery-input-overlay.md)：transient overlay、budget 与 privacy；
-- [ADR-0142](../adr/0142-native-session-scoped-compaction-observer-lease.md)：Observer authority 与中断；
-- [ADR-0143](../adr/0143-best-effort-non-blocking-compaction-detector-capability.md)：non-blocking detector。
-- [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)：Redelivery
+- [Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)：durable revision 与 ACK；
+- [Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)：版本 policy 与首次启用；
+- [Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)：exact signal 与 cutoff；
+- [Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)：transient overlay、budget 与 privacy；
+- [Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)：Observer authority 与中断；
+- [Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)：non-blocking detector。
+- [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)：Redelivery
   v2 marker/wording 与模型投影、Manifest、Delivery Evidence 分层。

@@ -66,8 +66,8 @@ AgentRun 仍是 Core、Evidence、取消与投递的唯一领域身份，不被 
 ## References
 
 - [v0.55 实施与验收计划](implementation-plan.md)
-- [ADR-0154](../../adr/0154-agent-level-execution-process-surface.md)
+- [ADR-0154](decisions.md#adr-0154)
 - [Run Process Detail Surface v2](../../contracts/run-process-detail-surface-v2.md)
-- [ADR-0155](../../adr/0155-treatment-blind-outcome-and-process-judge-views.md)
+- [ADR-0155](decisions.md#adr-0155)
 - [Semantic Judge Views v1](../../contracts/semantic-judge-views-v1.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)

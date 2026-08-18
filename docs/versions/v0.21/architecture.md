@@ -13,18 +13,18 @@ last_updated: 2026-07-29
 > 版本范围：[README.md](README.md)
 >
 > 当前相关有效决策：
-> [ADR-0049](../../adr/0049-reproducible-context-delivery-v2.md) ·
-> [ADR-0050](../../adr/0050-camp-shared-progressive-summaries.md) ·
-> [ADR-0051](../../adr/0051-boundary-capped-context-retrieval.md) ·
-> [ADR-0052](../../adr/0052-explicit-memory-revision-authority.md) ·
-> [ADR-0063](../../adr/0063-minimal-a2a-turn-envelope-and-reply-correlation.md) ·
-> [ADR-0064](../../adr/0064-default-on-bounded-automatic-partner-memory.md)
+> [ADR-0049](../v0.12/decisions.md#adr-0049) ·
+> [ADR-0050](../v0.12/decisions.md#adr-0050) ·
+> [ADR-0051](../v0.12/decisions.md#adr-0051) ·
+> [ADR-0052](../v0.13/decisions.md#adr-0052) ·
+> [ADR-0063](../v0.17/decisions.md#adr-0063) ·
+> [ADR-0064](../v0.18/decisions.md#adr-0064)
 >
 > 当前 v0.21 决策：
-> [ADR-0067](../../adr/0067-native-session-bootstrap-and-agentrun-context-v3.md) ·
-> [ADR-0068](../../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md) ·
-> [ADR-0069](../../adr/0069-single-effective-memory-and-scope-bounded-agent-mutation.md) ·
-> [ADR-0070](../../adr/0070-normalized-sqlite-memory-store-v2.md)
+> [ADR-0067](decisions.md#adr-0067) ·
+> [ADR-0068](decisions.md#adr-0068) ·
+> [ADR-0069](decisions.md#adr-0069) ·
+> [ADR-0070](decisions.md#adr-0070)
 
 ## 1. 已确认的版本边界
 
@@ -473,17 +473,17 @@ Core 通过每次 `memory.read` 的实时鉴权和 `cacheState` 阻止旧正文�
 
 v0.21 使用四份已接受 ADR 原子替代旧语义，不直接改写历史理由：
 
-- [ADR-0067](../../adr/0067-native-session-bootstrap-and-agentrun-context-v3.md)：
+- [ADR-0067](decisions.md#adr-0067)：
   Native Session Bootstrap 与 AgentRun Dynamic Context；整篇替代 ADR-0049、
   ADR-0063，并局部替代 ADR-0014、ADR-0058 的 Task Context 条款；
-- [ADR-0068](../../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)：
+- [ADR-0068](decisions.md#adr-0068)：
   Entrypoint、Relationship 适用性、Search/Read 与缓存失效；替代 ADR-0035、
   ADR-0042；
-- [ADR-0069](../../adr/0069-single-effective-memory-and-scope-bounded-agent-mutation.md)：
+- [ADR-0069](decisions.md#adr-0069)：
   单一 Active 效力、来源证据、直接 Agent 写入与 Hearth 用户确认；替代 ADR-0024、
   ADR-0025、ADR-0036～ADR-0040、ADR-0052、ADR-0064，并局部替代 ADR-0057 的旧
   Memory Capability 条款；
-- [ADR-0070](../../adr/0070-normalized-sqlite-memory-store-v2.md)：
+- [ADR-0070](decisions.md#adr-0070)：
   新 Memory 表族与可重建 FTS；替代 ADR-0045。
 
 ADR-0050 的共享摘要生成协议和 ADR-0051 的边界封顶检索原则继续有效，仅更新对旧模型

@@ -10,7 +10,7 @@ last_updated: 2026-08-17
 # Current Input Skill Links v1 Contract
 
 本合同定义 Composer Skill Picker 的结构化身份、Direct AgentRun 发送时快照、start-time 解析和模型可见
-`CURRENT_INPUT.skills`。决策理由见 [ADR-0203](../adr/0203-structured-current-input-skill-links.md)，完整
+`CURRENT_INPUT.skills`。决策理由见 [ADR-0203](../versions/v0.98/decisions.md#adr-0203)，完整
 实施前后对照见 [v0.98 model-context-change revision 1](../versions/v0.98/model-context-change.md)。
 
 ## Structured Content
@@ -157,7 +157,7 @@ Skill item，不重复正文，也不把 Skill link 放入 Attachment transport�
 
 ## References
 
-- [ADR-0203](../adr/0203-structured-current-input-skill-links.md)
+- [ADR-0203](../versions/v0.98/decisions.md#adr-0203)
 - [ContextManifest Evidence v16](context-manifest-evidence-v16.md)
 - [Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)

@@ -11,7 +11,7 @@ last_updated: 2026-08-17
 
 本合同继承 v2 的 launch purpose、TRAE execution-deferred verification、ACP continuation、Prompt fencing 与
 response-only input ACK，并新增启动浅检测、显式深检、manager-owned attempt 和统一 Probe process lifecycle。
-决策理由见 [ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)。
+决策理由见 [ADR-0204](../versions/v0.98/decisions.md#adr-0204)。
 
 ## 1. Light discovery
 
@@ -134,4 +134,4 @@ fingerprint；不匹配时作为 superseded 收口，不提交 snapshot。
 
 - [Runtime Launch and Verification v2（历史）](runtime-launch-and-verification-v2.md)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
-- [ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
+- [ADR-0192](../versions/v0.87/decisions.md#adr-0192)

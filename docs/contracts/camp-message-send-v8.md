@@ -33,7 +33,7 @@ Public return evidence does not close a GatherItem. Item settlement, fallback an
 
 ## References
 
-- [ADR-0193](../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)
+- [ADR-0193](../versions/v0.89/decisions.md#adr-0193)
 - [Camp Message Send v7 (historical)](camp-message-send-v7.md)
 - [Message Delivery v3](message-delivery-v3.md)
 - [Gather v1](gather-v1.md)

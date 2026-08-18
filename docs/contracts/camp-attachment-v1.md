@@ -98,7 +98,7 @@ CampSnapshot Read Model 从 schema 28 升为 schema 29，只增加 `kind / fileC
 
 ## References
 
-- [ADR-0169](../adr/0169-core-owned-directory-attachment-snapshots.md)
-- [ADR-0080](../adr/0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)
-- [ADR-0081](../adr/0081-camp-public-attachment-paths-and-frozen-discovery.md)
+- [ADR-0169](../versions/v0.65/decisions.md#adr-0169)
+- [ADR-0080](../versions/v0.25/decisions.md#adr-0080)
+- [ADR-0081](../versions/v0.25/decisions.md#adr-0081)
 - [Camp 会话区拖放 UI](../ui/components/conversation-drop-zone.md)

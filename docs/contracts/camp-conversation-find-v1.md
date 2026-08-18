@@ -76,5 +76,5 @@ query 与最新 request generation 的响应；乱序响应必须丢弃。新增
 - [Camp Open Projection v1](camp-open-projection-v1.md)
 - [Camp Open Read Path](../architecture/camp-open-read-path.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
-- [ADR-0013](../adr/0013-managed-content-and-read-side-v2.md)
-- [ADR-0108](../adr/0108-discovery-only-camp-message-search-and-sequence-paged-reads.md)
+- [ADR-0013](../versions/v0.06/decisions.md#adr-0013)
+- [ADR-0108](../versions/v0.40/decisions.md#adr-0108)

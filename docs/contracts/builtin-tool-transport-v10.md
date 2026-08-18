@@ -112,7 +112,7 @@ socket/context path、request identity 或完整 Envelope。
 
 ## References
 
-- [ADR-0183: Scope-Identified Agent Memory Revision Targets](../adr/0183-scope-identified-agent-memory-revision-targets.md)
+- [ADR-0183: Scope-Identified Agent Memory Revision Targets](../versions/v0.75/decisions.md#adr-0183)
 - [Memory Capture v2](memory-capture-v2.md)
 - [Built-in Tool Transport v9 (historical)](builtin-tool-transport-v9.md)
 - [Camp Message Send v6](camp-message-send-v6.md)

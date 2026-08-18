@@ -52,7 +52,7 @@ ID 定位后续读取；timeline sequence cursor 和任何模型提供的 ID 都
 受用户治理、可跨 Camp 延续的长期认识；历史搜索不能成为绕过 Memory Scope、Lifecycle、
 Forget 或写入授权的隐式持久化通道。
 
-这项决定记录于 accepted [ADR-0106](../../adr/0106-agent-bounded-cross-camp-public-history-retrieval.md)。
+这项决定记录于 accepted [ADR-0106](decisions.md#adr-0106)。
 
 ## 决策 2：冻结历史访问集合与全局消息边界
 

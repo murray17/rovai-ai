@@ -4,7 +4,7 @@
 
 ## 定位文档
 
-如果仓库根目录存在 `CONTEXT-MAP.md`，先找到当前主题所属的上下文、对应的 `CONTEXT.md` 和 ADR 目录。只有根 `CONTEXT.md` 时，使用单一上下文。没有相关文件时，等第一个术语真正确认后再创建。
+如果仓库根目录存在 `CONTEXT-MAP.md`，先找到当前主题所属的上下文和对应的 `CONTEXT.md`；只有根 `CONTEXT.md` 时，使用单一上下文。随后定位相关 Architecture、Contract，并从 `docs/versions/README.md` 解析唯一当前版本及其 `decisions.md`。没有相关文件时，等第一项内容真正确认后再按项目路由创建。
 
 仓库自己的文档导航和维护规则始终优先。
 
@@ -30,12 +30,12 @@
 
 术语确认后及时更新适用的 `CONTEXT.md`，使用 [词汇表格式](context-format.md)。`CONTEXT.md` 只保存领域语言，不保存实现细节、草稿或完整规格。
 
-### 谨慎记录 ADR
+### 谨慎记录长期决定
 
-只有决定同时满足以下条件时才记录 ADR：
+只有决定同时满足以下条件时，才在当前版本 `decisions.md` 增加章节：
 
 1. 以后改变的成本高；
 2. 缺少背景时会让未来读者意外；
 3. 存在真实取舍并选择了其中一种。
 
-使用仓库规定的 ADR 格式；没有仓库规则时使用 [通用 ADR 参考](adr-format.md)。
+同时把当前语义直接写入适用的 Architecture、Contract、Context、UI 或 Development 文档。使用仓库自己的决定治理；没有项目规则时使用[决定与当前权威路由](decision-routing.md)。不得创建数字 ADR。

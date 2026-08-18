@@ -10,7 +10,7 @@ last_updated: 2026-08-16
 # Runtime Launch and Verification v1
 
 本合同冻结 Product Runtime 的启动目的、静态 Installation 证据、执行期验证和用户状态投影。决策理由见
-[ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)，组件边界见
+[ADR-0192](../versions/v0.87/decisions.md#adr-0192)，组件边界见
 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)。
 
 ## 1. Launch purpose

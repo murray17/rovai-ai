@@ -1,5 +1,5 @@
 ---
-version: 3
+version: 4
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -61,7 +61,7 @@ that Runtime. The Runtime, model and permissions save atomically through the exi
 
 For any `light_ready` installation, expose Runtime default model plus only permissions described by the
 static Adapter schema. Supporting copy says login, model and capability verification happens on explicit
-check or the first real task. Do not offer explicit models before a verified catalog. TRAE uses the same model
+check or the real task's uniform Dispatch Preflight. Do not offer explicit models before a verified catalog. TRAE uses the same model
 catalog cache and Picker behavior as every other Runtime; its permission draft still defaults to the statically
 admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the existing compact switch pattern for
 `trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.

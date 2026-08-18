@@ -15,9 +15,9 @@ last_updated: 2026-08-13
 > Migration 77 与 Data Contract `v0.66 / 32` 由 v0.66 权威链拥有。
 
 本文把已确认的产品决定映射为可直接实施的模块、状态和验收边界。长期理由由
-[ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)、
-[ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)与
-[ADR-0167](../../adr/0167-seven-skill-official-inventory.md)分别拥有，完整 wire shape 由
+[ADR-0165](decisions.md#adr-0165)、
+[ADR-0166](decisions.md#adr-0166)与
+[ADR-0167](decisions.md#adr-0167)分别拥有，完整 wire shape 由
 [Camp Message Send v4](../../contracts/camp-message-send-v4.md)、
 [Current User Attention v1](../../contracts/current-user-attention-v1.md)、
 [Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)与

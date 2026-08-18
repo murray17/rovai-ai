@@ -34,7 +34,6 @@ export function compactRuntimeState(status: RuntimeUserStatus): CompactRuntimeSt
   if (
     status === 'checking'
     || status === 'unknown'
-    || status === 'installed_unverified'
     || status === 'not_qualified'
     || status === 'unsupported'
   ) return 'neutral'

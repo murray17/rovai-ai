@@ -235,7 +235,7 @@ type ProjectBinding = {
 - 静止 Camp 的删除在单个 SQLite 事务内移除 CampMember、Conversation/Message、CampMessage、Task/Dependency、CampTurn/AgentRun、Inbox、Approval、Action、证据关系、事件及其他 Camp 从属记录，最后删除 Camp。任一数据库步骤失败则整体回滚，不能留下半删除聚合。
 - Lumen 管理的附件 Blob 在引用删除后进入确定性 GC；仍被其他权威引用的去重 Blob 保留。Lumen 可以清理自己创建且只属于该 Camp 的内部 Git Ref，但不得删除 Repository、用户文件、普通 Branch、Worktree 或 Commit。外部 Adapter 的 Native Session 只解除本地绑定；是否能清理 Provider 自有历史不作为删除成功门禁。
 - 已成功删除的 `DeleteCamp` 命令结果可保留最小幂等记录，使相同 `commandId` 重试返回原结果；它不保留 Camp 内容，也不构成归档或回收站。
-- 该决策明确修订 v0.02 “普通删除实现为 ArchiveCamp”的历史方案；[ADR-0008](../../adr/0008-collaboration-v2.md) 已完整替代 ADR-0002，后续实现不得同时支持两套相反语义。
+- 该决策明确修订 v0.02 “普通删除实现为 ArchiveCamp”的历史方案；[ADR-0008](decisions.md#adr-0008) 已完整替代 ADR-0002，后续实现不得同时支持两套相反语义。
 
 ## 待逐项确认
 

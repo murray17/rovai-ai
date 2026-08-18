@@ -69,6 +69,10 @@ describe('first-run onboarding flow', () => {
       installation,
       windowsNotQualifiedAdmission()
     )).toBe(false)
+    expect(onboardingRuntimeCanContinue('ready', selection, {
+      ...readyAvailability(),
+      status: 'installed_unverified'
+    }, installation)).toBe(false)
   })
 })
 

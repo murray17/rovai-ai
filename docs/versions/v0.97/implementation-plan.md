@@ -29,7 +29,7 @@ last_updated: 2026-08-17
 ## Checkpoint 0：版本与长期文档
 
 - [x] 建立唯一 current v0.97，冻结 v0.96 historical，并更新前后版本链接；
-- [x] 接受 [ADR-0202](../../adr/0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md)；
+- [x] 接受 [ADR-0202](decisions.md#adr-0202)；
 - [x] 建立 [First-run Onboarding v1](../../contracts/first-run-onboarding-v1.md)与
   [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)；
 - [x] 更新 [首次训练 UI](../../ui/components/first-run-onboarding.md)及文档路由；
@@ -112,7 +112,7 @@ last_updated: 2026-08-17
 ## References
 
 - [v0.97 版本概览](README.md)
-- [ADR-0202](../../adr/0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md)
+- [ADR-0202](decisions.md#adr-0202)
 - [First-run Onboarding v1](../../contracts/first-run-onboarding-v1.md)
 - [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)
 - [首次训练 UI](../../ui/components/first-run-onboarding.md)

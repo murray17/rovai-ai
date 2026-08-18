@@ -16,7 +16,7 @@ last_updated: 2026-08-03
 >
 > 前置版本：[v0.31 Default Team Delivery Qualification](../v0.31/README.md)
 >
-> 跨版本决策：[ADR-0091](../../adr/0091-durable-member-calls-and-single-slot-a2a-resume.md)
+> 跨版本决策：[ADR-0091](decisions.md#adr-0091)
 >
 > 实施设计：[architecture.md](architecture.md)
 >

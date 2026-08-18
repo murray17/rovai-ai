@@ -153,6 +153,20 @@ impl DomainCommand for CancelCampTurnCommand {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CancelAgentRunCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
+    pub camp_id: String,
+    pub agent_run_id: String,
+    pub expected_version: i64,
+}
+
+impl sealed::Sealed for CancelAgentRunCommand {}
+impl DomainCommand for CancelAgentRunCommand {
+    const TYPE: &'static str = "agent_run.cancel";
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AcknowledgeAgentRunCancellationCommand {
     pub agent_run_id: String,
     pub expected_version: i64,
@@ -585,7 +599,169 @@ pub struct ExecutionRuntimeService {
     gateway: DomainCommandGateway,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordObservedRuntimeModelCommand {
+    pub agent_run_id: String,
+    pub execution_epoch: i64,
+    pub model_id: String,
+}
+
+impl sealed::Sealed for RecordObservedRuntimeModelCommand {}
+impl DomainCommand for RecordObservedRuntimeModelCommand {
+    const TYPE: &'static str = "agent_run.runtime_model.observe";
+}
+
 impl ExecutionRuntimeService {
+    pub fn record_observed_runtime_model(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<RecordObservedRuntimeModelCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(
+                &envelope.actor,
+                ActorRef::System { component_id }
+                    if component_id.starts_with("runtime-adapter:")
+            ) {
+                return Ok(rejected(
+                    "agent_run.runtime_model_adapter_required",
+                    "Runtime model observation requires a Runtime Adapter",
+                ));
+            }
+            let model_id = envelope.payload.model_id.trim();
+            if model_id.is_empty() || model_id.len() > 512 {
+                return Ok(rejected(
+                    "agent_run.runtime_model_invalid",
+                    "Observed Runtime model identifier is invalid",
+                ));
+            }
+            let target = transaction
+                .query_row(
+                    r#"
+                SELECT camp_turn.camp_id,
+                       json_extract(agent_run.runtime_model_selection_json, '$.source'),
+                       agent_run.runtime_observed_model_id,
+                       agent_run.cancel_requested_at
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.id = ?1
+                  AND agent_run.execution_epoch = ?2
+                "#,
+                    params![
+                        envelope.payload.agent_run_id,
+                        envelope.payload.execution_epoch
+                    ],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((camp_id, model_source, existing_model_id, cancel_requested_at)) = target
+            else {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.runtime_model_not_recorded",
+                    json!({ "changed": false, "reason": "run_or_epoch_missing" }),
+                    None,
+                ));
+            };
+            if envelope.camp_id.as_deref() != Some(camp_id.as_str()) {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if cancel_requested_at.is_some() {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.runtime_model_observation_fenced",
+                    json!({
+                        "agentRunId": envelope.payload.agent_run_id,
+                        "campId": camp_id,
+                        "changed": false,
+                        "reason": "cancellation_requested",
+                    }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
+            if model_source.as_deref() != Some("runtime_default") || existing_model_id.is_some() {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.runtime_model_not_recorded",
+                    json!({
+                        "agentRunId": envelope.payload.agent_run_id,
+                        "campId": camp_id,
+                        "changed": false,
+                        "reason": if existing_model_id.is_some() {
+                            "already_observed"
+                        } else {
+                            "explicit_model"
+                        },
+                    }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
+            let now = chrono::Utc::now().to_rfc3339();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET runtime_observed_model_id = ?3,
+                    version = version + 1,
+                    updated_at = ?4
+                WHERE id = ?1
+                  AND execution_epoch = ?2
+                  AND cancel_requested_at IS NULL
+                  AND runtime_observed_model_id IS NULL
+                  AND json_extract(runtime_model_selection_json, '$.source') = 'runtime_default'
+                "#,
+                params![
+                    envelope.payload.agent_run_id,
+                    envelope.payload.execution_epoch,
+                    model_id,
+                    now
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.runtime_model_observation_fenced",
+                    json!({
+                        "agentRunId": envelope.payload.agent_run_id,
+                        "campId": camp_id,
+                        "changed": false,
+                        "reason": "concurrent_change",
+                    }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.runtime_model_observed",
+                &camp_id,
+                ("agent_run", &envelope.payload.agent_run_id),
+                &envelope.actor,
+                Some(envelope.payload.execution_epoch),
+                &json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "executionEpoch": envelope.payload.execution_epoch,
+                    "modelId": model_id,
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                "agent_run.runtime_model_observed",
+                json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "campId": camp_id,
+                    "changed": true,
+                    "modelId": model_id,
+                }),
+                Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+            ))
+        })
+    }
+
     pub fn record_runtime_compatibility_digest(
         &self,
         database: &mut Database,
@@ -1945,6 +2121,149 @@ impl ExecutionRuntimeService {
                     "campTurnStatus": camp_turn_status,
                 }),
                 Some(entity_ref("camp_turn", &envelope.payload.camp_turn_id)),
+            ))
+        })
+    }
+
+    pub fn request_agent_run_cancellation(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<CancelAgentRunCommand>,
+    ) -> Result<CommandExecution> {
+        self.gateway.execute(database, envelope, |transaction| {
+            if !matches!(envelope.actor, ActorRef::User { .. }) {
+                return Ok(rejected(
+                    "agent_run.cancel_user_required",
+                    "Only a User can stop an AgentRun",
+                ));
+            }
+            let target = transaction
+                .query_row(
+                    r#"
+                    SELECT camp_turn.camp_id, agent_run.camp_turn_id,
+                           agent_run.status, agent_run.wait_reason,
+                           agent_run.version, agent_run.execution_epoch,
+                           agent_run.cancel_requested_at,
+                           camp_turn.cancel_requested_at
+                    FROM agent_run
+                    JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                    WHERE agent_run.id = ?1
+                    "#,
+                    [&envelope.payload.agent_run_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                            row.get::<_, i64>(4)?,
+                            row.get::<_, i64>(5)?,
+                            row.get::<_, Option<String>>(6)?,
+                            row.get::<_, Option<String>>(7)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let Some((
+                camp_id,
+                camp_turn_id,
+                status,
+                wait_reason,
+                version,
+                execution_epoch,
+                cancel_requested_at,
+                turn_cancel_requested_at,
+            )) = target
+            else {
+                return Ok(rejected("agent_run.not_found", "AgentRun does not exist"));
+            };
+            if envelope.camp_id.as_deref() != Some(camp_id.as_str())
+                || envelope.payload.camp_id != camp_id
+            {
+                return Ok(rejected(
+                    "agent_run.camp_mismatch",
+                    "AgentRun is outside the Camp",
+                ));
+            }
+            if matches!(status.as_str(), "succeeded" | "failed" | "cancelled") {
+                return Ok(CommandHandlerResult::applied(
+                    "agent_run.already_terminal",
+                    json!({
+                        "agentRunId": envelope.payload.agent_run_id,
+                        "status": status,
+                    }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
+            if cancel_requested_at.is_some() {
+                return Ok(CommandHandlerResult::accepted(
+                    "agent_run.cancellation_already_requested",
+                    json!({ "agentRunId": envelope.payload.agent_run_id }),
+                    Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
+                ));
+            }
+            if version != envelope.payload.expected_version {
+                return Ok(CommandHandlerResult::rejected(
+                    "command.version_conflict",
+                    json!({ "currentVersion": version }),
+                ));
+            }
+            if status == "waiting" && wait_reason.as_deref() == Some("recovery_blocked") {
+                return Ok(rejected(
+                    "agent_run.recovery_blocker_requires_resolution",
+                    "Recovery-blocked AgentRuns must use their dedicated resolution action",
+                ));
+            }
+            if turn_cancel_requested_at.is_some() {
+                return Ok(rejected(
+                    "agent_run.turn_cancellation_in_progress",
+                    "The owning CampTurn is already stopping",
+                ));
+            }
+
+            let now = chrono::Utc::now().to_rfc3339();
+            let updated = transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET cancel_requested_at = ?2,
+                    cancel_reason_code = 'user_requested_agent_run_stop',
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                  AND status IN ('queued', 'running', 'waiting')
+                  AND version = ?3
+                  AND cancel_requested_at IS NULL
+                "#,
+                params![
+                    envelope.payload.agent_run_id,
+                    now,
+                    envelope.payload.expected_version,
+                ],
+            )?;
+            if updated != 1 {
+                return Ok(rejected(
+                    "agent_run.cancellation_fenced",
+                    "AgentRun changed before cancellation was requested",
+                ));
+            }
+            append_domain_event(
+                transaction,
+                "agent_run.cancel_requested",
+                &camp_id,
+                ("agent_run", &envelope.payload.agent_run_id),
+                &envelope.actor,
+                Some(execution_epoch),
+                &json!({
+                    "campTurnId": camp_turn_id,
+                    "reasonCode": "user_requested_agent_run_stop",
+                }),
+            )?;
+            Ok(CommandHandlerResult::accepted(
+                "agent_run.cancellation_requested",
+                json!({
+                    "agentRunId": envelope.payload.agent_run_id,
+                    "campTurnId": camp_turn_id,
+                }),
+                Some(entity_ref("agent_run", &envelope.payload.agent_run_id)),
             ))
         })
     }
@@ -5887,6 +6206,227 @@ mod tests {
         assert_eq!(updated, 1);
     }
 
+    #[test]
+    fn observed_runtime_model_is_default_only_epoch_fenced_and_write_once() {
+        let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        let runtime = ExecutionRuntimeService::default();
+        let initial_version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET runtime_model_selection_json = ?2 WHERE id = ?1",
+                params![agent_run_id, json!({"source": "explicit"}).to_string()],
+            )
+            .unwrap();
+        let fixed = runtime
+            .record_observed_runtime_model(
+                &mut database,
+                &adapter_envelope(
+                    "runtime-model-fixed",
+                    &camp_id,
+                    RecordObservedRuntimeModelCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        execution_epoch,
+                        model_id: "fixed-model-must-not-project".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(fixed.result.payload["changed"], false);
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET runtime_model_selection_json = ?2 WHERE id = ?1",
+                params![
+                    agent_run_id,
+                    json!({"source": "runtime_default"}).to_string()
+                ],
+            )
+            .unwrap();
+        let wrong_epoch = runtime
+            .record_observed_runtime_model(
+                &mut database,
+                &adapter_envelope(
+                    "runtime-model-wrong-epoch",
+                    &camp_id,
+                    RecordObservedRuntimeModelCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        execution_epoch: execution_epoch + 1,
+                        model_id: "wrong-epoch".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(wrong_epoch.result.payload["changed"], false);
+        let first = runtime
+            .record_observed_runtime_model(
+                &mut database,
+                &adapter_envelope(
+                    "runtime-model-first",
+                    &camp_id,
+                    RecordObservedRuntimeModelCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        execution_epoch,
+                        model_id: "  gpt-5.6  ".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(first.result.payload["changed"], true);
+        let replay = runtime
+            .record_observed_runtime_model(
+                &mut database,
+                &adapter_envelope(
+                    "runtime-model-first",
+                    &camp_id,
+                    RecordObservedRuntimeModelCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        execution_epoch,
+                        model_id: "  gpt-5.6  ".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert!(replay.replayed);
+        let later = runtime
+            .record_observed_runtime_model(
+                &mut database,
+                &adapter_envelope(
+                    "runtime-model-later",
+                    &camp_id,
+                    RecordObservedRuntimeModelCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        execution_epoch,
+                        model_id: "later-model-must-not-overwrite".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(later.result.payload["changed"], false);
+
+        let state: (Option<String>, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT runtime_observed_model_id, version,
+                       (SELECT COUNT(*) FROM event_log
+                        WHERE event_type = 'agent_run.runtime_model_observed'
+                          AND entity_id = ?1)
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state.0.as_deref(), Some("gpt-5.6"));
+        assert_eq!(state.1, initial_version + 1);
+        assert_eq!(state.2, 1);
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let run = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap();
+        assert_eq!(
+            run.runtime_model
+                .as_ref()
+                .and_then(|model| model.model_id.as_deref()),
+            Some("gpt-5.6")
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn observed_runtime_model_respects_run_cancellation_fence() {
+        let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        let runtime = ExecutionRuntimeService::default();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET runtime_model_selection_json = ?2 WHERE id = ?1",
+                params![
+                    agent_run_id,
+                    json!({"source": "runtime_default"}).to_string()
+                ],
+            )
+            .unwrap();
+        let version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        runtime
+            .request_agent_run_cancellation(
+                &mut database,
+                &user_envelope(
+                    "cancel-before-model-observation",
+                    Some(&camp_id),
+                    CancelAgentRunCommand {
+                        camp_id: camp_id.clone(),
+                        agent_run_id: agent_run_id.clone(),
+                        expected_version: version,
+                    },
+                ),
+            )
+            .unwrap();
+
+        let observation = runtime
+            .record_observed_runtime_model(
+                &mut database,
+                &adapter_envelope(
+                    "runtime-model-after-cancel",
+                    &camp_id,
+                    RecordObservedRuntimeModelCommand {
+                        agent_run_id: agent_run_id.clone(),
+                        execution_epoch,
+                        model_id: "must-not-persist".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(observation.result.payload["changed"], false);
+        assert_eq!(
+            observation.result.code,
+            "agent_run.runtime_model_observation_fenced"
+        );
+        let state: (Option<String>, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT runtime_observed_model_id,
+                       (SELECT COUNT(*) FROM event_log
+                        WHERE event_type = 'agent_run.runtime_model_observed'
+                          AND entity_id = ?1)
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(state, (None, 0));
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     fn insert_test_runtime_input(
         database: &Database,
         agent_run_id: &str,
@@ -7689,6 +8229,268 @@ mod tests {
             acknowledged.result.payload["reasonCode"],
             "execution_budget_exhausted"
         );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn user_agent_run_cancellation_is_run_local_and_stably_idempotent() {
+        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let collaboration = CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "run-cancel-create-camp",
+                    None,
+                    CreateCampCommand::for_test_with_members(
+                        workspace.to_string_lossy().to_string(),
+                        &["agent_2", "agent_1"],
+                        "agent_2",
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        for agent_id in ["agent_2", "agent_1"] {
+            collaboration
+                .add_camp_member(
+                    &mut database,
+                    &user_envelope(
+                        &format!("run-cancel-add-{agent_id}"),
+                        Some(&camp_id),
+                        AddCampMemberCommand {
+                            camp_id: camp_id.clone(),
+                            agent_id: agent_id.to_string(),
+                            capability_overrides: json!({}),
+                        },
+                    ),
+                )
+                .unwrap();
+        }
+        let sent = collaboration
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "run-cancel-send",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "并行处理两项职责".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Explicit {
+                            agent_ids: vec!["agent_2".to_string(), "agent_1".to_string()],
+                        },
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "验证仅停止目标运行".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                ),
+            )
+            .unwrap();
+        let camp_turn_id = sent.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let run_ids = sent.result.payload["agentRunIds"].as_array().unwrap();
+        assert_eq!(run_ids.len(), 2);
+        let target_run_id = run_ids[0].as_str().unwrap().to_string();
+        let sibling_run_id = run_ids[1].as_str().unwrap().to_string();
+        let target_version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&target_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let turn_before: (String, i64, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT status, version, cancel_requested_at FROM camp_turn WHERE id = ?1",
+                [&camp_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        let camp_messages_before: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let runtime = ExecutionRuntimeService::default();
+        let system_attempt = runtime
+            .request_agent_run_cancellation(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: "run-cancel-system-attempt".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "test-system".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CancelAgentRunCommand {
+                        camp_id: camp_id.clone(),
+                        agent_run_id: target_run_id.clone(),
+                        expected_version: target_version,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(system_attempt.result.code, "agent_run.cancel_user_required");
+
+        let requested = runtime
+            .request_agent_run_cancellation(
+                &mut database,
+                &user_envelope(
+                    "run-cancel-request",
+                    Some(&camp_id),
+                    CancelAgentRunCommand {
+                        camp_id: camp_id.clone(),
+                        agent_run_id: target_run_id.clone(),
+                        expected_version: target_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(requested.result.status, CommandResultStatus::Accepted);
+        assert_eq!(requested.result.code, "agent_run.cancellation_requested");
+        let repeated_with_stale_version = runtime
+            .request_agent_run_cancellation(
+                &mut database,
+                &user_envelope(
+                    "run-cancel-repeat",
+                    Some(&camp_id),
+                    CancelAgentRunCommand {
+                        camp_id: camp_id.clone(),
+                        agent_run_id: target_run_id.clone(),
+                        expected_version: target_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            repeated_with_stale_version.result.code,
+            "agent_run.cancellation_already_requested"
+        );
+
+        let run_state: (Option<String>, Option<String>, Option<String>) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT cancel_reason_code FROM agent_run WHERE id = ?1),
+                    (SELECT cancel_requested_at FROM agent_run WHERE id = ?2),
+                    (SELECT cancel_reason_code FROM agent_run WHERE id = ?2)
+                "#,
+                params![target_run_id, sibling_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            run_state.0.as_deref(),
+            Some("user_requested_agent_run_stop")
+        );
+        assert!(run_state.1.is_none() && run_state.2.is_none());
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let projected_target = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == target_run_id)
+            .unwrap();
+        assert!(projected_target.cancel_requested_at.is_some());
+        assert_eq!(
+            projected_target.cancel_reason_code.as_deref(),
+            Some("user_requested_agent_run_stop")
+        );
+        assert!(projected_target.cancel_acknowledged_at.is_none());
+        let sibling_version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&sibling_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'waiting', wait_reason = 'recovery_blocked',
+                    updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![sibling_run_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let blocked = runtime
+            .request_agent_run_cancellation(
+                &mut database,
+                &user_envelope(
+                    "run-cancel-recovery-blocked",
+                    Some(&camp_id),
+                    CancelAgentRunCommand {
+                        camp_id: camp_id.clone(),
+                        agent_run_id: sibling_run_id.clone(),
+                        expected_version: sibling_version,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            blocked.result.code,
+            "agent_run.recovery_blocker_requires_resolution"
+        );
+        let sibling_cancel_requested: Option<String> = database
+            .connection()
+            .query_row(
+                "SELECT cancel_requested_at FROM agent_run WHERE id = ?1",
+                [&sibling_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(sibling_cancel_requested.is_none());
+        let turn_after: (String, i64, Option<String>) = database
+            .connection()
+            .query_row(
+                "SELECT status, version, cancel_requested_at FROM camp_turn WHERE id = ?1",
+                [&camp_turn_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(turn_after, turn_before);
+        let public_state: (i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1),
+                    (SELECT COUNT(*) FROM event_log
+                     WHERE event_type = 'agent_run.cancel_requested'
+                       AND entity_id = ?2)
+                "#,
+                params![camp_id, target_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(public_state, (camp_messages_before, 1));
+        let candidates = runtime.list_cancellation_candidates(&database, 10).unwrap();
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].agent_run_id, target_run_id);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

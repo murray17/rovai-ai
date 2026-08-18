@@ -39,7 +39,7 @@ camp.read
 
 ## 并行跨版本身份修正
 
-[ADR-0110](../../adr/0110-internal-agent-uuid-and-monotonic-short-agent-id.md) 是在 v0.40 期间
+[ADR-0110](decisions.md#adr-0110) 是在 v0.40 期间
 单独确认并授权实施的跨版本修正：AgentProfile 使用内部 UUID 主键，对模型和工具只投影
 单调递增且不复用的短 Agent ID，并始终同时提供 Name、Team Role 与 Professional
 Responsibilities 作为选择语义。该修正不改变下述 Camp 历史检索范围，也不代表其设计门禁

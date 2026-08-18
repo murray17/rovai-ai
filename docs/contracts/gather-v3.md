@@ -102,4 +102,4 @@ inputs only.
 - [v1.07 model-context revision 1](../versions/v1.07/model-context-change-a2a-public-only.md)
 - [Gather v2 (accepted predecessor)](gather-v2.md)
 - [ContextManifest Evidence v17](context-manifest-evidence-v17.md)
-- [ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)
+- [ADR-0218](../versions/v1.07/decisions.md#adr-0218)

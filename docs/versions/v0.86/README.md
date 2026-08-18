@@ -72,13 +72,13 @@ Judge 保持分离；Team/Solo 效果与效率仍只由 paired counterfactual pr
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.85 冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.86。 |
-| ADR | 确认无需更新 | 实现遵循 [ADR-0171](../../adr/0171-opportunity-based-tool-interaction-measurement.md) 的 closed Adapter/Opportunity/Judge authority，未改变长期决定。 |
+| ADR | 确认无需更新 | 实现遵循 [ADR-0171](../v0.68/decisions.md#adr-0171) 的 closed Adapter/Opportunity/Judge authority，未改变长期决定。 |
 | Contracts | 已更新 | [Tool Interaction Measurement v2](../../contracts/tool-interaction-measurement-v2.md)替代 v1，冻结 runtime compatibility、Memory v3/readback、Task 与 current Adapter wire。 |
 | Architecture | 已更新 | [Benchmark Protocol](../../architecture/benchmark-protocol.md)记录 v2 compatibility gate、Memory effective-state 边界与 A2A reply/Task 候选关系。 |
 | UI | 确认无需更新 | 本版本没有 Renderer、交互或视觉表面变化。 |
 | Runtime Activity | 确认无需更新 | Runtime Activity canonical mapping 未变化；新增的是 Core-owned Qualification Evidence projection。 |
 | Runtime compatibility | 确认无需更新 | 不改变 Product Runtime 能力结论；Pack 精确绑定 v12/十四项 catalog 所属 Core health fingerprint。 |
-| Documentation routing | 已更新 | [文档导航](../../README.md)、[合同索引](../../contracts/README.md)与 [ADR current map](../../adr/CURRENT.md)路由到 v2。 |
+| Documentation routing | 已更新 | [文档导航](../../README.md)、[合同索引](../../contracts/README.md)与 [当前决定导航](../../decisions/CURRENT.md)路由到 v2。 |
 | Root README | 确认无需更新 | 项目常青产品定位和公开支持范围不因 Benchmark 内部测量升级而变化。 |
 
 ## References
@@ -86,5 +86,5 @@ Judge 保持分离；Team/Solo 效果与效率仍只由 paired counterfactual pr
 - [实施与验收计划](implementation-plan.md)
 - [Tool Interaction Measurement v2](../../contracts/tool-interaction-measurement-v2.md)
 - [Benchmark Protocol 架构](../../architecture/benchmark-protocol.md)
-- [ADR-0171](../../adr/0171-opportunity-based-tool-interaction-measurement.md)
-- [ADR-0172](../../adr/0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md)
+- [ADR-0171](../v0.68/decisions.md#adr-0171)
+- [ADR-0172](../v0.68/decisions.md#adr-0172)

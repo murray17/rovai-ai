@@ -39,7 +39,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - 长期记忆跨 Camp 延续，但不得借来源引用扩大原对象的可见权限。
 
 跨版本规范见
-[ADR-0019](../../adr/0019-application-global-memory-ownership.md)。
+[ADR-0019](decisions.md#adr-0019)。
 
 ### MEM-02 用户独占正式写入权威
 
@@ -53,7 +53,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   Projection 时可以观察到已提交的新状态。
 
 跨版本规范见
-[ADR-0032](../../adr/0032-user-authorized-live-memory-projection.md)。
+[ADR-0032](decisions.md#adr-0032)。
 
 ### MEM-03 原子 Memory 与不可变 Revision
 
@@ -67,7 +67,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - `current.md` 一类按作用域组织的文件只能是可重建只读投影。
 
 跨版本规范见
-[ADR-0021](../../adr/0021-atomic-memory-and-immutable-revisions.md)。
+[ADR-0021](decisions.md#adr-0021)。
 
 ### MEM-04 Memory Scope 不可变
 
@@ -80,7 +80,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - 目标作用域必须独立满足可见性规则；派生引用不能把来源权限带入新作用域。
 
 跨版本规范见
-[ADR-0022](../../adr/0022-immutable-memory-scope.md)。
+[ADR-0022](decisions.md#adr-0022)。
 
 ### MEM-05 Relationship Direction 定义 Agent 适用视图
 
@@ -95,7 +95,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - Directed Memory 仍不得记录人格评价、能力评分或对另一位伙伴的秘密观察档案。
 
 跨版本规范见
-[ADR-0035](../../adr/0035-user-transparent-agent-applicable-relationship-memory.md)。
+[ADR-0035](decisions.md#adr-0035)。
 
 ### MEM-06 封闭且不可变的 Memory Kind
 
@@ -108,7 +108,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   Summary、TODO、当前计划及秘密凭据都不属于 Memory。
 
 跨版本规范见
-[ADR-0024](../../adr/0024-closed-memory-kinds.md)。
+[ADR-0024](decisions.md#adr-0024)。
 
 ### MEM-07 Proposal 保存最小提案溯源
 
@@ -124,7 +124,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - Proposal 溯源只用于管理和审计，不进入 Agent 可读 Memory Projection。
 
 跨版本规范见
-[ADR-0025](../../adr/0025-proposal-scoped-memory-provenance.md)。
+[ADR-0025](decisions.md#adr-0025)。
 
 ### MEM-08 Supersession 是关系而非生命周期状态
 
@@ -138,7 +138,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - `forgotten` 的具体清除和审计残留语义由 MEM-09 定义。
 
 跨版本规范见
-[ADR-0026](../../adr/0026-explicit-memory-supersession.md)。
+[ADR-0026](decisions.md#adr-0026)。
 
 ### MEM-09 Forget 清除 Memory Library 内容
 
@@ -152,7 +152,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - 需要保留正文但停止沿用时使用 retire，而不是 forget。
 
 跨版本规范见
-[ADR-0027](../../adr/0027-memory-domain-forgetting.md)。
+[ADR-0027](decisions.md#adr-0027)。
 
 ### MEM-10 立即生效与建议复核
 
@@ -166,7 +166,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - Review 到期不改变 active 状态，也不自动 retire、forget 或创建 Revision。
 
 跨版本规范见
-[ADR-0033](../../adr/0033-advisory-memory-review-v2.md)。
+[ADR-0033](decisions.md#adr-0033)。
 
 ### MEM-11 Retire 有限可逆
 
@@ -178,7 +178,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - Review due 不阻止重新启用，也不会因重新启用自动清除。
 
 跨版本规范见
-[ADR-0029](../../adr/0029-bounded-memory-reactivation.md)。
+[ADR-0029](decisions.md#adr-0029)。
 
 ### MEM-12 Proposal 使用三态生命周期
 
@@ -204,7 +204,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   复制的快照。
 
 跨版本规范见
-[ADR-0032](../../adr/0032-user-authorized-live-memory-projection.md)。
+[ADR-0032](decisions.md#adr-0032)。
 
 ### MEM-14 短 Memory Guide 与原生按需读取
 
@@ -220,7 +220,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - Runtime 无可靠文件读取能力或权限时明确显示不可用，不回退为全文 prompt 注入。
 
 跨版本规范见
-[ADR-0032](../../adr/0032-user-authorized-live-memory-projection.md)。
+[ADR-0032](decisions.md#adr-0032)。
 
 ### MEM-15 Agent 专属 Relationship Projection Directory
 
@@ -236,7 +236,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   不建立 per-Run 目录副本。
 
 跨版本规范见
-[ADR-0035](../../adr/0035-user-transparent-agent-applicable-relationship-memory.md)。
+[ADR-0035](decisions.md#adr-0035)。
 
 ### MEM-16 Agent 投影条目只保留修订所需字段
 
@@ -274,7 +274,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   范围约束。
 
 跨版本规范见
-[ADR-0036](../../adr/0036-agent-bounded-memory-proposal-scope.md)。
+[ADR-0036](decisions.md#adr-0036)。
 
 ### MEM-19 Relationship add Proposal 不能替他方承担义务
 
@@ -288,7 +288,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   的另一位当前成员，不信任模型传入 actor ID。
 
 跨版本规范见
-[ADR-0037](../../adr/0037-actor-bounded-relationship-proposal-direction.md)。
+[ADR-0037](decisions.md#adr-0037)。
 
 ### MEM-20 add Proposal 使用最小扁平参数
 
@@ -326,7 +326,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - 这不增加第四种 Proposal status，也不会把未确认冲突写入正式 Memory。
 
 跨版本规范见
-[ADR-0038](../../adr/0038-memory-proposal-staleness.md)。
+[ADR-0038](decisions.md#adr-0038)。
 
 ### MEM-23 Proposal Tool Receipt 明确 Memory 未生效
 
@@ -353,7 +353,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   执行任何正式 Memory 管理；用户命令不依赖 Agent Capability。
 
 跨版本规范见
-[ADR-0039](../../adr/0039-memory-proposal-capability.md)。
+[ADR-0039](decisions.md#adr-0039)。
 
 ### MEM-25 每个 AgentRun 最多保存四条 Proposal
 
@@ -458,7 +458,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - Terminal 非正文元数据不按时间自动删除；永久事件与 receipt 仍不得复制候选正文。
 
 跨版本规范见
-[ADR-0040](../../adr/0040-terminal-memory-proposal-retention.md)。
+[ADR-0040](decisions.md#adr-0040)。
 
 ### MEM-34 Proposal 来源是不会级联的弱引用
 
@@ -486,7 +486,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   充当批量 Memory 命令。
 
 跨版本规范见
-[ADR-0041](../../adr/0041-agent-profile-status-memory-independence.md)。
+[ADR-0041](decisions.md#adr-0041)。
 
 ### MEM-36 Projection 单文件安全上限为 256 KiB
 
@@ -515,7 +515,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - 权威 Memory 命令不因 projector 或 sentinel 写入失败回滚。
 
 跨版本规范见
-[ADR-0042](../../adr/0042-fail-closed-memory-projection.md)。
+[ADR-0042](decisions.md#adr-0042)。
 
 ### MEM-38 不生成用户完整 pair Markdown
 
@@ -541,7 +541,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   账户、磁盘和私有 `userData` 边界保护；不承诺隔离同一系统用户权限下的进程。
 
 跨版本规范见
-[ADR-0043](../../adr/0043-memory-secret-filter.md)。
+[ADR-0043](decisions.md#adr-0043)。
 
 ### MEM-40 Proposal 必须逐条由用户确认
 
@@ -556,7 +556,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
 - 会话“忽略”只关闭当前提示；Proposal 继续进入管理队列。
 
 跨版本规范见
-[ADR-0044](../../adr/0044-per-proposal-user-confirmation.md)。
+[ADR-0044](decisions.md#adr-0044)。
 
 ### MEM-41 Memory Store 使用五类规范化 SQLite 表
 
@@ -574,7 +574,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   推断历史 Conversation 来回填。
 
 跨版本规范见
-[ADR-0045](../../adr/0045-normalized-sqlite-memory-store.md)。
+[ADR-0045](decisions.md#adr-0045)。
 
 ### MEM-42 统一提供共同记忆维护 Skill
 
@@ -593,7 +593,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   隐式替代提示，也不阻塞正常 AgentRun。
 
 跨版本规范见
-[ADR-0046](../../adr/0046-memory-stewardship-bundled-skill.md)。
+[ADR-0046](decisions.md#adr-0046)。
 
 ### MEM-43 只提供用户主动导出，不新增 Memory 专属备份或同步
 
@@ -607,7 +607,7 @@ AgentProfile 身份跨 Camp 延续，同时保持可见、可审计、可修订�
   但任何格式都不得包含已 forgotten 的正文。
 
 跨版本规范见
-[ADR-0047](../../adr/0047-user-initiated-memory-export-boundary.md)。
+[ADR-0047](decisions.md#adr-0047)。
 
 ## 当前版本状态
 

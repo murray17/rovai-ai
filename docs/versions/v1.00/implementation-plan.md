@@ -10,7 +10,7 @@ last_updated: 2026-08-17
 
 ## 计划状态与使用方式
 
-本计划实现 [ADR-0206](../../adr/0206-user-confirmed-force-camp-deletion.md)与
+本计划实现 [ADR-0206](decisions.md#adr-0206)与
 [Camp Permanent Deletion v1](../../contracts/camp-permanent-deletion-v1.md)。修改 Rust 测试遵守
 [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)；本地 App 验收
 遵守[本地 Runtime 工作流](../../development/local-workflow.md)。
@@ -69,5 +69,5 @@ last_updated: 2026-08-17
 ## References
 
 - [v1.00 版本概览](README.md)
-- [ADR-0206](../../adr/0206-user-confirmed-force-camp-deletion.md)
+- [ADR-0206](decisions.md#adr-0206)
 - [Camp Permanent Deletion v1](../../contracts/camp-permanent-deletion-v1.md)

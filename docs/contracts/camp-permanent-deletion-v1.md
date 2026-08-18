@@ -81,6 +81,6 @@ local pagination/cache and navigates an active deleted Camp to the new-conversat
 
 ## References
 
-- [ADR-0206](../adr/0206-user-confirmed-force-camp-deletion.md)
-- [ADR-0058](../adr/0058-collaboration-v4-presence-aware-admission.md)
-- [ADR-0123](../adr/0123-exclusive-agentrun-runtime-fleet.md)
+- [ADR-0206](../versions/v1.00/decisions.md#adr-0206)
+- [ADR-0058](../versions/v0.15/decisions.md#adr-0058)
+- [ADR-0123](../versions/v0.41/decisions.md#adr-0123)

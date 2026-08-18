@@ -89,7 +89,7 @@ candidate 迁移或过渡状态；只清理 Memory domain，保留协作、成�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.77 切换为 historical；v0.78 在交付时成为 current，后由 v0.79 冻结为 historical；本概览与[实施计划](implementation-plan.md)保留完成证据 |
-| ADR | 已更新 | [ADR-0186](../../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)完整替代 ADR-0183，冻结 complete View、copyable target、capacity 与 clean break |
+| ADR | 已更新 | [ADR-0186](decisions.md#adr-0186)完整替代 ADR-0183，冻结 complete View、copyable target、capacity 与 clean break |
 | Contracts | 已更新 | 新增 [Memory Capture v3](../../contracts/memory-capture-v3.md)和[Built-in Tool Transport v11](../../contracts/builtin-tool-transport-v11.md)，v2/v10 转 historical 入口 |
 | Architecture | 已更新 | [Online Memory Capture](../../architecture/online-memory-capture.md)与[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)切换到 View/target/v11 组件边界 |
 | UI | 确认无需更新 | 本版本没有 Renderer surface；Memory View 是 Agent CLI operation，用户 Hearth Review 与治理 UI 不变 |
@@ -101,7 +101,7 @@ candidate 迁移或过渡状态；只清理 Memory domain，保留协作、成�
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0186: Complete Exact-Scope Memory View](../../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)
+- [ADR-0186: Complete Exact-Scope Memory View](decisions.md#adr-0186)
 - [Memory Capture v3](../../contracts/memory-capture-v3.md)
 - [Built-in Tool Transport v11](../../contracts/builtin-tool-transport-v11.md)
 - [Online Memory Capture architecture](../../architecture/online-memory-capture.md)

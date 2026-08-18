@@ -57,4 +57,4 @@ an incompatible pre-release store is quarantined rather than mapped.
 - [Camp Identity v1](camp-identity-v1.md)
 - [Camp History Retrieval v3](camp-history-v3.md)
 - [ContextManifest Evidence v18](context-manifest-evidence-v18.md)
-- [ADR-0219](../adr/0219-single-namespaced-camp-identity.md)
+- [ADR-0219 的迁移后决定正文](../versions/v1.10/decisions.md#adr-0219)

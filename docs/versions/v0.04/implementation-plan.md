@@ -12,7 +12,7 @@ last_updated: 2026-07-22
 >
 > 版本范围：[README.md](README.md)
 >
-> 跨版本约束：[ADR-0008](../../adr/0008-collaboration-v2.md)
+> 跨版本约束：[ADR-0008](decisions.md#adr-0008)
 >
 > 文档规则：[文档导航](../../README.md)
 

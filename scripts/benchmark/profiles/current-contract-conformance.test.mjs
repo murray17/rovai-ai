@@ -10,9 +10,9 @@ import {
 
 test('current contract profile is deterministic, offline, and covers every requested criterion', async () => {
   assert.equal(CURRENT_CONTRACT_PROFILE.id, 'current-contract-conformance')
-  assert.equal(CURRENT_CONTRACT_PROFILE.version, '1.12.0')
-  assert.equal(CURRENT_CONTRACT_PROFILE.suite.version, '1.12.0')
-  assert.deepEqual(CURRENT_CONTRACT_DATA_STORE, { version: 'v1.11', projectionSchemaVersion: 51 })
+  assert.equal(CURRENT_CONTRACT_PROFILE.version, '1.14.0')
+  assert.equal(CURRENT_CONTRACT_PROFILE.suite.version, '1.14.0')
+  assert.deepEqual(CURRENT_CONTRACT_DATA_STORE, { version: 'v1.14', projectionSchemaVersion: 52 })
   assert.equal(CURRENT_CONTRACT_CRITERIA.length, 15)
   assert.equal(CURRENT_CONTRACT_PROFILE.suite.cases.length, CURRENT_CONTRACT_CRITERIA.length)
   assert.equal(CURRENT_CONTRACT_PROFILE.publicationPolicy.publishOutcomeRate, false)

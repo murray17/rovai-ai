@@ -13,37 +13,37 @@ last_updated: 2026-07-25
 > 版本范围：[README.md](README.md)
 >
 > 已确认跨版本边界：
-> [ADR-0019](../../adr/0019-application-global-memory-ownership.md)、
-> [ADR-0021](../../adr/0021-atomic-memory-and-immutable-revisions.md)、
-> [ADR-0022](../../adr/0022-immutable-memory-scope.md)、
-> [ADR-0024](../../adr/0024-closed-memory-kinds.md)、
-> [ADR-0025](../../adr/0025-proposal-scoped-memory-provenance.md)、
-> [ADR-0026](../../adr/0026-explicit-memory-supersession.md)、
-> [ADR-0027](../../adr/0027-memory-domain-forgetting.md)、
-> [ADR-0029](../../adr/0029-bounded-memory-reactivation.md)、
-> [ADR-0032](../../adr/0032-user-authorized-live-memory-projection.md)、
-> [ADR-0033](../../adr/0033-advisory-memory-review-v2.md)、
-> [ADR-0035](../../adr/0035-user-transparent-agent-applicable-relationship-memory.md)、
-> [ADR-0036](../../adr/0036-agent-bounded-memory-proposal-scope.md)、
-> [ADR-0037](../../adr/0037-actor-bounded-relationship-proposal-direction.md)、
-> [ADR-0038](../../adr/0038-memory-proposal-staleness.md)、
-> [ADR-0039](../../adr/0039-memory-proposal-capability.md)、
-> [ADR-0040](../../adr/0040-terminal-memory-proposal-retention.md)、
-> [ADR-0041](../../adr/0041-agent-profile-status-memory-independence.md)、
-> [ADR-0042](../../adr/0042-fail-closed-memory-projection.md)、
-> [ADR-0043](../../adr/0043-memory-secret-filter.md)、
-> [ADR-0044](../../adr/0044-per-proposal-user-confirmation.md)、
-> [ADR-0045](../../adr/0045-normalized-sqlite-memory-store.md)、
-> [ADR-0046](../../adr/0046-memory-stewardship-bundled-skill.md)、
-> [ADR-0047](../../adr/0047-user-initiated-memory-export-boundary.md)
+> [ADR-0019](decisions.md#adr-0019)、
+> [ADR-0021](decisions.md#adr-0021)、
+> [ADR-0022](decisions.md#adr-0022)、
+> [ADR-0024](decisions.md#adr-0024)、
+> [ADR-0025](decisions.md#adr-0025)、
+> [ADR-0026](decisions.md#adr-0026)、
+> [ADR-0027](decisions.md#adr-0027)、
+> [ADR-0029](decisions.md#adr-0029)、
+> [ADR-0032](decisions.md#adr-0032)、
+> [ADR-0033](decisions.md#adr-0033)、
+> [ADR-0035](decisions.md#adr-0035)、
+> [ADR-0036](decisions.md#adr-0036)、
+> [ADR-0037](decisions.md#adr-0037)、
+> [ADR-0038](decisions.md#adr-0038)、
+> [ADR-0039](decisions.md#adr-0039)、
+> [ADR-0040](decisions.md#adr-0040)、
+> [ADR-0041](decisions.md#adr-0041)、
+> [ADR-0042](decisions.md#adr-0042)、
+> [ADR-0043](decisions.md#adr-0043)、
+> [ADR-0044](decisions.md#adr-0044)、
+> [ADR-0045](decisions.md#adr-0045)、
+> [ADR-0046](decisions.md#adr-0046)、
+> [ADR-0047](decisions.md#adr-0047)
 >
 > 相关现行约束：
-> [ADR-0001](../../adr/0001-core-transaction.md)、
-> [ADR-0009](../../adr/0009-reproducible-context-delivery.md)、
-> [ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)、
-> [ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md)、
-> [ADR-0015](../../adr/0015-action-safety-v2.md)、
-> [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md)
+> [ADR-0001](../v0.02/decisions.md#adr-0001)、
+> [ADR-0009](../v0.05/decisions.md#adr-0009)、
+> [ADR-0013](../v0.06/decisions.md#adr-0013)、
+> [ADR-0014](../v0.06/decisions.md#adr-0014)、
+> [ADR-0015](../v0.06/decisions.md#adr-0015)、
+> [ADR-0016](../v0.06/decisions.md#adr-0016)
 
 ## 1. 已确认的领域边界
 

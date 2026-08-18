@@ -13,7 +13,7 @@ last_updated: 2026-07-23
 >
 > 版本范围：[README.md](README.md)
 >
-> 跨版本约束：[ADR-0009](../../adr/0009-reproducible-context-delivery.md)、[ADR-0011](../../adr/0011-stable-team-tool-gateway.md)
+> 跨版本约束：[ADR-0009](decisions.md#adr-0009)、[ADR-0011](decisions.md#adr-0011)
 >
 > 文档规则：[文档导航](../../README.md)
 

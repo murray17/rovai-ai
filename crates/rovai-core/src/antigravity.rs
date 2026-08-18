@@ -881,6 +881,7 @@ enum AntigravityStdoutCapture {
 struct AntigravityStreamCapture {
     conversation_id: Option<String>,
     final_result: Option<AntigravityJsonResult>,
+    model_observation_emitted: bool,
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
 }
@@ -950,6 +951,17 @@ fn process_antigravity_stream_line(
         Some("init") => {
             let conversation_id = antigravity_event_conversation_id(&event, "init")?;
             observe_antigravity_conversation(capture, expected_session_id, conversation_id)?;
+            if !capture.model_observation_emitted
+                && let Some(model_id) = antigravity_init_model_id(&event)
+            {
+                capture.model_observation_emitted = true;
+                if let Some(sender) = runtime_events {
+                    let _ = sender.send(AntigravityRuntimeEvent {
+                        event_type: "runtime.model.observed",
+                        payload: serde_json::json!({"modelId": model_id}),
+                    });
+                }
+            }
         }
         Some("step_update") => {
             let step = event
@@ -1017,6 +1029,25 @@ fn process_antigravity_stream_line(
         None => anyhow::bail!("Antigravity stream event omitted its event type"),
     }
     Ok(())
+}
+
+fn antigravity_init_model_id(event: &Value) -> Option<String> {
+    [
+        event.get("model"),
+        event.pointer("/init/model"),
+        event.pointer("/init/model_id"),
+        event.pointer("/init/modelId"),
+    ]
+    .into_iter()
+    .flatten()
+    .find_map(|value| {
+        value
+            .as_str()
+            .or_else(|| value.get("id").and_then(Value::as_str))
+            .map(str::trim)
+            .filter(|model_id| !model_id.is_empty())
+            .map(str::to_string)
+    })
 }
 
 fn antigravity_event_conversation_id<'a>(event: &'a Value, event_name: &str) -> Result<&'a str> {
@@ -1389,6 +1420,34 @@ impl Drop for SensitiveLogGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn structured_init_exposes_only_an_explicit_nonempty_model() {
+        assert_eq!(
+            antigravity_init_model_id(&serde_json::json!({
+                "event": "init",
+                "conversation_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+                "init": {"model": {"id": " gemini-2.5-pro "}}
+            })),
+            Some("gemini-2.5-pro".to_string())
+        );
+        assert_eq!(
+            antigravity_init_model_id(&serde_json::json!({
+                "event": "init",
+                "conversation_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+                "init": {"tools": ["run_command"]}
+            })),
+            None
+        );
+        assert_eq!(
+            antigravity_init_model_id(&serde_json::json!({
+                "event": "init",
+                "conversation_id": "0bdd2166-d420-40c6-94be-70b93eb290c5",
+                "model": "  "
+            })),
+            None
+        );
+    }
 
     #[test]
     fn workspace_roots_include_canonical_execution_and_attachment_directories() {

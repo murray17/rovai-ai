@@ -11,7 +11,7 @@ last_updated: 2026-08-17
 
 # Rovai-ai v1.01：TRAE 与 Kiro 最高权限队员默认
 
-> 当前状态：[ADR-0207](../../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)与
+> 当前状态：[ADR-0207](decisions.md#adr-0207)与
 > [Runtime Launch and Verification v4](../../contracts/runtime-launch-and-verification-v4.md)已经接受；Core、
 > Renderer、文档治理与定向自动化已经完成，证据见[实施计划](implementation-plan.md)。
 >
@@ -70,6 +70,6 @@ last_updated: 2026-08-17
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0207](../../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)
+- [ADR-0207](decisions.md#adr-0207)
 - [Runtime Launch and Verification v4](../../contracts/runtime-launch-and-verification-v4.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)

@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Rovai-ai 开发者指南
@@ -59,19 +59,17 @@ target 测试；Cargo 配置、`src/lib.rs`、多 target、删除/重命名或�
 [测试与 Smoke Test](testing.md#staged-rust-路由)。
 
 `pnpm test` 会先运行 `pnpm docs:check`，验证唯一当前版本指针、版本目录 Front Matter
-和版本索引一致，并验证 ADR schema/生命周期/直接替代图、CURRENT/HISTORY、Architecture 索引及
+和版本索引一致，并验证 Version Decisions、迁移证据、当前权威覆盖、Architecture 索引及
 全仓 Markdown 本地链接；它还显式运行文档治理单测。只修改文档时，可以先运行：
 
 ```bash
 pnpm docs:test
 pnpm docs:check
 DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
-pnpm docs:adr:generate -- --check
 ```
 
-最后一条只验证生成式 HISTORY 未漂移；更新 HISTORY 时运行不带 `--check` 的
-`pnpm docs:adr:generate`。PR CI 必须提供真实 base SHA，本地缺少该参数时 `docs:check:adr`
-只运行 snapshot check 并明确报告 diff freeze skipped。
+PR CI 必须提供真实 base SHA；`docs:check:ci` 以它验证 historical
+`decisions.md` 未被静默改写，本地普通 `docs:check` 不伪造或推测 base。
 
 push / PR 前运行完整 Rust 验证：
 
@@ -99,6 +97,7 @@ pnpm build:desktop
 | 启动开发 App、运行打包产物或区分日常/开发数据 | [本地开发与 App 隔离流程](local-workflow.md) |
 | 创建、复用、交接、合入或清理 Git worktree | [Git Worktree 生命周期与清理](worktrees.md) |
 | 判断主机、Node、pnpm、Rust、Git 或 Runtime 前置条件 | [开发环境与依赖](environment.md) |
+| 新增 Product Runtime、建立真实 Probe 或完成逐平台准入 | [Agent Runtime 接入与准入 Checklist](runtime-integration-checklist.md) |
 | 新增、合并或退役 Rust 测试，或选择单元测试、集成测试、Smoke 与版本验收命令 | [测试与 Smoke Test](testing.md) |
 | 编写或更新仓库 Skill、触发 `description`、正文分层、references 或界面元数据 | [Skill 编写与 description 路由规范](skill-authoring.md) |
 | 修改 Native Session Bootstrap、AgentRun Dynamic Context、模型可见 section/字段/语义或其证据与 formatter 版本 | [核心模型上下文变更治理](model-context-change-governance.md) |

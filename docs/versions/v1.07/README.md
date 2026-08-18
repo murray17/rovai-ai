@@ -128,9 +128,9 @@ Runtime automatic final / missing-send recovery
 
 - [实施与验收计划](implementation-plan.md)
 - [模型上下文变更 revision 1](model-context-change-a2a-public-only.md)
-- [ADR-0216](../../adr/0216-explicit-agent-addressing-intent-as-delivery-gate.md)
-- [ADR-0217](../../adr/0217-transport-v15-inherits-cross-platform-v14.md)
-- [ADR-0218](../../adr/0218-audience-specific-principal-message-projection.md)
+- [ADR-0216](decisions.md#adr-0216)
+- [ADR-0217](decisions.md#adr-0217)
+- [ADR-0218](decisions.md#adr-0218)
 - [Camp Message Send v10 proposal](../../contracts/camp-message-send-v10.md)
 - [Built-in Tool Transport v15 proposal](../../contracts/builtin-tool-transport-v15.md)
 - [Camp History Retrieval v2 proposal](../../contracts/camp-history-v2.md)

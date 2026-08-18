@@ -66,7 +66,7 @@ last_updated: 2026-08-12
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.63 冻结为 historical，v0.64 成为唯一 current，并新增概览、实施计划与 P1 实验协议 |
-| ADR | 已更新 | 新增 [ADR-0164](../../adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)，冻结 Session/Turn 分离和 accepted-input fail-closed 边界 |
+| ADR | 已更新 | 新增 [ADR-0164](decisions.md#adr-0164)，冻结 Session/Turn 分离和 accepted-input fail-closed 边界 |
 | Contracts | 已更新 | 新增 [Accepted Input Recovery v1](../../contracts/accepted-input-recovery-v1.md)和[Run Process Detail Surface v4](../../contracts/run-process-detail-surface-v4.md) |
 | Architecture | 已更新 | 新增 [AgentRun Recovery](../../architecture/agent-run-recovery.md)，组合启动分类、Scheduler、Adapter、取消与用户收敛职责 |
 | UI | 已更新 | Arctic Dawn 当前规范和 Renderer v4 合同增加“结果待确认” blocker，沿用现有 Neutral Porcelain + Steel token |
@@ -79,7 +79,7 @@ last_updated: 2026-08-12
 
 - [v0.64 实施与验收计划](implementation-plan.md)
 - [Copilot Native Turn Reconciliation 实验](copilot-native-turn-reconciliation-experiment.md)
-- [ADR-0164](../../adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)
+- [ADR-0164](decisions.md#adr-0164)
 - [Accepted Input Recovery v1](../../contracts/accepted-input-recovery-v1.md)
 - [Run Process Detail Surface v4](../../contracts/run-process-detail-surface-v4.md)
 - [AgentRun Recovery 架构](../../architecture/agent-run-recovery.md)

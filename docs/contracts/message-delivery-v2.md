@@ -130,7 +130,7 @@ return because Camp membership, reply reference, or current Runs changed.
 
 ## References
 
-- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)
+- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../versions/v0.62/decisions.md#adr-0163)
 - [Camp Message Send v3](camp-message-send-v3.md)
 - [Message Delivery v1](message-delivery-v1.md)
 - [Public A2A Message and Message Delivery architecture](../architecture/public-a2a-message-delivery.md)

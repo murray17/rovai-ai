@@ -11,7 +11,7 @@ last_updated: 2026-08-17
 
 # Rovai-ai v0.99：最小 Runtime Usage Metering
 
-> 当前状态：长期边界已由 [ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md)接受；实现、打包、
+> 当前状态：长期边界已由 [ADR-0205](decisions.md#adr-0205)接受；实现、打包、
 > clean-break 迁移与 `/Applications` 安装验收已经完成，证据见[实施计划](implementation-plan.md)。
 >
 > 前置版本：[v0.98 结构化 Skill 文件链接](../v0.98/README.md)
@@ -79,7 +79,7 @@ Coverage 只对已由协议或真实 Fixture 证明 eligible 的 logical AgentRu
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.98 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后链接建立唯一 current v0.99。 |
-| ADR | 已更新 | [ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md)替代 ADR-0201，冻结最小五表、稀疏 Usage、保留和读取边界。 |
+| ADR | 已更新 | [ADR-0205](decisions.md#adr-0205)替代 ADR-0201，冻结最小五表、稀疏 Usage、保留和读取边界。 |
 | Contracts | 已更新 | [Runtime Usage Monitoring v2](../../contracts/runtime-usage-monitoring-v2.md)替代 v1，定义 parser、persistence、Snapshot 与刷新合同。 |
 | Architecture | 已更新 | [Runtime Monitoring](../../architecture/runtime-monitoring.md)收缩为 in-memory Usage buffer、短 Flush、五表 Projection/Rollup 与单 Snapshot read side。 |
 | UI | 已更新 | [Runtime Monitoring surface brief](../../../apps/desktop/.impeccable/surfaces/runtime-monitoring.md)删除三 Tab 和可靠性面板，只保留 Usage 汇总、趋势与分组表。 |
@@ -91,7 +91,7 @@ Coverage 只对已由协议或真实 Fixture 证明 eligible 的 logical AgentRu
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md)
+- [ADR-0205](decisions.md#adr-0205)
 - [Runtime Usage Monitoring v2](../../contracts/runtime-usage-monitoring-v2.md)
 - [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)
 - [Runtime monitoring feasibility audit](../../research/runtime-monitoring/README.md)

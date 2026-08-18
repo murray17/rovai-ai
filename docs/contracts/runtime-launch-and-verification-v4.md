@@ -11,7 +11,7 @@ last_updated: 2026-08-17
 
 本合同继承 v3 的 light discovery、按需深检、manager-owned attempt、Probe process owner、TRAE
 execution-deferred verification、ACP continuation、Prompt fence 与 response-only input ACK，并按
-[ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)冻结 TRAE/Kiro 的队员权限默认与
+[ADR-0207](../versions/v1.01/decisions.md#adr-0207)冻结 TRAE/Kiro 的队员权限默认与
 Kiro Host 启动映射。
 
 ## 1. Member permission defaults
@@ -116,6 +116,6 @@ permission schema digest 改变时，Core 用新的 `light_ready`（TRAE 仍用 
 ## References
 
 - [Runtime Launch and Verification v3（历史）](runtime-launch-and-verification-v3.md)
-- [ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)
+- [ADR-0207](../versions/v1.01/decisions.md#adr-0207)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime compatibility evidence](../runtime-compatibility.md)

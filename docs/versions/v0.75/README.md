@@ -114,7 +114,7 @@ smoke/qualification script syntax 与 `git diff --check` 均通过。Memory 实�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | [v0.74](../v0.74/README.md)按未完成事实冻结为 historical；v0.75 成为唯一 current，并新增本概览与[实施计划](implementation-plan.md) |
-| ADR | 已更新 | [ADR-0182](../../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)拥有 inline alias；Review Duo 结构校准继续服从 ADR-0181；新增 [ADR-0183](../../adr/0183-scope-identified-agent-memory-revision-targets.md)冻结 Scope-identified Search/Read/revise |
+| ADR | 已更新 | [ADR-0182](decisions.md#adr-0182)拥有 inline alias；Review Duo 结构校准继续服从 ADR-0181；新增 [ADR-0183](decisions.md#adr-0183)冻结 Scope-identified Search/Read/revise |
 | Contracts | 已更新 | [Camp Message Send v6](../../contracts/camp-message-send-v6.md)保持当前；新增 [Memory Capture v2](../../contracts/memory-capture-v2.md)与 [Built-in Tool Transport v10](../../contracts/builtin-tool-transport-v10.md)，v1/v9 转 historical current-entry |
 | Architecture | 已更新 | [Public A2A Message 与 Message Delivery](../../architecture/public-a2a-message-delivery.md)保留 alias；[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)保留 Review Duo 恢复并升级 v10；[Online Memory Capture](../../architecture/online-memory-capture.md)增加 Scope target、durable rejection 与 atomic Supersession |
 | UI | 确认无需更新 | Renderer 继续只消费 canonical Structured Member Mention；不增加输入提示、交互或视觉合同 |
@@ -126,8 +126,8 @@ smoke/qualification script syntax 与 `git diff --check` 均通过。Memory 实�
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0182: Core-Resolved Current-Camp Display-Name Inline Addressing Alias](../../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)
-- [ADR-0183: Scope-Identified Agent Memory Revision Targets](../../adr/0183-scope-identified-agent-memory-revision-targets.md)
+- [ADR-0182: Core-Resolved Current-Camp Display-Name Inline Addressing Alias](decisions.md#adr-0182)
+- [ADR-0183: Scope-Identified Agent Memory Revision Targets](decisions.md#adr-0183)
 - [Camp Message Send v6](../../contracts/camp-message-send-v6.md)
 - [Memory Capture v2](../../contracts/memory-capture-v2.md)
 - [Built-in Tool Transport v10](../../contracts/builtin-tool-transport-v10.md)

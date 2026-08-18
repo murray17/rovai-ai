@@ -15,7 +15,7 @@ last_updated: 2026-07-24
 > 架构协议：[architecture.md](architecture.md)
 >
 > 跨版本边界：
-> [ADR-0017](../../adr/0017-managed-skill-library-runtime-projection.md)
+> [ADR-0017](decisions.md#adr-0017)
 
 ## 实施原则
 

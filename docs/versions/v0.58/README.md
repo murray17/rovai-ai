@@ -139,11 +139,11 @@ accepted 时结算为 `not_accepted`。三类 Adapter 在 accepted 后发生的 
 ## References
 
 - [v0.58 实施与验收计划](implementation-plan.md)
-- [ADR-0156](../../adr/0156-logical-runtime-identity-and-bounded-installation-rebind.md)
-- [ADR-0158](../../adr/0158-default-all-runtime-delivery-for-managed-skills.md)
-- [ADR-0159](../../adr/0159-pinned-third-party-tasteful-ui-bundled-skill.md)
-- [ADR-0160](../../adr/0160-focused-camp-inspector-and-single-approval-surface.md)
-- [ADR-0161](../../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)
+- [ADR-0156](decisions.md#adr-0156)
+- [ADR-0158](decisions.md#adr-0158)
+- [ADR-0159](decisions.md#adr-0159)
+- [ADR-0160](decisions.md#adr-0160)
+- [ADR-0161](decisions.md#adr-0161)
 - [Run Process Detail Surface v3](../../contracts/run-process-detail-surface-v3.md)
 - [Built-in Tool Runtime architecture](../../architecture/builtin-tool-runtime.md)
 - [Skill Projection Reconciliation architecture](../../architecture/skill-projection-reconciliation.md)

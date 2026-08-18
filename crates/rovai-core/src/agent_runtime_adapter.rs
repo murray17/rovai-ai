@@ -656,35 +656,6 @@ impl AgentRuntimeAdapterRegistry {
         }
     }
 
-    pub fn trae_installed_unverified_snapshot(
-        &self,
-        reported_version: Option<String>,
-        executable_fingerprint: String,
-        observed_at: String,
-    ) -> Result<AdapterCapabilitySnapshot> {
-        let permission_options = trae_static_permission_options();
-        let permission_schema_digest =
-            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
-        Ok(AdapterCapabilitySnapshot {
-            reported_version,
-            executable_fingerprint: Some(executable_fingerprint),
-            authentication_status: "unknown".to_string(),
-            probe_status: "installed_unverified".to_string(),
-            permission_schema_version: 1,
-            permission_schema_digest,
-            capabilities: Vec::new(),
-            protocols: Vec::new(),
-            models: Vec::new(),
-            permission_options,
-            observed_at: Some(observed_at.clone()),
-            last_attempted_at: observed_at,
-            last_successful_probe_at: None,
-            stale_at: None,
-            last_error: None,
-            native_session_compatibility_key: None,
-        })
-    }
-
     pub fn light_ready_snapshot(
         &self,
         kind: AdapterKind,
@@ -1438,6 +1409,25 @@ fn append_additive_mcp_axes(capabilities: &mut Vec<String>, same_name_policy: Mc
     ));
 }
 
+pub fn acp_runtime_model_id_from_session(session_result: &Value) -> Option<String> {
+    session_result
+        .pointer("/models/currentModelId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            session_result
+                .get("configOptions")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|option| option.get("id").and_then(Value::as_str) == Some("model"))
+                .and_then(|option| option.get("currentValue"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|model_id| !model_id.is_empty())
+        .map(str::to_string)
+}
+
 pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<ModelDescriptor>> {
     let config_options = session_result
         .get("configOptions")
@@ -1447,14 +1437,7 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
     let model_config = config_options
         .iter()
         .find(|option| option.get("id").and_then(Value::as_str) == Some("model"));
-    let current_model = session_result
-        .pointer("/models/currentModelId")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            model_config
-                .and_then(|option| option.get("currentValue"))
-                .and_then(Value::as_str)
-        });
+    let current_model = acp_runtime_model_id_from_session(session_result);
     let mut values = session_result
         .pointer("/models/availableModels")
         .and_then(Value::as_array)
@@ -1497,7 +1480,7 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
         models.push(ModelDescriptor {
             id: id.to_string(),
             display_name: display_name.to_string(),
-            is_default: current_model == Some(id),
+            is_default: current_model.as_deref() == Some(id),
             hidden: false,
             deprecated: false,
             options: model_options.clone(),
@@ -2371,6 +2354,22 @@ mod tests {
         assert_eq!(snapshot.models.len(), 2);
         assert_eq!(snapshot.models[0].id, "opencode/current");
         assert!(snapshot.models[0].is_default);
+        assert_eq!(
+            acp_runtime_model_id_from_session(&json!({
+                "models": {"currentModelId": "native/current"}
+            })),
+            Some("native/current".to_string())
+        );
+        assert_eq!(
+            acp_runtime_model_id_from_session(&json!({
+                "configOptions": [{
+                    "id": "model",
+                    "currentValue": "opencode/current"
+                }]
+            })),
+            Some("opencode/current".to_string())
+        );
+        assert_eq!(acp_runtime_model_id_from_session(&json!({})), None);
         assert_eq!(snapshot.permission_options[0].key, "permission");
         assert!(snapshot.capabilities.contains(&"session.load".to_string()));
         assert!(

@@ -15,7 +15,7 @@ last_updated: 2026-07-29
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：
-> [ADR-0065](../../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)
+> [ADR-0065](decisions.md#adr-0065)
 >
 > 调研证据：[Runtime 兼容性清单](../../runtime-compatibility.md)
 

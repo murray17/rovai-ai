@@ -82,5 +82,5 @@ Episode 推荐动作或持久历史恢复浮层。
 
 - [Notification Episode v3 (historical)](notification-episode-v3.md)
 - [Current User Attention v4](current-user-attention-v4.md)
-- [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
+- [ADR-0175](../versions/v0.71/decisions.md#adr-0175)
 - [Notification Episode 架构](../architecture/notification-episodes.md)

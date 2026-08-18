@@ -14,9 +14,9 @@ last_updated: 2026-08-05
 >
 > 前置版本：[v0.36 Collaboration-Value Diagnostic Portfolio](../v0.36/README.md)
 >
-> 跨版本决策：[ADR-0103](../../adr/0103-canonical-mcp-json-and-stable-assignment-identity.md)、
-> [ADR-0104](../../adr/0104-rovai-preferred-mcp-projection-and-external-degradation.md)、
-> [ADR-0105](../../adr/0105-runtime-group-assigned-skill-delivery.md)
+> 跨版本决策：[ADR-0103](decisions.md#adr-0103)、
+> [ADR-0104](decisions.md#adr-0104)、
+> [ADR-0105](decisions.md#adr-0105)
 >
 > 实施设计：[architecture.md](architecture.md)
 >

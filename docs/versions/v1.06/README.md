@@ -83,7 +83,7 @@ v1.05 在 Windows 产品代码、打包与真实 Runtime 资格尚未实施时�
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0215](../../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)
+- [ADR-0215](decisions.md#adr-0215)
 - [Camp History Retrieval v1](../../contracts/camp-history-v1.md)
 - [Built-in Tool Agent Output Projection v1](../../contracts/builtin-tool-agent-output-projection-v1.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

@@ -12,9 +12,9 @@ last_updated: 2026-07-27
 >
 > 版本范围：[README.md](README.md)
 >
-> 跨版本决策：[ADR-0049](../../adr/0049-reproducible-context-delivery-v2.md) ·
-> [ADR-0050](../../adr/0050-camp-shared-progressive-summaries.md) ·
-> [ADR-0051](../../adr/0051-boundary-capped-context-retrieval.md)
+> 跨版本决策：[ADR-0049](decisions.md#adr-0049) ·
+> [ADR-0050](decisions.md#adr-0050) ·
+> [ADR-0051](decisions.md#adr-0051)
 
 检查点按依赖顺序排列，每步独立可验收。demo 阶段原则：直接删除被替代的表、字段与代码路径，
 不做冻结保留或兼容读取；历史数据允许有损迁移，但迁移顺序必须尊重外键与状态机依赖。

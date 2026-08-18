@@ -55,7 +55,7 @@ last_updated: 2026-08-12
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.61 冻结为 historical，v0.62 成为唯一 current，并新增本版本概览与实施计划 |
-| ADR | 已更新 | 新增 [ADR-0163](../../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)，冻结显式 caller return、非直属 ancestor guard 与 Core-managed reply reference |
+| ADR | 已更新 | 新增 [ADR-0163](decisions.md#adr-0163)，冻结显式 caller return、非直属 ancestor guard 与 Core-managed reply reference |
 | Contracts | 已更新 | 新增 [Camp Message Send v3](../../contracts/camp-message-send-v3.md)、[Message Delivery v2](../../contracts/message-delivery-v2.md)与[Built-in Tool Transport v6](../../contracts/builtin-tool-transport-v6.md) |
 | Architecture | 已更新 | Public A2A 与 Built-in Tool Runtime 架构改为 forward/return 分离，并区分 Delivery causal source 与 target call lineage |
 | UI | 确认无需更新 | Read Side 增加 Delivery 审计字段但本版本不改变 Renderer 交互、视觉或现有 Delivery footer |
@@ -67,7 +67,7 @@ last_updated: 2026-08-12
 ## References
 
 - [v0.62 实施与验收计划](implementation-plan.md)
-- [ADR-0163：显式调用者返回与 Core 管理回复引用](../../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)
+- [ADR-0163：显式调用者返回与 Core 管理回复引用](decisions.md#adr-0163)
 - [Camp Message Send v3](../../contracts/camp-message-send-v3.md)
 - [Message Delivery v2](../../contracts/message-delivery-v2.md)
 - [Built-in Tool Transport v6](../../contracts/builtin-tool-transport-v6.md)

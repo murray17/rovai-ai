@@ -26,7 +26,7 @@ last_updated: 2026-08-05
 ## Codex Runtime 隔离阻断修复
 
 Codex 轨已完成 grilling 并接受
-[ADR-0107](../../adr/0107-camp-member-isolated-codex-home-and-agentrun-app-server.md)：
+[ADR-0107](decisions.md#adr-0107)：
 
 - Isolated Codex Home 以 `Camp ID + AgentProfile ID` 为身份，保留配置、外部 MCP 与 Native
   Session，跨 CampTurn/AgentRun 复用；

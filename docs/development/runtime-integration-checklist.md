@@ -1,0 +1,201 @@
+---
+document_type: development-checklist
+authority: development-procedure
+status: proposed
+last_updated: 2026-08-19
+---
+
+# Agent Runtime 接入与准入 Checklist
+
+本清单用于新增 Product Runtime 的研究、实现、真实 Probe 和逐平台准入。
+
+> 可执行文件存在、`--version` 成功、ACP `initialize` 成功或普通对话成功，
+> 都不等于 Runtime 已完成准入。
+
+权威边界：
+
+- [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
+- [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v9.md)
+- [Runtime 兼容性清单](../runtime-compatibility.md)
+- [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
+
+## 1. 接入记录
+
+- [ ] Runtime 名称及稳定 `AdapterKind` / wire identity
+- [ ] 上游版本、build/commit、模型和账号类型
+- [ ] 可执行文件 canonical path 与 fingerprint
+- [ ] 协议族：ACP / JSON-RPC / stream-json / one-shot / 其他
+- [ ] 目标平台：macOS arm64 / macOS x64 / Windows x64
+- [ ] Evidence revision
+- [ ] 已知限制与未支持能力
+
+## 2. 发现、检查与启动
+
+- [ ] 命令名、显示名、环境变量覆盖键和常见安装位置已定义。
+- [ ] PATH、已保存路径和自定义路径均验证为真实可执行文件。
+- [ ] 路径、fingerprint 或必要 schema 改变后，旧 Ready 不再直接复用。
+- [ ] 轻检有超时和输出上限，不发模型请求、不弹登录、不修改用户配置。
+- [ ] 空输出、stderr、非零退出、超时、格式变化和命令不存在均有明确结果。
+- [ ] 显式深检只检查用户选择的 Runtime；页面进入和成员选择不自动深检。
+- [ ] Discovery、Availability Check、Probe 和 AgentRun 使用不同 launch purpose。
+- [ ] stdout、stderr、临时目录和私有配置目录均有界且可清理。
+- [ ] Runtime 及其后代进程受进程组或 Job Object 管理。
+- [ ] completion、failure、cancel、Probe timeout 和 App shutdown 后无残留进程。
+- [ ] Host 复用键覆盖 executable、模型、权限、cwd、workspace access、MCP 和附件根。
+
+## 3. 协议、事件与 Command Output
+
+- [ ] 协议 stdout 全程保持结构化；日志和 banner 只能进入 stderr。
+- [ ] 输入 accepted 有 Runtime 原生依据，不从 spawn 或首段输出推断。
+- [ ] 每个 Tool 有稳定 ID，并形成唯一的 started → terminal 生命周期。
+- [ ] partial/full、重复通知或补发事件不会创建重复 Action。
+- [ ] 使用真实 Runtime 执行固定 `printf` marker。
+- [ ] marker 出现在对应 `runtime.action.payload.output`，而非只出现在最终回复或日志。
+- [ ] stdout、stderr、混合输出、空输出、非零退出和超大输出分别验证。
+- [ ] 命令无输出时仍保留安全的 command input，并可在 UI 中展开检查。
+- [ ] 只从明确公开字段提取 input/output，不从 Diff、私有日志或未知 metadata 猜测。
+- [ ] 未报告结构化 Tool 时，不补造 Tool、命令或文件活动。
+- [ ] Session ID 错误、缺少必要字段、非法 JSON、多 final 或未知 shape 均 fail closed。
+- [ ] ANSI、绝对路径、凭据、Prompt、文件正文和 Provider 私有字段不进入公开事件。
+
+### ACP Runtime 额外验证
+
+- [ ] `initialize.protocolVersion` 和必要 capability 均符合要求。
+- [ ] `session/new` 返回稳定且非空的 Session ID。
+- [ ] 模型、mode 和权限目录来自真实 Session 返回。
+- [ ] Session 消息按 Host、Session、Prompt、delivery 和 execution epoch 隔离。
+- [ ] Prompt 完成后、旧 Run 和恢复 replay 的迟到事件不会进入当前 Run。
+- [ ] Permission request 的 option ID 可以被批准或拒绝并正确返回 Runtime。
+- [ ] cancel 返回明确终态，且取消后不会产生延迟副作用。
+- [ ] ACP 支持矩阵逐能力记录，不以“支持 ACP v1”代替行为验证。
+
+## 4. Session Continuation 与 Resume
+
+- [ ] 明确策略：`warm_host`、`exact_resume`、`history_restore` 或 `new_only`。
+- [ ] 首次 Run 持久化精确 Native Session ID。
+- [ ] 后继 Run 保持同一 logical Conversation。
+- [ ] 声称支持 Resume 时，真实 Smoke 必须验证精确 Native Session ID 延续。
+- [ ] 不使用“最近 Session”、`AUTO`、模糊匹配或解析私有 Session 文件代替精确 ID。
+- [ ] Runtime 返回不同 Session ID 时 fail closed，不静默换绑。
+- [ ] Core 或 Host 重启后完成冷恢复验证。
+- [ ] History Restore replay 在当前 Prompt 前完全隔离。
+- [ ] replay 不产生公开文本、Action、Approval、Usage、Missing-Send 或副作用。
+- [ ] replay 使用有界的时间、事件数和字节数。
+- [ ] 恢复失败时记录 continuity lost，停止失败 Host，再至多创建一个新 Session。
+- [ ] executable、模型、权限、cwd、workspace access 或 MCP 不兼容时禁止复用。
+- [ ] Runtime 的 Session lock 和进程级配置行为已通过真实实验确认。
+- [ ] `new_only` 不得在产品文案中宣称支持 Resume。
+
+## 5. 权限、Approval 与 MCP
+
+- [ ] 权限默认值映射到 Runtime 的精确原生值。
+- [ ] 静态 permission descriptor 不冒充登录或动态能力证据。
+- [ ] permission schema drift 会使旧 Ready 失效，不会静默扩大既有成员权限。
+- [ ] read-only 或 Core-enforced 工作区会收窄高权限启动参数。
+- [ ] allow-once 只产生一次精确副作用。
+- [ ] deny 后文件、命令、Git、网络或 MCP 副作用均未发生。
+- [ ] Approval 可持久恢复，不只存在于 Runtime 进程内。
+- [ ] External MCP 只对当前 AgentRun 生效，不写 Runtime 用户级配置。
+- [ ] 同名 MCP precedence、logical name 与 runtime name 映射已经验证。
+- [ ] 不同 MCP 集合不会复用不兼容 Host。
+- [ ] 未配置 MCP 的相邻 Session 看不到前一 Run 的 Server。
+- [ ] Runtime 能实际调用 bundled `rovai` CLI，并通过 Built-in Tool Smoke。
+
+## 6. Narration、Final、Missing-Send 与错误
+
+- [ ] 公开 narration 只来自 Runtime 明确标记的公开文本。
+- [ ] thinking、调试信息、内部错误和 Provider metadata 不进入 narration。
+- [ ] 已有 streamed text 时，terminal result 不重复发布正文。
+- [ ] 没有 streamed text 时，只在可靠成功终态使用明确 final fallback。
+- [ ] success、failed、cancelled、timeout 和 interrupted 均有唯一终态。
+- [ ] 进程退出或最后一段 stdout 不单独构成 final boundary。
+- [ ] Missing-Send zero-send 成功场景可以恢复可靠最终正文。
+- [ ] 任意 accepted `camp.message.send` 都会抑制 Missing-Send Recovery。
+- [ ] tool → final 只恢复最后一次 Tool 之后的可靠 assistant suffix。
+- [ ] 没有可靠 final boundary 时，Missing-Send 保持禁用。
+- [ ] auth、rate limit、quota、model、permission、compatibility、environment 和 transient failure 可稳定分类。
+- [ ] 用户可见错误经过脱敏和长度限制，不暴露原始 stderr、私有日志、路径、Prompt 或凭据。
+
+## 7. Usage、Token、Cache 与 Cost
+
+本节是可选能力。Runtime 不上报 Usage 不阻断基础准入；未验证字段保持未知。
+
+- [ ] 记录 Usage 的精确事件来源、scope、counter mode 和 Runtime 版本。
+- [ ] 明确 `inputTokens` 是总输入、未缓存输入，还是语义未知。
+- [ ] 分开映射 uncached input、cache read、cache write、output 和 reasoning。
+- [ ] Reasoning 是 Output 子集，不重复累计或重复计费。
+- [ ] 缺失字段默认保持 `NULL`；只有版本化证据证明“省略即零”时才归零。
+- [ ] 同一 Usage 重发、metadata 补发或累计快照重发不会重复累计。
+- [ ] cumulative/gauge 首次建立 baseline；回退视为 counter reset。
+- [ ] terminal Flush 与周期 Flush 并发时不会丢失或重复数据。
+- [ ] Session cumulative cost 不直接记为当前 AgentRun cost。
+- [ ] Cost 必须有明确 scope、amount、currency 和 source，不默认币种。
+- [ ] 价格估算只在 Token bucket、模型、tier、日期和版本化价格目录完整时生成。
+- [ ] Eligibility 按 `Runtime × version × field` 冻结，并记录 Coverage。
+- [ ] 不持久化完整原始 Usage payload、Prompt、Output、Tool 内容或 Native ID。
+
+## 8. 必过真实 Smoke
+
+| Case | 通过条件 |
+| --- | --- |
+| First run | 建立登录、模型、权限和唯一 Session/final |
+| Public narration | 普通无 Tool 回复可见，terminal 不重复 |
+| Command output | 固定 marker 进入对应 Action output |
+| Empty output | 命令仍可检查，且无私有字段泄漏 |
+| Approval allow | 一次批准只产生一次副作用 |
+| Approval deny | 拒绝后没有副作用 |
+| Cancellation | 收敛为 cancelled，之后无延迟副作用 |
+| Warm continuation | 按声明策略复用，且不串 Prompt/MCP/权限 |
+| Cold continuation | Core/Host 重启后用精确 Session ID 恢复 |
+| Restore failure | 错误 ID、非法 JSON、超限 replay 均 fail closed |
+| MCP isolation | 只对当前 Run 生效，不污染相邻 Session |
+| Missing-Send | zero-send、send suppression、tool→final 均通过 |
+| Built-in CLI | 实际调用正式 `rovai` operation 集 |
+| Process cleanup | 所有退出路径都无残留进程 |
+| Usage（若支持） | 无重复累计，Token/Cache bucket 与原生事件一致 |
+
+## 9. 自动化与证据
+
+- [ ] 为 parser、缺字段、重复事件、错误 ID 和输出边界增加确定性 Fixture。
+- [ ] 增加子进程持有 stdio 的进程树清理测试。
+- [ ] 增加真实 Runtime Smoke；Fixture 不能代替本机实测。
+- [ ] 新 Runtime 纳入 Runtime Activity、诊断、planned shutdown 和 Built-in CLI 验收。
+- [ ] 运行 `pnpm typecheck`、`pnpm test` 和适用的 Rust 门禁。
+- [ ] 记录 Runtime 版本、模型、平台、fingerprint、日期和仓库 revision。
+- [ ] 一次实测不外推为其他版本、模型或账号均兼容。
+- [ ] 已知限制和未支持能力写入 [Runtime 兼容性清单](../runtime-compatibility.md)。
+
+## 10. 硬性阻断条件
+
+出现任一情况，不得标记为正式支持：
+
+- [ ] 固定 command marker 无法从对应 Action output 取得。
+- [ ] Tool ID 不稳定，或 started/terminal 无法可靠配对。
+- [ ] Prompt 完成后或恢复期事件污染当前/下一 Run。
+- [ ] 声称支持 Resume，但精确 Native Session ID 没有延续。
+- [ ] Approval deny 或 cancel 后仍发生副作用。
+- [ ] Probe、Run 或 shutdown 后存在残留进程。
+- [ ] 浅检成功被当成认证、模型、Session 或完整协议 Ready。
+- [ ] 旧 Probe 失败覆盖当前成功证据。
+- [ ] permission schema 改变后静默保留 Ready 或扩权。
+- [ ] final 依赖进程退出、最后 stdout 或语义猜测。
+- [ ] 原始日志、路径、凭据、Prompt 或私有字段进入公开事件。
+- [ ] Usage 缺少来源、scope、counter mode 或版本证据却被声明为支持。
+- [ ] Usage 重发会重复累计，或 Session cost 被误记为 Run cost。
+- [ ] 只有 `initialize` 或一次普通回复成功，没有完整行为 Smoke。
+
+## 11. 准入结论
+
+```text
+Runtime:
+AdapterKind:
+Platform:
+Admission: qualified | not_qualified | unsupported
+Evidence revision:
+Verified version/model/account:
+Supported capabilities:
+Known limitations:
+Reviewer:
+Date:
+```

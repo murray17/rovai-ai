@@ -219,7 +219,7 @@ alias. This phase does not suppress return-continuation recovery.
 
 ## References
 
-- [ADR-0216](../adr/0216-explicit-agent-addressing-intent-as-delivery-gate.md)
+- [ADR-0216](../versions/v1.07/decisions.md#adr-0216)
 - [Camp Message Send v9 (accepted predecessor)](camp-message-send-v9.md)
 - [Missing-Send Recovery Publication v1](missing-send-recovery-publication-v1.md)
 - [Built-in Tool Transport v15](builtin-tool-transport-v15.md)

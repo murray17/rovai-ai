@@ -162,8 +162,8 @@ schema migration 85 / projection schema 40 增加三个字段。旧 Draft 不伪
 
 ## References
 
-- [ADR-0187](../adr/0187-durable-composer-recipient-continuation.md)
-- [ADR-0185](../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)
+- [ADR-0187](../versions/v0.80/decisions.md#adr-0187)
+- [ADR-0185](../versions/v0.77/decisions.md#adr-0185)
 - [Camp Composer Draft v1（historical）](camp-composer-draft-v1.md)
 - [Camp Attachment v1](camp-attachment-v1.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)

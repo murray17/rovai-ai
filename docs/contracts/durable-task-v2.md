@@ -11,8 +11,8 @@ last_updated: 2026-08-08
 
 本合同冻结 v0.47 起 Task 的字段、状态、授权、可见性、事务、列表投影、CampMember 关系结束与收口，
 以及 Task-linked responsibility admission。设计理由见
-[ADR-0136](../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与
-[ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)；Agent CLI 的 wire、
+[ADR-0136](../versions/v0.47/decisions.md#adr-0136)与
+[ADR-0137](../versions/v0.47/decisions.md#adr-0137)；Agent CLI 的 wire、
 stdout 和版本矩阵由 [Built-in Tool Transport v4](builtin-tool-transport-v4.md)负责。
 
 这是 clean-break 合同。旧四态 Task、旧输入字段、旧结果形状和旧 Rovai-owned Task 数据
@@ -546,7 +546,7 @@ CampTurn cancellation。Task `cancelled` 表示持久责任终止，不是历史
 ## 15. Clean break 与非 Task 投影
 
 v0.47 直接采用五态 schema 与本合同字段，不迁移 v0.46 Task、旧 command result、旧 catalog
-或旧 replay 记录。Reset 只能按 [ADR-0118](../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md)
+或旧 replay 记录。Reset 只能按 [ADR-0118](../versions/v0.41/decisions.md#adr-0118)
 清理 Rovai-owned App data，不得触碰用户 workspace、外部 Runtime Home/config/credentials 或
 外部 MCP state。
 
@@ -557,8 +557,8 @@ Delivery 关系派生；Task 与执行必须能显示为两个同时成立的事
 
 ## References
 
-- [ADR-0136: Durable Task v2 Responsibility and Coordination Authority](../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)
-- [ADR-0137: One-Time Task-Linked Responsibility Admission](../adr/0137-one-time-task-linked-responsibility-admission.md)
+- [ADR-0136: Durable Task v2 Responsibility and Coordination Authority](../versions/v0.47/decisions.md#adr-0136)
+- [ADR-0137: One-Time Task-Linked Responsibility Admission](../versions/v0.47/decisions.md#adr-0137)
 - [Built-in Tool Transport v4](builtin-tool-transport-v4.md)
 - [Message Delivery v1](message-delivery-v1.md)
 - [Camp Message Send v2](camp-message-send-v2.md)

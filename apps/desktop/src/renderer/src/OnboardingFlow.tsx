@@ -561,8 +561,7 @@ export function onboardingRuntimeCanContinue(
   const status = admission
     ? runtimeProductPresentation(admission, availability).status
     : runtimeAvailabilityPresentation(availability).status
-  if (status !== 'available' && status !== 'installed_unverified') return false
-  if (status === 'installed_unverified' && selection.model.mode !== 'runtime_default') return false
+  if (status !== 'available') return false
   return selection.adapterKind === installation.adapterKind
     && installation.installationClass === 'managed_default'
     && installation.authScope === 'default'
@@ -575,7 +574,6 @@ function runtimeRowDetail(presentation: RuntimeStatusPresentation): string {
   return presentation.detail ?? ({
     checking: '正在读取当前状态',
     available: '能力与模型目录可读取',
-    installed_unverified: '首次任务时继续验证',
     authentication_required: '完成登录后重新扫描',
     not_installed: '本机未找到安装入口',
     version_unsupported: '更新后重新扫描',

@@ -120,7 +120,7 @@ Core 合同或安全状态机，失效作者错误与替代成员选择仍可独
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.76 按完成事实冻结为 historical；v0.77 成为唯一 current，并新增本概览与[实施计划](implementation-plan.md) |
-| ADR | 已更新 | 新增 [ADR-0185](../../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)，局部替代 ADR-0128 的 caller-supplied user reply target 并扩展 ADR-0080 Draft 范围 |
+| ADR | 已更新 | 新增 [ADR-0185](decisions.md#adr-0185)，局部替代 ADR-0128 的 caller-supplied user reply target 并扩展 ADR-0080 Draft 范围 |
 | Contracts | 已更新 | 新增 [Camp Composer Draft v1](../../contracts/camp-composer-draft-v1.md)，冻结 Draft view、reply mutations、exact send 与 fail-closed errors；Camp Message Send v7 不变 |
 | Architecture | 已更新 | 新增 [Camp Composer Draft 架构](../../architecture/camp-composer-draft.md)，组合 Renderer、Draft store、user send 与 timeline read projection 权威 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与[结构化 Mention](../../ui/components/structured-mentions.md)增加 reply entry、dock、父引用、fanout 和失效作者修复合同 |
@@ -133,7 +133,7 @@ Core 合同或安全状态机，失效作者错误与替代成员选择仍可独
 
 - [实施与验收计划](implementation-plan.md)
 - [三方向 HTML 交互稿](../../prototypes/message-reply-chain/README.md)
-- [ADR-0185](../../adr/0185-durable-composer-reply-intent-and-explicit-recipient-resolution.md)
+- [ADR-0185](decisions.md#adr-0185)
 - [Camp Composer Draft v1](../../contracts/camp-composer-draft-v1.md)
 - [Camp Composer Draft architecture](../../architecture/camp-composer-draft.md)
-- [ADR-0163](../../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)
+- [ADR-0163](../v0.62/decisions.md#adr-0163)

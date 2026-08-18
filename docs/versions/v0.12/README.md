@@ -14,9 +14,9 @@ last_updated: 2026-07-27
 >
 > 前置版本：[v0.11 受控品牌与技术标识迁移](../v0.11/README.md)
 >
-> 跨版本决策：[ADR-0049](../../adr/0049-reproducible-context-delivery-v2.md) ·
-> [ADR-0050](../../adr/0050-camp-shared-progressive-summaries.md) ·
-> [ADR-0051](../../adr/0051-boundary-capped-context-retrieval.md)
+> 跨版本决策：[ADR-0049](decisions.md#adr-0049) ·
+> [ADR-0050](decisions.md#adr-0050) ·
+> [ADR-0051](decisions.md#adr-0051)
 >
 > 实施与验收：[implementation-plan.md](implementation-plan.md)
 

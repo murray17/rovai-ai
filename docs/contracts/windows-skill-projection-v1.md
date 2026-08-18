@@ -104,9 +104,10 @@ The gate is keyed by opened canonical root identity:
 - Core restart reuses persisted registrations, reconstructs active/recovery facts, resolves journals, then opens admission;
 - ambiguous recovery leaves the root blocked with a stable `skill_projection_recovery_required` reason.
 
-Migration 96 installs the registration table plus nullable `operation_id` and `entry_identity` observation columns and
-advances the exact `v1.10 / schema 50` source to Data Contract `v1.11 / projection schema 51`. Existing macOS observations
-remain valid with null Windows-only identity fields.
+Migration 97 installs the registration table plus nullable `operation_id` and `entry_identity` observation columns and
+advances the exact `v1.13 / schema 51 / migration 96` source to Data Contract `v1.14 / projection schema 52`. Existing
+macOS observations remain valid with null Windows-only identity fields; Migration 96 remains the released v1.13
+`agent_run.runtime_observed_model_id` transition and is never reused.
 
 ## 5. Ownership and delete
 
@@ -117,6 +118,6 @@ closed. Runtime-visible Skill content contains no marker.
 
 ## References
 
-- [ADR-0214](../adr/0214-crash-recoverable-windows-skill-projection.md)
+- [ADR-0214](../versions/v1.05/decisions.md#adr-0214)
 - [Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)
 - [Microsoft: Moving Directories](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-directories)

@@ -132,7 +132,10 @@ mod slow_tests {
                 .any(|member| member.agent_id == "agent_2" && member.is_default_lead)
         );
         assert!(outcome.reconcile_duration.is_some());
-        assert_eq!(outcome.projection.schema_version, 1);
+        assert_eq!(
+            outcome.projection.schema_version,
+            crate::read_model::CAMP_OPEN_SCHEMA_VERSION
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

@@ -13,7 +13,7 @@ last_updated: 2026-08-09
 ## 文档边界
 
 本文记录对“第 4–13 项分析”的逐项挑战结果及用户已确认的决定。它是形成
-[ADR-0147](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)的版本内
+[ADR-0147](decisions.md#adr-0147)的版本内
 评审证据，不单独充当字段级实施规格。用户在本评审完成后另行明确授权一次性实施；最终字段、
 Migration 68 shape 和验收矩阵由同版本实施计划、当前合同 fixture 与代码共同冻结。
 

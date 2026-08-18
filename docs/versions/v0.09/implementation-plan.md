@@ -15,7 +15,7 @@ last_updated: 2026-07-25
 > 架构协议：[architecture.md](architecture.md)
 >
 > 跨版本边界：
-> [ADR-0018](../../adr/0018-file-backed-mcp-library-runtime-projection.md)
+> [ADR-0018](decisions.md#adr-0018)
 
 ## 实施原则
 

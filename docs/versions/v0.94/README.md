@@ -57,7 +57,7 @@ last_updated: 2026-08-16
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.93 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[核心上下文变更说明](model-context-change.md)与版本索引建立唯一 current v0.94。 |
-| ADR | 已更新 | [ADR-0200](../../adr/0200-compact-context-projection-and-structured-run-facts.md)局部替代历史 Charter、完整 continuation、显式 false mention 与 Run Notice 决定，同时保留 Collaboration v2。 |
+| ADR | 已更新 | [ADR-0200](decisions.md#adr-0200)局部替代历史 Charter、完整 continuation、显式 false mention 与 Run Notice 决定，同时保留 Collaboration v2。 |
 | Contracts | 已更新 | ContextManifest Evidence v15 与 Run Facts v1 拥有新的字段、精确字节和 clean-break 边界。 |
 | Architecture | 已更新 | Built-in Tool Runtime 同步 Bootstrap/Dynamic Context section、历史恢复 locator 与 Run Facts 职责。 |
 | UI | 确认无需更新 | 模型输入和内部 evidence 改动不改变 Renderer 数据或交互。 |
@@ -71,7 +71,7 @@ last_updated: 2026-08-16
 - [核心模型上下文变更说明](model-context-change.md)
 - [实施与验收计划](implementation-plan.md)
 - [核心模型上下文变更治理](../../development/model-context-change-governance.md)
-- [ADR-0200](../../adr/0200-compact-context-projection-and-structured-run-facts.md)
+- [ADR-0200](decisions.md#adr-0200)
 - [ContextManifest Evidence v15](../../contracts/context-manifest-evidence-v15.md)
 - [Run Facts v1](../../contracts/run-facts-v1.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

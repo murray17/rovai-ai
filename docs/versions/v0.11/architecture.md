@@ -12,7 +12,7 @@ last_updated: 2026-07-26
 >
 > 版本范围：[README.md](README.md)
 >
-> 跨版本决策：[ADR-0048](../../adr/0048-rovai-product-identity-and-legacy-namespace.md)
+> 跨版本决策：[ADR-0048](decisions.md#adr-0048)
 
 ## 1. 身份分层
 

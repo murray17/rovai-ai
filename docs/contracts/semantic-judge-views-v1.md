@@ -190,7 +190,7 @@ measurement，不能替代配对 Hard Outcome、预算、时延和 validity 分�
 
 ## References
 
-- [ADR-0155](../adr/0155-treatment-blind-outcome-and-process-judge-views.md)
+- [ADR-0155](../versions/v0.55/decisions.md#adr-0155)
 - [Benchmark Protocol v3](benchmark-protocol-v3.md)
 - [Benchmark Protocol architecture](../architecture/benchmark-protocol.md)
-- [ADR-0098](../adr/0098-dual-replica-evidence-bound-semantic-judge.md)
+- [ADR-0098](../versions/v0.34/decisions.md#adr-0098)

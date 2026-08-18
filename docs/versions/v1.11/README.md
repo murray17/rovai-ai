@@ -11,13 +11,14 @@ last_updated: 2026-08-19
 
 # Rovai-ai v1.11：Runtime 模型目录缓存与真实执行校验
 
-> 当前状态：Core/Renderer、自动门禁、签名打包与隔离队员工作区验收均已完成；实现提交
-> `a9cf6e06` 已推送 main，已替换并从 `/Applications/Rovai AI.app` 重新启动日常安装版。
+> 当前状态：v1.11 首次发布与 2026-08-19 发布后修正均已完成。首次实现提交 `a9cf6e06` 与修正提交
+> `f3ce1f68` 已推送 main；修正版完成签名打包、隔离队员工作区与首次训练验收，已替换并从
+> `/Applications/Rovai AI.app` 重新启动日常安装版。
 >
 > 前置版本：[v1.10 唯一 Camp ID 与安全公开 Runtime 失败](../v1.10/README.md)。v1.10 已完成并冻结为
 > historical。
 >
-> 后续版本：[v1.12 Windows x64 产品实现与资格闭环](../v1.12/README.md)。
+> 后续版本：[v1.12 AgentRun 局部停止](../v1.12/README.md)。
 
 ## 版本目标
 
@@ -64,6 +65,17 @@ last_updated: 2026-08-19
   污染用户刚切换的 Runtime draft；
 - TRAE 没有独立 cache、Picker 或 refresh 分支；需要真实 TRAE 的验收用例串行运行。
 
+### 统一深检与候选失败修正
+
+- 所有 Product Runtime（包括 TRAE）统一允许 Installation Refresh、Health Probe 与 Dispatch Preflight；
+- `light_ready` 只允许保存 runtime-default 与静态 permission descriptor，正式 AgentRun 前必须统一达到 `ready`；
+- 旧 `installed_unverified` 只读，不再是 onboarding、配置或执行入口；
+- 删除 TRAE-only 首次 AgentRun 验证成功/失败补偿路径；
+- 只有当前 Installation canonical path 自身的 fingerprint 变化可写 `identity_changed`；未采用备用候选失败
+  固定为 candidate-local transient attempt，不修改当前 LKG 的 `stale_at`；
+- 文档治理迁移后的 bundled `grill-duo-with-docs` reference 路径同步到 `decision-routing.md`，恢复 clean
+  checkout 的 Rust 构建完整性。
+
 ## 数据与兼容性
 
 本版复用 `adapter_capability_snapshot.last_successful_probe_at/stale_at` 与 `adapter_probe_attempt`。没有新增表、列、
@@ -79,27 +91,28 @@ migration 95。Runtime model catalog read model 与 Desktop method 是 additive 
 - TRAE acceptance/smoke 不并发，且不接触日常 App userData；
 - Renderer 在 Day/Night 既有 Porcelain/Steel 世界中验证键盘打开、焦点、loading/error/LKG/empty、长模型名与
   Runtime 切换竞态；
-- 推送 main、打包和替换 `/Applications` 只在本版组合门禁完成并获得当前任务授权后执行。
+- 修正提交 `f3ce1f68` 已在本版组合门禁完成并获得当前任务授权后推送 main；签名 App 已完成隔离验收、
+  替换 `/Applications/Rovai AI.app` 并从安装路径重新启动。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.10 冻结为 historical；本概览、实施计划与版本索引建立唯一 current v1.11。 |
-| ADR | 已更新 | [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)固定统一 SWR、LKG 与执行期显式模型校验边界。 |
+| Decisions | 已更新 | [ADR-0220 的迁移后决定正文](decisions.md#adr-0220)保留统一 SWR、LKG 与执行期显式模型校验的历史理由；V1.11-D01/D02 记录数字 ADR clean break 与规范内核归一，[V1.11-D03](decisions.md#v1-11-d03)统一深检生命周期与候选局部失败。 |
 | Contracts | 已更新 | [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)定义 cache/read interface、终态检查和 AgentRun 校验。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)加入模型目录 cache authority、Picker-open 与 TRAE 统一边界。 |
 | UI | 已更新 | 队员工作区 brief 与 UI 路由记录 Picker 的即时缓存、证据文案、错误和竞态要求。 |
 | Runtime Activity | 确认无需更新 | 本版不增加 Runtime Activity canonical kind、映射规则或展示语义。 |
-| Runtime compatibility | 确认无需更新 | 本版不改变已实测 Runtime 版本或兼容性结论；真实 Host 测试验证的是统一产品合同。 |
-| Documentation routing | 已更新 | 文档导航、ADR CURRENT 与 Contract 索引切换到 ADR-0220 和 Runtime v9。 |
+| Runtime compatibility | 已更新 | 兼容性清单追加 2026-08-19 当前语义勘误；既有真实 Runtime 版本与协议证据不变。 |
+| Documentation routing | 已更新 | 文档导航、Decisions CURRENT 与 Contract 索引切换到 v1.11 决定和 Runtime v9。 |
 | Root README | 确认无需更新 | 项目定位、常青能力和支持 Runtime 范围不变，版本流水账不进入根 README。 |
 
 ## References
 
 - [v1.11 实施与验收计划](implementation-plan.md)
-- [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)
+- [v1.11 决策记录](decisions.md)
 - [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
-- [ADR-0204](../../adr/0204-on-demand-runtime-deep-verification.md)
-- [ADR-0208](../../adr/0208-user-authorized-trae-light-and-availability-verification.md)
+- [v0.98 Runtime 深检决定](../v0.98/decisions.md#adr-0204)
+- [v1.03 TRAE 检查决定](../v1.03/decisions.md#adr-0208)

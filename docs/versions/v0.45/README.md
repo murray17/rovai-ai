@@ -17,11 +17,11 @@ last_updated: 2026-08-08
 >
 > 前置版本：[v0.44 确定性原始公共上下文](../v0.44/README.md)
 >
-> 主要决策：[ADR-0130](../../adr/0130-public-a2a-message-and-unified-delivery.md)、
-> [ADR-0131](../../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)、
-> [ADR-0132](../../adr/0132-public-reference-context-closure-profile-v2.md)、
-> [ADR-0133](../../adr/0133-scheme-c-run-process-detail-surface.md)、
-> [ADR-0134](../../adr/0134-runtime-public-output-boundary.md)
+> 主要决策：[ADR-0130](decisions.md#adr-0130)、
+> [ADR-0131](decisions.md#adr-0131)、
+> [ADR-0132](decisions.md#adr-0132)、
+> [ADR-0133](decisions.md#adr-0133)、
+> [ADR-0134](decisions.md#adr-0134)
 
 ## 版本目标
 

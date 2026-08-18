@@ -8,7 +8,7 @@ last_updated: 2026-08-05
 
 # v0.39 Codex Isolated Home 与 AgentRun 进程合同
 
-本文是 [ADR-0107](../../adr/0107-camp-member-isolated-codex-home-and-agentrun-app-server.md)
+本文是 [ADR-0107](decisions.md#adr-0107)
 在 v0.39 的冻结实施合同。它记录已经完成 grilling 并由用户确认的范围；代码、Migration、
 测试和打包仍需单独完成，不能从 `status: frozen` 推断已经实现。
 

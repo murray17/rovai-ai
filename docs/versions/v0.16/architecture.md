@@ -11,13 +11,13 @@ last_updated: 2026-07-28
 > 版本范围：[README.md](README.md)
 >
 > 跨版本约束：
-> [ADR-0059](../../adr/0059-runtime-owned-resource-permissions.md) ·
-> [ADR-0060](../../adr/0060-opaque-member-routing-identity.md)
+> [ADR-0059](decisions.md#adr-0059) ·
+> [ADR-0060](decisions.md#adr-0060)
 >
 > 相关既有约束：
-> [ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md) ·
-> [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md) ·
-> [ADR-0049](../../adr/0049-reproducible-context-delivery-v2.md)
+> [ADR-0014](../v0.06/decisions.md#adr-0014) ·
+> [ADR-0016](../v0.06/decisions.md#adr-0016) ·
+> [ADR-0049](../v0.12/decisions.md#adr-0049)
 >
 > 当时 UI 约束：Meridian（文件已删除，原文见 Git 历史；当前规范见
 > [Arctic Dawn](../../ui/README.md)）

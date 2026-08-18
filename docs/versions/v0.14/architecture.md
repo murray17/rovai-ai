@@ -10,7 +10,7 @@ last_updated: 2026-07-27
 
 > 版本范围：[README.md](README.md)
 >
-> 跨版本约束：[ADR-0056](../../adr/0056-controlled-member-avatar-assets.md)
+> 跨版本约束：[ADR-0056](decisions.md#adr-0056)
 >
 > 当时 UI 约束：Meridian（文件已删除，原文见 Git 历史；当前规范见
 > [Arctic Dawn](../../ui/README.md)）

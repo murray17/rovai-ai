@@ -61,10 +61,10 @@ Core 鉴权的索引、搜索和按 ID 读取合同。该迁移必须保持 SQLi
 上下文区段、Session 轮换、Memory 写入、Run Notice、附件路径和 Task 工具化的目标
 合同记录在 [architecture.md](architecture.md)。四项跨版本切换已经形成 ADR：
 
-- [ADR-0067：Native Session Bootstrap and AgentRun Context v3](../../adr/0067-native-session-bootstrap-and-agentrun-context-v3.md)；
-- [ADR-0068：Brokered Memory Retrieval and Session Entrypoint](../../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)；
-- [ADR-0069：Single Effective Memory and Scope-Bounded Agent Mutation](../../adr/0069-single-effective-memory-and-scope-bounded-agent-mutation.md)；
-- [ADR-0070：Normalized SQLite Memory Store v2](../../adr/0070-normalized-sqlite-memory-store-v2.md)。
+- [ADR-0067：Native Session Bootstrap and AgentRun Context v3](decisions.md#adr-0067)；
+- [ADR-0068：Brokered Memory Retrieval and Session Entrypoint](decisions.md#adr-0068)；
+- [ADR-0069：Single Effective Memory and Scope-Bounded Agent Mutation](decisions.md#adr-0069)；
+- [ADR-0070：Normalized SQLite Memory Store v2](decisions.md#adr-0070)。
 
 它们均已于 2026-07-29 接受；对应旧 ADR 已原子标记为 `superseded`，局部替代条款也在
 ADR 索引和原决策中建立了指向。

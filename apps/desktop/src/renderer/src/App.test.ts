@@ -34,12 +34,14 @@ import {
   campSnapshotWithCurrentAnchor,
   campSnapshotWithAnchoredMessages,
   commandFailureMessage,
+  effectiveCancellingRunIds,
   effectiveCancellingTurnIds,
   notificationFocusMatchesAction,
   optimisticCampMessage,
   rectanglesIntersect,
   recentCampSnapshot,
   reconcileCancellingTurnIds,
+  reconcileRunCancellationIds,
   rememberCampSnapshot,
   runtimeRecoveryFromCommandResult,
   SettingsView,
@@ -64,9 +66,13 @@ import {
   agentExecutionProcesses,
   agentRunTerminalNote,
   agentRunCountsAsExecuting,
+  agentRunRuntimeModelPresentation,
   agentRunShowsUnsettledWarning,
   attachmentDragKind,
   attachmentDropIsBlocked,
+  agentRunStopConfirmation,
+  agentRunStopViewState,
+  canStopAgentRun,
   campConversationViewFromStoredValue,
   campConversationTimeline,
   composerDraftNeedsContinuationRepair,
@@ -169,6 +175,20 @@ function canonicalActivity(
     ...overrides
   }
 }
+
+describe('AgentRun Runtime model presentation', () => {
+  it('shows Runtime defaults before observation and ignores fixed-model Runs', () => {
+    expect(agentRunRuntimeModelPresentation({ modelId: null })).toEqual({
+      modelId: 'Agent 运行时默认',
+      observed: false
+    })
+    expect(agentRunRuntimeModelPresentation({ modelId: 'gpt-5.6' })).toEqual({
+      modelId: 'gpt-5.6',
+      observed: true
+    })
+    expect(agentRunRuntimeModelPresentation(null)).toBeNull()
+  })
+})
 
 describe('cold startup route presentation', () => {
   it('removes the global gate as soon as Main Window Session returns a target', () => {
@@ -275,7 +295,7 @@ describe('Camp snapshot cache', () => {
       updatedAt: '2026-08-14T00:00:00Z'
     }
     const previous = {
-      schemaVersion: 30,
+      schemaVersion: 32,
       throughGlobalSequence: 10,
       camp,
       members: [],
@@ -297,7 +317,7 @@ describe('Camp snapshot cache', () => {
       complete: true
     }
     const projection = {
-      schemaVersion: 1,
+      schemaVersion: 3,
       throughGlobalSequence: 20,
       camp,
       members: [],
@@ -916,6 +936,79 @@ describe('task event projections', () => {
       }))
     }
     expect([...reconcileCancellingTurnIds(cancelling, cancelled)]).toEqual([])
+  })
+
+  it('projects Run-local cancellation from local latency into authoritative state', () => {
+    const activeRun = {
+      id: 'run-local-stop',
+      status: 'running' as const,
+      cancelRequestedAt: null
+    }
+    const local = new Set([activeRun.id, 'run-from-another-camp'])
+    expect([...effectiveCancellingRunIds(local, { agentRuns: [activeRun] })])
+      .toEqual([activeRun.id])
+    expect(reconcileRunCancellationIds(local, { agentRuns: [activeRun] }))
+      .toEqual(new Set([activeRun.id]))
+
+    const requested = {
+      ...activeRun,
+      cancelRequestedAt: '2026-08-19T01:00:00Z'
+    }
+    expect([...effectiveCancellingRunIds(new Set(), { agentRuns: [requested] })])
+      .toEqual([activeRun.id])
+    expect([...reconcileRunCancellationIds(local, { agentRuns: [requested] })])
+      .toEqual([])
+    expect([...reconcileRunCancellationIds(local, {
+      agentRuns: [{ ...requested, status: 'cancelled' as const }]
+    })]).toEqual([])
+  })
+
+  it('admits Run Stop only for an active non-blocked Run outside Turn cancellation', () => {
+    const run = {
+      status: 'waiting' as const,
+      waitReason: 'runtime_delivery',
+      cancelRequestedAt: null
+    }
+    const turn = { cancelRequestedAt: null }
+    expect(canStopAgentRun(run, turn)).toBe(true)
+    expect(canStopAgentRun({ ...run, waitReason: 'recovery_blocked' }, turn)).toBe(false)
+    expect(canStopAgentRun({ ...run, cancelRequestedAt: '2026-08-19T01:00:00Z' }, turn))
+      .toBe(false)
+    expect(canStopAgentRun(run, { cancelRequestedAt: '2026-08-19T01:00:00Z' }))
+      .toBe(false)
+    expect(canStopAgentRun({ ...run, status: 'cancelled' }, turn)).toBe(false)
+    expect(canStopAgentRun(run, null)).toBe(false)
+
+    expect(agentRunStopViewState(run, turn, {
+      cancelling: false,
+      confirming: false,
+      turnCancelling: false
+    })).toBe('available')
+    expect(agentRunStopViewState(run, turn, {
+      cancelling: true,
+      confirming: false,
+      turnCancelling: false
+    })).toBe('stopping')
+    expect(agentRunStopViewState(run, turn, {
+      cancelling: false,
+      confirming: true,
+      turnCancelling: false
+    })).toBe('confirming')
+    expect(agentRunStopViewState({ ...run, status: 'cancelled' }, turn, {
+      cancelling: false,
+      confirming: false,
+      turnCancelling: false
+    })).toBe('stopped')
+    expect(agentRunStopViewState({ ...run, waitReason: 'recovery_blocked' }, turn, {
+      cancelling: false,
+      confirming: false,
+      turnCancelling: false
+    })).toBe('hidden')
+
+    expect(agentRunStopConfirmation('required')).toContain('必要职责未完成')
+    expect(agentRunStopConfirmation('required')).toContain('其他已接受的运行继续')
+    expect(agentRunStopConfirmation('optional')).toContain('本轮仍可完成')
+    expect(agentRunStopConfirmation('optional')).toContain('其他已接受的运行继续')
   })
 
   it('projects one terminal Stop outcome at the authoritative cancellation boundary', () => {
@@ -1844,7 +1937,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 30,
+      schemaVersion: 32,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2037,7 +2130,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 30,
+      schemaVersion: 32,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2089,7 +2182,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 30,
+      schemaVersion: 32,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
@@ -2127,9 +2220,10 @@ describe('task event projections', () => {
         id: 'run-muwa', campTurnId: 'turn-1', conversationId: 'conversation-muwa',
         agentId: 'agent_2', taskId: null, responsibilityKey: 'direct:agent_2',
         responsibilityGeneration: 0, purpose: '实现复制',
-        completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
+        completionRole: 'required', status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
         terminalResolutionSource: null, terminalReasonCode: null,
         failure: null,
+        runtimeModel: null,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
         executionEvidenceCount: 3,
@@ -2698,7 +2792,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 30,
+      schemaVersion: 32,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2810,7 +2904,7 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 30,
+      schemaVersion: 32,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2935,7 +3029,7 @@ describe('task event projections', () => {
 
   it('renders durable Task records below a single explicit creation action', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 30,
+      schemaVersion: 32,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3278,13 +3372,14 @@ describe('task event projections', () => {
       id: 'run-claude-failed', campTurnId: 'turn-1', conversationId: 'conversation-claude',
       agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
       responsibilityGeneration: 0, purpose: '检查仓库', completionRole: 'required',
-      status: 'failed', waitReason: null, executionEpoch: 1,
+      status: 'failed', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: 'runtime_terminal', terminalReasonCode: null,
       failure: {
         runtimeKind: 'claude-code-cli', origin: 'runtime', phase: 'terminal',
         code: 'runtime_rate_limited', summary: '请求受到速率限制',
         detail: '请稍后重试。', retryable: true
       },
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 0, hasUnsettledExternalEffects: false,
@@ -3330,9 +3425,10 @@ describe('task event projections', () => {
       id: 'run-copilot', campTurnId: 'turn-1', conversationId: 'conversation-copilot',
       agentId: 'agent-copilot', taskId: null, responsibilityKey: 'direct:agent-copilot',
       responsibilityGeneration: 0, purpose: '检查工作区状态', completionRole: 'required',
-      status: 'running', waitReason: null, executionEpoch: 1,
+      status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
       failure: null,
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
@@ -3426,9 +3522,10 @@ describe('task event projections', () => {
       id: 'run-builtins', campTurnId: 'turn-1', conversationId: 'conversation-builtins',
       agentId: 'agent-builtins', taskId: null, responsibilityKey: 'direct:agent-builtins',
       responsibilityGeneration: 0, purpose: '读取 Camp 历史', completionRole: 'required',
-      status: 'succeeded', waitReason: null, executionEpoch: 1,
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
       failure: null,
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
@@ -3488,9 +3585,10 @@ describe('task event projections', () => {
       id: 'run-claude', campTurnId: 'turn-1', conversationId: 'conversation-claude',
       agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
       responsibilityGeneration: 0, purpose: '执行无输出 Bash 命令', completionRole: 'required',
-      status: 'succeeded', waitReason: null, executionEpoch: 1,
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
       failure: null,
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,

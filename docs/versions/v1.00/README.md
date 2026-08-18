@@ -11,7 +11,7 @@ last_updated: 2026-08-17
 
 # Rovai-ai v1.00：用户确认后的 Camp 强制永久删除
 
-> 当前状态：[ADR-0206](../../adr/0206-user-confirmed-force-camp-deletion.md)与
+> 当前状态：[ADR-0206](decisions.md#adr-0206)与
 > [Camp Permanent Deletion v1](../../contracts/camp-permanent-deletion-v1.md)已经接受；Core、Renderer、
 > Runtime cleanup 与自动化已经完成，证据见[实施计划](implementation-plan.md)。
 >
@@ -54,7 +54,7 @@ last_updated: 2026-08-17
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.99 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.00。 |
-| ADR | 已更新 | [ADR-0206](../../adr/0206-user-confirmed-force-camp-deletion.md)局部替代 ADR-0058 的 quiescence-only 删除要求。 |
+| ADR | 已更新 | [ADR-0206](decisions.md#adr-0206)局部替代 ADR-0058 的 quiescence-only 删除要求。 |
 | Contracts | 已更新 | [Camp Permanent Deletion v1](../../contracts/camp-permanent-deletion-v1.md)冻结 command、结果、blocker 与 Runtime cleanup 语义。 |
 | Architecture | 确认无需更新 | Core transaction、Runtime Fleet 与受管附件组件边界不变；新组合由 ADR 与字段级合同完整表达。 |
 | UI | 确认无需更新 | 保留既有 Rovai Dialog 组件和视觉系统，只移除 blocker 分支并校准破坏性文案，不建立新的跨页面 UI 组件合同。 |
@@ -66,5 +66,5 @@ last_updated: 2026-08-17
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0206](../../adr/0206-user-confirmed-force-camp-deletion.md)
+- [ADR-0206](decisions.md#adr-0206)
 - [Camp Permanent Deletion v1](../../contracts/camp-permanent-deletion-v1.md)

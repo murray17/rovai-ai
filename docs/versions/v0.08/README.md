@@ -298,4 +298,4 @@ Lumen 管理的全局 Skill Library，并由 `AgentRuntimeAdapter` 按各 Runtim
 
 - [架构与协议](architecture.md)
 - [实施计划与验收](implementation-plan.md)
-- [ADR-0017：受管 Skill Library 与 Runtime 原生投影](../../adr/0017-managed-skill-library-runtime-projection.md)
+- [ADR-0017：受管 Skill Library 与 Runtime 原生投影](decisions.md#adr-0017)

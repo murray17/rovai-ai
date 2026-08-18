@@ -157,7 +157,7 @@ The `--to` field description is: `Optional Agent to wake; repeat for multiple re
 
 ## References
 
-- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)
+- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../versions/v0.62/decisions.md#adr-0163)
 - [Message Delivery v2](message-delivery-v2.md)
 - [Built-in Tool Transport v6](builtin-tool-transport-v6.md)
 - [Camp Message Send v2 (historical)](camp-message-send-v2.md)

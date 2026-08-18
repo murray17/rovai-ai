@@ -8,8 +8,8 @@ last_updated: 2026-08-13
 # AgentRun Recovery
 
 本文描述 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复边界。规范依据是
-[ADR-0164](../adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)。受控关闭后的 product
-fence 由 [ADR-0177](../adr/0177-controlled-shutdown-fences-product-execution.md)拥有；字段级状态与命令见
+[Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
+fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
 [Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)与
 [Planned Shutdown v2](../contracts/planned-shutdown-v2.md)。
 
@@ -67,9 +67,11 @@ accepted Runtime Input Delivery = unchanged
 CampTurn = recomputed
 ```
 
-CampTurn Stop 与 Execution Budget 到期经 cancellation coordinator 走相同 Run 终态；Stop 可使 CampTurn
-整体成为 cancelled，预算到期使其成为 failed，但 blocker Run 本身始终保留 outcome unknown。用户若要
-继续，必须检查 Workspace/Git/外部效果现场并发送新的后续任务；Core 不自动创建 successor。
+CampTurn Stop、AgentRun 局部 Stop 与 Execution Budget 到期经同一 cancellation coordinator 走 Run 终态。
+CampTurn Stop 可使整轮成为 cancelled；Run-local Stop 不设置 Turn cancel request，required Run 取消后由
+聚合得到 `failed / required_run_incomplete`，optional Run 不单独阻止完成；预算到期使 Turn 成为 failed。
+`recovery_blocked` 不提供普通 Run Stop，仍只允许既有“结束此运行”把 blocker 收敛为 outcome unknown。
+用户若要继续，必须检查 Workspace/Git/外部效果现场并发送新的后续任务；Core 不自动创建 successor。
 
 ## 5. 证据与观测
 

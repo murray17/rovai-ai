@@ -11,8 +11,8 @@ last_updated: 2026-08-17
 
 本合同继承 v1 的 Product Runtime 启动目的、静态 Installation 证据和执行期验证边界，并新增 ACP
 Session 续接、历史 replay 隔离、Prompt fencing 与 warm Host 复用规则。决策理由见
-[ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)和
-[ADR-0123](../adr/0123-exclusive-agentrun-runtime-fleet.md)，组件边界见
+[ADR-0192](../versions/v0.87/decisions.md#adr-0192)和
+[ADR-0123](../versions/v0.41/decisions.md#adr-0123)，组件边界见
 [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)。
 
 ## 1. Launch purpose

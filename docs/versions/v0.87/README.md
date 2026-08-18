@@ -57,7 +57,7 @@ TRAE 进程继续执行，不增加 Probe 或失败诊断进程。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.86 冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.87。 |
-| ADR | 已更新 | [ADR-0192](../../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)冻结目的化启动权限、TRAE 静态检测和同一真实进程验证边界。 |
+| ADR | 已更新 | [ADR-0192](decisions.md#adr-0192)冻结目的化启动权限、TRAE 静态检测和同一真实进程验证边界。 |
 | Contracts | 已更新 | [Runtime Launch and Verification v1](../../contracts/runtime-launch-and-verification-v1.md)定义启动目的、`installed_unverified`、nullable version 与状态迁移。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录静态 Installation、执行期验证和 Ready 保留规则。 |
 | UI | 已更新 | [Member workspace brief](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)与[Settings workspace brief](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)加入“已安装/首次运行验证”和“重新扫描安装”语义。 |
@@ -69,7 +69,7 @@ TRAE 进程继续执行，不增加 Probe 或失败诊断进程。
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0192](../../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
+- [ADR-0192](decisions.md#adr-0192)
 - [Runtime Launch and Verification v1](../../contracts/runtime-launch-and-verification-v1.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
 - [TRAE CLI CN v0.83 准入记录](../../runtime-compatibility.md#trae-cli-cn-v083-准入记录)

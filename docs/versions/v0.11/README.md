@@ -14,7 +14,7 @@ last_updated: 2026-07-26
 >
 > 前置版本：[v0.10 长期记忆](../v0.10/README.md)
 >
-> 跨版本决策：[ADR-0048](../../adr/0048-rovai-product-identity-and-legacy-namespace.md)
+> 跨版本决策：[ADR-0048](decisions.md#adr-0048)
 >
 > 实施入口：[架构与协议](architecture.md) · [实施计划](implementation-plan.md)
 

@@ -101,8 +101,8 @@ invalid/excluded pair、Judge disagreement、coverage gap 和 order 都保留；
 
 ## References
 
-- [ADR-0172](../adr/0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md)
+- [ADR-0172](../versions/v0.68/decisions.md#adr-0172)
 - [Tool Interaction Measurement v1](tool-interaction-measurement-v1.md)
 - [Benchmark Protocol v3](benchmark-protocol-v3.md)
 - [Semantic Judge Views v1](semantic-judge-views-v1.md)
-- [ADR-0094](../adr/0094-formal-qualification-isolation-and-effect-coverage.md)
+- [ADR-0094](../versions/v0.34/decisions.md#adr-0094)

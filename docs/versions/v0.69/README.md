@@ -87,7 +87,7 @@ last_updated: 2026-08-13
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.68 按已完成事实冻结为 historical；v0.69 成为唯一 current，并新增本概览与实施计划 |
-| ADR | 确认无需更新 | [ADR-0168](../../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)已拥有 launch admission、同 generation terminal authority 与有界 deadline；本版本只修复实现漂移 |
+| ADR | 确认无需更新 | [ADR-0168](../v0.66/decisions.md#adr-0168)已拥有 launch admission、同 generation terminal authority 与有界 deadline；本版本只修复实现漂移 |
 | Contracts | 已更新 | [Planned Shutdown v1](../../contracts/planned-shutdown-v1.md)澄清 `closing_launch`、waiting abortive settlement、guard 生命周期与 deadline 上界，不改变 wire 或持久字段 |
 | Architecture | 已更新 | [Planned Shutdown](../../architecture/planned-shutdown.md)明确 lifecycle phase、handoff happens-before 与有界收口职责 |
 | UI | 确认无需更新 | 关闭等待 modal、terminal reason 与 recovery blocker 的 Renderer 合同不变 |
@@ -99,7 +99,7 @@ last_updated: 2026-08-13
 ## References
 
 - [v0.69 实施与验收计划](implementation-plan.md)
-- [ADR-0168](../../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)
+- [ADR-0168](../v0.66/decisions.md#adr-0168)
 - [Planned Shutdown 架构](../../architecture/planned-shutdown.md)
 - [Planned Shutdown v1](../../contracts/planned-shutdown-v1.md)
 - [v0.66 历史勘误](../v0.66/README.md#历史勘误2026-08-13)

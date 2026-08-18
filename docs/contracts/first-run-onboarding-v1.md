@@ -132,10 +132,10 @@ an explicit user action through the normal Draft-only message contract.
 
 ## References
 
-- [ADR-0202: Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning](../adr/0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md)
-- [Configured Camp Creation and Lazy Conversations](../adr/0071-configured-camp-creation-and-lazy-conversations.md)
-- [Quick Chat Ubiquitous Language](../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md)
-- [Background Runtime Checks](../adr/0083-background-runtime-checks-and-actionable-status.md)
-- [Atomic Member Runtime Configuration](../adr/0127-atomic-member-runtime-configuration.md)
-- [Structured Draft-only User Message Submission](../adr/0128-structured-draft-only-user-message-submission.md)
+- [ADR-0202: Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning](../versions/v0.97/decisions.md#adr-0202)
+- [Configured Camp Creation and Lazy Conversations](../versions/v0.22/decisions.md#adr-0071)
+- [Quick Chat Ubiquitous Language](../versions/v0.24/decisions.md#adr-0074)
+- [Background Runtime Checks](../versions/v0.26/decisions.md#adr-0083)
+- [Atomic Member Runtime Configuration](../versions/v0.43/decisions.md#adr-0127)
+- [Structured Draft-only User Message Submission](../versions/v0.43/decisions.md#adr-0128)
 - [Camp Composer Draft v2](camp-composer-draft-v2.md)

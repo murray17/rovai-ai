@@ -3,23 +3,17 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Runtime Catalog Boundaries
 
-本文件定义 Runtime 名称出现在产品中时的权威分层。准入理由见
-[ADR-0065](../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)、
-[ADR-0066](../adr/0066-managed-product-runtime-resolution.md)与
-[ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)。主机平台准入由
-[ADR-0210](../adr/0210-platform-qualified-product-runtime-admission.md)与
+本文件定义 Runtime 名称出现在产品中时的权威分层。Catalog、Installation 与机器状态的长期边界见
+[Runtime Catalog 与 Installation 不变量](foundational-invariants.md#runtime-catalog-installation)。主机平台准入由
+[Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)与
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
-[ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
-[ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)和
-[ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
-[ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)、
-[ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)及
-[ADR-0220](../adr/0220-runtime-model-catalog-stale-while-revalidate.md)及
+[Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
+[Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
 [Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
@@ -29,7 +23,7 @@ last_updated: 2026-08-18
 | --- | --- | --- | --- |
 | Product Runtime Catalog | closed `AdapterKind` 与 Rust `AgentRuntimeAdapter` Registry | 全局产品身份与 Adapter interface | 某个平台已验证、机器状态、未接入候选或 roadmap |
 | Runtime Platform Admission | Rust Adapter Registry 的 `AdapterKind × HostPlatformKey` 矩阵 | 某平台上的 discovery/check/Installation、成员选择、AgentRun、诊断与 Migration 准入 | 当前机器是否安装/登录/Ready、Renderer roadmap |
-| Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 active/execution-deferred verification snapshot | light ready、checking、installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
+| Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
 Product Runtime Catalog 当前包含十种可执行 Adapter。Preview 与它不是“同一目录的另一种状态”；
@@ -45,7 +39,7 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 新增 Product Runtime 必须原子建立：
 
 1. 稳定 wire identity、可执行发现和 Installation/Migration closed kind；
-2. 由 Adapter launch policy 明确深检 purpose 或 execution-deferred verification，并对协议、认证、必需 capability 与 transient failure 诚实分类；
+2. 由统一 purpose-scoped launch policy 管理深检，并对协议、认证、必需 capability 与 transient failure 诚实分类；
 3. 冻结模型、权限、Session、MCP、cwd 和进程策略的 AgentRun Adapter；
 4. prompt 终态、cancel、Action/Approval、Tool ID、Runtime Activity 与兼容性证据；
 5. 成员配置、Runtime 设置、诊断、测试与文档投影。
@@ -60,12 +54,12 @@ continuation、Built-in Tool、Approval、cancel、terminal、process cleanup �
 ## 浅检测与按需深检
 
 只有平台准入为 `qualified` 的 Adapter 才参加 Core 启动和 Runtime 重扫。它们只建立 executable path、权限、metadata/fingerprint 与 Adapter 声明为无副作用的
-有界 one-shot 身份证据。非 TRAE 只有命令成功、输出未超限且识别到基础版本/身份才写入 `light_ready`；
+有界 one-shot 身份证据。所有 Runtime 都只有在命令成功、输出未超限且识别到基础版本/身份时才写入 `light_ready`；
 `found_uninspected` 既不是 light-ready，也不是 checking。`light_ready` 可以驱动成员 Runtime-default 配置和
 “可用”主状态，但只表示 executable 已通过轻度启动验证、可选择和尝试运行。认证、协议、模型、Session 与
 capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 
-发现结束、缓存过期、fingerprint 变化、页面进入和成员选择都不排队深检。fingerprint 变化只替换静态快照并
+发现结束、页面进入和成员选择不排队深检；模型 Picker 按 60 秒/24 小时策略请求刷新。fingerprint 变化只替换静态快照并
 使旧 Ready 失效。Runtime Check Manager 以内部 attempt identity、总 deadline、每 Runtime 单飞和全局并发二
 统一收口 success、failure、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
 和整进程树 cleanup。
@@ -80,14 +74,22 @@ TTL。
 
 切换队员 Runtime 只读取 Installation，不启动进程。打开模型 Picker 才进入 `runtime.modelCatalog.open` seam：
 fresh 直接返回，stale 立即服务 last-known-good 并由 Check Manager 后台单飞刷新，其他状态等待一次用户动作
-授权的 Availability Check。刷新失败只追加 failed Probe Attempt，保留成功 snapshot；确定的 executable、安装
-或 capability identity 变化使目录立即失效。account/provider 变化只有 Adapter 提供稳定、非敏感 identity
+授权的 Availability Check。刷新失败只追加 failed Probe Attempt，保留成功 snapshot。只有当前 Installation
+canonical path 自身的确定 fingerprint/identity 变化才可使目录立即失效；其他搜索候选的失败是
+candidate-local transient attempt，不得修改当前 snapshot 的 `stale_at`。备用候选只有完整 deep probe 成功并
+即将正式采用时，才能替换 Installation 并推进 generation。确定的安装或 capability identity 变化同样立即
+失效。account/provider 变化只有 Adapter 提供稳定、非敏感 identity
 evidence 时才自动比较，不能从凭据内容或错误文案猜测。
 
 Picker catalog 只用于建立新的显式选择。既有已保存显式模型在目录暂不可用或 Provider 后续移除时保持原值，
 并按当前证据显示尚未核对或目录未提供；不为人工修改或技术恢复的损坏数据提供兼容修复。真实 AgentRun
 仍在 Host/Session 建立后核对当前目录，不存在或无法核对即 fail closed。`runtime_default` 不依赖 catalog，
 内部 sentinel 只用于审计和冻结，Adapter 不向真实 Runtime 发送该 sentinel。
+
+成员配置只拥有模型策略，不拥有某次 Run 的实际模型。使用 `runtime_default` 时，Core 只能从当前
+Thread/Session 的 Runtime-native 结构化字段记录首个实际模型，并按 AgentRun execution epoch、default-only、
+write-once 持久化；catalog default、请求模型、冻结 sentinel、Usage 或自由文本都不能补推。无观测时 Read
+Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime failure；该事实也不反向改写配置或 catalog。
 
 ## 内部诊断与公开 Runtime failure
 
@@ -121,15 +123,14 @@ TRAE 参加正常 light discovery：启动和显式 rescan 通过统一 Probe pr
 用户点击“检查可用性”授权 `AvailabilityCheck` 启动一次 TRAE ACP Host。Probe 使用保守
 `permission_mode=default`，只执行版本、initialize 与 session/new，并要求动态模型/权限目录；它不发送 Prompt、
 模型请求、工具或 Approval 行为测试。成功提交 Ready，随后的 discovery event 不重复静态落库覆盖该 Ready。
-Installation refresh、health/diagnostics 与 dispatch preflight 继续不启动 `traecli`；旧
-`installed_unverified` 仍可读取，但不再是正常启动轻检成功后的主状态。
+Installation Refresh、Health Probe 与 Dispatch Preflight 和其他 Runtime 一样可以启动有界 TRAE Probe；旧
+`installed_unverified` 仍可读取，但不能配置或执行。
 
-成员可以在该状态下原子保存 Runtime default model 与 `permission_mode=default|bypass_permissions`，新 draft
-默认后者。首次真实 AgentRun 只启动
-一个 TRAE Host，从同一个 Host 的 `initialize` 与 `session/new` response 生成 Ready snapshot 后继续发送
-任务输入。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host；失败使用该 Host 已有错误分类，不启动 diagnostic
-process。相同 path/fingerprint 且 Adapter permission schema digest 相同的轻检复扫保留 Ready；任一权限
-descriptor 改变时降级为 light snapshot，等待显式检查或下一次真实执行重新验证。
+成员可以在 `light_ready` 下原子保存 Runtime default model 与静态声明的
+`permission_mode=default|bypass_permissions`，新 draft 默认后者，但 Scheduler 必须先完成统一 Dispatch Preflight
+并得到 Ready 才能启动正式 AgentRun。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host。相同
+path/fingerprint 且 Adapter permission schema digest 相同的轻检复扫保留 Ready；任一权限 descriptor 改变时
+降级为 light snapshot，等待显式检查、Picker 刷新或统一 Dispatch Preflight 重新验证。
 
 TRAE 的模型 Picker、cache status、60 秒/24 小时窗口、失败保留和显式模型 AgentRun 校验与其他 Runtime
 共用同一模块。产品代码不增加 TRAE-specific cache 或 refresh policy；只有真实 Runtime acceptance/smoke

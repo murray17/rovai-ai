@@ -8,13 +8,13 @@ last_updated: 2026-08-18
 # Planned Shutdown
 
 本文组合计划内退出、重启和更新时的 Core 生命周期结构。可靠 Runtime terminal 边界由
-[ADR-0168](../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)拥有；关闭后必须终止 Rovai
+[Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；关闭后必须终止 Rovai
 执行权、同时保留未知外部效果的边界由
-[ADR-0177](../adr/0177-controlled-shutdown-fences-product-execution.md)拥有。精确 wire、字段、幂等和 deadline
+[Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有。精确 wire、字段、幂等和 deadline
 语义由 [Planned Shutdown v2](../contracts/planned-shutdown-v2.md)拥有。没有 durable shutdown cycle 的异常
 崩溃、强杀、断电和下一 generation accepted-input 分类仍由 [AgentRun Recovery](agent-run-recovery.md)负责。
 Windows 受管进程的创建时 Job 归属见
-[ADR-0211](../adr/0211-atomic-windows-managed-process-launch.md)与
+[Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)与
 [Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)。
 
 ## 1. 单调生命周期与三个准入面

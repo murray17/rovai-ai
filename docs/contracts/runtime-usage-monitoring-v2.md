@@ -9,7 +9,7 @@ last_updated: 2026-08-17
 # Runtime Usage Monitoring v2
 
 本合同定义 `monitoring.snapshot`、Runtime Usage 解析、五表持久化和 Renderer 的当前长期边界。设计理由见
-[ADR-0205](../adr/0205-minimal-runtime-usage-metering.md)，组件组合见
+[ADR-0205](../versions/v0.99/decisions.md#adr-0205)，组件组合见
 [Runtime Monitoring 架构](../architecture/runtime-monitoring.md)。v1 是历史合同，不再是兼容入口。
 
 ## 产品范围

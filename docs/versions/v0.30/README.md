@@ -14,7 +14,7 @@ last_updated: 2026-08-02
 >
 > 前置版本：[v0.29 队员工作台信息架构](../v0.29/README.md)
 >
-> 跨版本决策：[ADR-0088](../../adr/0088-attested-native-team-gateway-attachment.md)
+> 跨版本决策：[ADR-0088](decisions.md#adr-0088)
 >
 > 实施设计：[architecture.md](architecture.md)
 >

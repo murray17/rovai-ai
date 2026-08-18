@@ -160,6 +160,6 @@ separate phase and ADR.
 
 - [v1.07 model-context revision 1](../versions/v1.07/model-context-change-a2a-public-only.md)
 - [ContextManifest Evidence v16 (accepted predecessor)](context-manifest-evidence-v16.md)
-- [ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)
+- [ADR-0218](../versions/v1.07/decisions.md#adr-0218)
 - [Run Facts v1](run-facts-v1.md)
 - [Gather v3](gather-v3.md)
