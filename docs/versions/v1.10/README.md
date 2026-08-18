@@ -92,20 +92,20 @@ Renderer、Agent Context、Built-in Tool 与本机路径中的唯一 Camp 主键
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.09 以 `complete` 冻结为 historical；本概览、计划与版本索引建立唯一 current v1.10。 |
-| ADR | 已更新 | [ADR-0219](../../adr/0219-single-namespaced-camp-identity.md)固定唯一 namespaced Camp identity 与 Native Session 分离；Runtime failure 继续沿用 ADR-0059/0065/0083/0168/0192/0204。 |
+| Decisions | 已更新 | [ADR-0219 的迁移后决定正文](decisions.md#adr-0219)保留唯一 namespaced Camp identity 与 Native Session 分离的历史理由；当前语义由 Camp Identity Architecture/Contract 直接拥有。 |
 | Contracts | 已更新 | [Camp Identity v1](../../contracts/camp-identity-v1.md)、[ContextManifest Evidence v18](../../contracts/context-manifest-evidence-v18.md)、[Camp History Retrieval v3](../../contracts/camp-history-v3.md)与[Built-in Tool Transport v16](../../contracts/builtin-tool-transport-v16.md)固定 Camp clean break；Runtime v8 与 Surface v9 独立固定公开 failure。 |
 | Architecture | 已更新 | [Camp Identity](../../architecture/camp-identity.md)记录生成、持久化、上下文、路径与 Native identity seam；[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录公开 failure 安全边界。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)和 Settings surface brief 固定按 origin 命名与安全 detail 展示。 |
 | Runtime Activity | 确认无需更新 | 公开 failure 不改变 Canonical Runtime Activity、Evidence schema、operation identity 或 registry classifier。 |
 | Runtime compatibility | 确认无需更新 | 未新增上游版本、capability 或资格证据；本版只改善既有 Claude Code/Antigravity 错误投影。 |
-| Documentation routing | 已更新 | 文档导航、Version/Contract/Architecture 索引和 ADR CURRENT 路由至 Camp v1/v18/v3/v16、ADR-0219 及 Runtime v8/v9。 |
+| Documentation routing | 已更新 | 文档导航、Version/Contract/Architecture 索引和 Decisions CURRENT 路由至 Camp v1/v18/v3/v16、v1.10 决定及 Runtime v8/v9。 |
 | Root README | 确认无需更新 | 安全错误可见性不改变项目定位、常青能力或正式 Runtime 支持集合。 |
 
 ## References
 
 - [实施与验收计划](implementation-plan.md)
 - [模型上下文 revision 1](model-context-change.md)
-- [ADR-0219](../../adr/0219-single-namespaced-camp-identity.md)
+- [v1.10 决策记录](decisions.md#adr-0219)
 - [Camp Identity v1](../../contracts/camp-identity-v1.md)
 - [ContextManifest Evidence v18](../../contracts/context-manifest-evidence-v18.md)
 - [Camp History Retrieval v3](../../contracts/camp-history-v3.md)
@@ -115,9 +115,9 @@ Renderer、Agent Context、Built-in Tool 与本机路径中的唯一 Camp 主键
 - [Run Process Detail Surface v9](../../contracts/run-process-detail-surface-v9.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
-- [ADR-0059](../../adr/0059-runtime-owned-resource-permissions.md)
-- [ADR-0065](../../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)
-- [ADR-0083](../../adr/0083-background-runtime-checks-and-actionable-status.md)
-- [ADR-0168](../../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)
-- [ADR-0192](../../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)
-- [ADR-0204](../../adr/0204-on-demand-runtime-deep-verification.md)
+- [v0.16 Runtime 资源权限决定](../v0.16/decisions.md#adr-0059)
+- [v0.19 Runtime Catalog 决定](../v0.19/decisions.md#adr-0065)
+- [v0.26 Runtime 检查决定](../v0.26/decisions.md#adr-0083)
+- [v0.66 Planned Shutdown 决定](../v0.66/decisions.md#adr-0168)
+- [v0.87 Runtime 启动决定](../v0.87/decisions.md#adr-0192)
+- [v0.98 Runtime 深检决定](../v0.98/decisions.md#adr-0204)

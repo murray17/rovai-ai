@@ -6,9 +6,9 @@ last_updated: 2026-08-18
 
 # Camp Identity Architecture
 
-本架构组合 [ADR-0219](../adr/0219-single-namespaced-camp-identity.md) 与
+本架构组合 [ADR-0219 的迁移后决定正文](../versions/v1.10/decisions.md#adr-0219)与
 [Camp Identity v1](../contracts/camp-identity-v1.md)，说明唯一 Camp identity 在创建、持久化、模型输入、工具、
-本机路径与 Native Session 之间如何流动。字段级格式与拒绝规则归 Contract；选择理由归 ADR。
+本机路径与 Native Session 之间如何流动。字段级格式与拒绝规则归 Contract；选择理由归版本决定。
 
 ## Identity flow
 

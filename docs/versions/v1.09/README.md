@@ -85,7 +85,7 @@ last_updated: 2026-08-19
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.08 以 `complete` 冻结为 historical；本概览、计划与版本索引建立唯一 current v1.09。 |
-| Decisions | 已更新 | 新增 `decisions.md` 的 V1.09-D01/V1.09-D02，记录当前权威收敛、数字 ADR clean break，以及历史局部替代/一次性迁移条款的规范内核归一；会话查找、CLI 和 Tool 详情的产品语义不因本次治理迁移改变。 |
+| Decisions | 确认无需更新 | v1.09 未形成需要独立保留的重要版本决定；数字 ADR clean break 属于后续 v1.11 文档治理，不回写本历史版本。 |
 | Contracts | 已更新 | [Camp Conversation Find v1](../../contracts/camp-conversation-find-v1.md)固定精确查找 wire；[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)固定完整 chronology、Built-in 公共结果和原位复制。 |
 | Architecture | 已更新 | [Camp Open Read Path](../../architecture/camp-open-read-path.md)记录完整会话查找与 around-window；[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 union-aware help、统一 pre-IPC Schema validation 与安全字段 issue。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)和 Day/Night 主题记录查找、高亮、完整 Tool 顺序、Built-in disclosure 与移除 standalone raw Evidence。 |

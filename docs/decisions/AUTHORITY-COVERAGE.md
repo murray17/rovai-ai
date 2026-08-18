@@ -1,13 +1,13 @@
 ---
 document_type: decision-authority-coverage
 authority: adr-clean-break-current-authority
-baseline_commit: 737699668a3034c7381ff14d74769bc7af6f0149
+baseline_commit: a987bef9c317554dcf0ca52a834e3b9ddb8f74e4
 last_updated: 2026-08-19
 ---
 
 # 当前决策权威覆盖
 
-本表按迁移基线中每份当前有效 ADR 的 Decision 章节及其三级章节拆分规范内核，并把它们映射到无需读取历史决定即可理解的当前权威章节。`migrated` 表示原内核仍有效且已直接进入当前权威；`replaced` 表示原内核已被后续决定改变，表中目标是归一后的当前语义；`retired` 表示一次性迁移规则已经完成、不再构成当前产品约束。后两类的本次裁决与理由记录在 [V1.09-D02](../versions/v1.09/decisions.md#v1-09-d02)。
+本表按迁移基线中每份当前有效 ADR 的 Decision 章节及其三级章节拆分规范内核，并把它们映射到无需读取历史决定即可理解的当前权威章节。`migrated` 表示原内核仍有效且已直接进入当前权威；`replaced` 表示原内核已被后续决定改变，表中目标是归一后的当前语义；`retired` 表示一次性迁移规则已经完成、不再构成当前产品约束。后两类的本次裁决与理由记录在 [V1.11-D02](../versions/v1.11/decisions.md#v1-11-d02)。
 
 `migrated` 必须对应“当前有效=是”，`replaced | retired` 必须对应“当前有效=否”。每个目标都必须是当前权威文档中实际存在的精确章节锚点；链接到历史决定本身不算覆盖。
 
@@ -50,6 +50,7 @@ last_updated: 2026-08-19
 | ADR-0187 | `camp-workspace` | Durable Composer Recipient Continuation | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#camp-composer) | `migrated` |
 | ADR-0202 | `camp-workspace` | Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#camp-resources) | `migrated` |
 | ADR-0206 | `camp-workspace` | User-Confirmed Force Camp Deletion | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#camp-resources) | `migrated` |
+| ADR-0219 | `camp-workspace` | Single Namespaced Camp Identity Separate from Native Sessions | 是 | Architecture | [Camp Identity](../architecture/camp-identity.md#stable-boundaries) | `migrated` |
 | ADR-0056 | `member-identity` | One controlled reference on AgentProfile | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#member-projection) | `migrated` |
 | ADR-0056 | `member-identity` | Split reference, byte and presentation authority | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#member-projection) | `migrated` |
 | ADR-0056 | `member-identity` | Asset-first commit and orphan retention | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#member-projection) | `migrated` |
@@ -183,6 +184,7 @@ last_updated: 2026-08-19
 | ADR-0210 | `runtime-execution-security` | Platform-Qualified Product Runtime Admission | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#runtime-platform-security) | `migrated` |
 | ADR-0211 | `runtime-execution-security` | Atomic Windows Managed Process Launch | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#runtime-platform-security) | `migrated` |
 | ADR-0213 | `runtime-execution-security` | Windows Local Private Storage and Filesystem Admission | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#runtime-platform-security) | `migrated` |
+| ADR-0220 | `runtime-execution-security` | Runtime Model Catalog Stale-While-Revalidate and Execution-Time Validation | 是 | Architecture | [Runtime Catalog](../architecture/runtime-catalog-boundaries.md#模型目录缓存与执行事实) | `migrated` |
 | ADR-0007 | `session-context-bootstrap` | Portable Conversation Handoff | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#context-session-bootstrap) | `migrated` |
 | ADR-0051 | `session-context-bootstrap` | 工具组与网关 | 否 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#collaboration-history-addressing) | `replaced` |
 | ADR-0051 | `session-context-bootstrap` | 输出纪律 | 是 | Architecture | [当前基础不变量](../architecture/foundational-invariants.md#context-public-history) | `migrated` |

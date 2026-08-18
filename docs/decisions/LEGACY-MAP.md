@@ -1,7 +1,7 @@
 ---
 document_type: legacy-decision-map
 authority: adr-clean-break-traceability
-baseline_commit: 737699668a3034c7381ff14d74769bc7af6f0149
+baseline_commit: a987bef9c317554dcf0ca52a834e3b9ddb8f74e4
 last_updated: 2026-08-18
 ---
 
@@ -229,3 +229,5 @@ last_updated: 2026-08-18
 | ADR-0216 | `docs/adr/0216-explicit-agent-addressing-intent-as-delivery-gate.md` | `v1.07` | `accepted` | [docs/versions/v1.07/decisions.md#adr-0216](../versions/v1.07/decisions.md#adr-0216) |
 | ADR-0217 | `docs/adr/0217-transport-v15-inherits-cross-platform-v14.md` | `v1.07` | `accepted` | [docs/versions/v1.07/decisions.md#adr-0217](../versions/v1.07/decisions.md#adr-0217) |
 | ADR-0218 | `docs/adr/0218-audience-specific-principal-message-projection.md` | `v1.07` | `accepted` | [docs/versions/v1.07/decisions.md#adr-0218](../versions/v1.07/decisions.md#adr-0218) |
+| ADR-0219 | `docs/adr/0219-single-namespaced-camp-identity.md` | `v1.10` | `accepted` | [docs/versions/v1.10/decisions.md#adr-0219](../versions/v1.10/decisions.md#adr-0219) |
+| ADR-0220 | `docs/adr/0220-runtime-model-catalog-stale-while-revalidate.md` | `v1.11` | `accepted` | [docs/versions/v1.11/decisions.md#adr-0220](../versions/v1.11/decisions.md#adr-0220) |

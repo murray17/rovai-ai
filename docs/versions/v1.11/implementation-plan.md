@@ -12,7 +12,7 @@ last_updated: 2026-08-19
 
 - [x] 审核 60 秒 revalidate、24 小时最大服务、失败保留 LKG 与明确失效条件；
 - [x] 确认 Provider/account 自动失效仅使用稳定非敏感 Adapter evidence；
-- [x] 接受 ADR-0220 与 Runtime Launch and Verification v9；
+- [x] 接受迁移前 ADR-0220 与 Runtime Launch and Verification v9；
 - [x] 冻结 v1.10，建立唯一 current v1.11；
 - [x] 确认不新增 Migration，Data Contract 保持 v1.10/schema 50/migration 95。
 
@@ -60,7 +60,7 @@ last_updated: 2026-08-19
 ## References
 
 - [v1.11 版本概览](README.md)
-- [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)
+- [ADR-0220 的迁移后决定正文](decisions.md#adr-0220)
 - [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)
 - [本地 Runtime 工作流](../../development/local-workflow.md)

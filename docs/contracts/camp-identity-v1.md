@@ -74,6 +74,6 @@ storage-version gates. Quarantine is recovery evidence, not a supported reader.
 
 ## References
 
-- [ADR-0219](../adr/0219-single-namespaced-camp-identity.md)
+- [ADR-0219 的迁移后决定正文](../versions/v1.10/decisions.md#adr-0219)
 - [Camp Identity Architecture](../architecture/camp-identity.md)
 - [v1.10 model-context revision 1](../versions/v1.10/model-context-change.md)

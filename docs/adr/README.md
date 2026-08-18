@@ -14,5 +14,5 @@ last_updated: 2026-08-18
 - 旧 ADR ID 与迁移后正文：[Legacy Map](../decisions/LEGACY-MAP.md)。
 - 自包含迁移证据：[ADR Migration Manifest](../decisions/ADR-MIGRATION-MANIFEST.json)。
 
-迁移基线为 `737699668a3034c7381ff14d74769bc7af6f0149`。本次迁移是旧文件 URL 的 clean break；
+迁移基线为 `a987bef9c317554dcf0ca52a834e3b9ddb8f74e4`。本次迁移是旧文件 URL 的 clean break；
 不保留逐 ADR 重定向文件，旧路径可能失效，历史内容与来源通过上述映射、Manifest 和 Git 历史追溯。

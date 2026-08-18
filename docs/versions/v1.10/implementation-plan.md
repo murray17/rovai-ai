@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 ## Checkpoint 0：版本与合同
 
 - [x] 将完成的 v1.09 冻结为 historical，并建立唯一 current v1.10；
-- [x] 确认 Camp 模型上下文 revision 1，接受 ADR-0219、Camp Identity v1、ContextManifest v18、Camp History
+- [x] 确认 Camp 模型上下文 revision 1，接受迁移前 ADR-0219、Camp Identity v1、ContextManifest v18、Camp History
   v3、Built-in Transport v16、Runtime Launch v8 与 Run Process Detail Surface v9；
 - [x] 更新 Camp/Runtime architecture、Camp UI、Settings brief、Contract/ADR current route 与文档导航。
 

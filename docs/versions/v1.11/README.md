@@ -84,20 +84,20 @@ migration 95。Runtime model catalog read model 与 Desktop method 是 additive 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.10 冻结为 historical；本概览、实施计划与版本索引建立唯一 current v1.11。 |
-| ADR | 已更新 | [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)固定统一 SWR、LKG 与执行期显式模型校验边界。 |
+| Decisions | 已更新 | [ADR-0220 的迁移后决定正文](decisions.md#adr-0220)保留统一 SWR、LKG 与执行期显式模型校验的历史理由；V1.11-D01/D02 记录数字 ADR clean break 与规范内核归一。 |
 | Contracts | 已更新 | [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)定义 cache/read interface、终态检查和 AgentRun 校验。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)加入模型目录 cache authority、Picker-open 与 TRAE 统一边界。 |
 | UI | 已更新 | 队员工作区 brief 与 UI 路由记录 Picker 的即时缓存、证据文案、错误和竞态要求。 |
 | Runtime Activity | 确认无需更新 | 本版不增加 Runtime Activity canonical kind、映射规则或展示语义。 |
 | Runtime compatibility | 确认无需更新 | 本版不改变已实测 Runtime 版本或兼容性结论；真实 Host 测试验证的是统一产品合同。 |
-| Documentation routing | 已更新 | 文档导航、ADR CURRENT 与 Contract 索引切换到 ADR-0220 和 Runtime v9。 |
+| Documentation routing | 已更新 | 文档导航、Decisions CURRENT 与 Contract 索引切换到 v1.11 决定和 Runtime v9。 |
 | Root README | 确认无需更新 | 项目定位、常青能力和支持 Runtime 范围不变，版本流水账不进入根 README。 |
 
 ## References
 
 - [v1.11 实施与验收计划](implementation-plan.md)
-- [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)
+- [v1.11 决策记录](decisions.md)
 - [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
-- [ADR-0204](../../adr/0204-on-demand-runtime-deep-verification.md)
-- [ADR-0208](../../adr/0208-user-authorized-trae-light-and-availability-verification.md)
+- [v0.98 Runtime 深检决定](../v0.98/decisions.md#adr-0204)
+- [v1.03 TRAE 检查决定](../v1.03/decisions.md#adr-0208)

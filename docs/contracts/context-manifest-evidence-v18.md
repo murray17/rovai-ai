@@ -73,4 +73,4 @@ Data Contract v1.10 store to projection schema 50.
 - [v1.10 model-context revision 1](../versions/v1.10/model-context-change.md)
 - [ContextManifest Evidence v17](context-manifest-evidence-v17.md)
 - [Camp Identity v1](camp-identity-v1.md)
-- [ADR-0219](../adr/0219-single-namespaced-camp-identity.md)
+- [ADR-0219 的迁移后决定正文](../versions/v1.10/decisions.md#adr-0219)
