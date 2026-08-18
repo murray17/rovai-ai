@@ -11,6 +11,7 @@ import {
 } from './onboarding-preferences'
 
 const cleanup: string[] = []
+const CAMP_ID = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })))
@@ -147,14 +148,14 @@ describe('onboarding preferences', () => {
 
     await store.recordProvisionedMember('agent-1', 1)
     await store.recordProvisionedRuntime(2)
-    await store.recordProvisionedCamp('camp-1')
+    await store.recordProvisionedCamp(CAMP_ID)
     const completed = await store.complete()
     expect(completed).toMatchObject({
       status: 'completed',
       origin: 'onboarding',
       selectedMemberRole: 'mianzhi',
       memberAgentId: 'agent-1',
-      quickChatCampId: 'camp-1'
+      quickChatCampId: CAMP_ID
     })
     expect((await stat(filePath)).mode & 0o777).toBe(0o600)
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(completed)

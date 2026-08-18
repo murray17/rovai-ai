@@ -769,7 +769,7 @@ mod tests {
             json!({"query": "handoff decision", "limit": 4}),
             json!({
                 "results": [{
-                    "campId": "camp-1",
+                    "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
                     "messageId": "message-1",
                     "sequence": 9,
                     "snippet": "private full search result"
@@ -1138,7 +1138,7 @@ mod tests {
             json!({"query": "find the review", "limit": 20}),
             json!({
                 "results": (0..100).map(|index| json!({
-                    "campId": "camp-1",
+                    "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
                     "messageId": format!("message-{index}"),
                     "sequence": index,
                     "body": "RAW_BODY_MUST_NOT_PERSIST",

@@ -20,14 +20,15 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
 
 ## Drag feedback
 
-- 只有 `DataTransfer.types` 含 `Files` 时进入接收态。主会话列内收 10px（窄屏 7px）显示 1.5px
-  Steel 虚线框和低透明 Steel wash；Inspector 与导航保持原色。
-- 原时间线与 Agent 执行台保持可读，不 blur、不重排、不隐藏。居中浮层使用 308×92px 紧凑卡，
-  主文案固定为“松手添加到当前消息”。
+- 只有 `DataTransfer.types` 含 `Files` 时进入接收态。统一接收层从消息时间线顶部连续延伸到 Composer
+  底部，主会话列内收 10px（窄屏 7px）显示不中断的 1.5px Steel 虚线框和低透明 Steel wash；Inspector
+  与导航保持原色。
+- 原时间线、Agent 执行台与 Composer 输入内容保持可读，不 blur、不重排、不隐藏。居中浮层使用
+  308×92px 紧凑卡，主文案固定为“松手添加到当前消息”。
 - 单个目录能由 Chromium entry 明确识别时，次文案为“文件夹将保存为只读快照，原文件不会移动”；
   其他 payload 使用“支持文件与文件夹 · 将安全复制到附件队列”，不猜测。
-- Composer 使用 Steel 边框和 focus ring，并在顶缘显示“将添加到这条消息”；不得用不透明遮罩覆盖
-  正文、Mention 或已有附件。
+- Composer 使用 Steel 边框和 focus ring，并在顶缘显示“将添加到这条消息”；Composer 整体不得浮在
+  统一接收层之上而截断 wash 或虚线框，也不得用不透明遮罩覆盖正文、Mention 或已有附件。
 - 指针进入 Inspector 或其他非接收面时立即退出；主会话列子节点之间移动使用短延迟边界收敛，
   不闪烁。外部拖放被系统取消且 Chromium 未派发 `dragleave` 时，Drag feedback 必须在有界的
   drag-over 心跳超时后自行清除。Overlay 必须 `pointer-events: none`。

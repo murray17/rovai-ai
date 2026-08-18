@@ -3,7 +3,10 @@ use std::{
     error::Error as StdError,
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 
 use anyhow::{Context, Result};
@@ -16,7 +19,11 @@ use rovai_core::{
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
-    runtime_discovery::configure_active_runtime_command,
+    runtime_discovery::{configure_active_runtime_command, is_executable_file},
+    runtime_failure::{
+        RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
+        public_runtime_failure_from_output,
+    },
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -53,7 +60,6 @@ pub struct ClaudeCodeRunRequest {
     pub runtime_events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
     pub launch_handoff: Option<oneshot::Sender<()>>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCodeInputAccepted {
     pub native_session_id: String,
@@ -78,7 +84,8 @@ pub struct ClaudeCodeRunResult {
 pub struct ClaudeCodeDeliveredFailure {
     pub native_session_id: String,
     pub native_turn_id: String,
-    pub error_code: &'static str,
+    pub error_code: String,
+    pub failure: RuntimeFailureView,
 }
 
 impl fmt::Display for ClaudeCodeDeliveredFailure {
@@ -188,25 +195,58 @@ impl ClaudeCodeCliRuntimeAdapter {
     ) -> Result<ClaudeCodeRunResult> {
         let execution_root = Path::new(&request.workspace.execution_root);
         if !execution_root.is_dir() {
-            anyhow::bail!(
+            let internal = anyhow::anyhow!(
                 "Claude Code execution directory no longer exists: {}",
                 execution_root.display()
             );
+            let failure = claude_public_failure(
+                request,
+                &self.private_runtime_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_execution_directory_unavailable",
+                "Claude Code 的执行目录不可用",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(internal.context(RuntimeFailureError::new(failure)));
         }
         if let Some(root) = request.attachment_access_root.as_deref()
             && !root.is_dir()
         {
-            anyhow::bail!(
+            let internal = anyhow::anyhow!(
                 "Claude Code Camp Attachment access root is unavailable: {}",
                 root.display()
             );
+            let failure = claude_public_failure(
+                request,
+                &self.private_runtime_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_attachment_root_unavailable",
+                "Claude Code 的附件目录不可用",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(internal.context(RuntimeFailureError::new(failure)));
         }
         let executable = Path::new(&request.runtime.executable_path);
-        if !executable.is_file() {
-            anyhow::bail!(
-                "Claude Code executable no longer exists: {}",
+        if !is_executable_file(executable) {
+            let internal = anyhow::anyhow!(
+                "Claude Code executable is missing or not executable: {}",
                 executable.display()
             );
+            let failure = claude_public_failure(
+                request,
+                &self.private_runtime_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_executable_unavailable",
+                "Claude Code 可执行文件不可用",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(internal.context(RuntimeFailureError::new(failure)));
         }
         let values = request
             .runtime
@@ -310,18 +350,34 @@ impl ClaudeCodeCliRuntimeAdapter {
         command.current_dir(execution_root);
         // Frozen context can contain user messages and local paths. The managed
         // process uses piped stdin so it never appears in argv or diagnostics.
-        let spec = ManagedProcessLaunchSpec::capture(
-            &command,
-            ManagedProcessPurpose::RuntimeOneShot,
-            ManagedStdinPolicy::Piped,
-            ManagedWindowsArgvDialect::MicrosoftCrt,
-            format!("agent-run:{}:claude-code-cli", request.agent_run_id),
-        )?;
-        let mut child = ManagedProcess::spawn(spec).with_context(|| {
-            format!(
-                "failed to start {} in Claude Code print mode",
-                executable.display()
-            )
+        let launch_result: Result<ManagedProcess> = (|| {
+            let spec = ManagedProcessLaunchSpec::capture(
+                &command,
+                ManagedProcessPurpose::RuntimeOneShot,
+                ManagedStdinPolicy::Piped,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                format!("agent-run:{}:claude-code-cli", request.agent_run_id),
+            )?;
+            ManagedProcess::spawn(spec)
+        })();
+        let mut child = launch_result.map_err(|error| {
+            let raw_detail = error.to_string();
+            let failure = claude_public_failure(
+                request,
+                &self.private_runtime_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_spawn_failed",
+                "Claude Code 进程无法启动",
+                Some(&raw_detail),
+                true,
+            );
+            error
+                .context(format!(
+                    "failed to start {} in Claude Code print mode",
+                    executable.display()
+                ))
+                .context(RuntimeFailureError::new(failure))
         })?;
         let mut stdin = child
             .take_stdin()
@@ -348,12 +404,14 @@ impl ClaudeCodeCliRuntimeAdapter {
             "claude-code:{}:{}",
             request.agent_run_id, request.execution_epoch
         );
+        let acceptance_observed = Arc::new(AtomicBool::new(false));
         let stdout_task = tokio::spawn(capture_claude_stream(
             stdout,
             native_session_id.clone(),
             native_turn_id.clone(),
             request.input_accepted.clone(),
             request.runtime_events.clone(),
+            acceptance_observed.clone(),
         ));
         let stderr_task = tokio::spawn(capture_bounded(stderr));
         tokio::pin!(interrupted);
@@ -367,9 +425,31 @@ impl ClaudeCodeCliRuntimeAdapter {
             }
         };
         let _ = child.force_terminate_tree();
-        let stdout = stdout_task
+        let stdout = match stdout_task
             .await
-            .context("Claude Code stdout collector failed")??;
+            .context("Claude Code stdout collector failed")?
+        {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                let failure = claude_public_failure(
+                    request,
+                    &self.private_runtime_dir,
+                    RuntimeFailureOrigin::Compatibility,
+                    RuntimeFailurePhase::Execution,
+                    "runtime_stream_incompatible",
+                    "Claude Code 返回了当前版本无法识别的输出",
+                    Some(&error.to_string()),
+                    false,
+                );
+                return Err(claude_failure_error(
+                    error,
+                    failure,
+                    &native_session_id,
+                    &native_turn_id,
+                    acceptance_observed.load(Ordering::Acquire),
+                ));
+            }
+        };
         let stderr = stderr_task
             .await
             .context("Claude Code stderr collector failed")??;
@@ -377,23 +457,75 @@ impl ClaudeCodeCliRuntimeAdapter {
             anyhow::bail!("Claude Code process was interrupted");
         }
         if !status.success() {
-            if explicit_mcp_config_rejection(&stderr.bytes) {
-                anyhow::bail!(
-                    "mcp_config.explicit_rejection: Claude Code rejected its MCP configuration"
-                );
-            }
-            anyhow::bail!(
+            let raw_stderr = String::from_utf8_lossy(&stderr.bytes);
+            let compatibility = explicit_mcp_config_rejection(&stderr.bytes)
+                || unsupported_option_rejection(&stderr.bytes);
+            let failure = claude_public_failure(
+                request,
+                &self.private_runtime_dir,
+                if compatibility {
+                    RuntimeFailureOrigin::Compatibility
+                } else {
+                    RuntimeFailureOrigin::Runtime
+                },
+                RuntimeFailurePhase::Execution,
+                if compatibility {
+                    "runtime_cli_incompatible"
+                } else {
+                    "runtime_process_failed"
+                },
+                if compatibility {
+                    "当前 Claude Code 版本不支持 Rovai 所需的命令参数"
+                } else {
+                    "Claude Code 进程执行失败"
+                },
+                Some(&raw_stderr),
+                !compatibility,
+            );
+            let internal = anyhow::anyhow!(
                 "Claude Code process exited with {} (stderrBytes={}, stderrDigest={})",
                 status,
                 stderr.total_bytes,
                 stderr.digest
             );
+            return Err(claude_failure_error(
+                internal,
+                failure,
+                &native_session_id,
+                &native_turn_id,
+                stdout.acceptance_emitted,
+            ));
         }
-        let output = stdout
-            .final_result
-            .context("Claude Code stream omitted its final result event")?;
-        let final_output =
-            validate_claude_terminal_result(&output, &native_session_id, &native_turn_id)?;
+        let output = match stdout.final_result {
+            Some(output) => output,
+            None => {
+                let internal = anyhow::anyhow!("Claude Code stream omitted its final result event");
+                let failure = claude_public_failure(
+                    request,
+                    &self.private_runtime_dir,
+                    RuntimeFailureOrigin::Compatibility,
+                    RuntimeFailurePhase::Terminal,
+                    "runtime_missing_final_result",
+                    "Claude Code 未返回当前集成所需的最终结果",
+                    Some(&internal.to_string()),
+                    false,
+                );
+                return Err(claude_failure_error(
+                    internal,
+                    failure,
+                    &native_session_id,
+                    &native_turn_id,
+                    stdout.acceptance_emitted,
+                ));
+            }
+        };
+        let sensitive_paths = claude_sensitive_paths(request, &self.private_runtime_dir);
+        let final_output = validate_claude_terminal_result(
+            &output,
+            &native_session_id,
+            &native_turn_id,
+            &sensitive_paths,
+        )?;
         Ok(ClaudeCodeRunResult {
             native_session_id,
             native_turn_id,
@@ -409,37 +541,186 @@ impl ClaudeCodeCliRuntimeAdapter {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the Runtime request and closed public failure fields stay explicit at this boundary"
+)]
+fn claude_public_failure(
+    request: &ClaudeCodeRunRequest,
+    private_runtime_dir: &Path,
+    origin: RuntimeFailureOrigin,
+    phase: RuntimeFailurePhase,
+    code: &str,
+    summary: &str,
+    raw_detail: Option<&str>,
+    retryable: bool,
+) -> RuntimeFailureView {
+    let sensitive_paths = claude_sensitive_paths(request, private_runtime_dir);
+    public_runtime_failure_from_output(
+        rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+        origin,
+        phase,
+        code,
+        summary,
+        raw_detail,
+        &sensitive_paths,
+        retryable,
+    )
+}
+
+fn claude_sensitive_paths<'a>(
+    request: &'a ClaudeCodeRunRequest,
+    private_runtime_dir: &'a Path,
+) -> Vec<(&'a Path, &'static str)> {
+    let mut sensitive_paths = vec![
+        (Path::new(&request.workspace.execution_root), "<project>"),
+        (private_runtime_dir, "<runtime-private>"),
+        (
+            Path::new(&request.runtime.executable_path),
+            "<runtime-executable>",
+        ),
+    ];
+    if let Some(root) = request.attachment_access_root.as_deref() {
+        sensitive_paths.push((root, "<attachment-root>"));
+    }
+    sensitive_paths
+}
+
+fn claude_failure_error(
+    internal: anyhow::Error,
+    failure: RuntimeFailureView,
+    native_session_id: &str,
+    native_turn_id: &str,
+    delivered: bool,
+) -> anyhow::Error {
+    if delivered {
+        let error_code = failure.code.clone();
+        internal.context(ClaudeCodeDeliveredFailure {
+            native_session_id: native_session_id.to_string(),
+            native_turn_id: native_turn_id.to_string(),
+            error_code,
+            failure,
+        })
+    } else {
+        internal.context(RuntimeFailureError::new(failure))
+    }
+}
+
 fn validate_claude_terminal_result(
     output: &ClaudeCodeJsonResult,
     native_session_id: &str,
     native_turn_id: &str,
+    sensitive_paths: &[(&Path, &str)],
 ) -> Result<String> {
-    let observed_session_id = output
-        .session_id
-        .as_deref()
-        .context("Claude Code result omitted session_id")?;
-    validate_session_id(observed_session_id)?;
+    let observed_session_id = match output.session_id.as_deref() {
+        Some(observed_session_id) => observed_session_id,
+        None => {
+            let internal = anyhow::anyhow!("Claude Code result omitted session_id");
+            let failure = public_runtime_failure_from_output(
+                rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+                RuntimeFailureOrigin::Compatibility,
+                RuntimeFailurePhase::Terminal,
+                "runtime_session_incompatible",
+                "Claude Code 最终结果缺少会话标识",
+                Some(&internal.to_string()),
+                sensitive_paths,
+                false,
+            );
+            return Err(claude_failure_error(
+                internal,
+                failure,
+                native_session_id,
+                native_turn_id,
+                true,
+            ));
+        }
+    };
+    if let Err(error) = validate_session_id(observed_session_id) {
+        let failure = public_runtime_failure_from_output(
+            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Terminal,
+            "runtime_session_incompatible",
+            "Claude Code 返回了无效的会话标识",
+            Some(&error.to_string()),
+            sensitive_paths,
+            false,
+        );
+        return Err(claude_failure_error(
+            error,
+            failure,
+            native_session_id,
+            native_turn_id,
+            true,
+        ));
+    }
     if observed_session_id != native_session_id {
-        anyhow::bail!(
+        let internal = anyhow::anyhow!(
             "Claude Code returned a different session than requested (expected {native_session_id}, observed {observed_session_id})"
         );
+        let failure = public_runtime_failure_from_output(
+            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Terminal,
+            "runtime_session_incompatible",
+            "Claude Code 返回了另一个会话的结果",
+            Some(&internal.to_string()),
+            sensitive_paths,
+            false,
+        );
+        return Err(claude_failure_error(
+            internal,
+            failure,
+            native_session_id,
+            native_turn_id,
+            true,
+        ));
     }
     if output.is_error || output.subtype.as_deref() != Some("success") {
-        return Err(ClaudeCodeDeliveredFailure {
-            native_session_id: native_session_id.to_string(),
-            native_turn_id: native_turn_id.to_string(),
-            error_code: "runtime_terminal_failure",
-        }
-        .into());
+        let failure = public_runtime_failure_from_output(
+            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Terminal,
+            "runtime_terminal_failure",
+            "Claude Code 返回了失败结果",
+            Some(&output.result),
+            sensitive_paths,
+            true,
+        );
+        let internal = anyhow::anyhow!(
+            "Claude Code terminal result reported failure (subtype={:?}, isError={}): {}",
+            output.subtype,
+            output.is_error,
+            output.result
+        );
+        return Err(claude_failure_error(
+            internal,
+            failure,
+            native_session_id,
+            native_turn_id,
+            true,
+        ));
     }
     let final_output = output.result.trim().to_string();
     if final_output.is_empty() {
-        return Err(ClaudeCodeDeliveredFailure {
-            native_session_id: native_session_id.to_string(),
-            native_turn_id: native_turn_id.to_string(),
-            error_code: "runtime_missing_final_output",
-        }
-        .into());
+        let internal = anyhow::anyhow!("Claude Code success result contained no final output");
+        let failure = public_runtime_failure_from_output(
+            rovai_core::agent_profile::AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Terminal,
+            "runtime_missing_final_output",
+            "Claude Code 最终结果缺少必要内容",
+            Some(&internal.to_string()),
+            sensitive_paths,
+            false,
+        );
+        return Err(claude_failure_error(
+            internal,
+            failure,
+            native_session_id,
+            native_turn_id,
+            true,
+        ));
     }
     Ok(final_output)
 }
@@ -458,6 +739,19 @@ fn explicit_mcp_config_rejection(stderr: &[u8]) -> bool {
         ]
         .iter()
         .any(|marker| diagnostic.contains(marker))
+}
+
+fn unsupported_option_rejection(stderr: &[u8]) -> bool {
+    let diagnostic = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    [
+        "unknown option",
+        "unrecognized option",
+        "unsupported option",
+        "unknown argument",
+        "unrecognized argument",
+    ]
+    .iter()
+    .any(|marker| diagnostic.contains(marker))
 }
 
 #[derive(Debug, Deserialize)]
@@ -479,6 +773,7 @@ struct ClaudeCodeJsonResult {
 #[derive(Debug)]
 struct ClaudeCodeStreamCapture {
     final_result: Option<ClaudeCodeJsonResult>,
+    acceptance_emitted: bool,
 }
 
 #[derive(Debug, Default)]
@@ -501,6 +796,7 @@ async fn capture_claude_stream<R>(
     native_turn_id: String,
     input_accepted: Option<mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
     runtime_events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
+    acceptance_observed: Arc<AtomicBool>,
 ) -> Result<ClaudeCodeStreamCapture>
 where
     R: AsyncRead + Unpin,
@@ -522,6 +818,7 @@ where
                         &native_turn_id,
                         input_accepted.as_ref(),
                         runtime_events.as_ref(),
+                        acceptance_observed.as_ref(),
                         &mut state,
                     )?;
                     line.clear();
@@ -544,11 +841,13 @@ where
             &native_turn_id,
             input_accepted.as_ref(),
             runtime_events.as_ref(),
+            acceptance_observed.as_ref(),
             &mut state,
         )?;
     }
     Ok(ClaudeCodeStreamCapture {
         final_result: state.final_result,
+        acceptance_emitted: state.acceptance_emitted,
     })
 }
 
@@ -558,6 +857,7 @@ fn process_claude_stream_line(
     native_turn_id: &str,
     input_accepted: Option<&mpsc::UnboundedSender<ClaudeCodeInputAccepted>>,
     runtime_events: Option<&mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
+    acceptance_observed: &AtomicBool,
     state: &mut ClaudeCodeStreamState,
 ) -> Result<()> {
     let event: Value =
@@ -571,6 +871,7 @@ fn process_claude_stream_line(
             });
         }
         state.acceptance_emitted = true;
+        acceptance_observed.store(true, Ordering::Release);
     }
     for runtime_event in normalize_claude_runtime_events(&event, expected_session_id, state)? {
         if let Some(sender) = runtime_events {
@@ -580,6 +881,13 @@ fn process_claude_stream_line(
     if event.get("type").and_then(Value::as_str) == Some("result") {
         if state.final_result.is_some() {
             anyhow::bail!("Claude Code stream emitted more than one final result event");
+        }
+        if !matches!(event.get("subtype"), Some(Value::String(_)))
+            || !matches!(event.get("is_error"), Some(Value::Bool(_)))
+            || !matches!(event.get("result"), Some(Value::String(_)))
+            || !matches!(event.get("session_id"), Some(Value::String(_)))
+        {
+            anyhow::bail!("Claude Code final stream event omitted a required result field");
         }
         state.final_result = Some(
             serde_json::from_value(event).context("Claude Code final stream event was invalid")?,
@@ -1108,22 +1416,29 @@ mod tests {
             usage: Value::Null,
             total_cost_usd: None,
         };
-        let error = validate_claude_terminal_result(&terminal_failure, session_id, native_turn_id)
-            .expect_err("a structured non-success result should be terminal failure proof");
+        let error =
+            validate_claude_terminal_result(&terminal_failure, session_id, native_turn_id, &[])
+                .expect_err("a structured non-success result should be terminal failure proof");
         let proof = error
             .downcast_ref::<ClaudeCodeDeliveredFailure>()
             .expect("the reliable failure must retain its typed proof");
         assert_eq!(proof.native_session_id, session_id);
         assert_eq!(proof.native_turn_id, native_turn_id);
         assert_eq!(proof.error_code, "runtime_terminal_failure");
+        assert_eq!(proof.failure.origin, RuntimeFailureOrigin::Runtime);
+        assert_eq!(proof.failure.phase, RuntimeFailurePhase::Terminal);
+        assert_eq!(proof.failure.detail.as_deref(), Some("provider detail"));
 
         let mismatched = ClaudeCodeJsonResult {
             session_id: Some("5ade59ac-f87e-4827-8cf2-0e1f3ba720ea".to_string()),
             ..terminal_failure
         };
-        let error = validate_claude_terminal_result(&mismatched, session_id, native_turn_id)
+        let error = validate_claude_terminal_result(&mismatched, session_id, native_turn_id, &[])
             .expect_err("a different Session must be fenced");
-        assert!(error.downcast_ref::<ClaudeCodeDeliveredFailure>().is_none());
+        let proof = error
+            .downcast_ref::<ClaudeCodeDeliveredFailure>()
+            .expect("the incompatible terminal still proves the requested one-shot turn ended");
+        assert_eq!(proof.failure.origin, RuntimeFailureOrigin::Compatibility);
     }
 
     #[test]
@@ -1360,6 +1675,7 @@ mod tests {
             native_turn_id.to_string(),
             Some(accepted_sender),
             Some(runtime_event_sender),
+            Arc::new(AtomicBool::new(false)),
         ));
 
         let accepted = tokio::time::timeout(Duration::from_secs(1), accepted_receiver.recv())

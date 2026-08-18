@@ -17,6 +17,7 @@ use crate::{
         StructuredCampMessageContent, mentions_current_user, normalize_content,
         render_agent_plain_text, validate_content,
     },
+    camp_id::{CAMP_ID_PATTERN, CampId},
     camp_message_publication::public_camp_message_publication_cte,
     db::Database,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
@@ -27,6 +28,7 @@ pub const CAMP_LIST_TOOL_NAME: &str = "camp.list";
 pub const CAMP_SEARCH_TOOL_NAME: &str = "camp.search";
 pub const HISTORY_SEARCH_TOOL_NAME: &str = "history.search";
 pub const CAMP_READ_TOOL_NAME: &str = "camp.read";
+pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 3;
 
 const CAMP_LIST_DEFAULT_LIMIT: usize = 20;
 const CAMP_LIST_MAX_LIMIT: usize = 50;
@@ -225,7 +227,7 @@ impl CampHistoryService {
             "required": ["query"],
             "properties": {
                 "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
-                "campId": {"type": "string", "minLength": 1},
+                "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                 "limit": {"type": "integer", "minimum": 1, "maximum": CAMP_SEARCH_MAX_LIMIT}
             }
         })
@@ -241,7 +243,7 @@ impl CampHistoryService {
                 "campIds": {
                     "type": "array", "minItems": 1, "maxItems": MAX_HISTORY_CAMP_IDS,
                     "uniqueItems": true,
-                    "items": {"type": "string", "minLength": 1}
+                    "items": {"type": "string", "pattern": CAMP_ID_PATTERN}
                 },
                 "dateFrom": {"type": "string", "format": "date-time"},
                 "dateTo": {"type": "string", "format": "date-time"},
@@ -258,7 +260,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "messageId"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "item"},
                         "messageId": {"type": "string", "minLength": 1},
                         "bodyOffset": {"type": "integer", "minimum": 0},
@@ -269,7 +271,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "messageId"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "around"},
                         "messageId": {"type": "string", "minLength": 1},
                         "before": {"type": "integer", "minimum": 0, "maximum": MAX_AROUND_MESSAGES},
@@ -280,7 +282,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "messageId", "direction"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "thread"},
                         "messageId": {"type": "string", "minLength": 1},
                         "direction": {"type": "string", "enum": ["before", "after"]},
@@ -292,7 +294,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "direction"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "timeline"},
                         "direction": {"type": "string", "enum": ["before", "after"]},
                         "cursor": {"type": "integer", "minimum": 1},
@@ -634,9 +636,9 @@ fn validate_requested_camps(values: Option<&[String]>) -> Result<Option<Vec<Stri
     }
     let mut unique = HashSet::new();
     for value in values {
-        if Uuid::parse_str(value).is_err() || !unique.insert(value.clone()) {
+        if CampId::parse(value).is_err() || !unique.insert(value.clone()) {
             return Err(invalid_argument(
-                "campIds must contain 1 to 20 unique UUIDs",
+                "campIds must contain 1 to 20 unique Rovai Camp IDs",
             ));
         }
     }
@@ -646,9 +648,9 @@ fn validate_requested_camps(values: Option<&[String]>) -> Result<Option<Vec<Stri
 fn validate_requested_camp_id(value: Option<&str>) -> Result<Option<String>> {
     value
         .map(|value| {
-            Uuid::parse_str(value)
+            CampId::parse(value)
                 .map(|camp_id| camp_id.to_string())
-                .map_err(|_| invalid_argument("campId must be a UUID"))
+                .map_err(|_| invalid_argument("campId must be a Rovai Camp ID"))
         })
         .transpose()
 }
@@ -2209,7 +2211,7 @@ mod slow_tests {
         let rows = (1..=9)
             .map(|sequence| MessageRow {
                 id: format!("message-{sequence}"),
-                camp_id: "camp-1".to_string(),
+                camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 sequence,
                 author_type: "user".to_string(),
                 author_id: "local_user".to_string(),
@@ -2253,7 +2255,7 @@ mod slow_tests {
         for sequence in 1..=9 {
             connection
                 .execute(
-                    "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body, created_at) VALUES (?1, 'camp-1', ?2, 'user', 'local_user', 'x', '2026-08-01T00:00:00Z')",
+                    "INSERT INTO camp_message(id, camp_id, sequence, author_type, author_id, body, created_at) VALUES (?1, 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', ?2, 'user', 'local_user', 'x', '2026-08-01T00:00:00Z')",
                     params![format!("short-{sequence}"), sequence],
                 )
                 .unwrap();
@@ -2263,7 +2265,7 @@ mod slow_tests {
             &transaction,
             &RunFence {
                 manifest_id: "manifest-1".to_string(),
-                current_camp_id: "camp-1".to_string(),
+                current_camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 current_boundary: 100,
                 global_boundary: 100,
             },
@@ -2279,7 +2281,7 @@ mod slow_tests {
     fn top_k_reorders_by_relevance_without_exposing_a_cursor() {
         let row = |id: &str, body: &str, recency: i64| MessageRow {
             id: id.to_string(),
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             sequence: recency,
             author_type: "user".to_string(),
             author_id: "local_user".to_string(),
@@ -2344,7 +2346,7 @@ mod slow_tests {
                     id, camp_id, sequence, author_type, author_id,
                     body, structured_content_json, created_at
                 ) VALUES (
-                    'message-projection', 'camp-1', 1, 'agent', 'agent_1',
+                    'message-projection', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 1, 'agent', 'agent_1',
                     'CORRUPTED CACHE',
                     '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"authoritative body"}]',
                     '2026-08-01T00:00:00Z'
@@ -2355,7 +2357,7 @@ mod slow_tests {
         let transaction = connection.transaction().unwrap();
         let row = MessageRow {
             id: "message-projection".to_string(),
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             sequence: 1,
             author_type: "agent".to_string(),
             author_id: "agent_1".to_string(),
@@ -2382,7 +2384,7 @@ mod slow_tests {
                 &transaction,
                 &RunFence {
                     manifest_id: "manifest-1".to_string(),
-                    current_camp_id: "camp-1".to_string(),
+                    current_camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                     current_boundary: 1,
                     global_boundary: 1,
                 },
@@ -2404,7 +2406,7 @@ mod slow_tests {
         let rows = load_ordered_messages(
             &transaction,
             &CampTarget {
-                camp_id: "camp-1".to_string(),
+                camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 fence: MessageFence::Current { boundary: 1 },
             },
             ReadDirection::After,
@@ -2469,43 +2471,43 @@ mod slow_tests {
                     source_agent_run_id, source_operation_id, body,
                     structured_content_json, created_at, tombstoned_at
                 ) VALUES
-                    ('self-send', 'camp-1', 2, 'agent', 'agent-1', 'run-1',
+                    ('self-send', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 2, 'agent', 'agent-1', 'run-1',
                      'operation-self', 'body-self-send',
                      '[{"kind":"text","text":"body-self-send"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('other-run', 'camp-1', 3, 'agent', 'agent-2', 'run-2',
+                    ('other-run', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 3, 'agent', 'agent-2', 'run-2',
                      'operation-other-run', 'other run',
                      '[{"kind":"text","text":"other run"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('user-message', 'camp-1', 4, 'user', 'local_user', 'run-1',
+                    ('user-message', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 4, 'user', 'local_user', 'run-1',
                      'operation-user-message', 'user body',
                      '[{"kind":"text","text":"user body"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('null-operation', 'camp-1', 5, 'agent', 'agent-1', 'run-1',
+                    ('null-operation', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 5, 'agent', 'agent-1', 'run-1',
                      NULL, 'null operation',
                      '[{"kind":"text","text":"null operation"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('fake-operation', 'camp-1', 6, 'agent', 'agent-1', 'run-1',
+                    ('fake-operation', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 6, 'agent', 'agent-1', 'run-1',
                      'operation-without-outcome', 'fake operation',
                      '[{"kind":"text","text":"fake operation"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('outcome-other-run', 'camp-1', 7, 'agent', 'agent-1', 'run-1',
+                    ('outcome-other-run', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 7, 'agent', 'agent-1', 'run-1',
                      'operation-outcome-other-run', 'other outcome',
                      '[{"kind":"text","text":"other outcome"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('wrong-epoch', 'camp-1', 8, 'agent', 'agent-1', 'run-1',
+                    ('wrong-epoch', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 8, 'agent', 'agent-1', 'run-1',
                      'operation-wrong-epoch', 'wrong epoch',
                      '[{"kind":"text","text":"wrong epoch"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('wrong-command', 'camp-1', 9, 'agent', 'agent-1', 'run-1',
+                    ('wrong-command', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 9, 'agent', 'agent-1', 'run-1',
                      'operation-wrong-command', 'wrong command',
                      '[{"kind":"text","text":"wrong command"}]',
                      '2026-08-13T00:00:00Z', NULL),
-                    ('tombstoned-self-send', 'camp-1', 10, 'agent', 'agent-1', 'run-1',
+                    ('tombstoned-self-send', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 10, 'agent', 'agent-1', 'run-1',
                      'operation-tombstoned', 'tombstoned',
                      '[{"kind":"text","text":"tombstoned"}]',
                      '2026-08-13T00:00:00Z', '2026-08-13T00:01:00Z'),
-                    ('other-camp', 'camp-2', 2, 'agent', 'agent-1', 'run-1',
+                    ('other-camp', 'rvcamp_01h47kvsy5fk1shh6w1g60eec0', 2, 'agent', 'agent-1', 'run-1',
                      'operation-other-camp', 'other camp',
                      '[{"kind":"text","text":"other camp"}]',
                      '2026-08-13T00:00:00Z', NULL);
@@ -2517,41 +2519,41 @@ mod slow_tests {
                 ) VALUES
                     ('command.result', 'operation-self', 'camp.message.send', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"self-send"}',
-                     'camp_message', 'self-send', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                     'camp_message', 'self-send', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'agent', 'agent-1', 'run-1', 7),
                     ('command.result', 'operation-other-run', 'camp.message.send', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"other-run"}',
-                     'camp_message', 'other-run', 'camp-1', 'agent', 'agent-2', 'run-2', 7),
+                     'camp_message', 'other-run', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'agent', 'agent-2', 'run-2', 7),
                     ('command.result', 'operation-user-message', 'camp.message.send', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"user-message"}',
-                     'camp_message', 'user-message', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                     'camp_message', 'user-message', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'agent', 'agent-1', 'run-1', 7),
                     ('command.result', 'operation-outcome-other-run', 'camp.message.send', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"outcome-other-run"}',
-                     'camp_message', 'outcome-other-run', 'camp-1', 'agent', 'agent-1', 'run-2', 7),
+                     'camp_message', 'outcome-other-run', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'agent', 'agent-1', 'run-2', 7),
                     ('command.result', 'operation-wrong-epoch', 'camp.message.send', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"wrong-epoch"}',
-                     'camp_message', 'wrong-epoch', 'camp-1', 'agent', 'agent-1', 'run-1', 8),
+                     'camp_message', 'wrong-epoch', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'agent', 'agent-1', 'run-1', 8),
                     ('command.result', 'operation-wrong-command', 'team.create_task', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"wrong-command"}',
-                     'camp_message', 'wrong-command', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                     'camp_message', 'wrong-command', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'agent', 'agent-1', 'run-1', 7),
                     ('command.result', 'operation-tombstoned', 'camp.message.send', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"tombstoned-self-send"}',
-                     'camp_message', 'tombstoned-self-send', 'camp-1', 'agent', 'agent-1', 'run-1', 7),
+                     'camp_message', 'tombstoned-self-send', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'agent', 'agent-1', 'run-1', 7),
                     ('command.result', 'operation-other-camp', 'camp.message.send', 'accepted',
                      'camp_message.send_accepted', '{"messageId":"other-camp"}',
-                     'camp_message', 'other-camp', 'camp-2', 'agent', 'agent-1', 'run-1', 7);
+                     'camp_message', 'other-camp', 'rvcamp_01h47kvsy5fk1shh6w1g60eec0', 'agent', 'agent-1', 'run-1', 7);
                 "#,
             )
             .unwrap();
 
         let transaction = connection.transaction().unwrap();
         let run = AuthenticatedTeamToolRun {
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             agent_id: "agent-1".to_string(),
             agent_run_id: "run-1".to_string(),
             execution_epoch: 7,
         };
         let target = CampTarget {
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
 
@@ -2581,7 +2583,7 @@ mod slow_tests {
         }
 
         let other_camp_target = CampTarget {
-            camp_id: "camp-2".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eec0".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
         assert!(
@@ -2651,7 +2653,7 @@ mod slow_tests {
                     id, camp_id, sequence, author_type, author_id, body,
                     structured_content_json, effective_recipient_ids_json, created_at
                 ) VALUES (
-                    'message-1', 'camp-1', 1, 'user', 'local_user', 'A😀中B',
+                    'message-1', 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 1, 'user', 'local_user', 'A😀中B',
                     '[{"kind":"current_user_mention","userId":"local_user"},{"kind":"text","text":"A😀中B"}]',
                     '["agent_5"]',
                     '2026-08-01T00:00:00Z'
@@ -2667,7 +2669,7 @@ mod slow_tests {
                         id, camp_id, camp_message_id, position, display_name, media_type,
                         byte_size, content_digest, storage_path, preview_kind,
                         created_by_type, created_by_id, created_at
-                    ) VALUES (?1, 'camp-1', 'message-1', ?2, ?3, ?4, 10,
+                    ) VALUES (?1, 'rvcamp_01h47kvsy5fk1shh6w1g60eecf', 'message-1', ?2, ?3, ?4, 10,
                                'sha256:attachment', ?5, 'none', 'user', 'local_user',
                                '2026-08-01T00:00:00Z')
                     "#,
@@ -2684,11 +2686,11 @@ mod slow_tests {
 
         let transaction = connection.transaction().unwrap();
         let target = CampTarget {
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
         let run = AuthenticatedTeamToolRun {
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             agent_id: "agent_1".to_string(),
             agent_run_id: "run-1".to_string(),
             execution_epoch: 1,
@@ -2727,7 +2729,7 @@ mod slow_tests {
         let rows = (1..=20)
             .map(|sequence| MessageRow {
                 id: format!("message-{sequence}"),
-                camp_id: "camp-1".to_string(),
+                camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 sequence,
                 author_type: "user".to_string(),
                 author_id: "local_user".to_string(),
@@ -2742,7 +2744,7 @@ mod slow_tests {
             &transaction,
             rows,
             json!({
-                "campId": "camp-1",
+                "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
                 "mode": "timeline",
                 "direction": "after",
                 "items": [],

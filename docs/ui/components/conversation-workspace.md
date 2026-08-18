@@ -211,12 +211,18 @@ Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` �
 可访问名称的复制控件按需从 Core 读取，不能为了复制先把全文挂载进 Drawer。执行台不显示独立“查看完整
 工具调用”、standalone raw Evidence 或 Envelope JSON。复制失败保留预览并原位说明，证据使用 evidence
 token 与等宽结构。精确合同见
-[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)。
+[Run Process Detail Surface v9](../../contracts/run-process-detail-surface-v9.md)。
 
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)。
+[Run Process Detail Surface v9](../../contracts/run-process-detail-surface-v9.md)。
+
+failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
+summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
+`origin` 固定为 Runtime 返回错误、与当前 Rovai 版本不兼容、本机运行环境不可用、Rovai 内部错误或
+未能完成运行。只有 `origin=rovai` 可以显示“Rovai 内部错误”；Renderer 不读取或展示原始 stderr、私有
+日志、内部 error chain 或 digest，也不从公开文本重新猜归因。
 
 `waiting/recovery_blocked` 显示“结果待确认”，不得显示 spinner 或“恢复中”。Recovery Blocker
 必须说明 Runtime 已接受任务、重启后最终结果未知、原请求不会自动重发，并提供唯一“结束此运行”

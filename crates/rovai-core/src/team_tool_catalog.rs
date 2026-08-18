@@ -884,7 +884,7 @@ mod tests {
             validate_builtin_tool_input(
                 "context.read",
                 &json!({
-                    "campId": "camp-1",
+                    "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
                     "messageId": "message-1"
                 })
             )

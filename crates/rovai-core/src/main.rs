@@ -74,6 +74,7 @@ use rovai_core::{
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
         HistorySearchInput, invalid_input_error,
     },
+    camp_id::CampId,
     camp_open::CampOpenService,
     collaboration::{
         CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
@@ -175,6 +176,9 @@ use rovai_core::{
         RuntimeSearchEnvironment, catalog_entries, discover_runtime_path, discover_runtime_version,
         discover_static_runtime_version, is_executable_file, runtime_launch_allowed,
         with_runtime_search_environment,
+    },
+    runtime_failure::{
+        RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
     },
     runtime_platform_admission::RuntimePlatformAdmission,
     runtime_resolution::RuntimeResolutionService,
@@ -464,7 +468,7 @@ struct CampCreationMember {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
-    camp_id: String,
+    camp_id: CampId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -479,13 +483,13 @@ struct CampEnterParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampOpenParams {
     trace_id: String,
-    camp_id: String,
+    camp_id: CampId,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampMessagePageParams {
-    camp_id: String,
+    camp_id: CampId,
     before_sequence: i64,
     through_global_sequence: i64,
     #[serde(default = "default_camp_message_page_limit")]
@@ -540,14 +544,14 @@ fn log_camp_open_projection(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampMessageAroundParams {
-    camp_id: String,
+    camp_id: CampId,
     message_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampMessageFindParams {
-    camp_id: String,
+    camp_id: CampId,
     query: String,
     selected_match_index: Option<i64>,
     anchor_message_id: Option<String>,
@@ -556,14 +560,14 @@ struct CampMessageFindParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceContentParams {
-    camp_id: String,
+    camp_id: CampId,
     evidence_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceListParams {
-    camp_id: String,
+    camp_id: CampId,
     agent_run_id: String,
     #[serde(default)]
     after_sequence: i64,
@@ -612,7 +616,7 @@ struct InspectGithubSkillImportParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateTaskParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     title: String,
     #[serde(default)]
     description: String,
@@ -625,7 +629,7 @@ struct CreateTaskParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateTaskParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     task_id: String,
     expected_version: i64,
     title: Option<String>,
@@ -643,7 +647,7 @@ struct UpdateTaskParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListTasksParams {
-    camp_id: String,
+    camp_id: CampId,
     statuses: Option<Vec<TaskStatus>>,
     #[serde(default)]
     assignee: TaskAssigneeFilter,
@@ -655,7 +659,7 @@ struct ListTasksParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GetTaskParams {
-    camp_id: String,
+    camp_id: CampId,
     task_id: String,
 }
 
@@ -670,7 +674,7 @@ struct NavigationGroupCampsParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AcknowledgeCampViewedParams {
-    camp_id: String,
+    camp_id: CampId,
     through_global_sequence: i64,
 }
 
@@ -678,7 +682,7 @@ struct AcknowledgeCampViewedParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SendCampMessageParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     draft_revision: i64,
     execution: Option<ExecutionRequest>,
 }
@@ -686,13 +690,13 @@ struct SendCampMessageParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampComposerDraftParams {
-    camp_id: String,
+    camp_id: CampId,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SaveCampComposerDraftParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     content: StructuredCampMessageContent,
     continuation_source_message_id: Option<String>,
@@ -701,7 +705,7 @@ struct SaveCampComposerDraftParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartCampComposerReplyParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     reply_to_camp_message_id: String,
 }
@@ -709,14 +713,14 @@ struct StartCampComposerReplyParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MutateCampComposerReplyParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResolveCampComposerReplyRecipientParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     recipient: CampComposerReplyRecipient,
 }
@@ -724,7 +728,7 @@ struct ResolveCampComposerReplyRecipientParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DismissCampComposerContinuationParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     source_camp_message_id: String,
 }
@@ -732,7 +736,7 @@ struct DismissCampComposerContinuationParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResolveCampComposerContinuationRecipientParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     agent_id: String,
 }
@@ -740,7 +744,7 @@ struct ResolveCampComposerContinuationRecipientParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RemovePreparedAttachmentParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     attachment_id: String,
 }
@@ -748,7 +752,7 @@ struct RemovePreparedAttachmentParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrepareAttachmentFromPathParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     source_path: String,
     display_name: String,
@@ -769,7 +773,7 @@ struct CancelPendingExecutionParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubscribeEventsParams {
-    camp_id: Option<String>,
+    camp_id: Option<CampId>,
     after_global_sequence: i64,
     limit: Option<i64>,
 }
@@ -800,7 +804,7 @@ struct NotificationChangesSinceParams {
 #[serde(rename_all = "camelCase")]
 struct ResolveActionApprovalParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     approval_id: String,
     expected_version: i64,
     option_id: String,
@@ -859,6 +863,12 @@ struct ProductRuntimeDiagnostic {
     status: &'static str,
     diagnostic_code: String,
     priority: u8,
+    failure: Option<RuntimeFailureView>,
+}
+
+struct RuntimeDeepProbeResult {
+    snapshot: rovai_core::agent_profile::AdapterCapabilitySnapshot,
+    failure: Option<RuntimeFailureView>,
 }
 
 const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
@@ -1585,6 +1595,7 @@ impl Core {
                                 }
                                 .to_string(),
                                 priority: 2,
+                                failure: None,
                             },
                         );
                         let mut observation =
@@ -1932,6 +1943,9 @@ impl Core {
                             .and_then(|attempt| attempt.diagnostic_code.as_deref())
                             .or_else(|| product_diagnostic.map(|diagnostic| diagnostic.diagnostic_code.as_str()))
                             .or(discovery.diagnostic_code.as_deref()),
+                        "failure": relevant_probe_attempt
+                            .and_then(|attempt| attempt.failure.as_ref())
+                            .or_else(|| product_diagnostic.and_then(|diagnostic| diagnostic.failure.as_ref())),
                         "lastAttemptedAt": installation
                             .and_then(|installation| installation.snapshot.as_ref())
                             .map(|snapshot| snapshot.last_attempted_at.as_str())
@@ -2217,6 +2231,12 @@ impl Core {
                     source: existing.as_ref().map(|installation| installation.source),
                     failure_class: "path_missing",
                     diagnostic_code: "runtime_path_missing",
+                    failure: availability_environment_failure(
+                        kind,
+                        "runtime_executable_unavailable",
+                        "Runtime 可执行文件不可用",
+                    )
+                    .as_ref(),
                 },
             )?;
             if existing.is_none() {
@@ -2224,6 +2244,11 @@ impl Core {
                     &mut unresolved_diagnostic,
                     "path_missing",
                     "runtime_path_missing",
+                    availability_environment_failure(
+                        kind,
+                        "runtime_executable_unavailable",
+                        "Runtime 可执行文件不可用",
+                    ),
                 );
                 if let Some(diagnostic) = unresolved_diagnostic {
                     self.runtime_product_diagnostics
@@ -2241,6 +2266,11 @@ impl Core {
                     &mut unresolved_diagnostic,
                     "path_missing",
                     "runtime_path_missing",
+                    availability_environment_failure(
+                        kind,
+                        "runtime_executable_unavailable",
+                        "Runtime 可执行文件不可用",
+                    ),
                 );
                 if existing
                     .as_ref()
@@ -2257,6 +2287,12 @@ impl Core {
                             source: Some(source),
                             failure_class: "path_missing",
                             diagnostic_code: "runtime_path_missing",
+                            failure: availability_environment_failure(
+                                kind,
+                                "runtime_executable_unavailable",
+                                "Runtime 可执行文件不可用",
+                            )
+                            .as_ref(),
                         },
                     )?;
                 }
@@ -2282,12 +2318,23 @@ impl Core {
                             source: Some(source),
                             failure_class: "transient",
                             diagnostic_code: "runtime_fingerprint_failed",
+                            failure: availability_environment_failure(
+                                kind,
+                                "runtime_executable_unavailable",
+                                "无法读取 Runtime 可执行文件",
+                            )
+                            .as_ref(),
                         },
                     )?;
                     note_product_runtime_diagnostic(
                         &mut unresolved_diagnostic,
                         "transient",
                         "runtime_fingerprint_failed",
+                        availability_environment_failure(
+                            kind,
+                            "runtime_executable_unavailable",
+                            "无法读取 Runtime 可执行文件",
+                        ),
                     );
                     continue;
                 }
@@ -2350,8 +2397,14 @@ impl Core {
                 let database = self.database.lock().await;
                 return managed_runtime_is_ready(&database, kind);
             }
-            discover_runtime_version(&mut lightweight, &search).await;
-            if lightweight.reported_version.is_none() {
+            let deep_probe_reports_version = matches!(
+                kind,
+                AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp
+            );
+            if !deep_probe_reports_version {
+                discover_runtime_version(&mut lightweight, &search).await;
+            }
+            if !deep_probe_reports_version && lightweight.reported_version.is_none() {
                 let failure_class = if identity_changed {
                     "identity_changed"
                 } else {
@@ -2372,22 +2425,24 @@ impl Core {
                         source: Some(source),
                         failure_class,
                         diagnostic_code,
+                        failure: None,
                     },
                 )?;
                 note_product_runtime_diagnostic(
                     &mut unresolved_diagnostic,
                     failure_class,
                     diagnostic_code,
+                    None,
                 );
                 continue;
             }
-            let snapshot = match with_runtime_search_environment(
+            let deep_probe = match with_runtime_search_environment(
                 &search,
                 self.deep_probe_candidate(kind, &canonical, purpose),
             )
             .await
             {
-                Ok(snapshot) => snapshot,
+                Ok(deep_probe) => deep_probe,
                 Err(error) => {
                     eprintln!(
                         "Runtime deep probe construction failed for {} at {}: {error:#}",
@@ -2415,16 +2470,19 @@ impl Core {
                             source: Some(source),
                             failure_class,
                             diagnostic_code,
+                            failure: None,
                         },
                     )?;
                     note_product_runtime_diagnostic(
                         &mut unresolved_diagnostic,
                         failure_class,
                         diagnostic_code,
+                        None,
                     );
                     continue;
                 }
             };
+            let RuntimeDeepProbeResult { snapshot, failure } = deep_probe;
             if !self
                 .runtime_probe_identity_is_current(
                     kind,
@@ -2488,12 +2546,14 @@ impl Core {
                     source: Some(source),
                     failure_class,
                     diagnostic_code,
+                    failure: failure.as_ref(),
                 },
             )?;
             note_product_runtime_diagnostic(
                 &mut unresolved_diagnostic,
                 failure_class,
                 diagnostic_code,
+                failure,
             );
         }
         if existing.is_none()
@@ -4182,7 +4242,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.acknowledge_camp_viewed(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.through_global_sequence,
                     )?,
                 )?)
@@ -4268,7 +4328,7 @@ impl Core {
                 let params: CampIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.camp_exists(&database, &params.camp_id)?,
+                    ReadModelService.camp_exists(&database, params.camp_id.as_str())?,
                 )?)
             }
             "camps.enter" => {
@@ -4312,7 +4372,7 @@ impl Core {
                 let lock_started_at = std::time::Instant::now();
                 let mut database = self.database.lock().await;
                 let lock_ms = lock_started_at.elapsed().as_millis();
-                let outcome = CampOpenService.open(&mut database, &params.camp_id)?;
+                let outcome = CampOpenService.open(&mut database, params.camp_id.as_str())?;
                 let projection = outcome.projection;
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
@@ -4437,7 +4497,7 @@ impl Core {
                 let params: CampIdParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
+                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
                 )?)
             }
             "camp.messages.page" => {
@@ -4445,7 +4505,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.camp_messages_page(
                     &mut database,
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     params.before_sequence,
                     params.through_global_sequence,
                     params.limit,
@@ -4458,7 +4518,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_messages_around(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &params.message_id,
                     )?,
                 )?)
@@ -4468,7 +4528,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.camp_messages_find(
                     &mut database,
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     &params.query,
                     params.selected_match_index,
                     params.anchor_message_id.as_deref(),
@@ -4481,7 +4541,7 @@ impl Core {
                 let payload = ExecutionEvidenceService.read_full_payload(
                     &database,
                     &ManagedBlobStore::new(&self.data_dir),
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     &params.evidence_id,
                 )?;
                 Ok(json!({ "evidenceId": params.evidence_id, "payload": payload }))
@@ -4493,7 +4553,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.agent_run_execution_evidence_page(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &params.agent_run_id,
                         params.after_sequence,
                         params.limit,
@@ -4507,9 +4567,9 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(
                         params.command_id,
-                        params.camp_id.clone(),
+                        params.camp_id.to_string(),
                         CreateTaskCommand {
-                            camp_id: params.camp_id,
+                            camp_id: params.camp_id.to_string(),
                             title: params.title,
                             description: params.description,
                             acceptance_criteria: params.acceptance_criteria,
@@ -4526,7 +4586,7 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(
                         params.command_id,
-                        params.camp_id,
+                        params.camp_id.to_string(),
                         UpdateTaskCommand {
                             task_id: params.task_id,
                             expected_version: params.expected_version,
@@ -4549,7 +4609,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CollaborationService::default().query_visible_tasks(
                         &database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &ActorRef::User {
                             user_id: CURRENT_USER_ID.to_string(),
                         },
@@ -4569,7 +4629,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CollaborationService::default().get_visible_task(
                         &database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &params.task_id,
                         &ActorRef::User {
                             user_id: CURRENT_USER_ID.to_string(),
@@ -4584,7 +4644,7 @@ impl Core {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir)
-                        .load_draft(&database, &params.camp_id)?,
+                        .load_draft(&database, params.camp_id.as_str())?,
                 )?)
             }
             "camp.composerDraft.save" => {
@@ -4594,7 +4654,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).save_content_with_continuation(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         params.content,
                         params.continuation_source_message_id.as_deref(),
@@ -4608,7 +4668,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).start_reply(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.reply_to_camp_message_id,
                     )?,
@@ -4621,7 +4681,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).cancel_reply(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                     )?,
                 )?)
@@ -4633,7 +4693,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).resolve_reply_recipient(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         params.recipient,
                     )?,
@@ -4646,7 +4706,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).dismiss_continuation(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.source_camp_message_id,
                     )?,
@@ -4659,7 +4719,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).resolve_continuation_recipient(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.agent_id,
                     )?,
@@ -4672,7 +4732,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).remove_prepared(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.attachment_id,
                     )?,
@@ -4683,7 +4743,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 CampAttachmentStore::new(&self.data_dir)
-                    .discard_draft(&mut database, &params.camp_id)?;
+                    .discard_draft(&mut database, params.camp_id.as_str())?;
                 Ok(json!({ "discarded": true }))
             }
             "camp.attachments.prepareFromPath" => {
@@ -4693,7 +4753,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).prepare_from_path(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         Path::new(&params.source_path),
                         &params.display_name,
@@ -4746,7 +4806,7 @@ impl Core {
                         actor: ActorRef::User {
                             user_id: CURRENT_USER_ID.to_string(),
                         },
-                        camp_id: Some(params.camp_id),
+                        camp_id: Some(params.camp_id.to_string()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: ResolveActionApprovalCommand {
@@ -4861,7 +4921,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.events_since(
                     &mut database,
-                    params.camp_id.as_deref(),
+                    params.camp_id.as_ref().map(CampId::as_str),
                     params.after_global_sequence,
                     params.limit.unwrap_or(500),
                 )?)?)
@@ -4981,11 +5041,11 @@ impl Core {
             actor: ActorRef::User {
                 user_id: CURRENT_USER_ID.to_string(),
             },
-            camp_id: Some(params.camp_id.clone()),
+            camp_id: Some(params.camp_id.to_string()),
             expected_versions: Vec::new(),
             execution_epoch: None,
             payload: SendUserCampDraftCommand {
-                camp_id: params.camp_id.clone(),
+                camp_id: params.camp_id.to_string(),
                 draft_revision: params.draft_revision,
                 execution: params.execution.clone(),
             },
@@ -5005,8 +5065,8 @@ impl Core {
 
         let execution = {
             let mut database = self.database.lock().await;
-            let draft =
-                CampAttachmentStore::new(&self.data_dir).load_draft(&database, &params.camp_id)?;
+            let draft = CampAttachmentStore::new(&self.data_dir)
+                .load_draft(&database, params.camp_id.as_str())?;
             if draft.revision == params.draft_revision {
                 let attachment_ids = draft
                     .attachments
@@ -5015,7 +5075,7 @@ impl Core {
                     .collect::<Vec<_>>();
                 CampAttachmentStore::new(&self.data_dir).verify_send(
                     &database,
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     &attachment_ids,
                 )?;
             }
@@ -5034,7 +5094,7 @@ impl Core {
         adapter_kind: rovai_core::agent_profile::AdapterKind,
         executable_path: &Path,
         purpose: RuntimeLaunchPurpose,
-    ) -> Result<rovai_core::agent_profile::AdapterCapabilitySnapshot> {
+    ) -> Result<RuntimeDeepProbeResult> {
         if let Some(blocker) = current_runtime_platform_blocker(adapter_kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
         }
@@ -5043,7 +5103,7 @@ impl Core {
         }
         let attempted_at = chrono::Utc::now().to_rfc3339();
         let registry = AgentRuntimeAdapterRegistry::default();
-        let snapshot = match adapter_kind {
+        let (snapshot, failure) = match adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
                 let probe = health::codex_runtime_probe_at(executable_path).await;
                 let authentication_status = probe_authentication_status(probe.status).to_string();
@@ -5067,16 +5127,19 @@ impl Core {
                 } else {
                     probe_status_name(probe.status).to_string()
                 };
-                registry.codex_capability_snapshot(CodexProbeObservation {
-                    reported_version: probe.reported_version,
-                    executable_fingerprint: probe.executable_fingerprint,
-                    authentication_status,
-                    probe_status: status,
-                    capabilities: probe.capabilities,
-                    raw_model_catalog,
-                    attempted_at,
-                    last_error,
-                })?
+                (
+                    registry.codex_capability_snapshot(CodexProbeObservation {
+                        reported_version: probe.reported_version,
+                        executable_fingerprint: probe.executable_fingerprint,
+                        authentication_status,
+                        probe_status: status,
+                        capabilities: probe.capabilities,
+                        raw_model_catalog,
+                        attempted_at,
+                        last_error,
+                    })?,
+                    None,
+                )
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
@@ -5088,52 +5151,61 @@ impl Core {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
                         .await;
-                registry.acp_capability_snapshot(AcpProbeObservation {
-                    adapter_kind: kind,
-                    reported_version: probe.result.reported_version,
-                    executable_fingerprint: probe.result.executable_fingerprint,
-                    authentication_status: probe_authentication_status(probe.result.status)
-                        .to_string(),
-                    probe_status: probe_status_name(probe.result.status).to_string(),
-                    capabilities: probe.result.capabilities,
-                    initialize_result: probe.initialize_result,
-                    session_result: probe.session_result,
-                    attempted_at,
-                    last_error: probe.result.detail,
-                })?
+                (
+                    registry.acp_capability_snapshot(AcpProbeObservation {
+                        adapter_kind: kind,
+                        reported_version: probe.result.reported_version,
+                        executable_fingerprint: probe.result.executable_fingerprint,
+                        authentication_status: probe_authentication_status(probe.result.status)
+                            .to_string(),
+                        probe_status: probe_status_name(probe.result.status).to_string(),
+                        capabilities: probe.result.capabilities,
+                        initialize_result: probe.initialize_result,
+                        session_result: probe.session_result,
+                        attempted_at,
+                        last_error: probe.result.detail,
+                    })?,
+                    None,
+                )
             }
             rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => {
                 let probe = health::claude_code_capability_probe_at(executable_path).await;
-                registry.claude_code_capability_snapshot(ClaudeCodeProbeObservation {
-                    reported_version: probe.result.reported_version,
-                    executable_fingerprint: probe.result.executable_fingerprint,
-                    authentication_status: probe_authentication_status(probe.result.status)
-                        .to_string(),
-                    probe_status: probe_status_name(probe.result.status).to_string(),
-                    capabilities: probe.result.capabilities,
-                    model_aliases: probe.model_aliases,
-                    attempted_at,
-                    last_error: probe.result.detail,
-                })?
+                let failure = probe.result.failure.clone();
+                let snapshot =
+                    registry.claude_code_capability_snapshot(ClaudeCodeProbeObservation {
+                        reported_version: probe.result.reported_version,
+                        executable_fingerprint: probe.result.executable_fingerprint,
+                        authentication_status: probe_authentication_status(probe.result.status)
+                            .to_string(),
+                        probe_status: probe_status_name(probe.result.status).to_string(),
+                        capabilities: probe.result.capabilities,
+                        model_aliases: probe.model_aliases,
+                        attempted_at,
+                        last_error: probe.result.detail,
+                    })?;
+                (snapshot, failure)
             }
             rovai_core::agent_profile::AdapterKind::AntigravityApp => {
                 let probe = health::antigravity_capability_probe_at(executable_path).await;
+                let failure = probe.result.failure.clone();
                 let builtin_cli_ready = bundled_cli_executable().is_ok_and(|path| path.is_file());
-                registry.antigravity_capability_snapshot(AntigravityProbeObservation {
-                    reported_version: probe.result.reported_version,
-                    executable_fingerprint: probe.result.executable_fingerprint,
-                    authentication_status: probe_authentication_status(probe.result.status)
-                        .to_string(),
-                    probe_status: probe_status_name(probe.result.status).to_string(),
-                    capabilities: probe.result.capabilities,
-                    models: probe.models,
-                    builtin_cli_ready,
-                    attempted_at,
-                    last_error: probe.result.detail,
-                })?
+                let snapshot =
+                    registry.antigravity_capability_snapshot(AntigravityProbeObservation {
+                        reported_version: probe.result.reported_version,
+                        executable_fingerprint: probe.result.executable_fingerprint,
+                        authentication_status: probe_authentication_status(probe.result.status)
+                            .to_string(),
+                        probe_status: probe_status_name(probe.result.status).to_string(),
+                        capabilities: probe.result.capabilities,
+                        models: probe.models,
+                        builtin_cli_ready,
+                        attempted_at,
+                        last_error: probe.result.detail,
+                    })?;
+                (snapshot, failure)
             }
         };
-        Ok(snapshot)
+        Ok(RuntimeDeepProbeResult { snapshot, failure })
     }
 
     async fn refresh_adapter_installation(
@@ -5200,13 +5272,14 @@ impl Core {
                         installation_id: installation.id,
                         expected_installation_version: installation.version,
                         snapshot,
+                        failure: None,
                     },
                 ),
             )?;
             return Ok(serde_json::to_value(execution.result)?);
         }
         let search = self.runtime_search_environment.read().await.clone();
-        let snapshot = with_runtime_search_environment(
+        let deep_probe = with_runtime_search_environment(
             &search,
             self.deep_probe_candidate(
                 installation.adapter_kind,
@@ -5223,7 +5296,8 @@ impl Core {
                 RecordAdapterCapabilitySnapshotCommand {
                     installation_id: installation.id,
                     expected_installation_version: installation.version,
-                    snapshot,
+                    snapshot: deep_probe.snapshot,
+                    failure: deep_probe.failure,
                 },
             ),
         )?;
@@ -5424,6 +5498,7 @@ impl Core {
                 "runtime_launch_admission_failed",
                 &error,
                 false,
+                None,
             )
             .await;
             return;
@@ -5451,22 +5526,50 @@ impl Core {
                     .await;
                 let delivered_one_shot_failure = error
                     .downcast_ref::<AntigravityDeliveredFailure>()
-                    .map(|failure| (failure.native_turn_id.clone(), failure.error_code))
+                    .map(|failure| {
+                        (
+                            failure.native_turn_id.clone(),
+                            failure.error_code.clone(),
+                            failure.failure.clone(),
+                        )
+                    })
                     .or_else(|| {
                         error
                             .downcast_ref::<ClaudeCodeDeliveredFailure>()
-                            .map(|failure| (failure.native_turn_id.clone(), failure.error_code))
+                            .map(|failure| {
+                                (
+                                    failure.native_turn_id.clone(),
+                                    failure.error_code.clone(),
+                                    failure.failure.clone(),
+                                )
+                            })
                     });
                 let runtime_terminal_observed = delivered_one_shot_failure.is_some();
+                let public_failure = delivered_one_shot_failure
+                    .as_ref()
+                    .map(|(_, _, failure)| failure.clone())
+                    .or_else(|| {
+                        error
+                            .downcast_ref::<RuntimeFailureError>()
+                            .map(|error| error.failure.clone())
+                    });
                 let error_code = if error.downcast_ref::<ContextPayloadTooLarge>().is_some() {
-                    "context_payload_too_large"
+                    "context_payload_too_large".to_string()
                 } else {
-                    delivered_one_shot_failure
+                    public_failure
                         .as_ref()
-                        .map(|(_, error_code)| *error_code)
-                        .unwrap_or("runtime_launch_failed")
+                        .map(|failure| failure.code.clone())
+                        .unwrap_or_else(|| "runtime_launch_failed".to_string())
                 };
-                if let Some((native_turn_id, delivered_error_code)) = delivered_one_shot_failure {
+                let public_failure = public_failure.or_else(|| {
+                    unknown_one_shot_runtime_failure(
+                        execution.runtime.adapter_kind,
+                        &error_code,
+                    )
+                });
+                if let Some((native_turn_id, delivered_error_code, delivered_failure)) =
+                    delivered_one_shot_failure
+                {
                     let ending_git_observation = core
                         .observe_run_git(
                             &execution.project_binding_kind,
@@ -5501,7 +5604,7 @@ impl Core {
                             execution.execution_epoch,
                             binding,
                             RuntimeTerminalOutcome::Failed,
-                            delivered_error_code,
+                            &delivered_error_code,
                         )
                         .await
                     {
@@ -5525,6 +5628,7 @@ impl Core {
                                         outcome: RuntimeTerminalOutcome::Failed,
                                         error_code: delivered_error_code.to_string(),
                                         error_detail: Some(format!("{error:#}")),
+                                        failure: Some(delivered_failure.clone()),
                                         manual_retry_allowed: true,
                                     },
                                 )
@@ -5559,9 +5663,10 @@ impl Core {
                             let failure_persisted = core
                                 .persist_claimed_agent_run_failure(
                                     &execution,
-                                    delivered_error_code,
+                                    &delivered_error_code,
                                     &error,
                                     true,
+                                    Some(delivered_failure),
                                     ending_git_observation,
                                 )
                                 .await;
@@ -5592,9 +5697,10 @@ impl Core {
                 }
                 core.fail_claimed_agent_run(
                     &execution,
-                    error_code,
+                    &error_code,
                     &error,
                     runtime_terminal_observed,
+                    public_failure,
                 )
                 .await;
                 core.planned_shutdown.remove_active(&active_key).await;
@@ -5629,6 +5735,7 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
     ) {
+        let public_failure = dispatch_public_failure(candidate, error_code);
         let rejection = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().reject_agent_run_dispatch(
@@ -5646,6 +5753,7 @@ impl Core {
                         expected_version: candidate.version,
                         error_code: error_code.to_string(),
                         error_detail: Some(format!("{error:#}")),
+                        failure: public_failure,
                         manual_retry_allowed: error_code != "context_payload_too_large",
                     },
                 },
@@ -7065,6 +7173,7 @@ impl Core {
                                             installation_id: installation.id.clone(),
                                             expected_installation_version: installation.version,
                                             snapshot,
+                                            failure: None,
                                         },
                                     },
                                 )
@@ -7083,7 +7192,7 @@ impl Core {
                     }
                 } else {
                     let search = self.runtime_search_environment.read().await.clone();
-                    let snapshot = with_runtime_search_environment(
+                    let deep_probe = with_runtime_search_environment(
                         &search,
                         self.deep_probe_candidate(
                             frozen_runtime.adapter_kind,
@@ -7092,8 +7201,8 @@ impl Core {
                         ),
                     )
                     .await;
-                    match snapshot {
-                        Ok(snapshot) => {
+                    match deep_probe {
+                        Ok(deep_probe) => {
                             let mut database = self.database.lock().await;
                             AgentProfileService::default()
                                 .record_snapshot(
@@ -7109,7 +7218,8 @@ impl Core {
                                         payload: RecordAdapterCapabilitySnapshotCommand {
                                             installation_id: installation.id.clone(),
                                             expected_installation_version: installation.version,
-                                            snapshot,
+                                            snapshot: deep_probe.snapshot,
+                                            failure: deep_probe.failure,
                                         },
                                     },
                                 )
@@ -7898,9 +8008,23 @@ impl Core {
                     && (accepted.native_session_id != result.native_session_id
                         || accepted.native_turn_id != result.native_turn_id)
                 {
-                    anyhow::bail!(
+                    return Err(anyhow::anyhow!(
                         "Claude Code terminal identity did not match its accepted input evidence"
-                    );
+                    ))
+                    .context(ClaudeCodeDeliveredFailure {
+                        native_session_id: accepted.native_session_id.clone(),
+                        native_turn_id: accepted.native_turn_id.clone(),
+                        error_code: "runtime_session_incompatible".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::ClaudeCodeCli,
+                            RuntimeFailureOrigin::Compatibility,
+                            RuntimeFailurePhase::Terminal,
+                            "runtime_session_incompatible",
+                            "Claude Code 返回了另一个会话的结果",
+                            None,
+                            false,
+                        ),
+                    });
                 }
                 result
             }
@@ -7911,9 +8035,20 @@ impl Core {
                         && (accepted.native_session_id != delivered.native_session_id
                             || accepted.native_turn_id != delivered.native_turn_id)
                     {
-                        anyhow::bail!(
-                            "Claude Code terminal identity did not match its accepted input evidence"
-                        );
+                        return Err(error).context(ClaudeCodeDeliveredFailure {
+                            native_session_id: accepted.native_session_id.clone(),
+                            native_turn_id: accepted.native_turn_id.clone(),
+                            error_code: "runtime_session_incompatible".to_string(),
+                            failure: RuntimeFailureView::new(
+                                AdapterKind::ClaudeCodeCli,
+                                RuntimeFailureOrigin::Compatibility,
+                                RuntimeFailurePhase::Terminal,
+                                "runtime_session_incompatible",
+                                "Claude Code 返回了另一个会话的结果",
+                                None,
+                                false,
+                            ),
+                        });
                     }
                     if accepted_input.is_none() {
                         let observed_acceptance = ClaudeCodeInputAccepted {
@@ -8401,7 +8536,16 @@ impl Core {
                     .context(AntigravityDeliveredFailure {
                         native_session_id: accepted.native_session_id.clone(),
                         native_turn_id: accepted.native_turn_id.clone(),
-                        error_code: "runtime_native_session_mismatch",
+                        error_code: "runtime_native_session_mismatch".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::AntigravityApp,
+                            RuntimeFailureOrigin::Compatibility,
+                            RuntimeFailurePhase::Terminal,
+                            "runtime_native_session_mismatch",
+                            "Antigravity 返回了另一个会话的结果",
+                            None,
+                            false,
+                        ),
                     });
                 }
                 result
@@ -8415,19 +8559,37 @@ impl Core {
                         return Err(error).context(AntigravityDeliveredFailure {
                             native_session_id: accepted.native_session_id.clone(),
                             native_turn_id: accepted.native_turn_id.clone(),
-                            error_code: "runtime_native_session_mismatch",
+                            error_code: "runtime_native_session_mismatch".to_string(),
+                            failure: RuntimeFailureView::new(
+                                AdapterKind::AntigravityApp,
+                                RuntimeFailureOrigin::Compatibility,
+                                RuntimeFailurePhase::Terminal,
+                                "runtime_native_session_mismatch",
+                                "Antigravity 返回了另一个会话的结果",
+                                None,
+                                false,
+                            ),
                         });
                     }
                     if let Some(error_code) = error
                         .downcast_ref::<AntigravityDeliveredFailure>()
-                        .map(|delivered| delivered.error_code)
+                        .map(|delivered| delivered.error_code.clone())
                     {
                         return Err(error).context(error_code);
                     }
                     return Err(error).context(AntigravityDeliveredFailure {
                         native_session_id: accepted.native_session_id.clone(),
                         native_turn_id: accepted.native_turn_id.clone(),
-                        error_code: "runtime_failed_after_input_accepted",
+                        error_code: "runtime_failed_after_input_accepted".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::AntigravityApp,
+                            RuntimeFailureOrigin::Unknown,
+                            RuntimeFailurePhase::Execution,
+                            "runtime_failed_after_input_accepted",
+                            "Antigravity 接受输入后未能完成运行",
+                            None,
+                            true,
+                        ),
                     });
                 }
                 if let Some(delivered) =
@@ -8807,6 +8969,7 @@ impl Core {
                     installation_id: execution.runtime.installation_id.clone(),
                     expected_installation_version: installation_version,
                     snapshot,
+                    failure: None,
                 },
             },
         )?;
@@ -8913,6 +9076,7 @@ impl Core {
                         installation_id: installation.id,
                         expected_installation_version: installation.version,
                         snapshot,
+                        failure: None,
                     },
                 },
             )
@@ -8928,6 +9092,7 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
         runtime_terminal_observed: bool,
+        public_failure: Option<RuntimeFailureView>,
     ) {
         if let Err(flush_error) = flush_runtime_monitoring_run(
             self,
@@ -8959,6 +9124,7 @@ impl Core {
                 error_code,
                 error,
                 runtime_terminal_observed,
+                public_failure,
                 ending_git_observation,
             )
             .await;
@@ -8972,6 +9138,7 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
         runtime_terminal_observed: bool,
+        public_failure: Option<RuntimeFailureView>,
         ending_git_observation: Option<git::GitObservation>,
     ) -> bool {
         let failure = {
@@ -8993,6 +9160,7 @@ impl Core {
                     execution_epoch: execution.execution_epoch,
                     error_code: error_code.to_string(),
                     error_detail: Some(format!("{error:#}")),
+                    failure: public_failure,
                     manual_retry_allowed: true,
                     ending_git_observation,
                 },
@@ -9087,6 +9255,7 @@ impl Core {
                         execution_epoch,
                         error_code: "runtime_configuration_invalid".to_string(),
                         error_detail: Some(format!("{error:#}")),
+                        failure: None,
                         manual_retry_allowed: true,
                         ending_git_observation,
                     },
@@ -9173,6 +9342,7 @@ fn note_product_runtime_diagnostic(
     current: &mut Option<ProductRuntimeDiagnostic>,
     failure_class: &str,
     diagnostic_code: &str,
+    failure: Option<RuntimeFailureView>,
 ) {
     let (status, priority) = match failure_class {
         "authentication_required" => ("authentication_required", 4),
@@ -9190,6 +9360,7 @@ fn note_product_runtime_diagnostic(
         status,
         diagnostic_code: diagnostic_code.to_string(),
         priority,
+        failure,
     });
 }
 
@@ -11316,7 +11487,7 @@ async fn process_agent_run_acp_message(
             )
         };
         if let Ok(Some(execution)) = execution {
-            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error, false)
+            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error, false, None)
                 .await;
         }
         return;
@@ -12023,6 +12194,7 @@ async fn persist_acp_prompt_completion(
                             .map(str::to_string)
                             .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
                     ),
+                    failure: None,
                     manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
                 },
             )
@@ -12118,6 +12290,7 @@ async fn persist_acp_prompt_completion(
                             error_detail: Some(
                                 "ACP Runtime ended the prompt without an Agent message".to_string(),
                             ),
+                            failure: None,
                             manual_retry_allowed: true,
                             ending_git_observation: ending_git_observation.clone(),
                         },
@@ -12146,6 +12319,7 @@ async fn persist_acp_prompt_completion(
                                 .map(str::to_string)
                                 .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
                         ),
+                        failure: None,
                         manual_retry_allowed: stop_reason != "cancelled",
                         ending_git_observation,
                     },
@@ -12812,6 +12986,7 @@ async fn process_agent_run_codex_message(
                     outcome: planned_outcome,
                     error_code,
                     error_detail,
+                    failure: None,
                     manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
                 },
             )
@@ -12919,6 +13094,7 @@ async fn process_agent_run_codex_message(
                             error_detail: Some(
                                 "Codex completed the Turn without an Agent message".to_string(),
                             ),
+                            failure: None,
                             manual_retry_allowed: true,
                             ending_git_observation: ending_git_observation.clone(),
                         },
@@ -12952,6 +13128,7 @@ async fn process_agent_run_codex_message(
                                 completed.turn_id, completed.status
                             ),
                         }),
+                        failure: None,
                         manual_retry_allowed: true,
                         ending_git_observation,
                     },
@@ -13639,6 +13816,7 @@ async fn finalize_runtime_check(
                 status: "needs_attention",
                 diagnostic_code: diagnostic_code.clone(),
                 priority: 2,
+                failure: None,
             });
         eprintln!(
             "Runtime check {} for {} finalized with {} after {} ms",
@@ -13694,6 +13872,128 @@ fn take_runtime_check_activity(
 
 fn runtime_check_has_capacity(active_count: usize) -> bool {
     active_count < RUNTIME_CHECK_MAX_CONCURRENCY
+}
+
+fn unknown_one_shot_runtime_failure(
+    runtime_kind: AdapterKind,
+    error_code: &str,
+) -> Option<RuntimeFailureView> {
+    let runtime_name = match runtime_kind {
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+        _ => return None,
+    };
+    let (origin, summary, retryable) = if error_code == "context_payload_too_large" {
+        (
+            RuntimeFailureOrigin::Rovai,
+            "Rovai 无法安全生成本次 Runtime 输入".to_string(),
+            false,
+        )
+    } else {
+        (
+            RuntimeFailureOrigin::Unknown,
+            format!("{runtime_name} 未能完成运行"),
+            true,
+        )
+    };
+    Some(RuntimeFailureView::new(
+        runtime_kind,
+        origin,
+        RuntimeFailurePhase::Execution,
+        error_code,
+        summary,
+        None,
+        retryable,
+    ))
+}
+
+fn availability_environment_failure(
+    runtime_kind: AdapterKind,
+    error_code: &str,
+    summary: &str,
+) -> Option<RuntimeFailureView> {
+    let runtime_name = match runtime_kind {
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+        _ => return None,
+    };
+    Some(RuntimeFailureView::new(
+        runtime_kind,
+        RuntimeFailureOrigin::Environment,
+        RuntimeFailurePhase::Spawn,
+        error_code,
+        summary.replace("Runtime", runtime_name),
+        None,
+        true,
+    ))
+}
+
+fn dispatch_public_failure(
+    candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+    error_code: &str,
+) -> Option<RuntimeFailureView> {
+    let runtime_kind = candidate
+        .effective_config
+        .get("adapterKind")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<AdapterKind>(value).ok())?;
+    let runtime_name = match runtime_kind {
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+        _ => return None,
+    };
+    let (origin, phase, summary, retryable) = match error_code {
+        "workspace_unavailable" => (
+            RuntimeFailureOrigin::Environment,
+            RuntimeFailurePhase::Spawn,
+            format!("{runtime_name} 的执行目录不可用"),
+            false,
+        ),
+        "runtime_configuration_invalid" => (
+            RuntimeFailureOrigin::Rovai,
+            RuntimeFailurePhase::Spawn,
+            "Rovai 无法生成有效的 Runtime 配置".to_string(),
+            false,
+        ),
+        "runtime_authentication_required" => (
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Authentication,
+            format!("需要登录 {runtime_name}"),
+            true,
+        ),
+        code if code.contains("path")
+            || code.contains("executable")
+            || code.contains("fingerprint") =>
+        {
+            (
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                format!("{runtime_name} 的本机运行环境不可用"),
+                false,
+            )
+        }
+        code if code.contains("incompatible") || code.contains("capability") => (
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Execution,
+            format!("当前 {runtime_name} 版本与 Rovai 集成不兼容"),
+            false,
+        ),
+        _ => (
+            RuntimeFailureOrigin::Unknown,
+            RuntimeFailurePhase::Spawn,
+            format!("{runtime_name} 未能开始运行"),
+            true,
+        ),
+    };
+    Some(RuntimeFailureView::new(
+        runtime_kind,
+        origin,
+        phase,
+        error_code,
+        summary,
+        None,
+        retryable,
+    ))
 }
 
 fn runtime_check_writes_diagnostic(finalization: RuntimeCheckFinalization) -> bool {
@@ -14807,6 +15107,7 @@ mod tests {
                     executable_fingerprint: Some("sha256:test".to_string()),
                     attempted_at: last_successful_probe_at.to_string(),
                     retry_after: Some(retry_after.to_string()),
+                    failure: None,
                 }
             }),
             relocation_history: Vec::new(),
@@ -14849,6 +15150,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: now.to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
         assert_eq!(
             product_runtime_availability_status(
@@ -14874,6 +15176,7 @@ mod tests {
             status: "needs_attention",
             diagnostic_code: "runtime_probe_transient_failure".to_string(),
             priority: 2,
+            failure: None,
         };
         assert_eq!(
             product_runtime_availability_status(
@@ -14931,6 +15234,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
         assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
         assert_eq!(
@@ -14958,6 +15262,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: (now - chrono::Duration::seconds(1)).to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
 
         assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
@@ -15003,6 +15308,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
         assert_eq!(
             product_runtime_availability_status(
@@ -15018,16 +15324,23 @@ mod tests {
     #[test]
     fn unregistered_product_probe_diagnostics_preserve_the_most_actionable_status() {
         let mut diagnostic = None;
-        note_product_runtime_diagnostic(&mut diagnostic, "path_missing", "runtime_path_missing");
+        note_product_runtime_diagnostic(
+            &mut diagnostic,
+            "path_missing",
+            "runtime_path_missing",
+            None,
+        );
         note_product_runtime_diagnostic(
             &mut diagnostic,
             "authentication_required",
             "runtime_authentication_required",
+            None,
         );
         note_product_runtime_diagnostic(
             &mut diagnostic,
             "transient",
             "runtime_probe_transient_failure",
+            None,
         );
         let diagnostic = diagnostic.expect("diagnostic");
         assert_eq!(diagnostic.status, "authentication_required");

@@ -27,6 +27,7 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 
 | 合同 | 权威范围 |
 | --- | --- |
+| [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [First-run Onboarding v1（当前）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页持久状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口 |
 | [Camp Open Projection v1（当前）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
@@ -36,7 +37,8 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [Runtime Launch and Verification v7（当前）](runtime-launch-and-verification-v7.md) | v6 加恢复 response exact-ID 校验；不同 ID 使 Host protocol-violated 并进入 continuity-lost fallback，禁止换绑返回 ID |
+| [Runtime Launch and Verification v8（当前）](runtime-launch-and-verification-v8.md) | v7 启动/恢复边界不变；增加 Claude Code/Antigravity 安全公开 failure、AgentRun/Probe 持久化、Availability 与内部诊断分离 |
+| [Runtime Launch and Verification v7（历史）](runtime-launch-and-verification-v7.md) | v6 加恢复 response exact-ID 校验；不同 ID 使 Host protocol-violated 并进入 continuity-lost fallback，禁止换绑返回 ID；不含公开 Runtime failure |
 | [Runtime Platform Admission v1（当前）](runtime-platform-admission-v1.md) | `AdapterKind × HostPlatformKey` 产品级准入、closed reason/evidence、现有配置保留与 execution blocker |
 | [Managed Runtime Process v1（当前）](managed-runtime-process-v1.md) | 统一进程启动 interface、Windows 创建时 Job/handle list、native EXE/validated Node shim 与 descendant cleanup |
 | [Runtime Launch and Verification v6（历史）](runtime-launch-and-verification-v6.md) | v5 加 TRAE exact-ID Provider Resume Probe、受控 ACP HistoryRestore、replay quarantine、兼容性 fence 与 continuity-lost fallback；其接受不同 response ID 的语义已由 v7 替代 |
@@ -51,12 +53,14 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Accepted Input Recovery v1（当前）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛 |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Camp History Retrieval v2（当前）](camp-history-v2.md) | v1 查询、授权、publication fence 与附件边界不变；Agent body/snippet/offset 使用 `agent_v1` Principal 投影，并为 `@Principal` 提供结构化候选路径 |
+| [Camp History Retrieval v3（当前）](camp-history-v3.md) | v2 Agent projection/授权/读取语义不变；所有显式 target 与输出只接受唯一 canonical Camp ID |
+| [Camp History Retrieval v2（历史）](camp-history-v2.md) | v1 查询、授权、publication fence 与附件边界不变；Agent body/snippet/offset 使用 `agent_v1` Principal 投影，并为 `@Principal` 提供结构化候选路径 |
 | [Camp History Retrieval v1（历史）](camp-history-v1.md) | `camp.search/read/history.search` 的 single-Camp target、Manifest/live authorization、Public A2A publication fence 与旧 Human-body Agent 投影 |
 | [Memory Capture v3（当前）](memory-capture-v3.md) | v2 边界加 complete exact-Scope View、copyable Revision target、active body aggregate quota、64 KiB production projection limit 与 Memory-domain clean break |
 | [Memory Capture v2 (historical)](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 flat Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
 | [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
-| [Built-in Tool Transport v15（当前）](builtin-tool-transport-v15.md) | 完整继承 v14 LocalIpcEndpoint/IPC v2，并加入 PublicOnly、canonical Principal attention、Send output v2 与 v15 catalog/capability clean break |
+| [Built-in Tool Transport v16（当前）](builtin-tool-transport-v16.md) | v15 transport/operation 语义不变；catalog、result、capability 与 Binding 统一使用 canonical Camp ID、History v3 和 Formatter20/Manifest18 |
+| [Built-in Tool Transport v15（历史）](builtin-tool-transport-v15.md) | 完整继承 v14 LocalIpcEndpoint/IPC v2，并加入 PublicOnly、canonical Principal attention、Send output v2 与 v15 catalog/capability clean break |
 | [Built-in Tool Transport v14（历史）](builtin-tool-transport-v14.md) | v13 十五项 operation 语义不变；LocalIpcEndpoint、IPC v2、Unix Socket/受保护 Windows Named Pipe 与 v14 capability clean break |
 | [Built-in Tool Agent Output Projection v1（当前）](builtin-tool-agent-output-projection-v1.md) | Core 完成后 Agent projection/schema drift 的安全 `output_contract_mismatch`、非重试 recovery 与 private local diagnostic |
 | [Built-in Tool Transport v13（历史）](builtin-tool-transport-v13.md) | 十五项固定命令、`team.gather -> rovai gather`、异步 completion、Unix IPC 与 v13 catalog/capability |
@@ -110,7 +114,8 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Message Delivery v2 (historical)](message-delivery-v2.md) | `forward | return` 冻结边、target lineage、caller continuation，以及 v1 queue/attempt/recovery/settlement |
 | [Message Delivery v1 (historical)](message-delivery-v1.md) | 无 caller-return 分类的 recipient queue、dispatch attempt、waitCondition、retry/cancel 与 settlement |
 | [Current Input Skill Links v1（当前）](current-input-skill-links-v1.md) | Structured Skill Mention、per-Run send snapshot、start-time resolver 与 optional sibling `CURRENT_INPUT.skills[{name,path}]` |
-| [ContextManifest Evidence v17（当前）](context-manifest-evidence-v17.md) | Formatter v19、`agent_v1` message audience、closed forward/return A2A guidance evidence、Gather v3 与 exact frozen recovery |
+| [ContextManifest Evidence v18（当前）](context-manifest-evidence-v18.md) | Formatter v20；v17 section/evidence 不变，Shared Conversation、Manifest 与 History Camp reference 只使用 canonical Camp ID |
+| [ContextManifest Evidence v17（历史）](context-manifest-evidence-v17.md) | Formatter v19、`agent_v1` message audience、closed forward/return A2A guidance evidence、Gather v3 与 exact frozen recovery |
 | [ContextManifest Evidence v16（历史）](context-manifest-evidence-v16.md) | Formatter v18、Skill selection/availability/Exposure/resolution、exact payload 与 Migration 91 clean-break recovery |
 | [ContextManifest Evidence v15（历史）](context-manifest-evidence-v15.md) | Formatter v17、compact history/offset、Run Facts exact bytes/evidence 与旧 v15 recovery 边界 |
 | [Run Facts v1（当前）](run-facts-v1.md) | Task reference、Session continuity、external effect、Gather generation fallback 与 delegation budget 的结构化模型事实 |
@@ -123,7 +128,8 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v8（当前）](run-process-detail-surface-v8.md) | v7 状态与位置合同不变；完整 Tool chronology、Built-in 公共结果 disclosure、长结果原位复制且无 standalone raw Evidence |
+| [Run Process Detail Surface v9（当前）](run-process-detail-surface-v9.md) | v8 执行过程合同不变；按 origin 显示 Claude Code/Antigravity 安全 failure，覆盖无 Evidence Run 与 Runtime 设置页 |
+| [Run Process Detail Surface v8（历史）](run-process-detail-surface-v8.md) | v7 状态与位置合同不变；完整 Tool chronology、Built-in 公共结果 disclosure、长结果原位复制且无 standalone raw Evidence；不含 Runtime failure 呈现 |
 | [Run Process Detail Surface v7（历史）](run-process-detail-surface-v7.md) | v6 执行台位置合同不变；取消 Run 中仍为 running 或明确 cancelled 的活动使用无动画“已停止”展示，不含完整 chronology 与 Built-in 结果收口 |
 | [Run Process Detail Surface v6（历史）](run-process-detail-surface-v6.md) | v5 诚实终态投影加默认底部、可移入 Inspector 的唯一执行 console 与容器适配；不含取消 Run 的活动停止投影 |
 | [Run Process Detail Surface v5 (historical)](run-process-detail-surface-v5.md) | v4 accepted-input surface 加 planned-shutdown terminal source/reason 与 cancelled unsettled-effect 诚实投影；不含位置切换 |

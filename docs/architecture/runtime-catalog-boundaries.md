@@ -19,7 +19,7 @@ last_updated: 2026-08-18
 [ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
 [ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)、
 [ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)及
-[Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)。实测版本和能力只由
+[Runtime Launch and Verification v8](../contracts/runtime-launch-and-verification-v8.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -68,6 +68,22 @@ capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 使旧 Ready 失效。Runtime Check Manager 以内部 attempt identity、总 deadline、每 Runtime 单飞和全局并发二
 统一收口 success、failure、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
 和整进程树 cleanup。
+
+## 内部诊断与公开 Runtime failure
+
+Claude Code 与 Antigravity 的执行或显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
+`RuntimeFailureView`。该对象只保存 Runtime identity、origin、phase、稳定 code、安全 summary/detail 与
+retryable；完整 error chain、原始 stderr、私有日志、exit status、byte count 和 digest 仍属于内部诊断。
+公开 detail 必须先脱敏、去控制字符并有界化，不能包含 Prompt、用户消息、Tool input 或完整 Tool output。
+
+`runtime` 只表示 Runtime/Provider 明确报错；协议、参数和输出格式问题是 `compatibility`，executable/cwd/
+权限/附件目录问题是 `environment`，只有明确 Core 状态、持久化或配置生成证据才能是 `rovai`，否则为
+`unknown`。Renderer 不重新分类，也不从内部 diagnostic code 或 digest 推断原因。
+
+`AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
+Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
+last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
+[Runtime Launch and Verification v8](../contracts/runtime-launch-and-verification-v8.md)。
 
 ## TRAE CLI CN 当前边界
 

@@ -1990,7 +1990,7 @@ mod tests {
     }
 
     struct Fixture {
-        database: Database,
+        database: crate::test_support::OwnedTestDatabase,
         directory: std::path::PathBuf,
         camp_id: String,
         #[cfg(feature = "slow-tests")]
@@ -2002,7 +2002,8 @@ mod tests {
 
     impl Fixture {
         fn new() -> Self {
-            let (mut database, directory) = crate::test_support::seeded_runtime_database();
+            let mut database = crate::test_support::seeded_runtime_database_owned();
+            let directory = database.directory().to_path_buf();
             let workspace = directory.join("workspace");
             std::fs::create_dir_all(&workspace).expect("workspace should exist");
             let collaboration = CollaborationService::default();
@@ -2429,6 +2430,7 @@ mod tests {
                             execution_epoch,
                             error_code: error_code.to_string(),
                             error_detail: None,
+                            failure: None,
                             manual_retry_allowed: false,
                             ending_git_observation: None,
                         },
@@ -2476,17 +2478,6 @@ mod tests {
                 .expect("AgentRun should complete");
             assert_eq!(completed.result.status, CommandResultStatus::Applied);
             completed
-        }
-    }
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            let replacement = std::env::temp_dir().join(format!("rovai-drop-{}", Uuid::new_v4()));
-            let database = Database::open(&replacement).expect("replacement database should open");
-            let old = std::mem::replace(&mut self.database, database);
-            drop(old);
-            let _ = std::fs::remove_dir_all(&self.directory);
-            let _ = std::fs::remove_dir_all(replacement);
         }
     }
 

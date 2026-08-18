@@ -2356,15 +2356,12 @@ mod slow_tests {
         library: &SkillLibraryService,
         group_keys: &[SkillDeliveryGroupKey],
     ) -> SkillView {
-        library.install_bundled_skills(database).unwrap();
-        let installed = library.list(database).unwrap();
+        let skill = library
+            .install_bundled_skill_for_test(database, "analyze-agent-codebase")
+            .unwrap();
         database
             .connection()
             .execute("DELETE FROM skill_group_assignment", [])
-            .unwrap();
-        let skill = installed
-            .into_iter()
-            .find(|skill| skill.name == "analyze-agent-codebase")
             .unwrap();
         assign_skill_to_groups(
             database,
@@ -2513,7 +2510,7 @@ mod slow_tests {
         initialize_git(&root);
         let exclude = root.join(".git/info/exclude");
         fs::write(&exclude, "# user rule\n/local-only\n").unwrap();
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root.clone()).unwrap();
         install_official_and_assign(
             &mut database,
@@ -2582,7 +2579,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-audit-root");
         let data = temporary_directory("rovai-projection-audit-db");
         let library_root = temporary_directory("rovai-projection-audit-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         let skill =
             install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
@@ -2620,7 +2617,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-exposure");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         let conflict = root.join(".codex/skills/analyze-agent-codebase");
@@ -2662,7 +2659,7 @@ mod slow_tests {
     fn waiting_native_session_is_an_active_projection_reader() {
         let root = temporary_directory("rovai-projection-wait-lock");
         let data = temporary_directory("rovai-projection-db");
-        let database = Database::open(&data).unwrap();
+        let database = crate::test_support::fresh_schema_database_fast_at(&data);
         insert_active_run(&database, &root);
         database
             .connection()
@@ -2696,7 +2693,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-conflict");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         let conflict = root.join(".codex/skills/analyze-agent-codebase");
@@ -2768,7 +2765,7 @@ mod slow_tests {
         let source = temporary_directory("rovai-projection-source");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         let skill = import_skill(&mut database, &library, &source, "delete-me");
         SkillProjectionReconciler
@@ -2822,7 +2819,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-dirty");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
@@ -2873,7 +2870,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-new-run-latest");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
@@ -2931,7 +2928,7 @@ mod slow_tests {
         let source = temporary_directory("rovai-projection-source");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         let original = import_skill(&mut database, &library, &source, "revision-change");
         SkillProjectionReconciler
@@ -2999,7 +2996,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-observation-only");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
@@ -3022,7 +3019,7 @@ mod slow_tests {
     #[test]
     fn startup_access_sync_records_a_missing_removed_root_without_resolving_it() {
         let data = temporary_directory("rovai-projection-db");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let missing = std::env::temp_dir()
             .join(format!("rovai-removed-missing-{}", Uuid::new_v4()))
             .to_string_lossy()
@@ -3044,7 +3041,7 @@ mod slow_tests {
     #[test]
     fn startup_access_sync_does_not_turn_db_only_dirty_state_into_removed_root_cleanup() {
         let data = temporary_directory("rovai-projection-db");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let missing = std::env::temp_dir()
             .join(format!("rovai-removed-dirty-missing-{}", Uuid::new_v4()))
             .to_string_lossy()
@@ -3078,7 +3075,7 @@ mod slow_tests {
         let canonical_root = root.canonicalize().unwrap();
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
@@ -3132,7 +3129,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-preflight-repair");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler
@@ -3166,7 +3163,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-preflight-corrupted");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         let skill =
             install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
@@ -3199,7 +3196,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-known-root");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(
             &mut database,
@@ -3323,7 +3320,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-overlap");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(
             &mut database,
@@ -3399,7 +3396,7 @@ mod slow_tests {
         let root = temporary_directory("rovai-projection-native-duplicate");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         let native = root.join(".agents/skills/analyze-agent-codebase");
@@ -3463,7 +3460,7 @@ mod slow_tests {
         let external = temporary_directory("rovai-projection-external-target");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
-        let mut database = Database::open(&data).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
         install_official_and_assign(&mut database, &library, &[SkillDeliveryGroupKey::Codex]);
         SkillProjectionReconciler

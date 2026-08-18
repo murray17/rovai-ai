@@ -14,12 +14,12 @@ type StoredCampTimelineReadingPosition = CampTimelineReadingPosition & {
 }
 
 type StoredCampTimelineReadingPositions = {
-  version: 1
+  version: 2
   entries: StoredCampTimelineReadingPosition[]
 }
 
 export const CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY =
-  'rovai.camp-timeline-reading-positions.v1'
+  'rovai.camp-timeline-reading-positions.v2'
 export const CAMP_TIMELINE_BOTTOM_THRESHOLD = 48
 const CAMP_TIMELINE_READING_POSITION_LIMIT = 50
 
@@ -27,11 +27,10 @@ function storedPositionsFromValue(value: string | null): StoredCampTimelineReadi
   if (!value) return []
   try {
     const parsed = JSON.parse(value) as Partial<StoredCampTimelineReadingPositions>
-    if (parsed.version !== 1 || !Array.isArray(parsed.entries)) return []
+    if (parsed.version !== 2 || !Array.isArray(parsed.entries)) return []
     return parsed.entries.filter((entry): entry is StoredCampTimelineReadingPosition =>
       Boolean(entry)
-      && typeof entry.campId === 'string'
-      && entry.campId.length > 0
+      && isCampId(entry.campId)
       && typeof entry.scrollTop === 'number'
       && Number.isFinite(entry.scrollTop)
       && entry.scrollTop >= 0
@@ -76,7 +75,7 @@ export function storedCampTimelineReadingPositionsWithUpdate(
     .concat(nextEntry)
     .sort((left, right) => right.updatedAt - left.updatedAt)
     .slice(0, boundedLimit)
-  return JSON.stringify({ version: 1, entries } satisfies StoredCampTimelineReadingPositions)
+  return JSON.stringify({ version: 2, entries } satisfies StoredCampTimelineReadingPositions)
 }
 
 export function campTimelineIsNearBottom(
@@ -112,3 +111,4 @@ export function restoredCampTimelineScrollTop(
   if (!position || position.followingLatest) return maximum
   return Math.min(maximum, Math.max(0, position.scrollTop))
 }
+import { isCampId } from '@contracts'

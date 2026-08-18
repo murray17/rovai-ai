@@ -56,6 +56,7 @@ import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { SafeMarkdown } from './SafeMarkdown'
+import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
 import { createStructuredMessageClipboardData } from './structured-message-clipboard'
@@ -327,6 +328,19 @@ export function executionConsoleIsVisible(
 ): boolean {
   return placement === 'bottom'
     || (inspectorVisible && inspectorSurfaceTab === 'execution')
+}
+
+export function attachmentDropIsBlocked(
+  executionDrawerPresent: boolean,
+  mentionPopoverPresent: boolean,
+  executionPlacement: ExecutionConsolePlacement,
+  inspectorVisible: boolean,
+  inspectorSurfaceTab: CampInspectorSurfaceTab
+): boolean {
+  return mentionPopoverPresent || (
+    executionDrawerPresent
+    && executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab)
+  )
 }
 
 export function agentRunTerminalNote(
@@ -2599,7 +2613,13 @@ export function CampWorkspace({
     }, 1_200)
   }
 
-  const attachmentDropBlocked = Boolean(executionDrawerProcess || mentionPopover)
+  const attachmentDropBlocked = attachmentDropIsBlocked(
+    Boolean(executionDrawerProcess),
+    Boolean(mentionPopover),
+    executionPlacement,
+    inspectorVisible,
+    inspectorSurfaceTab
+  )
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -3723,7 +3743,18 @@ export function CampWorkspace({
               </button>
             </div>
             <div className="composer-actions">
-              {!executionBlocked && <span className="composer-hint">Enter</span>}
+              {!executionBlocked && (
+                <span className="composer-hint">
+                  <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
+                  <span className="composer-hint-visual" aria-hidden="true">
+                    <kbd>↵</kbd>
+                    <span>发送</span>
+                    <span className="composer-hint-separator">·</span>
+                    <kbd>⇧↵</kbd>
+                    <span>换行</span>
+                  </span>
+                </span>
+              )}
               {executionBlocked
                 ? (
                     <button
@@ -6113,12 +6144,17 @@ export function RunExecutionDisclosure({
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
   const cancellingActive = nonTerminal && cancelling && focused
-  const [open, setOpen] = useState(active)
+  const publicFailure = run.status === 'failed' ? run.failure : null
+  const hasPublicFailure = publicFailure !== null
+  const [open, setOpen] = useState(active || hasPublicFailure)
   const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
   const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
   useEffect(() => {
-    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(currentOpen, active || cancellingActive))
-  }, [active, cancellingActive])
+    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(
+      currentOpen,
+      active || cancellingActive || hasPublicFailure
+    ))
+  }, [active, cancellingActive, hasPublicFailure])
 
   const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
   const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
@@ -6139,7 +6175,7 @@ export function RunExecutionDisclosure({
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
-  if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
+  if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning && !hasPublicFailure) {
     return null
   }
 
@@ -6164,6 +6200,7 @@ export function RunExecutionDisclosure({
 
   const content = (
     <div className="process-content">
+      {publicFailure && <RuntimeFailureNotice failure={publicFailure} />}
       {showUnsettledWarning && (
         <p className="execution-uncertain" role="status">
           仍有外部效果待确认

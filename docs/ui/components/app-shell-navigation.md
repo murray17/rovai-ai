@@ -56,9 +56,10 @@ Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再�
 
 ## 宿主平台交互
 
-macOS 保留 hidden title bar 与受控 drag region；Windows 使用 OS native frame，所有 Renderer
-`-webkit-app-region: drag` 必须关闭。Windows caption buttons、Snap Layout、Alt+Space、双击标题栏和多屏 DPI
-由系统拥有，50px App 顶行位于原生标题栏之下且不复制窗口按钮或第二个 App 标题。
+macOS 保留 hidden title bar 与受控 drag region；新对话、设置、队员和记忆页使用同一个内容列全宽、
+固定 50px 的透明拖拽带，位于顶部的交互控件保留明确的 `no-drag` 点击区域。Windows 使用 OS native frame，
+所有 Renderer `-webkit-app-region: drag` 必须关闭。Windows caption buttons、Snap Layout、Alt+Space、双击标题栏
+和多屏 DPI 由系统拥有，50px App 顶行位于原生标题栏之下且不复制窗口按钮或第二个 App 标题。
 
 实现统一使用 `CommandOrControl` 动作和集中式平台文案映射：macOS 可显示 `⌘K`、Windows 显示 `Ctrl+K`；
 文件定位分别显示“在 Finder 中显示”和“在文件资源管理器中显示”。可访问名称始终描述动作，不能只读出快捷键

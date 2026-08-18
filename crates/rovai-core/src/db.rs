@@ -5,6 +5,8 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+#[cfg(test)]
+use rusqlite::OpenFlags;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -14,6 +16,7 @@ use crate::agent_identity::{
     FIRST_USER_AGENT_ORDINAL, LEGACY_BUILT_IN_AGENT_ID_MAPPINGS, LUOKE_AGENT_ID, MIANZHI_AGENT_ID,
     MUWA_AGENT_ID, QILU_AGENT_ID, format_agent_id,
 };
+use crate::camp_id::CampId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::execution_budget::{
@@ -43,8 +46,19 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.07";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 48;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.10";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 50;
+const V095_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.10";
+const V095_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 49;
+const V094_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.07";
+const V094_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 48;
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TestDatabaseOpenMode {
+    FastIsolated,
+    ProductionLike,
+}
 const V092_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.98";
 const V092_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 46;
 const V091_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.96";
@@ -110,6 +124,8 @@ struct CurrentMigrationState {
     v91: bool,
     v92: bool,
     v93: bool,
+    v94: bool,
+    v95: bool,
 }
 
 impl CurrentMigrationState {
@@ -119,6 +135,63 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95;
+        }
+        if self.v95 {
+            return false;
+        }
+        if contract == V095_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V095_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94;
+        }
+        if self.v94 {
+            return false;
+        }
+        if contract == V094_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V094_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -493,6 +566,10 @@ fn has_current_data_contract(path: &Path) -> bool {
     let Ok(connection) = Connection::open(path) else {
         return false;
     };
+    connection_has_current_data_contract(&connection).unwrap_or(false)
+}
+
+fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     let marker = connection
         .query_row(
             r#"
@@ -515,15 +592,15 @@ fn has_current_data_contract(path: &Path) -> bool {
         [],
         |row| row.get(0),
     );
-    let migration_state = load_current_migration_state(&connection);
-    matches!(
+    let migration_state = load_current_migration_state(connection);
+    Ok(matches!(
         (marker, projection_exists, migration_state),
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
             if contract == CURRENT_DATA_CONTRACT_VERSION
                 && schema == CURRENT_PROJECTION_SCHEMA_VERSION
                 && classifier == V043_CLASSIFIER_VERSION
                 && migrations.admits(&contract, schema)
-    )
+    ))
 }
 
 fn load_current_migration_state(
@@ -554,7 +631,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 90),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 91),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 92),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 93)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 93),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 94),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 95)
         "#,
         [],
         |row| {
@@ -583,6 +662,8 @@ fn load_current_migration_state(
                 v91: row.get(21)?,
                 v92: row.get(22)?,
                 v93: row.get(23)?,
+                v94: row.get(24)?,
+                v95: row.get(25)?,
             })
         },
     )
@@ -985,6 +1066,50 @@ impl Database {
         }
         database.seed_agents()?;
         Ok(database)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_verified_test_clone(
+        data_dir: &Path,
+        mode: TestDatabaseOpenMode,
+    ) -> Result<Self> {
+        let path = data_dir.join("rovai.sqlite");
+        if !path.is_file() {
+            anyhow::bail!(
+                "verified test clone requires an existing SQLite database at {}",
+                path.display()
+            );
+        }
+        let connection = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("failed to open verified SQLite clone at {}", path.display()))?;
+        crate::monitoring::register_monitoring_sql_functions(&connection)?;
+        if !connection_has_current_data_contract(&connection)? {
+            anyhow::bail!(
+                "verified test clone is not at the current data contract: {}",
+                path.display()
+            );
+        }
+        match mode {
+            TestDatabaseOpenMode::FastIsolated => connection.execute_batch(
+                r#"
+                PRAGMA journal_mode = MEMORY;
+                PRAGMA synchronous = OFF;
+                PRAGMA temp_store = MEMORY;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )?,
+            TestDatabaseOpenMode::ProductionLike => connection.execute_batch(
+                r#"
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )?,
+        }
+        Ok(Self { connection, path })
     }
 
     pub fn path(&self) -> &Path {
@@ -1684,6 +1809,12 @@ impl Database {
             if !self.schema_migration_applied(93)? {
                 self.migrate_a2a_public_only_v93()?;
             }
+            if !self.schema_migration_applied(94)? {
+                self.migrate_public_runtime_failures_v94()?;
+            }
+            if !self.schema_migration_applied(95)? {
+                self.migrate_camp_identity_v95()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2012,6 +2143,12 @@ impl Database {
         }
         if !self.schema_migration_applied(93)? {
             self.migrate_a2a_public_only_v93()?;
+        }
+        if !self.schema_migration_applied(94)? {
+            self.migrate_public_runtime_failures_v94()?;
+        }
+        if !self.schema_migration_applied(95)? {
+            self.migrate_camp_identity_v95()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -11148,6 +11285,249 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_public_runtime_failures_v94(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE agent_run ADD COLUMN
+                public_runtime_failure_json TEXT
+                CHECK(
+                    public_runtime_failure_json IS NULL
+                    OR (
+                        json_valid(public_runtime_failure_json)
+                        AND json_type(public_runtime_failure_json) = 'object'
+                    )
+                );
+            ALTER TABLE adapter_probe_attempt ADD COLUMN
+                public_runtime_failure_json TEXT
+                CHECK(
+                    public_runtime_failure_json IS NULL
+                    OR (
+                        json_valid(public_runtime_failure_json)
+                        AND json_type(public_runtime_failure_json) = 'object'
+                    )
+                );
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.10', projection_schema_version = 49,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (94, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_camp_identity_v95(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let create_context_manifest_v95 = create_context_manifest
+                .replacen(
+                    "CREATE TABLE context_manifest",
+                    "CREATE TABLE context_manifest_v95",
+                    1,
+                )
+                .replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v95",
+                    1,
+                )
+                .replacen(
+                    "CHECK(formatter_version = 19)",
+                    "CHECK(formatter_version = 20)",
+                    1,
+                );
+            if create_context_manifest_v95 == create_context_manifest
+                || !create_context_manifest_v95.contains("CREATE TABLE context_manifest_v95")
+                || !create_context_manifest_v95.contains("CHECK(formatter_version = 20)")
+            {
+                anyhow::bail!("v95 could not rebuild the ContextManifest v18 schema");
+            }
+
+            transaction.execute(
+                r#"
+                UPDATE gather_item
+                SET status = 'cancelled', terminal_source = 'delivery',
+                    error_code = 'context_formatter_v20_required',
+                    terminal_resolution_source = 'migration',
+                    terminal_reason_code = 'camp_identity_clean_break',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE gather_record
+                SET status = 'cancelled',
+                    cancellation_reason_code = 'context_formatter_v20_required',
+                    version = version + 1, cancelled_at = ?1, updated_at = ?1
+                WHERE status IN ('collecting', 'ready', 'completing')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    context_manifest_id = NULL,
+                    failure_code = 'context_formatter_v20_required',
+                    failure_detail_json = '{"reason":"camp_identity_clean_break"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0
+                        THEN 'interrupted_before_dispatch'
+                        ELSE 'failed'
+                    END,
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    manual_intervention_required = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                        ELSE 0
+                    END,
+                    failure_code = 'context_formatter_v20_required',
+                    failure_detail_json = '{"reason":"camp_identity_clean_break"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET frozen_snapshot_json = CASE
+                        WHEN json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                        THEN json_remove(frozen_snapshot_json, '$.frozenContext')
+                        ELSE frozen_snapshot_json
+                    END,
+                    context_manifest_id = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE context_manifest_id IS NOT NULL
+                   OR json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                "UPDATE message_delivery_attempt SET context_manifest_id = NULL WHERE context_manifest_id IS NOT NULL",
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_formatter_v20_required',
+                    public_runtime_failure_json = NULL,
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DELETE FROM bootstrap_redelivery_requirement;
+                DELETE FROM native_session_compaction_observation;
+                DELETE FROM native_session_compaction_observer_lease;
+                DELETE FROM native_session_resume_attempt;
+                DELETE FROM runtime_input_delivery;
+                DELETE FROM context_manifest_history_camp;
+                DELETE FROM context_manifest;
+                DELETE FROM native_session_bootstrap_evidence;
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1, updated_at = ?1
+                "#,
+                [&now],
+            )?;
+
+            transaction.execute_batch(&create_context_manifest_v95)?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v95 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.10', projection_schema_version = 50,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (95, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v95 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -15309,7 +15689,7 @@ impl Database {
             } else {
                 None
             };
-            let camp_id = Uuid::new_v4().to_string();
+            let camp_id = CampId::new();
             let internal_ref = is_repository.then(|| format!("refs/rovai/camps/{camp_id}"));
             let lead = active_profiles
                 .first()
@@ -15631,6 +16011,8 @@ mod tests {
             v91: version >= 91,
             v92: version >= 92,
             v93: version >= 93,
+            v94: version >= 94,
+            v95: version >= 95,
         }
     }
 
@@ -15641,6 +16023,18 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                95,
+            ),
+            (
+                "v1.10/schema-49",
+                V095_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V095_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                94,
+            ),
+            (
+                "v1.07/schema-48",
+                V094_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V094_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 93,
             ),
             (
@@ -15765,7 +16159,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(93);
+        let current = migration_state_through(95);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -15823,7 +16217,7 @@ mod tests {
     fn database_loads_current_migration_state_for_admission() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-smoke-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let state = load_current_migration_state(database.connection())
             .expect("current migration markers should load");
         let (contract, schema): (String, i64) = database
@@ -15835,18 +16229,230 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(93));
+        assert_eq!(state, migration_state_through(95));
         assert!(state.admits(&contract, schema));
         assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
+
+    #[test]
+    fn v95_invalidates_native_session_context_and_nonterminal_runs() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-camp-identity-v95-{}", Uuid::new_v4()));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = crate::test_support::seeded_runtime_database();
+        let collaboration = crate::collaboration::CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database.0,
+                &crate::command::CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: crate::command::ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::CreateCampCommand::for_test(
+                        workspace.display().to_string(),
+                    ),
+                },
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let sent = collaboration
+            .send_test_camp_message(
+                &mut database.0,
+                &crate::command::CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: crate::command::ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "Invalidate the old Camp identity context".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: crate::collaboration::TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(crate::collaboration::ExecutionRequest {
+                            task_id: None,
+                            purpose: "Exercise the v95 clean break".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                },
+            )
+            .unwrap();
+        let run_id = sent.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let turn_id = sent.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        database
+            .0
+            .connection()
+            .execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = (
+                        SELECT default_runtime_installation_id
+                        FROM agent_profile
+                        WHERE agent_profile.id = conversation.agent_id
+                    ),
+                    native_session_id = 'native-session-v95',
+                    native_binding_compatibility_digest = 'compatibility-v95',
+                    native_binding_id = 'binding-v95',
+                    native_binding_generation = 1,
+                    native_binding_secret_digest = 'secret-v95',
+                    last_accepted_public_boundary_sequence = 1,
+                    native_charter_digest = 'charter-v95',
+                    native_collaboration_state_digest = 'collaboration-v95',
+                    native_installation_generation = 1,
+                    native_session_compatibility_key = 'session-compatibility-v95'
+                WHERE camp_id = ?1
+                "#,
+                [&camp_id],
+            )
+            .unwrap();
+
+        database
+            .0
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        let current_schema: String = database
+            .0
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let v94_schema = current_schema
+            .replacen(
+                "CREATE TABLE context_manifest",
+                "CREATE TABLE context_manifest_v94_test",
+                1,
+            )
+            .replacen(
+                "CREATE TABLE \"context_manifest\"",
+                "CREATE TABLE context_manifest_v94_test",
+                1,
+            )
+            .replace(
+                "CHECK(formatter_version = 20)",
+                "CHECK(formatter_version = 19)",
+            );
+        assert!(v94_schema.contains("CHECK(formatter_version = 19)"));
+        database.0.connection().execute_batch(&v94_schema).unwrap();
+        database
+            .0
+            .connection()
+            .execute_batch(
+                r#"
+                DROP INDEX context_manifest_blob_idx;
+                DROP INDEX context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v94_test RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.10', projection_schema_version = 49
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 95;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .unwrap();
+        let source_directory = database.1.clone();
+        drop(database);
+
+        let reopened = Database::open(&source_directory).expect("v94 source should migrate to v95");
+        let contract: (String, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 95)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
+        let manifest_schema: String = reopened
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(manifest_schema.contains("CHECK(formatter_version = 20)"));
+        let conversation: (Option<String>, Option<String>, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT native_session_id, native_binding_id,
+                       native_binding_generation,
+                       last_accepted_public_boundary_sequence
+                FROM conversation WHERE camp_id = ?1
+                "#,
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(conversation, (None, None, 0, 0));
+        let run: (String, Option<String>, Option<String>) = reopened
+            .connection()
+            .query_row(
+                "SELECT status, last_error_code, public_runtime_failure_json FROM agent_run WHERE id = ?1",
+                [&run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            run,
+            (
+                "failed".to_string(),
+                Some("context_formatter_v20_required".to_string()),
+                None,
+            )
+        );
+        let turn: String = reopened
+            .connection()
+            .query_row(
+                "SELECT status FROM camp_turn WHERE id = ?1",
+                [&turn_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(turn, "failed");
+        drop(reopened);
+        std::fs::remove_dir_all(source_directory).unwrap();
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[test]
     fn runtime_usage_v92_replaces_legacy_monitoring_without_backfill() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-usage-v92-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -15994,7 +16600,7 @@ mod tests {
             "rovai-current-input-skill-v91-test-{}",
             Uuid::new_v4()
         ));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -16027,7 +16633,7 @@ mod tests {
                 "",
             )
             .replace(
-                "CHECK(formatter_version = 19)",
+                "CHECK(formatter_version = 20)",
                 "CHECK(formatter_version = 17)",
             );
         assert!(!v90_schema.contains("current_input_skill_resolution"));
@@ -16047,10 +16653,14 @@ mod tests {
                     ON context_manifest(bootstrap_evidence_id);
                 ALTER TABLE agent_run DROP COLUMN skill_selection_snapshot_digest;
                 ALTER TABLE agent_run DROP COLUMN skill_selection_snapshot_json;
+                ALTER TABLE agent_run DROP COLUMN public_runtime_failure_json;
+                ALTER TABLE adapter_probe_attempt DROP COLUMN public_runtime_failure_json;
                 ALTER TABLE camp_message DROP COLUMN agent_addressing_mode;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 95;
+                DELETE FROM schema_migration WHERE version = 94;
                 DELETE FROM schema_migration WHERE version = 93;
                 DELETE FROM schema_migration WHERE version = 92;
                 DELETE FROM schema_migration WHERE version = 91;
@@ -16064,6 +16674,10 @@ mod tests {
         let agent_run_columns = table_columns(reopened.connection(), "agent_run").unwrap();
         assert!(agent_run_columns.contains(&"skill_selection_snapshot_json".to_string()));
         assert!(agent_run_columns.contains(&"skill_selection_snapshot_digest".to_string()));
+        assert!(agent_run_columns.contains(&"public_runtime_failure_json".to_string()));
+        let probe_attempt_columns =
+            table_columns(reopened.connection(), "adapter_probe_attempt").unwrap();
+        assert!(probe_attempt_columns.contains(&"public_runtime_failure_json".to_string()));
         let manifest_columns = table_columns(reopened.connection(), "context_manifest").unwrap();
         assert!(manifest_columns.contains(&"current_input_skill_resolution_json".to_string()));
         assert!(manifest_columns.contains(&"current_input_skill_resolution_digest".to_string()));
@@ -16075,7 +16689,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("formatter_version = 20"));
         let contract: (String, i64, i64) = reopened
             .connection()
             .query_row(
@@ -16088,7 +16702,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.07".to_string(), 48, 1));
+        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
         assert_eq!(
             reopened
                 .connection()
@@ -16100,7 +16714,15 @@ mod tests {
         );
         drop(reopened);
         let reopened_again = Database::open(&directory).expect("v91 should reopen idempotently");
-        assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
+        let v91_markers: i64 = reopened_again
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 91",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(v91_markers, 1);
         drop(reopened_again);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -16156,7 +16778,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v72_backfills_initial_runtime_evidence_without_overwriting_existing_values() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v72-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16220,7 +16842,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v73_removes_expected_output_without_losing_agent_runs() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v73-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16279,7 +16901,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v74_assigns_every_active_skill_to_all_runtime_groups_once() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v74-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16393,7 +17015,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v75_persists_skill_projection_root_access_without_reapplying_it() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v75-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("test database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16453,7 +17075,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v79_preserves_v78_lineage_and_installs_notification_episodes_once() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v79-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -16559,7 +17181,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("formatter_version = 20"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_digest TEXT NOT NULL"));
@@ -16582,7 +17204,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v80_adds_durable_controlled_shutdown_cycles() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v80-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -16635,7 +17257,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v81_adds_exact_notification_heads_up_invalidation_facts() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v81-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -16674,7 +17296,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v77-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -18293,7 +18915,7 @@ mod tests {
     fn v83_preserves_existing_composer_drafts_and_installs_null_reply_state() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v83-draft-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -18378,7 +19000,7 @@ mod tests {
     #[test]
     fn v84_clean_break_clears_only_memory_domain_state_and_admits_view_evidence() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v84-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -18559,7 +19181,7 @@ mod tests {
     fn v85_preserves_existing_drafts_without_inventing_continuation_routes() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v85-draft-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -18649,7 +19271,7 @@ mod tests {
     fn v86_preserves_runtime_bindings_and_admits_only_the_new_trae_kind() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v86-runtime-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         crate::agent_profile::configure_test_runtime(&database, &["agent_1"]);
         database
             .connection()
@@ -20301,7 +20923,7 @@ mod tests {
     fn current_schema_contains_required_contract_objects() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-schema-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let connection = database.connection();
 
         assert_migrations_applied(connection, &[58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92]);
@@ -20396,7 +21018,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("formatter_version = 20"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_digest TEXT NOT NULL"));

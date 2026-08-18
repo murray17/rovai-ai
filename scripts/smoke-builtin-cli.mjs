@@ -450,7 +450,7 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v15')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v16')
       || !snapshot.models.length) {
     throw new Error(`${label} is not ready for Built-in CLI v15: ${JSON.stringify(snapshot)}`)
   }

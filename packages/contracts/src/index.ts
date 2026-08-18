@@ -2,6 +2,24 @@ import type { BuiltinMemberAvatarRole } from './member-avatar'
 
 export * from './member-avatar'
 
+export const CAMP_ID_PATTERN = /^rvcamp_[0-7][0123456789abcdefghjkmnpqrstvwxyz]{25}$/u
+
+const CAMP_ID_PREFIX_LENGTH = 'rvcamp_'.length
+const CAMP_ID_CROCKFORD = '0123456789abcdefghjkmnpqrstvwxyz'
+
+export function isCampId(value: unknown): value is string {
+  if (typeof value !== 'string' || !CAMP_ID_PATTERN.test(value)) return false
+  let decoded = 0n
+  for (const character of value.slice(CAMP_ID_PREFIX_LENGTH)) {
+    const digit = CAMP_ID_CROCKFORD.indexOf(character)
+    if (digit < 0) return false
+    decoded = (decoded << 5n) | BigInt(digit)
+  }
+  const version = Number((decoded >> 76n) & 0xfn)
+  const variant = Number((decoded >> 62n) & 0x3n)
+  return version === 7 && variant === 2
+}
+
 export type AdapterKind =
   | 'codex-cli'
   | 'opencode-cli'
@@ -98,6 +116,7 @@ export interface AdapterProbeAttempt {
   executableFingerprint: string | null
   attemptedAt: string
   retryAfter: string | null
+  failure: RuntimeFailureView | null
 }
 
 export type InstallationSource =
@@ -354,6 +373,30 @@ export type ProductRuntimeAvailabilityStatus =
   | 'disabled'
   | 'refresh_failed_using_last_success'
 
+export type RuntimeFailureOrigin =
+  | 'runtime'
+  | 'compatibility'
+  | 'environment'
+  | 'rovai'
+  | 'unknown'
+
+export type RuntimeFailurePhase =
+  | 'spawn'
+  | 'authentication'
+  | 'model_catalog'
+  | 'execution'
+  | 'terminal'
+
+export interface RuntimeFailureView {
+  runtimeKind: AdapterKind
+  origin: RuntimeFailureOrigin
+  phase: RuntimeFailurePhase
+  code: string
+  summary: string
+  detail: string | null
+  retryable: boolean
+}
+
 export interface ProductRuntimeAvailability {
   runtimeKind: AdapterKind
   status: ProductRuntimeAvailabilityStatus
@@ -362,6 +405,7 @@ export interface ProductRuntimeAvailability {
   installationId: string | null
   reportedVersion: string | null
   diagnosticCode: string | null
+  failure: RuntimeFailureView | null
   lastAttemptedAt?: string | null
   lastSuccessfulProbeAt?: string | null
 }
@@ -1014,6 +1058,7 @@ export interface AgentRunView {
     | 'planned_shutdown_failed'
     | 'planned_shutdown_cancelled'
     | null
+  failure: RuntimeFailureView | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
   invocationKind: 'direct' | 'a2a' | 'gather_completion'
@@ -1226,7 +1271,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 19
+  formatterVersion: 20
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

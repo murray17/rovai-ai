@@ -66,6 +66,7 @@ import {
   agentRunCountsAsExecuting,
   agentRunShowsUnsettledWarning,
   attachmentDragKind,
+  attachmentDropIsBlocked,
   campConversationViewFromStoredValue,
   campConversationTimeline,
   composerDraftNeedsContinuationRepair,
@@ -1119,17 +1120,27 @@ describe('task event projections', () => {
     const settingsStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
       page: 'settings'
     }))
+    const membersStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'members'
+    }))
+    const memoryStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'memory'
+    }))
     expect(composeStrip).toContain('window-drag-strip-compose')
     expect(settingsStrip).toContain('window-drag-strip-settings')
+    expect(membersStrip).toContain('window-drag-strip-members')
+    expect(memoryStrip).toContain('window-drag-strip-memory')
     expect(composeStrip).toContain('aria-hidden="true"')
     expect(settingsStrip).toContain('aria-hidden="true"')
+    expect(membersStrip).toContain('aria-hidden="true"')
+    expect(memoryStrip).toContain('aria-hidden="true"')
     expect(composeStrip).not.toContain('快速对话')
     expect(settingsStrip).not.toContain('设置')
     expect(windowDragStripPage('compose')).toBe('compose')
     expect(windowDragStripPage('settings')).toBe('settings')
+    expect(windowDragStripPage('members')).toBe('members')
+    expect(windowDragStripPage('memory')).toBe('memory')
     expect(windowDragStripPage('camp')).toBeNull()
-    expect(windowDragStripPage('members')).toBeNull()
-    expect(windowDragStripPage('memory')).toBeNull()
   })
 
   it('only acknowledges a Camp as viewed while that exact conversation is visible', () => {
@@ -1899,8 +1910,9 @@ describe('task event projections', () => {
     expect(markup).toContain('配置洛可的 Agent 运行时')
     expect(markup.indexOf('class="runtime-recovery-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
     expect(markup).toMatch(
-      /<div class="composer-actions"><span class="composer-hint">Enter<\/span><button class="primary-button composer-send"/
+      /<div class="composer-actions"><span class="composer-hint"><span class="sr-only">Enter 发送，Shift\+Enter 换行<\/span><span class="composer-hint-visual" aria-hidden="true"><kbd>↵<\/kbd><span>发送<\/span><span class="composer-hint-separator">·<\/span><kbd>⇧↵<\/kbd><span>换行<\/span><\/span><\/span><button class="primary-button composer-send"/
     )
+    expect(markup).not.toContain('<span class="composer-hint">Enter</span>')
     expect(markup).not.toContain('agent_run.runtime_not_ready')
     expect(markup).not.toContain('agent_1')
     expect(markup).not.toContain('Runtime')
@@ -2117,6 +2129,7 @@ describe('task event projections', () => {
         responsibilityGeneration: 0, purpose: '实现复制',
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
         terminalResolutionSource: null, terminalReasonCode: null,
+        failure: null,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
         executionEvidenceCount: 3,
@@ -2222,6 +2235,12 @@ describe('task event projections', () => {
     expect(executionConsoleIsVisible('inspector', true, 'execution')).toBe(true)
     expect(executionConsoleIsVisible('inspector', true, 'tasks')).toBe(false)
     expect(executionConsoleIsVisible('inspector', false, 'execution')).toBe(false)
+    expect(attachmentDropIsBlocked(true, false, 'bottom', false, 'tasks')).toBe(true)
+    expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'execution')).toBe(true)
+    expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'tasks')).toBe(false)
+    expect(attachmentDropIsBlocked(true, false, 'inspector', false, 'execution')).toBe(false)
+    expect(attachmentDropIsBlocked(false, true, 'inspector', true, 'tasks')).toBe(true)
+    expect(attachmentDropIsBlocked(false, false, 'bottom', true, 'tasks')).toBe(false)
     expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
     expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
     expect(executionDrawerHeightBounds(600, 54, 920)).toEqual({ min: 160, max: 434 })
@@ -3254,6 +3273,36 @@ describe('task event projections', () => {
     expect(activityStatusForAgentRun('running', 'failed')).toBe('running')
   })
 
+  it('shows a failed Claude run public failure even when no execution evidence was recorded', () => {
+    const run: AgentRunView = {
+      id: 'run-claude-failed', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
+      responsibilityGeneration: 0, purpose: '检查仓库', completionRole: 'required',
+      status: 'failed', waitReason: null, executionEpoch: 1,
+      terminalResolutionSource: 'runtime_terminal', terminalReasonCode: null,
+      failure: {
+        runtimeKind: 'claude-code-cli', origin: 'runtime', phase: 'terminal',
+        code: 'runtime_rate_limited', summary: '请求受到速率限制',
+        detail: '请稍后重试。', retryable: true
+      },
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
+      a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
+      executionEvidenceCount: 0, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-18T00:00:00Z', startedAt: '2026-08-18T00:00:01Z',
+      endedAt: '2026-08-18T00:00:02Z', updatedAt: '2026-08-18T00:00:02Z'
+    }
+
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, campId: 'camp-1'
+    }))
+    expect(markup).toContain('<details class="execution-disclosure worked is-terminal" open="">')
+    expect(markup).toContain('Claude Code 返回错误')
+    expect(markup).toContain('请求受到速率限制')
+    expect(markup).toContain('请稍后重试。')
+    expect(markup).not.toContain('Rovai 内部错误')
+  })
+
   it('does not present an ACP protocol kind as Copilot execution detail', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'copilot-tool-call', agentRunId: 'run-copilot', eventType: 'runtime.action',
@@ -3283,6 +3332,7 @@ describe('task event projections', () => {
       responsibilityGeneration: 0, purpose: '检查工作区状态', completionRole: 'required',
       status: 'running', waitReason: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
+      failure: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
@@ -3378,6 +3428,7 @@ describe('task event projections', () => {
       responsibilityGeneration: 0, purpose: '读取 Camp 历史', completionRole: 'required',
       status: 'succeeded', waitReason: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
+      failure: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
@@ -3439,6 +3490,7 @@ describe('task event projections', () => {
       responsibilityGeneration: 0, purpose: '执行无输出 Bash 命令', completionRole: 'required',
       status: 'succeeded', waitReason: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
+      failure: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
@@ -3984,7 +4036,15 @@ describe('task event projections', () => {
         productAvailability('codex-cli', 'ready'),
         productAvailability('opencode-cli', 'found_uninspected'),
         productAvailability('copilot-cli', 'checking'),
-        productAvailability('claude-code-cli', 'authentication_required'),
+        productAvailability('claude-code-cli', 'authentication_required', {
+          runtimeKind: 'claude-code-cli',
+          origin: 'runtime',
+          phase: 'authentication',
+          code: 'runtime_authentication_required',
+          summary: 'Claude Code 尚未登录',
+          detail: '请先在终端完成 Claude Code 登录。',
+          retryable: true
+        }),
         productAvailability('antigravity-app', 'missing')
       ],
       searchEnvironment: {
@@ -4018,6 +4078,10 @@ describe('task event projections', () => {
     expect(markup).toContain('可用')
     expect(markup).toContain('正在检查…')
     expect(markup).toContain('需要登录')
+    expect(markup).toContain('Claude Code 返回错误')
+    expect(markup).toContain('Claude Code 尚未登录')
+    expect(markup).toContain('请先在终端完成 Claude Code 登录。')
+    expect(markup).not.toContain('Rovai 内部错误')
     expect(markup).toContain('未安装')
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
@@ -4149,7 +4213,8 @@ function codexInstallation(): AdapterInstallation {
 
 function productAvailability(
   runtimeKind: HealthStatus['runtimeAvailability'][number]['runtimeKind'],
-  status: HealthStatus['runtimeAvailability'][number]['status']
+  status: HealthStatus['runtimeAvailability'][number]['status'],
+  failure: HealthStatus['runtimeAvailability'][number]['failure'] = null
 ): HealthStatus['runtimeAvailability'][number] {
   return {
     runtimeKind,
@@ -4168,7 +4233,8 @@ function productAvailability(
     },
     installationId: status === 'ready' ? `installation-${runtimeKind}` : null,
     reportedVersion: status === 'missing' || status === 'detecting' ? null : `${runtimeKind} 1.0.0`,
-    diagnosticCode: null
+    diagnosticCode: null,
+    failure
   }
 }
 

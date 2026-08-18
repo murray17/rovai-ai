@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { isCampId } from '@contracts'
 import type {
   NavigationPin,
   NavigationPreferencesSnapshot,
@@ -83,7 +84,7 @@ export class NavigationPreferencesStore {
     if (!isProjectTargetKey(targetKey)) {
       return Promise.reject(new Error('Unsupported Project navigation key'))
     }
-    if (!Array.isArray(relatedCampIds) || !relatedCampIds.every(isStableId)) {
+    if (!Array.isArray(relatedCampIds) || !relatedCampIds.every(isCampId)) {
       return Promise.reject(new Error('Related Camp IDs are invalid'))
     }
     return this.#enqueue(async () => {
@@ -155,18 +156,23 @@ function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
   const seen = new Set<string>()
   const pins: NavigationPin[] = []
   for (const candidate of source.pins) {
+    if (!isRecord(candidate)) continue
+    const kind = candidate.kind
+    const targetKey = candidate.targetKey
     if (
-      !isRecord(candidate)
-      || (candidate.kind !== 'camp' && candidate.kind !== 'project')
-      || !isStableId(candidate.targetKey)
+      (kind !== 'camp' && kind !== 'project')
+      || typeof targetKey !== 'string'
+      || (kind === 'camp'
+        ? !isCampId(targetKey)
+        : !isProjectTargetKey(targetKey))
       || !isTimestamp(candidate.pinnedAt)
     ) continue
-    const key = `${candidate.kind}:${candidate.targetKey}`
+    const key = `${kind}:${targetKey}`
     if (seen.has(key)) continue
     seen.add(key)
     pins.push({
-      kind: candidate.kind,
-      targetKey: candidate.targetKey,
+      kind,
+      targetKey,
       pinnedAt: candidate.pinnedAt
     })
   }

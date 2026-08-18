@@ -6,7 +6,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// pre-existing macOS Product Runtime qualification baseline. New evidence
 /// must receive a new digest instead of reusing a human-readable label.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:2c38c96ffcd4bdda6b7a2a53a11415047a13668ea4e7ef258500b71c650566d2";
+    "sha256:78f9a0095f632c35d57667736e0efc66ded41ad2d8d210994fac0670e90bdd8b";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

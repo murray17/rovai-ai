@@ -6728,7 +6728,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: Some(Uuid::new_v4().to_string()),
+                    camp_id: Some(crate::camp_id::CampId::new().to_string()),
                     message_id: initial_message_id,
                     body_offset: None,
                     body_limit: None,
@@ -7623,7 +7623,7 @@ mod slow_tests {
                 "",
             )
             .replace(
-                "CHECK(formatter_version = 19)",
+                "CHECK(formatter_version = 20)",
                 "CHECK(formatter_version = 18)",
             );
         assert!(!v92_schema.contains("message_projection_audience"));
@@ -7696,10 +7696,14 @@ mod slow_tests {
                 ALTER TABLE context_manifest_v92_test RENAME TO context_manifest;
                 CREATE INDEX context_manifest_blob_idx ON context_manifest(rendered_payload_blob_id);
                 CREATE INDEX context_manifest_bootstrap_idx ON context_manifest(bootstrap_evidence_id);
+                ALTER TABLE agent_run DROP COLUMN public_runtime_failure_json;
+                ALTER TABLE adapter_probe_attempt DROP COLUMN public_runtime_failure_json;
                 ALTER TABLE camp_message DROP COLUMN agent_addressing_mode;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.99', projection_schema_version = 47
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 95;
+                DELETE FROM schema_migration WHERE version = 94;
                 DELETE FROM schema_migration WHERE version = 93;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -7757,7 +7761,7 @@ mod slow_tests {
             .unwrap();
         assert!(manifest_schema.contains("run_fact_payload_json"));
         assert!(!manifest_schema.contains("run_notice_"));
-        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("formatter_version = 20"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         let contract: (String, i64, i64) = reopened
@@ -7772,7 +7776,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.07".to_string(), 48, 1));
+        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -8400,7 +8404,10 @@ mod slow_tests {
                 .code,
             "camp.invalid_argument"
         );
-        for unavailable_camp_id in [late_camp_id.clone(), Uuid::new_v4().to_string()] {
+        for unavailable_camp_id in [
+            late_camp_id.clone(),
+            crate::camp_id::CampId::new().to_string(),
+        ] {
             let unavailable_search = CampHistoryService
                 .search_camp(
                     &mut fixture.database,
@@ -12141,7 +12148,7 @@ mod slow_tests {
         fn message(id: &str) -> SharedMessage {
             let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V3.max_message_body_chars);
             SharedMessage {
-                camp_id: "camp-1".to_string(),
+                camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 message_id: id.to_string(),
                 sequence: 0,
                 sender_type: "user".to_string(),
@@ -12621,7 +12628,7 @@ mod slow_tests {
         assert!(empty.is_empty());
         assert_eq!(empty.payload_json, "{\"schemaVersion\":1}");
         let shared_conversation = SharedConversation {
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             originating_public_user_message: None,
             reference_closure: Vec::new(),
             recent_messages: Vec::new(),

@@ -30,10 +30,10 @@ const criteria = [
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 17 and Context Formatter version is 19', [
+  criterion('CCC-010', 'ContextManifest version is 18 and Context Formatter version is 20', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v1.07 with projection schema 48', [
+  criterion('CCC-011', 'Data Contract is v1.10 with projection schema 50', [
     test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
     test('crates/rovai-core/src/db.rs', 'current_schema_contains_required_contract_objects')
   ]),
@@ -44,11 +44,11 @@ const criteria = [
     test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
     test('crates/rovai-core/src/db.rs', 'v107_quarantine_moves_owned_directories_without_following_links')
   ]),
-  criterion('CCC-014', 'The v93 schema transition preserves business messages while removing incompatible frozen context', [
-    test('crates/rovai-core/src/context.rs', 'v93_clean_break_preserves_business_history_and_removes_old_context_state')
+  criterion('CCC-014', 'The v95 schema transition invalidates incompatible Native Session context before Formatter 20', [
+    test('crates/rovai-core/src/db.rs', 'v95_invalidates_native_session_context_and_nonterminal_runs')
   ]),
-  criterion('CCC-015', 'The v93 schema transition fails old active execution closed before installing Formatter 19', [
-    test('crates/rovai-core/src/context.rs', 'v93_clean_break_preserves_business_history_and_removes_old_context_state')
+  criterion('CCC-015', 'The v95 schema transition fails nonterminal Runs and Turns closed', [
+    test('crates/rovai-core/src/db.rs', 'v95_invalidates_native_session_context_and_nonterminal_runs')
   ])
 ]
 
@@ -58,7 +58,7 @@ export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
     evidence: test('crates/rovai-core/src/collaboration.rs', 'agent_task_updates_respect_lead_and_assignee_authority')
   },
   {
-    id: 'built-in-transport-v15',
+    id: 'built-in-transport-v16',
     evidence: test('crates/rovai-core/src/builtin_tool_transport.rs', 'list_and_describe_share_one_digest')
   },
   {
@@ -71,7 +71,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.9.0',
+  version: '1.10.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -89,8 +89,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.07-current-contract',
-    version: '1.9.0',
+    id: 'rovai-v1.10-current-contract',
+    version: '1.10.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

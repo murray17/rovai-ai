@@ -31,6 +31,7 @@ use crate::{
         settle_materialized_delivery_for_agent_run,
     },
     planned_shutdown::{RuntimeTerminalOutcome, TerminalSettlementPermit},
+    runtime_failure::RuntimeFailureView,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -125,6 +126,7 @@ impl DomainCommand for MarkAgentRunForRecoveryCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveAcceptedInputRecoveryBlockerCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub agent_run_id: String,
     pub expected_version: i64,
@@ -138,6 +140,7 @@ impl DomainCommand for ResolveAcceptedInputRecoveryBlockerCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelCampTurnCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub camp_turn_id: String,
     pub expected_version: i64,
@@ -280,6 +283,8 @@ pub struct FailAgentRunCommand {
     pub execution_epoch: i64,
     pub error_code: String,
     pub error_detail: Option<String>,
+    #[serde(default)]
+    pub failure: Option<RuntimeFailureView>,
     pub manual_retry_allowed: bool,
     pub ending_git_observation: Option<GitObservation>,
 }
@@ -291,6 +296,7 @@ pub struct PlannedShutdownAbortiveTerminal {
     pub outcome: RuntimeTerminalOutcome,
     pub error_code: String,
     pub error_detail: Option<String>,
+    pub failure: Option<RuntimeFailureView>,
     pub manual_retry_allowed: bool,
 }
 
@@ -338,6 +344,8 @@ pub struct RejectAgentRunDispatchCommand {
     pub expected_version: i64,
     pub error_code: String,
     pub error_detail: Option<String>,
+    #[serde(default)]
+    pub failure: Option<RuntimeFailureView>,
     pub manual_retry_allowed: bool,
 }
 
@@ -3268,6 +3276,10 @@ impl ExecutionRuntimeService {
         if envelope.payload.error_code.trim().is_empty() {
             anyhow::bail!("AgentRun dispatch errorCode must not be empty");
         }
+        validate_public_runtime_failure(
+            &envelope.payload.error_code,
+            envelope.payload.failure.as_ref(),
+        )?;
         let execution = self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
                 &envelope.actor,
@@ -3307,6 +3319,12 @@ impl ExecutionRuntimeService {
                 .error_detail
                 .as_ref()
                 .map(|detail| json!({ "detail": detail }).to_string());
+            let public_runtime_failure_json = envelope
+                .payload
+                .failure
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -3314,6 +3332,7 @@ impl ExecutionRuntimeService {
                     runtime_recovery_required = 0,
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     last_error_code = ?2, last_error_details_ref = ?3,
+                    public_runtime_failure_json = ?7,
                     manual_retry_allowed = ?4,
                     ended_at = ?5, version = version + 1, updated_at = ?5
                 WHERE id = ?1 AND version = ?6
@@ -3334,6 +3353,7 @@ impl ExecutionRuntimeService {
                     i64::from(envelope.payload.manual_retry_allowed),
                     target.now,
                     envelope.payload.expected_version,
+                    public_runtime_failure_json,
                 ],
             )?;
             if updated != 1 {
@@ -3353,6 +3373,7 @@ impl ExecutionRuntimeService {
                     "phase": "dispatch_preflight",
                     "errorCode": envelope.payload.error_code,
                     "errorDetail": envelope.payload.error_detail,
+                    "failure": envelope.payload.failure,
                     "manualRetryAllowed": envelope.payload.manual_retry_allowed,
                 }),
             )?;
@@ -3419,6 +3440,10 @@ impl ExecutionRuntimeService {
         if envelope.payload.error_code.trim().is_empty() {
             anyhow::bail!("AgentRun errorCode must not be empty");
         }
+        validate_public_runtime_failure(
+            &envelope.payload.error_code,
+            envelope.payload.failure.as_ref(),
+        )?;
         let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_runtime_adapter(&envelope.actor) {
                 return Ok(rejected(
@@ -3444,6 +3469,12 @@ impl ExecutionRuntimeService {
                 .error_detail
                 .as_ref()
                 .map(|detail| json!({ "detail": detail }).to_string());
+            let public_runtime_failure_json = envelope
+                .payload
+                .failure
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             let ending_git_observation = envelope
                 .payload
                 .ending_git_observation
@@ -3459,6 +3490,7 @@ impl ExecutionRuntimeService {
                     terminal_resolution_source = ?9,
                     terminal_reason_code = NULL,
                     last_error_code = ?2, last_error_details_ref = ?3,
+                    public_runtime_failure_json = ?10,
                     manual_retry_allowed = ?4,
                     ending_git_observation_json = ?8,
                     ended_at = ?5, version = version + 1, updated_at = ?5
@@ -3475,6 +3507,7 @@ impl ExecutionRuntimeService {
                     envelope.payload.execution_epoch,
                     ending_git_observation,
                     terminal_resolution_source,
+                    public_runtime_failure_json,
                 ],
             )?;
             if updated != 1 {
@@ -3490,6 +3523,7 @@ impl ExecutionRuntimeService {
                 &json!({
                     "errorCode": envelope.payload.error_code,
                     "errorDetail": envelope.payload.error_detail,
+                    "failure": envelope.payload.failure,
                     "manualRetryAllowed": envelope.payload.manual_retry_allowed,
                     "endingGitObservation": envelope.payload.ending_git_observation,
                     "terminalResolutionSource": terminal_resolution_source,
@@ -3833,16 +3867,12 @@ impl ExecutionRuntimeService {
         permit: &TerminalSettlementPermit,
         terminal: &PlannedShutdownAbortiveTerminal,
     ) -> Result<PlannedShutdownTerminalSettlement> {
-        let (agent_run_status, terminal_reason_code) = match terminal.outcome {
-            RuntimeTerminalOutcome::Failed => ("failed", "planned_shutdown_failed"),
-            RuntimeTerminalOutcome::Cancelled => ("cancelled", "planned_shutdown_cancelled"),
-            RuntimeTerminalOutcome::Succeeded => {
-                anyhow::bail!("planned shutdown abortive settlement cannot record success")
-            }
-        };
+        let (agent_run_status, terminal_reason_code) =
+            planned_shutdown_abortive_terminal_facts(terminal.outcome)?;
         if terminal.error_code.trim().is_empty() {
             anyhow::bail!("planned shutdown terminal errorCode must not be empty");
         }
+        validate_public_runtime_failure(&terminal.error_code, terminal.failure.as_ref())?;
         if !permit.authorizes(
             &terminal.agent_run_id,
             terminal.execution_epoch,
@@ -3904,6 +3934,11 @@ impl ExecutionRuntimeService {
             .error_detail
             .as_ref()
             .map(|detail| json!({ "detail": detail }).to_string());
+        let public_runtime_failure_json = terminal
+            .failure
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         let manual_retry_allowed =
             terminal.outcome == RuntimeTerminalOutcome::Failed && terminal.manual_retry_allowed;
         let updated = transaction.execute(
@@ -3915,6 +3950,7 @@ impl ExecutionRuntimeService {
                 terminal_resolution_source = 'runtime_terminal',
                 terminal_reason_code = ?3,
                 last_error_code = ?4, last_error_details_ref = ?5,
+                public_runtime_failure_json = ?9,
                 manual_retry_allowed = ?6,
                 ended_at = ?7, version = version + 1, updated_at = ?7
             WHERE id = ?1 AND status IN ('running', 'waiting')
@@ -3929,6 +3965,7 @@ impl ExecutionRuntimeService {
                 i64::from(manual_retry_allowed),
                 target.now,
                 terminal.execution_epoch,
+                public_runtime_failure_json,
             ],
         )?;
         if updated != 1 {
@@ -3948,6 +3985,7 @@ impl ExecutionRuntimeService {
             &json!({
                 "errorCode": terminal.error_code,
                 "errorDetail": terminal.error_detail,
+                "failure": terminal.failure,
                 "manualRetryAllowed": manual_retry_allowed,
                 "terminalResolutionSource": "runtime_terminal",
                 "terminalReasonCode": terminal_reason_code,
@@ -4493,6 +4531,32 @@ fn is_runtime_adapter(actor: &ActorRef) -> bool {
         actor,
         ActorRef::System { component_id } if component_id.starts_with("runtime-adapter:")
     )
+}
+
+fn validate_public_runtime_failure(
+    error_code: &str,
+    failure: Option<&RuntimeFailureView>,
+) -> Result<()> {
+    let Some(failure) = failure else {
+        return Ok(());
+    };
+    failure.validate()?;
+    if failure.code != error_code {
+        anyhow::bail!("public Runtime failure code must match AgentRun errorCode");
+    }
+    Ok(())
+}
+
+fn planned_shutdown_abortive_terminal_facts(
+    outcome: RuntimeTerminalOutcome,
+) -> Result<(&'static str, &'static str)> {
+    match outcome {
+        RuntimeTerminalOutcome::Failed => Ok(("failed", "planned_shutdown_failed")),
+        RuntimeTerminalOutcome::Cancelled => Ok(("cancelled", "planned_shutdown_cancelled")),
+        RuntimeTerminalOutcome::Succeeded => {
+            anyhow::bail!("planned shutdown abortive settlement cannot record success")
+        }
+    }
 }
 
 pub(crate) fn recompute_camp_turn(
@@ -5215,7 +5279,6 @@ mod tests {
     use crate::{
         agent_profile::{
             AdapterKind, AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
-            configure_test_runtime,
         },
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
@@ -5279,7 +5342,7 @@ mod tests {
     ) -> AgentRunExecution {
         AgentRunExecution {
             agent_run_id: "run-resume".to_string(),
-            camp_id: "camp-resume".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             camp_turn_id: "turn-resume".to_string(),
             conversation_id: "conversation-resume".to_string(),
             conversation_version: 1,
@@ -5384,10 +5447,7 @@ mod tests {
 
     #[test]
     fn controlled_resume_is_persistently_fenced_after_a_crash_or_failure() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-resume-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent_1"]);
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let now = chrono::Utc::now().to_rfc3339();
         database
             .connection()
@@ -5588,11 +5648,7 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn manual_native_session_restart_keeps_conversation_identity_and_generation() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-restart-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&directory).unwrap();
-        let mut database = Database::open(&directory).unwrap();
-        configure_test_runtime(&database, &["agent_1"]);
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let now = chrono::Utc::now().to_rfc3339();
         database
             .connection()
@@ -5717,13 +5773,9 @@ mod tests {
     fn claimed_run_for_planned_shutdown(
         completion_role: &str,
     ) -> (PathBuf, Database, String, String, String, i64) {
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-planned-shutdown-settlement-{}",
-            Uuid::new_v4()
-        ));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -5754,7 +5806,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -5950,6 +6001,7 @@ mod tests {
                     execution_epoch,
                     error_code: "runtime_launch_failed".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                     ending_git_observation: None,
                 },
@@ -6177,8 +6229,33 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    #[test]
+    fn planned_shutdown_abortive_terminal_outcomes_are_wait_reason_independent() {
+        for wait_reason in ["approval", "action_execution", "runtime_delivery"] {
+            for (outcome, expected) in [
+                (
+                    RuntimeTerminalOutcome::Failed,
+                    ("failed", "planned_shutdown_failed"),
+                ),
+                (
+                    RuntimeTerminalOutcome::Cancelled,
+                    ("cancelled", "planned_shutdown_cancelled"),
+                ),
+            ] {
+                assert_eq!(
+                    planned_shutdown_abortive_terminal_facts(outcome).unwrap(),
+                    expected,
+                    "wait reason {wait_reason} must not change terminal facts"
+                );
+            }
+        }
+        assert!(
+            planned_shutdown_abortive_terminal_facts(RuntimeTerminalOutcome::Succeeded).is_err()
+        );
+    }
+
     #[cfg(feature = "slow-tests")]
-    async fn planned_shutdown_abortive_terminal_settles_live_waiting_runs() {
+    async fn planned_shutdown_failed_clears_live_waiting_state() {
         struct WaitingTerminalState {
             run_status: String,
             wait_reason: Option<String>,
@@ -6193,11 +6270,8 @@ mod tests {
             turn_cancel_requested_at: Option<String>,
         }
 
-        for wait_reason in ["approval", "action_execution", "runtime_delivery"] {
-            for outcome in [
-                RuntimeTerminalOutcome::Failed,
-                RuntimeTerminalOutcome::Cancelled,
-            ] {
+        for wait_reason in ["approval"] {
+            for outcome in [RuntimeTerminalOutcome::Failed] {
                 let (
                     directory,
                     mut database,
@@ -6208,16 +6282,8 @@ mod tests {
                 ) = claimed_run_for_planned_shutdown("required");
                 mark_claimed_run_waiting(&database, &agent_run_id, wait_reason);
                 let permit = planned_terminal_permit(&agent_run_id, execution_epoch, outcome).await;
-                let expected_run_status = match outcome {
-                    RuntimeTerminalOutcome::Failed => "failed",
-                    RuntimeTerminalOutcome::Cancelled => "cancelled",
-                    RuntimeTerminalOutcome::Succeeded => unreachable!(),
-                };
-                let expected_terminal_reason = match outcome {
-                    RuntimeTerminalOutcome::Failed => "planned_shutdown_failed",
-                    RuntimeTerminalOutcome::Cancelled => "planned_shutdown_cancelled",
-                    RuntimeTerminalOutcome::Succeeded => unreachable!(),
-                };
+                let (expected_run_status, expected_terminal_reason) =
+                    planned_shutdown_abortive_terminal_facts(outcome).unwrap();
                 let settlement = ExecutionRuntimeService::default()
                     .settle_planned_shutdown_abortive_terminal(
                         &mut database,
@@ -6230,6 +6296,7 @@ mod tests {
                             error_detail: Some(format!(
                                 "Runtime returned {expected_run_status} while waiting for {wait_reason}"
                             )),
+                            failure: None,
                             manual_retry_allowed: false,
                         },
                     )
@@ -6322,6 +6389,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Cancelled,
                     error_code: "runtime_cancelled".to_string(),
                     error_detail: Some("Runtime confirmed cancellation".to_string()),
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6392,6 +6460,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Cancelled,
                     error_code: "runtime_cancelled".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6435,6 +6504,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6479,6 +6549,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
                     error_detail: Some("Provider returned a terminal failure".to_string()),
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6607,6 +6678,7 @@ mod tests {
                         execution_epoch,
                         error_code: "provider_terminal_failure".to_string(),
                         error_detail: None,
+                        failure: None,
                         manual_retry_allowed: false,
                         ending_git_observation: None,
                     },
@@ -6639,6 +6711,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6782,10 +6855,9 @@ mod tests {
 
     #[test]
     fn scheduler_serializes_one_conversation_and_increments_recovery_epoch() {
-        let directory = std::env::temp_dir().join(format!("rovai-runtime-test-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -6816,7 +6888,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let mut run_ids = Vec::new();
         for index in 0..2 {
             let turn = collaboration
@@ -7076,11 +7147,9 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn scheduler_can_reject_a_queued_run_without_starting_it_or_removing_its_message() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-dispatch-reject-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7111,7 +7180,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7139,6 +7207,15 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        let public_failure = crate::runtime_failure::RuntimeFailureView::new(
+            AdapterKind::ClaudeCodeCli,
+            crate::runtime_failure::RuntimeFailureOrigin::Environment,
+            crate::runtime_failure::RuntimeFailurePhase::Execution,
+            "workspace_unavailable",
+            "Claude Code 的执行目录不可用",
+            Some("请选择一个可访问的项目目录".to_string()),
+            true,
+        );
         let runtime = ExecutionRuntimeService::default();
         let rejected = runtime
             .reject_agent_run_dispatch(
@@ -7151,6 +7228,7 @@ mod tests {
                         expected_version: 1,
                         error_code: "workspace_unavailable".to_string(),
                         error_detail: Some("workspace safety check failed".to_string()),
+                        failure: Some(public_failure.clone()),
                         manual_retry_allowed: true,
                     },
                 ),
@@ -7185,6 +7263,15 @@ mod tests {
         assert!(state.2.is_none());
         assert!(state.3.is_none());
         assert_eq!(state.4, "workspace_unavailable");
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let run = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .unwrap();
+        assert_eq!(run.failure.as_ref(), Some(&public_failure));
         let message_count: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
@@ -7196,11 +7283,9 @@ mod tests {
 
     #[test]
     fn scheduler_rebinds_one_compatible_runtime_drift_and_preserves_initial_audit() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-rebind-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7231,7 +7316,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7400,11 +7484,9 @@ mod tests {
 
     #[test]
     fn persisted_deadline_exhausts_after_reopen_and_fences_dispatch_recovery_and_replay() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-budget-restart-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7435,7 +7517,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7611,11 +7692,9 @@ mod tests {
 
     #[test]
     fn camp_turn_cancellation_is_persisted_and_finalized_from_authoritative_state() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-cancel-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7646,7 +7725,6 @@ mod tests {
                 ),
             )
             .unwrap();
-        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7803,11 +7881,9 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn away_members_keep_responsibility_but_wait_for_presence_before_dispatch() {
-        let directory =
-            std::env::temp_dir().join(format!("rovai-runtime-fanout-{}", Uuid::new_v4()));
+        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
-        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7840,7 +7916,6 @@ mod tests {
                 )
                 .unwrap();
         }
-        configure_test_runtime(&database, &["agent_2", "agent_1"]);
         let queued = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -8078,8 +8153,8 @@ mod tests {
             super::manual_native_session_restart_keeps_conversation_identity_and_generation();
         }
         #[tokio::test]
-        async fn planned_shutdown_abortive_terminal_settles_live_waiting_runs() {
-            super::planned_shutdown_abortive_terminal_settles_live_waiting_runs().await;
+        async fn planned_shutdown_failed_clears_live_waiting_state() {
+            super::planned_shutdown_failed_clears_live_waiting_state().await;
         }
         #[tokio::test]
         async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {

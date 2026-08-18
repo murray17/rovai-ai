@@ -125,6 +125,13 @@ initialize/session check without sending a model prompt, then presents the resul
 failure. Startup and rescan may run bounded identity commands, while page entry and selection changes never
 start deep checks.
 
+Claude Code and Antigravity explicit-check failures keep the existing machine-state badge and add the safe
+public Runtime failure in the same row. The title names the Runtime and follows Core's origin: Runtime returned
+an error, incompatible with the current Rovai version, local environment unavailable, Rovai internal error, or
+unable to complete. Show the safe summary and optional detail with wrapping; never expose raw stderr, private
+logs or a digest. Only `origin=rovai` may use the user-facing phrase “Rovai 内部错误”. Startup shallow version
+failures without a public failure keep the existing state copy and last-known-good behavior.
+
 The Runtime settings list may append a separately typed presentation-only preview row after supported
 products. A preview must say `待支持` and `尚未接入 AgentRun`, expose no health/configuration action and
 remain absent from member selection, diagnostics and every execution surface. It is not a Product Runtime

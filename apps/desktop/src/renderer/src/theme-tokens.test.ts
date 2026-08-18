@@ -210,21 +210,23 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
-  it('lets the Members and Memory workspaces own the window top edge', () => {
+  it('gives Members and Memory the same full-width 50px window drag strip as other pages', () => {
     expect(css).toContain(`.content.compose-content,
 .content.settings-content,
 .content.members-content,
 .content.memory-content { grid-row: 1 / -1; }`)
-    expect(css).not.toContain('.window-drag-strip-members')
-    expect(css).not.toContain('.window-drag-strip-memory')
+    expect(css).toMatch(/\.window-drag-strip\s*\{[^}]*width: 100%[^}]*height: 50px[^}]*-webkit-app-region: drag/)
     expect(css).toMatch(/\.memory-library\s*\{[^}]*padding: 34px 28px 24px/)
-    expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 17px[^}]*border-bottom: 0/)
+    expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 17px[^}]*border-bottom: 0(?![^}]*-webkit-app-region: drag)/)
+    expect(css).toMatch(/\.memory-header-actions\s*\{[^}]*position: relative[^}]*z-index: 3/)
     expect(css).toMatch(/\.content\.memory-content\s*\{[^}]*border-top: 0[^}]*background: var\(--surface\)/)
     expect(css).toContain('.memory-library-header .eyebrow')
     expect(css).toContain('.memory-page-notices')
     expect(css).not.toContain('.memory-page-kicker')
     expect(css).toMatch(/\.member-detail-scroll\s*\{[^}]*padding: 30px 26px 48px/)
-    expect(css).toMatch(/\.member-detail-header\s*\{[^}]*-webkit-app-region: drag/)
+    expect(css).toMatch(/\.member-detail-header\s*\{(?![^}]*-webkit-app-region: drag)[^}]*\}/)
+    expect(css).toMatch(/\.member-sidebar-actions\s*\{[^}]*position: relative[^}]*z-index: 3[^}]*-webkit-app-region: no-drag/)
+    expect(css).toMatch(/\.member-detail-actions\s*\{[^}]*position: relative[^}]*z-index: 3/)
     expect(css).toMatch(
       /html\[data-rovai-platform="win32"\] \*,\s*html\[data-rovai-platform="win32"\] \*::before,\s*html\[data-rovai-platform="win32"\] \*::after\s*\{[^}]*-webkit-app-region: no-drag !important;/
     )
@@ -296,7 +298,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.composer-action-row\s*\{[^}]*justify-content:\s*space-between/)
     expect(css).toMatch(/\.composer-tools, \.composer-actions\s*\{[^}]*gap:\s*5px/)
     expect(css).toMatch(/\.composer-attachment-button\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/)
-    expect(css).toMatch(/\.composer-hint\s*\{[^}]*border:\s*1px solid var\(--line\)[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.composer-hint\s*\{[^}]*display:\s*inline-flex[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.composer-hint-visual\s*\{[^}]*display:\s*inline-flex[^}]*gap:\s*4px/)
+    expect(css).toMatch(/\.composer-hint kbd\s*\{[^}]*min-width:\s*20px[^}]*height:\s*18px[^}]*border:\s*1px solid var\(--line\)/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.composer-hint\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
   })
 

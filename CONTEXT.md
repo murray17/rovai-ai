@@ -42,6 +42,10 @@ _Avoid_: recent-history inference, live Gather reconstruction, partial item list
 A shared collaboration aggregate containing participants, public discussion, private Agent continuities, resources, and outcomes. Its Core-owned Activation State is `pending | active`: explicit Dialog creation becomes Active immediately and may validly contain no public messages, while one-click creation begins as a Pending Camp Draft and becomes Active only with its first accepted user message. A Camp created without a user-configured name starts as `未命名对话`; its first accepted user message generates the name only while the user has never explicitly named or renamed that Camp. The product may present an Active Camp as a conversation, but domain code must not call it a Conversation. User deletion permanently removes the Camp aggregate; Rovai-ai does not model Camp archive or trash.
 _Avoid_: Public Conversation, Task, Project, Archived Camp
 
+**Camp ID**:
+The sole Core-owned primary identity of one Camp, serialized as `rvcamp_` followed by the 26-character lowercase canonical Crockford Base32 encoding of an RFC-compatible UUIDv7. The same value is used in Camp primary and foreign keys, domain and Renderer APIs, model context, built-in tools, logs, events, and managed Camp paths; there is no internal UUID, `CampRef`, legacy alias, or identity mapping. A Camp ID is never a Native Session, Thread, Turn, Conversation, or Binding identifier and cannot be used to resume or load Runtime state.
+_Avoid_: bare UUID Camp ID, CampRef, internal Camp UUID, legacy Camp alias, Native Session locator
+
 **Camp Name**:
 The user-facing title of one Camp. Core trims outer whitespace and collapses internal whitespace runs before enforcing a maximum of 80 Unicode scalar values. Blank optional creation input becomes `未命名对话`; over-limit user input is rejected without truncation. First-message generation applies the same normalization to the accepted first user message and deterministically takes its first 80 Unicode scalar values. It is a synchronous Core rule in the message transaction and never invokes an Agent, Product Runtime, or language model.
 _Avoid_: unbounded message body, Renderer-only validation, Project name, Conversation name, model-generated title, asynchronous naming job
@@ -1015,8 +1019,8 @@ The per-checklist state produced when the frozen independent Judge replicas retu
 _Avoid_: Hard Outcome conflict, low confidence, unavailable Judge, composite variance score
 
 **Native Session**:
-A replaceable external Runtime handle currently bound to a Conversation. Rovai-ai owns only the binding reference and portable context, not the Runtime's persisted Session files, retention, deletion, or physical isolation; deleting the Camp removes the binding without proving deletion of external Runtime state.
-_Avoid_: Conversation, Session Chain, Rovai-owned Session files, Camp deletion guarantee
+A replaceable external Runtime handle currently bound to a Conversation and identified only by provider-native Session, Thread, Turn, or Binding values. Rovai-ai owns only the binding reference and portable context, not the Runtime's persisted Session files, retention, deletion, or physical isolation; deleting the Camp removes the binding without proving deletion of external Runtime state. A Camp ID cannot be passed to Runtime resume or load operations, and a provider-native identifier cannot locate a Camp.
+_Avoid_: Conversation, Session Chain, Rovai-owned Session files, Camp deletion guarantee, Camp ID resume target
 
 **Native Session Compatibility Key**:
 Adapter-derived evidence describing the Session-level semantics under which a Native Session is known reusable across a Runtime change. Path, fingerprint, or version changes require renewed probing but are not incompatibility by themselves; unknown compatibility permits one fenced Resume attempt before the binding is replaced.
@@ -1155,8 +1159,8 @@ An explicit, on-demand lookup by a running Agent within its Cross-Camp History F
 _Avoid_: global Camp history, Archived Camp search, former-membership history, Memory recall, private Conversation search
 
 **Camp History Retrieval**:
-The model-facing discovery and raw-read surface for original public CampMessages. Camp and relevance discovery return bounded Top-K anchors without pagination; stable Camp/message IDs locate evidence; only reply-tree and original-timeline collections continue with Camp sequence cursors. Attachment content remains outside the surface, and every call rederives authority from its current AgentRun rather than from an ID or cursor. `camp.read` and `camp.search` may return any currently authorized raw message at or below the ContextManifest boundary, including messages already delivered automatically; they do not filter for “unread” content, and they cannot reveal later messages above that frozen boundary.
-_Avoid_: Summary retrieval, unread-only retrieval, relevance-result traversal, attachment file access, bearer cursor, Memory recall
+The model-facing discovery and raw-read surface for original public CampMessages. Camp and relevance discovery return bounded Top-K anchors without pagination; canonical Camp IDs and stable message IDs locate evidence, while only reply-tree and original-timeline collections continue with Camp sequence cursors. Every Camp locator is the exact `rvcamp_...` Camp primary identity rather than a Runtime-native identifier, alias, or mapping. Attachment content remains outside the surface, and every call rederives authority from its current AgentRun rather than from an ID or cursor. `camp.read` and `camp.search` may return any currently authorized raw message at or below the ContextManifest boundary, including messages already delivered automatically; they do not filter for “unread” content, and they cannot reveal later messages above that frozen boundary.
+_Avoid_: Summary retrieval, unread-only retrieval, relevance-result traversal, attachment file access, bearer cursor, Memory recall, Native Session locator
 
 **Cross-Camp History Fence**:
 The immutable maximum scope of one AgentRun's Cross-Camp History Search, pairing the exact set of eligible Camp Discovery Snapshots with one global public-message boundary. Live membership, Member Presence, Camp deletion and tombstones may only narrow it; later joins, renames and messages cannot expand or rewrite it.

@@ -26,6 +26,7 @@ use crate::{
         member_mention_ids, normalize_content, render_current_plain_text,
         validate_user_authored_content,
     },
+    camp_id::CampId,
     current_user::{CURRENT_USER_ID, CurrentUserResolver},
     db::Database,
 };
@@ -164,15 +165,15 @@ impl CampAttachmentStore {
     }
 
     pub fn camp_root(&self, camp_id: &str) -> Result<PathBuf> {
-        validate_component(camp_id, "Camp")?;
-        let root = self.root.join(camp_id);
+        let camp_id = CampId::parse(camp_id)?;
+        let root = self.root.join(camp_id.as_str());
         ensure_directory(&root)?;
         restrict_discovery(&root)?;
         Ok(root)
     }
 
     pub fn load_draft(&self, database: &Database, camp_id: &str) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let draft = database
             .connection()
@@ -309,7 +310,7 @@ impl CampAttachmentStore {
         content: StructuredCampMessageContent,
         continuation_source_message_id: Option<&str>,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         if let Some(source_message_id) = continuation_source_message_id {
             validate_component(source_message_id, "Camp Message")?;
@@ -441,7 +442,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         reply_to_camp_message_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         validate_component(reply_to_camp_message_id, "Camp Message")?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
@@ -506,7 +507,7 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -540,7 +541,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         recipient: CampComposerReplyRecipient,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -607,7 +608,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         source_camp_message_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         validate_component(source_camp_message_id, "Camp Message")?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
@@ -661,7 +662,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         agent_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -732,7 +733,7 @@ impl CampAttachmentStore {
         source_path: &Path,
         requested_display_name: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         validate_draft_capacity(database, camp_id, 0)?;
@@ -820,7 +821,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         attachment_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         validate_component(attachment_id, "Prepared Attachment")?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         let path = database
@@ -871,13 +872,13 @@ impl CampAttachmentStore {
     }
 
     pub fn discard_draft(&self, database: &mut Database, camp_id: &str) -> Result<()> {
-        validate_component(camp_id, "Camp")?;
+        let parsed_camp_id = CampId::parse(camp_id)?;
         let paths = prepared_paths(database, camp_id)?;
         database.connection().execute(
             "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
             [camp_id],
         )?;
-        let camp_root = self.root.join(camp_id);
+        let camp_root = self.root.join(parsed_camp_id.as_str());
         if !paths.is_empty() && camp_root.exists() {
             allow_directory_update(&camp_root)?;
         }
@@ -987,8 +988,8 @@ impl CampAttachmentStore {
     }
 
     pub fn remove_camp(&self, camp_id: &str) -> Result<()> {
-        validate_component(camp_id, "Camp")?;
-        let root = self.root.join(camp_id);
+        let camp_id = CampId::parse(camp_id)?;
+        let root = self.root.join(camp_id.as_str());
         if !root.exists() {
             return Ok(());
         }
@@ -3120,7 +3121,7 @@ mod slow_tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-draft-revision-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-draft-revision";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         let store = CampAttachmentStore::new(&directory);
 
@@ -3206,7 +3207,7 @@ mod slow_tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-draft-reply-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-draft-reply";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         insert_test_member(&database, camp_id, "agent_2");
         insert_test_member(&database, camp_id, "agent_3");
@@ -3390,7 +3391,7 @@ mod slow_tests {
             Uuid::new_v4()
         ));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-unavailable-reply";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         insert_test_member(&database, camp_id, "agent_2");
         insert_test_message(
@@ -3442,7 +3443,7 @@ mod slow_tests {
             Uuid::new_v4()
         ));
         let database = Database::open(&directory).unwrap();
-        let camp_id = "camp-continuation-source";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         insert_test_member(&database, camp_id, "agent_1");
         insert_test_member(&database, camp_id, "agent_2");
@@ -3531,7 +3532,7 @@ mod slow_tests {
             Uuid::new_v4()
         ));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-continuation-dismiss";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         insert_test_member(&database, camp_id, "agent_1");
         insert_test_member(&database, camp_id, "agent_2");
@@ -3594,7 +3595,7 @@ mod slow_tests {
             Uuid::new_v4()
         ));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-continuation-repair";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         insert_test_member(&database, camp_id, "agent_1");
         insert_test_member(&database, camp_id, "agent_2");
@@ -3654,7 +3655,7 @@ mod slow_tests {
             Uuid::new_v4()
         ));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-continuation-blank-unavailable";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         insert_test_member(&database, camp_id, "agent_1");
         insert_test_member(&database, camp_id, "agent_2");
@@ -3724,7 +3725,7 @@ mod slow_tests {
             Uuid::new_v4()
         ));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-continuation-reply-priority";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         insert_test_member(&database, camp_id, "agent_1");
         insert_test_member(&database, camp_id, "agent_2");
@@ -3804,7 +3805,7 @@ mod slow_tests {
         let directory =
             std::env::temp_dir().join(format!("rovai-draft-user-mention-test-{}", Uuid::new_v4()));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-draft-user-mention";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         let store = CampAttachmentStore::new(&directory);
 
@@ -3848,7 +3849,7 @@ mod slow_tests {
             Uuid::new_v4()
         ));
         let mut database = Database::open(&directory).unwrap();
-        let camp_id = "camp-draft-attachment-revision";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         let store = CampAttachmentStore::new(&directory);
         let saved = store
@@ -3913,7 +3914,7 @@ mod slow_tests {
         fs::write(source.join(".env.example"), b"TOKEN=example").unwrap();
 
         let mut database = Database::open(&data_directory).unwrap();
-        let camp_id = "camp-directory-attachment";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         let store = CampAttachmentStore::new(&data_directory);
         let draft = store
@@ -3986,7 +3987,7 @@ mod slow_tests {
         symlink(&outside, source.join("linked-secret.txt")).unwrap();
 
         let mut database = Database::open(&data_directory).unwrap();
-        let camp_id = "camp-directory-symlink";
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
         insert_test_camp(&database, camp_id);
         let store = CampAttachmentStore::new(&data_directory);
         let error = store

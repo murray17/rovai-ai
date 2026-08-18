@@ -1303,7 +1303,7 @@ mod tests {
                 process_id: process_id.to_string(),
                 adapter_kind: AdapterKind::CodexCli,
                 compatibility: RuntimeCompatibilityKey {
-                    camp_id: "camp-1".to_string(),
+                    camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                     agent_id: "agent-1".to_string(),
                     runtime_compatibility_digest: "digest-1".to_string(),
                 },

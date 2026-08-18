@@ -418,6 +418,7 @@ impl DomainCommand for AcknowledgeNotificationEpisodeCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AcknowledgeVisibleNotificationSourcesCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub observed_through_change_sequence: i64,
     pub visible_message_ids: Vec<String>,
@@ -2101,11 +2102,9 @@ fn rejected(code: &str, message: &str) -> CommandHandlerResult {
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
-    use uuid::Uuid;
 
     fn test_database() -> (std::path::PathBuf, Database) {
-        let directory = std::env::temp_dir().join(format!("rovai-episode-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("Notification database should open");
+        let (database, directory) = crate::test_support::fresh_schema_database_fast();
         (directory, database)
     }
 
