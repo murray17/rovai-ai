@@ -8354,7 +8354,7 @@ impl Core {
                     }
                     if let Some(error_code) = error
                         .downcast_ref::<AntigravityDeliveredFailure>()
-                        .map(|delivered| delivered.error_code)
+                        .map(|delivered| delivered.error_code.clone())
                     {
                         return Err(error).context(error_code);
                     }

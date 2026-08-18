@@ -1073,7 +1073,7 @@ mod tests {
             "camp.list",
             "request-1",
             true,
-            &json!({"camps": [{"campId": "camp-1"}]}),
+            &json!({"camps": [{"campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"}]}),
         )
         .unwrap();
         assert_eq!(first, replay);

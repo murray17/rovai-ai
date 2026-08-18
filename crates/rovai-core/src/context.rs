@@ -6728,7 +6728,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: Some(Uuid::new_v4().to_string()),
+                    camp_id: Some(crate::camp_id::CampId::new().to_string()),
                     message_id: initial_message_id,
                     body_offset: None,
                     body_limit: None,
@@ -7623,7 +7623,7 @@ mod slow_tests {
                 "",
             )
             .replace(
-                "CHECK(formatter_version = 19)",
+                "CHECK(formatter_version = 20)",
                 "CHECK(formatter_version = 18)",
             );
         assert!(!v92_schema.contains("message_projection_audience"));
@@ -8400,7 +8400,10 @@ mod slow_tests {
                 .code,
             "camp.invalid_argument"
         );
-        for unavailable_camp_id in [late_camp_id.clone(), Uuid::new_v4().to_string()] {
+        for unavailable_camp_id in [
+            late_camp_id.clone(),
+            crate::camp_id::CampId::new().to_string(),
+        ] {
             let unavailable_search = CampHistoryService
                 .search_camp(
                     &mut fixture.database,
@@ -12141,7 +12144,7 @@ mod slow_tests {
         fn message(id: &str) -> SharedMessage {
             let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V3.max_message_body_chars);
             SharedMessage {
-                camp_id: "camp-1".to_string(),
+                camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 message_id: id.to_string(),
                 sequence: 0,
                 sender_type: "user".to_string(),
@@ -12621,7 +12624,7 @@ mod slow_tests {
         assert!(empty.is_empty());
         assert_eq!(empty.payload_json, "{\"schemaVersion\":1}");
         let shared_conversation = SharedConversation {
-            camp_id: "camp-1".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             originating_public_user_message: None,
             reference_closure: Vec::new(),
             recent_messages: Vec::new(),

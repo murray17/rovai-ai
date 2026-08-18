@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { CampMessageFindParams, CampMessageFindSnapshot, CoreMethod } from './index'
 
+const CAMP_ID = 'rvcamp_01h47kvsy5fk1shh6w1g60eecf'
+
 describe('Camp conversation find contract', () => {
   it('keeps exact traversal bounded to one selected match', () => {
     const method: CoreMethod = 'camp.messages.find'
     const params: CampMessageFindParams = {
-      campId: 'camp-1',
+      campId: CAMP_ID,
       query: 'needle',
       selectedMatchIndex: 2,
       anchorMessageId: 'message-7'
@@ -13,7 +15,7 @@ describe('Camp conversation find contract', () => {
     const snapshot: CampMessageFindSnapshot = {
       schemaVersion: 1,
       throughGlobalSequence: 42,
-      campId: 'camp-1',
+      campId: CAMP_ID,
       query: 'needle',
       totalMatchCount: 4,
       selectedMatchIndex: 2,

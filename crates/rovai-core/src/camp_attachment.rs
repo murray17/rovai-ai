@@ -302,7 +302,7 @@ impl CampAttachmentStore {
         content: StructuredCampMessageContent,
         continuation_source_message_id: Option<&str>,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         if let Some(source_message_id) = continuation_source_message_id {
             validate_component(source_message_id, "Camp Message")?;
@@ -434,7 +434,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         reply_to_camp_message_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         validate_component(reply_to_camp_message_id, "Camp Message")?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
@@ -499,7 +499,7 @@ impl CampAttachmentStore {
         camp_id: &str,
         expected_revision: i64,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -533,7 +533,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         recipient: CampComposerReplyRecipient,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -600,7 +600,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         source_camp_message_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         validate_component(source_camp_message_id, "Camp Message")?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
@@ -654,7 +654,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         agent_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         let transaction = database
             .connection_mut()
@@ -725,7 +725,7 @@ impl CampAttachmentStore {
         source_path: &Path,
         requested_display_name: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         validate_draft_capacity(database, camp_id, 0)?;
@@ -813,7 +813,7 @@ impl CampAttachmentStore {
         expected_revision: i64,
         attachment_id: &str,
     ) -> Result<CampComposerDraftView> {
-        validate_component(camp_id, "Camp")?;
+        CampId::parse(camp_id)?;
         validate_component(attachment_id, "Prepared Attachment")?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         let path = database

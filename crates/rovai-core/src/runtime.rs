@@ -5342,7 +5342,7 @@ mod tests {
     ) -> AgentRunExecution {
         AgentRunExecution {
             agent_run_id: "run-resume".to_string(),
-            camp_id: "camp-resume".to_string(),
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             camp_turn_id: "turn-resume".to_string(),
             conversation_id: "conversation-resume".to_string(),
             conversation_version: 1,
