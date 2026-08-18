@@ -1886,12 +1886,14 @@ mod tests {
         let fleet = Arc::new(AgentRuntimeFleetManager::new(Default::default()));
         let (incoming, mut receiver) = mpsc::unbounded_channel();
         let adapter = CodexCliRuntimeAdapter::new(incoming, fleet);
-        let first_builtin_tools = BuiltinToolProcessConfig::create(
-            &executable,
-            &directory.join("builtin.sock"),
-            &directory,
-        )
-        .unwrap();
+        let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+            path: directory
+                .join("builtin.sock")
+                .to_string_lossy()
+                .into_owned(),
+        };
+        let first_builtin_tools =
+            BuiltinToolProcessConfig::create(&executable, &endpoint, &directory).unwrap();
         let first = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-1",
@@ -1905,12 +1907,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let second_builtin_tools = BuiltinToolProcessConfig::create(
-            &executable,
-            &directory.join("builtin.sock"),
-            &directory,
-        )
-        .unwrap();
+        let second_builtin_tools =
+            BuiltinToolProcessConfig::create(&executable, &endpoint, &directory).unwrap();
         let second = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-2",
@@ -2002,12 +2000,8 @@ mod tests {
         .unwrap();
         let first_host = first.host_instance_id().to_string();
         adapter.complete_agent_run("run-1", 1).await;
-        let successor_builtin_tools = BuiltinToolProcessConfig::create(
-            &executable,
-            &directory.join("builtin.sock"),
-            &directory,
-        )
-        .unwrap();
+        let successor_builtin_tools =
+            BuiltinToolProcessConfig::create(&executable, &endpoint, &directory).unwrap();
         let successor = adapter
             .ensure_agent_run_runtime(CodexAgentRunRuntimeRequest {
                 agent_run_id: "run-3",

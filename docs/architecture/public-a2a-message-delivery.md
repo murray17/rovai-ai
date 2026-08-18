@@ -9,14 +9,16 @@ last_updated: 2026-08-18
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v9](../contracts/camp-message-send-v9.md)、
+分别见 [Camp Message Send v10](../contracts/camp-message-send-v10.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
 [Message Delivery v4](../contracts/message-delivery-v4.md)、
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)、
-[Camp History Retrieval v1](../contracts/camp-history-v1.md)；决策理由见
+[Camp History Retrieval v2](../contracts/camp-history-v2.md)；决策理由见
 [ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md)、
-[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)与
-[ADR-0215](../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)，显式 caller return 与 Core 管理
+[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)、
+[ADR-0215](../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)、
+[ADR-0216](../adr/0216-explicit-agent-addressing-intent-as-delivery-gate.md)与
+[ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)，显式 caller return 与 Core 管理
 reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)，成功 Run 的 zero-send safety net 见
 [ADR-0162](../adr/0162-missing-send-recovery-publication.md)。
@@ -62,8 +64,9 @@ Core 在一个提交事务中完成：
 
 1. 从 authenticated current AgentRun/Lease/Native Binding 推导唯一当前 Camp，并从 Run trigger
    自动确定 Message Reply Reference；
-2. 从 canonical `--to`、正文 canonical token 与当前 Camp 有效成员 exact display-name alias 解析 Agent
-   recipients，并独立读取 closed `mentionUser` boolean；
+2. 读取 closed `AgentAddressingMode` 和独立的 `mentionUser`；PublicOnly 先拒绝显式 `to/taskId`，并在
+   alias/member lookup 前把完整正文保留为 literal Text；Automatic 才从 canonical `--to`、正文 canonical
+   token 与当前 Camp 有效成员 exact display-name alias 解析 Agent recipients；
 3. 对所有目标执行 Camp membership、self、presence/removal、fanout、lineage 和 budget
    检查；
 4. 去重并按 canonical Agent ID UTF-8/ASCII 字节序升序冻结 Effective Recipients；
@@ -73,12 +76,17 @@ Core 在一个提交事务中完成：
    冻结 target parent/root/depth；
 7. 原子写入一个 Public A2A Message、每个 Agent 目标一个 Message Delivery，并在
    `mentionUser=true` 时写入唯一 `user_mention NotificationOccurrence(local_user, messageId)`；
-8. 记录 idempotency receipt 和 audit facts。
+8. 记录 idempotency receipt、Send mode 和 audit facts；clean-break send event v2 以
+   `agentAddressingMode` 表达 caller intent，以 `recipientFree` 表达派生结果。
 
 任何一个目标不合格、fanout 超限、self/ancestor cycle 或相同 requestId 输入冲突，都使整笔
 事务失败，不留下公共消息、Current User Mention、Notification、Delivery 或半成品审计事实。
 Runtime readiness、busy 和容量不
 属于身份解析失败；它们只在 Delivery 进入调度生命周期后成为 waitCondition。
+
+PublicOnly 与 Automatic-empty 都可能得到空数组，但前者必须保持零 MemberMention、Delivery、A2A allocation
+和 Agent wakeup，且不能从正文、结果数组或历史 event 反推模式。Principal attention 与 Agent routing 正交；
+`--to-principal` 只创建当前消息的 CurrentUserMention/Inbox effect，不创建 Delivery，也不代表批准。
 
 Display-name alias 只在上述发送事务内存在。Core 只在 logical line 的首个非空白 token 解析它；推荐的
 trailing handoff 是专门的最后一个非空行，该行仍须以 alias 开头。普通 mid-line prose 即使位于最后一行
@@ -131,13 +139,13 @@ recipient/Camp 的直接相关事件调用 `dispatchPending(agentId)`；没有�
 
 Delivery 被选中尝试后，Core 先按
 [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)完成选择与预算 gate，再由
-当前 Context Formatter 形成 Model Context Projection，并由 ContextManifest 冻结 Evidence，最后决定
+当前 Context Formatter v19 形成 Model Context Projection，并由 ContextManifest v17 冻结 Evidence，最后决定
 是否创建 AgentRun：
 
 ```text
 Delivery attempt
   → read authoritative public boundary
-  → resolve Profile v2 + reference closure
+  → resolve Profile v3 + reference closure
   → format Model Context Projection
   → freeze ContextManifest Evidence + exact payload/digest
   → if fit: materialize AgentRun and bind Delivery
@@ -155,7 +163,9 @@ Current Input 保留触发来源的权威差异。普通用户触发精确投影
 `{"source":{"type":"member_call","senderAgentId":...,"senderName":...},"message":...}`。
 Core 在 preflight 和 frozen Context materialization 时验证 CampMessage 作者、Delivery causal source、
 target parent/root/depth、recipient 与 A2A lineage 一致；不把 CampMessage ID、MessageDelivery ID 或 source
-AgentRun ID 暴露给模型。
+AgentRun ID 暴露给模型。ordinary A2A `public_a2a/dispatch/forward|return` 还在 `RUN_FACTS` 后、
+`CURRENT_INPUT` 前获得 closed exact `[A2A_GUIDANCE]`；direct、Gather Completion 与 captured return 不注入。
+Manifest 冻结 inclusion/variant/payload digest，恢复只复用并校验原始 bytes。
 
 ContextManifest 只证明冻结的 Model Context Projection 及其 source/selection Evidence。随后独立的
 Runtime Input Delivery 才把 Manifest 绑定到 AgentRun execution epoch 与 Native Binding generation；
@@ -209,7 +219,9 @@ Execution Drawer 只能读取并选择 Run 详情；它不拥有取消命令。C
 Agent routing 与 User attention 不能相互推导。exact `camp.read item` 分别投影冻结的
 `effectiveAgentRecipients` 与从 Structured Content 派生的 `mentionsCurrentUser`；notification clear、
 retention 或 source unavailable 不改变后者。Renderer 展示名称只是当前 presentation，不能改写
-`local_user` segment、消息 digest 或 Runtime 已冻结的 Context bytes。
+`local_user` segment、消息 digest 或 Runtime 已冻结的 Context bytes。同一 Structured CurrentUserMention 在
+Human body/FTS/UI 显示 `@你`，在 Agent Context、Camp History 与 Gather v3 输入显示 `@Principal`；Agent
+snippet、Unicode-scalar offset 和 projected digest 均在 `agent_v1` 空间计算，禁止字符串替换 Human cache。
 
 `camp.read item` 对当前 Run 自己已提交的 accepted send 具有一条 command-result-bound 的窄
 receipt verification 例外；它不改变 ContextManifest 历史边界，也不扩展 collection read。Renderer

@@ -43,8 +43,8 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v0.99";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 47;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.07";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 48;
 const V092_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.98";
 const V092_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 46;
 const V091_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.96";
@@ -109,6 +109,7 @@ struct CurrentMigrationState {
     v90: bool,
     v91: bool,
     v92: bool,
+    v93: bool,
 }
 
 impl CurrentMigrationState {
@@ -137,7 +138,11 @@ impl CurrentMigrationState {
                 && self.v89
                 && self.v90
                 && self.v91
-                && self.v92;
+                && self.v92
+                && self.v93;
+        }
+        if self.v93 {
+            return false;
         }
         if contract == V092_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
             && schema == V092_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
@@ -457,7 +462,7 @@ impl CurrentMigrationState {
     }
 }
 
-const V043_RESET_FILES: &[&str] = &[
+const V107_QUARANTINE_FILES: &[&str] = &[
     "rovai.sqlite",
     "rovai.sqlite-wal",
     "rovai.sqlite-shm",
@@ -466,7 +471,7 @@ const V043_RESET_FILES: &[&str] = &[
     "lumen.sqlite-shm",
 ];
 
-const V043_RESET_DIRECTORIES: &[&str] = &[
+const V107_QUARANTINE_DIRECTORIES: &[&str] = &[
     "managed-blobs",
     "camp-attachments",
     "codex-homes",
@@ -514,7 +519,9 @@ fn has_current_data_contract(path: &Path) -> bool {
     matches!(
         (marker, projection_exists, migration_state),
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
-            if classifier == V043_CLASSIFIER_VERSION
+            if contract == CURRENT_DATA_CONTRACT_VERSION
+                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+                && classifier == V043_CLASSIFIER_VERSION
                 && migrations.admits(&contract, schema)
     )
 }
@@ -546,7 +553,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 89),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 90),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 91),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 92)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 92),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 93)
         "#,
         [],
         |row| {
@@ -574,86 +582,60 @@ fn load_current_migration_state(
                 v90: row.get(20)?,
                 v91: row.get(21)?,
                 v92: row.get(22)?,
+                v93: row.get(23)?,
             })
         },
     )
 }
 
-fn remove_v043_owned_state(data_dir: &Path) -> Result<()> {
-    for relative in V043_RESET_FILES {
-        let path = data_dir.join(relative);
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_symlink() || metadata.is_file() => {
-                fs::remove_file(&path)
-                    .with_context(|| format!("failed to remove reset target {}", path.display()))?;
-            }
-            Ok(_) => anyhow::bail!(
-                "refusing to remove non-file reset target {}",
-                path.display()
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).with_context(|| path.display().to_string()),
+fn quarantine_v107_owned_state(data_dir: &Path) -> Result<PathBuf> {
+    let quarantine_root = data_dir.join("inactive-data-quarantine").join(format!(
+        "v1.07-{}-{}",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ"),
+        Uuid::new_v4()
+    ));
+    for (relative, expects_directory) in V107_QUARANTINE_FILES
+        .iter()
+        .map(|path| (*path, false))
+        .chain(V107_QUARANTINE_DIRECTORIES.iter().map(|path| (*path, true)))
+    {
+        let source = data_dir.join(relative);
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error).with_context(|| source.display().to_string()),
+        };
+        let is_symlink = metadata.file_type().is_symlink();
+        if !is_symlink
+            && ((expects_directory && !metadata.is_dir())
+                || (!expects_directory && !metadata.is_file()))
+        {
+            anyhow::bail!(
+                "refusing to quarantine unexpected managed target {}",
+                source.display()
+            );
         }
-    }
-    for relative in V043_RESET_DIRECTORIES {
-        let path = data_dir.join(relative);
-        match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                fs::remove_file(&path)
-                    .with_context(|| format!("failed to remove reset link {}", path.display()))?;
-            }
-            Ok(metadata) if metadata.is_dir() => {
-                remove_owned_directory_tree(&path)?;
-            }
-            Ok(_) => anyhow::bail!(
-                "refusing to remove non-directory reset target {}",
-                path.display()
-            ),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).with_context(|| path.display().to_string()),
-        }
-    }
-    Ok(())
-}
-
-fn remove_owned_directory_tree(path: &Path) -> Result<()> {
-    let metadata = fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect reset directory {}", path.display()))?;
-    if metadata.file_type().is_symlink() {
-        fs::remove_file(path)
-            .with_context(|| format!("failed to remove reset link {}", path.display()))?;
-        return Ok(());
-    }
-    if !metadata.is_dir() {
-        anyhow::bail!(
-            "refusing to traverse non-directory reset target {}",
-            path.display()
+        let destination = quarantine_root.join(relative);
+        let parent = destination
+            .parent()
+            .context("quarantine target has no parent")?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create quarantine directory {}", parent.display())
+        })?;
+        eprintln!(
+            "quarantining incompatible managed local data: {} -> {}",
+            source.display(),
+            destination.display()
         );
+        fs::rename(&source, &destination).with_context(|| {
+            format!(
+                "failed to quarantine managed target {} at {}",
+                source.display(),
+                destination.display()
+            )
+        })?;
     }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-            .with_context(|| format!("failed to unlock reset directory {}", path.display()))?;
-    }
-    for entry in fs::read_dir(path)
-        .with_context(|| format!("failed to read reset directory {}", path.display()))?
-    {
-        let child = entry
-            .with_context(|| format!("failed to enumerate reset directory {}", path.display()))?
-            .path();
-        let child_metadata = fs::symlink_metadata(&child)
-            .with_context(|| format!("failed to inspect reset target {}", child.display()))?;
-        if child_metadata.is_dir() && !child_metadata.file_type().is_symlink() {
-            remove_owned_directory_tree(&child)?;
-        } else {
-            fs::remove_file(&child)
-                .with_context(|| format!("failed to remove reset target {}", child.display()))?;
-        }
-    }
-    fs::remove_dir(path)
-        .with_context(|| format!("failed to remove reset directory {}", path.display()))?;
-    Ok(())
+    Ok(quarantine_root)
 }
 
 fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
@@ -970,7 +952,11 @@ impl Database {
             } else {
                 "missing_or_incompatible_current_data_contract"
             };
-            remove_v043_owned_state(data_dir)?;
+            let quarantine_root = quarantine_v107_owned_state(data_dir)?;
+            eprintln!(
+                "incompatible managed local data is inactive at {}",
+                quarantine_root.display()
+            );
             Some(reason)
         } else {
             None
@@ -1695,6 +1681,9 @@ impl Database {
             if !self.schema_migration_applied(92)? {
                 self.migrate_minimal_runtime_usage_v92()?;
             }
+            if !self.schema_migration_applied(93)? {
+                self.migrate_a2a_public_only_v93()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2020,6 +2009,9 @@ impl Database {
         }
         if !self.schema_migration_applied(92)? {
             self.migrate_minimal_runtime_usage_v92()?;
+        }
+        if !self.schema_migration_applied(93)? {
+            self.migrate_a2a_public_only_v93()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -11016,6 +11008,146 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_a2a_public_only_v93(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let create_context_manifest_v93 = create_context_manifest
+                .replacen(
+                    "CREATE TABLE context_manifest",
+                    "CREATE TABLE context_manifest_v93",
+                    1,
+                )
+                .replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v93",
+                    1,
+                )
+                .replacen(
+                    "current_input_skill_resolution_digest TEXT NOT NULL,",
+                    "current_input_skill_resolution_digest TEXT NOT NULL,\n                    message_projection_audience TEXT NOT NULL CHECK(message_projection_audience = 'agent_v1'),\n                    a2a_guidance_evidence_json TEXT NOT NULL,\n                    a2a_guidance_evidence_digest TEXT NOT NULL,",
+                    1,
+                )
+                .replacen(
+                    "CHECK(formatter_version = 18)",
+                    "CHECK(formatter_version = 19)",
+                    1,
+                );
+            if create_context_manifest_v93 == create_context_manifest
+                || !create_context_manifest_v93.contains("CREATE TABLE context_manifest_v93")
+                || !create_context_manifest_v93
+                    .contains("message_projection_audience TEXT NOT NULL")
+                || !create_context_manifest_v93.contains("a2a_guidance_evidence_json TEXT NOT NULL")
+                || !create_context_manifest_v93.contains("CHECK(formatter_version = 19)")
+            {
+                anyhow::bail!("v93 could not rebuild the ContextManifest v17 schema");
+            }
+
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    context_manifest_id = NULL,
+                    failure_code = 'context_formatter_v19_required',
+                    failure_detail_json = '{"reason":"a2a_guidance_clean_break"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0
+                        THEN 'interrupted_before_dispatch'
+                        ELSE 'failed'
+                    END,
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    context_manifest_id = NULL,
+                    failure_code = 'context_formatter_v19_required',
+                    failure_detail_json = '{"reason":"a2a_guidance_clean_break"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                   OR context_manifest_id IS NOT NULL
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_formatter_v19_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DELETE FROM runtime_input_delivery;
+                DELETE FROM context_manifest_history_camp;
+                DELETE FROM context_manifest;
+
+                ALTER TABLE camp_message ADD COLUMN
+                    agent_addressing_mode TEXT
+                    CHECK(agent_addressing_mode IN ('automatic', 'public_only'));
+                "#,
+            )?;
+            transaction.execute_batch(&create_context_manifest_v93)?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v93 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.07', projection_schema_version = 48,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (93, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v93 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -15498,6 +15630,7 @@ mod tests {
             v90: version >= 90,
             v91: version >= 91,
             v92: version >= 92,
+            v93: version >= 93,
         }
     }
 
@@ -15508,7 +15641,7 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
-                92,
+                93,
             ),
             (
                 "v0.98/schema-46",
@@ -15632,7 +15765,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(92);
+        let current = migration_state_through(93);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -15702,7 +15835,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(92));
+        assert_eq!(state, migration_state_through(93));
         assert!(state.admits(&contract, schema));
         assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
 
@@ -15886,11 +16019,15 @@ mod tests {
                 1,
             )
             .replace(
+                "message_projection_audience TEXT NOT NULL CHECK(message_projection_audience = 'agent_v1'),\n                    a2a_guidance_evidence_json TEXT NOT NULL,\n                    a2a_guidance_evidence_digest TEXT NOT NULL,\n                    ",
+                "",
+            )
+            .replace(
                 "current_input_skill_resolution_json TEXT NOT NULL,\n                    current_input_skill_resolution_digest TEXT NOT NULL,\n                    ",
                 "",
             )
             .replace(
-                "CHECK(formatter_version = 18)",
+                "CHECK(formatter_version = 19)",
                 "CHECK(formatter_version = 17)",
             );
         assert!(!v90_schema.contains("current_input_skill_resolution"));
@@ -15910,9 +16047,11 @@ mod tests {
                     ON context_manifest(bootstrap_evidence_id);
                 ALTER TABLE agent_run DROP COLUMN skill_selection_snapshot_digest;
                 ALTER TABLE agent_run DROP COLUMN skill_selection_snapshot_json;
+                ALTER TABLE camp_message DROP COLUMN agent_addressing_mode;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 93;
                 DELETE FROM schema_migration WHERE version = 92;
                 DELETE FROM schema_migration WHERE version = 91;
                 PRAGMA foreign_keys = ON;
@@ -15936,7 +16075,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 18"));
+        assert!(manifest_schema.contains("formatter_version = 19"));
         let contract: (String, i64, i64) = reopened
             .connection()
             .query_row(
@@ -15949,7 +16088,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.99".to_string(), 47, 1));
+        assert_eq!(contract, ("v1.07".to_string(), 48, 1));
         assert_eq!(
             reopened
                 .connection()
@@ -16420,7 +16559,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 18"));
+        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
+        assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
+        assert!(manifest_schema.contains("a2a_guidance_evidence_digest TEXT NOT NULL"));
         drop(database);
 
         let reopened = Database::open(&directory).expect("v79 database should reopen");
@@ -16592,7 +16734,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn v047_reset_removes_execute_only_owned_directories_without_following_links() {
+    fn v107_quarantine_moves_owned_directories_without_following_links() {
         use std::os::unix::fs::{PermissionsExt, symlink};
 
         let fixture =
@@ -16607,10 +16749,15 @@ mod tests {
         symlink(&outside, protected.join("outside-link")).unwrap();
         fs::set_permissions(&protected, fs::Permissions::from_mode(0o100)).unwrap();
 
-        remove_v043_owned_state(&data_dir).expect("managed reset should unlock its owned tree");
+        let quarantine = quarantine_v107_owned_state(&data_dir)
+            .expect("managed state should move into inactive quarantine");
 
         assert!(!data_dir.join("camp-attachments").exists());
+        let quarantined = quarantine.join("camp-attachments").join("protected-camp");
+        assert!(quarantined.join("attachment.bin").exists());
+        assert!(quarantined.join("outside-link").symlink_metadata().is_ok());
         assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"preserve");
+        fs::set_permissions(&quarantined, fs::Permissions::from_mode(0o700)).unwrap();
         fs::remove_dir_all(fixture).unwrap();
     }
 
@@ -20249,7 +20396,10 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 18"));
+        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
+        assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
+        assert!(manifest_schema.contains("a2a_guidance_evidence_digest TEXT NOT NULL"));
         assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
         let delivery_schema: String = connection

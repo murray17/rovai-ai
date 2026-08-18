@@ -1,17 +1,16 @@
 ---
 document_type: protocol-contract
 contract: context-manifest-evidence-v17
-authority: proposed-agent-run-context-evidence
-status: proposed
+authority: agent-run-context-evidence
+status: accepted
 version: 17
 last_updated: 2026-08-18
 ---
 
-# ContextManifest Evidence v17 Contract (Proposal)
+# ContextManifest Evidence v17 Contract
 
-Model-context revision 1 is confirmed. This proposal would replace
-[ContextManifest Evidence v16](context-manifest-evidence-v16.md) only after its own acceptance and implementation; v16
-remains the accepted current entry. v17 requires AgentRun Context Formatter 19
+Model-context revision 1 is confirmed. This contract replaces
+[ContextManifest Evidence v16](context-manifest-evidence-v16.md) as the current entry. v17 requires AgentRun Context Formatter 19
 and preserves Bootstrap v3 / Bootstrap Formatter 3, Context Delivery Profile v3, Collaboration State v2,
 Self Active Tasks, Run Facts v1, Current Input Skill Links v1, source/budget selection,
 exact rendered payload and Runtime Input Delivery ACK authority except for the changes below.
@@ -163,4 +162,4 @@ separate phase and ADR.
 - [ContextManifest Evidence v16 (accepted predecessor)](context-manifest-evidence-v16.md)
 - [ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)
 - [Run Facts v1](run-facts-v1.md)
-- [Gather v3 proposal](gather-v3.md)
+- [Gather v3](gather-v3.md)

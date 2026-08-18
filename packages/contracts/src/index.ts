@@ -1194,12 +1194,15 @@ export interface ContextManifestView {
   skillExposureDigest: string
   currentInputSkillResolution: CurrentInputSkillResolution
   currentInputSkillResolutionDigest: string
+  messageProjectionAudience: 'agent_v1'
+  a2aGuidanceEvidence: unknown
+  a2aGuidanceEvidenceDigest: string
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 18
+  formatterVersion: 19
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

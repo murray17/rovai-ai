@@ -5,12 +5,16 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    camp_content::{
+        AGENT_MESSAGE_PROJECTION_AUDIENCE, StructuredCampMessageContent, normalize_content,
+        render_agent_plain_text,
+    },
     collaboration::append_domain_event,
     command::{ActorRef, canonical_json_digest},
 };
 
 pub const GATHER_TOOL_NAME: &str = "team.gather";
-pub const GATHER_COMPLETION_INPUT_SCHEMA_VERSION: i64 = 2;
+pub const GATHER_COMPLETION_INPUT_SCHEMA_VERSION: i64 = 3;
 pub const GATHER_COMPLETION_INPUT_MAX_BYTES: usize = 512 * 1024;
 pub const GATHER_COMPLETION_CONTEXT_MAX_BYTES: usize = 640 * 1024;
 pub const GATHER_CAPTURED_MESSAGES_MAX_PER_ITEM_GENERATION: i64 = 16;
@@ -839,7 +843,8 @@ fn run_barrier(
             SELECT gather.camp_id, gather.camp_turn_id, gather.request_message_id,
                    initiator_agent_id, initiator_agent_run_id,
                    initiator_conversation_id, command_id, gather.status,
-                   request.body, request.content_digest
+                   request.body, request.structured_content_json,
+                   request.content_digest
             FROM gather_record AS gather
             JOIN camp_message AS request
               ON request.id = gather.request_message_id
@@ -858,7 +863,8 @@ fn run_barrier(
                     command_id: row.get(6)?,
                     status: row.get(7)?,
                     request_body: row.get(8)?,
-                    request_content_digest: row.get(9)?,
+                    request_structured_content_json: row.get(9)?,
+                    request_content_digest: row.get(10)?,
                 })
             },
         )
@@ -1059,6 +1065,12 @@ fn build_completion_input(
     gather: &BarrierGather,
     camp_boundary: i64,
 ) -> Result<Value> {
+    let request_body = project_agent_message(
+        transaction,
+        &gather.request_body,
+        gather.request_structured_content_json.as_deref(),
+    )?;
+    let request_projected_body_digest = text_digest(&request_body);
     let items = {
         let mut statement = transaction.prepare(
             r#"
@@ -1142,14 +1154,16 @@ fn build_completion_input(
     }
     Ok(json!({
         "schemaVersion": GATHER_COMPLETION_INPUT_SCHEMA_VERSION,
+        "messageProjectionAudience": AGENT_MESSAGE_PROJECTION_AUDIENCE,
         "source": { "type": "gather_completed" },
         "gatherId": gather_id,
         "commandId": gather.command_id,
         "requestMessageId": gather.request_message_id,
         "request": {
             "messageId": gather.request_message_id,
-            "body": gather.request_body,
+            "body": request_body,
             "contentDigest": gather.request_content_digest,
+            "projectedBodyDigest": request_projected_body_digest,
         },
         "items": projected_items,
     }))
@@ -1171,7 +1185,8 @@ fn load_current_captured_message(
             r#"
             SELECT message.id, captured.source_agent_run_id,
                    source_run.trigger_delivery_generation,
-                   message.sequence, message.content_digest, message.body
+                   message.sequence, message.content_digest, message.body,
+                   message.structured_content_json
             FROM message_delivery AS captured
             JOIN camp_message AS message ON message.id = captured.message_id
             JOIN agent_run AS source_run ON source_run.id = captured.source_agent_run_id
@@ -1204,12 +1219,13 @@ fn load_current_captured_message(
                         row.get::<_, i64>(3)?,
                         row.get::<_, String>(4)?,
                         row.get::<_, String>(5)?,
+                        row.get::<_, Option<String>>(6)?,
                     ))
                 },
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    Ok(messages
+    messages
         .into_iter()
         .map(
             |(
@@ -1219,21 +1235,28 @@ fn load_current_captured_message(
                 sequence,
                 content_digest,
                 body,
+                structured_content_json,
             )| {
-                let excerpt = bounded_snapshot::<GATHER_CAPTURED_BODY_EXCERPT_MAX_BYTES>(&body);
-                json!({
+                let projected_body =
+                    project_agent_message(transaction, &body, structured_content_json.as_deref())?;
+                let projected_body_digest = text_digest(&projected_body);
+                let excerpt =
+                    bounded_snapshot::<GATHER_CAPTURED_BODY_EXCERPT_MAX_BYTES>(&projected_body);
+                Ok(json!({
                     "messageId": message_id,
                     "sourceAgentRunId": source_agent_run_id,
                     "retryGeneration": retry_generation,
                     "sequence": sequence,
                     "contentDigest": content_digest,
+                    "bodyProjectionAudience": AGENT_MESSAGE_PROJECTION_AUDIENCE,
+                    "projectedBodyDigest": projected_body_digest,
                     "bodyExcerpt": excerpt.body,
                     "bodyOriginalBytes": excerpt.original_bytes,
                     "bodyTruncated": excerpt.truncated,
-                })
+                }))
             },
         )
-        .collect())
+        .collect::<Result<Vec<_>>>()
 }
 
 #[derive(Debug)]
@@ -1247,7 +1270,27 @@ struct BarrierGather {
     command_id: String,
     status: String,
     request_body: String,
+    request_structured_content_json: Option<String>,
     request_content_digest: String,
+}
+
+fn project_agent_message(
+    transaction: &Transaction<'_>,
+    stored_body: &str,
+    structured_content_json: Option<&str>,
+) -> Result<String> {
+    let Some(structured_content_json) = structured_content_json else {
+        return Ok(stored_body.to_string());
+    };
+    let content = normalize_content(
+        serde_json::from_str::<StructuredCampMessageContent>(structured_content_json)
+            .context("Gather CampMessage Structured Content is invalid")?,
+    );
+    render_agent_plain_text(transaction, &content)
+}
+
+fn text_digest(value: &str) -> String {
+    format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
 }
 
 #[derive(Debug)]

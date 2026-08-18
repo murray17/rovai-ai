@@ -1,17 +1,16 @@
 ---
 document_type: protocol-contract
 contract: camp-message-send-v10
-authority: proposed-camp-public-a2a-send
-status: proposed
+authority: camp-public-a2a-send
+status: accepted
 version: 10
 last_updated: 2026-08-18
 ---
 
-# Camp Message Send v10 Contract (Proposal)
+# Camp Message Send v10 Contract
 
-Model-context revision 1 is confirmed. This proposal would replace
-[Camp Message Send v9](camp-message-send-v9.md) only after its own acceptance and implementation; v9 remains the
-accepted current entry. v10 preserves v9's Camp identity, public message, Current User
+Model-context revision 1 is confirmed. This contract replaces
+[Camp Message Send v9](camp-message-send-v9.md) as the current entry. v10 preserves v9's Camp identity, public message, Current User
 Attention, canonical recipient parser, Task/reply admission, forward/return lineage, Gather capture, fanout, execution
 budget, atomicity, idempotency and dispatch semantics except where this document explicitly changes Send addressing.
 
@@ -223,4 +222,4 @@ alias. This phase does not suppress return-continuation recovery.
 - [ADR-0216](../adr/0216-explicit-agent-addressing-intent-as-delivery-gate.md)
 - [Camp Message Send v9 (accepted predecessor)](camp-message-send-v9.md)
 - [Missing-Send Recovery Publication v1](missing-send-recovery-publication-v1.md)
-- [Built-in Tool Transport v15 proposal](builtin-tool-transport-v15.md)
+- [Built-in Tool Transport v15](builtin-tool-transport-v15.md)

@@ -1,17 +1,16 @@
 ---
 document_type: protocol-contract
 contract: camp-history-v2
-authority: proposed-agent-camp-history-retrieval
-status: proposed
+authority: agent-camp-history-retrieval
+status: accepted
 version: 2
 last_updated: 2026-08-18
 ---
 
-# Camp History Retrieval v2 Contract (Proposal)
+# Camp History Retrieval v2 Contract
 
-Model-context revision 1 is confirmed. This proposal would replace
-[Camp History Retrieval v1](camp-history-v1.md) only after its own acceptance and implementation; v1 remains the
-accepted current entry. v2 preserves every v1 operation responsibility, closed input/output shape, Camp target,
+Model-context revision 1 is confirmed. This contract replaces
+[Camp History Retrieval v1](camp-history-v1.md) as the current entry. v2 preserves every v1 operation responsibility, closed input/output shape, Camp target,
 authorization, publication fence, limit, ranking, attachment, exact self-write and error rule. It changes only the
 plain-text audience used by Agent-visible message bodies and the candidate path needed to search that projection.
 
@@ -101,4 +100,4 @@ same audience through ContextManifest v17 `messageProjectionAudience=agent_v1` a
 
 - [ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)
 - [Camp History Retrieval v1 (accepted predecessor)](camp-history-v1.md)
-- [ContextManifest Evidence v17 proposal](context-manifest-evidence-v17.md)
+- [ContextManifest Evidence v17](context-manifest-evidence-v17.md)

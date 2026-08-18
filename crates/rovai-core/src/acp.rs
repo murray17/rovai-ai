@@ -3942,9 +3942,11 @@ while IFS= read -r ignored; do :; done
         );
         let cli = root.join("rovai");
         make_executable(&cli, "#!/bin/sh\nexit 0\n");
+        let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+            path: root.join("core.sock").to_string_lossy().into_owned(),
+        };
         let builtin_tools =
-            BuiltinToolProcessConfig::create(&cli, &root.join("core.sock"), &root.join("runtime"))
-                .unwrap();
+            BuiltinToolProcessConfig::create(&cli, &endpoint, &root.join("runtime")).unwrap();
         let frozen = frozen_trae_runtime(&executable);
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let attachment_root = root.join("attachments");

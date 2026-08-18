@@ -41,6 +41,9 @@ Activity 与外部效果证据保持不变。
 - 不隐藏 `hasUnsettledExternalEffects`、Recovery Blocker 或既有 Evidence 详情；
 - 不实施 v1.07 的 Public-only、A2A guidance、Principal projection 或其 proposal Contract。
 
+该条描述 v1.08 原交付范围。v1.08 完成并冻结该范围后，开发者另行授权按已确认 revision 1 独立实施
+v1.07 提案；该后续交付不追溯扩张 v1.08 的目标或验收结果。
+
 ## 验收边界
 
 - cancelled Run 中 canonical `progress + unknown` 的最后一条活动显示“已停止”且没有动画；

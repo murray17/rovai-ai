@@ -19,6 +19,17 @@ last_updated: 2026-08-18
 >
 > 后续版本：[v1.08 取消 Run 的活动停止投影](../v1.08/README.md)
 
+## 历史冻结后的独立交付说明（2026-08-18）
+
+上述 `historical/not_started` 是 v1.08 切换发生时的冻结事实，不作追溯改写。冻结后开发者明确授权按已
+确认 revision 1 实施；ADR-0216～0218 与 Camp Message Send v10、Built-in Tool Transport v15、Camp History
+Retrieval v2、Gather v3、ContextManifest Evidence v17 已接受并成为当前长期入口。生产实现同步推进
+Schema 48/Migration 93、Formatter 19/Manifest 17、Gather Input v3、Transport/CLI v15 与 IPC v2；不兼容的
+Rovai-owned 本地产品状态在启动时移动到 `inactive-data-quarantine/`，不提供旧 reader、backfill 或双写。
+
+这是一项冻结后的独立交付，不把 v1.07 重新设为 current，也不把实施状态倒写进历史 Front Matter；当前
+实现与约束应从代码、当前 Contract、Architecture 和有效 ADR 判断。
+
 ## 版本目标
 
 把“公开 CampMessage”和“调度 Agent”彻底分开：为显式发送增加 Core 强制的 public-only 寻址意图；用

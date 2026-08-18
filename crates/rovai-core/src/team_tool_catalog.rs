@@ -671,6 +671,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
                 "additionalProperties": false,
                 "required": [
                     "status", "messageId", "visibility", "campTurnId",
+                    "agentAddressingMode",
                     "effectiveRecipients", "recipientPresentation", "recipientSetDigest",
                     "deliveryIds",
                     "allocatedAgentRunResponsibilities"
@@ -680,6 +681,10 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
                     "messageId": {"type": "string"},
                     "visibility": {"const": "camp_public"},
                     "campTurnId": {"type": "string"},
+                    "agentAddressingMode": {
+                        "type": "string",
+                        "enum": ["automatic", "public_only"]
+                    },
                     "effectiveRecipients": {
                         "type": "array", "maxItems": 16, "uniqueItems": true,
                         "items": {"type": "string"}

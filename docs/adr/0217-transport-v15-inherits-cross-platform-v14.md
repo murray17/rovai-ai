@@ -2,7 +2,7 @@
 document_type: adr
 id: ADR-0217
 title: Built-in Tool Transport v15 Inherits the Cross-Platform v14 Wire
-status: proposed
+status: accepted
 date: 2026-08-18
 decision_scope: cross-version
 source_version: v1.07
@@ -67,6 +67,6 @@ not supersede it; v15 is the next transport contract that composes it with the n
 ## References
 
 - [v1.07 proposal](../versions/v1.07/README.md)
-- [Built-in Tool Transport v15 proposal](../contracts/builtin-tool-transport-v15.md)
+- [Built-in Tool Transport v15](../contracts/builtin-tool-transport-v15.md)
 - [ADR-0212: Cross-Platform Local IPC for v14](0212-cross-platform-local-ipc-transport-v14.md)
 - [Built-in Tool Transport v14](../contracts/builtin-tool-transport-v14.md)

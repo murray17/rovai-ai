@@ -380,6 +380,9 @@ pub struct ContextManifestView {
     pub skill_exposure_digest: String,
     pub current_input_skill_resolution: CurrentInputSkillResolution,
     pub current_input_skill_resolution_digest: String,
+    pub message_projection_audience: String,
+    pub a2a_guidance_evidence: Value,
+    pub a2a_guidance_evidence_digest: String,
     pub mcp_exposure: McpExposureSnapshot,
     pub mcp_exposure_digest: String,
     pub mcp_projection_digest: String,
@@ -2712,7 +2715,10 @@ fn load_context_manifests(
                delivery.bootstrap_redelivery_formatter_version,
                manifest.omission_entries_json,
                manifest.self_active_task_evidence_json,
-               manifest.self_active_task_evidence_digest
+               manifest.self_active_task_evidence_digest,
+               manifest.message_projection_audience,
+               manifest.a2a_guidance_evidence_json,
+               manifest.a2a_guidance_evidence_digest
         FROM context_manifest AS manifest
         JOIN native_session_bootstrap_evidence AS bootstrap
           ON bootstrap.id = manifest.bootstrap_evidence_id
@@ -2790,6 +2796,9 @@ fn load_context_manifests(
                 row.get::<_, String>(53)?,
                 row.get::<_, String>(54)?,
                 row.get::<_, String>(55)?,
+                row.get::<_, String>(56)?,
+                row.get::<_, String>(57)?,
+                row.get::<_, String>(58)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2807,6 +2816,8 @@ fn load_context_manifests(
                 .context("ContextManifest omission evidence is invalid")?;
             let self_active_task_evidence = serde_json::from_str::<Value>(&row.54)
                 .context("ContextManifest Self Active Task evidence is invalid")?;
+            let a2a_guidance_evidence = serde_json::from_str::<Value>(&row.57)
+                .context("ContextManifest A2A Guidance evidence is invalid")?;
             let current_input_source = serde_json::from_str::<Value>(&row.9)
                 .context("ContextManifest Current Input source is invalid")?;
             let attachment_refs = serde_json::from_str::<Vec<CampAttachmentRefView>>(&row.10)
@@ -2899,6 +2910,9 @@ fn load_context_manifests(
                 skill_exposure_digest: row.13,
                 current_input_skill_resolution,
                 current_input_skill_resolution_digest: row.15,
+                message_projection_audience: row.56,
+                a2a_guidance_evidence,
+                a2a_guidance_evidence_digest: row.58,
                 mcp_exposure,
                 mcp_exposure_digest: row.17,
                 mcp_projection_digest: row.18,

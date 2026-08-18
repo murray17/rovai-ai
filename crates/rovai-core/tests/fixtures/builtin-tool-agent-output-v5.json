@@ -1,7 +1,7 @@
 {
   "camp.message.send": {
-    "canonicalResult": {"status":"accepted","messageId":"msg_123","visibility":"camp_public","campTurnId":"turn_123","effectiveRecipients":["agent_27"],"recipientPresentation":{},"recipientSetDigest":"sha256:recipient-set","deliveryIds":["delivery_123"],"allocatedAgentRunResponsibilities":1},
-    "agentOutput": {"messageId":"msg_123","effectiveRecipients":["agent_27"]}
+    "canonicalResult": {"status":"accepted","messageId":"msg_123","agentAddressingMode":"automatic","visibility":"camp_public","campTurnId":"turn_123","effectiveRecipients":["agent_27"],"recipientPresentation":{},"recipientSetDigest":"sha256:recipient-set","deliveryIds":["delivery_123"],"allocatedAgentRunResponsibilities":1},
+    "agentOutput": {"messageId":"msg_123","agentAddressingMode":"automatic","effectiveRecipients":["agent_27"],"deliveryIds":["delivery_123"]}
   },
   "team.gather": {
     "canonicalResult": {"status":"accepted","gatherId":"gather_123","requestMessageId":"msg_gather_123","campTurnId":"turn_123","effectiveRecipients":["agent_27","agent_28"],"dispatchDeliveryIds":["delivery_27","delivery_28"],"completion":"deferred","allocatedAgentRunResponsibilities":3},

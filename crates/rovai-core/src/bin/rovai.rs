@@ -19,11 +19,13 @@ use rovai_core::builtin_tool_transport::{
     BuiltinToolCliIdentity, BuiltinToolDescription, BuiltinToolIpcRequest,
     BuiltinToolIpcRequestBody, BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
     COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION, CompactionHookIpcRequest,
-    CompactionHookIpcResponse, CompactionObservationOutboxRecord, ROVAI_CLI_CONTEXT_ENV,
-    ROVAI_RUN_TMP_ENV, builtin_tool_description, builtin_tool_identity_by_command,
+    CompactionHookIpcResponse, CompactionObservationOutboxRecord, LocalIpcEndpoint,
+    ROVAI_CLI_CONTEXT_ENV, ROVAI_RUN_TMP_ENV, builtin_tool_description,
+    builtin_tool_identity_by_command,
 };
 use rovai_core::camp_message_send_teaching::{
-    CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_TO_USER_HELP,
+    CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
+    CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP,
 };
 use rovai_core::command::canonical_json_digest;
 use serde::Serialize;
@@ -121,7 +123,7 @@ fn run() -> Result<u8> {
         },
     };
 
-    let response = match send_with_retry(Path::new(&context.core_socket), &request) {
+    let response = match send_with_retry(&context.core_endpoint, &request) {
         Ok(response) => response,
         Err(BuiltinToolIpcFailure::OutcomeIndeterminate) => {
             println!(
@@ -270,7 +272,7 @@ fn run_compaction_hook(args: &[String]) -> Result<()> {
     let staged_observation = stage_compaction_observation(&context_path, &outbox_record)?;
     let mut last_error = None;
     for attempt in 0..COMPACTION_HOOK_ATTEMPTS {
-        match send_compaction_hook(Path::new(&context.core_socket), &request) {
+        match send_compaction_hook(&context.core_endpoint, &request) {
             Ok(_response) => {
                 let _ = fs::remove_file(&staged_observation);
                 return Ok(());
@@ -330,30 +332,52 @@ fn stage_compaction_observation(
 
 #[cfg(unix)]
 fn send_compaction_hook(
-    socket: &Path,
+    endpoint: &LocalIpcEndpoint,
     request: &CompactionHookIpcRequest,
 ) -> Result<CompactionHookIpcResponse> {
     use std::os::unix::net::UnixStream;
+
+    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
+        bail!("compaction hook endpoint does not match this platform");
+    };
 
     let serialized = serde_json::to_vec(request)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
         bail!("compaction hook request is too large");
     }
-    let mut stream = UnixStream::connect(socket)?;
+    let mut stream = UnixStream::connect(path)?;
     stream.set_read_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
     stream.set_write_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
     stream.write_all(&serialized)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
-    let mut reader = BufReader::new(stream);
-    let mut response = String::new();
-    reader.read_line(&mut response)?;
+    let response = read_bounded_response(stream)?;
     Ok(serde_json::from_str(&response)?)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn send_compaction_hook(
-    _socket: &Path,
+    endpoint: &LocalIpcEndpoint,
+    request: &CompactionHookIpcRequest,
+) -> Result<CompactionHookIpcResponse> {
+    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
+        bail!("compaction hook endpoint does not match this platform");
+    };
+    let serialized = serde_json::to_vec(request)?;
+    if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
+        bail!("compaction hook request is too large");
+    }
+    let mut stream = open_windows_named_pipe(name)?;
+    stream.write_all(&serialized)?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+    let response = read_bounded_response(stream)?;
+    Ok(serde_json::from_str(&response)?)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn send_compaction_hook(
+    _endpoint: &LocalIpcEndpoint,
     _request: &CompactionHookIpcRequest,
 ) -> Result<CompactionHookIpcResponse> {
     bail!("compaction hook relay is unavailable on this platform")
@@ -1099,8 +1123,13 @@ fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) 
         let (flag, inline_value) = raw
             .split_once('=')
             .map_or((raw.as_str(), None), |(flag, value)| (flag, Some(value)));
+        let canonical_flag = if description.name == "camp.message.send" && flag == "--to-user" {
+            "--to-principal"
+        } else {
+            flag
+        };
         let argument = argument_by_flag
-            .get(flag)
+            .get(canonical_flag)
             .with_context(|| format!("unknown argument for {}: {flag}", description.name))?;
         if input_file.is_some() {
             bail!("--input-file cannot be combined with direct arguments");
@@ -1208,10 +1237,14 @@ fn insert_direct_value(
 
 #[cfg(unix)]
 fn send_with_retry(
-    socket: &Path,
+    endpoint: &LocalIpcEndpoint,
     request: &BuiltinToolIpcRequest,
 ) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
     use std::os::unix::net::UnixStream;
+
+    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
+        return Err(BuiltinToolIpcFailure::Predictable);
+    };
 
     let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
@@ -1219,7 +1252,7 @@ fn send_with_retry(
     }
     let mut dispatch_became_indeterminate = false;
     for _attempt in 0..CORE_ATTEMPTS {
-        let Ok(mut stream) = UnixStream::connect(socket) else {
+        let Ok(mut stream) = UnixStream::connect(path) else {
             continue;
         };
         if stream.set_read_timeout(Some(CORE_TIMEOUT)).is_err()
@@ -1234,13 +1267,12 @@ fn send_with_retry(
             dispatch_became_indeterminate = true;
             continue;
         }
-        let mut reader = BufReader::new(stream);
-        let mut response = String::new();
-        match reader.read_line(&mut response) {
-            Ok(0) | Err(_) => {
-                dispatch_became_indeterminate = true;
+        match read_bounded_response(stream) {
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                return Err(BuiltinToolIpcFailure::Predictable);
             }
-            Ok(_) => match serde_json::from_str(&response) {
+            Err(_) => dispatch_became_indeterminate = true,
+            Ok(response) => match serde_json::from_str(&response) {
                 Ok(response) => return Ok(response),
                 Err(_) => return Err(BuiltinToolIpcFailure::Predictable),
             },
@@ -1253,9 +1285,93 @@ fn send_with_retry(
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn send_with_retry(
-    _socket: &Path,
+    endpoint: &LocalIpcEndpoint,
+    request: &BuiltinToolIpcRequest,
+) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
+    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
+        return Err(BuiltinToolIpcFailure::Predictable);
+    };
+    let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
+    if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
+        return Err(BuiltinToolIpcFailure::Predictable);
+    }
+    let mut dispatch_became_indeterminate = false;
+    for _attempt in 0..CORE_ATTEMPTS {
+        let Ok(mut stream) = open_windows_named_pipe(name) else {
+            continue;
+        };
+        if stream.write_all(&serialized).is_err()
+            || stream.write_all(b"\n").is_err()
+            || stream.flush().is_err()
+        {
+            dispatch_became_indeterminate = true;
+            continue;
+        }
+        match read_bounded_response(stream) {
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                return Err(BuiltinToolIpcFailure::Predictable);
+            }
+            Err(_) => dispatch_became_indeterminate = true,
+            Ok(response) => match serde_json::from_str(&response) {
+                Ok(response) => return Ok(response),
+                Err(_) => return Err(BuiltinToolIpcFailure::Predictable),
+            },
+        }
+    }
+    Err(if dispatch_became_indeterminate {
+        BuiltinToolIpcFailure::OutcomeIndeterminate
+    } else {
+        BuiltinToolIpcFailure::Predictable
+    })
+}
+
+fn read_bounded_response(stream: impl Read) -> std::io::Result<String> {
+    let reader = BufReader::new(stream);
+    let mut limited = reader.take((BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 2) as u64);
+    let mut frame = Vec::new();
+    let read = limited.read_until(b'\n', &mut frame)?;
+    if read == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "Built-in Tool IPC response ended before a frame",
+        ));
+    }
+    if frame.last() != Some(&b'\n') || frame.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Built-in Tool IPC response exceeds the frame limit",
+        ));
+    }
+    frame.pop();
+    if frame.last() == Some(&b'\r') {
+        frame.pop();
+    }
+    String::from_utf8(frame).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Built-in Tool IPC response is not UTF-8",
+        )
+    })
+}
+
+#[cfg(windows)]
+fn open_windows_named_pipe(name: &str) -> Result<std::fs::File> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+
+    let stream = OpenOptions::new().read(true).write(true).open(name)?;
+    if unsafe { SetHandleInformation(stream.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) } == 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to make the Built-in Tool client handle non-inheritable");
+    }
+    Ok(stream)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn send_with_retry(
+    _endpoint: &LocalIpcEndpoint,
     _request: &BuiltinToolIpcRequest,
 ) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
     Err(BuiltinToolIpcFailure::Predictable)
@@ -1416,11 +1532,10 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
         )
         .expect("writing help to a String cannot fail");
         if description.name == "camp.message.send" && argument.field == "to" {
-            writeln!(
-                output,
-                "      Optional canonical Agent ID to wake; repeat for multiple recipients. Display names are accepted only as inline aliases."
-            )
-            .expect("writing help to a String cannot fail");
+            write_indented_help(output, CAMP_MESSAGE_SEND_TO_HELP);
+        }
+        if description.name == "camp.message.send" && argument.field == "publicOnly" {
+            write_indented_help(output, CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP);
         }
         if description.name == "team.gather" && argument.field == "to" {
             writeln!(
@@ -1430,13 +1545,7 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
             .expect("writing help to a String cannot fail");
         }
         if description.name == "camp.message.send" && argument.field == "mentionUser" {
-            for line in CAMP_MESSAGE_SEND_TO_USER_HELP.lines() {
-                if line.is_empty() {
-                    writeln!(output).expect("writing help to a String cannot fail");
-                } else {
-                    writeln!(output, "      {line}").expect("writing help to a String cannot fail");
-                }
-            }
+            write_indented_help(output, CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP);
         }
         if description.name == "memory.view" && argument.field == "scope" {
             writeln!(output, "      One of: hearth, companion, relationship.")
@@ -1713,6 +1822,18 @@ fn operation_help_examples_for_variant(
     }
 }
 
+fn write_indented_help(output: &mut String, help: &str) {
+    use std::fmt::Write as _;
+
+    for line in help.lines() {
+        if line.is_empty() {
+            writeln!(output).expect("writing help to a String cannot fail");
+        } else {
+            writeln!(output, "      {line}").expect("writing help to a String cannot fail");
+        }
+    }
+}
+
 fn operation_help_examples(operation: &str) -> &'static [&'static str] {
     match operation {
         "camp.message.send" => &CAMP_MESSAGE_SEND_HELP_EXAMPLES,
@@ -1776,6 +1897,27 @@ mod tests {
                 input: json!({}),
             },
         }
+    }
+
+    #[test]
+    fn ipc_response_reader_requires_one_bounded_newline_delimited_utf8_frame() {
+        assert_eq!(
+            read_bounded_response(std::io::Cursor::new(b"{\"ok\":true}\n")).unwrap(),
+            r#"{"ok":true}"#
+        );
+        assert_eq!(
+            read_bounded_response(std::io::Cursor::new(b"{}"))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        let oversized = vec![b'x'; BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 2];
+        assert_eq!(
+            read_bounded_response(std::io::Cursor::new(oversized))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
@@ -2182,20 +2324,17 @@ mod tests {
             )
             .is_err()
         );
-        assert!(description.summary.contains("canonical inline @agent_N"));
         assert!(
             description
                 .summary
-                .contains("exact active Camp member @display-name")
+                .contains("restricted inline Agent addressing")
         );
-        assert!(description.summary.contains("inspect effectiveRecipients"));
-        assert!(
-            description
-                .summary
-                .contains("first non-whitespace token on a line")
-        );
+        assert!(description.summary.contains("agentAddressingMode"));
+        assert!(description.summary.contains("effectiveRecipients"));
+        assert!(description.summary.contains("deliveryIds"));
         assert!(description.summary.contains("public-only"));
-        assert!(description.summary.contains("--to-user"));
+        assert!(description.summary.contains("--to-principal"));
+        assert!(!description.summary.contains("--to-user"));
         let to = description
             .arguments
             .iter()
@@ -2203,26 +2342,47 @@ mod tests {
             .unwrap();
         assert_eq!(to.flag, "--to");
         assert!(to.repeatable);
-        let to_user = description
+        let public_only = description
+            .arguments
+            .iter()
+            .find(|argument| argument.field == "publicOnly")
+            .unwrap();
+        assert_eq!(public_only.flag, "--public-only");
+        assert_eq!(public_only.value_kind, "boolean");
+        assert!(!public_only.repeatable);
+        assert!(!public_only.required);
+        let to_principal = description
             .arguments
             .iter()
             .find(|argument| argument.field == "mentionUser")
             .unwrap();
-        assert_eq!(to_user.flag, "--to-user");
-        assert_eq!(to_user.value_kind, "boolean");
-        assert!(!to_user.repeatable);
-        assert!(!to_user.required);
+        assert_eq!(to_principal.flag, "--to-principal");
+        assert_eq!(to_principal.value_kind, "boolean");
+        assert!(!to_principal.repeatable);
+        assert!(!to_principal.required);
         assert_eq!(
             parse_operation_input(
                 &description,
                 &[
-                    "--to-user".to_string(),
+                    "--to-principal".to_string(),
                     "--body".to_string(),
                     "Choose A or B".to_string(),
                 ]
             )
             .unwrap(),
             json!({"body": "Choose A or B", "mentionUser": true})
+        );
+        assert_eq!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--to-user".to_string(),
+                    "--body".to_string(),
+                    "Legacy spelling".to_string(),
+                ]
+            )
+            .unwrap(),
+            json!({"body": "Legacy spelling", "mentionUser": true})
         );
         let input_file =
             std::env::temp_dir().join(format!("rovai-send-v4-input-{}.json", Uuid::new_v4()));
@@ -2247,21 +2407,24 @@ mod tests {
         assert_eq!(
             operation_help_examples("camp.message.send"),
             [
-                "rovai send --body 'Status update'",
-                "rovai send --to agent_5 --body 'Please review and report back'",
-                "rovai send --to-user --body 'Please choose A or B'",
+                "rovai send --public-only --body 'Final conclusion: the failure is a client-version regression.'",
+                "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'",
+                "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'",
             ]
         );
         let help = operation_help_text(&description);
-        assert!(help.contains("Ordinary Camp messages are already visible to the user."));
-        assert!(help.contains("new unresolved user decision, answer, or action"));
-        assert!(help.contains("User attention is message-local"));
-        assert!(help.contains("does not represent user approval"));
-        assert!(help.contains("whitespace or end-of-body"));
-        assert!(help.contains("dedicated final line"));
-        assert!(help.contains("[] means no Agent was routed"));
-        assert!(help.contains("Display names are accepted only as inline aliases"));
-        assert!(!help.contains("--to agent_5 --to-user"));
+        assert!(
+            help.contains("Ordinary public Camp messages are already visible to the Principal.")
+        );
+        assert!(help.contains("new unresolved decision, answer, or action for the Principal"));
+        assert!(help.contains("Principal attention is message-local"));
+        assert!(help.contains("does not represent approval"));
+        assert!(help.contains("Agent addressing schedules concrete continuing work, not CC."));
+        assert!(help.contains("This option is invalid with --public-only."));
+        assert!(help.contains("Restricted inline Agent addressing is disabled"));
+        assert!(help.contains("It may be combined with --to-principal."));
+        assert!(!help.contains("--to-user"));
+        assert!(!help.contains("--to agent_5 --public-only"));
     }
 
     #[test]
@@ -2296,8 +2459,11 @@ mod tests {
             "rv-missing-{}.sock",
             &Uuid::new_v4().to_string()[..8]
         ));
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: socket.to_string_lossy().into_owned(),
+        };
         assert_eq!(
-            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
             BuiltinToolIpcFailure::Predictable
         );
     }
@@ -2310,6 +2476,9 @@ mod tests {
         let socket = std::path::PathBuf::from("/tmp")
             .join(format!("rv-loss-{}.sock", &Uuid::new_v4().to_string()[..8]));
         let listener = UnixListener::bind(&socket).unwrap();
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: socket.to_string_lossy().into_owned(),
+        };
         let server = std::thread::spawn(move || {
             for _ in 0..CORE_ATTEMPTS {
                 let (stream, _) = listener.accept().unwrap();
@@ -2317,7 +2486,7 @@ mod tests {
             }
         });
         assert_eq!(
-            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
             BuiltinToolIpcFailure::OutcomeIndeterminate
         );
         server.join().unwrap();
@@ -2334,12 +2503,15 @@ mod tests {
             &Uuid::new_v4().to_string()[..8]
         ));
         let listener = UnixListener::bind(&socket).unwrap();
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: socket.to_string_lossy().into_owned(),
+        };
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             stream.write_all(b"not-json\n").unwrap();
         });
         assert_eq!(
-            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
             BuiltinToolIpcFailure::Predictable
         );
         server.join().unwrap();

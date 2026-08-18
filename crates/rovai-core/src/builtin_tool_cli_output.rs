@@ -42,10 +42,20 @@ pub fn agent_output_schema(operation: &str) -> Result<Value> {
         "camp.message.send" => Ok(json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["messageId", "effectiveRecipients"],
+            "required": ["messageId", "agentAddressingMode", "effectiveRecipients", "deliveryIds"],
             "properties": {
                 "messageId": {"type": "string"},
+                "agentAddressingMode": {
+                    "type": "string",
+                    "enum": ["automatic", "public_only"]
+                },
                 "effectiveRecipients": {
+                    "type": "array",
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "items": {"type": "string"}
+                },
+                "deliveryIds": {
                     "type": "array",
                     "maxItems": 16,
                     "uniqueItems": true,
@@ -132,9 +142,15 @@ fn project_success(operation: &str, result: &Value) -> Result<Value> {
             "messageId": object
                 .get("messageId")
                 .context("camp.message.send result has no messageId")?,
+            "agentAddressingMode": object
+                .get("agentAddressingMode")
+                .context("camp.message.send result has no agentAddressingMode")?,
             "effectiveRecipients": object
                 .get("effectiveRecipients")
                 .context("camp.message.send result has no effectiveRecipients")?,
+            "deliveryIds": object
+                .get("deliveryIds")
+                .context("camp.message.send result has no deliveryIds")?,
         })),
         "team.gather" => Ok(json!({
             "gatherId": object
@@ -448,6 +464,7 @@ mod tests {
             json!({
                 "status": "accepted",
                 "messageId": "msg_123",
+                "agentAddressingMode": "automatic",
                 "visibility": "camp_public",
                 "campTurnId": "turn_1",
                 "effectiveRecipients": ["agent_27"],
@@ -460,7 +477,12 @@ mod tests {
         .unwrap();
         assert_eq!(
             project_envelope(&envelope).unwrap(),
-            json!({"messageId": "msg_123", "effectiveRecipients": ["agent_27"]})
+            json!({
+                "messageId": "msg_123",
+                "agentAddressingMode": "automatic",
+                "effectiveRecipients": ["agent_27"],
+                "deliveryIds": ["delivery_1"]
+            })
         );
     }
 
@@ -558,7 +580,9 @@ mod tests {
             validate_schema(
                 &json!({
                     "messageId": "msg_123",
+                    "agentAddressingMode": "automatic",
                     "effectiveRecipients": [],
+                    "deliveryIds": [],
                     "receipt": "must-not-cross-the-boundary"
                 }),
                 &schema
