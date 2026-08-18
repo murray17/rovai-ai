@@ -64,8 +64,9 @@ last_updated: 2026-08-19
 - [x] 将未采用备用 executable candidate 的失败收口为 candidate-local transient attempt，并保护当前 LKG；
 - [x] 阻止旧 `installed_unverified` 继续 onboarding、配置或执行；
 - [x] 修复数字 ADR clean break 后 bundled `grill-duo-with-docs` 的 reference 路径；
-- [ ] 通过 Rust、TypeScript、Renderer、文档与 Desktop 全量门禁；
-- [ ] 推送 main，完成签名打包、隔离 App 验收并替换 `/Applications/Rovai AI.app`。
+- [x] 通过 Rust、TypeScript、Renderer、文档与 Desktop 全量门禁；
+- [x] 推送修正提交 `f3ce1f68` 到 main，完成签名打包、隔离队员工作区与首次训练验收，替换并从
+  `/Applications/Rovai AI.app` 重新启动日常安装版。
 
 ## References
 

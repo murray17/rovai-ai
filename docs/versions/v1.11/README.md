@@ -11,10 +11,9 @@ last_updated: 2026-08-19
 
 # Rovai-ai v1.11：Runtime 模型目录缓存与真实执行校验
 
-> 当前状态：Core/Renderer、自动门禁、签名打包与隔离队员工作区验收均已完成；实现提交
-> `a9cf6e06` 已推送 main，已替换并从 `/Applications/Rovai AI.app` 重新启动日常安装版。
-> 2026-08-19 发现的统一 Runtime 生命周期与备用候选 LKG 修正正在执行最终门禁；完成后将追加新提交、
-> 打包与安装证据，不改写上述首次发布事实。
+> 当前状态：v1.11 首次发布与 2026-08-19 发布后修正均已完成。首次实现提交 `a9cf6e06` 与修正提交
+> `f3ce1f68` 已推送 main；修正版完成签名打包、隔离队员工作区与首次训练验收，已替换并从
+> `/Applications/Rovai AI.app` 重新启动日常安装版。
 >
 > 前置版本：[v1.10 唯一 Camp ID 与安全公开 Runtime 失败](../v1.10/README.md)。v1.10 已完成并冻结为
 > historical。
@@ -90,7 +89,8 @@ migration 95。Runtime model catalog read model 与 Desktop method 是 additive 
 - TRAE acceptance/smoke 不并发，且不接触日常 App userData；
 - Renderer 在 Day/Night 既有 Porcelain/Steel 世界中验证键盘打开、焦点、loading/error/LKG/empty、长模型名与
   Runtime 切换竞态；
-- 推送 main、打包和替换 `/Applications` 只在本版组合门禁完成并获得当前任务授权后执行。
+- 修正提交 `f3ce1f68` 已在本版组合门禁完成并获得当前任务授权后推送 main；签名 App 已完成隔离验收、
+  替换 `/Applications/Rovai AI.app` 并从安装路径重新启动。
 
 ## 跨版本文档影响
 
