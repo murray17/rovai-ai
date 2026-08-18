@@ -166,10 +166,19 @@ pub(crate) fn fresh_schema_database() -> (Database, PathBuf) {
 }
 
 #[cfg(feature = "slow-tests")]
-pub(crate) fn fresh_schema_database_fast() -> OwnedTestDatabase {
-    clone_template_owned(
+pub(crate) fn fresh_schema_database_fast() -> (Database, PathBuf) {
+    clone_template(
         FRESH_SCHEMA_TEMPLATE.get_or_init(|| build_template("fresh-template", false)),
         "fresh-fast-clone",
+        TestDatabaseOpenMode::FastIsolated,
+    )
+}
+
+#[cfg(feature = "slow-tests")]
+pub(crate) fn fresh_schema_database_fast_owned() -> OwnedTestDatabase {
+    clone_template_owned(
+        FRESH_SCHEMA_TEMPLATE.get_or_init(|| build_template("fresh-template", false)),
+        "fresh-fast-owned-clone",
         TestDatabaseOpenMode::FastIsolated,
     )
 }
@@ -216,7 +225,7 @@ mod slow_tests {
         let workers = (0..2)
             .map(|worker| {
                 std::thread::spawn(move || {
-                    let database = fresh_schema_database_fast();
+                    let database = fresh_schema_database_fast_owned();
                     database
                         .connection()
                         .execute_batch(
@@ -254,7 +263,7 @@ mod slow_tests {
 
     #[test]
     fn fast_clone_open_skips_seed_repair_and_production_reopen_runs_it() {
-        let mut database = fresh_schema_database_fast();
+        let mut database = fresh_schema_database_fast_owned();
         database
             .connection()
             .execute(
@@ -308,7 +317,7 @@ mod slow_tests {
         assert!(error.to_string().contains("requires an existing SQLite"));
         assert!(!missing.exists());
 
-        let mut database = fresh_schema_database_fast();
+        let mut database = fresh_schema_database_fast_owned();
         database
             .connection()
             .execute("DELETE FROM schema_migration WHERE version = 93", [])

@@ -4595,6 +4595,14 @@ mod slow_tests {
     }
 
     fn database() -> (Database, std::path::PathBuf) {
+        crate::test_support::fresh_schema_database_fast()
+    }
+
+    fn production_like_database() -> (Database, std::path::PathBuf) {
+        crate::test_support::fresh_schema_database()
+    }
+
+    fn startup_database() -> (Database, std::path::PathBuf) {
         let directory =
             std::env::temp_dir().join(format!("rovai-agent-profile-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
@@ -4824,7 +4832,7 @@ mod slow_tests {
 
     #[test]
     fn starter_profiles_are_generic_and_runtime_is_not_configured() {
-        let (database, directory) = database();
+        let (database, directory) = startup_database();
         let profiles = AgentProfileService::default()
             .list_profiles(&database)
             .expect("profiles should load");
@@ -5832,7 +5840,7 @@ mod slow_tests {
 
     #[test]
     fn verified_relocation_preserves_installation_identity_and_never_commits_a_failed_candidate() {
-        let (mut database, directory) = database();
+        let (mut database, directory) = production_like_database();
         let service = AgentProfileService::default();
         let mut original_snapshot = ready_codex_snapshot();
         original_snapshot.executable_fingerprint = Some("sha256:original".to_string());
@@ -5961,7 +5969,7 @@ mod slow_tests {
 
     #[test]
     fn setting_a_starter_profile_away_survives_database_reopen() {
-        let (mut database, directory) = database();
+        let (mut database, directory) = production_like_database();
         let service = AgentProfileService::default();
         let profile = service
             .get_profile(&database, "agent_4")
@@ -6587,7 +6595,7 @@ mod slow_tests {
 
     #[test]
     fn starter_profile_user_edits_survive_database_reopen() {
-        let (mut database, directory) = database();
+        let (mut database, directory) = production_like_database();
         let service = AgentProfileService::default();
         let profile = service
             .get_profile(&database, "agent_4")
