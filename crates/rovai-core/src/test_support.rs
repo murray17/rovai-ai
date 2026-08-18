@@ -199,10 +199,18 @@ pub(crate) fn seeded_runtime_database_owned() -> OwnedTestDatabase {
     )
 }
 
-pub(crate) fn seeded_runtime_database_fast() -> OwnedTestDatabase {
-    clone_template_owned(
+pub(crate) fn seeded_runtime_database_fast() -> (Database, PathBuf) {
+    clone_template(
         SEEDED_RUNTIME_TEMPLATE.get_or_init(|| build_template("seeded-template", true)),
         "seeded-fast-clone",
+        TestDatabaseOpenMode::FastIsolated,
+    )
+}
+
+pub(crate) fn seeded_runtime_database_fast_owned() -> OwnedTestDatabase {
+    clone_template_owned(
+        SEEDED_RUNTIME_TEMPLATE.get_or_init(|| build_template("seeded-template", true)),
+        "seeded-fast-owned-clone",
         TestDatabaseOpenMode::FastIsolated,
     )
 }
@@ -213,6 +221,15 @@ pub(crate) fn fresh_schema_database_at(directory: &Path) -> Database {
         FRESH_SCHEMA_TEMPLATE.get_or_init(|| build_template("fresh-template", false)),
         directory,
         TestDatabaseOpenMode::ProductionLike,
+    )
+}
+
+#[cfg(feature = "slow-tests")]
+pub(crate) fn fresh_schema_database_fast_at(directory: &Path) -> Database {
+    clone_template_to(
+        FRESH_SCHEMA_TEMPLATE.get_or_init(|| build_template("fresh-template", false)),
+        directory,
+        TestDatabaseOpenMode::FastIsolated,
     )
 }
 
@@ -338,8 +355,8 @@ mod slow_tests {
 
     #[test]
     fn deleting_one_clone_does_not_change_the_template_or_another_clone() {
-        let first = seeded_runtime_database_fast();
-        let second = seeded_runtime_database_fast();
+        let first = seeded_runtime_database_fast_owned();
+        let second = seeded_runtime_database_fast_owned();
         let first_directory = first.directory().to_path_buf();
         let second_profiles: i64 = second
             .connection()
