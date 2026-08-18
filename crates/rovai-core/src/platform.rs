@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub mod local_ipc;
+
 /// Closed identity for build targets Rovai can ship.
 ///
 /// This is not host-envelope or Runtime Platform Admission evidence. Callers

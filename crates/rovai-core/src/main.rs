@@ -65,8 +65,7 @@ use rovai_core::{
         BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolError, BuiltinToolInvocationEnvelope,
         BuiltinToolIpcRequest, BuiltinToolIpcRequestBody, BuiltinToolIpcResponse,
         COMPACTION_HOOK_IPC_PROTOCOL_VERSION, CompactionHookIpcRequest, CompactionHookIpcResponse,
-        LocalIpcEndpoint, builtin_tool_catalog_digest, builtin_tool_description,
-        recovery_for_error_code,
+        builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
     camp_content::StructuredCampMessageContent,
@@ -155,6 +154,7 @@ use rovai_core::{
         PlannedShutdownCoordinator, RuntimeRouteBinding, RuntimeTerminalAdmission,
         RuntimeTerminalObservation, RuntimeTerminalOutcome, TerminalSettlementPermit,
     },
+    platform::local_ipc::{LocalIpcListener, LocalIpcStream},
     read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -192,14 +192,8 @@ use rovai_core::{
 use runtime_fleet::{AgentRuntimeFleetConfig, AgentRuntimeFleetManager};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-#[cfg(unix)]
-use tokio::net::UnixListener;
-#[cfg(windows)]
-use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
 use tokio::{
-    io::{
-        AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, BufWriter,
-    },
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter},
     sync::{Mutex, Notify, RwLock, mpsc, oneshot},
     time::{Duration, MissedTickBehavior},
 };
@@ -9601,11 +9595,10 @@ async fn run_core(
     );
     let (builtin_tool_shutdown_tx, builtin_tool_shutdown_rx) = oneshot::channel();
     let builtin_tool_endpoint = builtin_tool_endpoint();
-    let builtin_tool_listener = bind_builtin_tool_listener(&builtin_tool_endpoint)?;
+    let builtin_tool_listener = LocalIpcListener::bind(&builtin_tool_endpoint)?;
     let mut builtin_tool_handle = tokio::spawn(serve_builtin_tool_ipc(
         core.clone(),
         builtin_tool_listener,
-        builtin_tool_endpoint,
         builtin_tool_shutdown_rx,
     ));
     let mut event_handle = tokio::spawn(process_codex_events(
@@ -13574,14 +13567,6 @@ fn runtime_check_writes_diagnostic(finalization: RuntimeCheckFinalization) -> bo
     finalization != RuntimeCheckFinalization::CleanupOnly
 }
 
-#[cfg(unix)]
-fn restrict_private_directory(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
-    Ok(())
-}
-
 fn emit(output: &mpsc::UnboundedSender<String>, method: &str, params: Value) {
     let message = json!({"method": method, "params": params});
     if let Ok(serialized) = serde_json::to_string(&message) {
@@ -13623,192 +13608,11 @@ async fn write_output(
     Ok(())
 }
 
-#[cfg(unix)]
-fn bind_builtin_tool_listener(endpoint: &LocalIpcEndpoint) -> Result<UnixListener> {
-    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
-        anyhow::bail!("Unix Core requires a Unix socket Built-in Tool endpoint");
-    };
-    let socket_path = Path::new(path);
-    let directory = socket_path
-        .parent()
-        .context("Built-in Tool socket path has no parent directory")?;
-    std::fs::create_dir_all(directory).with_context(|| {
-        format!(
-            "failed to create private Built-in Tool directory {}",
-            directory.display()
-        )
-    })?;
-    restrict_private_directory(directory)?;
-    if socket_path.exists() {
-        std::fs::remove_file(socket_path).with_context(|| {
-            format!(
-                "failed to remove stale Built-in Tool socket {}",
-                socket_path.display()
-            )
-        })?;
-    }
-    let listener = UnixListener::bind(socket_path).with_context(|| {
-        format!(
-            "failed to bind private Built-in Tool socket {}",
-            socket_path.display()
-        )
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(listener)
-}
-
-#[cfg(windows)]
-fn create_builtin_tool_named_pipe(name: &str, first_instance: bool) -> Result<NamedPipeServer> {
-    use std::{ffi::c_void, os::windows::io::AsRawHandle};
-    use windows_sys::Win32::{
-        Foundation::{HANDLE_FLAG_INHERIT, LocalFree, SetHandleInformation},
-        Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES},
-    };
-
-    let user_sid = current_windows_logon_sid()?;
-    let sddl = format!("D:P(A;;GA;;;SY)(A;;GA;;;{user_sid})");
-    let sddl_wide = sddl
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-    let converted = unsafe {
-        windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl_wide.as_ptr(),
-            windows_sys::Win32::Security::Authorization::SDDL_REVISION_1,
-            &mut descriptor,
-            std::ptr::null_mut(),
-        )
-    };
-    if converted == 0 || descriptor.is_null() {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to build the Built-in Tool named-pipe DACL");
-    }
-    let mut attributes = SECURITY_ATTRIBUTES {
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: descriptor,
-        bInheritHandle: 0,
-    };
-    let mut options = ServerOptions::new();
-    options
-        .pipe_mode(PipeMode::Byte)
-        .reject_remote_clients(true)
-        .first_pipe_instance(first_instance);
-    let created = unsafe {
-        options.create_with_security_attributes_raw(
-            name,
-            &mut attributes as *mut SECURITY_ATTRIBUTES as *mut c_void,
-        )
-    };
-    unsafe {
-        LocalFree(descriptor);
-    }
-    let server = created.context("failed to create protected Built-in Tool named pipe")?;
-    let non_inheritable =
-        unsafe { SetHandleInformation(server.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) };
-    if non_inheritable == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to make the Built-in Tool named-pipe handle non-inheritable");
-    }
-    Ok(server)
-}
-
-#[cfg(windows)]
-fn current_windows_logon_sid() -> Result<String> {
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, LocalFree},
-        Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser},
-        System::Threading::{GetCurrentProcess, OpenProcessToken},
-    };
-
-    struct TokenHandle(windows_sys::Win32::Foundation::HANDLE);
-    impl Drop for TokenHandle {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-
-    let mut token = std::ptr::null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to open the current process token");
-    }
-    let token = TokenHandle(token);
-    let mut required = 0_u32;
-    unsafe {
-        GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut required);
-    }
-    if required == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to size the current logon SID");
-    }
-    let mut buffer = vec![0_u8; required as usize];
-    if unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenUser,
-            buffer.as_mut_ptr().cast(),
-            required,
-            &mut required,
-        )
-    } == 0
-    {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to read the current logon SID");
-    }
-    let token_user = unsafe { &*(buffer.as_ptr() as *const TOKEN_USER) };
-    let mut sid_text = std::ptr::null_mut();
-    if unsafe {
-        windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW(
-            token_user.User.Sid,
-            &mut sid_text,
-        )
-    } == 0
-        || sid_text.is_null()
-    {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to format the current logon SID");
-    }
-    let length = unsafe {
-        let mut length = 0_usize;
-        while *sid_text.add(length) != 0 {
-            length += 1;
-        }
-        length
-    };
-    let result = String::from_utf16(unsafe { std::slice::from_raw_parts(sid_text, length) });
-    unsafe {
-        LocalFree(sid_text.cast());
-    }
-    Ok(result.context("current logon SID is not valid UTF-16")?)
-}
-
-#[cfg(windows)]
-fn bind_builtin_tool_listener(endpoint: &LocalIpcEndpoint) -> Result<NamedPipeServer> {
-    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
-        anyhow::bail!("Windows Core requires a named-pipe Built-in Tool endpoint");
-    };
-    create_builtin_tool_named_pipe(name, true)
-}
-
-#[cfg(unix)]
 async fn serve_builtin_tool_ipc(
     core: Arc<Core>,
-    listener: UnixListener,
-    endpoint: LocalIpcEndpoint,
+    mut listener: LocalIpcListener,
     mut shutdown: oneshot::Receiver<()>,
 ) {
-    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
-        eprintln!("Built-in Tool IPC endpoint changed platform before serving");
-        return;
-    };
-    let socket_path = PathBuf::from(path);
     let mut connections = tokio::task::JoinSet::new();
     loop {
         let accepted = tokio::select! {
@@ -13821,64 +13625,16 @@ async fn serve_builtin_tool_ipc(
                 continue;
             },
         };
-        let (stream, _) = match accepted {
+        let stream = match accepted {
             Ok(stream) => stream,
             Err(error) => {
                 eprintln!("Built-in Tool IPC accept failed: {error:#}");
-                continue;
-            }
-        };
-        let core = core.clone();
-        connections.spawn(async move {
-            if let Err(error) = handle_builtin_tool_connection(core, stream).await {
-                eprintln!("Built-in Tool IPC request failed: {error:#}");
-            }
-        });
-    }
-    drop(listener);
-    connections.abort_all();
-    while connections.try_join_next().is_some() {}
-    let _ = std::fs::remove_file(socket_path);
-}
-
-#[cfg(windows)]
-async fn serve_builtin_tool_ipc(
-    core: Arc<Core>,
-    mut listener: NamedPipeServer,
-    endpoint: LocalIpcEndpoint,
-    mut shutdown: oneshot::Receiver<()>,
-) {
-    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
-        eprintln!("Built-in Tool IPC endpoint changed platform before serving");
-        return;
-    };
-    let mut connections = tokio::task::JoinSet::new();
-    loop {
-        let connected = tokio::select! {
-            connected = listener.connect() => connected,
-            _ = &mut shutdown => break,
-            completed = connections.join_next(), if !connections.is_empty() => {
-                if let Some(Err(error)) = completed {
-                    eprintln!("Built-in Tool IPC worker failed: {error}");
+                if error.closes_admission() {
+                    break;
                 }
                 continue;
-            },
-        };
-        if let Err(error) = connected {
-            eprintln!("Built-in Tool IPC named-pipe connect failed: {error:#}");
-            break;
-        }
-        // Create the next protected listening instance before dispatching the
-        // connected one. Failure closes the accepted handle without handing
-        // any request to Core, preserving fail-closed admission.
-        let replacement = match create_builtin_tool_named_pipe(&name, false) {
-            Ok(replacement) => replacement,
-            Err(error) => {
-                eprintln!("Built-in Tool IPC replacement listener failed: {error:#}");
-                break;
             }
         };
-        let stream = std::mem::replace(&mut listener, replacement);
         let core = core.clone();
         connections.spawn(async move {
             if let Err(error) = handle_builtin_tool_connection(core, stream).await {
@@ -13891,10 +13647,7 @@ async fn serve_builtin_tool_ipc(
     while connections.try_join_next().is_some() {}
 }
 
-async fn handle_builtin_tool_connection<S>(core: Arc<Core>, stream: S) -> Result<()>
-where
-    S: AsyncRead + AsyncWrite + Unpin,
-{
+async fn handle_builtin_tool_connection(core: Arc<Core>, stream: LocalIpcStream) -> Result<()> {
     let (reader, mut writer) = tokio::io::split(stream);
     let reader = BufReader::new(reader);
     let mut limited = reader.take((BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 2) as u64);
