@@ -78,8 +78,8 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 ## Collaboration、Task 与 Message
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
-- **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v10](../contracts/camp-message-send-v10.md)、[Camp History Retrieval v2](../contracts/camp-history-v2.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Gather v3](../contracts/gather-v3.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前架构：** [Camp Identity](../architecture/camp-identity.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
+- **当前合同：** [Camp Identity v1](../contracts/camp-identity-v1.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v10](../contracts/camp-message-send-v10.md)、[Camp History Retrieval v3](../contracts/camp-history-v3.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Gather v3](../contracts/gather-v3.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -106,6 +106,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 | [ADR-0195](0195-generation-scoped-last-gather-return.md) | Generation-Scoped Last Gather Return with Independent Bound |
 | [ADR-0215](0215-unified-single-camp-history-target-and-publication-boundary.md) | Unified Single-Camp History Target and Public Message Publication Boundary |
 | [ADR-0216](0216-explicit-agent-addressing-intent-as-delivery-gate.md) | Explicit Agent Addressing Intent as the Delivery Gate |
+| [ADR-0219](0219-single-namespaced-camp-identity.md) | Single Namespaced Camp Identity Separate from Native Sessions |
 <!-- adr-current-primary:end -->
 
 Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。
@@ -150,8 +151,8 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 ## Session、Context 与 Bootstrap
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
-- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Structured Current Input Skill Links](../architecture/structured-current-input-skill-links.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)、[ContextManifest Evidence v17](../contracts/context-manifest-evidence-v17.md)、[Run Facts v1](../contracts/run-facts-v1.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前架构：** [Camp Identity](../architecture/camp-identity.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Structured Current Input Skill Links](../architecture/structured-current-input-skill-links.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)、[ContextManifest Evidence v18](../contracts/context-manifest-evidence-v18.md)、[Run Facts v1](../contracts/run-facts-v1.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -208,7 +209,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)、[Windows Desktop Platform](../architecture/windows-desktop-platform.md)
-- **当前合同：** [Built-in Tool Transport v15](../contracts/builtin-tool-transport-v15.md)、[Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)
+- **当前合同：** [Built-in Tool Transport v16](../contracts/builtin-tool-transport-v16.md)、[Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |

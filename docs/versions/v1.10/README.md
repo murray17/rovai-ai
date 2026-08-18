@@ -4,24 +4,40 @@ version: v1.10
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: complete
-model_context_change: false
+implementation_status: in_progress
+model_context_change: true
 last_updated: 2026-08-18
 ---
 
-# Rovai-ai v1.10：Claude Code 与 Antigravity 的安全公开 Runtime 失败
+# Rovai-ai v1.10：唯一 Camp ID 与安全公开 Runtime 失败
 
-> 当前状态：Runtime、持久化、Read Model、Availability 与 Renderer 已完成，完整仓库门禁通过。
+> 当前状态：唯一 Camp identity clean break 与 Claude Code/Antigravity 安全公开失败均已实现；最终集成门禁、
+> macOS 打包验收、main 推送和 Applications 提升由本版本收口统一完成。
 >
 > 前置版本：[v1.09 完整会话查找、Mode-aware CLI 与 Tool 结果交互](../v1.09/README.md)。
 
 ## 版本目标
 
-当 Claude Code 或 Antigravity 明确返回错误、输出协议不兼容或本机执行环境不可用时，用户应看到产品名称、
-可靠归因和经过清理的原因，不再只看到“失败”、digest 或把 Runtime 格式问题误解为 Rovai 内部故障。
-完整 `anyhow` chain、原始 stderr、私有日志与用户可见 failure 继续位于不同安全边界。
+本版包含两个独立增量。Camp 不再与 Runtime 原生 UUID 共享模糊命名空间：`rvcamp_...` 成为数据库、Core、
+Renderer、Agent Context、Built-in Tool 与本机路径中的唯一 Camp 主键，Native Session/Thread 继续独立。
+同时，当 Claude Code 或 Antigravity 明确返回错误、输出协议不兼容或本机执行环境不可用时，用户应看到
+可靠归因和经过清理的原因；完整 `anyhow` chain、原始 stderr、私有日志与公开 failure 保持分离。
 
 ## 交付范围
+
+### 唯一 Camp identity clean break
+
+- 新增 `CampId`，唯一格式为 `rvcamp_<26 位小写 canonical Crockford Base32>`，payload 必须是 RFC-compatible
+  UUIDv7；Rust/TypeScript 同时验证 lexical、version 和 variant；
+- `CampId::new()` 直接生成 Camp 主键；数据库主键/外键、Core/Renderer `campId`、Agent Context、Built-in
+  Tool、事件和 Camp 路径使用同一值，不增加 `CampRef`、UUID alias 或映射表；
+- Desktop Core 参数、领域 command、Camp History target 与 Attachment path 在使用前严格解析；导航、
+  onboarding、pin、restorable location 与 timeline storage 丢弃旧本机 ID；
+- `SHARED_CONVERSATION.campId` 和 Agent-facing Camp/Task/History 输出改用 `rvcamp_...`，Native Session、Thread、
+  Turn、Conversation 与 Binding ID 的格式和恢复语义不变；
+- Formatter 20 / ContextManifest 18、Camp History v3、Built-in Tool Transport v16 与 fixture v20 原子换版；
+- Migration 95 在 Runtime failure 的 migration 94 之后把 projection schema 49→50，失效旧 context/binding 和
+  非终态执行；生产旧预发布 store 隔离到 `inactive-data-quarantine/` 后重建，不映射旧 UUID Camp。
 
 ### 安全公开失败合同
 
@@ -46,7 +62,7 @@ last_updated: 2026-08-18
 
 ### 持久化、检查与用户界面
 
-- Migration 94 将 Data Contract 升至 `v1.10`、projection schema 49，并为 `agent_run` 与
+- 独立的 Migration 94 将 Data Contract 升至 `v1.10`、projection schema 49，并为 `agent_run` 与
   `adapter_probe_attempt` 增加 nullable `public_runtime_failure_json`；旧 Run/attempt 保持 `null`；
 - `FailAgentRunCommand`、`RejectAgentRunDispatchCommand`、`PlannedShutdownAbortiveTerminal`、
   `AgentRunView.failure` 与 `ProductRuntimeAvailability.failure` 传递同一安全对象；
@@ -59,6 +75,10 @@ last_updated: 2026-08-18
 
 ## 明确不做
 
+- 不增加 `camp_ref`、旧 Camp UUID reader、别名查询、双写或永久映射；
+- 不把 `rvcamp_...` 传给 Runtime resume/load，也不修改 Native Session/Thread/Turn 或其他实体 ID；
+- 不为未发布的开发数据建立长期兼容迁移；quarantine 只提供可恢复证据，不是当前 reader；
+
 - 不修改 Codex、ACP Runtime、TRAE 或其他 Runtime 的执行与错误分类；
 - 不重构 Runtime manager、进程管理、后台扫描、检查调度或 Runtime Activity mapping；
 - 不把原始 stderr、完整日志、Prompt、Tool payload 或 digest 当作用户可见原因；
@@ -70,18 +90,25 @@ last_updated: 2026-08-18
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.09 以 `complete` 冻结为 historical；本概览、计划与版本索引建立唯一 current v1.10。 |
-| ADR | 确认无需更新 | 本版沿用 ADR-0059/0065/0083/0168/0192/0204 的 Runtime 权威、可操作状态、terminal 与按需检查边界，没有改变跨版本决策。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v8](../../contracts/runtime-launch-and-verification-v8.md)固定公开 failure、持久化、检查与 Renderer read model；[Run Process Detail Surface v9](../../contracts/run-process-detail-surface-v9.md)固定执行台和设置页呈现。 |
-| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录内部诊断、公开 failure 与浅检/显式检查边界。 |
+| ADR | 已更新 | [ADR-0219](../../adr/0219-single-namespaced-camp-identity.md)固定唯一 namespaced Camp identity 与 Native Session 分离；Runtime failure 继续沿用 ADR-0059/0065/0083/0168/0192/0204。 |
+| Contracts | 已更新 | [Camp Identity v1](../../contracts/camp-identity-v1.md)、[ContextManifest Evidence v18](../../contracts/context-manifest-evidence-v18.md)、[Camp History Retrieval v3](../../contracts/camp-history-v3.md)与[Built-in Tool Transport v16](../../contracts/builtin-tool-transport-v16.md)固定 Camp clean break；Runtime v8 与 Surface v9 独立固定公开 failure。 |
+| Architecture | 已更新 | [Camp Identity](../../architecture/camp-identity.md)记录生成、持久化、上下文、路径与 Native identity seam；[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录公开 failure 安全边界。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)和 Settings surface brief 固定按 origin 命名与安全 detail 展示。 |
 | Runtime Activity | 确认无需更新 | 公开 failure 不改变 Canonical Runtime Activity、Evidence schema、operation identity 或 registry classifier。 |
 | Runtime compatibility | 确认无需更新 | 未新增上游版本、capability 或资格证据；本版只改善既有 Claude Code/Antigravity 错误投影。 |
-| Documentation routing | 已更新 | 文档导航、版本索引、Contract index 与 ADR CURRENT 路由至 v8/v9 当前合同。 |
+| Documentation routing | 已更新 | 文档导航、Version/Contract/Architecture 索引和 ADR CURRENT 路由至 Camp v1/v18/v3/v16、ADR-0219 及 Runtime v8/v9。 |
 | Root README | 确认无需更新 | 安全错误可见性不改变项目定位、常青能力或正式 Runtime 支持集合。 |
 
 ## References
 
 - [实施与验收计划](implementation-plan.md)
+- [模型上下文 revision 1](model-context-change.md)
+- [ADR-0219](../../adr/0219-single-namespaced-camp-identity.md)
+- [Camp Identity v1](../../contracts/camp-identity-v1.md)
+- [ContextManifest Evidence v18](../../contracts/context-manifest-evidence-v18.md)
+- [Camp History Retrieval v3](../../contracts/camp-history-v3.md)
+- [Built-in Tool Transport v16](../../contracts/builtin-tool-transport-v16.md)
+- [Camp Identity Architecture](../../architecture/camp-identity.md)
 - [Runtime Launch and Verification v8](../../contracts/runtime-launch-and-verification-v8.md)
 - [Run Process Detail Surface v9](../../contracts/run-process-detail-surface-v9.md)
 - [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)

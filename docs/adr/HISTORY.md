@@ -230,4 +230,5 @@ generated_from: docs/adr-front-matter
 | [ADR-0216](0216-explicit-agent-addressing-intent-as-delivery-gate.md) | Explicit Agent Addressing Intent as the Delivery Gate | `accepted` | `cross-version` | [v1.07](../versions/v1.07/README.md) | — |
 | [ADR-0217](0217-transport-v15-inherits-cross-platform-v14.md) | Built-in Tool Transport v15 Inherits the Cross-Platform v14 Wire | `accepted` | `cross-version` | [v1.07](../versions/v1.07/README.md) | — |
 | [ADR-0218](0218-audience-specific-principal-message-projection.md) | Audience-Specific Principal Message Projection | `accepted` | `cross-version` | [v1.07](../versions/v1.07/README.md) | — |
+| [ADR-0219](0219-single-namespaced-camp-identity.md) | Single Namespaced Camp Identity Separate from Native Sessions | `accepted` | `cross-version` | [v1.10](../versions/v1.10/README.md) | — |
 <!-- adr-history:end -->
