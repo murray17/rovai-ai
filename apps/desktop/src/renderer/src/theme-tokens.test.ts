@@ -210,21 +210,23 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
-  it('lets the Members and Memory workspaces own the window top edge', () => {
+  it('gives Members and Memory the same full-width 50px window drag strip as other pages', () => {
     expect(css).toContain(`.content.compose-content,
 .content.settings-content,
 .content.members-content,
 .content.memory-content { grid-row: 1 / -1; }`)
-    expect(css).not.toContain('.window-drag-strip-members')
-    expect(css).not.toContain('.window-drag-strip-memory')
+    expect(css).toMatch(/\.window-drag-strip\s*\{[^}]*width: 100%[^}]*height: 50px[^}]*-webkit-app-region: drag/)
     expect(css).toMatch(/\.memory-library\s*\{[^}]*padding: 34px 28px 24px/)
-    expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 17px[^}]*border-bottom: 0/)
+    expect(css).toMatch(/\.memory-library-header\s*\{[^}]*align-items: flex-end[^}]*padding: 0 0 17px[^}]*border-bottom: 0(?![^}]*-webkit-app-region: drag)/)
+    expect(css).toMatch(/\.memory-header-actions\s*\{[^}]*position: relative[^}]*z-index: 3/)
     expect(css).toMatch(/\.content\.memory-content\s*\{[^}]*border-top: 0[^}]*background: var\(--surface\)/)
     expect(css).toContain('.memory-library-header .eyebrow')
     expect(css).toContain('.memory-page-notices')
     expect(css).not.toContain('.memory-page-kicker')
     expect(css).toMatch(/\.member-detail-scroll\s*\{[^}]*padding: 30px 26px 48px/)
-    expect(css).toMatch(/\.member-detail-header\s*\{[^}]*-webkit-app-region: drag/)
+    expect(css).toMatch(/\.member-detail-header\s*\{(?![^}]*-webkit-app-region: drag)[^}]*\}/)
+    expect(css).toMatch(/\.member-sidebar-actions\s*\{[^}]*position: relative[^}]*z-index: 3[^}]*-webkit-app-region: no-drag/)
+    expect(css).toMatch(/\.member-detail-actions\s*\{[^}]*position: relative[^}]*z-index: 3/)
   })
 
   it('uses solid, rule-free headers for the approved Memory, Appearance, and Reminder pages', () => {

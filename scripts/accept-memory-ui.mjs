@@ -110,7 +110,7 @@ try {
       sqliteIsTheOnlyMemoryAuthority: true,
       restartPersistence: true,
       dayAndNightLayouts: true,
-      fullHeightHeaderWithoutBlankDragStrip: true,
+      sharedWindowDragStripAndClickableHeaderActions: true,
       horizontalOverflow: false
     },
     headerGeometry: {
@@ -170,28 +170,58 @@ async function assertMemoryPageHeaderGeometry(cdp, context) {
     const headerBounds = header?.getBoundingClientRect()
     const headingBounds = heading?.getBoundingClientRect()
     const actionBounds = actions?.getBoundingClientRect()
+    const dragStrip = document.querySelector('.window-drag-strip-memory')
+    const dragStripBounds = dragStrip?.getBoundingClientRect()
+    const firstAction = actions?.querySelector('button')
+    const firstActionBounds = firstAction?.getBoundingClientRect()
+    const firstActionHit = firstActionBounds
+      ? document.elementFromPoint(
+          firstActionBounds.left + firstActionBounds.width / 2,
+          firstActionBounds.top + firstActionBounds.height / 2
+        )
+      : null
     const round = (value) => value == null ? null : Math.round(value * 10) / 10
     return {
-      hasBlankDragStrip: Boolean(document.querySelector('.window-drag-strip-memory')),
+      hasWindowDragStrip: Boolean(dragStrip),
+      dragStripTop: round(dragStripBounds?.top),
+      dragStripLeft: round(dragStripBounds?.left),
+      dragStripWidth: round(dragStripBounds?.width),
+      dragStripHeight: round(dragStripBounds?.height),
+      dragStripRegion: dragStrip
+        ? getComputedStyle(dragStrip).getPropertyValue('-webkit-app-region')
+        : null,
       contentTop: round(contentBounds?.top),
+      contentWidth: round(contentBounds?.width),
       libraryTop: round(libraryBounds?.top),
       headerTop: round(headerBounds?.top),
+      headerRegion: header
+        ? getComputedStyle(header).getPropertyValue('-webkit-app-region')
+        : null,
       topBorderWidth: content ? getComputedStyle(content).borderTopWidth : null,
       headerAlignment: header ? getComputedStyle(header).alignItems : null,
       hasKicker: Boolean(document.querySelector('.memory-page-kicker')),
+      firstActionClickable: Boolean(firstAction && firstActionHit
+        && (firstActionHit === firstAction || firstAction.contains(firstActionHit))),
       actionBottomDelta: headingBounds && actionBounds
         ? round(actionBounds.bottom - headingBounds.bottom)
         : null
     }
   })()`)
   assert(
-    !state.hasBlankDragStrip
+    state.hasWindowDragStrip
+      && Math.abs(state.dragStripTop) <= 0.5
+      && Math.abs(state.dragStripLeft - 270) <= 0.5
+      && Math.abs(state.dragStripWidth - state.contentWidth) <= 0.5
+      && Math.abs(state.dragStripHeight - 50) <= 0.5
+      && state.dragStripRegion === 'drag'
       && Math.abs(state.contentTop) <= 0.5
       && Math.abs(state.libraryTop) <= 0.75
       && Math.abs(state.headerTop - 34) <= 0.75
+      && state.headerRegion !== 'drag'
       && state.topBorderWidth === '0px'
       && state.headerAlignment === 'flex-end'
       && !state.hasKicker
+      && state.firstActionClickable
       && Math.abs(state.actionBottomDelta) <= 0.75,
     `${context} did not match the full-height rule-free header contract: ${JSON.stringify(state)}`
   )

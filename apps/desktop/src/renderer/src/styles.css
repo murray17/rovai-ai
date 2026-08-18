@@ -946,13 +946,12 @@ button:disabled { opacity: 0.52; cursor: default; }
   gap: 20px;
   padding: 0 0 17px;
   border-bottom: 0;
-  -webkit-app-region: drag;
 }
 .memory-library-header .eyebrow { color: var(--brand-ink); font-size: 9px; letter-spacing: .09em; }
 .memory-library-header h2 { margin: 4px 0 0; font: 620 25px/1.2 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; letter-spacing: -.03em; }
 .memory-library-header p:not(.eyebrow) { max-width: 650px; margin: 7px 0 0; color: var(--muted); font-size: 10.5px; line-height: 1.42; }
 .memory-library-header > div:first-child { min-width: 0; }
-.memory-header-actions { display: flex; flex: 0 0 auto; gap: 7px; }
+.memory-header-actions { position: relative; z-index: 3; display: flex; flex: 0 0 auto; gap: 7px; }
 .memory-header-actions,
 .memory-header-actions *,
 .memory-library-header :where(button, a, input, select, textarea, summary, details, [role="button"], [role="menu"], [role="menuitem"], [contenteditable="true"]) {
@@ -4815,7 +4814,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .member-sidebar-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
 .member-sidebar-heading strong { font-size: 13px; font-weight: 700; }
 .member-sidebar-heading span { color: var(--faint); font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.member-sidebar-actions { display: flex; flex: 0 0 auto; gap: 2px; }
+.member-sidebar-actions { position: relative; z-index: 3; display: flex; flex: 0 0 auto; gap: 2px; -webkit-app-region: no-drag; }
 .member-sidebar-actions button,
 .member-sidebar-filter button {
   display: grid;
@@ -5072,7 +5071,6 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   justify-content: space-between;
   gap: 20px;
   padding: 0 0 18px;
-  -webkit-app-region: drag;
 }
 .member-detail-header-empty { align-items: center; }
 .member-detail-heading { display: flex; min-width: 0; align-items: center; gap: 13px; }
@@ -5130,7 +5128,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .member-header-runtime.status-unavailable { color: var(--attention); }
 .member-header-runtime.status-checking,
 .member-header-runtime.status-unknown { color: var(--info); }
-.member-detail-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.member-detail-actions { position: relative; z-index: 3; display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .member-detail-actions,
 .member-detail-actions *,
 .member-detail-header :where(button, a, input, select, textarea, summary, details, [role="button"], [role="menu"], [role="menuitem"], [contenteditable="true"]) {
