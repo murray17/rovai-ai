@@ -57,6 +57,7 @@ state，不改变 projection ownership、preflight、Snapshot 或 Runtime load �
 | --- | --- |
 | `SkillLibraryService` | 提交 Library desired state 与 immutable Revision；启动时只维护 Rovai 私有 Library |
 | `skill_projection_root_state` | 持久 `active | removed`、dirty 与 pending cleanup；不探测 filesystem |
+| `skill_projection_run_registration` | Windows-only 持久 launch registration；绑定 AgentRun epoch 与 canonical root volume/file identity，不保存文件锁 |
 | `SkillProjectionReconciler` | 只在明确 root trigger 下安全检查、投影、验证、记录 observation 与 Snapshot |
 | `ContextService` | 在 Runtime launch 前取得或复用该 Run 已持久化的 start-time Snapshot |
 | `CurrentInputSkillResolver` | 只读相交发送时 selection、start-time Library availability 与 verified Exposure；生成 model entries 和完整 resolution evidence，不修改 filesystem |
@@ -146,10 +147,12 @@ claimed AgentRun
 backend 中，不同 Agent 的新 Run 可以把共享 projection 更新到最新 Revision；旧 Run 不被取消也不阻塞更新，
 之后重新读取 native Skill path 仍可能观察到新 Revision 或已删除 entry。
 
-Windows copy backend 使用 `Execution Root Projection Gate`：launch 在短 shared section 中验证 ready 并登记
-active Run；publish/recovery 取得 exclusive gate，等待该 exact root 的 active Run 结束并阻止新 launch。
-Core 启动先恢复该 root 未完成 journal，再开放准入。这个平台特例避免 copy/swap 期间 Runtime 读取半发布目录，
-但仍不把 SkillExposureSnapshot 升级为 lifetime load proof。
+Windows copy backend 使用 `Execution Root Projection Gate`：launch 在同一 Core database critical section 内验证
+ready，并持久登记 `AgentRun + execution epoch + canonical root identity` 后释放；publish/recovery 只有在该 exact
+root 无 active registration 时才能取得 mutation admission。等待方必须释放 database mutex，使 terminal settlement
+能够推进；Core restart 继续使用持久 registration，并在当前 root preflight 中恢复未完成 journal 后才开放新
+launch。这个平台特例避免 copy/swap 期间 Runtime 读取半发布目录，但仍不把 SkillExposureSnapshot 升级为
+lifetime load proof。
 
 已存在 ContextManifest 的 active Run 恢复时复用其已持久化 SkillExposureSnapshot，不把 Snapshot
 重新解释为当下 filesystem health，也不因此扫描其他 roots。
@@ -171,7 +174,12 @@ Resolver 只接受 `ready`、同 ID/同名且与冻结 Runtime Group 相容的�
 - active Run 结束后的 removed-root cleanup 是唯一受限例外；完成或失败后保持 removed，不进入后续
   background schedule。
 - Windows staging/final/backup 必须同父目录、同一 admitted NTFS volume；发布使用多阶段私有 journal，
-  每一步在 reopen/verify 后推进。journal、DB observation 与 opened identity/digest 无法唯一解释时，root 保持
+  staging 的 volume/file identity 在 rename 后必须成为 final identity，old final identity 必须跟随 backup；每一步
+  在 reopen/verify 后推进。journal、DB observation 与 opened identity/digest 无法唯一解释时，root 保持
   `skill_projection_recovery_required` 且不启动 Runtime。
 - crash recovery 对 rename 后 journal 未更新、DB commit 后 metadata state 未更新均幂等；文件系统工作不放进
   长 SQLite transaction，project-owned 或 externally modified entry 永不静默覆盖/删除。
+
+Migration 96 从已发布的 Data Contract `v1.10 / projection schema 50` 安装 observation `operation_id`、
+`entry_identity` 与 Windows Run registration，目标为 `v1.11 / projection schema 51`。它不改变 macOS link backend、
+ContextManifest 18 或 SkillExposureSnapshot schema 2。

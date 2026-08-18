@@ -42,7 +42,9 @@ use crate::{
 };
 
 #[cfg(windows)]
-use crate::platform::private_storage::{create_private_directory, create_private_new_file};
+use crate::platform::private_storage::{
+    admit_private_directory, create_private_directory, create_private_new_file,
+};
 
 pub const MAX_SKILL_FILES: usize = 1_000;
 pub const MAX_SKILL_DEPTH: usize = 32;
@@ -1953,6 +1955,64 @@ impl SkillLibraryService {
                 "Skill Revision {} content digest does not match its immutable record",
                 revision_id
             );
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn copy_revision_to_projection_staging(
+        &self,
+        revision: &SkillRevisionView,
+        destination: &Path,
+    ) -> Result<()> {
+        self.verify_revision_content(revision)?;
+        if destination.exists() {
+            anyhow::bail!(
+                "Windows Skill projection staging destination already exists: {}",
+                destination.display()
+            );
+        }
+        let source = self.revision_content_path(&revision.skill_id, &revision.id);
+        create_private_directory(destination)?;
+        let copied = (|| -> Result<CandidateSnapshot> {
+            let mut collector = CandidateCollector::default();
+            copy_candidate_tree(&source, destination, Path::new(""), 0, &mut collector)?;
+            candidate_snapshot(destination, &revision.name, collector)
+        })();
+        let copied = match copied {
+            Ok(copied) => copied,
+            Err(error) => {
+                let _ = remove_directory_if_present(destination);
+                return Err(error);
+            }
+        };
+        if copied.content_digest != revision.content_digest {
+            let _ = remove_directory_if_present(destination);
+            anyhow::bail!(
+                "Windows Skill projection staging digest does not match Revision {}",
+                revision.id
+            );
+        }
+        let reopened = inspect_candidate_tree(destination, &revision.name)?;
+        if reopened.content_digest != revision.content_digest || reopened != copied {
+            let _ = remove_directory_if_present(destination);
+            anyhow::bail!("Windows Skill projection staging changed before durable verification");
+        }
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn verify_projected_revision(
+        &self,
+        path: &Path,
+        name: &str,
+        expected_digest: &str,
+    ) -> Result<()> {
+        admit_private_directory(path)
+            .context("Windows Skill projection root failed private-storage admission")?;
+        let snapshot = inspect_candidate_tree(path, name)?;
+        if snapshot.content_digest != expected_digest {
+            anyhow::bail!("Windows Skill projection content digest does not match its observation");
         }
         Ok(())
     }

@@ -1,17 +1,14 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs,
+    fs::{self, OpenOptions},
+    io::Write,
     path::{Component, Path, PathBuf},
+    process::Command,
     str::FromStr,
 };
 
 #[cfg(unix)]
-use std::{
-    fs::OpenOptions,
-    io::Write,
-    os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink},
-    process::Command,
-};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
 
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -27,11 +24,12 @@ use crate::{
     skill::{SkillLibraryService, SkillView},
 };
 
-#[cfg(unix)]
+#[cfg(windows)]
+#[path = "skill_projection/windows.rs"]
+mod windows_projection;
+
 const GIT_EXCLUDE_BEGIN: &str = "# BEGIN ROVAI MANAGED SKILL PROJECTIONS";
-#[cfg(unix)]
 const GIT_EXCLUDE_END: &str = "# END ROVAI MANAGED SKILL PROJECTIONS";
-#[cfg(unix)]
 const MANAGED_GIT_EXCLUDE_MARKERS: [(&str, &str); 3] = [
     (GIT_EXCLUDE_BEGIN, GIT_EXCLUDE_END),
     (
@@ -43,6 +41,7 @@ const MANAGED_GIT_EXCLUDE_MARKERS: [(&str, &str); 3] = [
         "# END LUMEN MANAGED SKILL PROJECTIONS",
     ),
 ];
+#[cfg(unix)]
 const MANAGED_TEMP_PREFIX: &str = ".rovai-skill-projection-";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +90,23 @@ pub struct SkillProjectionRootAccessResult {
     pub access_state: String,
     pub cleanup_pending: bool,
 }
+
+#[derive(Debug)]
+pub struct SkillProjectionGateBusy {
+    execution_root: String,
+}
+
+impl std::fmt::Display for SkillProjectionGateBusy {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Windows Skill projection is waiting for active Runs in {}",
+            self.execution_root
+        )
+    }
+}
+
+impl std::error::Error for SkillProjectionGateBusy {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -249,11 +265,27 @@ impl SkillProjectionReconciler {
             observed != 0,
         )?;
 
-        if observed != 0 && !has_active_run(database, &execution_root_text, None, None)? {
-            match self.reconcile_root_internal(database, library, execution_root, &[]) {
-                Ok(_) => {
-                    mark_root_reconciled(database, &execution_root_text)?;
-                    self.finalize_deleting_skills(database, library)?;
+        let mutation_blocked = if observed == 0 {
+            false
+        } else {
+            match projection_mutation_blocked(database, execution_root, &execution_root_text, None)
+            {
+                Ok(blocked) => blocked,
+                Err(error) => {
+                    eprintln!(
+                        "deferred removed Skill projection cleanup for {}: {error:#}",
+                        execution_root.display()
+                    );
+                    true
+                }
+            }
+        };
+        if observed != 0 && !mutation_blocked {
+            match self.reconcile_root_internal(database, library, execution_root, &[], None) {
+                Ok(report) => {
+                    if finish_reconciliation_state(database, &report)? {
+                        self.finalize_deleting_skills(database, library)?;
+                    }
                 }
                 Err(error) => eprintln!(
                     "failed to clean removed Skill projection root {}: {error:#}",
@@ -340,7 +372,13 @@ impl SkillProjectionReconciler {
             return Ok(());
         }
         let removed = root_access_is_removed(database, &execution_root_text)?;
-        if removed && has_active_run(database, &execution_root_text, None, None)? {
+        let active_run_present = has_active_run(database, &execution_root_text, None, None)?;
+        if removed && active_run_present {
+            return Ok(());
+        }
+        if cfg!(windows)
+            && projection_mutation_blocked(database, execution_root, &execution_root_text, None)?
+        {
             return Ok(());
         }
         let required_delivery_groups = if removed {
@@ -354,9 +392,16 @@ impl SkillProjectionReconciler {
             )?);
             groups.into_iter().collect()
         };
-        self.reconcile_root_internal(database, library, execution_root, &required_delivery_groups)?;
-        mark_root_reconciled(database, &execution_root_text)?;
-        self.finalize_deleting_skills(database, library)?;
+        let report = self.reconcile_root_internal(
+            database,
+            library,
+            execution_root,
+            &required_delivery_groups,
+            None,
+        )?;
+        if finish_reconciliation_state(database, &report)? {
+            self.finalize_deleting_skills(database, library)?;
+        }
         Ok(())
     }
 
@@ -521,14 +566,24 @@ impl SkillProjectionReconciler {
             &canonical_root_text,
             Some(agent_run_id),
         )?);
-        self.reconcile_root_internal(
+        let report = self.reconcile_root_internal(
             database,
             library,
             &canonical_root,
             &delivery_groups.iter().copied().collect::<Vec<_>>(),
+            Some(agent_run_id),
         )?;
-        mark_root_reconciled(database, &canonical_root_text)?;
-        self.finalize_deleting_skills(database, library)?;
+        let reconciliation_finished = finish_reconciliation_state(database, &report)?;
+        #[cfg(windows)]
+        if !reconciliation_finished {
+            return Err(SkillProjectionGateBusy {
+                execution_root: canonical_root_text,
+            }
+            .into());
+        }
+        if reconciliation_finished {
+            self.finalize_deleting_skills(database, library)?;
+        }
 
         let mut entries = Vec::new();
         for group_key in &capability.delivery_groups {
@@ -637,10 +692,15 @@ impl SkillProjectionReconciler {
             schema_version: 2,
             skills: entries,
         };
-        Ok(PreparedSkillExposure {
+        let prepared = PreparedSkillExposure {
             digest: canonical_json_digest(&serde_json::to_value(&snapshot)?)?,
             snapshot,
-        })
+        };
+        #[cfg(windows)]
+        if !capability.delivery_groups.is_empty() {
+            windows_projection::register_run(database, &canonical_root, agent_run_id)?;
+        }
+        Ok(prepared)
     }
 
     pub fn reconcile_root(
@@ -655,8 +715,9 @@ impl SkillProjectionReconciler {
             library,
             execution_root,
             required_delivery_groups,
+            None,
         )?;
-        mark_root_reconciled(database, &report.execution_root)?;
+        finish_reconciliation_state(database, &report)?;
         Ok(report)
     }
 
@@ -666,6 +727,7 @@ impl SkillProjectionReconciler {
         library: &SkillLibraryService,
         execution_root: &Path,
         required_delivery_groups: &[SkillDeliveryGroupKey],
+        ignored_agent_run_id: Option<&str>,
     ) -> Result<SkillProjectionReport> {
         let execution_root = execution_root.canonicalize().with_context(|| {
             format!(
@@ -680,7 +742,21 @@ impl SkillProjectionReconciler {
             );
         }
         let execution_root_text = execution_root.to_string_lossy().to_string();
+        #[cfg(windows)]
+        windows_projection::prune_run_registrations(database)?;
         let active_run_present = has_active_run(database, &execution_root_text, None, None)?;
+        #[cfg(windows)]
+        let mutation_allowed = !windows_projection::has_active_run_registration(
+            database,
+            &execution_root,
+            ignored_agent_run_id,
+        )?;
+        #[cfg(not(windows))]
+        let mutation_allowed = true;
+        #[cfg(not(windows))]
+        let _ = ignored_agent_run_id;
+        #[cfg(windows)]
+        windows_projection::recover_root(database, library, &execution_root, mutation_allowed)?;
         let required_delivery_groups = required_delivery_groups
             .iter()
             .copied()
@@ -737,11 +813,13 @@ impl SkillProjectionReconciler {
                 if let Some(claude_observation) = claude_observation {
                     reconcile_undesired_entry(
                         database,
+                        library,
                         &execution_root_text,
                         group_key,
                         skill,
                         &entry_path,
                         state,
+                        mutation_allowed,
                     )?;
                     let pending_direct_removal =
                         load_observation(database, &execution_root_text, group_key, &skill.id)?
@@ -765,15 +843,18 @@ impl SkillProjectionReconciler {
                         skill,
                         &entry_path,
                         state,
+                        mutation_allowed,
                     )?;
                 } else {
                     reconcile_undesired_entry(
                         database,
+                        library,
                         &execution_root_text,
                         group_key,
                         skill,
                         &entry_path,
                         state,
+                        mutation_allowed,
                     )?;
                 }
             }
@@ -1237,14 +1318,19 @@ fn reconcile_desired_entry(
     skill: &SkillView,
     entry_path: &Path,
     state: EntryState,
+    mutation_allowed: bool,
 ) -> Result<()> {
+    let observed_revision_id = match &state {
+        EntryState::Managed(actual) if actual.skill_id == skill.id => actual.revision_id.as_str(),
+        _ => skill.current_revision.id.as_str(),
+    };
     if let Err(error) = library.verify_revision_content(&skill.current_revision) {
         upsert_observation(
             database,
             execution_root,
             group_key,
             skill,
-            &skill.current_revision.id,
+            observed_revision_id,
             entry_path,
             "error",
             Some("revision_corrupted"),
@@ -1255,20 +1341,62 @@ fn reconcile_desired_entry(
         );
         return Ok(());
     }
+    #[cfg(windows)]
+    let mutation_required = match &state {
+        EntryState::Missing => true,
+        EntryState::Managed(actual) => {
+            actual.skill_id == skill.id && actual.revision_id != skill.current_revision.id
+        }
+        EntryState::ProjectOwned(_) => false,
+    };
+    #[cfg(windows)]
+    if !mutation_allowed && mutation_required {
+        return upsert_observation(
+            database,
+            execution_root,
+            group_key,
+            skill,
+            observed_revision_id,
+            entry_path,
+            "stale",
+            Some("projection_update_waiting_for_active_run"),
+        );
+    }
+    #[cfg(not(windows))]
+    let _ = mutation_allowed;
+    #[cfg(unix)]
     let desired_target = library.revision_content_path(&skill.id, &skill.current_revision.id);
     match state {
         EntryState::Missing => {
-            publish_managed_link(&desired_target, entry_path, false)?;
-            upsert_observation(
-                database,
-                execution_root,
-                group_key,
-                skill,
-                &skill.current_revision.id,
-                entry_path,
-                "ready",
-                None,
-            )
+            #[cfg(unix)]
+            {
+                publish_managed_link(&desired_target, entry_path, false)?;
+                upsert_observation(
+                    database,
+                    execution_root,
+                    group_key,
+                    skill,
+                    &skill.current_revision.id,
+                    entry_path,
+                    "ready",
+                    None,
+                )
+            }
+            #[cfg(windows)]
+            {
+                windows_projection::publish_managed_copy(
+                    database,
+                    library,
+                    Path::new(execution_root),
+                    skill,
+                    entry_path,
+                    None,
+                )
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                anyhow::bail!("skill_projection_platform_not_supported")
+            }
         }
         EntryState::ProjectOwned(reason) => upsert_observation(
             database,
@@ -1309,17 +1437,35 @@ fn reconcile_desired_entry(
                 entry_path,
                 &actual,
             )?;
-            publish_managed_link(&desired_target, entry_path, true)?;
-            upsert_observation(
-                database,
-                execution_root,
-                group_key,
-                skill,
-                &skill.current_revision.id,
-                entry_path,
-                "ready",
-                None,
-            )
+            #[cfg(unix)]
+            {
+                publish_managed_link(&desired_target, entry_path, true)?;
+                upsert_observation(
+                    database,
+                    execution_root,
+                    group_key,
+                    skill,
+                    &skill.current_revision.id,
+                    entry_path,
+                    "ready",
+                    None,
+                )
+            }
+            #[cfg(windows)]
+            {
+                windows_projection::publish_managed_copy(
+                    database,
+                    library,
+                    Path::new(execution_root),
+                    skill,
+                    entry_path,
+                    Some(&actual),
+                )
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                anyhow::bail!("skill_projection_platform_not_supported")
+            }
         }
         EntryState::Managed(_) => upsert_observation(
             database,
@@ -1334,16 +1480,36 @@ fn reconcile_desired_entry(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn reconcile_undesired_entry(
     database: &mut Database,
+    library: &SkillLibraryService,
     execution_root: &str,
     group_key: SkillDeliveryGroupKey,
     skill: &SkillView,
     entry_path: &Path,
     state: EntryState,
+    mutation_allowed: bool,
 ) -> Result<()> {
+    #[cfg(not(windows))]
+    let _ = library;
     match state {
         EntryState::Managed(actual) if actual.skill_id == skill.id => {
+            #[cfg(windows)]
+            if !mutation_allowed {
+                return upsert_observation(
+                    database,
+                    execution_root,
+                    group_key,
+                    skill,
+                    &actual.revision_id,
+                    entry_path,
+                    "pending_removal",
+                    Some("projection_removal_waiting_for_active_run"),
+                );
+            }
+            #[cfg(not(windows))]
+            let _ = mutation_allowed;
             ensure_observation_proves_entry(
                 database,
                 execution_root,
@@ -1351,9 +1517,43 @@ fn reconcile_undesired_entry(
                 entry_path,
                 &actual,
             )?;
-            fs::remove_file(entry_path)
-                .with_context(|| format!("failed to remove {}", entry_path.display()))?;
-            delete_observation(database, execution_root, group_key, &skill.id)
+            #[cfg(unix)]
+            {
+                fs::remove_file(entry_path)
+                    .with_context(|| format!("failed to remove {}", entry_path.display()))?;
+                delete_observation(database, execution_root, group_key, &skill.id)
+            }
+            #[cfg(windows)]
+            {
+                windows_projection::remove_managed_copy(
+                    database,
+                    library,
+                    execution_root,
+                    group_key,
+                    skill,
+                    entry_path,
+                    &actual,
+                )
+            }
+            #[cfg(not(any(unix, windows)))]
+            {
+                anyhow::bail!("skill_projection_platform_not_supported")
+            }
+        }
+        #[cfg(windows)]
+        EntryState::ProjectOwned(reason)
+            if load_observation(database, execution_root, group_key, &skill.id)?.is_some() =>
+        {
+            upsert_observation(
+                database,
+                execution_root,
+                group_key,
+                skill,
+                &skill.current_revision.id,
+                entry_path,
+                "shadowed",
+                Some(reason),
+            )
         }
         EntryState::Missing | EntryState::ProjectOwned(_) | EntryState::Managed(_) => {
             delete_observation(database, execution_root, group_key, &skill.id)
@@ -1361,6 +1561,7 @@ fn reconcile_undesired_entry(
     }
 }
 
+#[cfg(unix)]
 fn inspect_entry(
     database: &Database,
     library: &SkillLibraryService,
@@ -1426,6 +1627,16 @@ fn inspect_entry(
     }))
 }
 
+#[cfg(windows)]
+fn inspect_entry(
+    database: &Database,
+    library: &SkillLibraryService,
+    entry_path: &Path,
+) -> Result<EntryState> {
+    windows_projection::inspect_entry(database, library, entry_path)
+}
+
+#[cfg(unix)]
 fn parse_managed_revision_target(library_root: &Path, target: &Path) -> Option<(String, String)> {
     let relative = target.strip_prefix(library_root).ok()?;
     let components = relative
@@ -1479,9 +1690,9 @@ fn ensure_observation_proves_entry(
         INSERT INTO skill_projection_observation(
             execution_root, group_key, skill_id, revision_id,
             entry_path, delivered_via_group_key, duplicate_visible,
-            state, last_error_code, last_observed_at
+            state, last_error_code, last_observed_at, operation_id
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?2, 0, 'stale',
-                  'observation_rebuilt_from_managed_target', ?6)
+                  'observation_rebuilt_from_managed_target', ?6, NULL)
         ON CONFLICT(execution_root, group_key, skill_id) DO UPDATE SET
             revision_id = excluded.revision_id,
             entry_path = excluded.entry_path,
@@ -1489,7 +1700,9 @@ fn ensure_observation_proves_entry(
             duplicate_visible = excluded.duplicate_visible,
             state = excluded.state,
             last_error_code = excluded.last_error_code,
-            last_observed_at = excluded.last_observed_at
+            last_observed_at = excluded.last_observed_at,
+            operation_id = NULL,
+            entry_identity = NULL
         "#,
         params![
             execution_root,
@@ -1514,6 +1727,62 @@ fn upsert_observation(
     state: &str,
     last_error_code: Option<&str>,
 ) -> Result<()> {
+    upsert_observation_internal(
+        database,
+        execution_root,
+        group_key,
+        skill,
+        revision_id,
+        entry_path,
+        state,
+        last_error_code,
+        None,
+        None,
+    )
+}
+
+#[cfg(windows)]
+#[allow(clippy::too_many_arguments)]
+fn upsert_observation_for_operation(
+    database: &mut Database,
+    execution_root: &str,
+    group_key: SkillDeliveryGroupKey,
+    skill: &SkillView,
+    revision_id: &str,
+    entry_path: &Path,
+    state: &str,
+    last_error_code: Option<&str>,
+    operation_id: &str,
+    entry_identity: &str,
+) -> Result<()> {
+    Uuid::parse_str(operation_id).context("Skill projection operation ID is invalid")?;
+    upsert_observation_internal(
+        database,
+        execution_root,
+        group_key,
+        skill,
+        revision_id,
+        entry_path,
+        state,
+        last_error_code,
+        Some(operation_id),
+        Some(entry_identity),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn upsert_observation_internal(
+    database: &mut Database,
+    execution_root: &str,
+    group_key: SkillDeliveryGroupKey,
+    skill: &SkillView,
+    revision_id: &str,
+    entry_path: &Path,
+    state: &str,
+    last_error_code: Option<&str>,
+    operation_id: Option<&str>,
+    entry_identity: Option<&str>,
+) -> Result<()> {
     let duplicate_visible = exact_duplicate_visible(
         Path::new(execution_root),
         group_key,
@@ -1525,8 +1794,9 @@ fn upsert_observation(
         INSERT INTO skill_projection_observation(
             execution_root, group_key, skill_id, revision_id,
             entry_path, delivered_via_group_key, duplicate_visible,
-            state, last_error_code, last_observed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?2, ?6, ?7, ?8, ?9)
+            state, last_error_code, last_observed_at, operation_id,
+            entry_identity
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?2, ?6, ?7, ?8, ?9, ?10, ?11)
         ON CONFLICT(execution_root, group_key, skill_id) DO UPDATE SET
             revision_id = excluded.revision_id,
             entry_path = excluded.entry_path,
@@ -1534,7 +1804,15 @@ fn upsert_observation(
             duplicate_visible = excluded.duplicate_visible,
             state = excluded.state,
             last_error_code = excluded.last_error_code,
-            last_observed_at = excluded.last_observed_at
+            last_observed_at = excluded.last_observed_at,
+            operation_id = COALESCE(
+                excluded.operation_id,
+                skill_projection_observation.operation_id
+            ),
+            entry_identity = COALESCE(
+                excluded.entry_identity,
+                skill_projection_observation.entry_identity
+            )
         "#,
         params![
             execution_root,
@@ -1546,6 +1824,8 @@ fn upsert_observation(
             state,
             last_error_code,
             Utc::now().to_rfc3339(),
+            operation_id,
+            entry_identity,
         ],
     )?;
     Ok(())
@@ -1573,8 +1853,8 @@ fn upsert_forwarded_observation(
         INSERT INTO skill_projection_observation(
             execution_root, group_key, skill_id, revision_id,
             entry_path, delivered_via_group_key, duplicate_visible,
-            state, last_error_code, last_observed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'ready', NULL, ?8)
+            state, last_error_code, last_observed_at, operation_id
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'ready', NULL, ?8, NULL)
         ON CONFLICT(execution_root, group_key, skill_id) DO UPDATE SET
             revision_id = excluded.revision_id,
             entry_path = excluded.entry_path,
@@ -1582,7 +1862,9 @@ fn upsert_forwarded_observation(
             duplicate_visible = excluded.duplicate_visible,
             state = excluded.state,
             last_error_code = excluded.last_error_code,
-            last_observed_at = excluded.last_observed_at
+            last_observed_at = excluded.last_observed_at,
+            operation_id = NULL,
+            entry_identity = NULL
         "#,
         params![
             execution_root,
@@ -1608,12 +1890,13 @@ fn exact_duplicate_visible(
     if fs::symlink_metadata(&legacy_agents_entry).is_ok() {
         return true;
     }
+    #[cfg(unix)]
     if direct_entry_path.is_some_and(|path| {
         fs::symlink_metadata(path).is_ok_and(|metadata| !metadata.file_type().is_symlink())
     }) {
         return true;
     }
-    let Some(user_home) = std::env::var_os("HOME").map(PathBuf::from) else {
+    let Some(user_home) = dirs::home_dir() else {
         return false;
     };
     let user_entry = user_home.join(group_key.relative_path()).join(skill_name);
@@ -1683,11 +1966,7 @@ fn publish_managed_link(target: &Path, entry_path: &Path, replace: bool) -> Resu
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn publish_managed_link(_target: &Path, _entry_path: &Path, _replace: bool) -> Result<()> {
-    anyhow::bail!("windows_skill_projection_not_implemented")
-}
-
+#[cfg(unix)]
 fn cleanup_safe_temporary_links(
     database: &Database,
     library: &SkillLibraryService,
@@ -1711,6 +1990,18 @@ fn cleanup_safe_temporary_links(
     Ok(())
 }
 
+#[cfg(windows)]
+fn cleanup_safe_temporary_links(
+    _database: &Database,
+    library: &SkillLibraryService,
+    native_root: &Path,
+) -> Result<()> {
+    // Windows staging and backup paths are governed by the private operation
+    // journal and are recovered once per root before group reconciliation.
+    windows_projection::audit_temporary_paths(library, native_root)
+}
+
+#[cfg(unix)]
 fn load_managed_symlink_target(
     database: &Database,
     library: &SkillLibraryService,
@@ -1861,6 +2152,42 @@ fn mark_root_reconciled(database: &mut Database, execution_root: &str) -> Result
     Ok(())
 }
 
+fn finish_reconciliation_state(
+    database: &mut Database,
+    report: &SkillProjectionReport,
+) -> Result<bool> {
+    if !reconciliation_has_deferred_mutation(report) {
+        mark_root_reconciled(database, &report.execution_root)?;
+        return Ok(true);
+    }
+    let now = Utc::now().to_rfc3339();
+    database.connection().execute(
+        r#"
+        INSERT INTO skill_projection_root_state(
+            execution_root, access_state, dirty,
+            cleanup_required, removed_at, updated_at
+        ) VALUES (?1, 'active', 1, 0, NULL, ?2)
+        ON CONFLICT(execution_root) DO UPDATE SET
+            dirty = 1,
+            updated_at = excluded.updated_at
+        "#,
+        params![report.execution_root, now],
+    )?;
+    Ok(false)
+}
+
+fn reconciliation_has_deferred_mutation(report: &SkillProjectionReport) -> bool {
+    report.observations.iter().any(|observation| {
+        matches!(
+            observation.last_error_code.as_deref(),
+            Some(
+                "projection_update_waiting_for_active_run"
+                    | "projection_removal_waiting_for_active_run"
+            )
+        )
+    })
+}
+
 fn root_access_is_removed(database: &Database, execution_root: &str) -> Result<bool> {
     Ok(database
         .connection()
@@ -1932,6 +2259,26 @@ fn active_run_delivery_groups(
         );
     }
     Ok(groups)
+}
+
+#[cfg(windows)]
+fn projection_mutation_blocked(
+    database: &Database,
+    execution_root: &Path,
+    _execution_root_text: &str,
+    ignored_agent_run_id: Option<&str>,
+) -> Result<bool> {
+    windows_projection::has_active_run_registration(database, execution_root, ignored_agent_run_id)
+}
+
+#[cfg(not(windows))]
+fn projection_mutation_blocked(
+    database: &Database,
+    _execution_root: &Path,
+    execution_root_text: &str,
+    ignored_agent_run_id: Option<&str>,
+) -> Result<bool> {
+    has_active_run(database, execution_root_text, ignored_agent_run_id, None)
 }
 
 fn has_active_run(
@@ -2048,7 +2395,6 @@ fn list_observations_for_root(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
-#[cfg(unix)]
 fn update_git_exclude(execution_root: &Path, managed_entries: &BTreeSet<PathBuf>) -> Result<()> {
     let top_level = run_git_path(execution_root, &["rev-parse", "--show-toplevel"])?;
     let Some(top_level) = top_level else {
@@ -2101,32 +2447,41 @@ fn update_git_exclude(execution_root: &Path, managed_entries: &BTreeSet<PathBuf>
     }
     let parent = exclude.parent().context("Git exclude path has no parent")?;
     fs::create_dir_all(parent)?;
+    #[cfg(unix)]
     let mode = fs::metadata(&exclude)
         .map(|metadata| metadata.permissions().mode() & 0o777)
         .unwrap_or(0o644);
     let temporary = parent.join(format!(".rovai-info-exclude-{}.tmp", Uuid::new_v4()));
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(mode)
-        .open(&temporary)?;
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    options.mode(mode);
+    let mut file = options.open(&temporary)?;
     file.write_all(next.as_bytes())?;
     file.sync_all()?;
-    fs::rename(&temporary, &exclude)?;
+    drop(file);
+    if let Err(error) = replace_git_exclude(&temporary, &exclude) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn update_git_exclude(_execution_root: &Path, _managed_entries: &BTreeSet<PathBuf>) -> Result<()> {
-    anyhow::bail!("windows_skill_projection_not_implemented")
+#[cfg(unix)]
+fn replace_git_exclude(source: &Path, destination: &Path) -> Result<()> {
+    fs::rename(source, destination).context("failed to publish Git Skill projection exclusions")
 }
 
-#[cfg(unix)]
+#[cfg(windows)]
+fn replace_git_exclude(source: &Path, destination: &Path) -> Result<()> {
+    crate::platform::windows_file_tree::replace_temporary(source, destination)
+        .context("failed to publish Git Skill projection exclusions")
+}
+
 fn run_git_path(cwd: &Path, arguments: &[&str]) -> Result<Option<String>> {
     run_git_path_with_executable(cwd, arguments, std::ffi::OsStr::new("git"))
 }
 
-#[cfg(unix)]
 fn run_git_path_with_executable(
     cwd: &Path,
     arguments: &[&str],
@@ -2151,7 +2506,6 @@ fn run_git_path_with_executable(
     Ok((!value.is_empty()).then_some(value))
 }
 
-#[cfg(unix)]
 fn strip_managed_exclude_block(content: &str) -> Result<(String, bool)> {
     let mut output = String::new();
     let mut expected_end = None;
@@ -2190,7 +2544,6 @@ fn strip_managed_exclude_block(content: &str) -> Result<(String, bool)> {
     Ok((output, block_count > 0))
 }
 
-#[cfg(unix)]
 fn path_to_git_pattern(path: &Path) -> String {
     path.components()
         .filter_map(|component| match component {
@@ -2202,7 +2555,6 @@ fn path_to_git_pattern(path: &Path) -> String {
         .join("/")
 }
 
-#[cfg(unix)]
 fn escape_gitignore_component(component: &str) -> String {
     let mut escaped = String::with_capacity(component.len());
     for character in component.chars() {

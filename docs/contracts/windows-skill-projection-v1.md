@@ -27,15 +27,19 @@ Root Access、desired state 和 SkillExposureSnapshot 继续由
   "skillId": "...",
   "oldRevisionId": "... or null",
   "oldContentDigest": "sha256:... or null",
+  "oldEntryIdentity": "volume-and-directory-file-id or null",
   "newRevisionId": "...",
   "newContentDigest": "sha256:...",
+  "newEntryIdentity": "volume-and-directory-file-id",
   "state": "prepared|old_moved_to_backup|new_promoted|verified|metadata_committed|cleanup_pending|completed"
 }
 ```
 
-Paths are siblings under one verified parent and volume. Every rename destination must not exist. Journal replacement is
-itself a private temp-write + flush + publish operation; copied file bytes are flushed before `prepared`. A state advances
-only after the filesystem result has been reopened and verified.
+Paths are siblings under one verified parent and volume. `newEntryIdentity` is captured from the fully flushed staging
+directory and must remain unchanged when staging is renamed to final; the optional old identity must likewise follow
+final to backup. Every rename destination must not exist. Journal replacement is itself a private temp-write + flush +
+publish operation; copied file bytes are flushed before `prepared`. A state advances only after the filesystem result has
+been reopened and its identity plus digest verified.
 
 ## 2. Publish sequence
 
@@ -79,6 +83,7 @@ staging and backup and the DB observation for `operationId`:
 - crash after DB commit but before `metadata_committed` is idempotently recognized by `operationId`;
 - old-only state restores old final; new-only verified state completes metadata; verified old+new selects according to
   the last proven transition and never deletes either until DB authority is settled;
+- same path and same content with a different NTFS volume/file identity is external replacement, not Rovai ownership;
 - missing, mismatched, project-owned or externally changed evidence is `ambiguous`; the root remains closed and repair
   diagnostics preserve all paths.
 
@@ -89,17 +94,26 @@ before and after every filesystem, journal and DB transition.
 
 The gate is keyed by opened canonical root identity:
 
-- launch obtains shared admission, verifies `ready`, records the active Run, then releases the short critical section;
+- launch obtains shared admission, verifies `ready`, records `agentRunId + executionEpoch + executionRoot + rootIdentity`
+  in `skill_projection_run_registration`, then releases the short critical section;
 - publish/recovery obtains exclusive admission; it waits until the root has no active Runs and blocks new launches;
 - an active Run keeps only a registration, not a long-held filesystem lock;
-- Core restart reconstructs active/recovery facts, resolves journals, then opens admission;
+- registration and projection mutation are serialized by the single Core database critical section; waiting never holds
+  that mutex, so terminal settlement can unregister the old Run;
+- terminal registrations are pruned only after authoritative AgentRun status/epoch proves they are no longer active;
+- Core restart reuses persisted registrations, reconstructs active/recovery facts, resolves journals, then opens admission;
 - ambiguous recovery leaves the root blocked with a stable `skill_projection_recovery_required` reason.
+
+Migration 96 installs the registration table plus nullable `operation_id` and `entry_identity` observation columns and
+advances the exact `v1.10 / schema 50` source to Data Contract `v1.11 / projection schema 51`. Existing macOS observations
+remain valid with null Windows-only identity fields.
 
 ## 5. Ownership and delete
 
-DB observation, journal/operation identity, entry/root opened identities, Skill/Revision identity and exact content digest
-must agree before replace or delete. Missing evidence, ordinary directories, foreign links or external modifications are
-project-owned/drift: preserve them, record the issue and fail closed. Runtime-visible Skill content contains no marker.
+DB observation, journal/operation identity, persisted entry identity, current entry/root opened identities,
+Skill/Revision identity and exact content digest must agree before replace or delete. Missing evidence, ordinary
+directories, foreign links or external modifications are project-owned/drift: preserve them, record the issue and fail
+closed. Runtime-visible Skill content contains no marker.
 
 ## References
 

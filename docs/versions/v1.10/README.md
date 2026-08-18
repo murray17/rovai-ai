@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.10
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-18
 > arm64 macOS 打包与严格签名检查、隔离启动验收、main 推送和 `/Applications/Rovai AI.app` 提升均已完成。
 >
 > 前置版本：[v1.09 完整会话查找、Mode-aware CLI 与 Tool 结果交互](../v1.09/README.md)。
+>
+> 后续版本：[v1.11 Windows x64 产品实现与资格闭环](../v1.11/README.md)。
 
 ## 版本目标
 

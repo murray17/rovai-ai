@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import { aggregateBenchmarkSuite } from './suite.mjs'
 import {
   CURRENT_CONTRACT_CRITERIA,
+  CURRENT_CONTRACT_DATA_STORE,
   CURRENT_CONTRACT_PREREQUISITES,
   CURRENT_CONTRACT_PROFILE
 } from '../profiles/current-contract-conformance.mjs'
@@ -79,8 +80,10 @@ export async function runCurrentContractConformance({
   const hardOutcome = infrastructurePassed ? (testsPassed ? 'pass' : 'fail') : 'unavailable'
   const failureTaxonomy = classifyBenchmarkFailure({
     benchmarkContractValid: true,
-    productContractMatched: productContract.dataContractVersion.value === 'v0.83'
-      && productContract.dataContractSchemaVersion.value === 41,
+    productContractMatched:
+      productContract.dataContractVersion.value === CURRENT_CONTRACT_DATA_STORE.version &&
+      productContract.dataContractSchemaVersion.value ===
+        CURRENT_CONTRACT_DATA_STORE.projectionSchemaVersion,
     environmentValid: infrastructurePassed,
     evaluationState: infrastructurePassed ? 'complete' : 'pending',
     verifiedDelivery: infrastructurePassed ? (testsPassed ? 'pass' : 'fail') : 'unavailable',

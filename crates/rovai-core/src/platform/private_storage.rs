@@ -4,8 +4,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::io::Read;
+
 use anyhow::{Context, Result};
 use serde::Serialize;
+#[cfg(windows)]
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -72,6 +77,14 @@ pub(crate) fn create_private_directory(path: &Path) -> Result<PathBuf> {
     create_private_directory_platform(path)
 }
 
+/// Admits one existing Windows private directory without creating a missing
+/// leaf. Verification paths use this to avoid turning a disappearance race
+/// into a new empty managed object.
+#[cfg(windows)]
+pub(crate) fn admit_private_directory(path: &Path) -> Result<PathBuf> {
+    windows::admit_private_directory(path)
+}
+
 /// Opens a retained private read/write file, creating it atomically when absent.
 ///
 /// This is intentionally narrower than `OpenOptions`: callers cannot request a
@@ -81,9 +94,47 @@ pub(crate) fn open_private_read_write_file(path: &Path) -> Result<File> {
     open_private_read_write_file_platform(path)
 }
 
+/// Opens an existing private regular file without ever creating a replacement.
+#[cfg(windows)]
+pub(crate) fn open_private_read_file(path: &Path) -> Result<File> {
+    open_private_read_file_platform(path)
+}
+
 /// Creates a new private, non-inheritable file and rejects an existing leaf.
 pub(crate) fn create_private_new_file(path: &Path) -> Result<File> {
     create_private_new_file_platform(path)
+}
+
+/// Creates one private JSON document and rejects any existing destination.
+#[cfg(windows)]
+pub(crate) fn create_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let parent = path.parent().context("private JSON path has no parent")?;
+    prepare_private_directory(parent)?;
+    let bytes = serde_json::to_vec_pretty(value)?;
+    let mut file = create_private_new_file(path)?;
+    file.write_all(&bytes)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+/// Reads one admitted private JSON document with a strict byte bound.
+#[cfg(windows)]
+pub(crate) fn read_private_json<T: DeserializeOwned>(
+    path: &Path,
+    maximum_bytes: usize,
+) -> Result<T> {
+    let mut file = open_private_read_file(path)?;
+    let read_limit = u64::try_from(maximum_bytes)
+        .context("private JSON byte limit is too large")?
+        .saturating_add(1);
+    let mut bytes = Vec::new();
+    Read::by_ref(&mut file)
+        .take(read_limit)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > maximum_bytes {
+        anyhow::bail!("private JSON exceeds the {} byte limit", maximum_bytes);
+    }
+    serde_json::from_slice(&bytes).context("private JSON is invalid")
 }
 
 /// Writes JSON through a fresh private sibling, flushes its bytes, and then
@@ -267,6 +318,11 @@ mod windows {
             }
         }
 
+        admit_private_directory(path)
+    }
+
+    pub(super) fn admit_private_directory(path: &Path) -> Result<PathBuf> {
+        validate_native_absolute_path(path)?;
         let opened = open_path(path, ExpectedObjectKind::Directory)?;
         admit_volume(path)?;
         let identity = file_identity(&opened)?;
@@ -368,6 +424,37 @@ mod windows {
                 format!(
                     "{} private file {} failed admission: {error:#}",
                     if created { "new" } else { "existing" },
+                    path.display()
+                ),
+            )
+        })?;
+        Ok(File::from(handle))
+    }
+
+    pub(super) fn open_private_read_file(path: &Path) -> Result<File> {
+        validate_native_absolute_path(path)?;
+        let parent = path.parent().ok_or_else(|| {
+            blocker(
+                HOST_UNSUPPORTED,
+                format!("private file path has no parent: {}", path.display()),
+            )
+        })?;
+        let admitted_parent = admit_private_directory(parent)?;
+        let parent_handle = open_path(&admitted_parent, ExpectedObjectKind::Directory)?;
+        let parent_identity = file_identity(&parent_handle)?;
+        let handle = open_existing_private_file(path)?;
+        let identity = inspect_handle(&handle, ExpectedObjectKind::File)?;
+        if identity.volume_serial_number != parent_identity.volume_serial_number {
+            bail!(
+                "{IDENTITY_UNAVAILABLE}: private file and parent resolved to different volumes: {}",
+                path.display()
+            );
+        }
+        verify_private_acl(&handle, PrivateObjectKind::File, "private file").map_err(|error| {
+            blocker(
+                PRIVATE_ACL_INVALID,
+                format!(
+                    "private file {} failed admission: {error:#}",
                     path.display()
                 ),
             )
@@ -762,6 +849,11 @@ fn create_private_directory_platform(path: &Path) -> Result<PathBuf> {
 #[cfg(windows)]
 fn open_private_read_write_file_platform(path: &Path) -> Result<File> {
     windows::open_private_read_write_file(path)
+}
+
+#[cfg(windows)]
+fn open_private_read_file_platform(path: &Path) -> Result<File> {
+    windows::open_private_read_file(path)
 }
 
 #[cfg(windows)]

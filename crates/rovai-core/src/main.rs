@@ -187,7 +187,8 @@ use rovai_core::{
         SetSkillGroupAssignmentsCommand, SkillLibraryService,
     },
     skill_projection::{
-        PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionReconciler,
+        PreparedSkillExposure, ReconcileSkillProjectionsCommand, SkillProjectionGateBusy,
+        SkillProjectionReconciler,
     },
     team_tool::{
         BuiltinToolBindingCredential, CampMessageSendInput, CampMessageSendInvocation, GatherInput,
@@ -6574,16 +6575,28 @@ impl Core {
         &self,
         execution: &AgentRunExecution,
     ) -> Result<Option<PreparedSkillExposure>> {
-        let exposure = {
-            let mut database = self.database.lock().await;
-            ContextService.prepare_skill_exposure(
-                &mut database,
-                &self.skill_library,
-                &execution.agent_run_id,
-                execution.execution_epoch,
-            )
-        }?;
-        Ok(Some(exposure))
+        loop {
+            let result = {
+                let mut database = self.database.lock().await;
+                ContextService.prepare_skill_exposure(
+                    &mut database,
+                    &self.skill_library,
+                    &execution.agent_run_id,
+                    execution.execution_epoch,
+                )
+            };
+            match result {
+                Ok(exposure) => return Ok(Some(exposure)),
+                Err(error) if error.downcast_ref::<SkillProjectionGateBusy>().is_some() => {
+                    // The database mutex is deliberately released while an
+                    // already-launched Windows Runtime keeps the shared root
+                    // registration. Its terminal hook (or this retry after a
+                    // restart) can then perform the exclusive projection update.
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     async fn prepare_agent_run_mcp_projection(

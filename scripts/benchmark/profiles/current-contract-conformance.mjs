@@ -1,6 +1,11 @@
 import { defineBenchmarkProfile } from '../execution/suite.mjs'
 import { digestJson } from '../protocol/canonical.mjs'
 
+export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
+  version: 'v1.11',
+  projectionSchemaVersion: 51
+})
+
 const criteria = [
   criterion('CCC-001', 'Public A2A Current Input preserves the trusted sender Agent identity', [
     test('crates/rovai-core/src/team_tool.rs', 'public_delivery_runtime_consumes_the_pre_run_frozen_context_bytes')
@@ -33,10 +38,14 @@ const criteria = [
   criterion('CCC-010', 'ContextManifest version is 18 and Context Formatter version is 20', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v1.10 with projection schema 50', [
-    test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
-    test('crates/rovai-core/src/db.rs', 'current_schema_contains_required_contract_objects')
-  ]),
+  criterion(
+    'CCC-011',
+    `Data Contract is ${CURRENT_CONTRACT_DATA_STORE.version} with projection schema ${CURRENT_CONTRACT_DATA_STORE.projectionSchemaVersion}`,
+    [
+      test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
+      test('crates/rovai-core/src/db.rs', 'current_schema_contains_required_contract_objects')
+    ]
+  ),
   criterion('CCC-012', 'CampSnapshot schema is 29', [
     test('crates/rovai-core/src/read_model.rs', 'snapshot_projects_current_names_from_structured_mentions')
   ]),
@@ -71,7 +80,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.10.0',
+  version: '1.11.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -89,8 +98,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.10-current-contract',
-    version: '1.10.0',
+    id: 'rovai-v1.11-current-contract',
+    version: '1.11.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

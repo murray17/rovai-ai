@@ -129,6 +129,12 @@ jobs:
           --target x86_64-pc-windows-msvc
           windows_skill_library
 
+      - name: Exercise Windows Skill projection lifecycle
+        run: >-
+          cargo test -p rovai-core --lib
+          --target x86_64-pc-windows-msvc
+          windows_skill_projection
+
       - name: Exercise Windows private JSON replacement
         run: >-
           cargo test -p rovai-core --lib

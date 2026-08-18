@@ -26,14 +26,16 @@ use windows_sys::{
             RtlNtStatusToDosError, SetHandleInformation, UNICODE_STRING,
         },
         Storage::FileSystem::{
-            CreateFileW, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_READONLY,
-            FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO, FILE_BASIC_INFO,
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-            FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ,
-            FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileAttributeTagInfo, FileBasicInfo,
-            FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo,
-            GetFileAttributesW, GetFileInformationByHandleEx, INVALID_FILE_ATTRIBUTES,
+            CreateFileW, DELETE, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY,
+            FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
+            FILE_BASIC_INFO, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO,
+            FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO,
+            FileAttributeTagInfo, FileBasicInfo, FileDispositionInfo, FileIdBothDirectoryInfo,
+            FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, GetFileAttributesW,
+            GetFileInformationByHandleEx, INVALID_FILE_ATTRIBUTES, MOVEFILE_REPLACE_EXISTING,
             MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, SetFileAttributesW,
+            SetFileInformationByHandle,
         },
         System::IO::IO_STATUS_BLOCK,
     },
@@ -65,6 +67,14 @@ pub(crate) struct NodeMetadata {
 /// point resolves to. Ancestors are resolved once by Windows; every descendant
 /// is subsequently opened relative to this retained handle.
 pub(crate) fn open_path_without_following(path: &Path) -> Result<File> {
+    open_path_with_access(path, FILE_GENERIC_READ)
+}
+
+pub(crate) fn open_path_for_removal(path: &Path) -> Result<File> {
+    open_path_with_access(path, FILE_GENERIC_READ | DELETE)
+}
+
+fn open_path_with_access(path: &Path, desired_access: u32) -> Result<File> {
     validate_source_path(path)?;
     let wide_path = wide_nul(path.as_os_str())?;
     let raw = unsafe {
@@ -72,7 +82,7 @@ pub(crate) fn open_path_without_following(path: &Path) -> Result<File> {
         // the new handle non-inheritable and OPEN_EXISTING creates no object.
         CreateFileW(
             wide_path.as_ptr(),
-            FILE_GENERIC_READ,
+            desired_access,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             null(),
             OPEN_EXISTING,
@@ -91,6 +101,14 @@ pub(crate) fn open_path_without_following(path: &Path) -> Result<File> {
 /// receives the retained directory handle as RootDirectory, so no absolute
 /// child path is re-resolved between enumeration and opening.
 pub(crate) fn open_child_without_following(directory: &File, name: &OsStr) -> Result<File> {
+    open_child_with_access(directory, name, FILE_GENERIC_READ)
+}
+
+pub(crate) fn open_child_for_removal(directory: &File, name: &OsStr) -> Result<File> {
+    open_child_with_access(directory, name, FILE_GENERIC_READ | DELETE)
+}
+
+fn open_child_with_access(directory: &File, name: &OsStr, desired_access: u32) -> Result<File> {
     let mut name_wide = direct_name(name)?;
     let byte_length = name_wide
         .len()
@@ -118,7 +136,7 @@ pub(crate) fn open_child_without_following(directory: &File, name: &OsStr) -> Re
         // instead of following it; inspect_node rejects such a handle.
         NtCreateFile(
             &mut raw,
-            FILE_GENERIC_READ,
+            desired_access,
             &attributes,
             &mut io_status,
             null(),
@@ -140,6 +158,28 @@ pub(crate) fn open_child_without_following(directory: &File, name: &OsStr) -> Re
         });
     }
     owned_file(raw)
+}
+
+/// Marks the exact opened file or empty directory for deletion. The object is
+/// removed when the retained handle closes, so a same-path replacement cannot
+/// redirect this mutation to a different node.
+pub(crate) fn delete_on_close(file: &File) -> Result<()> {
+    let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+    let deleted = unsafe {
+        // SAFETY: file remains live and was opened with DELETE access. The
+        // buffer has the exact type and byte length required by the class.
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileDispositionInfo,
+            (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+            size_of::<FILE_DISPOSITION_INFO>() as u32,
+        )
+    };
+    if deleted == 0 {
+        Err(io::Error::last_os_error()).context("failed to delete opened Windows file-tree node")
+    } else {
+        Ok(())
+    }
 }
 
 pub(crate) fn inspect_node(file: &File) -> Result<NodeMetadata> {
@@ -253,16 +293,24 @@ pub(crate) fn read_directory_names(
 /// is flushed before this call, then MOVEFILE_WRITE_THROUGH requests the native
 /// write-through form of the same-directory rename.
 pub(crate) fn commit_temporary(source: &Path, destination: &Path) -> Result<()> {
+    move_file(source, destination, MOVEFILE_WRITE_THROUGH)
+}
+
+pub(crate) fn replace_temporary(source: &Path, destination: &Path) -> Result<()> {
+    move_file(
+        source,
+        destination,
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+    )
+}
+
+fn move_file(source: &Path, destination: &Path, flags: u32) -> Result<()> {
     let source_wide = wide_nul(source.as_os_str())?;
     let destination_wide = wide_nul(destination.as_os_str())?;
     let moved = unsafe {
-        // SAFETY: both paths are NUL-terminated and remain live. The caller uses
-        // a fresh destination, so replacement and cross-volume copy are absent.
-        MoveFileExW(
-            source_wide.as_ptr(),
-            destination_wide.as_ptr(),
-            MOVEFILE_WRITE_THROUGH,
-        )
+        // SAFETY: both paths are NUL-terminated and remain live. The selected
+        // flags request only same-volume move/replace behavior, never copy.
+        MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), flags)
     };
     if moved == 0 {
         Err(io::Error::last_os_error()).with_context(|| {
