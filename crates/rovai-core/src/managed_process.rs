@@ -722,6 +722,94 @@ mod tests {
     }
 
     #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_job_closes_when_its_core_owner_is_force_killed() {
+        let handshake = std::env::temp_dir().join(format!(
+            "rovai-managed-process-owner-kill-{}.pid",
+            uuid::Uuid::new_v4()
+        ));
+        let mut owner = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "managed_process::tests::windows_job_owner_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(WINDOWS_HELPER_MODE, "job-owner")
+            .env(WINDOWS_HELPER_FILE, &handshake)
+            .spawn()
+            .expect("failed to spawn Job owner helper");
+        let handshake_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !handshake.is_file() && tokio::time::Instant::now() < handshake_deadline {
+            if owner.try_wait().unwrap().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let runtime_pid = std::fs::read_to_string(&handshake)
+            .expect("owned Runtime handshake was not written")
+            .trim()
+            .parse::<u32>()
+            .expect("owned Runtime handshake PID was invalid");
+        assert!(windows::process_is_running_for_test(runtime_pid).unwrap());
+
+        owner.kill().expect("failed to force-kill Job owner");
+        owner.wait().expect("failed to reap Job owner");
+        let termination_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while windows::process_is_running_for_test(runtime_pid).unwrap()
+            && tokio::time::Instant::now() < termination_deadline
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!windows::process_is_running_for_test(runtime_pid).unwrap());
+        let _ = std::fs::remove_file(handshake);
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_main_force_kill_closes_core_stdin_and_runtime_job() {
+        let handshake = std::env::temp_dir().join(format!(
+            "rovai-managed-process-main-kill-{}.pid",
+            uuid::Uuid::new_v4()
+        ));
+        let mut main_owner = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "managed_process::tests::windows_main_owner_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(WINDOWS_HELPER_MODE, "main-owner")
+            .env(WINDOWS_HELPER_FILE, &handshake)
+            .spawn()
+            .expect("failed to spawn Main owner helper");
+        let handshake_deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !handshake.is_file() && tokio::time::Instant::now() < handshake_deadline {
+            if main_owner.try_wait().unwrap().is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let runtime_pid = std::fs::read_to_string(&handshake)
+            .expect("Main-owned Core did not start its Runtime")
+            .trim()
+            .parse::<u32>()
+            .expect("Main-owned Runtime handshake PID was invalid");
+        assert!(windows::process_is_running_for_test(runtime_pid).unwrap());
+
+        main_owner.kill().expect("failed to force-kill Main owner");
+        main_owner.wait().expect("failed to reap Main owner");
+        let termination_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while windows::process_is_running_for_test(runtime_pid).unwrap()
+            && tokio::time::Instant::now() < termination_deadline
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!windows::process_is_running_for_test(runtime_pid).unwrap());
+        let _ = std::fs::remove_file(handshake);
+    }
+
+    #[cfg(windows)]
     #[test]
     #[ignore = "managed process subprocess helper"]
     fn windows_job_child_helper() {
@@ -776,5 +864,121 @@ mod tests {
             std::env::var(WINDOWS_HELPER_IDENTITY).expect("missing helper identity");
         let observed = windows::file_identity_for_raw_handle_for_test(raw_handle).ok();
         assert_ne!(observed.as_deref(), Some(expected_identity.as_str()));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "managed process subprocess helper"]
+    fn windows_job_owner_helper() {
+        if std::env::var(WINDOWS_HELPER_MODE).as_deref() != Ok("job-owner") {
+            return;
+        }
+        let handshake = std::env::var_os(WINDOWS_HELPER_FILE).expect("missing helper file");
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "managed_process::tests::windows_owned_runtime_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(WINDOWS_HELPER_MODE, "owned-runtime")
+            .env(WINDOWS_HELPER_FILE, &handshake);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeOneShot,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "runtime-owner:force-kill-test",
+        )
+        .unwrap();
+        let _runtime = ManagedProcess::spawn(spec).expect("failed to spawn owned Runtime");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !std::path::Path::new(&handshake).is_file() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(std::path::Path::new(&handshake).is_file());
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "managed process subprocess helper"]
+    fn windows_owned_runtime_helper() {
+        if std::env::var(WINDOWS_HELPER_MODE).as_deref() != Ok("owned-runtime") {
+            return;
+        }
+        let handshake = std::env::var_os(WINDOWS_HELPER_FILE).expect("missing helper file");
+        std::fs::write(handshake, std::process::id().to_string())
+            .expect("failed to write owned Runtime handshake");
+        std::thread::sleep(Duration::from_secs(30));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "managed process subprocess helper"]
+    fn windows_main_owner_helper() {
+        if std::env::var(WINDOWS_HELPER_MODE).as_deref() != Ok("main-owner") {
+            return;
+        }
+        let handshake = std::env::var_os(WINDOWS_HELPER_FILE).expect("missing helper file");
+        let mut core = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "managed_process::tests::windows_core_eof_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(WINDOWS_HELPER_MODE, "core-eof")
+            .env(WINDOWS_HELPER_FILE, &handshake)
+            .stdin(std::process::Stdio::piped())
+            .spawn()
+            .expect("failed to spawn Core EOF helper");
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !std::path::Path::new(&handshake).is_file() && std::time::Instant::now() < deadline {
+            assert!(core.try_wait().unwrap().is_none());
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(std::path::Path::new(&handshake).is_file());
+        std::thread::sleep(Duration::from_secs(30));
+        let _ = core.kill();
+        let _ = core.wait();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "managed process subprocess helper"]
+    fn windows_core_eof_helper() {
+        if std::env::var(WINDOWS_HELPER_MODE).as_deref() != Ok("core-eof") {
+            return;
+        }
+        let handshake = std::env::var_os(WINDOWS_HELPER_FILE).expect("missing helper file");
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "managed_process::tests::windows_owned_runtime_helper",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(WINDOWS_HELPER_MODE, "owned-runtime")
+            .env(WINDOWS_HELPER_FILE, &handshake);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeOneShot,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "runtime-owner:main-eof-test",
+        )
+        .unwrap();
+        let _runtime = ManagedProcess::spawn(spec).expect("failed to spawn Main-owned Runtime");
+        let watchdog = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(20));
+            std::process::exit(91);
+        });
+        let mut input = Vec::new();
+        std::io::Read::read_to_end(&mut std::io::stdin(), &mut input)
+            .expect("failed to observe Main stdin EOF");
+        drop(watchdog);
     }
 }
