@@ -184,7 +184,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v7](../contracts/run-process-detail-surface-v7.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v8](../contracts/run-process-detail-surface-v8.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -228,10 +228,14 @@ pnpm accept:runtime-activity-ui
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致；Claude Bash fixture 必须覆盖 terminal output 为 `null` 的情况，并证明仅凭
   公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。
+- 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
+  Built-in `camp.read/search` fixture 的顶层 `input/output` 为空、公共结果只在 `coreEnvelope.result` 时，
+  两条 Tool 行仍可展开，详情与复制文本不含 Envelope、request/receipt 或 canonical input。
 - 超过 Renderer 预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出只在原 Evidence `pre`
   中保留开头 10 行和明确截断提示；DOM 不包含中段或末尾。右上角只有一个 25px、无边框、具名的
   复制图标；真实点击必须按需读取完整 Evidence、只复制公开输出字段，并证明 8,000 行以上的中段与
-  末尾都进入剪贴板而 Evidence 外层 JSON 不进入。读取成功后图标与可访问名称反馈“已复制完整输出”。
+  末尾都进入剪贴板而 Evidence 外层 JSON 不进入。读取成功后图标与可访问名称反馈“已复制完整输出”；
+  DOM 不存在 standalone“查看完整工具调用”、`.complete-evidence-control` 或 raw Payload 展开面。
 
 ### Task Inspector 门禁
 

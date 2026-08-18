@@ -6114,8 +6114,6 @@ export function RunExecutionDisclosure({
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
   const cancellingActive = nonTerminal && cancelling && focused
   const [open, setOpen] = useState(active)
-  const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
-  const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
   const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
   const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
   useEffect(() => {
@@ -6139,15 +6137,6 @@ export function RunExecutionDisclosure({
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
-  const visibleToolIds = new Set(processItems.flatMap((item) =>
-    item.kind === 'tool' ? [item.step.id] : []
-  ))
-  const standaloneCompleteEvidence = [
-    ...completeEvidence.unassigned,
-    ...[...completeEvidence.byToolId.entries()].flatMap(([toolId, evidence]) =>
-      visibleToolIds.has(toolId) ? [] : [evidence]
-    )
-  ]
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
   if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
@@ -6172,34 +6161,6 @@ export function RunExecutionDisclosure({
       setHistoryStatus('failed')
     }
   }
-
-  const renderCompleteEvidenceControl = (evidence: PresentableExecutionEvidence): JSX.Element => (
-    <div className="complete-evidence-control">
-      <button
-        className="quiet-button compact"
-        type="button"
-        disabled={loadingEvidenceId === evidence.id}
-        onClick={() => {
-          setLoadingEvidenceId(evidence.id)
-          void window.rovai.request<{ payload: unknown }>('agentRunEvidence.getContent', {
-            campId,
-            evidenceId: evidence.id
-          }).then((result) => {
-            setExpandedPayloads((current) => ({
-              ...current,
-              [evidence.id]: result.payload
-            }))
-          }).catch(() => undefined)
-            .finally(() => setLoadingEvidenceId(null))
-        }}
-      >
-        {loadingEvidenceId === evidence.id ? '正在读取…' : `查看完整${evidenceKindLabel(evidence.kind)}`}
-      </button>
-      {Object.prototype.hasOwnProperty.call(expandedPayloads, evidence.id) && (
-        <pre>{JSON.stringify(expandedPayloads[evidence.id], null, 2)}</pre>
-      )}
-    </div>
-  )
 
   const content = (
     <div className="process-content">
@@ -6237,7 +6198,7 @@ export function RunExecutionDisclosure({
         const step = item.step
         const status = activityStatusForAgentRun(step.status, run.status)
         const fullEvidence = completeEvidence.byToolId.get(step.id)
-        const hasDetail = Boolean(step.detail || fullEvidence)
+        const hasDetail = Boolean(step.detail)
         const summary = (
           <>
             <ToolCallIcon activityDomain={step.activityDomain} status={status} />
@@ -6268,7 +6229,6 @@ export function RunExecutionDisclosure({
                 completeEvidence={fullEvidence}
               />
             )}
-            {!step.detail && fullEvidence && renderCompleteEvidenceControl(fullEvidence)}
           </details>
         )
       })}
@@ -6286,11 +6246,6 @@ export function RunExecutionDisclosure({
           </button>
         </div>
       )}
-      {standaloneCompleteEvidence.map((evidence) => (
-        <div className="process-action complete-evidence-standalone" key={evidence.id}>
-          {renderCompleteEvidenceControl(evidence)}
-        </div>
-      ))}
       {nonTerminal && !cancelling && run.waitReason === 'recovery_blocked' && (
         <div className="process-recovery-blocker" role="status">
           <div>
@@ -6508,18 +6463,6 @@ function isPresentableExecutionEvidence(
   evidence: AgentRunExecutionEvidenceView
 ): evidence is PresentableExecutionEvidence {
   return evidence.kind !== 'reasoning_summary'
-}
-
-function evidenceKindLabel(kind: PresentableExecutionEvidence['kind']): string {
-  return ({
-    narration: '进展说明',
-    plan: '计划',
-    step: '步骤',
-    tool_call: '工具调用',
-    tool_result: '工具调用',
-    command: '工具调用',
-    file_change: '文件变更'
-  })[kind]
 }
 
 export function TaskPanel({

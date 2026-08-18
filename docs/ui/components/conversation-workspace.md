@@ -202,14 +202,21 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 显示时保留“执行”Tab、Agent 与 Run。位置切换后焦点进入另一位置的对应切换控件，详情关闭/Escape
 优先返回仍连接的真实过程入口，无法返回时落到当前位置切换控件。
 
-命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。超长 Tool 输出只渲染有界的
-开头预览；完整内容由轻量、Icon-only 且有可访问名称的复制控件按需从 Core 读取，不能为了复制
-先把全文挂载进 Drawer。复制失败保留预览并原位说明，证据使用 evidence token 与等宽结构。
+命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。已读取 Evidence 中的 Tool chronology
+完整保留，不用最后 N 项切片静默删除较早操作，也不增加第二条“较早 N 项”时间线。Built-in Tool 从
+Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
+静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
+
+超长 Tool 输出只在原 disclosure 渲染有界开头预览；完整内容由该次展开结果内轻量、Icon-only 且有
+可访问名称的复制控件按需从 Core 读取，不能为了复制先把全文挂载进 Drawer。执行台不显示独立“查看完整
+工具调用”、standalone raw Evidence 或 Envelope JSON。复制失败保留预览并原位说明，证据使用 evidence
+token 与等宽结构。精确合同见
+[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)。
 
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v7](../../contracts/run-process-detail-surface-v7.md)。
+[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)。
 
 `waiting/recovery_blocked` 显示“结果待确认”，不得显示 spinner 或“恢复中”。Recovery Blocker
 必须说明 Runtime 已接受任务、重启后最终结果未知、原请求不会自动重发，并提供唯一“结束此运行”

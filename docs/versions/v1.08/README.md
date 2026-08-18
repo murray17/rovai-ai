@@ -15,7 +15,7 @@ last_updated: 2026-08-18
 >
 > 前置版本：[v1.07 Public-only、A2A 指导与 Principal 投影提案](../v1.07/README.md)
 >
-> 后续版本：[v1.09 当前会话精确查找](../v1.09/README.md)
+> 后续版本：[v1.09 完整会话查找、Mode-aware CLI 与 Tool 结果交互](../v1.09/README.md)
 
 ## 版本目标
 
