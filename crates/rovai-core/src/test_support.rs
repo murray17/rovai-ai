@@ -1,5 +1,6 @@
 use crate::{agent_profile::configure_test_runtime, db::Database};
 use std::{
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     sync::OnceLock,
 };
@@ -13,6 +14,62 @@ struct TestDatabaseTemplate {
 #[cfg(feature = "slow-tests")]
 static FRESH_SCHEMA_TEMPLATE: OnceLock<TestDatabaseTemplate> = OnceLock::new();
 static SEEDED_RUNTIME_TEMPLATE: OnceLock<TestDatabaseTemplate> = OnceLock::new();
+
+pub(crate) struct OwnedTestDatabase {
+    database: Option<Database>,
+    directory: PathBuf,
+}
+
+impl OwnedTestDatabase {
+    fn new(database: Database, directory: PathBuf) -> Self {
+        Self {
+            database: Some(database),
+            directory,
+        }
+    }
+
+    pub(crate) fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    pub(crate) fn close(&mut self) {
+        drop(self.database.take());
+    }
+
+    pub(crate) fn reopen_production(&mut self) -> anyhow::Result<&mut Database> {
+        self.close();
+        self.database = Some(Database::open(&self.directory)?);
+        Ok(self
+            .database
+            .as_mut()
+            .expect("production database should be open"))
+    }
+}
+
+impl Deref for OwnedTestDatabase {
+    type Target = Database;
+
+    fn deref(&self) -> &Self::Target {
+        self.database
+            .as_ref()
+            .expect("owned test database is closed")
+    }
+}
+
+impl DerefMut for OwnedTestDatabase {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.database
+            .as_mut()
+            .expect("owned test database is closed")
+    }
+}
+
+impl Drop for OwnedTestDatabase {
+    fn drop(&mut self) {
+        self.close();
+        let _ = std::fs::remove_dir_all(&self.directory);
+    }
+}
 
 fn unique_directory(kind: &str) -> PathBuf {
     std::env::temp_dir().join(format!("rovai-{kind}-{}", Uuid::new_v4()))
@@ -76,6 +133,11 @@ pub(crate) fn seeded_runtime_database() -> (Database, PathBuf) {
         SEEDED_RUNTIME_TEMPLATE.get_or_init(|| build_template("seeded-template", true)),
         "seeded-clone",
     )
+}
+
+pub(crate) fn seeded_runtime_database_owned() -> OwnedTestDatabase {
+    let (database, directory) = seeded_runtime_database();
+    OwnedTestDatabase::new(database, directory)
 }
 
 #[cfg(feature = "slow-tests")]
