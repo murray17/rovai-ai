@@ -554,7 +554,7 @@ try {
     acceptanceRuntime
   )
   await mkdir(join(freshDataDir, 'quick-chat'), { recursive: true })
-  campId = 'camp-lifecycle-accept'
+  campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
   campTitle = 'Camp 生命周期验收'
   await createCampFixture(
     join(freshDataDir, 'rovai.sqlite'),
@@ -562,7 +562,7 @@ try {
     campTitle,
     join(freshDataDir, 'quick-chat')
   )
-  projectCampId = 'camp-project-return-accept'
+  projectCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec1'
   projectCampTitle = '项目会话返回验收 · 一个用于确认成员名册单行截断的超长对话标题'
   projectCampPath = join(freshDataDir, 'project-return')
   await mkdir(projectCampPath, { recursive: true })
@@ -660,12 +660,7 @@ try {
     JSON.stringify(runtimeActionLabels) === JSON.stringify(['放弃更改', '保存运行配置']),
     `Runtime actions did not expose discard and save: ${JSON.stringify(runtimeActionLabels)}`
   )
-  await selectFieldValue(
-    running.cdp,
-    '.member-runtime-parameters',
-    '模型策略',
-    'explicit'
-  )
+  await selectRuntimeModel(running.cdp, 'Lifecycle Acceptance Runtime')
   await waitForText(running.cdp, '.member-runtime-parameters', '推理强度')
   await selectFieldValue(
     running.cdp,
@@ -1235,6 +1230,7 @@ async function installAcceptanceRuntime(
   const commandName = sqlLiteral(runtimeIdentity.commandName)
   const executableFingerprint = sqlLiteral(runtimeIdentity.executableFingerprint)
   const permissionSchemaDigest = sqlLiteral(runtimeIdentity.permissionSchemaDigest)
+  const observedAt = sqlLiteral(new Date().toISOString())
   const ids = agentIds.map(sqlLiteral).join(', ')
   await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
@@ -1262,7 +1258,7 @@ async function installAcceptanceRuntime(
       'adapter-lifecycle-accept', 'acceptance', ${executableFingerprint},
       'authenticated', 'ready', 1, ${permissionSchemaDigest}, '[]', '[]',
       ${modelCatalog}, ${permissionOptions},
-      datetime('now'), datetime('now'), datetime('now'), NULL, NULL,
+      ${observedAt}, ${observedAt}, ${observedAt}, NULL, NULL,
       'codex-app-server-v2'
     );
     UPDATE agent_profile
@@ -1418,7 +1414,13 @@ async function openCamp(cdp, title) {
   if (await evaluate(cdp, `Boolean(document.querySelector('.members-view'))`)) {
     await mouseClick(cdp, '.conversation-jump')
     await waitForSelector(cdp, '.command-palette')
-    await focusElement(cdp, '.command-palette-item', title, true)
+    await replaceInputValue(cdp, '.command-palette-input', title)
+    await waitForExpression(cdp, `(() => {
+      const items = [...document.querySelectorAll('.command-palette-item')]
+      return items.length === 1
+        && items[0].textContent?.includes(${JSON.stringify(title)})
+    })()`)
+    await focusElement(cdp, '.command-palette-input')
     await pressKey(cdp, 'Enter')
     await waitForSelector(cdp, '.camp-workspace', 30_000)
     return
@@ -1545,14 +1547,35 @@ async function runtimeParameterValues(cdp) {
     const fields = [...document.querySelectorAll(
       '.member-runtime-parameters .field-label'
     )]
+    const modelField = fields
+      .find((field) => field.childNodes[0]?.textContent?.trim() === '模型策略')
+    const modelLabel = modelField
+      ?.querySelector('.runtime-model-picker-trigger strong')?.textContent?.trim()
     const value = (label) => fields
       .find((field) => field.childNodes[0]?.textContent?.trim() === label)
       ?.querySelector('select')?.value
     return {
-      modelMode: value('模型策略'),
+      modelMode: modelLabel === '跟随 Agent 运行时默认'
+        ? 'runtime_default'
+        : modelLabel ? 'explicit' : undefined,
+      modelLabel,
       sandboxMode: value('文件系统访问'),
       approvalPolicy: value('审批策略')
     }
+  })()`)
+}
+
+async function selectRuntimeModel(cdp, label) {
+  await focusElement(cdp, '.runtime-model-picker-trigger')
+  await pressKey(cdp, 'Enter')
+  await waitForSelector(cdp, '.runtime-model-picker-menu')
+  await focusElement(cdp, '.runtime-model-picker-item[role="menuitemradio"]', label, true)
+  await pressKey(cdp, 'Enter')
+  await waitForExpression(cdp, `(() => {
+    const trigger = document.querySelector('.runtime-model-picker-trigger')
+    return trigger?.querySelector('strong')?.textContent?.trim() === ${JSON.stringify(label)}
+      && !document.querySelector('.runtime-model-picker-menu')
+      && document.activeElement === trigger
   })()`)
 }
 

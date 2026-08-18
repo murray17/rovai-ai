@@ -45,8 +45,8 @@ Runtime health must not reorder or hide teammates.
 
 Roster Runtime shortcuts use the approved compact `✓`, `!` and `…` states rather than product logos.
 Each shortcut has a full accessible label and opens that teammate's Runtime configuration.
-TRAE 的静态 Installation 使用中性的“已安装”状态，不借用 `✓` 暗示 Ready；完整 accessible label 说明登录与
-能力将在首次实际任务验证。加载或复扫期间仍使用 `…`，不得把延迟验证画成失败。
+`light_ready` 可以使用“可用”主状态，但完整 accessible label 说明登录、模型与能力仍待显式检查或首次实际
+任务确认。加载或复扫期间仍使用 `…`，不得把延迟验证画成失败。
 
 ## Detail and editing
 
@@ -61,10 +61,18 @@ that Runtime. The Runtime, model and permissions save atomically through the exi
 
 For any `light_ready` installation, expose Runtime default model plus only permissions described by the
 static Adapter schema. Supporting copy says login, model and capability verification happens on explicit
-check or the first real task. Do not offer explicit models before a verified catalog. TRAE keeps its narrower
-`installed_unverified` state and Runtime default model, while its permission draft defaults to the statically
+check or the first real task. Do not offer explicit models before a verified catalog. TRAE uses the same model
+catalog cache and Picker behavior as every other Runtime; its permission draft still defaults to the statically
 admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the existing compact switch pattern for
 `trust_all_tools`; label it “自动允许全部工具” and default it on from Core without adding a separate warning card.
+
+Opening the model Picker uses Core-owned stale-while-revalidate state. Fresh catalogs display immediately;
+serviceable stale catalogs remain interactive while a single background refresh runs; expired, unavailable or
+invalidated catalogs show a bounded loading state until discovery settles. A failed refresh keeps and labels the
+last successful catalog. Switching Runtime never triggers discovery, and an older async result must not mutate the
+new draft. Runtime default remains selectable without a catalog. An existing saved explicit model that cannot yet
+be checked reads “尚未核对”; a fresh or stale catalog that omits it uses evidence-specific copy instead of the
+absolute “已失效”. This does not add repair semantics for manually modified or technically recovered corrupt data.
 
 After Runtime configuration, keep Memory Capability and the danger zone. Do not expose Installation
 IDs, executable paths or internal bindings in the ordinary profile.

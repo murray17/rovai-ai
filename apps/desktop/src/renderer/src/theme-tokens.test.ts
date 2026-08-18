@@ -380,6 +380,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     const declared = new Set([...css.matchAll(/(--[a-z0-9-]+)\s*:/gi)].map((match) => match[1]))
     const used = new Set([...css.matchAll(/var\((--[a-z0-9-]+)/gi)].map((match) => match[1]))
     const runtimeOwned = new Set([
+      '--radix-dropdown-menu-content-available-height',
       '--radix-dropdown-menu-trigger-width'
     ])
     expect([...used].filter((token) => !declared.has(token) && !runtimeOwned.has(token))).toEqual([])

@@ -6952,7 +6952,11 @@ mod tests {
             .unwrap()
             .expect("claimed AgentRun should materialize");
         assert_eq!(execution.runtime.installation_id, "adapter-test-codex");
-        assert_eq!(execution.runtime.model.model_id, "gpt-test");
+        assert_eq!(execution.runtime.model.source, "runtime_default");
+        assert_eq!(
+            execution.runtime.model.model_id,
+            "codex-cli://runtime-default"
+        );
         database
             .connection()
             .execute(

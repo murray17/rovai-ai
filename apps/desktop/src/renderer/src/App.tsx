@@ -61,6 +61,7 @@ import {
   type NavigationSettingsSection
 } from './CampNavigation'
 import { NewConversationDialog } from './NewConversationDialog'
+import { openRuntimeModelCatalog } from './runtime-check'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { AppearanceSettings } from './AppearanceSettings'
 import {
@@ -2445,6 +2446,14 @@ export function App(): React.JSX.Element {
             () => window.rovai.onboarding.completeMemberSelection()
           )}
           onRefreshRuntime={() => void refreshOnboardingRuntime()}
+          onOpenModelCatalog={async (runtimeKind) => {
+            const catalog = await openRuntimeModelCatalog(runtimeKind)
+            const nextInstallations = await window.rovai.request<AdapterInstallation[]>(
+              'runtime.installations.list'
+            )
+            setInstallations(nextInstallations)
+            return catalog
+          }}
           onRuntimeSelectionChange={(selection: OnboardingRuntimeSelection | null) => {
             void runOnboardingMutation(
               () => window.rovai.onboarding.setRuntimeSelection(selection)

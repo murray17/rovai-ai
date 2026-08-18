@@ -15,7 +15,7 @@ use std::{
     time::Instant,
 };
 
-use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpRuntime};
+use acp::{AcpCliRuntimeAdapter, AcpIncoming, AcpLiveModelValidationError, AcpRuntime};
 use antigravity::{
     AntigravityAppRuntimeAdapter, AntigravityDeliveredFailure, AntigravityInputAccepted,
     AntigravityRunRequest,
@@ -31,7 +31,7 @@ use claude::{
 };
 use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
-    CodexRuntime,
+    CodexLiveModelValidationError, CodexRuntime,
 };
 use rovai_core::{
     action::{
@@ -46,8 +46,8 @@ use rovai_core::{
         ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
         CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
         InstallationClass, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
-        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeReadinessStatus,
-        SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
+        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeModelCatalogCacheStatus,
+        RuntimeReadinessStatus, SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
         SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
         UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
@@ -327,6 +327,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.discovery.rescan"
             | "runtime.product.ensure"
             | "runtime.product.check"
+            | "runtime.modelCatalog.open"
             | "camp.messages.send"
             | "camp.attachments.prepareFromPath"
             | "campTurns.cancel"
@@ -877,6 +878,7 @@ const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum RuntimeCheckTrigger {
+    CatalogOpen,
     UserCheck,
     Execution,
 }
@@ -1713,14 +1715,132 @@ impl Core {
         self.runtime_health_payload().await
     }
 
-    async fn schedule_runtime_check(&self, kind: rovai_core::agent_profile::AdapterKind) -> bool {
-        self.enqueue_runtime_check(
-            kind,
-            RuntimeLaunchPurpose::AvailabilityCheck,
-            RuntimeCheckTrigger::UserCheck,
+    async fn open_runtime_model_catalog(&self, kind: AdapterKind) -> Result<Value> {
+        let initial = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().managed_installation(&database, kind, "default")?
+        };
+        let cache_status = initial
+            .as_ref()
+            .map(|installation| installation.model_catalog.status)
+            .unwrap_or(RuntimeModelCatalogCacheStatus::Unavailable);
+        let refresh_status = match cache_status {
+            RuntimeModelCatalogCacheStatus::Fresh => "not_required",
+            RuntimeModelCatalogCacheStatus::Stale => {
+                if self
+                    .enqueue_runtime_check(
+                        kind,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        RuntimeCheckTrigger::CatalogOpen,
+                    )
+                    .await?
+                {
+                    "scheduled"
+                } else {
+                    "joined"
+                }
+            }
+            RuntimeModelCatalogCacheStatus::Expired
+            | RuntimeModelCatalogCacheStatus::Unavailable
+            | RuntimeModelCatalogCacheStatus::Invalidated => {
+                if self
+                    .await_runtime_check(
+                        kind,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        RuntimeCheckTrigger::CatalogOpen,
+                    )
+                    .await?
+                {
+                    "completed"
+                } else {
+                    "failed"
+                }
+            }
+        };
+        self.runtime_model_catalog_payload(kind, refresh_status)
+            .await
+    }
+
+    async fn runtime_model_catalog_payload(
+        &self,
+        kind: AdapterKind,
+        refresh_status: &str,
+    ) -> Result<Value> {
+        let installation = {
+            let database = self.database.lock().await;
+            AgentProfileService::default().managed_installation(&database, kind, "default")?
+        };
+        let diagnostic = self
+            .runtime_product_diagnostics
+            .read()
+            .await
+            .get(&kind)
+            .cloned();
+        let Some(installation) = installation else {
+            return Ok(json!({
+                "runtimeKind": kind,
+                "cache": {
+                    "status": "unavailable",
+                    "observedAt": null,
+                    "revalidateAfter": null,
+                    "expiresAt": null,
+                },
+                "models": [],
+                "refreshStatus": refresh_status,
+                "diagnosticCode": diagnostic.map(|value| value.diagnostic_code),
+            }));
+        };
+        let models = if installation.model_catalog.is_serviceable() {
+            installation
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.models.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        Ok(json!({
+            "runtimeKind": kind,
+            "cache": installation.model_catalog,
+            "models": models,
+            "refreshStatus": refresh_status,
+            "diagnosticCode": installation
+                .last_probe_attempt
+                .as_ref()
+                .filter(|attempt| attempt.status == "failed")
+                .and_then(|attempt| attempt.diagnostic_code.clone())
+                .or_else(|| diagnostic.map(|value| value.diagnostic_code)),
+        }))
+    }
+
+    async fn record_runtime_check_manager_failure(
+        &self,
+        kind: AdapterKind,
+        diagnostic_code: &str,
+    ) -> Result<()> {
+        let mut database = self.database.lock().await;
+        let installation =
+            AgentProfileService::default().managed_installation(&database, kind, "default")?;
+        let Some(installation) = installation else {
+            return Ok(());
+        };
+        let fingerprint = installation
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.executable_fingerprint.clone());
+        AgentProfileService::default().record_managed_probe_failure(
+            &mut database,
+            ManagedProbeFailure {
+                adapter_kind: kind,
+                auth_scope: "default",
+                candidate_path: &installation.executable_path,
+                fingerprint: fingerprint.as_deref(),
+                source: Some(installation.source),
+                failure_class: "transient",
+                diagnostic_code,
+                failure: None,
+            },
         )
-        .await
-        .unwrap_or(false)
     }
 
     async fn ensure_runtime_check(
@@ -4886,11 +5006,24 @@ impl Core {
             "runtime.product.check" => {
                 let params: CheckProductRuntimeParams =
                     serde_json::from_value(request.params.clone())?;
-                let scheduled = self.schedule_runtime_check(params.runtime_kind).await;
+                let ready = self
+                    .await_runtime_check(
+                        params.runtime_kind,
+                        RuntimeLaunchPurpose::AvailabilityCheck,
+                        RuntimeCheckTrigger::UserCheck,
+                    )
+                    .await?;
                 Ok(json!({
-                    "scheduled": scheduled,
+                    "scheduled": true,
+                    "completed": true,
+                    "ready": ready,
                     "runtimeKind": params.runtime_kind,
                 }))
+            }
+            "runtime.modelCatalog.open" => {
+                let params: CheckProductRuntimeParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.open_runtime_model_catalog(params.runtime_kind).await
             }
             "health.check" => {
                 let git = health::git_health().await;
@@ -5440,6 +5573,14 @@ impl Core {
                     });
                 let error_code = if error.downcast_ref::<ContextPayloadTooLarge>().is_some() {
                     "context_payload_too_large".to_string()
+                } else if let Some(model_error) =
+                    error.downcast_ref::<AcpLiveModelValidationError>()
+                {
+                    model_error.code.to_string()
+                } else if let Some(model_error) =
+                    error.downcast_ref::<CodexLiveModelValidationError>()
+                {
+                    model_error.code.to_string()
                 } else {
                     public_failure
                         .as_ref()
@@ -7446,6 +7587,14 @@ impl Core {
             .and_then(Value::as_str)
             .context("Codex AgentRun requires approval_policy")?;
         let model = execution.runtime.model.model_id.as_str();
+        let explicit_model = match execution.runtime.model.source.as_str() {
+            "explicit" => {
+                runtime.validate_explicit_model(model).await?;
+                Some(model)
+            }
+            "runtime_default" => None,
+            _ => anyhow::bail!("Codex model source is invalid"),
+        };
         let mut session_bootstrap = {
             let mut database = self.database.lock().await;
             ContextService
@@ -7474,7 +7623,7 @@ impl Core {
                     developer_instructions: Some(session_bootstrap.as_str()),
                     sandbox_mode,
                     approval_policy,
-                    model: Some(model),
+                    model: explicit_model,
                     attachment_access_root: &attachment_access_root,
                     external_mcp_servers: &mcp_projection.servers,
                 },
@@ -7526,7 +7675,7 @@ impl Core {
                             developer_instructions: Some(session_bootstrap.as_str()),
                             sandbox_mode,
                             approval_policy,
-                            model: Some(model),
+                            model: explicit_model,
                             attachment_access_root: &attachment_access_root,
                             external_mcp_servers: &mcp_projection.servers,
                         },
@@ -7578,7 +7727,7 @@ impl Core {
         let native_turn_id = match runtime
             .start_turn_with_config(
                 &prepared_context.rendered_payload,
-                Some(model),
+                explicit_model,
                 reasoning_effort,
             )
             .await
@@ -8626,6 +8775,7 @@ impl Core {
             .start_or_resume_session(
                 resumable_session_id.as_deref(),
                 session_capabilities,
+                &execution.runtime.model.source,
                 model,
                 &execution.runtime.model.options,
                 &mcp_projection.servers,
@@ -8633,7 +8783,12 @@ impl Core {
             .await;
         let session_id = match session {
             Ok(session_id) => session_id,
-            Err(error) if resumable_session_id.is_some() => {
+            Err(error)
+                if resumable_session_id.is_some()
+                    && error
+                        .downcast_ref::<AcpLiveModelValidationError>()
+                        .is_none() =>
+            {
                 let failure = classify_native_resume_failure(&error);
                 eprintln!(
                     "{} Native Session {:?} failed for AgentRun {}; continuity is lost and a new Session will be created: {error:#}",
@@ -8710,6 +8865,7 @@ impl Core {
                     .start_or_resume_session(
                         None,
                         session_capabilities,
+                        &execution.runtime.model.source,
                         model,
                         &execution.runtime.model.options,
                         &mcp_projection.servers,
@@ -13682,6 +13838,16 @@ async fn finalize_runtime_check(
     if let Err(diagnostic_code) = &result
         && runtime_check_writes_diagnostic(finalization)
     {
+        if finalization == RuntimeCheckFinalization::Supervisor
+            && let Err(error) = core
+                .record_runtime_check_manager_failure(attempt.runtime_kind, diagnostic_code)
+                .await
+        {
+            eprintln!(
+                "failed to persist Runtime check supervisor failure for {}: {error:#}",
+                attempt.runtime_kind.as_str()
+            );
+        }
         core.runtime_product_diagnostics
             .write()
             .await
@@ -15121,6 +15287,12 @@ mod tests {
                 last_error: None,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
             }),
+            model_catalog: rovai_core::agent_profile::RuntimeModelCatalogCacheView {
+                status: RuntimeModelCatalogCacheStatus::Fresh,
+                observed_at: Some(last_successful_probe_at.to_string()),
+                revalidate_after: None,
+                expires_at: None,
+            },
             member_runtime_defaults: None,
             last_probe_attempt: retry_after.map(|retry_after| {
                 rovai_core::agent_profile::AdapterProbeAttempt {

@@ -7,6 +7,7 @@ describe('Runtime Renderer Core method allowlist', () => {
       'runtime.discovery.rescan',
       'runtime.product.ensure',
       'runtime.product.check',
+      'runtime.modelCatalog.open',
       'runtime.pendingExecution.cancel'
     ])
     expect(RUNTIME_RENDERER_CORE_METHODS).not.toContain('core.shutdown')

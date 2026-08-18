@@ -79,6 +79,63 @@ describe('member runtime parameters', () => {
     expect(markup).toContain('value="high" selected')
   })
 
+  it('marks a saved unknown model as unverified when no serviceable catalog exists', () => {
+    const installation = runtimeInstallation('copilot-cli')
+    installation.modelCatalog = {
+      status: 'unavailable',
+      observedAt: null,
+      revalidateAfter: null,
+      expiresAt: null
+    }
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
+      adapterKind: 'copilot-cli',
+      installation,
+      draft: {
+        model: {
+          mode: 'explicit',
+          modelId: 'claude-opus-5',
+          options: {}
+        },
+        permissions: installation.memberRuntimeDefaults!.permissions
+      },
+      disabled: false,
+      onChange: () => undefined
+    }))
+
+    expect(markup).toContain('尚未核对 · claude-opus-5')
+    expect(markup).not.toContain('已失效')
+  })
+
+  it('keeps a stale last-known-good catalog visible after a newer refresh failure', () => {
+    const installation = runtimeInstallation('copilot-cli')
+    installation.modelCatalog.status = 'stale'
+    installation.lastProbeAttempt = {
+      id: 'attempt-refresh-failed',
+      installationId: installation.id,
+      status: 'failed',
+      failureClass: 'transient',
+      diagnosticCode: 'runtime_check_timed_out',
+      candidatePath: installation.executablePath,
+      executableFingerprint: 'sha256:test',
+      attemptedAt: '2026-07-31T00:02:00Z',
+      retryAfter: null,
+      failure: null
+    }
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
+      adapterKind: 'copilot-cli',
+      installation,
+      draft: {
+        model: { mode: 'explicit', modelId: 'runtime/model', options: {} },
+        permissions: installation.memberRuntimeDefaults!.permissions
+      },
+      disabled: false,
+      onChange: () => undefined
+    }))
+
+    expect(markup).toContain('Runtime Model')
+    expect(markup).toContain('刷新失败，继续显示上次成功结果')
+  })
+
   it.each([
     ['opencode-cli', '工具权限', 'allow'],
     ['claude-code-cli', '权限模式', 'bypassPermissions'],
@@ -230,6 +287,12 @@ function runtimeInstallation(kind: AdapterKind): AdapterInstallation {
       staleAt: null,
       lastError: null,
       nativeSessionCompatibilityKey: null
+    },
+    modelCatalog: {
+      status: 'fresh',
+      observedAt: '2026-07-31T00:00:00Z',
+      revalidateAfter: '2026-07-31T00:01:00Z',
+      expiresAt: '2026-08-01T00:00:00Z'
     },
     memberRuntimeDefaults: {
       adapterKind: kind,

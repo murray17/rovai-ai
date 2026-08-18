@@ -98,6 +98,28 @@ export interface AdapterCapabilitySnapshot {
   nativeSessionCompatibilityKey: string | null
 }
 
+export type RuntimeModelCatalogCacheStatus =
+  | 'fresh'
+  | 'stale'
+  | 'expired'
+  | 'unavailable'
+  | 'invalidated'
+
+export interface RuntimeModelCatalogCache {
+  status: RuntimeModelCatalogCacheStatus
+  observedAt: string | null
+  revalidateAfter: string | null
+  expiresAt: string | null
+}
+
+export interface RuntimeModelCatalogView {
+  runtimeKind: AdapterKind
+  cache: RuntimeModelCatalogCache
+  models: ModelDescriptor[]
+  refreshStatus: 'not_required' | 'scheduled' | 'joined' | 'completed' | 'failed'
+  diagnosticCode: string | null
+}
+
 export type RuntimeProbeFailureClass =
   | 'none'
   | 'transient'
@@ -156,6 +178,7 @@ export interface AdapterInstallation {
   version: number
   referencedProfileCount: number
   snapshot: AdapterCapabilitySnapshot | null
+  modelCatalog: RuntimeModelCatalogCache
   memberRuntimeDefaults: MemberRuntimeConfiguration | null
   lastProbeAttempt: AdapterProbeAttempt | null
   relocationHistory: AdapterRelocationAudit[]
@@ -2276,6 +2299,7 @@ export type CoreMethod =
   | 'runtime.discovery.rescan'
   | 'runtime.product.ensure'
   | 'runtime.product.check'
+  | 'runtime.modelCatalog.open'
   | 'runtime.pendingExecution.cancel'
   | 'members.list'
   | 'members.get'

@@ -14,13 +14,15 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
+#[cfg(test)]
+use rovai_core::agent_runtime_adapter::TRAE_RUNTIME_DEFAULT_MODEL_ID;
 use rovai_core::{
     action::{
         ActionResultOutcome, CanonicalActionInput, RuntimeActionRequestBinding,
         RuntimePermissionOption,
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
-    agent_runtime_adapter::{TRAE_RUNTIME_DEFAULT_MODEL_ID, write_kiro_additive_agent_config},
+    agent_runtime_adapter::{acp_model_catalog_from_session, write_kiro_additive_agent_config},
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
@@ -1429,6 +1431,25 @@ pub struct AcpRuntime {
     authorized_file_writes: Mutex<HashSet<PathBuf>>,
 }
 
+#[derive(Debug)]
+pub(crate) struct AcpLiveModelValidationError {
+    pub code: &'static str,
+    model_id: String,
+    detail: String,
+}
+
+impl std::fmt::Display for AcpLiveModelValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} for explicit model {}: {}",
+            self.code, self.model_id, self.detail
+        )
+    }
+}
+
+impl std::error::Error for AcpLiveModelValidationError {}
+
 fn select_acp_session_continuation(
     adapter_kind: AdapterKind,
     same_host_knows_session: bool,
@@ -1510,6 +1531,7 @@ impl AcpRuntime {
         &self,
         existing_session_id: Option<&str>,
         capabilities: AcpSessionCapabilities,
+        model_source: &str,
         model: &str,
         model_options: &Value,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
@@ -1625,21 +1647,48 @@ impl AcpRuntime {
         self.host
             .remember_session(&session_id, session_result.as_ref())
             .await;
-        if self.host.adapter_kind == AdapterKind::KiroCli {
-            self.set_model(&session_id, model).await?;
-        } else if !(self.host.adapter_kind == AdapterKind::TraeCnCli
-            && model == TRAE_RUNTIME_DEFAULT_MODEL_ID)
-        {
-            self.set_config_option(&session_id, "model", model).await?;
+        if model_source == "explicit" {
+            let session_result = session_result.as_ref().ok_or_else(|| {
+                anyhow::Error::new(AcpLiveModelValidationError {
+                    code: "runtime_model_catalog_unavailable",
+                    model_id: model.to_string(),
+                    detail: "the real ACP Session did not expose its catalog".to_string(),
+                })
+            })?;
+            let models = acp_model_catalog_from_session(session_result).map_err(|error| {
+                anyhow::Error::new(AcpLiveModelValidationError {
+                    code: "runtime_model_catalog_unavailable",
+                    model_id: model.to_string(),
+                    detail: error.to_string(),
+                })
+            })?;
+            if !models.iter().any(|candidate| {
+                candidate.id == model && !candidate.hidden && !candidate.deprecated
+            }) {
+                return Err(anyhow::Error::new(AcpLiveModelValidationError {
+                    code: "runtime_model_unavailable",
+                    model_id: model.to_string(),
+                    detail: "the real ACP Session did not advertise the saved model".to_string(),
+                }));
+            }
+            if self.host.adapter_kind == AdapterKind::KiroCli {
+                self.set_model(&session_id, model).await?;
+            } else {
+                self.set_config_option(&session_id, "model", model).await?;
+            }
+        } else if model_source != "runtime_default" {
+            bail!("ACP model source is invalid");
         }
-        if self.host.adapter_kind == AdapterKind::KiroCli
+        if model_source == "explicit"
+            && self.host.adapter_kind == AdapterKind::KiroCli
             && model_options
                 .as_object()
                 .is_some_and(|options| !options.is_empty())
         {
             bail!("Kiro ACP does not support generic per-Session model options");
         }
-        if self.host.adapter_kind != AdapterKind::KiroCli
+        if model_source == "explicit"
+            && self.host.adapter_kind != AdapterKind::KiroCli
             && let Some(options) = model_options.as_object()
         {
             for (key, value) in options {
@@ -3656,6 +3705,7 @@ while IFS= read -r ignored; do :; done
             .start_or_resume_session(
                 None,
                 AcpSessionCapabilities::default(),
+                "runtime_default",
                 TRAE_RUNTIME_DEFAULT_MODEL_ID,
                 &json!({}),
                 &BTreeMap::new(),
@@ -3672,6 +3722,75 @@ while IFS= read -r ignored; do :; done
         assert_eq!(invocations.lines().count(), 1);
         assert_eq!(invocations.trim(), "acp serve --permission-mode default");
         assert!(!invocations.contains("--version"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn real_acp_session_catalog_rejects_a_missing_explicit_model_without_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-live-model-validation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        make_executable(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-live-model","models":{"currentModelId":"trae-default","availableModels":[{"modelId":"trae-default","name":"TRAE Default"}]}}}'
+while IFS= read -r ignored; do :; done
+"#,
+        );
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            None,
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-live-model-validation".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            None,
+            "runtime_managed".to_string(),
+        );
+
+        let error = runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "explicit",
+                "claude-opus-5",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .expect_err("a model absent from the real Session catalog must fail closed");
+        let validation = error
+            .downcast_ref::<AcpLiveModelValidationError>()
+            .expect("the launch layer needs a typed model failure");
+        assert_eq!(validation.code, "runtime_model_unavailable");
+
+        host.shutdown().await;
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -3748,6 +3867,7 @@ while IFS= read -r ignored; do :; done
                     can_resume: false,
                     can_load_history: true,
                 },
+                "runtime_default",
                 TRAE_RUNTIME_DEFAULT_MODEL_ID,
                 &json!({}),
                 &BTreeMap::new(),
@@ -3872,6 +3992,7 @@ while IFS= read -r ignored; do :; done
                         can_resume: false,
                         can_load_history: true,
                     },
+                    "runtime_default",
                     TRAE_RUNTIME_DEFAULT_MODEL_ID,
                     &json!({}),
                     &BTreeMap::new(),
@@ -3989,6 +4110,7 @@ while IFS= read -r ignored; do :; done
                     can_resume: false,
                     can_load_history: true,
                 },
+                "runtime_default",
                 TRAE_RUNTIME_DEFAULT_MODEL_ID,
                 &json!({}),
                 &BTreeMap::new(),
@@ -4024,6 +4146,7 @@ while IFS= read -r ignored; do :; done
                     can_resume: false,
                     can_load_history: true,
                 },
+                "runtime_default",
                 TRAE_RUNTIME_DEFAULT_MODEL_ID,
                 &json!({}),
                 &BTreeMap::new(),

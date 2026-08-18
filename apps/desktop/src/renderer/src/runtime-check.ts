@@ -1,5 +1,16 @@
-import type { AdapterKind } from '@contracts'
+import type { AdapterKind, RuntimeModelCatalogView } from '@contracts'
 
-export function requestProductRuntimeCheck(runtimeKind: AdapterKind): Promise<unknown> {
-  return window.rovai.request('runtime.product.check', { runtimeKind })
+export type ProductRuntimeCheckResult = {
+  scheduled: true
+  completed: true
+  ready: boolean
+  runtimeKind: AdapterKind
+}
+
+export function requestProductRuntimeCheck(runtimeKind: AdapterKind): Promise<ProductRuntimeCheckResult> {
+  return window.rovai.request<ProductRuntimeCheckResult>('runtime.product.check', { runtimeKind })
+}
+
+export function openRuntimeModelCatalog(runtimeKind: AdapterKind): Promise<RuntimeModelCatalogView> {
+  return window.rovai.request<RuntimeModelCatalogView>('runtime.modelCatalog.open', { runtimeKind })
 }

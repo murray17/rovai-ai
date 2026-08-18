@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.10
+current_version: v1.11
 last_updated: 2026-08-18
 ---
 
@@ -161,4 +161,5 @@ last_updated: 2026-08-18
 | v1.07 | `historical` | 显式 Public-only、A2A 边指导与 Principal 双投影提案；revision 1 确认后先冻结，随后作为独立交付实现 | [v1.07/README.md](v1.07/README.md) |
 | v1.08 | `historical` | 取消 Run 中未闭合活动的无动画“已停止”投影 | [v1.08/README.md](v1.08/README.md) |
 | v1.09 | `historical` | 完整 Camp 会话查找、Mode-aware Built-in CLI 与完整 Tool 结果交互 | [v1.09/README.md](v1.09/README.md) |
-| v1.10 | `current` | 唯一 Rovai Camp ID clean break 与 Claude Code/Antigravity 安全公开失败 | [v1.10/README.md](v1.10/README.md) |
+| v1.10 | `historical` | 唯一 Rovai Camp ID clean break 与 Claude Code/Antigravity 安全公开失败 | [v1.10/README.md](v1.10/README.md) |
+| v1.11 | `current` | Runtime 模型目录 SWR、主动检查终态与真实执行模型校验 | [v1.11/README.md](v1.11/README.md) |

@@ -268,6 +268,9 @@ function codexInstallation(): AdapterInstallation {
     version: 1,
     referencedProfileCount: 0,
     snapshot: null,
+    modelCatalog: {
+      status: 'unavailable', observedAt: null, revalidateAfter: null, expiresAt: null
+    },
     memberRuntimeDefaults: {
       adapterKind: 'codex-cli',
       model: { mode: 'runtime_default' },

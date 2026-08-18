@@ -571,6 +571,25 @@ pub struct CodexRuntime {
     completed_agent_message: RwLock<Option<String>>,
 }
 
+#[derive(Debug)]
+pub(crate) struct CodexLiveModelValidationError {
+    pub code: &'static str,
+    model_id: String,
+    detail: String,
+}
+
+impl std::fmt::Display for CodexLiveModelValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "{} for explicit model {}: {}",
+            self.code, self.model_id, self.detail
+        )
+    }
+}
+
+impl std::error::Error for CodexLiveModelValidationError {}
+
 struct CodexThreadStartOptions<'a> {
     developer_instructions: Option<&'a str>,
     sandbox: &'a str,
@@ -653,6 +672,68 @@ impl CodexRuntime {
             )
             .await?;
         native_mcp_server_names_from_config_read(&response)
+    }
+
+    pub async fn validate_explicit_model(&self, model_id: &str) -> Result<()> {
+        let mut cursor: Option<String> = None;
+        let mut pages = 0_u8;
+        loop {
+            let response = self
+                .rpc(
+                    "model/list",
+                    json!({
+                        "cursor": cursor,
+                        "includeHidden": true,
+                        "limit": 100,
+                    }),
+                )
+                .await
+                .map_err(|error| {
+                    anyhow::Error::new(CodexLiveModelValidationError {
+                        code: "runtime_model_catalog_unavailable",
+                        model_id: model_id.to_string(),
+                        detail: error.to_string(),
+                    })
+                })?;
+            let models = response
+                .get("data")
+                .and_then(Value::as_array)
+                .ok_or_else(|| {
+                    anyhow::Error::new(CodexLiveModelValidationError {
+                        code: "runtime_model_catalog_unavailable",
+                        model_id: model_id.to_string(),
+                        detail: "model/list did not return data".to_string(),
+                    })
+                })?;
+            if models.iter().any(|model| {
+                model.get("id").and_then(Value::as_str) == Some(model_id)
+                    && !model
+                        .get("hidden")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+            }) {
+                return Ok(());
+            }
+            cursor = response
+                .get("nextCursor")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if cursor.is_none() {
+                return Err(anyhow::Error::new(CodexLiveModelValidationError {
+                    code: "runtime_model_unavailable",
+                    model_id: model_id.to_string(),
+                    detail: "the real Codex host did not advertise the saved model".to_string(),
+                }));
+            }
+            pages = pages.saturating_add(1);
+            if pages >= 100 {
+                return Err(anyhow::Error::new(CodexLiveModelValidationError {
+                    code: "runtime_model_catalog_unavailable",
+                    model_id: model_id.to_string(),
+                    detail: "model/list exceeded the pagination safety limit".to_string(),
+                }));
+            }
+        }
     }
 
     async fn start_or_resume_thread_with_config(
@@ -1759,6 +1840,16 @@ pub fn completed_turn(params: &Value) -> Result<CompletedTurn> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn make_test_executable(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(path, body).unwrap();
+        let mut permissions = std::fs::metadata(path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(path, permissions).unwrap();
+    }
+
     fn bootstrap_thread_options<'a>(bootstrap: &'a str) -> CodexThreadStartOptions<'a> {
         CodexThreadStartOptions {
             developer_instructions: Some(bootstrap),
@@ -1837,6 +1928,52 @@ mod tests {
             config.pointer("/mcp_servers/rovai_docs/url"),
             Some(&json!("https://example.test/mcp"))
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn real_host_catalog_rejects_a_missing_explicit_model_without_fallback() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-codex-live-model-validation-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("codex");
+        make_test_executable(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"id":1,"result":{}}'
+IFS= read -r initialized || exit 1
+IFS= read -r model_list || exit 1
+printf '%s\n' '{"id":2,"result":{"data":[{"id":"gpt-current","hidden":false}],"nextCursor":null}}'
+while IFS= read -r ignored; do :; done
+"#,
+        );
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = CodexHost::spawn_with_executable(&executable, &root, incoming, None)
+            .await
+            .unwrap();
+        let runtime = CodexRuntime::from_host(
+            CodexRuntimeOwner::AgentRun {
+                agent_run_id: "run-live-model-validation".to_string(),
+                execution_epoch: 1,
+            },
+            Some("camp-live-model-validation".to_string()),
+            host.clone(),
+        );
+
+        let error = runtime
+            .validate_explicit_model("claude-opus-5")
+            .await
+            .expect_err("a model absent from the real host catalog must fail closed");
+        let validation = error
+            .downcast_ref::<CodexLiveModelValidationError>()
+            .expect("the launch layer needs a typed model failure");
+        assert_eq!(validation.code, "runtime_model_unavailable");
+
+        host.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[tokio::test]

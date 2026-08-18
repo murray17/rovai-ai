@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AdapterInstallation,
   AdapterKind,
@@ -6,7 +8,9 @@ import type {
   MemberRuntimeConfiguration,
   ModelDescriptor,
   ModelSelection,
-  PermissionOptionDescriptor
+  PermissionOptionDescriptor,
+  RuntimeModelCatalogCache,
+  RuntimeModelCatalogView
 } from '@contracts'
 
 export type MemberRuntimeDraft = {
@@ -15,9 +19,12 @@ export type MemberRuntimeDraft = {
 }
 
 type RuntimeParameterProps = {
+  adapterKind: AdapterKind
+  installation: AdapterInstallation
   snapshot: NonNullable<AdapterInstallation['snapshot']>
   draft: MemberRuntimeDraft
   disabled: boolean
+  onOpenModelCatalog?: () => Promise<RuntimeModelCatalogView>
   onChange(draft: MemberRuntimeDraft): void
 }
 
@@ -43,6 +50,9 @@ export function runtimeModelSelectionAvailable(
 ): boolean {
   if (!installation?.memberRuntimeDefaults || !model) return false
   if (model.mode === 'runtime_default') return true
+  if (!installation.modelCatalog || !modelCatalogIsServiceable(installation.modelCatalog)) {
+    return false
+  }
   const descriptor = installation.snapshot?.models.find((candidate) => (
     candidate.id === model.modelId
     && !candidate.hidden
@@ -104,17 +114,27 @@ export function MemberRuntimeParameters({
   installation,
   draft,
   disabled,
+  onOpenModelCatalog,
   onChange
 }: {
   adapterKind: AdapterKind
   installation: AdapterInstallation | null
   draft: MemberRuntimeDraft | null
   disabled: boolean
+  onOpenModelCatalog?: () => Promise<RuntimeModelCatalogView>
   onChange(draft: MemberRuntimeDraft): void
 }): React.JSX.Element {
   const snapshot = installation?.snapshot ?? null
-  const content = snapshot && draft
-    ? runtimeParametersFor(adapterKind, { snapshot, draft, disabled, onChange })
+  const content = installation && snapshot && draft
+    ? runtimeParametersFor(adapterKind, {
+        adapterKind,
+        installation,
+        snapshot,
+        draft,
+        disabled,
+        onOpenModelCatalog,
+        onChange
+      })
     : (
         <p className="runtime-parameter-empty">
           当前还没有可编辑的能力快照。你仍可保存 Agent 运行时选择；检查完成后需要回来保存运行参数。
@@ -138,17 +158,19 @@ export function MemberModelParameters({
   installation,
   model,
   disabled,
+  onOpenModelCatalog,
   onChange
 }: {
   adapterKind: AdapterKind
   installation: AdapterInstallation | null
   model: ModelSelection | null
   disabled: boolean
+  onOpenModelCatalog?: () => Promise<RuntimeModelCatalogView>
   onChange(model: ModelSelection): void
 }): React.JSX.Element {
   const snapshot = installation?.snapshot ?? null
   const defaults = installation?.memberRuntimeDefaults ?? null
-  if (!snapshot || !defaults || !model) {
+  if (!installation || !snapshot || !defaults || !model) {
     return (
       <p className="runtime-parameter-empty">
         当前没有可编辑的模型目录；如果 Agent 运行时已准备好，将使用它的默认模型。
@@ -162,9 +184,12 @@ export function MemberModelParameters({
   return (
     <div className="runtime-parameter-form onboarding-model-parameter-form">
       {modelFieldsFor(adapterKind, {
+        adapterKind,
+        installation,
         snapshot,
         draft,
         disabled,
+        onOpenModelCatalog,
         onChange: (nextDraft) => onChange(nextDraft.model)
       })}
     </div>
@@ -318,47 +343,26 @@ function modelFieldsFor(
 }
 
 function ModelFields({
+  adapterKind,
+  installation,
   snapshot,
   draft,
   disabled,
+  onOpenModelCatalog,
   onChange,
   optionKey,
   optionLabel
 }: ModelFieldsProps): React.JSX.Element {
-  const models = snapshot.models.filter((model) => (
-    !model.hidden
-    && !model.deprecated
-    && !model.id.endsWith('://runtime-default')
-  ))
   const explicit = draft.model.mode === 'explicit' ? draft.model : null
+  const initialModels = modelCatalogIsServiceable(installation.modelCatalog)
+    ? selectableModels(snapshot.models)
+    : []
   const selectedModel = explicit
-    ? snapshot.models.find((model) => model.id === explicit.modelId) ?? null
+    ? initialModels.find((model) => model.id === explicit.modelId) ?? null
     : null
   const option = optionKey && selectedModel
     ? selectedModel.options.find((candidate) => candidate.key === optionKey) ?? null
     : null
-
-  const setStrategy = (mode: ModelSelection['mode']): void => {
-    if (mode === 'runtime_default') {
-      onChange({ ...draft, model: { mode: 'runtime_default' } })
-      return
-    }
-    const model = models.find((candidate) => candidate.isDefault) ?? models[0]
-    if (!model) return
-    onChange({
-      ...draft,
-      model: explicitSelection(model)
-    })
-  }
-
-  const setModel = (modelId: string): void => {
-    const model = models.find((candidate) => candidate.id === modelId)
-    if (!model) return
-    onChange({
-      ...draft,
-      model: explicitSelection(model)
-    })
-  }
 
   const setOption = (value: string): void => {
     if (!explicit || !optionKey) return
@@ -371,7 +375,6 @@ function ModelFields({
     })
   }
 
-  const modelInvalid = explicit && !models.some((model) => model.id === explicit.modelId)
   const optionValue = explicit && optionKey
     ? stringValue(explicit.options[optionKey])
     : ''
@@ -381,33 +384,14 @@ function ModelFields({
 
   return (
     <>
-      <label className="field-label">模型策略
-        <select
-          value={draft.model.mode}
-          disabled={disabled}
-          onChange={(event) => setStrategy(event.target.value as ModelSelection['mode'])}
-        >
-          <option value="runtime_default">跟随 Agent 运行时默认</option>
-          <option value="explicit" disabled={models.length === 0}>固定模型</option>
-        </select>
-      </label>
-
-      {explicit && (
-        <label className="field-label">模型
-          <select
-            value={explicit.modelId}
-            disabled={disabled}
-            onChange={(event) => setModel(event.target.value)}
-          >
-            {modelInvalid && (
-              <option value={explicit.modelId} disabled>已失效 · {explicit.modelId}</option>
-            )}
-            {models.map((model) => (
-              <option key={model.id} value={model.id}>{model.displayName}</option>
-            ))}
-          </select>
-        </label>
-      )}
+      <RuntimeModelPicker
+        adapterKind={adapterKind}
+        installation={installation}
+        draft={draft}
+        disabled={disabled}
+        onOpenModelCatalog={onOpenModelCatalog}
+        onChange={onChange}
+      />
 
       {explicit && option && optionKey && (
         <label className="field-label">{optionLabel ?? option.label}
@@ -428,6 +412,265 @@ function ModelFields({
       )}
     </>
   )
+}
+
+function RuntimeModelPicker({
+  adapterKind,
+  installation,
+  draft,
+  disabled,
+  onOpenModelCatalog,
+  onChange
+}: {
+  adapterKind: AdapterKind
+  installation: AdapterInstallation
+  draft: MemberRuntimeDraft
+  disabled: boolean
+  onOpenModelCatalog?: () => Promise<RuntimeModelCatalogView>
+  onChange(draft: MemberRuntimeDraft): void
+}): React.JSX.Element {
+  const [open, setOpen] = useState(false)
+  const [loading, setLoading] = useState(false)
+  const [refreshFailed, setRefreshFailed] = useState(false)
+  const [liveCatalog, setLiveCatalog] = useState<RuntimeModelCatalogView | null>(null)
+  const requestGeneration = useRef(0)
+  const initialCache = installation.modelCatalog
+  const initialModels = modelCatalogIsServiceable(initialCache)
+    ? selectableModels(installation.snapshot?.models ?? [])
+    : []
+  const cache = liveCatalog?.cache ?? initialCache
+  const models = liveCatalog
+    ? (modelCatalogIsServiceable(liveCatalog.cache) ? selectableModels(liveCatalog.models) : [])
+    : initialModels
+  const explicit = draft.model.mode === 'explicit' ? draft.model : null
+  const selectedModel = explicit
+    ? models.find((model) => model.id === explicit.modelId) ?? null
+    : null
+  const selectedValue = explicit?.modelId ?? 'runtime_default'
+  const persistedRefreshFailed = latestCatalogRefreshFailed(installation)
+
+  useEffect(() => {
+    requestGeneration.current += 1
+    setOpen(false)
+    setLoading(false)
+    setRefreshFailed(false)
+    setLiveCatalog(null)
+  }, [
+    adapterKind,
+    installation.id,
+    installation.lastProbeAttempt?.attemptedAt,
+    installation.lastProbeAttempt?.status,
+    initialCache.observedAt,
+    initialCache.status
+  ])
+
+  const loadCatalog = (): void => {
+    if (!onOpenModelCatalog) return
+    const generation = ++requestGeneration.current
+    setLoading(models.length === 0)
+    setRefreshFailed(false)
+    void onOpenModelCatalog()
+      .then((catalog) => {
+        if (generation !== requestGeneration.current || catalog.runtimeKind !== adapterKind) return
+        setLiveCatalog(catalog)
+        setRefreshFailed(catalog.refreshStatus === 'failed')
+      })
+      .catch(() => {
+        if (generation !== requestGeneration.current) return
+        setRefreshFailed(true)
+      })
+      .finally(() => {
+        if (generation === requestGeneration.current) setLoading(false)
+      })
+  }
+
+  const selectModel = (value: string): void => {
+    if (value === 'runtime_default') {
+      onChange({ ...draft, model: { mode: 'runtime_default' } })
+      return
+    }
+    const model = models.find((candidate) => candidate.id === value)
+    if (model) onChange({ ...draft, model: explicitSelection(model) })
+  }
+
+  const statusCopy = modelCatalogStatusCopy(cache, {
+    loading,
+    refreshFailed: refreshFailed || persistedRefreshFailed,
+    servingCachedModels: models.length > 0,
+    refreshStatus: liveCatalog?.refreshStatus ?? null
+  })
+  const missingSelectionLabel = explicit && !selectedModel
+    ? missingModelLabel(explicit.modelId, cache.status)
+    : null
+  const triggerLabel = draft.model.mode === 'runtime_default'
+    ? '跟随 Agent 运行时默认'
+    : selectedModel?.displayName ?? missingSelectionLabel ?? draft.model.modelId
+
+  return (
+    <div className="field-label runtime-model-field">
+      <span>模型策略</span>
+      <DropdownMenu.Root
+        open={open}
+        onOpenChange={(nextOpen) => {
+          setOpen(nextOpen)
+          if (nextOpen) loadCatalog()
+        }}
+      >
+        <DropdownMenu.Trigger asChild>
+          <button
+            className="runtime-model-picker-trigger"
+            type="button"
+            disabled={disabled}
+            aria-label={`模型，${triggerLabel}`}
+          >
+            <span>
+              <strong>{triggerLabel}</strong>
+              <small>{explicit ? `固定模型 · ${statusCopy}` : statusCopy}</small>
+            </span>
+            <svg aria-hidden="true" viewBox="0 0 16 16">
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            className="runtime-model-picker-menu"
+            align="start"
+            sideOffset={5}
+            collisionPadding={10}
+            loop
+          >
+            <DropdownMenu.Label className="runtime-model-picker-heading">
+              <strong>选择模型</strong>
+              <small>{statusCopy}</small>
+            </DropdownMenu.Label>
+            <DropdownMenu.RadioGroup value={selectedValue} onValueChange={selectModel}>
+              <RuntimeModelPickerItem value="runtime_default" label="跟随 Agent 运行时默认" />
+              {missingSelectionLabel && (
+                <RuntimeModelPickerItem
+                  value={explicit?.modelId ?? ''}
+                  label={missingSelectionLabel}
+                  disabled
+                  code
+                />
+              )}
+              {models.map((model) => (
+                <RuntimeModelPickerItem
+                  key={model.id}
+                  value={model.id}
+                  label={model.displayName}
+                  detail={model.id === model.displayName ? undefined : model.id}
+                  code
+                />
+              ))}
+            </DropdownMenu.RadioGroup>
+            {loading && (
+              <DropdownMenu.Label className="runtime-model-picker-state">
+                <i aria-hidden="true" />正在获取当前模型目录…
+              </DropdownMenu.Label>
+            )}
+            {!loading && models.length === 0 && (
+              <DropdownMenu.Label className={`runtime-model-picker-state ${refreshFailed || persistedRefreshFailed ? 'error' : ''}`}>
+                {refreshFailed || persistedRefreshFailed
+                  ? '暂时无法获取模型目录；可以稍后重试。'
+                  : '当前没有可选的固定模型。'}
+              </DropdownMenu.Label>
+            )}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </div>
+  )
+}
+
+function RuntimeModelPickerItem({
+  value,
+  label,
+  detail,
+  disabled = false,
+  code = false
+}: {
+  value: string
+  label: string
+  detail?: string
+  disabled?: boolean
+  code?: boolean
+}): React.JSX.Element {
+  return (
+    <DropdownMenu.RadioItem
+      className="runtime-model-picker-item"
+      value={value}
+      disabled={disabled}
+    >
+      <span className="runtime-model-picker-copy">
+        <strong>{label}</strong>
+        {detail && <small className={code ? 'is-code' : ''}>{detail}</small>}
+      </span>
+      <DropdownMenu.ItemIndicator className="runtime-model-picker-check">
+        <svg aria-hidden="true" viewBox="0 0 16 16"><path d="m3.5 8.2 2.8 2.8 6.2-6.2" /></svg>
+      </DropdownMenu.ItemIndicator>
+    </DropdownMenu.RadioItem>
+  )
+}
+
+function selectableModels(models: ModelDescriptor[]): ModelDescriptor[] {
+  return models.filter((model) => (
+    !model.hidden
+    && !model.deprecated
+    && !model.id.endsWith('://runtime-default')
+  ))
+}
+
+function modelCatalogIsServiceable(cache: RuntimeModelCatalogCache): boolean {
+  return cache.status === 'fresh' || cache.status === 'stale'
+}
+
+function latestCatalogRefreshFailed(installation: AdapterInstallation): boolean {
+  const attempt = installation.lastProbeAttempt
+  if (attempt?.status !== 'failed') return false
+  const observedAt = installation.modelCatalog.observedAt
+  if (!observedAt) return true
+  const attemptedTime = Date.parse(attempt.attemptedAt)
+  const observedTime = Date.parse(observedAt)
+  return Number.isNaN(attemptedTime)
+    || Number.isNaN(observedTime)
+    || attemptedTime >= observedTime
+}
+
+function missingModelLabel(
+  modelId: string,
+  status: RuntimeModelCatalogCache['status']
+): string {
+  if (status === 'fresh') return `当前目录未提供 · ${modelId}`
+  if (status === 'stale') return `缓存中未找到 · ${modelId}`
+  return `尚未核对 · ${modelId}`
+}
+
+function modelCatalogStatusCopy(
+  cache: RuntimeModelCatalogCache,
+  state: {
+    loading: boolean
+    refreshFailed: boolean
+    servingCachedModels: boolean
+    refreshStatus: RuntimeModelCatalogView['refreshStatus'] | null
+  }
+): string {
+  if (state.loading) return '正在获取当前模型目录'
+  if (state.refreshFailed) {
+    return state.servingCachedModels
+      ? '刷新失败，继续显示上次成功结果'
+      : '获取失败，打开后重试'
+  }
+  if (state.refreshStatus === 'scheduled' || state.refreshStatus === 'joined') {
+    return '显示上次成功结果，正在后台刷新'
+  }
+  switch (cache.status) {
+    case 'fresh': return '模型目录刚刚核对'
+    case 'stale': return '显示上次成功结果，打开时后台刷新'
+    case 'expired': return '缓存已超过 24 小时，打开后重新获取'
+    case 'invalidated': return '运行环境已变化，打开后重新获取'
+    case 'unavailable': return '尚未获取目录，打开后检查'
+  }
 }
 
 function explicitSelection(model: ModelDescriptor): ModelSelection {

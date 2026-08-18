@@ -3871,6 +3871,7 @@ describe('task event projections', () => {
       busy: null,
       onSave: async () => undefined,
       onClear: async () => undefined,
+      onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
     }))
 
@@ -3914,6 +3915,7 @@ describe('task event projections', () => {
       busy: null,
       onSave: async () => undefined,
       onClear: async () => undefined,
+      onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
     }))
 
@@ -3941,6 +3943,7 @@ describe('task event projections', () => {
       busy: 'runtime',
       onSave: async () => undefined,
       onClear: async () => undefined,
+      onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
     }))
 
@@ -3963,6 +3966,7 @@ describe('task event projections', () => {
       busy: null,
       onSave: async () => undefined,
       onClear: async () => undefined,
+      onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
     }))
 
@@ -3987,6 +3991,7 @@ describe('task event projections', () => {
       busy: null,
       onSave: async () => undefined,
       onClear: async () => undefined,
+      onReload: async () => undefined,
       onOpenRuntimeSettings: () => undefined
     }))
 
@@ -4104,6 +4109,10 @@ function codexInstallation(): AdapterInstallation {
     authScope: 'default', enabled: true, generation: 1, pathState: 'valid', version: 1,
     referencedProfileCount: 0, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z',
     lastProbeAttempt: null, relocationHistory: [],
+    modelCatalog: {
+      status: 'fresh', observedAt: '2026-07-22T00:00:00Z',
+      revalidateAfter: '2026-07-22T00:01:00Z', expiresAt: '2026-07-23T00:00:00Z'
+    },
     memberRuntimeDefaults: {
       adapterKind: 'codex-cli',
       model: { mode: 'runtime_default' },
