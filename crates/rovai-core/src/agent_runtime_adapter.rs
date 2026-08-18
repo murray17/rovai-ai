@@ -85,6 +85,16 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
     if !metadata.is_file() {
         anyhow::bail!("Runtime executable is not a file: {}", canonical.display());
     }
+    #[cfg(windows)]
+    if !canonical
+        .extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
+    {
+        anyhow::bail!(
+            "Runtime executable is not a native Windows EXE: {}",
+            canonical.display()
+        );
+    }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -110,13 +120,55 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
 
         Some(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
     };
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    let file_id = Some(windows_executable_file_id(&file).with_context(|| {
+        format!(
+            "failed to read opened Runtime identity for {}",
+            canonical.display()
+        )
+    })?);
+    #[cfg(not(any(unix, windows)))]
     let file_id = None;
     Ok(ExecutableFileIdentity {
         byte_size: metadata.len(),
         modified_at_unix_nanos,
         file_id,
     })
+}
+
+#[cfg(windows)]
+fn windows_executable_file_id(file: &File) -> Result<String> {
+    use std::{mem::size_of, os::windows::io::AsRawHandle};
+
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ID_INFO, FileIdInfo, GetFileInformationByHandleEx,
+    };
+
+    let mut identity = FILE_ID_INFO::default();
+    // SAFETY: `file` owns a live, non-inheritable file handle. `identity` is a
+    // correctly sized writable FILE_ID_INFO buffer for the FileIdInfo class.
+    let succeeded = unsafe {
+        GetFileInformationByHandleEx(
+            file.as_raw_handle(),
+            FileIdInfo,
+            std::ptr::from_mut(&mut identity).cast(),
+            u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO size fits DWORD"),
+        )
+    };
+    if succeeded == 0 {
+        return Err(std::io::Error::last_os_error()).context("GetFileInformationByHandleEx failed");
+    }
+
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut file_id = String::with_capacity(identity.FileId.Identifier.len() * 2);
+    for byte in identity.FileId.Identifier {
+        file_id.push(char::from(HEX[usize::from(byte >> 4)]));
+        file_id.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    Ok(format!(
+        "windows:{:016x}:{file_id}",
+        identity.VolumeSerialNumber
+    ))
 }
 
 pub fn verify_executable_integrity(
@@ -2118,6 +2170,27 @@ mod tests {
                 .expect("detect changed Runtime"),
             ExecutableIntegrityStatus::Changed
         );
+        std::fs::remove_file(path).expect("remove Runtime fixture");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_identity_combines_opened_volume_and_file_id() {
+        let path = std::env::temp_dir().join(format!(
+            "rovai-runtime-identity-{}.exe",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, b"runtime-fixture").expect("write Runtime fixture");
+
+        let identity =
+            observe_executable_file_identity(&path).expect("observe Windows Runtime identity");
+        let file_id = identity
+            .file_id
+            .expect("Windows identity must be available");
+        assert!(file_id.starts_with("windows:"));
+        assert_eq!(file_id.split(':').count(), 3);
+        assert_eq!(file_id.rsplit(':').next().map(str::len), Some(32));
+
         std::fs::remove_file(path).expect("remove Runtime fixture");
     }
 

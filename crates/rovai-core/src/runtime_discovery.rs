@@ -94,6 +94,7 @@ pub struct RuntimeSearchEnvironment {
     generation: u64,
     path_entries: Vec<SearchPathEntry>,
     path_value: OsString,
+    executable_suffixes: Vec<OsString>,
     created_at: String,
     shell_diagnostic: ShellPathDiagnostic,
 }
@@ -205,7 +206,7 @@ impl RuntimeSearchEnvironment {
         );
         extend_paths(
             &mut entries,
-            known_macos_runtime_directories().into_iter(),
+            known_runtime_directories().into_iter(),
             SearchPathSource::KnownLocation,
         );
         let path_value = env::join_paths(entries.iter().map(|entry| entry.path.as_os_str()))
@@ -214,6 +215,7 @@ impl RuntimeSearchEnvironment {
             generation,
             path_entries: entries,
             path_value,
+            executable_suffixes: runtime_executable_suffixes(),
             created_at: chrono::Utc::now().to_rfc3339(),
             shell_diagnostic: ShellPathDiagnostic {
                 status: shell_status,
@@ -278,19 +280,21 @@ impl RuntimeSearchEnvironment {
     ) -> Vec<RuntimeExecutableCandidate> {
         let mut candidates = Vec::new();
         for path in manual_candidates {
-            push_candidate(
+            push_candidates(
                 &mut candidates,
                 path,
                 InstallationSource::Manual,
                 kind.command_name(),
+                &self.executable_suffixes,
             );
         }
         if let Some(path) = override_path {
-            push_candidate(
+            push_candidates(
                 &mut candidates,
                 path,
                 InstallationSource::Env,
                 kind.command_name(),
+                &self.executable_suffixes,
             );
         }
         for entry in &self.path_entries {
@@ -300,11 +304,12 @@ impl RuntimeSearchEnvironment {
                 .copied()
                 .unwrap_or(SearchPathSource::KnownLocation)
                 .installation_source();
-            push_candidate(
+            push_candidates(
                 &mut candidates,
                 entry.path.clone(),
                 source,
                 kind.command_name(),
+                &self.executable_suffixes,
             );
         }
         candidates
@@ -703,17 +708,29 @@ fn normalize_directory(path: PathBuf) -> PathBuf {
     path.canonicalize().unwrap_or(path)
 }
 
-fn push_candidate(
+fn push_candidates(
     candidates: &mut Vec<RuntimeExecutableCandidate>,
     path_or_directory: PathBuf,
     source: InstallationSource,
     command_name: &str,
+    executable_suffixes: &[OsString],
 ) {
-    let path = if path_or_directory.is_dir() {
-        path_or_directory.join(command_name)
-    } else {
-        path_or_directory
-    };
+    if path_or_directory.is_dir() {
+        for suffix in executable_suffixes {
+            let mut executable_name = OsString::from(command_name);
+            executable_name.push(suffix);
+            push_concrete_candidate(candidates, path_or_directory.join(executable_name), source);
+        }
+        return;
+    }
+    push_concrete_candidate(candidates, path_or_directory, source);
+}
+
+fn push_concrete_candidate(
+    candidates: &mut Vec<RuntimeExecutableCandidate>,
+    path: PathBuf,
+    source: InstallationSource,
+) {
     let canonical = path.canonicalize().unwrap_or(path);
     if candidates
         .iter()
@@ -733,13 +750,20 @@ pub fn is_executable_file(path: &Path) -> bool {
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+pub fn is_executable_file(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
+        && fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
+#[cfg(not(any(unix, windows)))]
 pub fn is_executable_file(_path: &Path) -> bool {
     false
 }
 
 #[cfg(target_os = "macos")]
-fn known_macos_runtime_directories() -> Vec<PathBuf> {
+fn known_runtime_directories() -> Vec<PathBuf> {
     let mut result = vec![
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
@@ -777,9 +801,62 @@ fn known_macos_runtime_directories() -> Vec<PathBuf> {
     result
 }
 
-#[cfg(not(target_os = "macos"))]
-fn known_macos_runtime_directories() -> Vec<PathBuf> {
+#[cfg(windows)]
+fn known_runtime_directories() -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    if let Some(pnpm_home) = env::var_os("PNPM_HOME").filter(|value| !value.is_empty()) {
+        result.push(PathBuf::from(pnpm_home));
+    }
+    if let Some(local_app_data) = env::var_os("LOCALAPPDATA").filter(|value| !value.is_empty()) {
+        let local_app_data = PathBuf::from(local_app_data);
+        result.push(local_app_data.join("pnpm"));
+        result.push(local_app_data.join("Microsoft/WinGet/Links"));
+    }
+    if let Some(app_data) = env::var_os("APPDATA").filter(|value| !value.is_empty()) {
+        result.push(PathBuf::from(app_data).join("npm"));
+    }
+    if let Some(user_profile) = env::var_os("USERPROFILE").filter(|value| !value.is_empty()) {
+        let user_profile = PathBuf::from(user_profile);
+        result.push(user_profile.join(".cargo/bin"));
+        result.push(user_profile.join(".local/bin"));
+    }
+    result.retain(|path| path.is_dir());
+    result
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
+fn known_runtime_directories() -> Vec<PathBuf> {
     Vec::new()
+}
+
+#[cfg(windows)]
+fn runtime_executable_suffixes() -> Vec<OsString> {
+    windows_executable_suffixes_from(env::var_os("PATHEXT").as_deref())
+}
+
+#[cfg(not(windows))]
+fn runtime_executable_suffixes() -> Vec<OsString> {
+    vec![OsString::new()]
+}
+
+#[cfg(any(windows, test))]
+fn windows_executable_suffixes_from(path_ext: Option<&OsStr>) -> Vec<OsString> {
+    let Some(path_ext) = path_ext.filter(|value| !value.is_empty()) else {
+        return vec![OsString::from(".exe")];
+    };
+    let mut executable = Vec::new();
+    for suffix in path_ext.to_string_lossy().split(';') {
+        let suffix = suffix.trim();
+        let normalized = if suffix.starts_with('.') {
+            suffix.to_string()
+        } else {
+            format!(".{suffix}")
+        };
+        if normalized.eq_ignore_ascii_case(".exe") && executable.is_empty() {
+            executable.push(OsString::from(".exe"));
+        }
+    }
+    executable
 }
 
 pub fn catalog_entries() -> Vec<BTreeMap<&'static str, &'static str>> {
@@ -805,6 +882,7 @@ mod tests {
             path_value: env::join_paths(entries.iter().map(|entry| entry.path.as_os_str()))
                 .unwrap(),
             path_entries: entries,
+            executable_suffixes: vec![OsString::new()],
             created_at: "2026-07-29T00:00:00Z".to_string(),
             shell_diagnostic: ShellPathDiagnostic {
                 status: ShellPathStatus::Captured,
@@ -846,6 +924,49 @@ mod tests {
             assert!(!entry["displayName"].trim().is_empty());
             assert!(!entry["commandName"].trim().is_empty());
         }
+    }
+
+    #[test]
+    fn windows_pathext_keeps_only_native_exe_candidates() {
+        assert_eq!(
+            windows_executable_suffixes_from(Some(OsStr::new(".COM;.EXE;.CMD;.BAT;.PS1;.exe"))),
+            [OsString::from(".exe")]
+        );
+        assert_eq!(
+            windows_executable_suffixes_from(Some(OsStr::new("COM;CMD;BAT;PS1"))),
+            Vec::<OsString>::new()
+        );
+        assert_eq!(
+            windows_executable_suffixes_from(None),
+            [OsString::from(".exe")]
+        );
+    }
+
+    #[test]
+    fn windows_directory_search_materializes_only_the_native_exe_name() {
+        let directory = env::temp_dir().join(format!("rovai-windows-search-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join("codex.exe"), b"native fixture").unwrap();
+        fs::write(directory.join("codex.cmd"), b"script fixture").unwrap();
+        let search = RuntimeSearchEnvironment {
+            executable_suffixes: windows_executable_suffixes_from(Some(OsStr::new(
+                ".EXE;.CMD;.BAT;.PS1",
+            ))),
+            ..test_search(vec![SearchPathEntry {
+                path: directory.clone(),
+                sources: vec![SearchPathSource::InheritedPath],
+            }])
+        };
+
+        let candidates =
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].path.file_name(),
+            Some(OsStr::new("codex.exe"))
+        );
+
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -1100,5 +1221,26 @@ mod tests {
         }
         target.push(length as u8);
         target.extend_from_slice(value.as_bytes());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn executable_file_gate_accepts_exe_and_rejects_script_shims() {
+        let directory =
+            env::temp_dir().join(format!("rovai-windows-executable-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join("runtime.exe");
+        let command_shim = directory.join("runtime.cmd");
+        fs::write(&executable, b"native fixture").unwrap();
+        fs::write(&command_shim, b"script fixture").unwrap();
+
+        assert!(is_executable_file(&executable));
+        assert!(!is_executable_file(&command_shim));
+
+        fs::remove_dir_all(directory).unwrap();
     }
 }
