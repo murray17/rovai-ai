@@ -1656,7 +1656,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     'Conversation drop acceptance must begin with the Execution Drawer closed')
 
   const dayDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  await waitForConversationDropLayerPaint(cdp)
   const dayPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
   assertConversationDropPresentation(dayPresentation, 'day 1440x920', 308)
   assert([
@@ -1692,7 +1692,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
 
   await setTheme(cdp, 'night')
   const nightDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  await waitForConversationDropLayerPaint(cdp)
   const nightPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
   assertConversationDropPresentation(nightPresentation, 'night 1440x920', 308)
   const nightDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-night-1440x920.png')
@@ -1711,7 +1711,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
   })
   await waitForExpression(cdp, `innerWidth === 1040 && innerHeight === 700`)
   const compactDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  await waitForConversationDropLayerPaint(cdp)
   const compactPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
   assertConversationDropPresentation(compactPresentation, 'day 1040x700', 280)
   const compactDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-day-1040x700.png')
@@ -1812,6 +1812,13 @@ async function beginFileDrag(cdp, sourcePath, selector) {
   return drag
 }
 
+async function waitForConversationDropLayerPaint(cdp) {
+  await waitForExpression(cdp, `(() => {
+    const layer = document.querySelector('.conversation-drop-layer')
+    return Boolean(layer) && getComputedStyle(layer).opacity === '1'
+  })()`)
+}
+
 async function dispatchFileDrag(cdp, type, drag) {
   await cdp.send('Input.dispatchDragEvent', {
     type,
@@ -1824,10 +1831,15 @@ async function dispatchFileDrag(cdp, type, drag) {
 async function collectConversationDropPresentation(cdp, sourceDirectory) {
   return evaluate(cdp, `(() => {
     const grid = document.querySelector('.workspace-grid')?.getBoundingClientRect()
-    const layer = document.querySelector('.conversation-drop-layer')?.getBoundingClientRect()
+    const layerElement = document.querySelector('.conversation-drop-layer')
+    const layer = layerElement?.getBoundingClientRect()
     const callout = document.querySelector('.conversation-drop-callout')?.getBoundingClientRect()
     const inspector = document.querySelector('.activity-pane')?.getBoundingClientRect()
     const runPulse = document.querySelector('.run-pulse')?.getBoundingClientRect()
+    const timeline = document.querySelector('.timeline-pane')?.getBoundingClientRect()
+    const composer = document.querySelector('.composer')
+    const composerRect = composer?.getBoundingClientRect()
+    const composerBox = document.querySelector('.composer-box')?.getBoundingClientRect()
     const destination = document.querySelector('.composer-destination')
     const tabs = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
       .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim())
@@ -1842,6 +1854,15 @@ async function collectConversationDropPresentation(cdp, sourceDirectory) {
       oldComposerOverlay: Boolean(document.querySelector('.composer-drop-overlay')),
       runPulseVisible: Boolean(runPulse && runPulse.width > 0 && runPulse.height > 0),
       calloutCoversRunPulse: overlap(callout, runPulse),
+      layerSpansTimelineAndComposer: overlap(layer, timeline) && overlap(layer, composerRect),
+      layerCoversComposerBox: Boolean(layer && composerBox
+        && layer.left <= composerBox.left
+        && layer.right >= composerBox.right
+        && layer.top <= composerBox.top
+        && layer.bottom >= composerBox.bottom),
+      layerAboveComposer: Boolean(composer && layerElement
+        && Number.parseInt(getComputedStyle(layerElement).zIndex, 10)
+        > Number.parseInt(getComputedStyle(composer).zIndex, 10)),
       layerInsideGrid: Boolean(grid && layer
         && layer.left >= grid.left + 6
         && layer.top >= grid.top + 6
@@ -1864,6 +1885,9 @@ function assertConversationDropPresentation(presentation, context, expectedCallo
     && !presentation.oldComposerOverlay
     && presentation.runPulseVisible
     && !presentation.calloutCoversRunPulse
+    && presentation.layerSpansTimelineAndComposer
+    && presentation.layerCoversComposerBox
+    && presentation.layerAboveComposer
     && presentation.layerInsideGrid
     && presentation.inspectorExcluded
     && Math.abs(presentation.calloutWidth - expectedCalloutWidth) <= 1
