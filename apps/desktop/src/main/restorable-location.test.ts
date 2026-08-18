@@ -10,6 +10,7 @@ import {
 } from './restorable-location'
 
 const cleanup: string[] = []
+const CAMP_ID = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })))
@@ -24,7 +25,7 @@ async function temporaryDirectory(): Promise<string> {
 describe('restorable location', () => {
   it.each<RestorableLocation>([
     { kind: 'quick_chat' },
-    { kind: 'camp', campId: 'camp-1' },
+    { kind: 'camp', campId: CAMP_ID },
     { kind: 'members', agentId: 'agent-1', tab: 'identity' },
     { kind: 'members', agentId: null, tab: 'runtime' },
     { kind: 'memory' }
@@ -60,7 +61,7 @@ describe('restorable location', () => {
     const store = await RestorableLocationStore.load(filePath)
 
     await Promise.all([
-      store.commit({ kind: 'camp', campId: 'camp-1' }),
+      store.commit({ kind: 'camp', campId: CAMP_ID }),
       store.commit({ kind: 'members', agentId: 'agent-1', tab: 'runtime' }),
       store.commit({ kind: 'memory' })
     ])

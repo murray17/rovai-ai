@@ -418,6 +418,7 @@ impl DomainCommand for AcknowledgeNotificationEpisodeCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AcknowledgeVisibleNotificationSourcesCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub observed_through_change_sequence: i64,
     pub visible_message_ids: Vec<String>,

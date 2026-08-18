@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
+import { isCampId } from '@contracts'
 import type {
   AdapterPermissionConfig,
   AdapterKind,
@@ -92,7 +93,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
     if (!isTimestamp(value.completedAt)) return null
     if (value.selectedMemberRole !== null && !isMemberRole(value.selectedMemberRole)) return null
     if (value.memberAgentId !== null && !isStableId(value.memberAgentId)) return null
-    if (value.quickChatCampId !== null && !isStableId(value.quickChatCampId)) return null
+    if (value.quickChatCampId !== null && !isCampId(value.quickChatCampId)) return null
     if (value.origin === 'onboarding' && (
       value.selectedMemberRole === null
       || value.memberAgentId === null
@@ -296,7 +297,7 @@ export class OnboardingStore {
   }
 
   recordProvisionedCamp(campId: unknown): Promise<OnboardingSnapshot> {
-    if (!isStableId(campId)) return Promise.reject(new Error('Invalid provisioned Camp checkpoint'))
+    if (!isCampId(campId)) return Promise.reject(new Error('Invalid provisioned Camp checkpoint'))
     return this.#mutateProvisioning((operation) => {
       if (operation.memberVersionAfterRuntime === null) {
         throw new Error('首次引导 Runtime 尚未保存')
@@ -418,7 +419,7 @@ function parseProvisioning(value: unknown): OnboardingProvisioningOperation | nu
   if (value.memberAgentId !== null && !isStableId(value.memberAgentId)) return null
   if (value.memberVersionBeforeRuntime !== null && !isPositiveVersion(value.memberVersionBeforeRuntime)) return null
   if (value.memberVersionAfterRuntime !== null && !isPositiveVersion(value.memberVersionAfterRuntime)) return null
-  if (value.quickChatCampId !== null && !isStableId(value.quickChatCampId)) return null
+  if (value.quickChatCampId !== null && !isCampId(value.quickChatCampId)) return null
   if ((value.memberAgentId === null) !== (value.memberVersionBeforeRuntime === null)) return null
   if (value.memberVersionAfterRuntime !== null && value.memberVersionBeforeRuntime === null) return null
   if (value.quickChatCampId !== null && value.memberVersionAfterRuntime === null) return null

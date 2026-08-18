@@ -23,7 +23,7 @@ serde_json = "1"
 sha2 = "0.10"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 toml = "0.9"
-uuid = { version = "1", features = ["serde", "v4"] }
+uuid = { version = "1", features = ["serde", "v4", "v7"] }
 url = "2"
 
 [target.'cfg(windows)'.dependencies]

@@ -9,6 +9,7 @@ pub mod builtin_tool_transport;
 pub mod camp_attachment;
 pub mod camp_content;
 pub mod camp_history;
+pub mod camp_id;
 mod camp_message_publication;
 pub mod camp_message_send_teaching;
 pub mod camp_open;

@@ -14,6 +14,7 @@ use crate::agent_identity::{
     FIRST_USER_AGENT_ORDINAL, LEGACY_BUILT_IN_AGENT_ID_MAPPINGS, LUOKE_AGENT_ID, MIANZHI_AGENT_ID,
     MUWA_AGENT_ID, QILU_AGENT_ID, format_agent_id,
 };
+use crate::camp_id::CampId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
 use crate::execution_budget::{
@@ -15309,7 +15310,7 @@ impl Database {
             } else {
                 None
             };
-            let camp_id = Uuid::new_v4().to_string();
+            let camp_id = CampId::new();
             let internal_ref = is_repository.then(|| format!("refs/rovai/camps/{camp_id}"));
             let lead = active_profiles
                 .first()

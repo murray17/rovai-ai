@@ -125,6 +125,7 @@ impl DomainCommand for MarkAgentRunForRecoveryCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolveAcceptedInputRecoveryBlockerCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub agent_run_id: String,
     pub expected_version: i64,
@@ -138,6 +139,7 @@ impl DomainCommand for ResolveAcceptedInputRecoveryBlockerCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelCampTurnCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub camp_turn_id: String,
     pub expected_version: i64,

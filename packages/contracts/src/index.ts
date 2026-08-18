@@ -2,6 +2,24 @@ import type { BuiltinMemberAvatarRole } from './member-avatar'
 
 export * from './member-avatar'
 
+export const CAMP_ID_PATTERN = /^rvcamp_[0-7][0123456789abcdefghjkmnpqrstvwxyz]{25}$/u
+
+const CAMP_ID_PREFIX_LENGTH = 'rvcamp_'.length
+const CAMP_ID_CROCKFORD = '0123456789abcdefghjkmnpqrstvwxyz'
+
+export function isCampId(value: unknown): value is string {
+  if (typeof value !== 'string' || !CAMP_ID_PATTERN.test(value)) return false
+  let decoded = 0n
+  for (const character of value.slice(CAMP_ID_PREFIX_LENGTH)) {
+    const digit = CAMP_ID_CROCKFORD.indexOf(character)
+    if (digit < 0) return false
+    decoded = (decoded << 5n) | BigInt(digit)
+  }
+  const version = Number((decoded >> 76n) & 0xfn)
+  const variant = Number((decoded >> 62n) & 0x3n)
+  return version === 7 && variant === 2
+}
+
 export type AdapterKind =
   | 'codex-cli'
   | 'opencode-cli'
@@ -1202,7 +1220,7 @@ export interface ContextManifestView {
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 19
+  formatterVersion: 20
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string

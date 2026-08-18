@@ -17,6 +17,7 @@ use crate::{
         StructuredCampMessageContent, mentions_current_user, normalize_content,
         render_agent_plain_text, validate_content,
     },
+    camp_id::{CAMP_ID_PATTERN, CampId},
     camp_message_publication::public_camp_message_publication_cte,
     db::Database,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
@@ -27,6 +28,7 @@ pub const CAMP_LIST_TOOL_NAME: &str = "camp.list";
 pub const CAMP_SEARCH_TOOL_NAME: &str = "camp.search";
 pub const HISTORY_SEARCH_TOOL_NAME: &str = "history.search";
 pub const CAMP_READ_TOOL_NAME: &str = "camp.read";
+pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 3;
 
 const CAMP_LIST_DEFAULT_LIMIT: usize = 20;
 const CAMP_LIST_MAX_LIMIT: usize = 50;
@@ -225,7 +227,7 @@ impl CampHistoryService {
             "required": ["query"],
             "properties": {
                 "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
-                "campId": {"type": "string", "minLength": 1},
+                "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                 "limit": {"type": "integer", "minimum": 1, "maximum": CAMP_SEARCH_MAX_LIMIT}
             }
         })
@@ -241,7 +243,7 @@ impl CampHistoryService {
                 "campIds": {
                     "type": "array", "minItems": 1, "maxItems": MAX_HISTORY_CAMP_IDS,
                     "uniqueItems": true,
-                    "items": {"type": "string", "minLength": 1}
+                    "items": {"type": "string", "pattern": CAMP_ID_PATTERN}
                 },
                 "dateFrom": {"type": "string", "format": "date-time"},
                 "dateTo": {"type": "string", "format": "date-time"},
@@ -258,7 +260,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "messageId"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "item"},
                         "messageId": {"type": "string", "minLength": 1},
                         "bodyOffset": {"type": "integer", "minimum": 0},
@@ -269,7 +271,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "messageId"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "around"},
                         "messageId": {"type": "string", "minLength": 1},
                         "before": {"type": "integer", "minimum": 0, "maximum": MAX_AROUND_MESSAGES},
@@ -280,7 +282,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "messageId", "direction"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "thread"},
                         "messageId": {"type": "string", "minLength": 1},
                         "direction": {"type": "string", "enum": ["before", "after"]},
@@ -292,7 +294,7 @@ impl CampHistoryService {
                     "additionalProperties": false,
                     "required": ["mode", "direction"],
                     "properties": {
-                        "campId": {"type": "string", "minLength": 1},
+                        "campId": {"type": "string", "pattern": CAMP_ID_PATTERN},
                         "mode": {"const": "timeline"},
                         "direction": {"type": "string", "enum": ["before", "after"]},
                         "cursor": {"type": "integer", "minimum": 1},
@@ -634,9 +636,9 @@ fn validate_requested_camps(values: Option<&[String]>) -> Result<Option<Vec<Stri
     }
     let mut unique = HashSet::new();
     for value in values {
-        if Uuid::parse_str(value).is_err() || !unique.insert(value.clone()) {
+        if CampId::parse(value).is_err() || !unique.insert(value.clone()) {
             return Err(invalid_argument(
-                "campIds must contain 1 to 20 unique UUIDs",
+                "campIds must contain 1 to 20 unique Rovai Camp IDs",
             ));
         }
     }
@@ -646,9 +648,9 @@ fn validate_requested_camps(values: Option<&[String]>) -> Result<Option<Vec<Stri
 fn validate_requested_camp_id(value: Option<&str>) -> Result<Option<String>> {
     value
         .map(|value| {
-            Uuid::parse_str(value)
+            CampId::parse(value)
                 .map(|camp_id| camp_id.to_string())
-                .map_err(|_| invalid_argument("campId must be a UUID"))
+                .map_err(|_| invalid_argument("campId must be a Rovai Camp ID"))
         })
         .transpose()
 }

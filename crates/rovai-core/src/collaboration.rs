@@ -19,6 +19,7 @@ use crate::{
         has_all_members_mention, member_mention_ids, normalize_content, render_plain_text,
         validate_user_authored_content,
     },
+    camp_id::CampId,
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandHandlerResult, DomainCommand,
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
@@ -147,6 +148,7 @@ impl CampNameOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RenameCampCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub title: String,
     pub expected_version: i64,
@@ -160,6 +162,7 @@ impl DomainCommand for RenameCampCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeDefaultLeadCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub successor_agent_id: String,
     pub expected_version: i64,
@@ -173,6 +176,7 @@ impl DomainCommand for ChangeDefaultLeadCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReconcileDefaultLeadCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
 }
 
@@ -184,6 +188,7 @@ impl DomainCommand for ReconcileDefaultLeadCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeleteCampCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub expected_version: i64,
     #[serde(default)]
@@ -198,6 +203,7 @@ impl DomainCommand for DeleteCampCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscardPendingCampCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
 }
 
@@ -209,6 +215,7 @@ impl DomainCommand for DiscardPendingCampCommand {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddCampMemberCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub agent_id: String,
     #[serde(default)]
@@ -238,6 +245,7 @@ fn required_completion_role() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendUserCampDraftCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub draft_revision: i64,
     pub execution: Option<ExecutionRequest>,
@@ -284,6 +292,7 @@ pub(crate) struct TestCampConversationCommand {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateTaskCommand {
+    #[serde(deserialize_with = "crate::camp_id::deserialize_camp_id_string")]
     pub camp_id: String,
     pub title: String,
     pub description: String,
@@ -627,7 +636,7 @@ impl CollaborationService {
     ) -> Result<CommandExecution> {
         validate_project_path(&envelope.payload.project_path)?;
         let normalized_name = normalize_camp_name(envelope.payload.name.as_deref().unwrap_or(""));
-        let camp_id = Uuid::new_v4().to_string();
+        let camp_id = CampId::new();
         self.gateway.execute(database, envelope, |transaction| {
             if !matches!(envelope.actor, ActorRef::User { .. }) {
                 return Ok(rejected(
@@ -731,7 +740,7 @@ impl CollaborationService {
                 append_domain_event(
                     transaction,
                     "camp.created",
-                    Some(&camp_id),
+                    Some(camp_id.as_str()),
                     Some(("camp", camp_id.as_str())),
                     &envelope.actor,
                     envelope.execution_epoch,
@@ -765,7 +774,7 @@ impl CollaborationService {
                 }),
                 Some(EntityReference {
                     entity_type: "camp".to_string(),
-                    entity_id: camp_id.clone(),
+                    entity_id: camp_id.to_string(),
                 }),
             ))
         })

@@ -75,6 +75,7 @@ use rovai_core::{
         CampListInput, CampReadInput, CampSearchInput, HISTORY_SEARCH_TOOL_NAME,
         HistorySearchInput, invalid_input_error,
     },
+    camp_id::CampId,
     camp_open::CampOpenService,
     collaboration::{
         CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
@@ -465,7 +466,7 @@ struct CampCreationMember {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
-    camp_id: String,
+    camp_id: CampId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -480,13 +481,13 @@ struct CampEnterParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampOpenParams {
     trace_id: String,
-    camp_id: String,
+    camp_id: CampId,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampMessagePageParams {
-    camp_id: String,
+    camp_id: CampId,
     before_sequence: i64,
     through_global_sequence: i64,
     #[serde(default = "default_camp_message_page_limit")]
@@ -541,14 +542,14 @@ fn log_camp_open_projection(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampMessageAroundParams {
-    camp_id: String,
+    camp_id: CampId,
     message_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampMessageFindParams {
-    camp_id: String,
+    camp_id: CampId,
     query: String,
     selected_match_index: Option<i64>,
     anchor_message_id: Option<String>,
@@ -557,14 +558,14 @@ struct CampMessageFindParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceContentParams {
-    camp_id: String,
+    camp_id: CampId,
     evidence_id: String,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ExecutionEvidenceListParams {
-    camp_id: String,
+    camp_id: CampId,
     agent_run_id: String,
     #[serde(default)]
     after_sequence: i64,
@@ -613,7 +614,7 @@ struct InspectGithubSkillImportParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateTaskParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     title: String,
     #[serde(default)]
     description: String,
@@ -626,7 +627,7 @@ struct CreateTaskParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateTaskParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     task_id: String,
     expected_version: i64,
     title: Option<String>,
@@ -644,7 +645,7 @@ struct UpdateTaskParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ListTasksParams {
-    camp_id: String,
+    camp_id: CampId,
     statuses: Option<Vec<TaskStatus>>,
     #[serde(default)]
     assignee: TaskAssigneeFilter,
@@ -656,7 +657,7 @@ struct ListTasksParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct GetTaskParams {
-    camp_id: String,
+    camp_id: CampId,
     task_id: String,
 }
 
@@ -671,7 +672,7 @@ struct NavigationGroupCampsParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AcknowledgeCampViewedParams {
-    camp_id: String,
+    camp_id: CampId,
     through_global_sequence: i64,
 }
 
@@ -679,7 +680,7 @@ struct AcknowledgeCampViewedParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SendCampMessageParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     draft_revision: i64,
     execution: Option<ExecutionRequest>,
 }
@@ -687,13 +688,13 @@ struct SendCampMessageParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampComposerDraftParams {
-    camp_id: String,
+    camp_id: CampId,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SaveCampComposerDraftParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     content: StructuredCampMessageContent,
     continuation_source_message_id: Option<String>,
@@ -702,7 +703,7 @@ struct SaveCampComposerDraftParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartCampComposerReplyParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     reply_to_camp_message_id: String,
 }
@@ -710,14 +711,14 @@ struct StartCampComposerReplyParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MutateCampComposerReplyParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResolveCampComposerReplyRecipientParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     recipient: CampComposerReplyRecipient,
 }
@@ -725,7 +726,7 @@ struct ResolveCampComposerReplyRecipientParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DismissCampComposerContinuationParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     source_camp_message_id: String,
 }
@@ -733,7 +734,7 @@ struct DismissCampComposerContinuationParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResolveCampComposerContinuationRecipientParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     agent_id: String,
 }
@@ -741,7 +742,7 @@ struct ResolveCampComposerContinuationRecipientParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RemovePreparedAttachmentParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     attachment_id: String,
 }
@@ -749,7 +750,7 @@ struct RemovePreparedAttachmentParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PrepareAttachmentFromPathParams {
-    camp_id: String,
+    camp_id: CampId,
     expected_revision: i64,
     source_path: String,
     display_name: String,
@@ -770,7 +771,7 @@ struct CancelPendingExecutionParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct SubscribeEventsParams {
-    camp_id: Option<String>,
+    camp_id: Option<CampId>,
     after_global_sequence: i64,
     limit: Option<i64>,
 }
@@ -801,7 +802,7 @@ struct NotificationChangesSinceParams {
 #[serde(rename_all = "camelCase")]
 struct ResolveActionApprovalParams {
     command_id: String,
-    camp_id: String,
+    camp_id: CampId,
     approval_id: String,
     expected_version: i64,
     option_id: String,
@@ -4073,7 +4074,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.acknowledge_camp_viewed(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.through_global_sequence,
                     )?,
                 )?)
@@ -4159,7 +4160,7 @@ impl Core {
                 let params: CampIdParams = serde_json::from_value(request.params.clone())?;
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.camp_exists(&database, &params.camp_id)?,
+                    ReadModelService.camp_exists(&database, params.camp_id.as_str())?,
                 )?)
             }
             "camps.enter" => {
@@ -4203,7 +4204,7 @@ impl Core {
                 let lock_started_at = std::time::Instant::now();
                 let mut database = self.database.lock().await;
                 let lock_ms = lock_started_at.elapsed().as_millis();
-                let outcome = CampOpenService.open(&mut database, &params.camp_id)?;
+                let outcome = CampOpenService.open(&mut database, params.camp_id.as_str())?;
                 let projection = outcome.projection;
                 let projection_ms = outcome.projection_duration.as_millis();
                 let serialization_started_at = std::time::Instant::now();
@@ -4328,7 +4329,7 @@ impl Core {
                 let params: CampIdParams = serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(
-                    ReadModelService.camp_snapshot(&mut database, &params.camp_id)?,
+                    ReadModelService.camp_snapshot(&mut database, params.camp_id.as_str())?,
                 )?)
             }
             "camp.messages.page" => {
@@ -4336,7 +4337,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.camp_messages_page(
                     &mut database,
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     params.before_sequence,
                     params.through_global_sequence,
                     params.limit,
@@ -4349,7 +4350,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.camp_messages_around(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &params.message_id,
                     )?,
                 )?)
@@ -4359,7 +4360,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.camp_messages_find(
                     &mut database,
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     &params.query,
                     params.selected_match_index,
                     params.anchor_message_id.as_deref(),
@@ -4372,7 +4373,7 @@ impl Core {
                 let payload = ExecutionEvidenceService.read_full_payload(
                     &database,
                     &ManagedBlobStore::new(&self.data_dir),
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     &params.evidence_id,
                 )?;
                 Ok(json!({ "evidenceId": params.evidence_id, "payload": payload }))
@@ -4384,7 +4385,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     ReadModelService.agent_run_execution_evidence_page(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &params.agent_run_id,
                         params.after_sequence,
                         params.limit,
@@ -4398,9 +4399,9 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(
                         params.command_id,
-                        params.camp_id.clone(),
+                        params.camp_id.to_string(),
                         CreateTaskCommand {
-                            camp_id: params.camp_id,
+                            camp_id: params.camp_id.to_string(),
                             title: params.title,
                             description: params.description,
                             acceptance_criteria: params.acceptance_criteria,
@@ -4417,7 +4418,7 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(
                         params.command_id,
-                        params.camp_id,
+                        params.camp_id.to_string(),
                         UpdateTaskCommand {
                             task_id: params.task_id,
                             expected_version: params.expected_version,
@@ -4440,7 +4441,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CollaborationService::default().query_visible_tasks(
                         &database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &ActorRef::User {
                             user_id: CURRENT_USER_ID.to_string(),
                         },
@@ -4460,7 +4461,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CollaborationService::default().get_visible_task(
                         &database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         &params.task_id,
                         &ActorRef::User {
                             user_id: CURRENT_USER_ID.to_string(),
@@ -4475,7 +4476,7 @@ impl Core {
                 let database = self.database.lock().await;
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir)
-                        .load_draft(&database, &params.camp_id)?,
+                        .load_draft(&database, params.camp_id.as_str())?,
                 )?)
             }
             "camp.composerDraft.save" => {
@@ -4485,7 +4486,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).save_content_with_continuation(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         params.content,
                         params.continuation_source_message_id.as_deref(),
@@ -4499,7 +4500,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).start_reply(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.reply_to_camp_message_id,
                     )?,
@@ -4512,7 +4513,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).cancel_reply(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                     )?,
                 )?)
@@ -4524,7 +4525,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).resolve_reply_recipient(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         params.recipient,
                     )?,
@@ -4537,7 +4538,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).dismiss_continuation(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.source_camp_message_id,
                     )?,
@@ -4550,7 +4551,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).resolve_continuation_recipient(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.agent_id,
                     )?,
@@ -4563,7 +4564,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).remove_prepared(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         &params.attachment_id,
                     )?,
@@ -4574,7 +4575,7 @@ impl Core {
                     serde_json::from_value(request.params.clone())?;
                 let mut database = self.database.lock().await;
                 CampAttachmentStore::new(&self.data_dir)
-                    .discard_draft(&mut database, &params.camp_id)?;
+                    .discard_draft(&mut database, params.camp_id.as_str())?;
                 Ok(json!({ "discarded": true }))
             }
             "camp.attachments.prepareFromPath" => {
@@ -4584,7 +4585,7 @@ impl Core {
                 Ok(serde_json::to_value(
                     CampAttachmentStore::new(&self.data_dir).prepare_from_path(
                         &mut database,
-                        &params.camp_id,
+                        params.camp_id.as_str(),
                         params.expected_revision,
                         Path::new(&params.source_path),
                         &params.display_name,
@@ -4637,7 +4638,7 @@ impl Core {
                         actor: ActorRef::User {
                             user_id: CURRENT_USER_ID.to_string(),
                         },
-                        camp_id: Some(params.camp_id),
+                        camp_id: Some(params.camp_id.to_string()),
                         expected_versions: Vec::new(),
                         execution_epoch: None,
                         payload: ResolveActionApprovalCommand {
@@ -4752,7 +4753,7 @@ impl Core {
                 let mut database = self.database.lock().await;
                 Ok(serde_json::to_value(ReadModelService.events_since(
                     &mut database,
-                    params.camp_id.as_deref(),
+                    params.camp_id.as_ref().map(CampId::as_str),
                     params.after_global_sequence,
                     params.limit.unwrap_or(500),
                 )?)?)
@@ -4872,11 +4873,11 @@ impl Core {
             actor: ActorRef::User {
                 user_id: CURRENT_USER_ID.to_string(),
             },
-            camp_id: Some(params.camp_id.clone()),
+            camp_id: Some(params.camp_id.to_string()),
             expected_versions: Vec::new(),
             execution_epoch: None,
             payload: SendUserCampDraftCommand {
-                camp_id: params.camp_id.clone(),
+                camp_id: params.camp_id.to_string(),
                 draft_revision: params.draft_revision,
                 execution: params.execution.clone(),
             },
@@ -4896,8 +4897,8 @@ impl Core {
 
         let execution = {
             let mut database = self.database.lock().await;
-            let draft =
-                CampAttachmentStore::new(&self.data_dir).load_draft(&database, &params.camp_id)?;
+            let draft = CampAttachmentStore::new(&self.data_dir)
+                .load_draft(&database, params.camp_id.as_str())?;
             if draft.revision == params.draft_revision {
                 let attachment_ids = draft
                     .attachments
@@ -4906,7 +4907,7 @@ impl Core {
                     .collect::<Vec<_>>();
                 CampAttachmentStore::new(&self.data_dir).verify_send(
                     &database,
-                    &params.camp_id,
+                    params.camp_id.as_str(),
                     &attachment_ids,
                 )?;
             }

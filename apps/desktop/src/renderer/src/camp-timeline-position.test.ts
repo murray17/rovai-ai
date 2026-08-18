@@ -8,26 +8,33 @@ import {
   storedCampTimelineReadingPositionsWithUpdate
 } from './camp-timeline-position'
 
+const CAMP_IDS = [
+  'rvcamp_01h47kvsy5fk1shh6w1g60eec0',
+  'rvcamp_01h47kvsy5fk1shh6w1g60eec1',
+  'rvcamp_01h47kvsy5fk1shh6w1g60eec2',
+  'rvcamp_01h47kvsy5fk1shh6w1g60eec3',
+] as const
+
 describe('Camp timeline reading positions', () => {
   it('round-trips one position and replaces the same Camp entry', () => {
     const first = storedCampTimelineReadingPositionsWithUpdate(
       null,
-      'camp-1',
+      CAMP_IDS[0],
       { scrollTop: 240, followingLatest: false },
       10
     )
-    expect(campTimelineReadingPositionFromStoredValue(first, 'camp-1')).toEqual({
+    expect(campTimelineReadingPositionFromStoredValue(first, CAMP_IDS[0])).toEqual({
       scrollTop: 240,
       followingLatest: false
     })
 
     const second = storedCampTimelineReadingPositionsWithUpdate(
       first,
-      'camp-1',
+      CAMP_IDS[0],
       { scrollTop: 720, followingLatest: true },
       20
     )
-    expect(campTimelineReadingPositionFromStoredValue(second, 'camp-1')).toEqual({
+    expect(campTimelineReadingPositionFromStoredValue(second, CAMP_IDS[0])).toEqual({
       scrollTop: 720,
       followingLatest: true
     })
@@ -35,19 +42,19 @@ describe('Camp timeline reading positions', () => {
   })
 
   it('rejects corrupt data and keeps only the newest bounded Camps', () => {
-    expect(campTimelineReadingPositionFromStoredValue('{broken', 'camp-1')).toBeNull()
+    expect(campTimelineReadingPositionFromStoredValue('{broken', CAMP_IDS[0])).toBeNull()
     let stored: string | null = null
     for (let index = 1; index <= 4; index += 1) {
       stored = storedCampTimelineReadingPositionsWithUpdate(
         stored,
-        `camp-${index}`,
+        CAMP_IDS[index - 1],
         { scrollTop: index * 10, followingLatest: false },
         index,
         3
       )
     }
-    expect(campTimelineReadingPositionFromStoredValue(stored, 'camp-1')).toBeNull()
-    expect(campTimelineReadingPositionFromStoredValue(stored, 'camp-4')).toEqual({
+    expect(campTimelineReadingPositionFromStoredValue(stored, CAMP_IDS[0])).toBeNull()
+    expect(campTimelineReadingPositionFromStoredValue(stored, CAMP_IDS[3])).toEqual({
       scrollTop: 40,
       followingLatest: false
     })

@@ -8,6 +8,8 @@ import {
 } from './navigation-preferences'
 
 const cleanup: string[] = []
+const CAMP_A = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
+const CAMP_B = 'rvcamp_01h47kvsy5fk1shh6w1g60eec1'
 
 afterEach(async () => {
   await Promise.all(cleanup.splice(0).map((path) => rm(path, { recursive: true, force: true })))
@@ -22,7 +24,7 @@ describe('navigation preferences', () => {
       schemaVersion: 1,
       pins: [
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-07-30T12:00:00Z' },
-        { kind: 'camp', targetKey: 'camp-a', pinnedAt: '2026-07-30T10:00:00Z' }
+        { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T10:00:00Z' }
       ]
     }))
 
@@ -31,7 +33,7 @@ describe('navigation preferences', () => {
     expect(snapshot).toEqual({
       schemaVersion: 2,
       pins: [
-        { kind: 'camp', targetKey: 'camp-a', pinnedAt: '2026-07-30T10:00:00Z' },
+        { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T10:00:00Z' },
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-07-30T12:00:00Z' }
       ],
       removedProjects: []
@@ -50,17 +52,17 @@ describe('navigation preferences', () => {
     await store.replacePins([
       { kind: 'project', targetKey: 'directory:/work/a', pinnedAt: '2026-08-11T07:00:00Z' },
       { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-08-11T07:01:00Z' },
-      { kind: 'camp', targetKey: 'camp-a', pinnedAt: '2026-08-11T07:02:00Z' },
-      { kind: 'camp', targetKey: 'camp-b', pinnedAt: '2026-08-11T07:03:00Z' }
+      { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-08-11T07:02:00Z' },
+      { kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }
     ])
 
-    const snapshot = await store.removeProject('directory:/work/a', ['camp-a'])
+    const snapshot = await store.removeProject('directory:/work/a', [CAMP_A])
 
     expect(snapshot).toEqual({
       schemaVersion: 2,
       pins: [
         { kind: 'project', targetKey: 'directory:/work/b', pinnedAt: '2026-08-11T07:01:00Z' },
-        { kind: 'camp', targetKey: 'camp-b', pinnedAt: '2026-08-11T07:03:00Z' }
+        { kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }
       ],
       removedProjects: [{
         targetKey: 'directory:/work/a',
@@ -76,7 +78,7 @@ describe('navigation preferences', () => {
     const filePath = join(directory, 'navigation.json')
     await writeFile(filePath, JSON.stringify({
       schemaVersion: 2,
-      pins: [{ kind: 'camp', targetKey: 'camp-b', pinnedAt: '2026-08-11T07:03:00Z' }],
+      pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
       removedProjects: [{
         targetKey: 'directory:/work/a',
         removedAt: '2026-08-11T08:00:00.000Z'
@@ -88,7 +90,7 @@ describe('navigation preferences', () => {
 
     expect(snapshot).toEqual({
       schemaVersion: 2,
-      pins: [{ kind: 'camp', targetKey: 'camp-b', pinnedAt: '2026-08-11T07:03:00Z' }],
+      pins: [{ kind: 'camp', targetKey: CAMP_B, pinnedAt: '2026-08-11T07:03:00Z' }],
       removedProjects: []
     })
     await expect(readNavigationPreferences(filePath)).resolves.toEqual(snapshot)
@@ -101,8 +103,8 @@ describe('navigation preferences', () => {
     await writeFile(filePath, JSON.stringify({
       schemaVersion: 2,
       pins: [
-        { kind: 'camp', targetKey: 'camp-a', pinnedAt: '2026-07-30T10:00:00Z' },
-        { kind: 'camp', targetKey: 'camp-a', pinnedAt: '2026-07-30T11:00:00Z' },
+        { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T10:00:00Z' },
+        { kind: 'camp', targetKey: CAMP_A, pinnedAt: '2026-07-30T11:00:00Z' },
         { kind: 'project', targetKey: '', pinnedAt: 'invalid' }
       ],
       removedProjects: [

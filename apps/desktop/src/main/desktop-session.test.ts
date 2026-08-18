@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { DesktopSessionRegistry } from './desktop-session'
 
+const CAMP_ID = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
+
 describe('Main Window Session registry', () => {
   it('freezes one startup route per window lifetime and rereads preferences only for a new window', () => {
     let sequence = 0
@@ -14,7 +16,7 @@ describe('Main Window Session registry', () => {
       oneClickNewConversationEnabled: false
     }, {
       status: 'valid',
-      location: { kind: 'camp', campId: 'camp-1' }
+      location: { kind: 'camp', campId: CAMP_ID }
     })
 
     const second = registry.create(22, {

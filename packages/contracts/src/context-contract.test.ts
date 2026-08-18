@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v19.json'
-import type { ContextManifestView } from './index'
+import fixture from '../fixtures/agent-run-context-v20.json'
+import { isCampId, type ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v19 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 19
+  it('uses the shared frozen v20 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 20
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(3)
-    expect(fixture.contextManifestVersion).toBe(17)
+    expect(fixture.contextManifestVersion).toBe(18)
     expect(fixture.messageProjectionAudience).toBe('agent_v1')
     expect(fixture.dynamicContextSectionOrder.slice(-2)).toEqual(['A2A_GUIDANCE?', 'CURRENT_INPUT'])
     expect(fixture.dynamicContextSectionOrder.at(-1)).toBe('CURRENT_INPUT')
@@ -55,6 +55,10 @@ describe('AgentRun context contract', () => {
     expect(fixture.currentInputSkillResolutionEvidence.outcomes).toEqual(['included', 'omitted'])
     expect(fixture.gatherCompletionManifestEvidence).toContain('completionInputDigest')
     expect(fixture.sharedConversationTopLevelFields).toEqual(['campId'])
+    expect(isCampId(fixture.sharedConversationExample.campId)).toBe(true)
+    expect(isCampId('01890f3d-e7c5-7cc3-98c4-dc0c0c07398f')).toBe(false)
+    expect(isCampId('rvcamp_2n1t201rmv87aae5j4csam8000')).toBe(false)
+    expect(isCampId('rvcamp_01h47kvsy5fk1hhh6w1g60eecf')).toBe(false)
     expect(fixture.modelCampMessageRequiredFields).toEqual([
       'messageId', 'sequence', 'senderType', 'senderId', 'body',
     ])

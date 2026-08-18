@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import { isCampId } from '@contracts'
 import type {
   NavigationPin,
   NavigationPreferencesSnapshot,
@@ -83,7 +84,7 @@ export class NavigationPreferencesStore {
     if (!isProjectTargetKey(targetKey)) {
       return Promise.reject(new Error('Unsupported Project navigation key'))
     }
-    if (!Array.isArray(relatedCampIds) || !relatedCampIds.every(isStableId)) {
+    if (!Array.isArray(relatedCampIds) || !relatedCampIds.every(isCampId)) {
       return Promise.reject(new Error('Related Camp IDs are invalid'))
     }
     return this.#enqueue(async () => {
@@ -158,7 +159,9 @@ function sanitizePins(source: Record<string, unknown>): NavigationPin[] {
     if (
       !isRecord(candidate)
       || (candidate.kind !== 'camp' && candidate.kind !== 'project')
-      || !isStableId(candidate.targetKey)
+      || (candidate.kind === 'camp'
+        ? !isCampId(candidate.targetKey)
+        : !isProjectTargetKey(candidate.targetKey))
       || !isTimestamp(candidate.pinnedAt)
     ) continue
     const key = `${candidate.kind}:${candidate.targetKey}`
