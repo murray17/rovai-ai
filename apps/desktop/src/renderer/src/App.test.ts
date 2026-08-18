@@ -66,6 +66,7 @@ import {
   agentRunCountsAsExecuting,
   agentRunShowsUnsettledWarning,
   attachmentDragKind,
+  attachmentDropIsBlocked,
   campConversationViewFromStoredValue,
   campConversationTimeline,
   composerDraftNeedsContinuationRepair,
@@ -2222,6 +2223,12 @@ describe('task event projections', () => {
     expect(executionConsoleIsVisible('inspector', true, 'execution')).toBe(true)
     expect(executionConsoleIsVisible('inspector', true, 'tasks')).toBe(false)
     expect(executionConsoleIsVisible('inspector', false, 'execution')).toBe(false)
+    expect(attachmentDropIsBlocked(true, false, 'bottom', false, 'tasks')).toBe(true)
+    expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'execution')).toBe(true)
+    expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'tasks')).toBe(false)
+    expect(attachmentDropIsBlocked(true, false, 'inspector', false, 'execution')).toBe(false)
+    expect(attachmentDropIsBlocked(false, true, 'inspector', true, 'tasks')).toBe(true)
+    expect(attachmentDropIsBlocked(false, false, 'bottom', true, 'tasks')).toBe(false)
     expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
     expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
     expect(executionDrawerHeightBounds(600, 54, 920)).toEqual({ min: 160, max: 434 })
