@@ -1,5 +1,5 @@
 ---
-version: 2
+version: 3
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -68,6 +68,13 @@ admitted highest value `permission_mode=bypass_permissions`. Kiro exposes the ex
 
 After Runtime configuration, keep Memory Capability and the danger zone. Do not expose Installation
 IDs, executable paths or internal bindings in the ordinary profile.
+
+On Windows, Runtime Platform Admission is evaluated before installation or health. An unqualified row
+uses the compact `!` shortcut with the full label “{Runtime}：Windows 尚未验证”; an unsupported row says
+“此平台不支持”. Neither may be shown as not installed, rescannable or temporarily checking. Opening the
+configuration shows frozen historical values but no Runtime/model/permission mutation or execution action.
+Name, role, portrait and other unrelated edits remain available and save while preserving the Runtime
+subobject exactly; the Renderer must not manufacture a default or require users to discard that history.
 
 ## Removal
 

@@ -3,7 +3,7 @@ document_type: contract
 contract: memory-capture-v3
 status: accepted
 target_version: v0.78
-last_updated: 2026-08-14
+last_updated: 2026-08-18
 ---
 
 # Memory Capture v3
@@ -232,5 +232,5 @@ pending candidate migration、导出或确认步骤。
 
 - [ADR-0186: Complete Exact-Scope Memory View](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)
 - [Memory Capture v2 (historical)](memory-capture-v2.md)
-- [Built-in Tool Transport v13](builtin-tool-transport-v13.md)
+- [Built-in Tool Transport v14](builtin-tool-transport-v14.md)
 - [Online Memory Capture architecture](../architecture/online-memory-capture.md)

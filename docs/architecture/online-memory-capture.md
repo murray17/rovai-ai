@@ -3,7 +3,7 @@ document_type: architecture
 architecture: online-memory-capture
 authority: memory-capture-component-boundaries
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-18
 ---
 
 # Online Memory Capture Architecture
@@ -15,7 +15,7 @@ live-authorized retrieval 与用户审核面。长期决策见
 [ADR-0180](../adr/0180-single-agent-memory-write-command.md)和
 [ADR-0186](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)；精确字段与状态见
 [Memory Capture v3](../contracts/memory-capture-v3.md)，CLI transport 见
-[Built-in Tool Transport v13](../contracts/builtin-tool-transport-v13.md)。
+[Built-in Tool Transport v14](../contracts/builtin-tool-transport-v14.md)。
 
 Architecture/Contract `accepted` 不表示代码已实现；当前完成度只从
 [v0.78 实施计划](../versions/v0.78/implementation-plan.md)判断。
@@ -236,7 +236,7 @@ Skill prose or FTS.
 ## References
 
 - [Memory Capture v3](../contracts/memory-capture-v3.md)
-- [Built-in Tool Transport v13](../contracts/builtin-tool-transport-v13.md)
+- [Built-in Tool Transport v14](../contracts/builtin-tool-transport-v14.md)
 - [Built-in Tool Runtime](builtin-tool-runtime.md)
 - [ADR-0068: Brokered Memory Retrieval](../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)
 - [ADR-0186: Complete Exact-Scope Memory View](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)

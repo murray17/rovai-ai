@@ -221,4 +221,10 @@ generated_from: docs/adr-front-matter
 | [ADR-0207](0207-explicit-maximum-authority-member-runtime-defaults.md) | Explicit Maximum-Authority Member Runtime Defaults | `accepted` | `cross-version` | [v1.01](../versions/v1.01/README.md) | — |
 | [ADR-0208](0208-user-authorized-trae-light-and-availability-verification.md) | User-Authorized TRAE Light and Availability Verification | `accepted` | `cross-version` | [v1.03](../versions/v1.03/README.md) | — |
 | [ADR-0209](0209-bounded-trae-cold-session-history-restore.md) | Bounded TRAE Cold Session History Restore | `accepted` | `cross-version` | [v1.04](../versions/v1.04/README.md) | — |
+| [ADR-0210](0210-platform-qualified-product-runtime-admission.md) | Platform-Qualified Product Runtime Admission | `accepted` | `cross-version` | [v1.05](../versions/v1.05/README.md) | — |
+| [ADR-0211](0211-atomic-windows-managed-process-launch.md) | Atomic Windows Managed Process Launch | `accepted` | `cross-version` | [v1.05](../versions/v1.05/README.md) | — |
+| [ADR-0212](0212-cross-platform-local-ipc-transport-v14.md) | Cross-Platform Local IPC for Built-in Tool Transport v14 | `accepted` | `cross-version` | [v1.05](../versions/v1.05/README.md) | — |
+| [ADR-0213](0213-windows-local-private-storage.md) | Windows Local Private Storage and Filesystem Admission | `accepted` | `cross-version` | [v1.05](../versions/v1.05/README.md) | — |
+| [ADR-0214](0214-crash-recoverable-windows-skill-projection.md) | Crash-Recoverable Windows Skill Projection | `accepted` | `cross-version` | [v1.05](../versions/v1.05/README.md) | — |
+| [ADR-0215](0215-unified-single-camp-history-target-and-publication-boundary.md) | Unified Single-Camp History Target and Public Message Publication Boundary | `accepted` | `cross-version` | [v1.06](../versions/v1.06/README.md) | — |
 <!-- adr-history:end -->

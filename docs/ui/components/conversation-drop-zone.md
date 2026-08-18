@@ -4,7 +4,7 @@ authority: camp-conversation-drop-zone
 status: accepted
 design_direction: porcelain-day-steel-night
 implementation_status: complete
-last_updated: 2026-08-13
+last_updated: 2026-08-18
 ---
 
 # Camp 会话区文件与文件夹拖放
@@ -15,7 +15,7 @@ ordinary Camp 的附件放置命中面是主会话列的完整两行：消息时
 Approval/Runtime Recovery Dock 和 Composer。左侧导航、右侧 Inspector、Execution Drawer、Dialog、
 Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不因本功能改变。
 
-拖放只修改当前 Core-owned Draft，不发送消息、不移动 Finder 原项目，也不改变光标、Mention/Skill
+拖放只修改当前 Core-owned Draft，不发送消息、不移动宿主文件管理器中的原项目，也不改变光标、Mention/Skill
 候选或 Inspector 状态。Execution Drawer 或 Popover 打开时底层接收面关闭。
 
 ## Drag feedback
@@ -35,7 +35,7 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
 
 ## Prepared cards
 
-- 放下后 Drag feedback 立即消失，附件队列按 Finder 顺序出现 preparing 卡；任一 preparing/error
+- 放下后 Drag feedback 立即消失，附件队列按宿主文件管理器提供的顺序出现 preparing 卡；任一 preparing/error
   继续阻止发送。
 - 普通文件沿用现有文件/图片卡。目录卡使用文件夹图标，preparing 文案为“正在创建只读快照…”。
 - Ready 目录卡固定显示“`{fileCount} 个文件 · {byteSize} · 只读快照`”，计为一个顶层附件。

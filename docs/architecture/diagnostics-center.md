@@ -2,7 +2,7 @@
 document_type: architecture
 authority: diagnostics-center-component-boundary
 status: accepted
-last_updated: 2026-08-09
+last_updated: 2026-08-18
 ---
 
 # Diagnostics Center Architecture
@@ -15,9 +15,9 @@ last_updated: 2026-08-09
 | Core router | Composes current Core/Git/data-dir facts, stored Skill projection state, strict-read MCP inspection, persistent member Runtime selections and cached Runtime evidence into one `DiagnosticsReport`. |
 | Skill projection reconciler | Exposes stored observation/root-access/dirty diagnostics without reading execution roots; explicit user reconcile remains a separate filesystem mutation. |
 | MCP config store | Exposes `inspect` that never materializes a missing file; `get` and permission repair remain separate user-authorized operations. |
-| Runtime health cache | Supplies all Product Runtime observations without rescan or probe scheduling. Runtime check remains an explicit per-product command. |
+| Runtime platform admission + health cache | Supplies platform rows for the complete Product Runtime Catalog, but machine observations only for qualified Adapters and without rescan/probe scheduling. Runtime check remains an explicit qualified-product command. |
 | Renderer Diagnostics Center | Owns Loading/Running/Partial/Error/Success/Disabled/Recovery presentation, attention-only issue projection, filters and the explicit action-to-Core mapping. |
-| Electron Main / Preload | Allowlist the typed read method, broker Save Dialog, write v5 atomically as `0600`, and constrain Finder reveal to the last successful session export. |
+| Electron Main / Preload | Allowlist the typed read method, broker Save Dialog, write v5 with the platform private atomic-write helper, and constrain host-file-manager reveal to the last successful session export. |
 | Startup Recovery | Remains the only recovery surface when Core cannot open or migrate SQLite; Diagnostics Center is not a second Core startup mode. |
 
 ## Read and repair flows
@@ -40,8 +40,8 @@ export
   -> diagnostics.export
      -> fresh read-only report + allowlisted aggregate counts
      -> centralized v5 redaction
-  -> Electron atomic 0600 save
-  -> exact-session Finder reveal
+  -> Electron platform-private atomic save
+  -> exact-session host file-manager reveal
 ```
 
 ## Invariants
@@ -53,7 +53,7 @@ export
   Observation is evidence, not filesystem access authority.
 - `unknown` is evidence insufficiency and never enters the attention issue list.
 - Runtime Catalog visibility and Runtime issue eligibility are different: all supported Adapters are visible, only selected
-  unavailable products become attention.
+  platform-qualified unavailable products become attention. Not-qualified/unsupported rows never become machine health.
 - Repair and its post-action read are a two-step protocol; mutation success alone is not health success.
 - v5 is built from an allowlist and still receives a final recursive redaction pass; raw health/profile/camp objects
   never become export fields.

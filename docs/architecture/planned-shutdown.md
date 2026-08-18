@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: planned-shutdown
 authority: planned-core-lifecycle-and-generation-local-terminal-settlement
-last_updated: 2026-08-13
+last_updated: 2026-08-18
 ---
 
 # Planned Shutdown
@@ -13,6 +13,9 @@ last_updated: 2026-08-13
 [ADR-0177](../adr/0177-controlled-shutdown-fences-product-execution.md)拥有。精确 wire、字段、幂等和 deadline
 语义由 [Planned Shutdown v2](../contracts/planned-shutdown-v2.md)拥有。没有 durable shutdown cycle 的异常
 崩溃、强杀、断电和下一 generation accepted-input 分类仍由 [AgentRun Recovery](agent-run-recovery.md)负责。
+Windows 受管进程的创建时 Job 归属见
+[ADR-0211](../adr/0211-atomic-windows-managed-process-launch.md)与
+[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)。
 
 ## 1. 单调生命周期与三个准入面
 
@@ -149,7 +152,16 @@ external effects 不计作 non-terminal execution。若 deadline/watchdog 在事
 
 Electron Main 是唯一调用方。`CoreClient.shutdown()` 在第一次调用时禁止自动重启、发送一次
 `core.shutdown` v2、等待 shutdown report，再等待子进程真实 exit；重复调用复用同一个 Promise。外层
-watchdog 只在 Core 协议未按期结束时依次发送 SIGTERM 和 SIGKILL。Main 的第一次 `before-quit` 通过
+watchdog 只在 Core 协议未按期结束时使用平台明确的强制结束：Unix 依次发送 SIGTERM/SIGKILL，Windows
+记录一次 `terminate_process`，不得伪造信号层级。Main 的第一次 `before-quit` 通过
 `preventDefault()` 保留等待面；Core child 已退出且 shutdown Promise settle 后，以 `app.exit(0)` 完成这次
 已授权退出，不能再进入一轮 native termination negotiation 并扩大有界关闭窗口。Preload/Renderer 不暴露
 此方法。
+
+Windows 的 Runtime/Probe 根进程在执行第一条用户代码前已经进入 kill-on-close Job，且 Runtime descendants 不得
+继承 Job handle 或 Electron↔Core pipe handle。planned shutdown 仍先请求可靠 Runtime terminal 并执行 product
+fence；只有 deadline 后的 process teardown 才关闭 Job。Job cleanup 证明 Rovai 进程权已经收口，不改变本文件对
+Provider terminal 与 unknown external effect 的解释。
+
+Electron Main 被强制结束的 acceptance 必须证明 Core 通过 stdin EOF 或 parent-process handle watcher 在 deadline
+内进入关闭并释放 Jobs；EOF 若无法稳定满足，watcher 成为正式实现而不是可选增强。

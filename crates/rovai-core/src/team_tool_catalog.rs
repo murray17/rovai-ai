@@ -172,6 +172,24 @@ fn collection_message_schema() -> Value {
     })
 }
 
+fn camp_read_attachment_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+            "attachmentId", "name", "kind", "fileCount", "mediaType", "byteSize"
+        ],
+        "properties": {
+            "attachmentId": {"type": "string"},
+            "name": {"type": "string"},
+            "kind": {"type": "string"},
+            "fileCount": {"type": "integer", "minimum": 0},
+            "mediaType": {"type": "string"},
+            "byteSize": {"type": "integer", "minimum": 0}
+        }
+    })
+}
+
 fn item_message_schema() -> Value {
     json!({
         "type": "object",
@@ -197,16 +215,7 @@ fn item_message_schema() -> Value {
             "attachmentCount": {"type": "integer", "minimum": 0},
             "attachments": {
                 "type": "array", "maxItems": 10,
-                "items": {
-                    "type": "object", "additionalProperties": false,
-                    "required": ["attachmentId", "name", "mediaType", "byteSize"],
-                    "properties": {
-                        "attachmentId": {"type": "string"},
-                        "name": {"type": "string"},
-                        "mediaType": {"type": "string"},
-                        "byteSize": {"type": "integer", "minimum": 0}
-                    }
-                }
+                "items": camp_read_attachment_schema()
             },
             "attachmentsTruncated": {"type": "boolean"},
             "attachmentOmittedCount": {"type": "integer", "minimum": 0},
@@ -760,22 +769,22 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         }),
         json!({
             "name": CAMP_SEARCH_TOOL_NAME,
-            "title": "Search the current Camp",
-            "description": "Return a bounded Top-K of original public messages in the current Camp. Search is discovery, not traversal: use a stable messageId with camp.read, then use sequence paging when continuous reading is needed. Summaries and attachments are not searched.",
+            "title": "Search one public Camp timeline",
+            "description": "Search one public Camp timeline. Omit campId to search the current Camp. Pass campId to search one other Camp available to the current AgentRun. Search is discovery, not traversal: use a stable messageId with camp.read. Summaries and attachments are not searched.",
             "inputSchema": CampHistoryService::camp_search_input_schema(),
             "outputSchema": camp_search_success_schema(false)
         }),
         json!({
             "name": HISTORY_SEARCH_TOOL_NAME,
             "title": "Search authorized Camp history",
-            "description": "Return a bounded Top-K of original public messages across other Camps frozen into this AgentRun and still authorized now. Camp titles are metadata, not hits. Use camp.read with stable IDs for evidence and sequence paging. Summaries and attachments are not searched.",
+            "description": "Discover messages across authorized historical Camps when the target Camp is unknown. Camp titles are metadata, not hits. Once a Camp is known, prefer camp.search and camp.read with stable IDs. Summaries and attachments are not searched.",
             "inputSchema": CampHistoryService::history_search_input_schema(),
             "outputSchema": camp_search_success_schema(true)
         }),
         json!({
             "name": CAMP_READ_TOOL_NAME,
             "title": "Read original Camp messages",
-            "description": "Read one original public message, a bounded neighborhood, a reply tree, or a stable Camp timeline. item slices one body; around does not paginate; thread and timeline use exclusive integer sequence cursors. IDs and cursors locate content but never grant access. Summary bodies and attachment content are unavailable.",
+            "description": "Read exact messages or timeline pages from one Camp. Omit campId for the current Camp; pass it explicitly for another Camp available to the current AgentRun. item slices one body; around does not paginate; thread and timeline use exclusive integer sequence cursors. IDs and cursors locate content but never grant access.",
             "inputSchema": CampHistoryService::camp_read_input_schema(),
             "outputSchema": camp_read_success_schema()
         }),
@@ -948,6 +957,76 @@ mod tests {
             validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &json!({"body": ""})).is_err()
         );
         validate_builtin_tool_input(TEAM_LIST_TASKS_TOOL_NAME, &json!({"limit": 100})).unwrap();
+    }
+
+    #[test]
+    fn camp_search_and_read_accept_an_omitted_or_explicit_single_camp_target() {
+        validate_builtin_tool_input(CAMP_SEARCH_TOOL_NAME, &json!({"query": "amount"})).unwrap();
+        validate_builtin_tool_input(
+            CAMP_SEARCH_TOOL_NAME,
+            &json!({
+                "campId": "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                "query": "amount"
+            }),
+        )
+        .unwrap();
+        validate_builtin_tool_input(
+            CAMP_READ_TOOL_NAME,
+            &json!({"mode": "item", "messageId": "message_123"}),
+        )
+        .unwrap();
+        validate_builtin_tool_input(
+            CAMP_READ_TOOL_NAME,
+            &json!({
+                "campId": "7b5db24c-4a43-4cab-9217-d982b08f7691",
+                "mode": "timeline",
+                "direction": "after"
+            }),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn camp_read_item_attachment_contract_requires_kind_and_file_count() {
+        let schema = camp_read_success_schema();
+        let mut item = json!({
+            "campId": "camp_123",
+            "mode": "item",
+            "items": [{
+                "messageId": "message_123",
+                "sequence": 1,
+                "authorType": "agent",
+                "authorId": "agent_1",
+                "replyToMessageId": null,
+                "createdAt": "2026-08-18T00:00:00Z",
+                "body": "evidence",
+                "bodyOffset": 0,
+                "bodyLength": 8,
+                "bodyTruncated": false,
+                "nextBodyOffset": null,
+                "attachmentCount": 1,
+                "attachments": [{
+                    "attachmentId": "attachment_123",
+                    "name": "notes.txt",
+                    "kind": "file",
+                    "fileCount": 1,
+                    "mediaType": "text/plain",
+                    "byteSize": 8
+                }],
+                "attachmentsTruncated": false,
+                "attachmentOmittedCount": 0,
+                "addressing": {
+                    "effectiveAgentRecipients": ["agent_1"],
+                    "mentionsCurrentUser": false
+                }
+            }]
+        });
+        crate::builtin_tool_cli_output::validate_schema(&item, &schema).unwrap();
+        item["items"][0]["attachments"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("kind");
+        assert!(crate::builtin_tool_cli_output::validate_schema(&item, &schema).is_err());
     }
 
     #[test]

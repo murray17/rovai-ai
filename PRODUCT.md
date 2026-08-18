@@ -8,7 +8,7 @@ web
 
 ## Users
 
-Rovai AI serves developers who coordinate local coding agents on a Mac. They need to assign work,
+Rovai AI serves developers who coordinate local coding agents on their desktop. They need to assign work,
 inspect what each agent did, intervene when approval or recovery is required, and keep collaboration
 state understandable across long-running projects.
 
@@ -27,7 +27,8 @@ coordinates them while preserving which facts came from Rovai Core and which cam
 
 ## Operating Context
 
-- A desktop Electron application operates alongside local Git workspaces and coding-agent CLIs.
+- A desktop Electron application operates alongside local Git workspaces and coding-agent CLIs; platform-specific
+  support and qualification remain explicit for macOS and Windows rather than being inferred from a shared UI.
 - Users move between Camps, teammates, memory, settings, approvals, diagnostics and execution detail.
 - Runtime availability, model capabilities and usage reporting vary by installed product and version.
 - Monitoring is a compact Usage read surface: users compare recent Runtime-reported Token, Cache,

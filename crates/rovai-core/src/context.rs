@@ -15,6 +15,7 @@ use crate::{
         StructuredCampMessageContent, mentions_current_user, normalize_content,
         render_current_plain_text,
     },
+    camp_message_publication::public_camp_message_publication_cte,
     command::{EntityReference, canonical_json_digest},
     compaction::{
         BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION, BOOTSTRAP_REDELIVERY_FORMATTER_VERSION,
@@ -5257,21 +5258,21 @@ fn capture_cross_camp_history_fence(
         [],
         |row| row.get::<_, i64>(0),
     )?;
-    let mut statement = transaction.prepare(
+    let publication_cte = public_camp_message_publication_cte();
+    let sql = format!(
         r#"
+        WITH {publication_cte}
         SELECT camp.id, camp.title,
                COALESCE(
                    (
                        SELECT message.created_at
                        FROM camp_message AS message
-                       JOIN event_log AS sent
-                         ON sent.entity_type = 'camp_message'
-                        AND sent.entity_id = message.id
-                        AND sent.event_type = 'camp_message.sent'
+                       JOIN public_camp_message_publication AS publication
+                         ON publication.message_id = message.id
                        WHERE message.camp_id = camp.id
                          AND message.tombstoned_at IS NULL
-                         AND sent.global_sequence <= ?1
-                       ORDER BY sent.global_sequence DESC, message.id DESC
+                         AND publication.global_sequence <= ?1
+                       ORDER BY publication.global_sequence DESC, message.id DESC
                        LIMIT 1
                    ),
                    camp.created_at
@@ -5287,8 +5288,9 @@ fn capture_cross_camp_history_fence(
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
         ORDER BY camp.id
-        "#,
-    )?;
+        "#
+    );
+    let mut statement = transaction.prepare(&sql)?;
     let camps = statement
         .query_map(
             params![global_boundary, snapshot.agent_id, snapshot.camp_id,],
@@ -6311,10 +6313,11 @@ mod slow_tests {
             .unwrap()
             .to_string();
         let late_search = CampHistoryService
-            .search_current_camp(
+            .search_camp(
                 &mut fixture.database,
                 &run,
                 &CampSearchInput {
+                    camp_id: None,
                     query: "CURRENT_BOUNDARY_AFTER_MANIFEST".to_string(),
                     limit: None,
                 },
@@ -6326,7 +6329,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: late_message_id,
                     body_offset: None,
                     body_limit: None,
@@ -6346,7 +6349,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: Uuid::new_v4().to_string(),
+                    camp_id: Some(Uuid::new_v4().to_string()),
                     message_id: initial_message_id,
                     body_offset: None,
                     body_limit: None,
@@ -6371,7 +6374,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Timeline {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     direction: ReadDirection::After,
                     cursor: None,
                     limit: Some(1),
@@ -6630,7 +6633,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &second_run,
                 &CampReadInput::Timeline {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     direction: ReadDirection::After,
                     cursor: None,
                     limit: Some(20),
@@ -6658,7 +6661,7 @@ mod slow_tests {
                     &mut fixture.database,
                     &first_run,
                     &CampReadInput::Timeline {
-                        camp_id: fixture.camp_id.clone(),
+                        camp_id: Some(fixture.camp_id.clone()),
                         direction: ReadDirection::After,
                         cursor: None,
                         limit: Some(1),
@@ -7522,6 +7525,88 @@ mod slow_tests {
             .as_str()
             .unwrap()
             .to_string();
+        let historical_child = collaboration
+            .send_test_camp_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(historical_camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: TestCampMessageCommand {
+                        camp_id: historical_camp_id.clone(),
+                        draft_revision: None,
+                        body: "PUBLIC_A2A_HISTORY_CHILD evidence".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: Some(historical_message_id.clone()),
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let historical_child_id = historical_child.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let historical_grandchild = collaboration
+            .send_test_camp_message(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(historical_camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: TestCampMessageCommand {
+                        camp_id: historical_camp_id.clone(),
+                        draft_revision: None,
+                        body: "PUBLIC_A2A_HISTORY_GRANDCHILD ADR-777".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: Some(historical_child_id.clone()),
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let historical_grandchild_id = historical_grandchild.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let rewritten_publications = fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE event_log
+                SET event_type = 'camp_message.public_a2a_sent'
+                WHERE entity_type = 'camp_message'
+                  AND event_type = 'camp_message.sent'
+                  AND entity_id IN (?1, ?2, ?3)
+                "#,
+                params![
+                    historical_message_id,
+                    historical_child_id,
+                    historical_grandchild_id
+                ],
+            )
+            .unwrap();
+        assert_eq!(rewritten_publications, 3);
+        let historical_latest_created_at: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT created_at FROM camp_message WHERE id = ?1",
+                [&historical_grandchild_id],
+                |row| row.get(0),
+            )
+            .unwrap();
         let frozen_title: String = fixture
             .database
             .connection()
@@ -7605,6 +7690,10 @@ mod slow_tests {
             .find(|camp| camp["campId"] == historical_camp_id)
             .unwrap();
         assert_eq!(historical_camp["title"], frozen_title);
+        assert_eq!(
+            historical_camp["lastVisibleActivityAt"],
+            historical_latest_created_at
+        );
         assert!(
             !camps["camps"]
                 .as_array()
@@ -7664,12 +7753,145 @@ mod slow_tests {
             .unwrap();
         assert!(exclusive_date["results"].as_array().unwrap().is_empty());
 
+        let historical_target_search = CampHistoryService
+            .search_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    camp_id: Some(historical_camp_id.clone()),
+                    query: "PUBLIC_A2A_HISTORY_GRANDCHILD".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            historical_target_search["results"][0]["messageId"],
+            historical_grandchild_id
+        );
+        assert_eq!(
+            historical_target_search["results"][0]["campId"],
+            historical_camp_id
+        );
+        assert!(
+            historical_target_search["results"][0]
+                .get("campTitle")
+                .is_none()
+        );
+        let historical_no_hit = CampHistoryService
+            .search_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    camp_id: Some(historical_camp_id.clone()),
+                    query: "KNOWN_CAMP_WITH_NO_MATCH".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(historical_no_hit["results"].as_array().unwrap().is_empty());
+
+        let historical_a2a_item = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: Some(historical_camp_id.clone()),
+                    message_id: historical_grandchild_id.clone(),
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            historical_a2a_item["items"][0]["messageId"],
+            historical_grandchild_id
+        );
+        let historical_a2a_around = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Around {
+                    camp_id: Some(historical_camp_id.clone()),
+                    message_id: historical_child_id.clone(),
+                    before: Some(1),
+                    after: Some(1),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            historical_a2a_around["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["messageId"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                historical_message_id.as_str(),
+                historical_child_id.as_str(),
+                historical_grandchild_id.as_str()
+            ]
+        );
+        let historical_a2a_thread = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Thread {
+                    camp_id: Some(historical_camp_id.clone()),
+                    message_id: historical_child_id.clone(),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            historical_a2a_thread["threadRootMessageId"],
+            historical_message_id
+        );
+        assert_eq!(
+            historical_a2a_thread["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["messageId"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                historical_child_id.as_str(),
+                historical_grandchild_id.as_str()
+            ]
+        );
+        let historical_a2a_timeline = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: Some(historical_camp_id.clone()),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            historical_a2a_timeline["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item["messageId"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            vec![
+                historical_message_id.as_str(),
+                historical_child_id.as_str(),
+                historical_grandchild_id.as_str()
+            ]
+        );
+
         let item = CampHistoryService
             .read(
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: historical_camp_id.clone(),
+                    camp_id: Some(historical_camp_id.clone()),
                     message_id: historical_message_id.clone(),
                     body_offset: None,
                     body_limit: None,
@@ -7684,7 +7906,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: current_id.clone(),
                     body_offset: None,
                     body_limit: Some(4_000),
@@ -7694,12 +7916,25 @@ mod slow_tests {
         assert_eq!(first_body_slice["items"][0]["bodyOffset"], 0);
         assert_eq!(first_body_slice["items"][0]["nextBodyOffset"], 4_000);
         assert_eq!(first_body_slice["items"][0]["bodyTruncated"], true);
+        let default_current_item = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: None,
+                    message_id: current_id.clone(),
+                    body_offset: None,
+                    body_limit: Some(4_000),
+                },
+            )
+            .unwrap();
+        assert_eq!(default_current_item, first_body_slice);
         let second_body_slice = CampHistoryService
             .read(
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: current_id.clone(),
                     body_offset: Some(4_000),
                     body_limit: Some(4_000),
@@ -7710,22 +7945,36 @@ mod slow_tests {
         assert_eq!(second_body_slice["items"][0]["nextBodyOffset"], Value::Null);
 
         let current_search = CampHistoryService
-            .search_current_camp(
+            .search_camp(
                 &mut fixture.database,
                 &run,
                 &CampSearchInput {
+                    camp_id: None,
                     query: "CURRENT_SEARCH_ANCHOR".to_string(),
                     limit: None,
                 },
             )
             .unwrap();
         assert_eq!(current_search["results"][0]["messageId"], current_id);
+        let explicit_current_search = CampHistoryService
+            .search_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    camp_id: Some(fixture.camp_id.clone()),
+                    query: "CURRENT_SEARCH_ANCHOR".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(explicit_current_search, current_search);
         for literal_query in ["任", "任务", "%", "_", "\\", "ADR-49"] {
             let literal = CampHistoryService
-                .search_current_camp(
+                .search_camp(
                     &mut fixture.database,
                     &run,
                     &CampSearchInput {
+                        camp_id: None,
                         query: literal_query.to_string(),
                         limit: None,
                     },
@@ -7734,22 +7983,99 @@ mod slow_tests {
             assert_eq!(literal["results"][0]["messageId"], current_id);
         }
         let injected_syntax = CampHistoryService
-            .search_current_camp(
+            .search_camp(
                 &mut fixture.database,
                 &run,
                 &CampSearchInput {
+                    camp_id: None,
                     query: "CURRENT_SEARCH_ANCHOR\" OR hidden*".to_string(),
                     limit: None,
                 },
             )
             .unwrap();
         assert!(injected_syntax["results"].as_array().unwrap().is_empty());
+        let invalid_search_target = CampHistoryService
+            .search_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    camp_id: Some("not-a-uuid".to_string()),
+                    query: "anything".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            invalid_search_target
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.invalid_argument"
+        );
+        let invalid_read_target = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: Some("not-a-uuid".to_string()),
+                    message_id: current_id.clone(),
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            invalid_read_target
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.invalid_argument"
+        );
+        for unavailable_camp_id in [late_camp_id.clone(), Uuid::new_v4().to_string()] {
+            let unavailable_search = CampHistoryService
+                .search_camp(
+                    &mut fixture.database,
+                    &run,
+                    &CampSearchInput {
+                        camp_id: Some(unavailable_camp_id.clone()),
+                        query: "anything".to_string(),
+                        limit: None,
+                    },
+                )
+                .unwrap_err();
+            assert_eq!(
+                unavailable_search
+                    .downcast_ref::<TeamToolInvocationError>()
+                    .unwrap()
+                    .code,
+                "camp.search_unavailable"
+            );
+        }
+        let unavailable_read = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: Some(late_camp_id.clone()),
+                    message_id: Uuid::new_v4().to_string(),
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            unavailable_read
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
         let mismatched_camp = CampHistoryService
             .read(
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: historical_message_id.clone(),
                     body_offset: None,
                     body_limit: None,
@@ -7768,7 +8094,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Around {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: child_id.clone(),
                     before: Some(1),
                     after: Some(1),
@@ -7783,7 +8109,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Thread {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: child_id.clone(),
                     direction: ReadDirection::After,
                     cursor: None,
@@ -7801,7 +8127,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Thread {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: grandchild_id.clone(),
                     direction: ReadDirection::After,
                     cursor: Some(thread_cursor),
@@ -7817,7 +8143,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Timeline {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     direction: ReadDirection::After,
                     cursor: None,
                     limit: Some(2),
@@ -7832,7 +8158,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Timeline {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     direction: ReadDirection::After,
                     cursor: Some(timeline_cursor),
                     limit: Some(2),
@@ -7847,7 +8173,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Timeline {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     direction: ReadDirection::Before,
                     cursor: None,
                     limit: Some(2),
@@ -7863,7 +8189,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Timeline {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     direction: ReadDirection::Before,
                     cursor: Some(before_cursor),
                     limit: Some(2),
@@ -7880,7 +8206,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Thread {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: grandchild_id.clone(),
                     direction: ReadDirection::Before,
                     cursor: None,
@@ -7896,7 +8222,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Thread {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: grandchild_id.clone(),
                     direction: ReadDirection::Before,
                     cursor: Some(thread_before_cursor),
@@ -7914,7 +8240,7 @@ mod slow_tests {
                 [&historical_camp_id],
             )
             .unwrap();
-        collaboration
+        let after_manifest = collaboration
             .send_test_camp_message(
                 &mut fixture.database,
                 &CommandEnvelope {
@@ -7937,6 +8263,27 @@ mod slow_tests {
                 },
             )
             .unwrap();
+        let after_manifest_id = after_manifest.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .execute(
+                    r#"
+                    UPDATE event_log
+                    SET event_type = 'camp_message.public_a2a_sent'
+                    WHERE entity_type = 'camp_message'
+                      AND entity_id = ?1
+                      AND event_type = 'camp_message.sent'
+                    "#,
+                    [&after_manifest_id],
+                )
+                .unwrap(),
+            1
+        );
         let future = CampHistoryService
             .search_history(
                 &mut fixture.database,
@@ -7951,6 +8298,56 @@ mod slow_tests {
             )
             .unwrap();
         assert!(future["results"].as_array().unwrap().is_empty());
+        let future_single_camp = CampHistoryService
+            .search_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    camp_id: Some(historical_camp_id.clone()),
+                    query: "AFTER_MANIFEST_MUST_STAY_HIDDEN".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap();
+        assert!(future_single_camp["results"].as_array().unwrap().is_empty());
+        let future_item = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: Some(historical_camp_id.clone()),
+                    message_id: after_manifest_id.clone(),
+                    body_offset: None,
+                    body_limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            future_item
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
+        let future_timeline = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Timeline {
+                    camp_id: Some(historical_camp_id.clone()),
+                    direction: ReadDirection::After,
+                    cursor: None,
+                    limit: Some(10),
+                },
+            )
+            .unwrap();
+        assert!(
+            future_timeline["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["messageId"] != after_manifest_id)
+        );
         let late_joined = CampHistoryService
             .search_history(
                 &mut fixture.database,
@@ -8022,19 +8419,61 @@ mod slow_tests {
                 .iter()
                 .any(|camp| camp["campId"] == historical_camp_id)
         );
+        let revoked_search = CampHistoryService
+            .search_camp(
+                &mut fixture.database,
+                &run,
+                &CampSearchInput {
+                    camp_id: Some(historical_camp_id.clone()),
+                    query: "HISTORY_SEARCH_ANCHOR".to_string(),
+                    limit: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            revoked_search
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.search_unavailable"
+        );
+        let revoked_read = CampHistoryService
+            .read(
+                &mut fixture.database,
+                &run,
+                &CampReadInput::Item {
+                    camp_id: Some(historical_camp_id.clone()),
+                    message_id: historical_message_id.clone(),
+                    body_offset: None,
+                    body_limit: Some(100),
+                },
+            )
+            .unwrap_err();
+        assert_eq!(
+            revoked_read
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "camp.read_unavailable"
+        );
+        let revoked_history_discovery = CampHistoryService
+            .search_history(
+                &mut fixture.database,
+                &run,
+                &HistorySearchInput {
+                    query: "HISTORY_SEARCH_ANCHOR".to_string(),
+                    camp_ids: Some(vec![historical_camp_id]),
+                    date_from: None,
+                    date_to: None,
+                    limit: None,
+                },
+            )
+            .unwrap();
         assert!(
-            CampHistoryService
-                .read(
-                    &mut fixture.database,
-                    &run,
-                    &CampReadInput::Item {
-                        camp_id: historical_camp_id,
-                        message_id: historical_message_id,
-                        body_offset: None,
-                        body_limit: Some(100),
-                    },
-                )
-                .is_err()
+            revoked_history_discovery["results"]
+                .as_array()
+                .unwrap()
+                .is_empty()
         );
         fixture
             .database
@@ -8045,10 +8484,11 @@ mod slow_tests {
             )
             .unwrap();
         let tombstoned = CampHistoryService
-            .search_current_camp(
+            .search_camp(
                 &mut fixture.database,
                 &run,
                 &CampSearchInput {
+                    camp_id: None,
                     query: "CURRENT_SEARCH_ANCHOR".to_string(),
                     limit: None,
                 },
@@ -8060,7 +8500,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Item {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: current_id.clone(),
                     body_offset: None,
                     body_limit: None,
@@ -8079,7 +8519,7 @@ mod slow_tests {
                 &mut fixture.database,
                 &run,
                 &CampReadInput::Timeline {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     direction: ReadDirection::After,
                     cursor: None,
                     limit: Some(20),
@@ -11018,7 +11458,7 @@ mod slow_tests {
                     execution_epoch: followup_epoch,
                 },
                 &CampReadInput::Item {
-                    camp_id: fixture.camp_id.clone(),
+                    camp_id: Some(fixture.camp_id.clone()),
                     message_id: source_message_id,
                     body_offset: Some(2_000),
                     body_limit: None,

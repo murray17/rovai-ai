@@ -17,6 +17,21 @@ pub fn outcome_indeterminate_agent_error() -> Value {
     })
 }
 
+/// Builds the fixed Agent-facing error used only after Core returned a complete
+/// result that the CLI could not validate against its closed output contract.
+pub fn output_contract_mismatch_agent_error(operation: &str) -> Value {
+    json!({
+        "error": {
+            "code": "builtin_tool.output_contract_mismatch",
+            "message": "The operation completed, but its result could not be safely projected.",
+            "recovery": "stop",
+            "details": {
+                "operation": operation
+            }
+        }
+    })
+}
+
 /// Builds the closed Agent-facing success schema for one canonical operation.
 ///
 /// Most operations deliberately reuse their canonical business-result schema. The two compact
@@ -468,6 +483,59 @@ mod tests {
                 "code": "builtin_tool.outcome_indeterminate",
                 "message": "The operation may already have committed. Confirm the exact current state before proceeding; do not blindly repeat the mutation. If confirmation is unavailable, report the uncertainty.",
                 "recovery": "confirm_outcome"
+            }})
+        );
+    }
+
+    #[test]
+    fn output_contract_mismatch_is_closed_and_non_retryable() {
+        let completed_core_result = json!({
+            "campId": "camp_123",
+            "mode": "item",
+            "items": [{
+                "messageId": "msg_123",
+                "sequence": 1,
+                "authorType": "agent",
+                "authorId": "agent_27",
+                "replyToMessageId": null,
+                "createdAt": "2026-01-01T00:00:00Z",
+                "body": "hello",
+                "bodyOffset": 0,
+                "bodyLength": 5,
+                "bodyTruncated": false,
+                "nextBodyOffset": null,
+                "attachmentCount": 1,
+                "attachments": [{
+                    "attachmentId": "attachment_123",
+                    "name": "notes.txt",
+                    "mediaType": "text/plain",
+                    "byteSize": 123
+                }],
+                "attachmentsTruncated": false,
+                "attachmentOmittedCount": 0,
+                "addressing": {
+                    "effectiveAgentRecipients": ["agent_27"],
+                    "mentionsCurrentUser": true
+                }
+            }]
+        });
+        let envelope = BuiltinToolInvocationEnvelope::success(
+            "camp.read",
+            "7b5db24c-4a43-4cab-9217-d982b08f7691",
+            completed_core_result,
+        )
+        .unwrap();
+        assert!(project_envelope(&envelope).is_err());
+
+        let projected = output_contract_mismatch_agent_error("camp.read");
+        validate_schema(&projected, &agent_error_schema()).unwrap();
+        assert_eq!(
+            projected,
+            json!({"error": {
+                "code": "builtin_tool.output_contract_mismatch",
+                "message": "The operation completed, but its result could not be safely projected.",
+                "recovery": "stop",
+                "details": {"operation": "camp.read"}
             }})
         );
     }

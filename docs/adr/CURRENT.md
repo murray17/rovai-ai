@@ -79,7 +79,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v9](../contracts/camp-message-send-v9.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Gather v2](../contracts/gather-v2.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v9](../contracts/camp-message-send-v9.md)、[Camp History Retrieval v1](../contracts/camp-history-v1.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Gather v2](../contracts/gather-v2.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -104,6 +104,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 | [ADR-0184](0184-line-leading-display-name-inline-addressing-alias.md) | Line-Leading Display-Name Inline Addressing Alias |
 | [ADR-0193](0193-durable-gather-barrier-over-unified-message-delivery.md) | Durable Gather Barrier over Unified Message Delivery |
 | [ADR-0195](0195-generation-scoped-last-gather-return.md) | Generation-Scoped Last Gather Return with Independent Bound |
+| [ADR-0215](0215-unified-single-camp-history-target-and-publication-boundary.md) | Unified Single-Camp History Target and Public Message Publication Boundary |
 <!-- adr-current-primary:end -->
 
 Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。
@@ -111,8 +112,8 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 ## Runtime execution 与 security
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
-- **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
+- **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Windows Desktop Platform](../architecture/windows-desktop-platform.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
+- **当前合同：** [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)、[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)、[Windows Private Storage v1](../contracts/windows-private-storage-v1.md)、[Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |
@@ -138,6 +139,9 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 | [ADR-0207](0207-explicit-maximum-authority-member-runtime-defaults.md) | Explicit Maximum-Authority Member Runtime Defaults |
 | [ADR-0208](0208-user-authorized-trae-light-and-availability-verification.md) | User-Authorized TRAE Light and Availability Verification |
 | [ADR-0209](0209-bounded-trae-cold-session-history-restore.md) | Bounded TRAE Cold Session History Restore |
+| [ADR-0210](0210-platform-qualified-product-runtime-admission.md) | Platform-Qualified Product Runtime Admission |
+| [ADR-0211](0211-atomic-windows-managed-process-launch.md) | Atomic Windows Managed Process Launch |
+| [ADR-0213](0213-windows-local-private-storage.md) | Windows Local Private Storage and Filesystem Admission |
 <!-- adr-current-primary:end -->
 
 Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。
@@ -201,8 +205,8 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 ## Skills、MCP 与 built-ins
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
-- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Built-in Tool Transport v13](../contracts/builtin-tool-transport-v13.md)
+- **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)、[Windows Desktop Platform](../architecture/windows-desktop-platform.md)
+- **当前合同：** [Built-in Tool Transport v14](../contracts/builtin-tool-transport-v14.md)、[Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |
@@ -225,6 +229,8 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0197](0197-empty-user-owned-mcp-library.md) | Empty User-Owned MCP Library Without Product Presets |
 | [ADR-0198](0198-bounded-open-round-grill-duo-skills.md) | Bounded Open-Round Protocol for Self-Contained Grill Duo Skills |
 | [ADR-0199](0199-session-semantic-four-message-review-duo.md) | Session-Semantic Four-Message Review Duo |
+| [ADR-0212](0212-cross-platform-local-ipc-transport-v14.md) | Cross-Platform Local IPC for Built-in Tool Transport v14 |
+| [ADR-0214](0214-crash-recoverable-windows-skill-projection.md) | Crash-Recoverable Windows Skill Projection |
 <!-- adr-current-primary:end -->
 
 Related: [ADR-0203](0203-structured-current-input-skill-links.md)在 Session/Context 主题拥有 primary，细化用户

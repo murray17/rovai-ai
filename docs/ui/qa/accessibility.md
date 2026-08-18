@@ -2,7 +2,7 @@
 document_type: ui-qa-contract
 authority: renderer-accessibility
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-18
 ---
 
 # Renderer 无障碍基线
@@ -40,3 +40,14 @@ Approval Dock 是非模态且不得遮住 Composer/Stop。
 一级 surface 覆盖 Loading、Empty、Partial、Error、Disabled、Submitting 与 Recovery。局部失败
 保留 Header、导航、Draft、选择、滚动和焦点；不确定状态必须说明对象、最后已知事实、未知范围和
 下一步。按[主题矩阵](theme-matrix.md)在最小窗口、2K、200% zoom 和双主题中检查所有路径。
+
+## Host assistive technology
+
+- macOS 真实验收保留 VoiceOver 与系统外观切换；Windows 真实验收覆盖 NVDA 的浏览/表单模式、系统
+  High Contrast 与 CSS Forced Colors。固定 Server CI 或浏览器模拟不能代替客户端 OS 证据。
+- `forced-colors: active` 下使用系统色与可见边界，不以背景图、阴影或身份色保留关键含义；原生标题栏仍由
+  Windows 拥有，Renderer 不覆盖 caption button 的系统对比度。
+- 中文 IME composition 期间 Enter、Space、方向键和候选选择不得触发发送、保存、Mention 选择或快捷键；
+  只在 `compositionend` 后按普通键盘合同处理。
+- Windows 100/125/150/200% display scale、多屏不同 DPI 和 200% page zoom 都要保持 Focus ring、Dialog、
+  Popover、菜单与主要操作可见可达。

@@ -2,7 +2,7 @@
 document_type: ui-theme-index
 authority: renderer-theme-routing
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-18
 ---
 
 # Renderer 主题
@@ -14,7 +14,7 @@ Rovai AI 有两套生产主题：
 | `day` | [Porcelain Day](porcelain-day.md) | `:root` |
 | `night` | [Steel Night](steel-night.md) | `:root[data-theme="night"]` |
 
-`ThemePreference = system | day | night` 是用户偏好。`system` 跟随 macOS 并解析为
+`ThemePreference = system | day | night` 是用户偏好。`system` 跟随当前宿主 OS 的应用主题并解析为
 `ResolvedTheme = day | night`，不是第三套主题。第三套视觉主题进入生产前，必须另行评估
 偏好值是否需要与明暗模式、具体主题 ID 解耦。
 
@@ -28,7 +28,8 @@ Theme Token → Shared Component → Surface Composition
 
 ## 首次绘制与运行时权威
 
-1. Electron Main 在建窗前设置 `nativeTheme.themeSource` 和匹配的窗口背景。
+1. Electron Main 在建窗前设置 `nativeTheme.themeSource` 和匹配的窗口背景；macOS appearance 与 Windows Apps
+   theme 都只解析为同一 `ResolvedTheme`。
 2. `index.html` 在 React 启动前按 `prefers-color-scheme` 写入初始 `data-theme`，避免先亮后暗。
 3. Renderer 收到 Main 的 `AppearanceSnapshot` 后，以其中 `resolvedTheme` 覆盖初值，同时更新
    `color-scheme`。

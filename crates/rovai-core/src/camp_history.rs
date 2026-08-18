@@ -17,6 +17,7 @@ use crate::{
         StructuredCampMessageContent, mentions_current_user, normalize_content,
         render_current_plain_text, validate_content,
     },
+    camp_message_publication::public_camp_message_publication_cte,
     db::Database,
     message_delivery::CAMP_MESSAGE_SEND_TOOL_NAME,
     team_tool::{AuthenticatedTeamToolRun, TeamToolInvocationError},
@@ -58,6 +59,7 @@ pub struct CampListInput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CampSearchInput {
+    pub camp_id: Option<String>,
     pub query: String,
     pub limit: Option<usize>,
 }
@@ -97,26 +99,26 @@ impl ReadDirection {
 )]
 pub enum CampReadInput {
     Item {
-        camp_id: String,
+        camp_id: Option<String>,
         message_id: String,
         body_offset: Option<usize>,
         body_limit: Option<usize>,
     },
     Around {
-        camp_id: String,
+        camp_id: Option<String>,
         message_id: String,
         before: Option<usize>,
         after: Option<usize>,
     },
     Thread {
-        camp_id: String,
+        camp_id: Option<String>,
         message_id: String,
         direction: ReadDirection,
         cursor: Option<i64>,
         limit: Option<usize>,
     },
     Timeline {
-        camp_id: String,
+        camp_id: Option<String>,
         direction: ReadDirection,
         cursor: Option<i64>,
         limit: Option<usize>,
@@ -145,7 +147,7 @@ enum MessageFence {
 }
 
 #[derive(Debug, Clone)]
-struct ReadTarget {
+struct CampTarget {
     camp_id: String,
     fence: MessageFence,
 }
@@ -223,6 +225,7 @@ impl CampHistoryService {
             "required": ["query"],
             "properties": {
                 "query": {"type": "string", "minLength": 1, "maxLength": MAX_QUERY_CHARS},
+                "campId": {"type": "string", "minLength": 1},
                 "limit": {"type": "integer", "minimum": 1, "maximum": CAMP_SEARCH_MAX_LIMIT}
             }
         })
@@ -253,7 +256,7 @@ impl CampHistoryService {
             "oneOf": [
                 {
                     "additionalProperties": false,
-                    "required": ["campId", "mode", "messageId"],
+                    "required": ["mode", "messageId"],
                     "properties": {
                         "campId": {"type": "string", "minLength": 1},
                         "mode": {"const": "item"},
@@ -264,7 +267,7 @@ impl CampHistoryService {
                 },
                 {
                     "additionalProperties": false,
-                    "required": ["campId", "mode", "messageId"],
+                    "required": ["mode", "messageId"],
                     "properties": {
                         "campId": {"type": "string", "minLength": 1},
                         "mode": {"const": "around"},
@@ -275,7 +278,7 @@ impl CampHistoryService {
                 },
                 {
                     "additionalProperties": false,
-                    "required": ["campId", "mode", "messageId", "direction"],
+                    "required": ["mode", "messageId", "direction"],
                     "properties": {
                         "campId": {"type": "string", "minLength": 1},
                         "mode": {"const": "thread"},
@@ -287,7 +290,7 @@ impl CampHistoryService {
                 },
                 {
                     "additionalProperties": false,
-                    "required": ["campId", "mode", "direction"],
+                    "required": ["mode", "direction"],
                     "properties": {
                         "campId": {"type": "string", "minLength": 1},
                         "mode": {"const": "timeline"},
@@ -351,13 +354,14 @@ impl CampHistoryService {
         Ok(result)
     }
 
-    pub fn search_current_camp(
+    pub fn search_camp(
         &self,
         database: &mut Database,
         run: &AuthenticatedTeamToolRun,
         input: &CampSearchInput,
     ) -> Result<Value> {
         let query = required_query(&input.query)?;
+        let requested_camp_id = validate_requested_camp_id(input.camp_id.as_deref())?;
         let limit = effective_limit(
             input.limit,
             CAMP_SEARCH_DEFAULT_LIMIT,
@@ -366,11 +370,31 @@ impl CampHistoryService {
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Deferred)?;
-        let fence = load_run_fence(&transaction, run)?;
+        let fence = match load_run_fence(&transaction, run) {
+            Ok(fence) => fence,
+            Err(error)
+                if error
+                    .downcast_ref::<TeamToolInvocationError>()
+                    .is_some_and(|error| error.code == "camp.manifest_unavailable") =>
+            {
+                return Err(search_unavailable());
+            }
+            Err(error) => return Err(error),
+        };
+        let target = resolve_camp_target(&transaction, run, &fence, requested_camp_id.as_deref())?
+            .ok_or_else(search_unavailable)?;
         let budget = limit * SEARCH_CANDIDATE_MULTIPLIER;
         let (mut candidates, search_incomplete) =
-            load_current_body_candidates(&transaction, &fence, &query, budget)?;
-        merge_current_reference_candidates(&transaction, &fence, &query, limit, &mut candidates)?;
+            load_target_body_candidates(&transaction, run, &fence, &target, &query, budget)?;
+        merge_target_reference_candidates(
+            &transaction,
+            run,
+            &fence,
+            &target,
+            &query,
+            limit,
+            &mut candidates,
+        )?;
         reproject_search_candidates(&transaction, &query, &mut candidates)?;
         let result = ranked_search_response(candidates, &query, limit, false, search_incomplete)?;
         transaction.commit()?;
@@ -445,6 +469,7 @@ impl CampHistoryService {
         run: &AuthenticatedTeamToolRun,
         input: &CampReadInput,
     ) -> Result<Value> {
+        let requested_camp_id = validate_requested_camp_id(input.camp_id())?;
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Deferred)?;
@@ -459,25 +484,24 @@ impl CampHistoryService {
             }
             Err(error) => return Err(error),
         };
+        let target = resolve_camp_target(&transaction, run, &fence, requested_camp_id.as_deref())?
+            .ok_or_else(read_unavailable)?;
         let value = match input {
             CampReadInput::Item {
-                camp_id,
+                camp_id: _,
                 message_id,
                 body_offset,
                 body_limit,
-            } => {
-                let target = load_read_target(&transaction, run, &fence, camp_id)?;
-                read_item(
-                    &transaction,
-                    &target,
-                    run,
-                    message_id,
-                    body_offset.unwrap_or(0),
-                    effective_limit(*body_limit, MAX_BODY_CHARS, MAX_BODY_CHARS)?,
-                )?
-            }
+            } => read_item(
+                &transaction,
+                &target,
+                run,
+                message_id,
+                body_offset.unwrap_or(0),
+                effective_limit(*body_limit, MAX_BODY_CHARS, MAX_BODY_CHARS)?,
+            )?,
             CampReadInput::Around {
-                camp_id,
+                camp_id: _,
                 message_id,
                 before,
                 after,
@@ -487,11 +511,10 @@ impl CampHistoryService {
                 if before > MAX_AROUND_MESSAGES || after > MAX_AROUND_MESSAGES {
                     return Err(invalid_argument("before and after must not exceed 10"));
                 }
-                let target = load_read_target(&transaction, run, &fence, camp_id)?;
                 read_around(&transaction, &target, message_id, before, after)?
             }
             CampReadInput::Thread {
-                camp_id,
+                camp_id: _,
                 message_id,
                 direction,
                 cursor,
@@ -499,7 +522,6 @@ impl CampHistoryService {
             } => {
                 validate_cursor(*cursor)?;
                 let limit = effective_limit(*limit, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT)?;
-                let target = load_read_target(&transaction, run, &fence, camp_id)?;
                 read_thread(
                     &transaction,
                     &target,
@@ -510,19 +532,29 @@ impl CampHistoryService {
                 )?
             }
             CampReadInput::Timeline {
-                camp_id,
+                camp_id: _,
                 direction,
                 cursor,
                 limit,
             } => {
                 validate_cursor(*cursor)?;
                 let limit = effective_limit(*limit, DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT)?;
-                let target = load_read_target(&transaction, run, &fence, camp_id)?;
                 read_timeline(&transaction, &target, *direction, *cursor, limit)?
             }
         };
         transaction.commit()?;
         Ok(value)
+    }
+}
+
+impl CampReadInput {
+    fn camp_id(&self) -> Option<&str> {
+        match self {
+            Self::Item { camp_id, .. }
+            | Self::Around { camp_id, .. }
+            | Self::Thread { camp_id, .. }
+            | Self::Timeline { camp_id, .. } => camp_id.as_deref(),
+        }
     }
 }
 
@@ -538,6 +570,13 @@ fn read_unavailable() -> anyhow::Error {
     tool_error(
         "camp.read_unavailable",
         "Camp history item is unavailable to this AgentRun",
+    )
+}
+
+fn search_unavailable() -> anyhow::Error {
+    tool_error(
+        "camp.search_unavailable",
+        "Camp search target is unavailable to this AgentRun",
     )
 }
 
@@ -602,6 +641,16 @@ fn validate_requested_camps(values: Option<&[String]>) -> Result<Option<Vec<Stri
         }
     }
     Ok(Some(values.to_vec()))
+}
+
+fn validate_requested_camp_id(value: Option<&str>) -> Result<Option<String>> {
+    value
+        .map(|value| {
+            Uuid::parse_str(value)
+                .map(|camp_id| camp_id.to_string())
+                .map_err(|_| invalid_argument("campId must be a UUID"))
+        })
+        .transpose()
 }
 
 fn parse_date_range(from: Option<&str>, to: Option<&str>) -> Result<ParsedDateRange> {
@@ -710,19 +759,20 @@ fn load_authorized_history_camps(
         .map_err(Into::into)
 }
 
-fn load_read_target(
+fn resolve_camp_target(
     transaction: &Transaction<'_>,
     run: &AuthenticatedTeamToolRun,
     fence: &RunFence,
-    camp_id: &str,
-) -> Result<ReadTarget> {
+    requested_camp_id: Option<&str>,
+) -> Result<Option<CampTarget>> {
+    let camp_id = requested_camp_id.unwrap_or(&fence.current_camp_id);
     if camp_id == fence.current_camp_id {
-        return Ok(ReadTarget {
+        return Ok(Some(CampTarget {
             camp_id: camp_id.to_string(),
             fence: MessageFence::Current {
                 boundary: fence.current_boundary,
             },
-        });
+        }));
     }
     let authorized = transaction
         .query_row(
@@ -745,14 +795,14 @@ fn load_read_target(
         )
         .optional()?;
     if authorized.is_none() {
-        return Err(read_unavailable());
+        return Ok(None);
     }
-    Ok(ReadTarget {
+    Ok(Some(CampTarget {
         camp_id: camp_id.to_string(),
         fence: MessageFence::History {
             global_boundary: fence.global_boundary,
         },
-    })
+    }))
 }
 
 fn camp_name_match_class(title: &str, folded_query: &str) -> u8 {
@@ -776,6 +826,37 @@ fn fold_char(value: char) -> char {
 
 fn literal_fts_query(query: &str) -> String {
     format!("\"{}\"", query.replace('"', "\"\""))
+}
+
+fn target_history_scope<'a>(
+    run: &'a AuthenticatedTeamToolRun,
+    fence: &'a RunFence,
+    target: &'a CampTarget,
+) -> Option<HistorySearchScope<'a>> {
+    matches!(target.fence, MessageFence::History { .. }).then(|| HistorySearchScope {
+        run,
+        fence,
+        camp_ids: std::slice::from_ref(&target.camp_id),
+        dates: ParsedDateRange {
+            from: None,
+            to: None,
+        },
+    })
+}
+
+fn load_target_body_candidates(
+    transaction: &Transaction<'_>,
+    run: &AuthenticatedTeamToolRun,
+    fence: &RunFence,
+    target: &CampTarget,
+    query: &str,
+    budget: usize,
+) -> Result<CandidatePage> {
+    if let Some(scope) = target_history_scope(run, fence, target) {
+        load_history_body_candidates(transaction, &scope, query, budget)
+    } else {
+        load_current_body_candidates(transaction, fence, query, budget)
+    }
 }
 
 fn load_current_body_candidates(
@@ -849,12 +930,15 @@ fn load_history_body_candidates(
     budget: usize,
 ) -> Result<CandidatePage> {
     let short = query.chars().count() < 3;
+    let publication_cte = public_camp_message_publication_cte();
     let sql = if short {
-        r#"
+        format!(
+            r#"
+        WITH {publication_cte}
         SELECT message.id, message.camp_id, message.sequence,
                message.author_type, message.author_id,
                message.reply_to_camp_message_id, message.body,
-               message.created_at, sent.global_sequence, snapshot.camp_title
+               message.created_at, publication.global_sequence, snapshot.camp_title
         FROM context_manifest_history_camp AS snapshot
         JOIN camp ON camp.id = snapshot.camp_id
         JOIN camp_member
@@ -862,28 +946,29 @@ fn load_history_body_candidates(
          AND camp_member.agent_id = ?2
         JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         JOIN camp_message AS message ON message.camp_id = snapshot.camp_id
-        JOIN event_log AS sent
-          ON sent.entity_type = 'camp_message'
-         AND sent.entity_id = message.id
-         AND sent.event_type = 'camp_message.sent'
+        JOIN public_camp_message_publication AS publication
+          ON publication.message_id = message.id
         WHERE snapshot.context_manifest_id = ?1
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
-          AND sent.global_sequence <= ?3
+          AND publication.global_sequence <= ?3
           AND message.tombstoned_at IS NULL
           AND message.camp_id IN (SELECT value FROM json_each(?4))
           AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
           AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
-        ORDER BY sent.global_sequence DESC, message.camp_id, message.id
+        ORDER BY publication.global_sequence DESC, message.camp_id, message.id
         LIMIT ?7
         "#
+        )
     } else {
-        r#"
+        format!(
+            r#"
+        WITH {publication_cte}
         SELECT message.id, message.camp_id, message.sequence,
                message.author_type, message.author_id,
                message.reply_to_camp_message_id, message.body,
-               message.created_at, sent.global_sequence, snapshot.camp_title
+               message.created_at, publication.global_sequence, snapshot.camp_title
         FROM context_manifest_history_camp AS snapshot
         JOIN camp ON camp.id = snapshot.camp_id
         JOIN camp_member
@@ -892,28 +977,27 @@ fn load_history_body_candidates(
         JOIN agent_profile ON agent_profile.id = camp_member.agent_id
         JOIN camp_message AS message ON message.camp_id = snapshot.camp_id
         JOIN camp_message_fts ON camp_message_fts.rowid = message.rowid
-        JOIN event_log AS sent
-          ON sent.entity_type = 'camp_message'
-         AND sent.entity_id = message.id
-         AND sent.event_type = 'camp_message.sent'
+        JOIN public_camp_message_publication AS publication
+          ON publication.message_id = message.id
         WHERE snapshot.context_manifest_id = ?1
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
           AND agent_profile.profile_status = 'present'
-          AND sent.global_sequence <= ?3
+          AND publication.global_sequence <= ?3
           AND message.tombstoned_at IS NULL
           AND message.camp_id IN (SELECT value FROM json_each(?4))
           AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
           AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
           AND camp_message_fts MATCH ?8
-        ORDER BY sent.global_sequence DESC, message.camp_id, message.id
+        ORDER BY publication.global_sequence DESC, message.camp_id, message.id
         LIMIT ?7
         "#
+        )
     };
     let camp_ids = serde_json::to_string(scope.camp_ids)?;
     let from = scope.dates.lower_bound_parameter();
     let to = scope.dates.upper_bound_parameter();
-    let mut statement = transaction.prepare(sql)?;
+    let mut statement = transaction.prepare(&sql)?;
     let rows = if short {
         statement
             .query_map(
@@ -1012,6 +1096,22 @@ fn merge_current_reference_candidates(
     Ok(())
 }
 
+fn merge_target_reference_candidates(
+    transaction: &Transaction<'_>,
+    run: &AuthenticatedTeamToolRun,
+    fence: &RunFence,
+    target: &CampTarget,
+    query: &str,
+    limit: usize,
+    candidates: &mut CandidateMap,
+) -> Result<()> {
+    if let Some(scope) = target_history_scope(run, fence, target) {
+        merge_history_reference_candidates(transaction, &scope, query, limit, candidates)
+    } else {
+        merge_current_reference_candidates(transaction, fence, query, limit, candidates)
+    }
+}
+
 fn merge_history_reference_candidates(
     transaction: &Transaction<'_>,
     scope: &HistorySearchScope<'_>,
@@ -1022,13 +1122,15 @@ fn merge_history_reference_candidates(
     let camp_ids = serde_json::to_string(scope.camp_ids)?;
     let from = scope.dates.lower_bound_parameter();
     let to = scope.dates.upper_bound_parameter();
+    let publication_cte = public_camp_message_publication_cte();
     for (kind, value) in extract_query_references(query).into_iter().take(20) {
-        let mut statement = transaction.prepare(
+        let sql = format!(
             r#"
+            WITH {publication_cte}
             SELECT message.id, message.camp_id, message.sequence,
                    message.author_type, message.author_id,
                    message.reply_to_camp_message_id, message.body,
-                   message.created_at, sent.global_sequence, snapshot.camp_title
+                   message.created_at, publication.global_sequence, snapshot.camp_title
             FROM camp_message_reference AS reference
             JOIN camp_message AS message ON message.id = reference.camp_message_id
             JOIN context_manifest_history_camp AS snapshot
@@ -1039,23 +1141,22 @@ fn merge_history_reference_candidates(
               ON camp_member.camp_id = camp.id
              AND camp_member.agent_id = ?2
             JOIN agent_profile ON agent_profile.id = camp_member.agent_id
-            JOIN event_log AS sent
-              ON sent.entity_type = 'camp_message'
-             AND sent.entity_id = message.id
-             AND sent.event_type = 'camp_message.sent'
+            JOIN public_camp_message_publication AS publication
+              ON publication.message_id = message.id
             WHERE reference.kind = ?3 AND reference.value = ?4
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
               AND agent_profile.profile_status = 'present'
-              AND sent.global_sequence <= ?5
+              AND publication.global_sequence <= ?5
               AND message.tombstoned_at IS NULL
               AND message.camp_id IN (SELECT value FROM json_each(?6))
               AND (?7 IS NULL OR julianday(message.created_at) >= julianday(?7))
               AND (?8 IS NULL OR julianday(message.created_at) < julianday(?8))
-            ORDER BY sent.global_sequence DESC, message.camp_id, message.id
+            ORDER BY publication.global_sequence DESC, message.camp_id, message.id
             LIMIT ?9
-            "#,
-        )?;
+            "#
+        );
+        let mut statement = transaction.prepare(&sql)?;
         let rows = statement
             .query_map(
                 params![
@@ -1289,7 +1390,7 @@ fn cap_top_k_response(mut response: Value, key: &str) -> Result<Value> {
 
 fn read_item(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     run: &AuthenticatedTeamToolRun,
     message_id: &str,
     body_offset: usize,
@@ -1346,7 +1447,7 @@ fn read_item(
 
 fn load_item_message(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     run: &AuthenticatedTeamToolRun,
     message_id: &str,
 ) -> Result<Option<MessageRow>> {
@@ -1364,7 +1465,7 @@ fn load_item_message(
 /// content.
 fn load_committed_self_written_message(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     run: &AuthenticatedTeamToolRun,
     message_id: &str,
 ) -> Result<Option<MessageRow>> {
@@ -1447,7 +1548,7 @@ fn load_exact_addressing(transaction: &Transaction<'_>, message_id: &str) -> Res
 
 fn read_around(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     message_id: &str,
     before: usize,
     after: usize,
@@ -1491,7 +1592,7 @@ fn read_around(
 
 fn read_thread(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     message_id: &str,
     direction: ReadDirection,
     cursor: Option<i64>,
@@ -1542,7 +1643,7 @@ fn read_thread(
 
 fn read_timeline(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     direction: ReadDirection,
     cursor: Option<i64>,
     limit: usize,
@@ -1577,9 +1678,10 @@ fn read_timeline(
 
 fn load_visible_message(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     message_id: &str,
 ) -> Result<Option<MessageRow>> {
+    let publication_cte = public_camp_message_publication_cte();
     let (sql, parameter) = match target.fence {
         MessageFence::Current { boundary } => (
             r#"
@@ -1588,32 +1690,33 @@ fn load_visible_message(
             FROM camp_message
             WHERE id = ?1 AND camp_id = ?2
               AND sequence <= ?3 AND tombstoned_at IS NULL
-            "#,
+            "#
+            .to_string(),
             boundary,
         ),
         MessageFence::History { global_boundary } => (
-            r#"
+            format!(
+                r#"
+            WITH {publication_cte}
             SELECT message.id, message.camp_id, message.sequence,
                    message.author_type, message.author_id,
                    message.reply_to_camp_message_id, message.body,
-                   message.created_at, sent.global_sequence, NULL
+                   message.created_at, publication.global_sequence, NULL
             FROM camp_message AS message
-            JOIN event_log AS sent
-              ON sent.entity_type = 'camp_message'
-             AND sent.entity_id = message.id
-             AND sent.event_type = 'camp_message.sent'
+            JOIN public_camp_message_publication AS publication
+              ON publication.message_id = message.id
             WHERE message.id = ?1 AND message.camp_id = ?2
-              AND sent.global_sequence <= ?3
+              AND publication.global_sequence <= ?3
               AND message.tombstoned_at IS NULL
-            ORDER BY sent.global_sequence DESC
             LIMIT 1
-            "#,
+            "#
+            ),
             global_boundary,
         ),
     };
     let mut message = transaction
         .query_row(
-            sql,
+            &sql,
             params![message_id, target.camp_id, parameter],
             message_search_row,
         )
@@ -1639,7 +1742,7 @@ fn projected_message_body(transaction: &Transaction<'_>, message_id: &str) -> Re
 
 fn load_relative_messages(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     direction: ReadDirection,
     cursor: i64,
     limit: usize,
@@ -1657,7 +1760,7 @@ fn load_relative_messages(
 
 fn load_timeline_page(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     direction: ReadDirection,
     cursor: Option<i64>,
     limit: usize,
@@ -1667,7 +1770,7 @@ fn load_timeline_page(
 
 fn load_ordered_messages(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     direction: ReadDirection,
     cursor: Option<i64>,
     inclusive: bool,
@@ -1689,10 +1792,10 @@ fn load_ordered_messages(
     let cursor_filter = cursor
         .map(|_| format!("AND message.sequence {comparator} ?3"))
         .unwrap_or_default();
-    let thread_cte = thread_root_id.map_or_else(String::new, |root| {
+    let thread_cte = thread_root_id.map(|root| {
         let escaped = root.replace('\'', "''");
         format!(
-            "WITH RECURSIVE thread(id) AS (\
+            "thread(id) AS (\
              SELECT '{escaped}' UNION ALL \
              SELECT child.id FROM camp_message AS child \
              JOIN thread ON child.reply_to_camp_message_id = thread.id)"
@@ -1702,12 +1805,24 @@ fn load_ordered_messages(
     let fence_filter = match target.fence {
         MessageFence::Current { .. } => "AND message.sequence <= ?2",
         MessageFence::History { .. } => {
-            "AND EXISTS (SELECT 1 FROM event_log AS sent WHERE sent.entity_type = 'camp_message' AND sent.entity_id = message.id AND sent.event_type = 'camp_message.sent' AND sent.global_sequence <= ?2)"
+            "AND EXISTS (SELECT 1 FROM public_camp_message_publication AS publication WHERE publication.message_id = message.id AND publication.global_sequence <= ?2)"
         }
+    };
+    let mut ctes = Vec::new();
+    if matches!(target.fence, MessageFence::History { .. }) {
+        ctes.push(public_camp_message_publication_cte());
+    }
+    if let Some(thread_cte) = thread_cte {
+        ctes.push(thread_cte);
+    }
+    let cte_prefix = if ctes.is_empty() {
+        String::new()
+    } else {
+        format!("WITH RECURSIVE {}", ctes.join(", "))
     };
     let sql = format!(
         r#"
-        {thread_cte}
+        {cte_prefix}
         SELECT message.id, message.camp_id, message.sequence,
                message.author_type, message.author_id,
                message.reply_to_camp_message_id, message.body,
@@ -1743,7 +1858,7 @@ fn load_ordered_messages(
 
 fn resolve_thread_root(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     mut message: MessageRow,
 ) -> Result<MessageRow> {
     let mut seen = HashSet::new();
@@ -1759,7 +1874,7 @@ fn resolve_thread_root(
 
 fn load_thread_page(
     transaction: &Transaction<'_>,
-    target: &ReadTarget,
+    target: &CampTarget,
     root_message_id: &str,
     direction: ReadDirection,
     boundary: i64,
@@ -2120,7 +2235,7 @@ mod slow_tests {
 
         let rows = load_ordered_messages(
             &transaction,
-            &ReadTarget {
+            &CampTarget {
                 camp_id: "camp-1".to_string(),
                 fence: MessageFence::Current { boundary: 1 },
             },
@@ -2267,7 +2382,7 @@ mod slow_tests {
             agent_run_id: "run-1".to_string(),
             execution_epoch: 7,
         };
-        let target = ReadTarget {
+        let target = CampTarget {
             camp_id: "camp-1".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
@@ -2297,7 +2412,7 @@ mod slow_tests {
             );
         }
 
-        let other_camp_target = ReadTarget {
+        let other_camp_target = CampTarget {
             camp_id: "camp-2".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
@@ -2400,7 +2515,7 @@ mod slow_tests {
         }
 
         let transaction = connection.transaction().unwrap();
-        let target = ReadTarget {
+        let target = CampTarget {
             camp_id: "camp-1".to_string(),
             fence: MessageFence::Current { boundary: 1 },
         };
@@ -2434,6 +2549,8 @@ mod slow_tests {
                 .iter()
                 .all(|attachment| {
                     attachment["name"].as_str().unwrap().chars().count() <= 500
+                        && attachment["kind"] == "file"
+                        && attachment["fileCount"] == 1
                         && attachment.get("storagePath").is_none()
                         && attachment.get("content").is_none()
                 })

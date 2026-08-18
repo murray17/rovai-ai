@@ -9,7 +9,9 @@ use std::{
 };
 
 use anyhow::{Context, Result, bail};
-use rovai_core::builtin_tool_cli_output::{outcome_indeterminate_agent_error, project_envelope};
+use rovai_core::builtin_tool_cli_output::{
+    outcome_indeterminate_agent_error, output_contract_mismatch_agent_error, project_envelope,
+};
 use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
     BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES, BuiltinToolArgument, BuiltinToolCliContext,
@@ -17,7 +19,7 @@ use rovai_core::builtin_tool_transport::{
     BuiltinToolIpcRequestBody, BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
     COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION, CompactionHookIpcRequest,
     CompactionHookIpcResponse, CompactionObservationOutboxRecord, ROVAI_CLI_CONTEXT_ENV,
-    builtin_tool_description, builtin_tool_identity_by_command,
+    ROVAI_RUN_TMP_ENV, builtin_tool_description, builtin_tool_identity_by_command,
 };
 use rovai_core::camp_message_send_teaching::{
     CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_TO_USER_HELP,
@@ -142,7 +144,19 @@ fn run() -> Result<u8> {
     match response {
         BuiltinToolIpcResponse::Envelope { envelope } => {
             envelope.validate()?;
-            let projected = project_envelope(&envelope)?;
+            let projected = match project_envelope(&envelope) {
+                Ok(projected) => projected,
+                Err(error) => {
+                    record_output_contract_mismatch(&envelope.operation, &error);
+                    println!(
+                        "{}",
+                        serde_json::to_string(&output_contract_mismatch_agent_error(
+                            &envelope.operation
+                        ))?
+                    );
+                    return Ok(2);
+                }
+            };
             println!("{}", serde_json::to_string(&projected)?);
             Ok(envelope_exit_code(&envelope))
         }
@@ -620,6 +634,45 @@ fn print_safe_cli_error() {
     );
 }
 
+fn record_output_contract_mismatch(operation: &str, error: &anyhow::Error) {
+    let Some(run_tmp) = env::var_os(ROVAI_RUN_TMP_ENV) else {
+        return;
+    };
+    let _ = write_output_contract_mismatch_diagnostic(Path::new(&run_tmp), operation, error);
+}
+
+fn write_output_contract_mismatch_diagnostic(
+    run_tmp: &Path,
+    operation: &str,
+    error: &anyhow::Error,
+) -> Result<PathBuf> {
+    let path = run_tmp.join(format!(
+        "builtin-tool-cli-diagnostic-{}.json",
+        Uuid::new_v4()
+    ));
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(&path)
+        .context("failed to create Built-in Tool CLI diagnostic")?;
+    let diagnostic = json!({
+        "observedAt": chrono::Utc::now().to_rfc3339(),
+        "code": "builtin_tool.output_contract_mismatch",
+        "operation": operation,
+        "diagnostic": format!("{error:#}"),
+    });
+    serde_json::to_writer(&mut file, &diagnostic)
+        .context("failed to write Built-in Tool CLI diagnostic")?;
+    file.write_all(b"\n")
+        .context("failed to finish Built-in Tool CLI diagnostic")?;
+    Ok(path)
+}
+
 fn print_invalid_input() {
     println!(
         "{}",
@@ -712,6 +765,15 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
                 output,
                 "      Optional run-readable PNG/JPEG path. If unavailable, omit it and Rovai uses the default avatar."
             )
+                .expect("writing help to a String cannot fail");
+        }
+        if matches!(description.name.as_str(), "camp.search" | "camp.read")
+            && argument.field == "campId"
+        {
+            writeln!(
+                output,
+                "      Optional. Omit for the current Camp; pass an authorized frozen historical Camp ID to target that Camp only."
+            )
             .expect("writing help to a String cannot fail");
         }
     }
@@ -750,9 +812,15 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
             &["rovai task update --task-id task_123 --expected-version 1 --status in_progress"]
         }
         "camp.list" => &["rovai camp list --limit 10"],
-        "camp.search" => &["rovai camp search --query 'release' --limit 5"],
-        "camp.read" => &["rovai camp read --camp-id camp_123 --mode item --message-id msg_123"],
-        "history.search" => &["rovai history search --query 'decision' --limit 5"],
+        "camp.search" => &[
+            "rovai camp search --query 'amount'",
+            "rovai camp search --camp-id '<camp-id>' --query 'amount'",
+        ],
+        "camp.read" => &[
+            "rovai camp read --mode item --message-id '<message-id>'",
+            "rovai camp read --camp-id '<camp-id>' --mode item --message-id '<message-id>'",
+        ],
+        "history.search" => &["rovai history search --query 'amount'"],
         "memory.view" => &[
             "rovai memory view --scope companion",
             "rovai memory view --scope relationship --counterparty-agent-id agent_3",
@@ -910,6 +978,93 @@ mod tests {
         let gather_help = operation_help_text(&gather);
         assert!(gather_help.contains("only the last accepted return"));
         assert!(gather_help.contains("limited to 16 per Item/retry generation"));
+    }
+
+    #[test]
+    fn camp_help_teaches_default_and_explicit_single_camp_targets() {
+        let search = builtin_tool_description("camp.search").unwrap();
+        let search_help = operation_help_text(&search);
+        assert!(search_help.contains("Omit for the current Camp"));
+        assert!(search_help.contains("authorized frozen historical Camp ID"));
+        assert!(
+            search
+                .arguments
+                .iter()
+                .find(|argument| argument.field == "campId")
+                .is_some_and(|argument| !argument.required)
+        );
+        assert_eq!(
+            parse_operation_input(&search, &["--query".to_string(), "amount".to_string()]).unwrap(),
+            json!({"query": "amount"})
+        );
+        assert_eq!(
+            operation_help_examples("camp.search"),
+            [
+                "rovai camp search --query 'amount'",
+                "rovai camp search --camp-id '<camp-id>' --query 'amount'",
+            ]
+        );
+
+        let read = builtin_tool_description("camp.read").unwrap();
+        let read_help = operation_help_text(&read);
+        assert!(read_help.contains("Omit for the current Camp"));
+        assert_eq!(
+            parse_operation_input(
+                &read,
+                &[
+                    "--mode".to_string(),
+                    "item".to_string(),
+                    "--message-id".to_string(),
+                    "msg_123".to_string(),
+                ],
+            )
+            .unwrap(),
+            json!({"mode": "item", "messageId": "msg_123"})
+        );
+        assert_eq!(
+            operation_help_examples("camp.read"),
+            [
+                "rovai camp read --mode item --message-id '<message-id>'",
+                "rovai camp read --camp-id '<camp-id>' --mode item --message-id '<message-id>'",
+            ]
+        );
+        assert_eq!(
+            operation_help_examples("history.search"),
+            ["rovai history search --query 'amount'"]
+        );
+    }
+
+    #[test]
+    fn output_contract_mismatch_keeps_full_error_in_a_private_local_diagnostic() {
+        let directory = env::temp_dir().join(format!(
+            "rovai-output-contract-mismatch-test-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let source_error =
+            anyhow::anyhow!("camp.read attachments[0] is missing required property fileCount");
+        let path =
+            write_output_contract_mismatch_diagnostic(&directory, "camp.read", &source_error)
+                .unwrap();
+        let diagnostic: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(diagnostic["code"], "builtin_tool.output_contract_mismatch");
+        assert_eq!(diagnostic["operation"], "camp.read");
+        assert!(
+            diagnostic["diagnostic"]
+                .as_str()
+                .unwrap()
+                .contains("attachments[0]")
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        fs::remove_file(path).unwrap();
+        fs::remove_dir(directory).unwrap();
     }
 
     #[test]

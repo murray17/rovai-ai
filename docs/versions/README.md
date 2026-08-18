@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.04
+current_version: v1.06
 last_updated: 2026-08-18
 ---
 
@@ -155,4 +155,6 @@ last_updated: 2026-08-18
 | v1.01 | `historical` | TRAE 与 Kiro 新队员使用已验证的最高权限默认 | [v1.01/README.md](v1.01/README.md) |
 | v1.02 | `historical` | OpenCode 完整 Token/Cache 语义与 Codex 版本化 API 公价估算 | [v1.02/README.md](v1.02/README.md) |
 | v1.03 | `historical` | TRAE 启动轻检、统一可用状态与用户显式 ACP Session 验证 | [v1.03/README.md](v1.03/README.md) |
-| v1.04 | `current` | TRAE cold resume、受控 HistoryRestore 与 replay quarantine | [v1.04/README.md](v1.04/README.md) |
+| v1.04 | `historical` | TRAE cold resume、受控 HistoryRestore 与 replay quarantine | [v1.04/README.md](v1.04/README.md) |
+| v1.05 | `historical` | Windows x64 技术设计闭环；产品代码、打包和真实 Runtime 资格未实施即冻结 | [v1.05/README.md](v1.05/README.md) |
+| v1.06 | `current` | 统一单 Camp History target、Public A2A 历史可见性与安全 CLI 投影错误 | [v1.06/README.md](v1.06/README.md) |

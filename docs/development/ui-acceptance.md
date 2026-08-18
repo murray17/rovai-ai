@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -9,7 +9,7 @@ last_updated: 2026-08-17
 本文只说明长期稳定的桌面验收基础设施。当前版本必须覆盖哪些页面、主题、尺寸和状态，
 以当前版本 `implementation-plan.md` 为准；不要把版本专属断言复制回本文。
 
-## 先生成 App
+## 当前 macOS 验收入口
 
 ```bash
 pnpm package:mac
@@ -60,6 +60,28 @@ node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/compact"
 通用页面验收会在隔离目录缺少状态时写入 `completed(existing_installation)` 的私有
 `onboarding.json`，以继续覆盖原有 App Shell；它不会修改已有 onboarding 状态。只有下文的
 `accept:onboarding-ui` 使用真正全新的状态并拥有首次安装语义。
+
+## Windows 验收入口（设计已接受、工具待实现）
+
+当前 `package.json` 尚无可运行的 Windows package/accept 命令，下面是实现验收合同，不是可复制命令。脚本和
+NSIS 落地后，命令名必须以 `package.json#scripts` 为真源，并在同一改动更新本文。
+
+Windows lane 使用与生产 `%LOCALAPPDATA%\Rovai AI` 同构但完全隔离的绝对 data root，分别隔离 Core、Electron
+User Data、Session Data、Logs、CrashDumps 和 Skill Library；它必须拒绝日常目录、junction/symlink 别名、UNC、
+network/removable/non-NTFS 目标。验收覆盖 unpacked App 与 installed App，且不能共享 fixture。
+
+自动化至少证明 native frame 下不存在 Renderer drag region、平台快捷键/Explorer 文案、Runtime Platform
+Admission 与 Availability 正交、历史 Runtime 子对象精确保留、Forced Colors DOM/CSS 和 IME composition
+不误提交。真实客户端 OS 另外覆盖：
+
+- Windows 10 22H2、Windows 11，`1040×700`、`1440×920`，100/125/150/200% display scale 与 200% page zoom；
+- Snap、最大化/还原、Alt+Space、多屏不同 DPI、Day/Night/System、High Contrast/Forced Colors；
+- keyboard-only、NVDA、中文 IME、Explorer、local NTFS storage blocker；
+- clean install、运行中 App upgrade、schema-incompatible downgrade、默认保留数据和显式删除数据的 uninstall。
+
+固定 Windows Server runner 只提供 compile/package/automated evidence，不证明上述客户端 UI。完整边界见
+[Windows Interaction Delta](../ui/windows-interaction-delta.md)和
+[Windows x64 构建、打包与发布设计](packaging-windows.md)。
 
 ## 独立 UI 验收
 

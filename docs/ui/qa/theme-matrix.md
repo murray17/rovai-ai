@@ -2,7 +2,7 @@
 document_type: ui-qa-contract
 authority: renderer-theme-verification
 status: accepted
-last_updated: 2026-08-16
+last_updated: 2026-08-18
 ---
 
 # Renderer 主题覆盖矩阵
@@ -32,9 +32,13 @@ Porcelain Day 与 Steel Night 必须在同一生产组件、数据和功能上�
   都以 `1440px` 为上限且不拉宽时间线、Dock 或执行台。
 - 200% zoom: Dialog、Dock、菜单、Popover 和 Inspector 仍可达。
 - reduced motion: 状态仍清楚，不依赖动画传达。
+- Windows display scale `100/125/150/200%`：native frame、App 顶行、菜单和内容边界不重叠；多屏切换后
+  不用 CSS 像素伪造系统 caption 尺寸。
+- Forced Colors / High Contrast：系统色、Focus、选中、禁用与错误均保留非颜色语义。
 
 ## Automated and visual evidence
 
 自动化至少覆盖完整 Token、两主题对比度、偏好解析、首次绘制和同组件映射；真实 App 验收
-补足排版、遮挡、焦点、macOS 系统主题切换和截图。版本是否完成只由对应当前版本实施计划与
+补足排版、遮挡、焦点，以及 macOS 与 Windows Apps theme 的系统主题切换和截图。Windows native frame、
+DPI、High Contrast、NVDA 与 IME 必须由真实客户端 OS 验收；固定 Windows Server CI 不替代。版本是否完成只由对应当前版本实施计划与
 可复现证据判断，本文 `accepted` 不代表某次实现自动完成。

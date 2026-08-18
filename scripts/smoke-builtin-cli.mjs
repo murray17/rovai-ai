@@ -783,7 +783,7 @@ function verificationScript(input) {
     assigneeAgentId: input.agentId
   })
   const campRead = (messageIdExpression) =>
-    `jq -n --arg campId ${shellQuote(input.campId)} --arg messageId "${messageIdExpression}" '{mode:"item",campId:$campId,messageId:$messageId}'`
+    `jq -n --arg messageId "${messageIdExpression}" '{mode:"item",messageId:$messageId}'`
   const memoryWrite = JSON.stringify({
     action: 'add',
     scope: 'companion',
@@ -879,6 +879,14 @@ member_help="$("$CLI" member create --help)"
 printf '%s\n' "$member_help" | grep -Fq -- '--creation-key'
 printf '%s\n' "$member_help" | grep -Fq -- '--avatar-file'
 printf '%s\n' "$member_help" | grep -Fq -- 'user explicitly confirms'
+camp_search_help="$("$CLI" camp search --help)"
+printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai camp search --query 'amount'"
+printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai camp search --camp-id '<camp-id>' --query 'amount'"
+camp_read_help="$("$CLI" camp read --help)"
+printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --mode item --message-id '<message-id>'"
+printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --camp-id '<camp-id>' --mode item --message-id '<message-id>'"
+history_search_help="$("$CLI" history search --help)"
+printf '%s\n' "$history_search_help" | grep -Fq -- "rovai history search --query 'amount'"
 set +e
 family_help="$("$CLI" camp --help 2>"$RUN_TMP/family-help.err")"
 family_help_status=$?
@@ -983,16 +991,33 @@ STEP=camp_search
 camp_search="$("$CLI" camp search --query ${shellQuote(input.currentMarker)} --limit 5)"
 assert_success "$camp_search" 'camp.search'
 message_id="$(printf '%s\n' "$camp_search" | "$JQ" -er '.results[0].messageId')"
+STEP=camp_search_explicit_current
+camp_search_explicit_current="$("$CLI" camp search --camp-id ${shellQuote(input.campId)} --query ${shellQuote(input.currentMarker)} --limit 5)"
+assert_success "$camp_search_explicit_current" 'camp.search'
+test "$(printf '%s\n' "$camp_search_explicit_current" | "$JQ" -er '.results[0].messageId')" = "$message_id"
 STEP=camp_read
 ${campRead('$message_id')} > "$RUN_TMP/camp-read.json"
 camp_read="$("$CLI" camp read --input-file "$RUN_TMP/camp-read.json")"
 assert_success "$camp_read" 'camp.read'
-printf '%s\n' "$camp_read" | "$JQ" -e --arg messageId "$message_id" '.items[0].messageId == $messageId' >/dev/null
+printf '%s\n' "$camp_read" | "$JQ" -e --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" '.campId == $campId and .items[0].messageId == $messageId' >/dev/null
 
 STEP=history_search
 history_search="$("$CLI" history search --query ${shellQuote(input.historyMarker)} --limit 5)"
 assert_success "$history_search" 'history.search'
 printf '%s\n' "$history_search" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} '.results | any(.campId == $campId)' >/dev/null
+history_message_id="$(printf '%s\n' "$history_search" | "$JQ" -er --arg campId ${shellQuote(input.historyCampId)} '.results | map(select(.campId == $campId))[0].messageId')"
+STEP=camp_search_historical
+camp_search_historical="$("$CLI" camp search --camp-id ${shellQuote(input.historyCampId)} --query ${shellQuote(input.historyMarker)} --limit 5)"
+assert_success "$camp_search_historical" 'camp.search'
+printf '%s\n' "$camp_search_historical" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} --arg messageId "$history_message_id" '
+  .results | any(.campId == $campId and .messageId == $messageId and (has("campTitle") | not))
+' >/dev/null
+STEP=camp_read_historical
+camp_read_historical="$("$CLI" camp read --camp-id ${shellQuote(input.historyCampId)} --mode item --message-id "$history_message_id")"
+assert_success "$camp_read_historical" 'camp.read'
+printf '%s\n' "$camp_read_historical" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} --arg messageId "$history_message_id" '
+  .campId == $campId and .items[0].messageId == $messageId
+' >/dev/null
 
 cat > "$RUN_TMP/public-send.json" <<'ROVAI_JSON'
 ${publicSend}

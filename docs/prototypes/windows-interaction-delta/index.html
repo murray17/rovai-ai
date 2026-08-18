@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day" data-platform="windows">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Rovai AI · Windows Interaction Delta</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef; --surface: #fbfbfa; --surface-raised: #fff; --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed; --surface-selected: #e9ecee; --surface-hover: #e8eaea;
+      --workspace-subtle: #f4f5f4; --workspace-raised: #fff; --workspace-hover: #e8ebec;
+      --workspace-line: #d5dadd; --workspace-faint: #71808a; --home: #fff; --topbar: #fbfbfa;
+      --input: #fff; --ink: #171b20; --muted: #616a73; --faint: #6e7382; --line: #dfe4e8;
+      --line-strong: #c7cfd6; --control-line: #8b9389; --brand: #526f88; --brand-hover: #3d5874;
+      --brand-contrast: #fff; --brand-soft: #e9eef3; --brand-ink: #405f7e; --rail: #f3f4f4;
+      --rail-ink: #626b72; --rail-line: #dadde0; --rail-logo: #526f88; --ember: #d3a45f;
+      --success: #3e775c; --success-soft: #e7f1ea; --attention: #8a6226; --attention-soft: #f8edda;
+      --danger: #a24c46; --danger-soft: #f7e6e3; --info: #416c86; --info-soft: #e5eef3;
+      --neutral: #5f6678; --neutral-soft: #ecefe9; --focus: #526f88; --focus-soft: rgb(82 111 136 / 16%);
+      --overlay: rgb(28 32 43 / 42%); --shadow: 0 18px 56px rgb(38 45 58 / 14%);
+      --native: #f3f3f3; --native-ink: #202020; --native-line: #d8d8d8;
+    }
+    html[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114; --surface: #151a1e; --surface-raised: #1b2227; --surface-subtle: #1a2024;
+      --surface-muted: #242d33; --surface-selected: #222c33; --surface-hover: #1d252b;
+      --workspace-subtle: #11171b; --workspace-raised: #1c2328; --workspace-hover: #1d252a;
+      --workspace-line: #2b353b; --workspace-faint: #8998a1; --home: #181d21; --topbar: #151a1e;
+      --input: #1b2227; --ink: #e7ecef; --muted: #abb5bc; --faint: #919da6; --line: #333e46;
+      --line-strong: #53616b; --control-line: #687b88; --brand: #7897ae; --brand-hover: #b1c8d8;
+      --brand-contrast: #091116; --brand-soft: #22303a; --brand-ink: #c0d4e1; --rail: #11161a;
+      --rail-ink: #a6b1b8; --rail-line: #313b43; --rail-logo: #b1c8d8; --ember: #d2aa72;
+      --success: #82b695; --success-soft: #1a2b22; --attention: #d2ac70; --attention-soft: #302719;
+      --danger: #d6857f; --danger-soft: #321e1d; --info: #83afc9; --info-soft: #182832;
+      --neutral: #abb5bc; --neutral-soft: #242d33; --focus: #8fb3cb; --focus-soft: rgb(143 179 203 / 18%);
+      --overlay: rgb(0 0 0 / 58%); --shadow: 0 22px 64px rgb(0 0 0 / 42%);
+      --native: #202020; --native-ink: #f1f1f1; --native-line: #313131;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 0; height: 100%; margin: 0; }
+    body { overflow: hidden; color: var(--ink); background: var(--canvas); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; font-synthesis: none; text-rendering: optimizeLegibility; }
+    button, input, select { color: inherit; font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .52; }
+    input::placeholder { color: var(--faint); }
+    ::selection { color: var(--ink); background: var(--brand-soft); }
+    :where(button, input, select, summary):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    * { scrollbar-color: var(--control-line) transparent; scrollbar-width: thin; }
+
+    .prototype-window { display: grid; width: 100vw; height: 100vh; grid-template-rows: 32px minmax(0, 1fr); overflow: hidden; background: var(--surface-raised); }
+    html[data-platform="mac"] .prototype-window { grid-template-rows: 0 minmax(0, 1fr); }
+    .native-titlebar { z-index: 10; display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; overflow: hidden; border-bottom: 1px solid var(--native-line); color: var(--native-ink); background: var(--native); user-select: none; }
+    html[data-platform="mac"] .native-titlebar { visibility: hidden; border: 0; }
+    .native-title { display: flex; min-width: 0; align-items: center; gap: 7px; padding-left: 11px; font: 11px "Segoe UI", sans-serif; }
+    .native-title svg { width: 14px; height: 14px; color: #52718a; }
+    .caption-buttons { display: grid; grid-template-columns: repeat(3, 46px); }
+    .caption-buttons button { display: grid; width: 46px; height: 31px; place-items: center; padding: 0; border: 0; color: inherit; background: transparent; cursor: default; }
+    .caption-buttons button:hover { background: rgb(127 127 127 / 16%); }
+    .caption-buttons button:last-child:hover { color: #fff; background: #c42b1c; }
+    .caption-buttons svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.1; }
+    .product-viewport { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
+
+    .app-shell { display: grid; width: 100%; height: 100%; grid-template-columns: 270px minmax(0, 1fr); grid-template-rows: 50px minmax(0, 1fr); background: var(--home); }
+    .unified-sidebar { display: flex; min-height: 0; grid-column: 1; grid-row: 1 / -1; flex-direction: column; overflow: hidden; padding: 0 10px 10px; border-right: 1px solid var(--rail-line); background: var(--rail); }
+    .sidebar-drag { flex: 0 0 38px; }
+    html[data-platform="windows"] .sidebar-drag { flex-basis: 7px; }
+    .unified-brand { display: flex; align-items: center; padding: 0 8px 14px; }
+    .rail-logo { display: flex; min-width: 0; height: 38px; align-items: center; gap: 10px; color: var(--rail-logo); }
+    .rail-logo > svg { width: 21px; height: 21px; flex: 0 0 21px; }
+    .rail-logo strong { color: var(--ink); font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+    .brand-point { fill: var(--ember); stroke: var(--rail); stroke-width: .65; }
+    .unified-primary-nav { display: grid; gap: 3px; margin-bottom: 12px; }
+    .rail-button, .project-row, .settings-menu button { position: relative; display: flex; width: 100%; min-height: 34px; align-items: center; gap: 8px; padding: 0 9px; border: 0; border-radius: 7px; color: var(--rail-ink); background: transparent; cursor: pointer; text-align: left; }
+    .rail-button:hover, .project-row:hover, .settings-menu button:hover { color: var(--ink); background: var(--surface-muted); }
+    .rail-button.active, .project-row.active, .settings-menu button.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .nav-icon { display: grid; width: 20px; flex: 0 0 20px; place-items: center; }
+    .nav-icon svg, .icon-button svg, .settings-sidebar-back svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .rail-label { overflow: hidden; font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-jump { display: flex; min-height: 32px; align-items: center; gap: 8px; margin: 0 2px 10px; padding: 6px 7px 6px 10px; border: 1px solid var(--line); border-radius: 7px; color: var(--faint); background: var(--surface); cursor: pointer; font-size: 12px; text-align: left; }
+    .conversation-jump span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conversation-jump kbd { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface-subtle); font: 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .project-heading { display: flex; min-height: 28px; align-items: center; justify-content: space-between; padding: 0 9px; color: var(--faint); }
+    .project-heading strong { font-size: 11px; font-weight: 650; }
+    .project-heading button, .icon-button { display: grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: var(--muted); background: transparent; cursor: pointer; }
+    .project-heading button { width: 24px; height: 24px; color: inherit; }
+    .project-heading button:hover, .icon-button:hover { color: var(--ink); background: var(--surface-muted); }
+    .project-heading svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .project-list { display: grid; gap: 2px; }
+    .project-row { min-height: 32px; font-size: 12px; }
+    .project-marker { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--brand); }
+    .project-marker.muted { background: var(--faint); }
+    .rail-spacer { flex: 1; }
+    .unified-sidebar-footer { display: grid; gap: 4px; padding-top: 8px; border-top: 1px solid var(--line); }
+    .app-topbar { grid-column: 2; grid-row: 1; border-bottom: 1px solid var(--line); background: var(--topbar); }
+    .app-content { min-width: 0; min-height: 0; grid-column: 2; grid-row: 2; overflow: hidden; background: var(--home); }
+
+    .quick-chat-workspace { display: grid; width: 100%; height: 100%; place-items: center; padding: 40px 28px; }
+    .quick-chat-stage { display: grid; width: min(680px, 100%); justify-items: center; text-align: center; }
+    .quick-chat-mark { width: 96px; height: 66px; margin-bottom: 14px; color: var(--rail-logo); }
+    .quick-chat-mark .brand-point { stroke: var(--home); stroke-width: 1.1; }
+    .quick-chat-eyebrow { margin: 0 0 8px; color: var(--brand); font-size: 10px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+    .quick-chat-stage h1 { margin: 0 0 8px; font-size: 22px; font-weight: 700; line-height: 1.3; letter-spacing: -.2px; }
+    .quick-chat-stage > p:not(.quick-chat-eyebrow) { margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+    .quick-chat-empty { display: grid; justify-items: center; gap: 12px; margin-top: 24px; }
+    .quick-chat-empty p { margin: 0; color: var(--faint); font-size: 12px; }
+    .quiet-button, .primary-button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; padding: 5px 10px; border-radius: 7px; cursor: pointer; font-size: 10.5px; font-weight: 620; }
+    .quiet-button { border: 1px solid var(--line-strong); color: var(--ink); background: var(--surface-raised); }
+    .quiet-button:hover:not(:disabled) { background: var(--surface-hover); }
+    .primary-button { border: 1px solid var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .primary-button:hover:not(:disabled) { background: var(--brand-hover); }
+
+    .settings-shell { display: grid; width: 100%; height: 100%; grid-template-columns: 270px minmax(0, 1fr); }
+    .settings-sidebar { display: flex; min-height: 0; flex-direction: column; overflow: hidden; padding: 0 10px 10px; border-right: 1px solid var(--rail-line); background: var(--rail); }
+    .settings-sidebar-heading { display: grid; gap: 10px; padding: 4px 0 11px; border-bottom: 1px solid var(--line); }
+    .settings-sidebar-back { display: grid; width: 100%; min-height: 36px; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px 9px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; text-align: left; }
+    .settings-sidebar-back:hover { color: var(--ink); background: var(--surface-muted); }
+    .settings-sidebar-back span { display: grid; width: 22px; place-items: center; }
+    .settings-sidebar-back strong { font-size: 13px; font-weight: 600; }
+    .settings-sidebar-title { display: grid; gap: 3px; padding: 0 9px 3px; }
+    .settings-sidebar-title strong { font-size: 17px; letter-spacing: -.02em; }
+    .settings-sidebar-title span { color: var(--faint); font-size: 10px; }
+    .settings-menu { display: grid; min-height: 0; align-content: start; gap: 16px; overflow-y: auto; padding: 10px 0; }
+    .settings-group { display: grid; gap: 3px; }
+    .settings-group h2 { margin: 0; padding: 0 9px 4px; color: var(--faint); font-size: 11px; font-weight: 650; letter-spacing: .04em; line-height: 16px; }
+    .settings-menu button { display: grid; min-height: 36px; grid-template-columns: 22px minmax(0, 1fr); border-radius: 8px; }
+    .settings-menu button strong { font-size: 13px; font-weight: 600; }
+    .settings-menu button.active::before { position: absolute; top: 7px; bottom: 7px; left: 0; width: 3px; border-radius: 0 3px 3px 0; background: var(--brand); content: ""; }
+    .settings-content { min-width: 0; min-height: 0; overflow-y: auto; padding: 27px 27px 48px; background: var(--surface); }
+    .settings-track { width: min(1040px, 100%); margin: 0 auto; }
+    .settings-page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 24px; }
+    .settings-page-heading h1 { margin: 5px 0 0; font-size: 25px; font-weight: 620; line-height: 1.15; letter-spacing: -.025em; }
+    .settings-eyebrow { margin: 0; color: var(--brand-ink); font-size: 9px; font-weight: 750; letter-spacing: .13em; text-transform: uppercase; }
+    .settings-page-heading p:last-child { max-width: 680px; margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .runtime-heading-tools { display: flex; align-items: center; gap: 8px; }
+    .runtime-installations { display: grid; gap: 14px; margin-top: 8px; padding: 0 0 34px; }
+    .runtime-installations h2 { margin: 0; font-size: 14px; font-weight: 620; line-height: 1.35; }
+    .runtime-product-list { display: grid; gap: 5px; padding: 7px; border-radius: 12px; background: var(--workspace-subtle); }
+    .runtime-product-row { display: grid; min-height: 68px; grid-template-columns: 40px minmax(0, 1fr) auto 110px; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 9px; background: var(--workspace-raised); }
+    .runtime-product-row:focus-within { background: var(--workspace-hover); }
+    .runtime-product-logo { display: grid; width: 40px; height: 40px; place-items: center; overflow: hidden; border: 1px solid var(--workspace-line); border-radius: 10px; background: #fff; }
+    .runtime-product-logo img { width: 27px; height: 27px; object-fit: contain; }
+    .runtime-product-copy { display: grid; min-width: 0; gap: 3px; }
+    .runtime-product-copy strong { overflow: hidden; font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-product-copy small { overflow: hidden; color: var(--workspace-faint); font-size: 10.5px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-status { display: inline-flex; min-height: 22px; align-items: center; gap: 6px; justify-self: end; padding: 2px 8px; border-radius: 999px; background: var(--workspace-hover); font-size: 10px; font-weight: 500; white-space: nowrap; }
+    .runtime-status::before { width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%; background: currentColor; content: ""; }
+    .runtime-status.available { color: var(--success); background: var(--success-soft); }
+    .runtime-status.info { color: var(--info); background: var(--info-soft); }
+    .runtime-status.attention { color: var(--attention); background: var(--attention-soft); }
+    .runtime-status.neutral { color: var(--neutral); background: var(--neutral-soft); }
+    .runtime-product-check { width: 110px; }
+
+    .member-content { display: flex; min-width: 0; min-height: 0; height: 100%; overflow: hidden; background: var(--home); }
+    .member-sidebar { display: flex; width: 236px; min-width: 236px; min-height: 0; flex-direction: column; overflow: hidden; border-right: 1px solid var(--line-strong); background: var(--surface); }
+    .member-sidebar-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; gap: 8px; padding: 18px 12px 12px 14px; border-bottom: 1px solid var(--line); }
+    .member-sidebar-title { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .member-sidebar-title strong { font-size: 13px; }
+    .member-sidebar-title span { color: var(--faint); font: 600 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .member-sidebar-actions { display: flex; gap: 2px; }
+    .member-filter { padding: 10px 10px 8px; border-bottom: 1px solid var(--line); }
+    .member-filter label { display: block; margin: 0 4px 4px; color: var(--faint); font-size: 9px; font-weight: 750; letter-spacing: .05em; }
+    .member-filter input { width: 100%; height: 32px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; outline: 0; color: var(--ink); background: var(--surface); font-size: 11px; }
+    .member-filter input:focus { border-color: var(--focus); box-shadow: 0 0 0 2px var(--focus-soft); }
+    .member-list { min-height: 0; flex: 1; overflow-y: auto; padding: 6px 7px 16px; }
+    .member-list-heading { display: flex; min-height: 28px; align-items: center; justify-content: space-between; padding: 5px 8px; color: var(--faint); font-size: 9.5px; font-weight: 750; letter-spacing: .05em; }
+    .member-row { position: relative; display: grid; width: 100%; min-height: 54px; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 9px; padding: 7px 9px; border: 0; border-radius: 8px; color: var(--ink); background: transparent; cursor: pointer; text-align: left; }
+    .member-row:hover { background: var(--surface-muted); }
+    .member-row.selected { background: var(--surface-selected); }
+    .member-row.selected::before { position: absolute; top: 9px; bottom: 9px; left: 0; width: 2px; border-radius: 0 2px 2px 0; background: var(--brand); content: ""; }
+    .member-avatar { position: relative; display: block; width: 34px; height: 34px; overflow: hidden; border-radius: 50%; background: var(--surface-muted); }
+    .member-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .member-avatar::after { position: absolute; right: 1px; bottom: 1px; width: 7px; height: 7px; border: 2px solid var(--surface); border-radius: 50%; background: var(--success); content: ""; }
+    .member-copy { display: grid; min-width: 0; gap: 3px; }
+    .member-copy strong, .member-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-copy strong { font-size: 11.5px; }
+    .member-copy small { color: var(--muted); font-size: 9.5px; }
+    .member-view { min-width: 0; min-height: 0; flex: 1; overflow-y: auto; padding: 30px 26px 48px; }
+    .member-detail { width: min(980px, 100%); margin: 0 auto; }
+    .member-detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 18px; }
+    .member-detail-heading { display: flex; min-width: 0; align-items: center; gap: 13px; }
+    .member-detail-heading .member-avatar { width: 50px; height: 50px; flex: 0 0 50px; }
+    .member-detail-heading h1 { margin: 0; font-size: 24px; font-weight: 680; line-height: 1.14; letter-spacing: -.025em; }
+    .member-detail-heading p { margin: 5px 0 0; color: var(--muted); font-size: 10.5px; }
+    .member-statuses { display: flex; flex-wrap: wrap; align-items: center; gap: 7px 14px; margin-top: 8px; color: var(--muted); font-size: 9.5px; font-weight: 650; }
+    .presence { display: inline-flex; align-items: center; gap: 6px; }
+    .presence::before { width: 6px; height: 6px; border-radius: 50%; background: var(--success); content: ""; }
+    .member-runtime-link { padding: 0; border: 0; color: var(--brand-ink); background: transparent; cursor: pointer; font-size: 9.5px; font-weight: 650; }
+    .member-runtime-link.attention { color: var(--attention); }
+    .member-detail-actions { display: flex; align-items: center; gap: 6px; }
+    .member-tabs { display: flex; min-height: 42px; align-items: end; gap: 4px; margin-top: 17px; border-bottom: 1px solid var(--line); }
+    .member-tabs button { position: relative; min-height: 36px; padding: 0 12px 8px; border: 0; color: var(--muted); background: transparent; cursor: pointer; font-size: 10.5px; font-weight: 700; }
+    .member-tabs button[aria-selected="true"] { color: var(--brand-ink); }
+    .member-tabs button[aria-selected="true"]::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .member-panel { padding: 17px 0 14px; }
+    .identity-overview { display: grid; grid-template-columns: minmax(0, 1fr) 220px; align-items: start; gap: 22px; }
+    .identity-copy { display: grid; min-height: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border-radius: 10px; background: var(--line); }
+    .identity-field { min-height: 112px; padding: 14px 13px; background: var(--surface-subtle); }
+    .identity-field > strong { color: var(--brand-ink); font-size: 9px; font-weight: 650; letter-spacing: .04em; }
+    .identity-field p { margin: 7px 0 0; font-size: 12px; line-height: 1.6; }
+    .trait-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+    .trait-list span { padding: 4px 8px; border-radius: 999px; color: var(--muted); background: var(--surface-muted); font-size: 10px; font-weight: 600; }
+    .portrait { width: 220px; aspect-ratio: 4 / 5; overflow: hidden; border-radius: 10px; background: var(--surface-subtle); }
+    .portrait img { width: 100%; height: 100%; object-fit: cover; }
+    .runtime-intro { max-width: 760px; margin: 14px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+    .runtime-form { display: grid; gap: 16px; padding-top: 14px; }
+    .runtime-form-row { display: grid; grid-template-columns: minmax(260px, 430px) minmax(0, 1fr); align-items: end; gap: 14px; }
+    .field { display: grid; gap: 6px; }
+    .field label { color: var(--muted); font-size: 10px; font-weight: 650; }
+    .field input, .field select { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--ink); background: var(--input); font-size: 11px; }
+    .field input:disabled, .field select:disabled { background: var(--surface-subtle); opacity: .72; }
+    .field small { color: var(--faint); font-size: 10px; line-height: 1.5; }
+    .inline-notice { display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; border-radius: 8px; color: var(--attention); background: var(--attention-soft); font-size: 10.5px; line-height: 1.5; }
+    .inline-notice.info { color: var(--info); background: var(--info-soft); }
+    .inline-notice svg { width: 16px; height: 16px; flex: 0 0 16px; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+    .runtime-form-actions { display: flex; align-items: center; gap: 8px; padding-top: 6px; }
+
+    .dialog-overlay { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; background: var(--overlay); }
+    .dialog-content { width: min(570px, calc(100vw - 48px)); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--surface-raised); box-shadow: var(--shadow); }
+    .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 20px 20px 14px; }
+    .dialog-heading h1 { margin: 0; font-size: 18px; font-weight: 680; }
+    .dialog-heading p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .dialog-body { display: grid; gap: 12px; padding: 0 20px 18px; }
+    .path-value { padding: 10px 11px; border-radius: 7px; color: var(--ink); background: var(--surface-subtle); font: 10px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+    .dialog-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--line); background: var(--surface); }
+
+    .installer { display: grid; width: 100%; height: 100%; place-items: center; padding: 38px; background: var(--canvas); }
+    .installer-panel { display: grid; width: min(720px, 100%); min-height: 448px; grid-template-columns: 220px minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-raised); box-shadow: var(--shadow); }
+    .installer-side { display: flex; flex-direction: column; padding: 28px 22px; color: var(--rail-ink); background: var(--rail); }
+    .installer-side .rail-logo { height: auto; }
+    .installer-steps { display: grid; gap: 16px; margin-top: 54px; }
+    .installer-step { display: grid; grid-template-columns: 22px minmax(0, 1fr); align-items: center; gap: 10px; color: var(--faint); font-size: 11px; }
+    .installer-step i { display: grid; width: 22px; height: 22px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; font-size: 9px; font-style: normal; }
+    .installer-step.active { color: var(--brand-ink); font-weight: 650; }
+    .installer-step.active i { border-color: var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .installer-main { display: flex; min-width: 0; flex-direction: column; padding: 42px 38px 28px; }
+    .installer-main h1 { margin: 0; font-size: 24px; font-weight: 650; letter-spacing: -.025em; }
+    .installer-main > p { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+    .install-facts { display: grid; gap: 1px; margin-top: 26px; overflow: hidden; border-radius: 9px; background: var(--line); }
+    .install-fact { display: grid; grid-template-columns: 100px minmax(0, 1fr); gap: 14px; padding: 11px 12px; background: var(--surface-subtle); }
+    .install-fact span { color: var(--faint); font-size: 9.5px; }
+    .install-fact strong { min-width: 0; overflow-wrap: anywhere; font-size: 10.5px; font-weight: 600; }
+    .installer-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: auto; padding-top: 26px; }
+    .installer-actions small { color: var(--faint); font-size: 9px; }
+    .delta-note { display: none; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--info) 45%, var(--line)); border-radius: 6px; color: var(--info); background: var(--info-soft); font-size: 9px; line-height: 1.35; }
+    body.show-deltas .delta-note { display: inline-flex; }
+
+    .prototype-handle { position: fixed; z-index: 200; right: 14px; bottom: 14px; min-height: 34px; padding: 7px 11px; border: 1px solid rgb(255 255 255 / 18%); border-radius: 8px; color: #eef4f7; background: #17212a; box-shadow: 0 10px 28px rgb(0 0 0 / 24%); cursor: pointer; font: 600 11px/1.2 "Segoe UI", sans-serif; }
+    .prototype-controls { position: fixed; z-index: 201; right: 14px; bottom: 56px; display: none; width: 292px; max-height: calc(100vh - 72px); overflow-y: auto; padding: 15px; border: 1px solid rgb(255 255 255 / 16%); border-radius: 11px; color: #e9f0f4; background: #17212a; box-shadow: 0 20px 56px rgb(0 0 0 / 34%); font-family: "Segoe UI", sans-serif; }
+    body.controls-open .prototype-controls { display: grid; gap: 14px; }
+    .prototype-controls header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .prototype-controls h2 { margin: 0; font-size: 13px; font-weight: 650; }
+    .prototype-controls header p { margin: 3px 0 0; color: #aab7c0; font-size: 9.5px; }
+    .prototype-controls header button { display: grid; width: 25px; height: 25px; place-items: center; padding: 0; border: 0; border-radius: 6px; color: #aab7c0; background: transparent; cursor: pointer; }
+    .prototype-group { display: grid; gap: 6px; }
+    .prototype-group > label, .prototype-group > span { color: #aab7c0; font-size: 9px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+    .prototype-controls select { width: 100%; min-height: 32px; padding: 5px 8px; border: 1px solid #44515b; border-radius: 7px; color: #eef4f7; background: #202d37; font-size: 11px; }
+    .prototype-segmented { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 8px; background: #202d37; }
+    .prototype-segmented.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .prototype-segmented button { min-height: 28px; padding: 4px 6px; border: 0; border-radius: 6px; color: #aab7c0; background: transparent; cursor: pointer; font-size: 10px; }
+    .prototype-segmented button[aria-pressed="true"] { color: #f7fbfd; background: #3a4b58; }
+    .prototype-check { display: flex; align-items: center; gap: 8px; color: #c5d0d7; font-size: 10.5px; }
+    .prototype-check input { width: 15px; height: 15px; accent-color: #8fb3cb; }
+    .prototype-help { margin: 0; color: #93a3ae; font-size: 9px; line-height: 1.5; }
+    .conditional-control[hidden] { display: none; }
+    .toast { position: fixed; z-index: 250; left: 50%; bottom: 18px; max-width: min(480px, calc(100vw - 32px)); padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow); font-size: 10.5px; opacity: 0; pointer-events: none; transform: translate(-50%, 7px); transition: opacity 160ms ease, transform 220ms cubic-bezier(.16, 1, .3, 1); }
+    .toast.visible { opacity: 1; transform: translate(-50%, 0); }
+    @media (max-width: 1080px) {
+      .runtime-product-row { grid-template-columns: 40px minmax(0, 1fr) 110px; }
+      .runtime-status { grid-column: 2; justify-self: start; }
+      .runtime-product-check { grid-column: 3; grid-row: 1 / span 2; }
+      .identity-overview { grid-template-columns: minmax(0, 1fr) 180px; }
+      .portrait { width: 180px; }
+    }
+    @media (max-width: 820px) {
+      .app-shell, .settings-shell { grid-template-columns: 220px minmax(0, 1fr); }
+      .member-sidebar { width: 190px; min-width: 190px; }
+      .identity-overview, .runtime-form-row { grid-template-columns: minmax(0, 1fr); }
+      .portrait { display: none; }
+      .settings-content { padding: 22px 20px 42px; }
+      .settings-page-heading { align-items: flex-start; flex-direction: column; }
+    }
+    @media (prefers-reduced-motion: reduce) { .toast { transition: none; } }
+  </style>
+</head>
+<body>
+  <main class="prototype-window" aria-label="Rovai AI Windows 交互差异原型">
+    <header class="native-titlebar" aria-label="Windows 原生标题栏示意">
+      <div class="native-title" id="nativeTitle"></div>
+      <div class="caption-buttons" aria-label="窗口控制按钮">
+        <button type="button" aria-label="最小化"><svg viewBox="0 0 10 10"><path d="M1 5.5h8"/></svg></button>
+        <button type="button" aria-label="最大化"><svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7"/></svg></button>
+        <button type="button" aria-label="关闭" id="captionClose"><svg viewBox="0 0 10 10"><path d="m1.5 1.5 7 7m0-7-7 7"/></svg></button>
+      </div>
+    </header>
+    <section class="product-viewport" id="sceneRoot"></section>
+  </main>
+
+  <button class="prototype-handle" id="controlHandle" type="button" aria-expanded="false" aria-controls="prototypeControls">原型控制</button>
+  <aside class="prototype-controls" id="prototypeControls" aria-label="原型控制，不属于产品界面">
+    <header><div><h2>原型控制 · 不属于产品</h2><p>用于核对 Mac 基线与 Windows 差异</p></div><button type="button" id="controlClose" aria-label="收起原型控制">×</button></header>
+    <div class="prototype-group"><label for="sceneSelect">页面</label><select id="sceneSelect"><option value="home">Quick Chat 首页</option><option value="runtime">Agent 运行时设置</option><option value="member">队员详情与历史配置</option><option value="path">添加 Project / 路径阻断</option><option value="installer">安装与升级</option></select></div>
+    <div class="prototype-group"><span>宿主</span><div class="prototype-segmented two"><button type="button" data-platform="mac" aria-pressed="false">macOS 原页</button><button type="button" data-platform="windows" aria-pressed="true">Windows 差异</button></div></div>
+    <div class="prototype-group"><span>主题</span><div class="prototype-segmented"><button type="button" data-theme-choice="day" aria-pressed="true">Day</button><button type="button" data-theme-choice="night" aria-pressed="false">Night</button><button type="button" data-theme-choice="system" aria-pressed="false">系统</button></div></div>
+    <div class="prototype-group conditional-control" id="runtimeControl" hidden><label for="runtimeMode">Runtime 平台资格</label><select id="runtimeMode"><option value="denied">当前基线：Windows 尚未验证</option><option value="qualified">说明态：已准入</option><option value="unsupported">说明态：明确不支持</option></select></div>
+    <div class="prototype-group conditional-control" id="pathControl" hidden><label for="pathMode">路径结果</label><select id="pathMode"><option value="local">本机 NTFS：通过</option><option value="unc">UNC 网络位置：拒绝</option><option value="long">长路径策略：阻断</option></select></div>
+    <label class="prototype-check"><input type="checkbox" id="deltaToggle"> 显示实现边界标注</label>
+    <p class="prototype-help">默认收起，截图区域只有产品界面。Mac 模式用于逐页对照；Windows 模式只增加 native frame、平台文案、快捷键和能力状态。</p>
+  </aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    const ASSET_ROOT = '../../../apps/desktop/src/renderer/src/assets';
+    const state = { scene: 'home', platform: 'windows', theme: 'day', runtimeMode: 'denied', pathMode: 'local', memberTab: 'identity' };
+    let toastTimer;
+    const icons = {
+      mark: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.3 13.5 8l5.9 1.6-5.9 1.5-1.5 5.7-1.5-5.7-5.9-1.5L10.5 8Z" fill="currentColor"/><path d="M4.5 20Q12 16.7 19.5 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle class="brand-point" cx="12" cy="18.5" r="1.15"/></svg>',
+      plus: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>',
+      users: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="7" r="2.5"/><circle cx="14" cy="8" r="2"/><path d="M2.8 15.5c.5-2.6 2-4 4.2-4s3.8 1.4 4.2 4M11.8 12c2.6-.5 4.4.7 4.9 3"/></svg>',
+      memory: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5h8.5A1.5 1.5 0 0 1 15 5v11H6.5A1.5 1.5 0 0 1 5 14.5z"/><path d="M5 13.5h10M8 6.5h4"/></svg>',
+      settings: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.4"/><path d="M10 2.7v2M10 15.3v2M2.7 10h2M15.3 10h2M4.8 4.8l1.4 1.4M13.8 13.8l1.4 1.4M15.2 4.8l-1.4 1.4M6.2 13.8l-1.4 1.4"/></svg>',
+      back: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m11.5 4-6 6 6 6M6 10h9"/></svg>',
+      sun: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3"/><path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.3 4.3l1.4 1.4M14.3 14.3l1.4 1.4M15.7 4.3l-1.4 1.4M5.7 14.3l-1.4 1.4"/></svg>',
+      bell: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 13.5h10l-1.2-2V8a3.8 3.8 0 0 0-7.6 0v3.5zM8.5 16h3"/></svg>',
+      sparkle: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 1.3 4.7L16 8l-4.7 1.3L10 14l-1.3-4.7L4 8l4.7-1.3zM16 13l.6 2.4L19 16l-2.4.6L16 19l-.6-2.4L13 16l2.4-.6z"/></svg>',
+      blocks: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="11" y="3" width="6" height="6" rx="1"/><rect x="3" y="11" width="6" height="6" rx="1"/><path d="M11 14h6M14 11v6"/></svg>',
+      cpu: '<svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5" y="5" width="10" height="10" rx="1.5"/><rect x="8" y="8" width="4" height="4"/><path d="M7 2.5v2M10 2.5v2M13 2.5v2M7 15.5v2M10 15.5v2M13 15.5v2M2.5 7h2M2.5 10h2M2.5 13h2M15.5 7h2M15.5 10h2M15.5 13h2"/></svg>',
+      chart: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 16.5h14M5 14V9M10 14V5M15 14v-3"/></svg>',
+      stethoscope: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 3v5a4 4 0 0 0 8 0V3M2.5 3h3M10.5 3h3M8 12v1.5a3.5 3.5 0 0 0 7 0V11"/><circle cx="15" cy="9.5" r="1.5"/></svg>',
+      sliders: '<svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h5M12 5h5M3 10h9M16 10h1M3 15h2M9 15h8"/><circle cx="10" cy="5" r="2"/><circle cx="14" cy="10" r="2"/><circle cx="7" cy="15" r="2"/></svg>',
+      info: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="M10 9v5M10 6.5h.01"/></svg>',
+      more: '<svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="4.5" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="10" cy="10" r="1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="10" r="1" fill="currentColor" stroke="none"/></svg>'
+    };
+    const members = [['栖鹭','产品与研究','qilu'],['洛可','架构与工程','luoke'],['绵织','内容与表达','mianzhi'],['木瓦','验证与交付','muwa']];
+    const runtimes = [
+      ['Claude Code','claudecode-color.svg','claude-code-cli'],['Codex','codex-color.svg','codex-cli'],
+      ['GitHub Copilot CLI','copilot-color.svg','copilot-cli'],['OpenCode','opencode.svg','opencode-cli'],
+      ['Antigravity','antigravity-color.svg','antigravity-app'],['Kiro','kiro-color.svg','kiro-cli'],
+      ['Qoder','qoder-color.svg','qoder-cli'],['CodeBuddy','codebuddy-color.svg','codebuddy-cli'],
+      ['Qwen Code','qwen-color.svg','qwen-code'],['TRAE CLI CN','trae-color.svg','trae-cn-cli']
+    ];
+
+    function logo() { return '<div class="rail-logo">' + icons.mark + '<strong>Rovai AI</strong></div>'; }
+    function navButton(key, label, icon, active) { return '<button class="rail-button ' + (active === key ? 'active' : '') + '" type="button" data-nav="' + key + '"><span class="nav-icon">' + icons[icon] + '</span><span class="rail-label">' + label + '</span></button>'; }
+    function appSidebar(active) {
+      return '<aside class="unified-sidebar"><div class="sidebar-drag"></div><div class="unified-brand">' + logo() + '</div>' +
+        '<nav class="unified-primary-nav" aria-label="主导航">' + navButton('home','New conversation','plus',active) + navButton('member','Members','users',active) + navButton('memory','Memory','memory',active) + '</nav>' +
+        '<button class="conversation-jump" type="button"><span>搜索对话</span><kbd>' + (state.platform === 'windows' ? 'Ctrl K' : '⌘K') + '</kbd></button>' +
+        '<div class="project-heading"><strong>Project</strong><button type="button" data-nav="path" aria-label="添加 Project">' + icons.plus + '</button></div>' +
+        '<div class="project-list"><button class="project-row" type="button"><span class="project-marker"></span><span>Rovai AI Windows</span></button><button class="project-row" type="button" data-nav="home"><span class="project-marker muted"></span><span>Quick Chat</span></button></div>' +
+        '<div class="rail-spacer"></div><footer class="unified-sidebar-footer">' + navButton('runtime','Settings','settings',active) + '</footer></aside>';
+    }
+    function settingsSidebar() {
+      function item(key,label,icon) { return '<button class="' + (key === 'runtime' ? 'active' : '') + '" type="button" data-settings="' + key + '"><span class="nav-icon">' + icons[icon] + '</span><strong>' + label + '</strong></button>'; }
+      return '<aside class="settings-sidebar"><div class="sidebar-drag"></div><div class="unified-brand">' + logo() + '</div>' +
+        '<div class="settings-sidebar-heading"><button class="settings-sidebar-back" type="button" data-nav="home"><span>' + icons.back + '</span><strong>返回 App</strong></button><div class="settings-sidebar-title"><strong>设置</strong><span>应用级偏好与本机能力</span></div></div>' +
+        '<nav class="settings-menu" aria-label="设置页面"><section class="settings-group"><h2>应用</h2>' + item('general','通用','sliders') + item('appearance','外观','sun') + item('notifications','提醒','bell') + '</section>' +
+        '<section class="settings-group"><h2>能力</h2>' + item('skills','Skills','sparkle') + item('mcp','MCP','blocks') + item('runtime','Agent 运行时','cpu') + '</section>' +
+        '<section class="settings-group"><h2>支持</h2>' + item('monitoring','运行监控','chart') + item('diagnostics','诊断与修复','stethoscope') + '</section></nav></aside>';
+    }
+    function shell(content, active) { return '<div class="app-shell">' + appSidebar(active || 'home') + '<div class="app-topbar"></div><section class="app-content">' + content + '</section></div>'; }
+    function quickChatStage() {
+      return '<div class="quick-chat-workspace"><div class="quick-chat-stage"><svg class="quick-chat-mark" viewBox="0 0 72 56" aria-hidden="true"><path d="M36 4 39.6 16.7 53.9 20.4 39.6 24.1 36 36.8 32.4 24.1 18.1 20.4 32.4 16.7Z" fill="currentColor"/><path d="M8 49.5Q36 37.5 64 49.5" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round"/><circle class="brand-point" cx="36" cy="43.5" r="2.6"/></svg><p class="quick-chat-eyebrow">Quick Chat</p><h1>开始下一段协作</h1><p>创建一个对话，选好队员与工作区，再写下这次协作的目标。</p></div></div>';
+    }
+    function homeScene() {
+      return shell('<div class="quick-chat-workspace"><div class="quick-chat-stage"><svg class="quick-chat-mark" viewBox="0 0 72 56" aria-hidden="true"><path d="M36 4 39.6 16.7 53.9 20.4 39.6 24.1 36 36.8 32.4 24.1 18.1 20.4 32.4 16.7Z" fill="currentColor"/><path d="M8 49.5Q36 37.5 64 49.5" stroke="currentColor" stroke-width="5" fill="none" stroke-linecap="round"/><circle class="brand-point" cx="36" cy="43.5" r="2.6"/></svg><p class="quick-chat-eyebrow">Quick Chat</p><h1>开始下一段协作</h1><p>创建一个对话，选好队员与工作区，再写下这次协作的目标。</p><div class="quick-chat-empty"><p>这里还没有可继续的对话。</p><button class="primary-button" type="button" id="newConversation">新对话</button></div><span class="delta-note">Mac 原有 App Shell 完整保留；Windows 只改变 native frame 与 Ctrl+K。</span></div></div>', 'home');
+    }
+    function runtimePresentation(index) {
+      if (state.platform === 'mac') return { label: '正在检查…', tone: 'info', action: '检查可用性', disabled: false };
+      if (state.runtimeMode === 'qualified') {
+        const states = [{label:'可用',tone:'available',action:'检查可用性',disabled:false},{label:'未安装',tone:'neutral',action:'检查可用性',disabled:false},{label:'需要登录',tone:'attention',action:'检查可用性',disabled:false}];
+        return states[index % states.length];
+      }
+      if (state.runtimeMode === 'unsupported') return { label:'此平台不支持', tone:'neutral', action:'尚未开放', disabled:true };
+      return { label:'Windows 尚未验证', tone:'attention', action:'不可检查', disabled:true };
+    }
+    function runtimeRows() {
+      return runtimes.map(function(runtime,index) {
+        const status = runtimePresentation(index);
+        const detail = state.platform === 'windows' && state.runtimeMode === 'denied' ? runtime[2] : (index < 2 ? '正在读取本机版本' : runtime[2]);
+        return '<article class="runtime-product-row"><span class="runtime-product-logo" aria-hidden="true"><img src="' + ASSET_ROOT + '/runtime-logos/' + runtime[1] + '" alt=""></span><div class="runtime-product-copy"><strong>' + runtime[0] + '</strong><small>' + detail + '</small></div><span class="runtime-status ' + status.tone + '">' + status.label + '</span><button class="quiet-button runtime-product-check" type="button" ' + (status.disabled ? 'disabled' : '') + ' data-runtime-check="' + runtime[0] + '">' + status.action + '</button></article>';
+      }).join('');
+    }
+    function runtimeScene() {
+      return '<div class="settings-shell">' + settingsSidebar() + '<main class="settings-content"><div class="settings-track"><header class="settings-page-heading"><div><p class="settings-eyebrow">Settings / Runtime</p><h1>Agent 运行时</h1><p>管理本机 Agent 运行时及其可用状态。</p></div><div class="runtime-heading-tools"><span class="delta-note">资格先于本机检测</span><button class="quiet-button" type="button" id="rescanRuntimes">重新检测全部</button></div></header><section class="runtime-installations"><h2>Agent 运行时目录</h2><div class="runtime-product-list">' + runtimeRows() + '</div></section></div></main></div>';
+    }
+    function memberRow(member, selected) {
+      return '<button class="member-row ' + (selected ? 'selected' : '') + '" type="button"><span class="member-avatar"><img src="' + ASSET_ROOT + '/characters/' + member[2] + '/icon-192.png" alt=""></span><span class="member-copy"><strong>' + member[0] + '</strong><small>' + member[1] + '</small></span></button>';
+    }
+    function identityPanel() {
+      return '<div class="member-panel"><div class="identity-overview"><div class="identity-copy"><section class="identity-field"><strong>专业职责</strong><p>把复杂产品问题拆成清晰的用户路径与可验证边界。</p></section><section class="identity-field"><strong>性格底色</strong><div class="trait-list"><span>敏锐</span><span>克制</span><span>重视证据</span></div></section><section class="identity-field"><strong>工作准则</strong><p>先确认用户真正需要解决的问题，再选择最小且可靠的方案。</p></section><section class="identity-field"><strong>成长课题</strong><p>让技术约束更早进入产品讨论，同时保持表达简洁。</p></section></div><div class="portrait"><img src="' + ASSET_ROOT + '/characters/qilu/source.png" alt="栖鹭角色图片"></div></div></div>';
+    }
+    function runtimeMemberPanel() {
+      const denied = state.platform === 'windows' && state.runtimeMode === 'denied';
+      const unsupported = state.platform === 'windows' && state.runtimeMode === 'unsupported';
+      const frozen = denied || unsupported;
+      const status = denied ? 'Windows 尚未验证' : unsupported ? '此平台不支持' : state.platform === 'mac' ? '正在检查…' : '可用';
+      return '<div class="member-panel"><p class="runtime-intro">设置这位队员后续执行使用的 Agent 运行时、模型和权限。保存后仅影响之后开始的新执行。</p><div class="runtime-form">' +
+        (frozen ? '<div class="inline-notice">' + icons.info + '<div><strong>' + status + '</strong><br>历史 Runtime 子对象保持原值；当前平台不允许修改，也不会写入 Windows 默认值。</div></div>' : '') +
+        '<div class="runtime-form-row"><div class="field"><label for="memberRuntime">Agent 运行时</label><select id="memberRuntime" ' + (frozen ? 'disabled' : '') + '><option>Claude Code</option></select><small>' + (frozen ? '冻结展示既有配置' : '选择后读取模型与权限能力') + '</small></div><div><span class="runtime-status ' + (frozen ? 'attention' : 'info') + '">' + status + '</span></div></div>' +
+        '<div class="runtime-form-row"><div class="field"><label for="memberModel">模型</label><input id="memberModel" value="继承 Agent 运行时默认" ' + (frozen ? 'disabled' : '') + '></div><div class="field"><label for="memberPermission">权限</label><input id="memberPermission" value="acceptEdits" ' + (frozen ? 'disabled' : '') + '></div></div>' +
+        '<div class="runtime-form-actions"><button class="primary-button" type="button" ' + (frozen ? 'disabled' : '') + '>保存运行配置</button><button class="quiet-button" type="button" data-nav="runtime">前往 Agent 运行时</button><span class="delta-note">身份资料仍可编辑，只有 Runtime 子对象被冻结。</span></div></div></div>';
+    }
+    function memberScene() {
+      const runtimeStatus = state.platform === 'windows' && state.runtimeMode === 'denied' ? 'Windows 尚未验证' : state.platform === 'windows' && state.runtimeMode === 'unsupported' ? '此平台不支持' : '正在检查…';
+      const attention = state.platform === 'windows' && state.runtimeMode !== 'qualified';
+      return '<div class="app-shell">' + appSidebar('member') + '<div class="app-topbar"></div><section class="app-content"><div class="member-content"><aside class="member-sidebar"><div class="member-sidebar-heading"><div class="member-sidebar-title"><strong>队员</strong><span>4</span></div><div class="member-sidebar-actions"><button class="icon-button" type="button" aria-label="添加队员">' + icons.plus + '</button><button class="icon-button" type="button" aria-label="队员列表选项">' + icons.more + '</button></div></div><div class="member-filter"><label for="memberSearch">筛选队员</label><input id="memberSearch" placeholder="输入名称或职责"></div><div class="member-list"><div class="member-list-heading"><span>在队</span><span>4</span></div>' + members.map(function(member,index){ return memberRow(member,index === 0); }).join('') + '</div></aside>' +
+        '<main class="member-view"><div class="member-detail"><header class="member-detail-header"><div class="member-detail-heading"><span class="member-avatar"><img src="' + ASSET_ROOT + '/characters/qilu/icon-192.png" alt=""></span><div><h1>栖鹭</h1><p>产品与研究</p><div class="member-statuses"><span class="presence">在队</span><button class="member-runtime-link ' + (attention ? 'attention' : '') + '" type="button" data-member-tab="runtime">Claude Code · ' + runtimeStatus + ' ›</button></div></div></div><div class="member-detail-actions"><button class="quiet-button" type="button" id="editIdentity">编辑身份</button><button class="icon-button" type="button" aria-label="更多操作">' + icons.more + '</button></div></header><div class="member-tabs" role="tablist"><button type="button" data-member-tab="identity" aria-selected="' + (state.memberTab === 'identity') + '">身份</button><button type="button" data-member-tab="runtime" aria-selected="' + (state.memberTab === 'runtime') + '">运行配置</button></div>' + (state.memberTab === 'identity' ? identityPanel() : runtimeMemberPanel()) + '</div></main></div></section></div>';
+    }
+    const pathCases = {
+      local: { win:'C:\\Users\\Murray\\Projects\\rovai-windows', mac:'/Users/murray/Projects/rovai-ai', tone:'info', title:'工作区可以使用', detail:'Core 已完成存储准入与 opened-handle identity 检查。', action:'添加项目' },
+      unc: { win:'\\\\fileserver\\team\\rovai-windows', mac:'/Volumes/team/rovai-ai', tone:'', title:'此存储位置暂不支持', detail:'请选择本机 NTFS 固定磁盘。当前选择与表单状态会保留。', action:'重新选择目录' },
+      long: { win:'C:\\Users\\Murray\\Projects\\very-long-workspace\\packages\\desktop\\generated\\artifacts\\release-candidate\\windows-x64\\…', mac:'/Users/murray/Projects/rovai-ai', tone:'', title:'当前主机无法安全处理此路径', detail:'应用不会修改注册表；请选择更短的工作区路径，或由管理员处理组织策略。', action:'选择较短路径' }
+    };
+    function pathScene() {
+      const data = pathCases[state.pathMode];
+      const path = state.platform === 'windows' ? data.win : data.mac;
+      return shell(quickChatStage() + '<div class="dialog-overlay"><section class="dialog-content" role="dialog" aria-modal="true" aria-labelledby="pathDialogTitle"><header class="dialog-heading"><div><h1 id="pathDialogTitle">添加 Project</h1><p>通过系统目录选择器选择工作区；Rovai AI 会在返回后检查存储与路径边界。</p></div><button class="icon-button" type="button" data-nav="home" aria-label="关闭">×</button></header><div class="dialog-body"><div class="path-value">' + path + '</div><div class="inline-notice ' + data.tone + '">' + icons.info + '<div><strong>' + data.title + '</strong><br>' + data.detail + '</div></div><span class="delta-note">Renderer 不从路径字符串猜测安全性；Core 返回稳定 blocker。</span></div><footer class="dialog-actions"><button class="quiet-button" type="button" data-nav="home">取消</button><button class="primary-button" type="button" id="confirmPath">' + data.action + '</button></footer></section></div>', 'home');
+    }
+    function installerScene() {
+      return '<div class="installer"><section class="installer-panel" aria-label="Rovai AI Windows 安装程序示意"><aside class="installer-side">' + logo() + '<div class="installer-steps"><div class="installer-step active"><i>1</i><span>检查并关闭应用</span></div><div class="installer-step"><i>2</i><span>安装更新</span></div><div class="installer-step"><i>3</i><span>完成</span></div></div></aside><main class="installer-main"><h1>准备安装 Rovai AI</h1><p>检测到 Rovai AI 正在运行。安装程序会请求应用正常关闭，并等待 Runtime 与 Core 完成计划内关闭。</p><div class="install-facts"><div class="install-fact"><span>安装范围</span><strong>仅当前用户 · 无需管理员权限</strong></div><div class="install-fact"><span>目标位置</span><strong>C:\\Users\\Murray\\AppData\\Local\\Programs\\Rovai AI</strong></div><div class="install-fact"><span>用户数据</span><strong>升级期间保留，不与 sidecar 同目录覆盖</strong></div></div><div class="inline-notice info" style="margin-top:16px">' + icons.info + '<div><strong>不会强制覆盖运行中的文件</strong><br>关闭超时会停止升级并保留可审阅结果；新旧 Core 不并行。</div></div><div class="installer-actions"><small>独立 Windows 系统流程 · 非产品内页</small><button class="primary-button" type="button" id="requestClose">请求关闭并继续</button></div><span class="delta-note">Installer 不嵌入 App Shell。</span></main></section></div>';
+    }
+    const renderers = { home:homeScene, runtime:runtimeScene, member:memberScene, path:pathScene, installer:installerScene };
+    function resolvedTheme() { return state.theme !== 'system' ? state.theme : (matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day'); }
+    function render() {
+      document.documentElement.dataset.platform = state.platform;
+      document.documentElement.dataset.theme = resolvedTheme();
+      document.getElementById('sceneRoot').innerHTML = renderers[state.scene]();
+      document.getElementById('nativeTitle').innerHTML = icons.mark + '<span>' + (state.scene === 'installer' ? 'Rovai AI 安装程序' : 'Rovai AI') + '</span>';
+      document.getElementById('runtimeControl').hidden = !['runtime','member'].includes(state.scene) || state.platform !== 'windows';
+      document.getElementById('pathControl').hidden = state.scene !== 'path';
+      document.querySelectorAll('[data-platform]').forEach(function(button){ button.setAttribute('aria-pressed', String(button.dataset.platform === state.platform)); });
+      document.querySelectorAll('[data-theme-choice]').forEach(function(button){ button.setAttribute('aria-pressed', String(button.dataset.themeChoice === state.theme)); });
+      bindScene();
+    }
+    function bindScene() {
+      document.querySelectorAll('[data-nav]').forEach(function(button){ button.addEventListener('click', function(){
+        const target = button.dataset.nav;
+        if (['home','member','runtime','path'].includes(target)) { state.scene = target; document.getElementById('sceneSelect').value = target; render(); }
+        else showToast(button.textContent.trim() + ' 沿用现有页面，本稿不展开。');
+      }); });
+      document.querySelectorAll('[data-settings]').forEach(function(button){ button.addEventListener('click', function(){ if (button.dataset.settings !== 'runtime') showToast(button.textContent.trim() + ' 沿用 macOS 现有页面，本稿只评审 Windows 差异。'); }); });
+      document.querySelectorAll('[data-member-tab]').forEach(function(button){ button.addEventListener('click', function(){ state.memberTab = button.dataset.memberTab; render(); }); });
+      document.querySelectorAll('[data-runtime-check]').forEach(function(button){ button.addEventListener('click', function(){ showToast('说明性检查：' + button.dataset.runtimeCheck + ' 将由 Core 执行本机能力探测。'); }); });
+      document.getElementById('newConversation')?.addEventListener('click', function(){ showToast('新对话流程沿用现有产品交互。'); });
+      document.getElementById('rescanRuntimes')?.addEventListener('click', function(){ showToast(state.platform === 'windows' && state.runtimeMode === 'denied' ? '平台资格未通过；重新检测不会把 not_qualified 变成未安装或可用。' : '正在重新读取本机 Agent 运行时。'); });
+      document.getElementById('editIdentity')?.addEventListener('click', function(){ showToast('身份编辑保持可用；Windows 平台拒绝只冻结 Runtime 子对象。'); });
+      document.getElementById('choosePath')?.addEventListener('click', function(){ showToast('打开' + (state.platform === 'windows' ? 'Windows' : 'macOS') + '系统目录选择器。'); });
+      document.getElementById('confirmPath')?.addEventListener('click', function(){ showToast(state.pathMode === 'local' ? '路径已通过准入，可继续添加 Project。' : '当前 blocker 未解除，返回系统目录选择器。'); });
+      document.getElementById('requestClose')?.addEventListener('click', function(event){ event.currentTarget.disabled = true; event.currentTarget.textContent = '正在等待安全关闭…'; showToast('等待 Core planned shutdown；超时则停止升级。'); });
+    }
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      clearTimeout(toastTimer); toast.textContent = message; toast.classList.add('visible');
+      toastTimer = setTimeout(function(){ toast.classList.remove('visible'); }, 3000);
+    }
+    document.getElementById('controlHandle').addEventListener('click', function(){
+      const open = !document.body.classList.contains('controls-open');
+      document.body.classList.toggle('controls-open', open);
+      document.getElementById('controlHandle').setAttribute('aria-expanded', String(open));
+    });
+    document.getElementById('controlClose').addEventListener('click', function(){
+      document.body.classList.remove('controls-open'); document.getElementById('controlHandle').setAttribute('aria-expanded','false'); document.getElementById('controlHandle').focus();
+    });
+    document.getElementById('sceneSelect').addEventListener('change', function(event){ state.scene = event.target.value; if (state.scene === 'installer') state.platform = 'windows'; render(); });
+    document.querySelectorAll('[data-platform]').forEach(function(button){ button.addEventListener('click', function(){ state.platform = button.dataset.platform; if (state.scene === 'installer' && state.platform === 'mac') state.scene = 'home'; document.getElementById('sceneSelect').value = state.scene; render(); }); });
+    document.querySelectorAll('[data-theme-choice]').forEach(function(button){ button.addEventListener('click', function(){ state.theme = button.dataset.themeChoice; render(); }); });
+    document.getElementById('runtimeMode').addEventListener('change', function(event){ state.runtimeMode = event.target.value; render(); });
+    document.getElementById('pathMode').addEventListener('change', function(event){ state.pathMode = event.target.value; render(); });
+    document.getElementById('deltaToggle').addEventListener('change', function(event){ document.body.classList.toggle('show-deltas', event.target.checked); });
+    document.getElementById('captionClose').addEventListener('click', function(){ showToast('关闭按钮进入既有 Planned Shutdown；caption behavior 由 Windows 拥有。'); });
+    document.addEventListener('keydown', function(event){ if (event.key === 'Escape' && document.body.classList.contains('controls-open')) document.getElementById('controlClose').click(); });
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (state.theme === 'system') render(); });
+    render();
+  </script>
+</body>
+</html>

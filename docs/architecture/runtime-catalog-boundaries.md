@@ -11,7 +11,9 @@ last_updated: 2026-08-18
 本文件定义 Runtime 名称出现在产品中时的权威分层。准入理由见
 [ADR-0065](../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)、
 [ADR-0066](../adr/0066-managed-product-runtime-resolution.md)与
-[ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)，Runtime 启动与延迟验证边界见
+[ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)。主机平台准入由
+[ADR-0210](../adr/0210-platform-qualified-product-runtime-admission.md)与
+[Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
 [ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)和
 [ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
@@ -20,17 +22,22 @@ last_updated: 2026-08-18
 [Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
-## 三层目录
+## 四层权威
 
 | 层 | 真源 | 可以驱动 | 不能驱动 |
 | --- | --- | --- | --- |
-| Product Runtime Catalog | Rust/TypeScript closed `AdapterKind` 与 `AgentRuntimeAdapter` Registry | Installation、Probe、成员配置、AgentRun、诊断、Migration、Runtime Activity | 未接入候选或 roadmap |
+| Product Runtime Catalog | closed `AdapterKind` 与 Rust `AgentRuntimeAdapter` Registry | 全局产品身份与 Adapter interface | 某个平台已验证、机器状态、未接入候选或 roadmap |
+| Runtime Platform Admission | Rust Adapter Registry 的 `AdapterKind × HostPlatformKey` 矩阵 | 某平台上的 discovery/check/Installation、成员选择、AgentRun、诊断与 Migration 准入 | 当前机器是否安装/登录/Ready、Renderer roadmap |
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 active/execution-deferred verification snapshot | light ready、checking、installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
 Product Runtime Catalog 当前包含十种可执行 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
-成员选项始终只来自 `AdapterKind`。
+成员选项始终只来自 `AdapterKind`，但在当前主机上还必须先经过 Runtime Platform Admission。
+
+`qualified` 是进入 Product Runtime Availability 的前置条件；`not_qualified` 显示“Windows 尚未验证”，
+`unsupported` 显示平台不支持。两者都不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
+可以原样读取并在修改无关队员字段时原样保留，但不能修改 Runtime 子对象、重新保存默认值或执行。
 
 ## 可执行准入
 
@@ -44,9 +51,14 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 
 图标、版本输出、`initialize` 成功或 Settings Preview 都不能单独满足准入。
 
+每个 shipped `HostPlatformKey` 还必须逐 Adapter 完成 discovery、identity、auth、first run、Session
+continuation、Built-in Tool、Approval、cancel、terminal、process cleanup 与 planned shutdown 证据。三种进程形态
+的公共测试只证明平台基础设施，不能替代逐 Adapter 准入。`reasonCode` 是关闭枚举，qualified evidence 使用
+不可变 digest-bound revision；TypeScript 不维护第二份矩阵。
+
 ## 浅检测与按需深检
 
-Core 启动和 Runtime 重扫只建立 executable path、权限、metadata/fingerprint 与 Adapter 声明为无副作用的
+只有平台准入为 `qualified` 的 Adapter 才参加 Core 启动和 Runtime 重扫。它们只建立 executable path、权限、metadata/fingerprint 与 Adapter 声明为无副作用的
 有界 one-shot 身份证据。非 TRAE 只有命令成功、输出未超限且识别到基础版本/身份才写入 `light_ready`；
 `found_uninspected` 既不是 light-ready，也不是 checking。`light_ready` 可以驱动成员 Runtime-default 配置和
 “可用”主状态，但只表示 executable 已通过轻度启动验证、可选择和尝试运行。认证、协议、模型、Session 与
@@ -118,5 +130,5 @@ Preview row 必须同时满足：明确“待支持/尚未接入 AgentRun”、�
 或诊断，并在键盘和辅助技术中表现为不可执行状态。DeepSeek Harness 是当前唯一 preview。
 
 未来接入时不得把 preview identity 写入 Migration 或原地解释为 Installation。实现必须删除 preview row，
-再按完整可执行准入增加新的 AdapterKind；用户从未保存过 preview 选择，因此没有 preview-to-product
+再按完整可执行准入增加新的 AdapterKind 和逐平台 Admission；用户从未保存过 preview 选择，因此没有 preview-to-product
 数据迁移。

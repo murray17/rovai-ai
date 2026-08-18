@@ -25,6 +25,31 @@ Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code 与 TRAE CLI CN
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
+### Windows x64 平台准入基线
+
+v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
+Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。下表是证据缺口，不是本机 `not_installed`、Probe 失败、
+上游不支持或 Renderer allowlist；实现后唯一产品真源必须是 Rust Registry 的
+[Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)投影。
+
+| AdapterKind | `windows-x64` admission | evidence revision | 说明 |
+| --- | --- | --- | --- |
+| `codex-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `opencode-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `copilot-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `claude-code-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `kiro-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `qoder-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `codebuddy-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `qwen-code` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `trae-cn-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `antigravity-app` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+
+公共 Named Pipe、Job Object 或三类 execution-shape 测试只能证明平台基础设施。任一行提升为 `qualified` 前，
+必须独立覆盖 discovery、executable identity、authentication、first run、Session continuation、Built-in Tool
+v14、Approval、cancellation、final boundary、process cleanup 与 planned shutdown；证据 revision 必须不可变且
+digest-bound。
+
 ### 2026-08-17 OpenCode Usage 与 Codex Cost Projection
 
 OpenCode `1.18.15` 的官方 `buildUsage()` 把 `inputTokens` 定义为 non-cached Input，并仅在正值时输出
@@ -215,7 +240,7 @@ diff 或最终回复文本补猜 command output。验收未启动、停止或替
 
 ### v0.89 Transport v13 当前基线
 
-当前字段级合同已推进到 [Built-in Tool Transport v13](contracts/builtin-tool-transport-v13.md)，固定十五项
+当前字段级合同已推进到 [Built-in Tool Transport v14](contracts/builtin-tool-transport-v14.md)，固定十五项
 operation；在 v12 的 `member.create` 之外新增异步 `team.gather -> rovai gather`。catalog、CLI
 help/projection、幂等重放、Gather completion、Evidence 脱敏和十 Runtime qualification 脚本均已完成
 确定性门禁与脚本对齐。

@@ -378,6 +378,10 @@ _Avoid_: mutable Skill directory, in-place update, source checkout, parallel sam
 A mutable, reconstructible Rovai-ai-managed filesystem view that exposes current Skill Library state through a Runtime's native project-level discovery path for one execution root. Runs sharing that root do not receive lifetime-isolated Revision directories.
 _Avoid_: Skill source of truth, Runtime personal installation, per-Run immutable Skill directory, proof that a model loaded the Skill
 
+**Execution Root Projection Gate**:
+The Windows copy-projection admission that serializes a short AgentRun launch registration with recovery or replacement of SkillProjection entries in one exact execution root. It prevents a Runtime launch from overlapping a partial directory swap; it is not a SkillRevision lease, lifetime file lock, or cross-root scheduler.
+_Avoid_: SkillExposureSnapshot lock, global AgentRun gate, per-Run projection, Runtime process lease
+
 **Skill Projection Observation**:
 The durable last-known fact for one Rovai-managed SkillProjection entry, used to prove ownership and explain or repair its observed state. Observation history neither authorizes nor schedules later access to its execution root.
 _Avoid_: filesystem watcher, access grant, reconciliation schedule, live directory health
@@ -1165,6 +1169,14 @@ _Avoid_: live Camp list item, Camp updated time, Archived Camp, cross-Run discov
 **Product Runtime Catalog**:
 The closed set of Agent Runtime products that Rovai-ai has integrated and can use to create AgentRuns. Catalog membership is independent of local discovery, installation, authentication, and current readiness; compatibility-evaluation candidates remain outside it.
 _Avoid_: installed Runtime list, compatibility candidate list, marketplace
+
+**Host Platform Key**:
+The closed OS-family and CPU-architecture identity used for product admission, currently `macos-arm64`, `macos-x64`, or `windows-x64`. It does not by itself prove a supported OS release, filesystem, WSL/native environment, or local Runtime installation.
+_Avoid_: `process.platform`, machine availability, OS version, storage admission
+
+**Runtime Platform Admission**:
+The product-level qualification of one Product Runtime Catalog identity on one Host Platform Key, independently established as qualified, not qualified, or unsupported from Adapter-specific evidence. It is authoritative before machine discovery and never means the Runtime is installed, authenticated, or Ready on the current computer.
+_Avoid_: Product Runtime Availability, Runtime Discovery Observation, Settings Runtime Preview, execution-shape inference
 
 **Runtime Search Environment**:
 An application-owned, ordered snapshot of executable search locations used consistently to discover, inspect, and launch Product Runtime binaries. Rebuilding it does not mutate the process environment, rebind an AdapterInstallation, or rewrite a frozen Run Runtime Configuration.

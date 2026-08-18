@@ -8,6 +8,9 @@ use serde_json::Value;
 use crate::{
     camp_attachment::managed_attachment_summary,
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
+    camp_message_publication::{
+        public_camp_message_event_predicate, public_camp_message_publication_cte,
+    },
     canonical_activity::CanonicalRuntimeActivity,
     current_input_skill::CurrentInputSkillResolution,
     db::Database,
@@ -1144,14 +1147,15 @@ impl ReadModelService {
 }
 
 fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<NavigationCampItem>> {
-    let mut statement = transaction.prepare(
+    let publication_predicate = public_camp_message_event_predicate("event_log.event_type");
+    let sql = format!(
         r#"
         WITH navigation_activity AS (
             SELECT
                 event_log.camp_id,
                 MAX(CASE
                     WHEN (
-                        event_log.event_type = 'camp_message.sent'
+                        {publication_predicate}
                         AND camp_message.author_type IN ('user', 'agent')
                     ) OR event_log.event_type IN (
                         'agent_run.succeeded',
@@ -1216,8 +1220,9 @@ fn load_navigation_camps(transaction: &Transaction<'_>) -> Result<Vec<Navigation
         WHERE camp.activation_state = 'active'
            OR length(trim(COALESCE(camp_composer_draft.body, ''))) > 0
            OR EXISTS(SELECT 1 FROM prepared_attachment WHERE camp_id = camp.id)
-        "#,
-    )?;
+        "#
+    );
+    let mut statement = transaction.prepare(&sql)?;
     let rows = statement.query_map([], |row| {
         let default_lead_agent_id = row.get::<_, Option<String>>(4)?;
         let default_lead_display_name = row.get::<_, Option<String>>(5)?;
@@ -1638,16 +1643,12 @@ fn load_messages(
     camp_id: &str,
     limit: i64,
 ) -> Result<Vec<CampMessageView>> {
-    let mut statement = transaction.prepare(
+    let publication_cte = public_camp_message_publication_cte();
+    let sql = format!(
         r#"
-        SELECT id, sequence,
-               (
-                   SELECT MAX(event_log.global_sequence)
-                   FROM event_log
-                   WHERE event_log.entity_type = 'camp_message'
-                     AND event_log.entity_id = camp_message.id
-                     AND event_log.event_type = 'camp_message.sent'
-               ),
+        WITH {publication_cte}
+        SELECT camp_message.id, camp_message.sequence,
+               publication.global_sequence,
                author_type, author_id,
                source_agent_run_id, body, structured_content_json, address_mode,
                addressed_agent_ids_json,
@@ -1657,10 +1658,13 @@ fn load_messages(
                     ELSE presentation_json
                END, created_at
         FROM camp_message
+        LEFT JOIN public_camp_message_publication AS publication
+          ON publication.message_id = camp_message.id
         WHERE camp_id = ?1 AND tombstoned_at IS NULL
         ORDER BY sequence DESC LIMIT ?2
-        "#,
-    )?;
+        "#
+    );
+    let mut statement = transaction.prepare(&sql)?;
     let rows = statement
         .query_map(params![camp_id, limit], camp_message_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1676,16 +1680,12 @@ fn load_messages_before(
     before_sequence: i64,
     limit: i64,
 ) -> Result<Vec<CampMessageView>> {
-    let mut statement = transaction.prepare(
+    let publication_cte = public_camp_message_publication_cte();
+    let sql = format!(
         r#"
-        SELECT id, sequence,
-               (
-                   SELECT MAX(event_log.global_sequence)
-                   FROM event_log
-                   WHERE event_log.entity_type = 'camp_message'
-                     AND event_log.entity_id = camp_message.id
-                     AND event_log.event_type = 'camp_message.sent'
-               ),
+        WITH {publication_cte}
+        SELECT camp_message.id, camp_message.sequence,
+               publication.global_sequence,
                author_type, author_id,
                source_agent_run_id, body, structured_content_json, address_mode,
                addressed_agent_ids_json,
@@ -1695,13 +1695,16 @@ fn load_messages_before(
                     ELSE presentation_json
                END, created_at
         FROM camp_message
+        LEFT JOIN public_camp_message_publication AS publication
+          ON publication.message_id = camp_message.id
         WHERE camp_id = ?1
           AND tombstoned_at IS NULL
           AND sequence < ?2
         ORDER BY sequence DESC, id DESC
         LIMIT ?3
-        "#,
-    )?;
+        "#
+    );
+    let mut statement = transaction.prepare(&sql)?;
     let rows = statement
         .query_map(params![camp_id, before_sequence, limit], camp_message_row)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -1718,9 +1721,10 @@ fn load_messages_around(
     anchor_sequence: i64,
     radius: i64,
 ) -> Result<Vec<CampMessageView>> {
-    let mut statement = transaction.prepare(
+    let publication_cte = public_camp_message_publication_cte();
+    let sql = format!(
         r#"
-        WITH window_ids(id) AS (
+        WITH {publication_cte}, window_ids(id) AS (
             SELECT id FROM (
                 SELECT id
                 FROM camp_message
@@ -1748,13 +1752,7 @@ fn load_messages_around(
             )
         )
         SELECT camp_message.id, camp_message.sequence,
-               (
-                   SELECT MAX(event_log.global_sequence)
-                   FROM event_log
-                   WHERE event_log.entity_type = 'camp_message'
-                     AND event_log.entity_id = camp_message.id
-                     AND event_log.event_type = 'camp_message.sent'
-               ),
+               publication.global_sequence,
                camp_message.author_type, camp_message.author_id,
                camp_message.source_agent_run_id, camp_message.body,
                camp_message.structured_content_json, camp_message.address_mode,
@@ -1767,9 +1765,12 @@ fn load_messages_around(
                camp_message.created_at
         FROM camp_message
         JOIN window_ids ON window_ids.id = camp_message.id
+        LEFT JOIN public_camp_message_publication AS publication
+          ON publication.message_id = camp_message.id
         ORDER BY camp_message.sequence ASC, camp_message.id ASC
-        "#,
-    )?;
+        "#
+    );
+    let mut statement = transaction.prepare(&sql)?;
     let rows = statement
         .query_map(
             params![camp_id, message_id, anchor_sequence, radius],

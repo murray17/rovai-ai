@@ -1,5 +1,5 @@
 ---
-version: 1
+version: 2
 slug: "new-conversation-dialog"
 primary_target: "apps/desktop/src/renderer/src/NewConversationDialog.tsx"
 related_targets:
@@ -29,7 +29,7 @@ right-edge inset. Native select styling must not introduce a second platform-spe
 ## Field order
 
 1. **工作目录 · 可选** — default Quick Chat, a known canonical Project or “选择工作目录…”. Preserve
-   Finder picker cancellation, directory safety validation and asynchronous Git capability. A valid
+   native folder-picker cancellation, directory safety validation and asynchronous Git capability. A valid
    ordinary directory is usable before Git detection completes; do not run `git init`.
 2. **队员与 Lead** — default to the saved valid team configuration, otherwise all active teammates.
    The set is non-empty and Lead remains inside it. Runtime availability is guidance, not a structural

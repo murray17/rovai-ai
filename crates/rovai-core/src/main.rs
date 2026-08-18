@@ -3261,11 +3261,7 @@ impl Core {
                 CAMP_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<CampSearchInput>(request.input)
                         .map_err(|_| invalid_input_error("camp.search input is invalid"))?;
-                    CampHistoryService.search_current_camp(
-                        &mut database,
-                        &authenticated_run,
-                        &input,
-                    )
+                    CampHistoryService.search_camp(&mut database, &authenticated_run, &input)
                 }
                 HISTORY_SEARCH_TOOL_NAME => {
                     let input = serde_json::from_value::<HistorySearchInput>(request.input)

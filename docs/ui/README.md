@@ -4,7 +4,7 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Rovai AI UI 规范
@@ -15,7 +15,7 @@ last_updated: 2026-08-17
 ## 当前视觉系统
 
 Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主题。它们共享组件树、功能和
-状态矩阵；`system` 只是跟随 macOS 的解析策略。全局排版、空间、形状、深度、色彩职责和基础组件
+状态矩阵；`system` 跟随当前宿主 OS 的应用主题解析策略。全局排版、空间、形状、深度、色彩职责和基础组件
 规则由 [`DESIGN.md`](../../DESIGN.md) 统一拥有。
 
 ## 主题
@@ -33,6 +33,14 @@ Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主�
 [复杂组件索引](components/README.md)路由以下稳定呈现合同：App Shell/统一侧栏、Camp 会话工作区、
 首次训练、结构化 Mention、队员身份与图像，以及会话区附件拖放。Task、AgentRun、A2A、Recovery、权限、
 持久化和事务语义仍须读取相关 ADR/Contract，不能从 UI 文档反向推导。
+
+## 平台差异
+
+- [Windows Interaction Delta](windows-interaction-delta.md)
+- [Windows Interaction Delta HTML 评审稿](../prototypes/windows-interaction-delta/index.html)
+
+平台文档只拥有 native frame、快捷键/文案、系统主题、文件系统反馈和平台准入等展示差异，不创建第二套
+产品结构。HTML 是对规范的交互评审载体，不是生产组件或领域状态真源。
 
 ## 页面局部 Brief
 

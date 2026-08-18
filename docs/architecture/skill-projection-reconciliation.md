@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -20,6 +20,9 @@ bundled bootstrap 与执行完整性时机见
 `CURRENT_INPUT.skills` 的交叉边界见
 [ADR-0203](../adr/0203-structured-current-input-skill-links.md)和
 [Structured Current Input Skill Links](structured-current-input-skill-links.md)。
+Windows copy backend 的 crash recovery 与执行根准入见
+[ADR-0214](../adr/0214-crash-recoverable-windows-skill-projection.md)和
+[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
 
 ## 三层状态
 
@@ -36,7 +39,7 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 | 层 | 权威 | 生命周期 | 不是 |
 | --- | --- | --- | --- |
 | Skill Library | Skill identity、current immutable Revision、Enablement、Group Assignments、deletion lifecycle | 应用全局 | 项目目录状态 |
-| SkillProjection | 当前 execution root 中由 Rovai 拥有的 native discovery links 与最后观测 | 可删除、可重建、多个 Run 共享 | 每 Run Revision 副本、Library 真源 |
+| SkillProjection | 当前 execution root 中由 Rovai 拥有的 native discovery entries 与最后观测 | 可删除、可重建、多个 Run 共享；macOS 为 link，Windows 为受控 copy | 每 Run Revision 副本、Library 真源 |
 | SkillExposureSnapshot | Run 启动时观察到的 Skill/Revision/Group/path/status/conflict 与 digest | 单个 AgentRun 的不可变 Evidence | 文件锁、Runtime load receipt、终身内容保证 |
 
 `skill_projection_observation` 证明上次看到的 entry 和 Rovai 所有权，只能支持安全清理、诊断和
@@ -100,8 +103,8 @@ Bootstrap report 只服务启动性能诊断，不进入 SkillExposureSnapshot�
 | App 启动 / Core 恢复 | 加载 Library；unchanged bundled Revision 走 digest + 私有 Library 文件树元数据快速路径；加载 observation、dirty、removed、active Run recovery | 不枚举、不 canonicalize 历史 execution roots |
 | Skill install/update/enable/assignment/delete | 提交 desired state；把已有 observation roots 标 dirty/pending cleanup | 不访问 |
 | Runtime selection/config change | 提交配置；标记相关已知 projection dirty | 不访问 |
-| 新 AgentRun | 读取当前 Run root 与 Runtime Groups | 只 reconcile/verify 当前 canonical root |
-| AgentRun terminal | 读取该 Run 的 persisted root state | 只在 dirty 或 removed cleanup pending 时处理该 root |
+| 新 AgentRun | 读取当前 Run root 与 Runtime Groups；Windows 进入 root launch gate | 只 reconcile/verify 当前 canonical root |
+| AgentRun terminal | 读取该 Run 的 persisted root state；Windows 注销 active run | 只在 dirty 或 removed cleanup pending 时处理该 root |
 | Project 移除 | 写 `removed`；active Run 时保留 cleanup pending | 无 active Run 可做一次 best-effort managed cleanup；之后停止 |
 | Project 恢复/重新选择 | 写 `active + dirty` | 等下一次 Run preflight |
 | Settings/Diagnostics 普通读取 | 读取 stored observation/root state | 不访问 |
@@ -126,9 +129,14 @@ claimed AgentRun
   → start Runtime
 ```
 
-同一 Agent 的 AgentRun 串行由 Runtime/AgentRun admission 保证；SkillProjection 不重复实现该锁。
-不同 Agent 的新 Run 可以把共享 projection 更新到最新 Revision。旧 Run 不被取消，也不阻塞更新；若
-之后重新读取 native Skill path，可以观察到新 Revision 或已删除 entry。
+同一 Agent 的 AgentRun 串行由 Runtime/AgentRun admission 保证；SkillProjection 不重复实现该锁。macOS link
+backend 中，不同 Agent 的新 Run 可以把共享 projection 更新到最新 Revision；旧 Run 不被取消也不阻塞更新，
+之后重新读取 native Skill path 仍可能观察到新 Revision 或已删除 entry。
+
+Windows copy backend 使用 `Execution Root Projection Gate`：launch 在短 shared section 中验证 ready 并登记
+active Run；publish/recovery 取得 exclusive gate，等待该 exact root 的 active Run 结束并阻止新 launch。
+Core 启动先恢复该 root 未完成 journal，再开放准入。这个平台特例避免 copy/swap 期间 Runtime 读取半发布目录，
+但仍不把 SkillExposureSnapshot 升级为 lifetime load proof。
 
 已存在 ContextManifest 的 active Run 恢复时复用其已持久化 SkillExposureSnapshot，不把 Snapshot
 重新解释为当下 filesystem health，也不因此扫描其他 roots。
@@ -149,3 +157,8 @@ Resolver 只接受 `ready`、同 ID/同名且与冻结 Runtime Group 相容的�
   触发权限访问。
 - active Run 结束后的 removed-root cleanup 是唯一受限例外；完成或失败后保持 removed，不进入后续
   background schedule。
+- Windows staging/final/backup 必须同父目录、同一 admitted NTFS volume；发布使用多阶段私有 journal，
+  每一步在 reopen/verify 后推进。journal、DB observation 与 opened identity/digest 无法唯一解释时，root 保持
+  `skill_projection_recovery_required` 且不启动 Runtime。
+- crash recovery 对 rename 后 journal 未更新、DB commit 后 metadata state 未更新均幂等；文件系统工作不放进
+  长 SQLite transaction，project-owned 或 externally modified entry 永不静默覆盖/删除。

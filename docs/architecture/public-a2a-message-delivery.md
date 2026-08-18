@@ -3,7 +3,7 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-16
+last_updated: 2026-08-18
 ---
 
 # Public A2A Message 与 Message Delivery 架构
@@ -11,10 +11,12 @@ last_updated: 2026-08-16
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
 分别见 [Camp Message Send v9](../contracts/camp-message-send-v9.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
-[Message Delivery v4](../contracts/message-delivery-v4.md) 与
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)；决策理由见
-[ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md) 和
-[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)，显式 caller return 与 Core 管理
+[Message Delivery v4](../contracts/message-delivery-v4.md)、
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)、
+[Camp History Retrieval v1](../contracts/camp-history-v1.md)；决策理由见
+[ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md)、
+[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)与
+[ADR-0215](../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)，显式 caller return 与 Core 管理
 reply reference 见
 [ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)，成功 Run 的 zero-send safety net 见
 [ADR-0162](../adr/0162-missing-send-recovery-publication.md)。
@@ -213,6 +215,12 @@ retention 或 source unavailable 不改变后者。Renderer 展示名称只是�
 receipt verification 例外；它不改变 ContextManifest 历史边界，也不扩展 collection read。Renderer
 的 Message Mention 导航是独立的用户 read side：通过 `camp.messages.around` 读取同 Camp 有界锚点
 窗口，不进入 Agent built-in operation catalog，也不授予 Agent post-boundary 历史访问。
+
+历史读取侧不以单一 event name 重新定义公共消息。共享 Public Camp message publication seam 从
+`camp_message.sent | camp_message.public_a2a_sent` 解析每条 `CampMessage` 的最早 global sequence，并只产生
+一个 publication fact；body/FTS/reference search、item/around/thread/timeline、root/parent 追溯和 Manifest
+历史 Camp activity 都在同一 global boundary 下消费它。重复 qualifying event 不重复消息，boundary 后消息
+保持不可见，private Delivery、Runtime evidence 和非公共 A2A 不进入该 seam，也不进行 Event Log 回填。
 
 ## 7. 并发、重放与清理
 

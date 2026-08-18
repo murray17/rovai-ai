@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-app-shell-navigation
 status: accepted
-last_updated: 2026-08-13
+last_updated: 2026-08-18
 ---
 
 # App Shell 与统一侧栏
@@ -24,7 +24,7 @@ Camp 行显示稳定标题和必要状态。三点菜单是置顶/取消置顶�
 首段正文开始后的文字，正文中后部的 Mention 和手写 `@文字` 继续作为普通标题文字。Camp 行不把
 任何 `@文字` 渲染为身份 Token、人物卡入口或独立点击目标，整行仍只负责打开会话。
 
-Project 的“移除项目”只从此 Mac 的导航移除并取消相关置顶，不删除工作目录、Camp 或历史。
+Project 的“移除项目”只从此设备的导航移除并取消相关置顶，不删除工作目录、Camp 或历史。
 重新选择相同目录可恢复。Core 的访问 ledger 与运行中清理边界由架构/ADR 决定，Renderer 不用
 隐藏行状态推断目录已经删除。
 
@@ -53,6 +53,17 @@ Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再�
 队员页继续显示普通全局侧栏和 Project / Camp 导航，不再用队员名册覆盖该槽位，也不提供独立的
 “返回对话 / 返回 App”控件。队员名册位于内容区左侧；用户通过全局侧栏切换页面或会话，所有切换
 继续遵守未保存 Runtime 草稿保护。
+
+## 宿主平台交互
+
+macOS 保留 hidden title bar 与受控 drag region；Windows 使用 OS native frame，所有 Renderer
+`-webkit-app-region: drag` 必须关闭。Windows caption buttons、Snap Layout、Alt+Space、双击标题栏和多屏 DPI
+由系统拥有，50px App 顶行位于原生标题栏之下且不复制窗口按钮或第二个 App 标题。
+
+实现统一使用 `CommandOrControl` 动作和集中式平台文案映射：macOS 可显示 `⌘K`、Windows 显示 `Ctrl+K`；
+文件定位分别显示“在 Finder 中显示”和“在文件资源管理器中显示”。可访问名称始终描述动作，不能只读出快捷键
+符号。普通设备文案优先使用“此设备”；仅在确需 OS 语境时分别使用“此 Mac / 此电脑”。完整差异见
+[Windows Interaction Delta](../windows-interaction-delta.md)。
 
 ## 响应式与可访问性
 

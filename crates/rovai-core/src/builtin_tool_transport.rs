@@ -711,7 +711,20 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
             code: "builtin_tool.outcome_indeterminate".to_string(),
             recovery: BuiltinToolRecovery::ConfirmOutcome,
         },
+        BuiltinToolErrorContract {
+            code: "builtin_tool.output_contract_mismatch".to_string(),
+            recovery: BuiltinToolRecovery::Stop,
+        },
     ];
+    if matches!(
+        operation,
+        "camp.list" | "camp.search" | "camp.read" | "history.search"
+    ) {
+        errors.push(BuiltinToolErrorContract {
+            code: "camp.invalid_argument".to_string(),
+            recovery: BuiltinToolRecovery::FixInput,
+        });
+    }
     match operation {
         "camp.message.send" => {
             for code in [
@@ -785,6 +798,14 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
             code: "memory.view_unavailable".to_string(),
             recovery: BuiltinToolRecovery::Stop,
         }),
+        "camp.search" => errors.push(BuiltinToolErrorContract {
+            code: "camp.search_unavailable".to_string(),
+            recovery: BuiltinToolRecovery::Stop,
+        }),
+        "camp.read" => errors.push(BuiltinToolErrorContract {
+            code: "camp.read_unavailable".to_string(),
+            recovery: BuiltinToolRecovery::Stop,
+        }),
         _ => {}
     }
     errors.sort_by(|left, right| left.code.cmp(&right.code));
@@ -829,6 +850,7 @@ pub fn recovery_for_error_code(code: &str) -> BuiltinToolRecovery {
                 | "member.invalid_identity"
                 | "member.avatar_invalid"
                 | "agent_profile.display_name_conflict"
+                | "camp.invalid_argument"
         )
         || code == "builtin_tool.unknown_operation"
     {
@@ -1017,7 +1039,18 @@ mod tests {
             assert_eq!(description.catalog_digest, list.catalog_digest);
             assert!(description.agent_output_schema.is_object());
             assert!(!description.projection_identity.is_empty());
+            assert!(description.errors.iter().any(|error| {
+                error.code == "builtin_tool.output_contract_mismatch"
+                    && error.recovery == BuiltinToolRecovery::Stop
+            }));
         }
+        let camp_search = builtin_tool_description("camp.search").unwrap();
+        assert!(camp_search.errors.iter().any(|error| {
+            error.code == "camp.invalid_argument" && error.recovery == BuiltinToolRecovery::FixInput
+        }));
+        assert!(camp_search.errors.iter().any(|error| {
+            error.code == "camp.search_unavailable" && error.recovery == BuiltinToolRecovery::Stop
+        }));
         let send = builtin_tool_description("camp.message.send").unwrap();
         assert_eq!(
             send.arguments

@@ -1,5 +1,5 @@
 ---
-version: 3
+version: 4
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -35,8 +35,9 @@ scroll and focus.
 ## 通用
 
 General owns stable startup location and window reset. Stable choices commit immediately through the
-narrow Desktop bridge. The App does not expose or enable a macOS login item; packaged macOS startup
-only makes a best-effort removal of any retired registration. General does not add hidden/background
+narrow Desktop bridge. The App does not expose or enable an OS login-start item on either supported
+platform; packaged macOS startup only makes a best-effort removal of any retired registration, while
+the first Windows release creates no Startup task or Run-key entry. General does not add hidden/background
 launch, default Project, recovery or update policy.
 
 New-conversation defaults use the user-facing terms 队员 and 队长. Ten or fewer selectable teammates
@@ -81,6 +82,11 @@ badge and details, not grouping or lifecycle. `cli-operations` and `memory-stewa
 badge or a special built-in group. Imported revisions, enablement and `allowed-tools` do not imply
 extra Runtime permission or proof that a model read the Skill.
 
+On Windows, an ambiguous or interrupted copy projection is a root-level execution blocker, not an
+individual Skill enablement state. Keep the list and saved choices visible, add one actionable recovery
+surface with the affected Runtime/root, and disable execution-dependent actions until Core reports the
+Execution Root Projection Gate admitted. Do not claim that toggling a Skill repairs journal state.
+
 ## MCP
 
 Keep the current JSON truth path and import/mutation boundary. The upper assignment workbench has a
@@ -101,6 +107,17 @@ result reads “可用” and means the executable can be selected and tried; su
 capabilities are confirmed by explicit check or first task. A path-only result remains temporarily unknown,
 never synthetic checking. Do not expose internal “found/not checked”, fingerprint or
 attempt stages. Executable path, fingerprint, backoff and audit remain inside advanced diagnostics.
+
+Before those machine states, every row consumes the Core-owned Runtime Platform Admission. On Windows,
+`not_qualified` renders “Windows 尚未验证” and `unsupported` renders “此平台不支持”; neither state has an
+availability probe, install, rescan, selection or execution action. They must not be rendered as not
+installed, unavailable, a red health failure or synthetic checking. Diagnostics may show the platform row
+and evidence revision without starting that Adapter.
+
+If an existing teammate references an unqualified Runtime, preserve the Runtime/model/permission/parameter
+subobject byte-for-byte through unrelated profile edits. Show the frozen values read-only and keep identity,
+role, portrait and other unrelated fields editable. Only a Runtime-subobject mutation receives a field-level
+platform error; do not block the whole settings save or silently select a replacement default.
 
 TRAE uses the same bounded startup/rescan version check and “可用” light-ready presentation as the other
 Runtime rows. Every supported row uses “检查可用性”; for TRAE that explicit action starts a fast ACP

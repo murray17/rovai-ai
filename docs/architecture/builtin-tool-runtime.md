@@ -3,13 +3,15 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v13](../contracts/builtin-tool-transport-v13.md)、
+[Built-in Tool Transport v14](../contracts/builtin-tool-transport-v14.md)、
+[Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
+[Camp History Retrieval v1](../contracts/camp-history-v1.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v9](../contracts/camp-message-send-v9.md)、
 [Gather v2](../contracts/gather-v2.md)、
@@ -17,7 +19,9 @@ last_updated: 2026-08-17
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v11 及更早 Transport 只保留
 historical 语义。决策理由见
 [ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
+[ADR-0212](../adr/0212-cross-platform-local-ipc-transport-v14.md)、
 [ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
+[ADR-0215](../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)、
 [ADR-0136](../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与
 [ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)。Native Session context
 compaction 后的 Bootstrap 补发可靠性见
@@ -59,7 +63,8 @@ Agent Runtime
     │ fixed business command + process-scoped CLI context
     ▼
 bundled `rovai` CLI
-    │ authenticated local Unix IPC
+    │ authenticated local IPC v2
+    │ Unix Socket | Windows Named Pipe
     ▼
 Core BuiltinToolRouter
     │ current Run / lease / Native Binding
@@ -97,6 +102,11 @@ active lease、调用既有领域服务，并生成完整 Envelope、receipt、R
 | Bootstrap / Charter | 固定命令、使用原则、帮助入口和安全恢复原则 | 完整 schema、Envelope、catalog digest、凭据、Camp ID |
 | Evidence / Qualification / host debug | 完整 Envelope、receipt、request identity 和诊断证据 | Agent 日常 stdout |
 
+Local IPC 的外部 seam 只有 `LocalIpcEndpoint` 与异步 byte stream。macOS Adapter 使用 Unix Socket；Windows
+Adapter 使用在创建时带 protected DACL、拒绝 remote client 的 Named Pipe。Raw `SECURITY_ATTRIBUTES`、listener
+补位与 Pipe instance 生命周期只存在于 Windows transport implementation；Router、Catalog、receipt 和 replay
+不感知端点类型。OS ACL 永不替代 process/lease token。
+
 ## Catalog 与 Agent command
 
 Core 只维护一份 catalog。它服务 IPC 校验、合同测试、Qualification、Evidence/receipt 验证和
@@ -127,6 +137,10 @@ Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--
 和短示例，不输出完整 JSON Schema、Envelope、receipt 或 catalog。Dotted canonical operation
 仍是 Core 内部语义身份，不能直接变成通用 Agent 命令。
 
+Camp History exact help 保持三段职责：目标未知时用 `history.search` 跨授权历史 Camp 发现；目标已知时
+用 `camp.search --camp-id` 搜索一个 Camp；获得稳定消息 ID 后用 `camp.read --camp-id` 读取。Search/Read
+省略 `--camp-id` 时只解析当前 Camp，显式当前 ID 与省略等价，不会扩张为全历史或按 message ID 反查。
+
 `rovai send --help` 的基础示例分别演示 public-only、Agent-only 与 User-attention-only，不把 `--to` 与
 `--to-user` 组合成默认模式。`--to-user` 的精确字段帮助拥有“新产生且未解决的用户决定、回答或行动”
 正向条件、常规负向场景、消息局部不继承、无 Agent Delivery 与不代表用户批准。非例行组合只在
@@ -136,8 +150,8 @@ Send exact help 公开 line-leading display-name alias：它必须是 logical li
 显示名后跟 whitespace/EOF；trailing handoff 使用专门 final line。`--to` 仍只接受 canonical ID，稳定自动化
 优先使用 `agent_N`，`effectiveRecipients=[]` 表示没有 Agent 路由。Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
-v12 的 contract/CLI command version 与 Runtime capability 变化来自 `member.create` closed wire shape；Binding
-compatibility 继续同时校验 version 与 digest。
+当前 v14 contract/CLI command version、`builtin_cli.transport.v14` capability 与 IPC protocol 2 必须同时进入
+Binding compatibility 和 digest。v13 Context 不做 endpoint 猜测并 fail closed。
 
 `member.create` 只接受 attested active、direct user-triggered AgentRun。Agent 依照 `member-studio` 展示完整
 名牌并取得用户确认，可选地把当前 Run 中 Core 可读的 PNG/JPEG 路径交给 CLI；Core 在领域提交前完成
@@ -159,7 +173,7 @@ canonical result 或 Evidence；这条 narrow importer 与 Renderer 上传继续
 | `team.list_tasks` | 紧凑 `TaskListPage` |
 | `memory.view` | complete exact-Scope canonical result；不分页、不截断 |
 | `memory.write` | `{outcome: effective, memoryId, revisionId} \| {outcome: review_pending, reviewItemId}` |
-| 其余六项 | 去除 Envelope wrapper 后的 canonical result |
+| 其余七项 | 去除 Envelope wrapper 后的 canonical result |
 
 `memory.view` item 与 authorized current/revised `memory.read` 的 canonical result 包含同一个 indivisible
 `target(memoryId, revisionId, complete Agent-relative Scope identity)`。Agent revise 原样复制 target；CLI 只
@@ -178,6 +192,12 @@ Read Side 合同，不是 generic projection heuristic。
 
 完整 Envelope 只保留在 Core IPC、Evidence、Qualification 和 host-controlled debug；不存在
 Agent 可控的 envelope output mode、环境变量、隐藏 flag 或 `--full`。
+
+如果 Core 已完成 operation 且完整 Envelope 已验证，但显式 Agent projection 或其 closed Schema 失败，CLI
+不得把它伪装成 Camp 授权失败或普通 `builtin_tool.cli_error`。它只向 stdout 输出闭合的
+`builtin_tool.output_contract_mismatch`、`recovery=stop` 和 canonical operation；完整 error chain 仅写入
+受管 Run 临时目录的私有 local diagnostic。该分支不改变 receipt、Replay 或
+`builtin_tool.outcome_indeterminate / confirm_outcome`。
 
 ## Runtime process、Lease 与 Camp scope
 
@@ -201,8 +221,10 @@ Lease → AgentRun + executionEpoch + NativeBinding
 ```
 
 推导。首次调用将它写入内部 `CampMessageSendCommand.camp_id`；持久 Replay 读取已记录的
-`camp_id + source AgentRun + executionEpoch`，不重新使用当前活跃身份。其他跨 Camp read 工具的
-显式 `campId` 仍由各自领域合同控制。
+`camp_id + source AgentRun + executionEpoch`，不重新使用当前活跃身份。Camp History service 为
+`camp.search` 和 `camp.read` 共用一个 single-target resolver：省略或显式当前 Camp 使用 current sequence
+boundary；其他 Camp 必须同时通过 ContextManifest snapshot 与 live membership/profile authorization，并使用
+冻结 global public boundary。`history.search` 保持独立 multi-Camp discovery；任何 message ID 都不授予范围。
 
 ### 新 Session
 
@@ -529,5 +551,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- 任一正式 Runtime 未通过 v12 command、projection、replay、fence 和 negative-path 验收：版本不
-  得完成。
+- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v14 command、projection、replay、
+  fence 和 negative-path 验收：对应平台版本不得完成。未准入 Windows Runtime 不进入 AgentRun。
