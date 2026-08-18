@@ -2,6 +2,7 @@
 document_type: decision-authority-coverage
 authority: adr-clean-break-current-authority
 baseline_commit: a987bef9c317554dcf0ca52a834e3b9ddb8f74e4
+resolution_source: docs/versions/v1.11/decisions.md#v1-11-d02
 last_updated: 2026-08-19
 ---
 

@@ -116,6 +116,33 @@ function documentAnchors(tree) {
   return anchors;
 }
 
+function explicitLevelTwoSection(text, tree, fragment) {
+  const escaped = fragment.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const anchorPattern = new RegExp(`\\bid=["']${escaped}["']`, "gi");
+  const anchorIndexes = [];
+  for (const [index, node] of (tree?.children ?? []).entries()) {
+    walkMarkdown(node, (child) => {
+      if (child.type !== "html" || typeof child.value !== "string") return;
+      for (const _match of child.value.matchAll(anchorPattern)) anchorIndexes.push(index);
+    });
+  }
+  if (anchorIndexes.length !== 1) return null;
+  const anchorIndex = anchorIndexes[0];
+  const headingIndex = tree.children.findIndex(
+    (node, index) => index > anchorIndex && node.type === "heading" && node.depth === 2
+  );
+  if (headingIndex < 0) return null;
+  const nextHeadingIndex = tree.children.findIndex(
+    (node, index) => index > headingIndex && node.type === "heading" && node.depth === 2
+  );
+  const start = tree.children[anchorIndex].position?.start?.offset;
+  const end = nextHeadingIndex < 0
+    ? text.length
+    : tree.children[nextHeadingIndex].position?.start?.offset;
+  if (start === undefined || end === undefined) return null;
+  return text.slice(start, end);
+}
+
 async function listFiles(directory, predicate) {
   const files = [];
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -429,8 +456,8 @@ function parseCoverageRows(text) {
 function parseAuthorityResolutionRows(text, filePath) {
   const diagnostics = [];
   const blocks = [...text.matchAll(/<!-- authority-resolution:begin -->([\s\S]*?)<!-- authority-resolution:end -->/g)];
-  if (blocks.length > 1) {
-    diagnostics.push(diagnostic("DECISION_RESOLUTION_BLOCK", filePath, "Only one authority-resolution block is allowed"));
+  if (blocks.length !== 1) {
+    diagnostics.push(diagnostic("DECISION_RESOLUTION_BLOCK", filePath, "Exactly one authority-resolution block is required"));
   }
   const rows = [];
   for (const block of blocks) {
@@ -443,7 +470,12 @@ function parseAuthorityResolutionRows(text, filePath) {
       rows.push({ id: cells[0], kernels: cells[1], action });
     }
   }
-  return { diagnostics, rows };
+  return {
+    diagnostics,
+    rows,
+    block: blocks.length === 1 ? blocks[0][0] : null,
+    valid: blocks.length === 1,
+  };
 }
 
 async function versionLifecycle(repoRoot, version) {
@@ -628,8 +660,10 @@ async function validateLegacyMap(repoRoot, manifest) {
 async function validateCoverage(repoRoot, manifest) {
   const file = path.join(repoRoot, "docs", "decisions", "AUTHORITY-COVERAGE.md");
   const text = await readFile(file, "utf8");
+  const repoFile = toRepoPath(repoRoot, file);
+  const parsedCoverage = splitFrontMatter(text, repoFile);
   const rows = parseCoverageRows(text);
-  const diagnostics = [];
+  const diagnostics = [...parsedCoverage.diagnostics];
   const currentEntries = manifest.entries.filter(isCurrentLegacy);
   const expectedIds = new Set(currentEntries.map((entry) => entry.legacy_id));
   const rowsById = new Map();
@@ -645,22 +679,22 @@ async function validateCoverage(repoRoot, manifest) {
   for (const row of rows) {
     if (!rowsById.has(row.id)) rowsById.set(row.id, []);
     rowsById.get(row.id).push(row);
-    if (!expectedIds.has(row.id)) diagnostics.push(diagnostic("DECISION_COVERAGE_EXTRA", toRepoPath(repoRoot, file), `Coverage contains non-current ${row.id}`));
+    if (!expectedIds.has(row.id)) diagnostics.push(diagnostic("DECISION_COVERAGE_EXTRA", repoFile, `Coverage contains non-current ${row.id}`));
     if (!new Set(["migrated", "replaced", "retired"]).has(row.action)) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_ACTION", toRepoPath(repoRoot, file), `${row.id} has invalid action ${row.action}`));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_ACTION", repoFile, `${row.id} has invalid action ${row.action}`));
     }
     const expectedCurrent = row.action === "migrated" ? "是" : "否";
     if (row.current !== expectedCurrent) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_CURRENT", toRepoPath(repoRoot, file), `${row.id} ${row.action} must use 当前有效=${expectedCurrent}`, { line: row.line }));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_CURRENT", repoFile, `${row.id} ${row.action} must use 当前有效=${expectedCurrent}`, { line: row.line }));
     }
     if (["replaced", "retired"].includes(row.action)) resolutionKeys.add(`${row.id}:${row.action}`);
     const rowKey = `${row.id}\u0000${row.kernel}`;
     if (rowKeys.has(rowKey)) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_DUPLICATE", toRepoPath(repoRoot, file), `${row.id} duplicates kernel ${row.kernel}`, { line: row.line }));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_DUPLICATE", repoFile, `${row.id} duplicates kernel ${row.kernel}`, { line: row.line }));
     }
     rowKeys.add(rowKey);
     if (!row.target || !row.target.includes("#")) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", toRepoPath(repoRoot, file), `${row.id} lacks an exact authority anchor`, { line: row.line }));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", repoFile, `${row.id} lacks an exact authority anchor`, { line: row.line }));
       continue;
     }
     const [rawTargetPath, rawFragment] = row.target.split("#", 2);
@@ -670,73 +704,117 @@ async function validateCoverage(repoRoot, manifest) {
       targetPathText = decodeURIComponent(rawTargetPath);
       fragment = decodeURIComponent(rawFragment).toLowerCase();
     } catch {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", toRepoPath(repoRoot, file), `${row.id} has an invalid encoded authority target`, { line: row.line }));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", repoFile, `${row.id} has an invalid encoded authority target`, { line: row.line }));
       continue;
     }
     const targetPath = path.resolve(path.dirname(file), targetPathText);
     const repoTarget = toRepoPath(repoRoot, targetPath);
     const expectedRoot = authorityRoots.get(row.authority);
     if (!expectedRoot || (expectedRoot.endsWith("/") ? !repoTarget.startsWith(expectedRoot) : repoTarget !== expectedRoot)) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_AUTHORITY", toRepoPath(repoRoot, file), `${row.id} authority ${row.authority} does not match ${repoTarget}`, { line: row.line }));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_AUTHORITY", repoFile, `${row.id} authority ${row.authority} does not match ${repoTarget}`, { line: row.line }));
       continue;
     }
     if (!(await exactPathExists(repoRoot, targetPath, new Map()))) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", toRepoPath(repoRoot, file), `${row.id} authority file does not exist: ${row.target}`, { line: row.line }));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", repoFile, `${row.id} authority file does not exist: ${row.target}`, { line: row.line }));
       continue;
     }
     const parsedTarget = parseMarkdown(await readFile(targetPath, "utf8"), repoTarget);
     diagnostics.push(...parsedTarget.diagnostics);
     if (parsedTarget.tree && !documentAnchors(parsedTarget.tree).has(fragment)) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", toRepoPath(repoRoot, file), `${row.id} authority fragment does not exist: ${row.target}`, { line: row.line }));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_TARGET", repoFile, `${row.id} authority fragment does not exist: ${row.target}`, { line: row.line }));
     }
   }
   for (const entry of currentEntries) {
     const actual = rowsById.get(entry.legacy_id) ?? [];
     const expectedKernels = decisionKernels(entry.original_body, entry.title);
     if (!expectedKernels) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_DECISION", toRepoPath(repoRoot, file), `${entry.legacy_id} has no Decision section in the manifest`));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_DECISION", repoFile, `${entry.legacy_id} has no Decision section in the manifest`));
       continue;
     }
     if (actual.length === 0) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_MISSING", toRepoPath(repoRoot, file), `Missing ${entry.legacy_id}`));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_MISSING", repoFile, `Missing ${entry.legacy_id}`));
       continue;
     }
     const actualKernels = actual.map((row) => row.kernel).sort();
     const expectedSorted = [...expectedKernels].sort();
     if (JSON.stringify(actualKernels) !== JSON.stringify(expectedSorted)) {
-      diagnostics.push(diagnostic("DECISION_COVERAGE_KERNELS", toRepoPath(repoRoot, file), `${entry.legacy_id} kernel coverage differs from its Decision sections`));
+      diagnostics.push(diagnostic("DECISION_COVERAGE_KERNELS", repoFile, `${entry.legacy_id} kernel coverage differs from its Decision sections`));
     }
   }
-  const resolutionRows = [];
-  const versionsRoot = path.join(repoRoot, "docs", "versions");
-  for (const versionEntry of await readdir(versionsRoot, { withFileTypes: true })) {
-    if (!versionEntry.isDirectory() || !VERSION_PATTERN.test(versionEntry.name)) continue;
-    if ((await versionLifecycle(repoRoot, versionEntry.name)) !== "current") continue;
-    const decisionFile = path.join(versionsRoot, versionEntry.name, "decisions.md");
-    try {
-      const parsed = parseAuthorityResolutionRows(await readFile(decisionFile, "utf8"), toRepoPath(repoRoot, decisionFile));
-      diagnostics.push(...parsed.diagnostics);
-      resolutionRows.push(...parsed.rows);
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
+  const resolutionSource = parsedCoverage.data?.resolution_source;
+  const resolutionSourceMatch = typeof resolutionSource === "string"
+    ? resolutionSource.match(/^(docs\/versions\/v\d+\.\d+\/decisions\.md)#([A-Za-z0-9][A-Za-z0-9._-]*)$/)
+    : null;
+  let resolutionRows = null;
+  if (!resolutionSourceMatch) {
+    diagnostics.push(
+      diagnostic(
+        "DECISION_RESOLUTION_SOURCE",
+        repoFile,
+        "resolution_source must be docs/versions/vX.Y/decisions.md#fragment"
+      )
+    );
+  } else {
+    const [, sourceRepoPath, sourceFragment] = resolutionSourceMatch;
+    const sourceFile = path.resolve(repoRoot, sourceRepoPath);
+    if (!(await exactPathExists(repoRoot, sourceFile, new Map()))) {
+      diagnostics.push(
+        diagnostic("DECISION_RESOLUTION_SOURCE", repoFile, `Resolution source does not exist: ${resolutionSource}`)
+      );
+    } else {
+      const sourceText = await readFile(sourceFile, "utf8");
+      const parsedSource = parseMarkdown(sourceText, sourceRepoPath);
+      diagnostics.push(...parsedSource.diagnostics);
+      if (!parsedSource.tree || !documentAnchors(parsedSource.tree).has(sourceFragment.toLowerCase())) {
+        diagnostics.push(
+          diagnostic("DECISION_RESOLUTION_SOURCE", repoFile, `Resolution source fragment does not exist: ${resolutionSource}`)
+        );
+      } else {
+        const sourceSection = explicitLevelTwoSection(sourceText, parsedSource.tree, sourceFragment);
+        if (!sourceSection) {
+          diagnostics.push(
+            diagnostic(
+              "DECISION_RESOLUTION_SOURCE",
+              repoFile,
+              `Resolution source must identify one explicit level-two decision: ${resolutionSource}`
+            )
+          );
+        } else {
+          const parsedResolutions = parseAuthorityResolutionRows(sourceText, sourceRepoPath);
+          diagnostics.push(...parsedResolutions.diagnostics);
+          if (parsedResolutions.valid && !sourceSection.includes(parsedResolutions.block)) {
+            diagnostics.push(
+              diagnostic(
+                "DECISION_RESOLUTION_SOURCE",
+                repoFile,
+                `The authority-resolution block is outside ${resolutionSource}`
+              )
+            );
+          } else if (parsedResolutions.valid) {
+            resolutionRows = parsedResolutions.rows;
+          }
+        }
+      }
     }
   }
-  const actualResolutionKeys = new Set();
-  for (const row of resolutionRows) {
-    const key = `${row.id}:${row.action}`;
-    if (actualResolutionKeys.has(key)) {
-      diagnostics.push(diagnostic("DECISION_RESOLUTION_DUPLICATE", toRepoPath(repoRoot, file), `Duplicate current resolution for ${key}`));
+  if (resolutionRows) {
+    const actualResolutionKeys = new Set();
+    for (const row of resolutionRows) {
+      const key = `${row.id}:${row.action}`;
+      if (actualResolutionKeys.has(key)) {
+        diagnostics.push(diagnostic("DECISION_RESOLUTION_DUPLICATE", repoFile, `Duplicate migration resolution for ${key}`));
+      }
+      actualResolutionKeys.add(key);
     }
-    actualResolutionKeys.add(key);
-  }
-  for (const key of resolutionKeys) {
-    if (!actualResolutionKeys.has(key)) {
-      diagnostics.push(diagnostic("DECISION_RESOLUTION_MISSING", toRepoPath(repoRoot, file), `${key} is not recorded in a current version decision`));
+    for (const key of resolutionKeys) {
+      if (!actualResolutionKeys.has(key)) {
+        diagnostics.push(diagnostic("DECISION_RESOLUTION_MISSING", repoFile, `${key} is not recorded in the migration resolution source`));
+      }
     }
-  }
-  for (const key of actualResolutionKeys) {
-    if (!resolutionKeys.has(key)) {
-      diagnostics.push(diagnostic("DECISION_RESOLUTION_EXTRA", toRepoPath(repoRoot, file), `${key} has no matching coverage action`));
+    for (const key of actualResolutionKeys) {
+      if (!resolutionKeys.has(key)) {
+        diagnostics.push(diagnostic("DECISION_RESOLUTION_EXTRA", repoFile, `${key} has no matching coverage action`));
+      }
     }
   }
   return { diagnostics, rows, currentCount: currentEntries.length };

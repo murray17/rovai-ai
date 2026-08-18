@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -9,6 +10,8 @@ import {
   sha256,
   validateDecisionRepository,
 } from "./doc-decisions.mjs";
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 const originalFrontMatter = `document_type: adr
 id: ADR-0001
@@ -150,6 +153,10 @@ ${entry.normalized_migrated_body}<!-- legacy-adr-body:end id=ADR-0001 -->
 <a id="v1-0-d01"></a>
 
 ## V1.0-D01：Fixture decision
+
+<!-- authority-resolution:begin -->
+
+<!-- authority-resolution:end -->
 `,
     "utf8"
   );
@@ -165,7 +172,14 @@ ${entry.normalized_migrated_body}<!-- legacy-adr-body:end id=ADR-0001 -->
   );
   await writeFile(
     path.join(root, "docs/decisions/AUTHORITY-COVERAGE.md"),
-    `# Coverage
+    `---
+document_type: decision-authority-coverage
+authority: adr-clean-break-current-authority
+baseline_commit: ${"1".repeat(40)}
+resolution_source: docs/versions/v1.0/decisions.md#v1-0-d01
+---
+
+# Coverage
 
 | 原 ADR | 主题 | 规范内核 | 当前有效 | 权威类型 | 当前权威 | 处理方式 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -248,7 +262,7 @@ test("missing current-authority coverage is rejected", async () => {
   });
 });
 
-test("coverage actions, authority anchors, and current resolutions are enforced", async () => {
+test("coverage actions, authority anchors, and migration resolutions are enforced", async () => {
   await withFixture(async (root) => {
     const coveragePath = path.join(root, "docs/decisions/AUTHORITY-COVERAGE.md");
     const coverage = await readFile(coveragePath, "utf8");
@@ -279,16 +293,73 @@ test("coverage actions, authority anchors, and current resolutions are enforced"
       coverage.replace("| 是 | Architecture", "| 否 | Architecture").replace("`migrated`", "`replaced`"),
       "utf8"
     );
-    const versionReadmePath = path.join(root, "docs/versions/v1.0/README.md");
-    const versionReadme = await readFile(versionReadmePath, "utf8");
-    await writeFile(versionReadmePath, versionReadme.replace("lifecycle: historical", "lifecycle: current"), "utf8");
-    const decisionPath = path.join(root, "docs/versions/v1.0/decisions.md");
-    const decision = await readFile(decisionPath, "utf8");
-    await writeFile(decisionPath, decision.replace("lifecycle: historical", "lifecycle: current"), "utf8");
     assert.ok(
       (await validate(root)).diagnostics.some((item) => item.rule === "DECISION_RESOLUTION_MISSING")
     );
   });
+
+  await withFixture(async (root) => {
+    const coveragePath = path.join(root, "docs/decisions/AUTHORITY-COVERAGE.md");
+    const coverage = await readFile(coveragePath, "utf8");
+    await writeFile(coveragePath, coverage.replace("#v1-0-d01", "#adr-0001"), "utf8");
+    assert.ok(
+      (await validate(root)).diagnostics.some((item) => item.rule === "DECISION_RESOLUTION_SOURCE")
+    );
+  });
+});
+
+test("migration resolutions remain valid after their source version becomes historical", async () => {
+  await withFixture(async (root) => {
+    const coveragePath = path.join(root, "docs/decisions/AUTHORITY-COVERAGE.md");
+    const coverage = await readFile(coveragePath, "utf8");
+    await writeFile(
+      coveragePath,
+      coverage.replace("| 是 | Architecture", "| 否 | Architecture").replace("`migrated`", "`replaced`"),
+      "utf8"
+    );
+    const decisionPath = path.join(root, "docs/versions/v1.0/decisions.md");
+    const decision = await readFile(decisionPath, "utf8");
+    await writeFile(
+      decisionPath,
+      decision.replace(
+        "<!-- authority-resolution:begin -->\n\n<!-- authority-resolution:end -->",
+        `<!-- authority-resolution:begin -->
+
+| 原 ADR | 受影响内核 | 裁决 | 理由 |
+| --- | --- | --- | --- |
+| ADR-0001 | Test Decision | \`replaced\` | test |
+
+<!-- authority-resolution:end -->`
+      ),
+      "utf8"
+    );
+    await mkdir(path.join(root, "docs/versions/v1.1"), { recursive: true });
+    await writeFile(
+      path.join(root, "docs/versions/v1.1/README.md"),
+      `---
+document_type: version-overview
+version: v1.1
+lifecycle: current
+---
+
+# v1.1
+`,
+      "utf8"
+    );
+
+    assert.deepEqual((await validate(root)).diagnostics, []);
+  });
+});
+
+test("documentation workflow checks both PRs and main pushes without legacy generation", async () => {
+  const workflow = await readFile(
+    path.join(repositoryRoot, ".github/workflows/docs-governance.yml"),
+    "utf8"
+  );
+  assert.doesNotMatch(workflow, /docs:adr:generate/);
+  assert.ok(workflow.includes("DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}"));
+  assert.ok(workflow.includes("DOCS_BASE_REF: ${{ github.event.before }}"));
+  assert.equal(workflow.match(/run: pnpm docs:check:ci/g)?.length, 2);
 });
 
 test("numbered ADR files and unmanifested ADR headings are rejected", async () => {

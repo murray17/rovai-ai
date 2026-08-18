@@ -212,7 +212,7 @@ model。显式模型在真实 Runtime Session/Host 建立后必须对当前实�
 - 覆盖表不再把“文件仍 accepted”误当成“其中每个旧条款仍当前有效”。
 - `replaced` 只否定旧内核，不否定其未被改变的相邻约束；最终实现只读取覆盖表指向的当前权威。
 - `retired` 仅用于已经完成的一次性迁移步骤；没有产品决定因“代码里暂时找不到”而被静默废止。
-- Checker 必须校验处理方式与当前有效标志一致、目标锚点真实存在，并要求每个 `replaced/retired` ADR 在当前版本裁决表中出现。
+- Checker 必须校验处理方式与当前有效标志一致、目标锚点真实存在，并要求每个 `replaced/retired` ADR 在权威覆盖 Front Matter 固定的一次性迁移裁决来源中出现；版本冻结后该来源不随 `current_version` 移动。
 
 ### 被拒绝方案
 

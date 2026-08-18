@@ -47,5 +47,8 @@ jobs:
           DOCS_BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: pnpm docs:check:ci
 
-      - name: Verify generated ADR history is current
-        run: pnpm docs:adr:generate -- --check
+      - name: Run diff-aware documentation freeze for main push
+        if: github.event_name == 'push'
+        env:
+          DOCS_BASE_REF: ${{ github.event.before }}
+        run: pnpm docs:check:ci
