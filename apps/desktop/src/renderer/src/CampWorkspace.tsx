@@ -329,6 +329,19 @@ export function executionConsoleIsVisible(
     || (inspectorVisible && inspectorSurfaceTab === 'execution')
 }
 
+export function attachmentDropIsBlocked(
+  executionDrawerPresent: boolean,
+  mentionPopoverPresent: boolean,
+  executionPlacement: ExecutionConsolePlacement,
+  inspectorVisible: boolean,
+  inspectorSurfaceTab: CampInspectorSurfaceTab
+): boolean {
+  return mentionPopoverPresent || (
+    executionDrawerPresent
+    && executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab)
+  )
+}
+
 export function agentRunTerminalNote(
   run: Pick<AgentRunView, 'terminalReasonCode'>
 ): string | null {
@@ -2599,7 +2612,13 @@ export function CampWorkspace({
     }, 1_200)
   }
 
-  const attachmentDropBlocked = Boolean(executionDrawerProcess || mentionPopover)
+  const attachmentDropBlocked = attachmentDropIsBlocked(
+    Boolean(executionDrawerProcess),
+    Boolean(mentionPopover),
+    executionPlacement,
+    inspectorVisible,
+    inspectorSurfaceTab
+  )
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)

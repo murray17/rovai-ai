@@ -1022,7 +1022,8 @@ async function seedFixture() {
       rendered_payload_blob_id, rendered_payload_digest, created_at,
       reference_closure_refs_json, omission_entries_json,
       shared_message_evidence_json, shared_message_evidence_digest,
-      run_fact_payload_json
+      run_fact_payload_json, message_projection_audience,
+      a2a_guidance_evidence_json, a2a_guidance_evidence_digest
     ) VALUES (
       'fixture-copilot-manifest', ${sqlLiteral(recoveryBlockedRunId)},
       'fixture-copilot-bootstrap', 1, ${runtimes.length}, 0,
@@ -1038,9 +1039,11 @@ async function seedFixture() {
       0, ${runtimes.length}, 0,
       3, '{"profileVersion":3,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
-      '[]', 18,
+      '[]', 19,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
-      '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}'
+      '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}',
+      'agent_v1', '{"schemaVersion":1,"included":false}',
+      '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92'
     );
     INSERT INTO runtime_input_delivery(
       id, agent_run_id, execution_epoch, context_manifest_id,
@@ -1653,7 +1656,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     'Conversation drop acceptance must begin with the Execution Drawer closed')
 
   const dayDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  await waitForConversationDropLayerPaint(cdp)
   const dayPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
   assertConversationDropPresentation(dayPresentation, 'day 1440x920', 308)
   assert([
@@ -1689,7 +1692,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
 
   await setTheme(cdp, 'night')
   const nightDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  await waitForConversationDropLayerPaint(cdp)
   const nightPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
   assertConversationDropPresentation(nightPresentation, 'night 1440x920', 308)
   const nightDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-night-1440x920.png')
@@ -1708,7 +1711,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
   })
   await waitForExpression(cdp, `innerWidth === 1040 && innerHeight === 700`)
   const compactDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  await waitForConversationDropLayerPaint(cdp)
   const compactPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
   assertConversationDropPresentation(compactPresentation, 'day 1040x700', 280)
   const compactDraggingCapture = join(capturesDirectory, 'conversation-drop-zone-day-1040x700.png')
@@ -1738,6 +1741,23 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     'An open Execution Drawer did not close the underlying drop target')
   await dispatchFileDrag(cdp, 'dragCancel', blockedDrag)
 
+  await evaluate(cdp,
+    `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
+  await waitForExpression(cdp, `(() => {
+    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+    return activeTab?.textContent?.includes('执行')
+      && document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'
+  })()`)
+  await mouseClickSelector(cdp, '.activity-tabs > .tabs-list [role="tab"]:first-child')
+  await waitForExpression(cdp, `(() => {
+    const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
+    return activeTab?.textContent?.includes('任务')
+  })()`)
+  const hiddenDrawerDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`)
+  await dispatchFileDrag(cdp, 'dragCancel', hiddenDrawerDrag)
+  await waitForExpression(cdp, `!document.querySelector('.conversation-drop-layer')`)
+
   const sourcePathLeaked = await evaluate(cdp,
     `document.body.innerText.includes(${JSON.stringify(sourceDirectory)})`)
   assert(!sourcePathLeaked, 'The Renderer exposed the original absolute directory path')
@@ -1747,6 +1767,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
       fullConversationColumnHitTarget: true,
       inspectorAndMenusUnchanged: true,
       executionConsolePresentAndDrawerBlocksDrop: true,
+      hiddenInspectorDrawerDoesNotBlockDrop: true,
       explicitDirectoryReadModel: true,
       directoryPreparedThroughRealElectronDrag: true,
       dayNightAndCompactLayouts: true,
@@ -1791,6 +1812,13 @@ async function beginFileDrag(cdp, sourcePath, selector) {
   return drag
 }
 
+async function waitForConversationDropLayerPaint(cdp) {
+  await waitForExpression(cdp, `(() => {
+    const layer = document.querySelector('.conversation-drop-layer')
+    return Boolean(layer) && getComputedStyle(layer).opacity === '1'
+  })()`)
+}
+
 async function dispatchFileDrag(cdp, type, drag) {
   await cdp.send('Input.dispatchDragEvent', {
     type,
@@ -1803,10 +1831,15 @@ async function dispatchFileDrag(cdp, type, drag) {
 async function collectConversationDropPresentation(cdp, sourceDirectory) {
   return evaluate(cdp, `(() => {
     const grid = document.querySelector('.workspace-grid')?.getBoundingClientRect()
-    const layer = document.querySelector('.conversation-drop-layer')?.getBoundingClientRect()
+    const layerElement = document.querySelector('.conversation-drop-layer')
+    const layer = layerElement?.getBoundingClientRect()
     const callout = document.querySelector('.conversation-drop-callout')?.getBoundingClientRect()
     const inspector = document.querySelector('.activity-pane')?.getBoundingClientRect()
     const runPulse = document.querySelector('.run-pulse')?.getBoundingClientRect()
+    const timeline = document.querySelector('.timeline-pane')?.getBoundingClientRect()
+    const composer = document.querySelector('.composer')
+    const composerRect = composer?.getBoundingClientRect()
+    const composerBox = document.querySelector('.composer-box')?.getBoundingClientRect()
     const destination = document.querySelector('.composer-destination')
     const tabs = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
       .map((tab) => tab.textContent?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim())
@@ -1821,6 +1854,15 @@ async function collectConversationDropPresentation(cdp, sourceDirectory) {
       oldComposerOverlay: Boolean(document.querySelector('.composer-drop-overlay')),
       runPulseVisible: Boolean(runPulse && runPulse.width > 0 && runPulse.height > 0),
       calloutCoversRunPulse: overlap(callout, runPulse),
+      layerSpansTimelineAndComposer: overlap(layer, timeline) && overlap(layer, composerRect),
+      layerCoversComposerBox: Boolean(layer && composerBox
+        && layer.left <= composerBox.left
+        && layer.right >= composerBox.right
+        && layer.top <= composerBox.top
+        && layer.bottom >= composerBox.bottom),
+      layerAboveComposer: Boolean(composer && layerElement
+        && Number.parseInt(getComputedStyle(layerElement).zIndex, 10)
+        > Number.parseInt(getComputedStyle(composer).zIndex, 10)),
       layerInsideGrid: Boolean(grid && layer
         && layer.left >= grid.left + 6
         && layer.top >= grid.top + 6
@@ -1843,6 +1885,9 @@ function assertConversationDropPresentation(presentation, context, expectedCallo
     && !presentation.oldComposerOverlay
     && presentation.runPulseVisible
     && !presentation.calloutCoversRunPulse
+    && presentation.layerSpansTimelineAndComposer
+    && presentation.layerCoversComposerBox
+    && presentation.layerAboveComposer
     && presentation.layerInsideGrid
     && presentation.inspectorExcluded
     && Math.abs(presentation.calloutWidth - expectedCalloutWidth) <= 1
