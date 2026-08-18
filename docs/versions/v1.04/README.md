@@ -12,7 +12,7 @@ last_updated: 2026-08-18
 # Rovai-ai v1.04：TRAE Cold Resume 与历史重放隔离
 
 > 当前状态：[ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)与
-> [Runtime Launch and Verification v6](../../contracts/runtime-launch-and-verification-v6.md)已经接受；实现与
+> [Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)已经接受；实现与
 > 验收已按[计划](implementation-plan.md)完成。
 >
 > 前置版本：[v1.03 TRAE 轻检与显式可用性验证](../v1.03/README.md)
@@ -28,6 +28,7 @@ last_updated: 2026-08-18
 - Provider Resume 不合格时启用 TRAE `HistoryRestore`，在当前 prompt 前执行 `session/load`；
 - `LoadingReplay` 隔离历史 assistant/tool/approval/usage/server request 与异常诊断；
 - replay 设置 4096 event、8 MiB、30 秒三类独立上限；
+- restore response 只接受省略或等于原始目标的 Session ID，不同 ID fail closed 且不得换绑；
 - 冻结 executable、workspace、模型、权限、Host config 等 Session compatibility；
 - 失败持久记录 continuity lost，停止失败 Host、轮换 Binding 并从 `session/new` 继续当前请求；
 - 保持同 Host warm reuse、当前 Run tool/approval/cancel 和 Camp/Conversation route fence。
@@ -56,7 +57,7 @@ last_updated: 2026-08-18
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.03 冻结为 historical；本概览、计划和索引建立唯一 current v1.04。 |
 | ADR | 已更新 | ADR-0209 冻结 exact-ID Provider Probe、HistoryRestore quarantine 与 fail-closed fallback。 |
-| Contracts | 已更新 | Runtime Launch and Verification v6 成为当前 continuation、预算、兼容性和失败语义入口。 |
+| Contracts | 已更新 | Runtime Launch and Verification v7 成为当前 continuation、exact-ID response、预算、兼容性和失败语义入口。 |
 | Architecture | 已更新 | Runtime Catalog Boundaries 与 Built-in Tool Runtime 记录 TRAE cold Host 的受控 HistoryRestore。 |
 | UI | 确认无需更新 | 恢复发生在 Runtime 控制面，不新增 Renderer 状态、动作或展示合同。 |
 | Runtime Activity | 确认无需更新 | replay 被隔离且当前 Run 仍使用既有 ACP Activity 映射。 |
@@ -68,5 +69,5 @@ last_updated: 2026-08-18
 
 - [实施与验收计划](implementation-plan.md)
 - [ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)
-- [Runtime Launch and Verification v6](../../contracts/runtime-launch-and-verification-v6.md)
+- [Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)
 - [TRAE ACP Probe](../../research/trae-cli-runtime/probe/README.md)

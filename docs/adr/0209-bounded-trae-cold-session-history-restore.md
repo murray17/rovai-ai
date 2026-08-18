@@ -67,6 +67,6 @@ Structured Skill、Prompt response-only ACK 和其他 Runtime continuation 决�
 ## References
 
 - [v1.04 version scope](../versions/v1.04/README.md)
-- [Runtime Launch and Verification v6](../contracts/runtime-launch-and-verification-v6.md)
+- [Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)
 - [TRAE ACP Probe](../research/trae-cli-runtime/probe/README.md)
 - [ADR-0203](0203-structured-current-input-skill-links.md)

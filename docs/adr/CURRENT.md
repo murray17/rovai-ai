@@ -112,7 +112,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
 - **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Runtime Launch and Verification v6](../contracts/runtime-launch-and-verification-v6.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
+- **当前合同：** [Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |

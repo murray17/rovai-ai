@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 ## 计划状态与使用方式
 
 本计划实现 [ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)与
-[Runtime Launch and Verification v6](../../contracts/runtime-launch-and-verification-v6.md)。Rust 测试遵守
+[Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)。Rust 测试遵守
 [准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)，真实 Runtime 遵守
 [本地 Runtime 工作流](../../development/local-workflow.md)。
 
@@ -30,6 +30,13 @@ last_updated: 2026-08-18
 - [x] 兼容性 key 覆盖 executable、workspace、模型、权限和 Host 配置；
 - [x] 失败记录 continuity lost、停止旧 Host、轮换 Binding 并建立新 Session。
 
+## Checkpoint 1.1：exact-ID response 缺陷修正
+
+- [x] restore response 省略 `sessionId` 或返回原始 ID 时继续使用原始 exact ID；
+- [x] restore response 返回不同 ID 时标记 Host protocol-violated 并进入既有 continuity-lost fallback；
+- [x] 禁止 `unbind old -> bind returned ID`，返回 ID 不进入 known sessions、Runtime 或持久 Native Binding；
+- [x] Runtime Launch and Verification v7 替代 v6 的旧 response 换绑语义。
+
 ## Checkpoint 2：验收
 
 - [x] 单元/协议测试覆盖 warm reuse、load barrier、历史 tool/approval/usage 隔离和异常拒绝；
@@ -45,6 +52,8 @@ last_updated: 2026-08-18
 - `pnpm smoke:trae-cold-resume` 通过：Core 重启后 Host ID 变化、Native Session ID 不变、私密 marker
   恢复，replay Action/Approval 均为 0；恢复后新工具/Approval 成功，cancel 后目标文件不存在；错误 Session
   ID 换用新 ID 并持久记录一次 continuity lost；
+- `history_restore_protocol_anomalies_fail_closed` 通过：恢复 response 返回不同 ID 时 Host
+  protocol-violated，返回 ID 不进入 route、known sessions、Runtime verification evidence 或持久 Binding；
 - `cargo test --workspace -- --test-threads=2` 通过：Library 227/227、CLI 12/12、Core Main 94/94，另有
   4 个明确 ignored 的手工 Runtime smoke；
 - `cargo fmt --all --check`、`cargo clippy --workspace --all-targets -- -D warnings`、`pnpm typecheck` 与
@@ -59,4 +68,4 @@ last_updated: 2026-08-18
 
 - [v1.04 版本概览](README.md)
 - [ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)
-- [Runtime Launch and Verification v6](../../contracts/runtime-launch-and-verification-v6.md)
+- [Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)

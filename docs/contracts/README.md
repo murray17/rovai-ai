@@ -30,7 +30,8 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [Runtime Launch and Verification v6（当前）](runtime-launch-and-verification-v6.md) | v5 加 TRAE exact-ID Provider Resume Probe、受控 ACP HistoryRestore、replay quarantine、兼容性 fence 与 continuity-lost fallback |
+| [Runtime Launch and Verification v7（当前）](runtime-launch-and-verification-v7.md) | v6 加恢复 response exact-ID 校验；不同 ID 使 Host protocol-violated 并进入 continuity-lost fallback，禁止换绑返回 ID |
+| [Runtime Launch and Verification v6（历史）](runtime-launch-and-verification-v6.md) | v5 加 TRAE exact-ID Provider Resume Probe、受控 ACP HistoryRestore、replay quarantine、兼容性 fence 与 continuity-lost fallback；其接受不同 response ID 的语义已由 v7 替代 |
 | [Runtime Launch and Verification v5（历史）](runtime-launch-and-verification-v5.md) | v4 加 TRAE 有界启动轻检、用户授权快速 ACP Session Probe 与 Ready commit fence |
 | [Runtime Launch and Verification v4（历史）](runtime-launch-and-verification-v4.md) | v3 加 TRAE/Kiro 最高权限队员默认、Kiro trust-all Host 映射与 permission schema digest preserve fence |
 | [Runtime Launch and Verification v3（历史）](runtime-launch-and-verification-v3.md) | v2 加 light discovery、显式/首次执行深检、manager-owned attempt、两路并发、generation/fingerprint fence 与统一受限 Probe process owner |

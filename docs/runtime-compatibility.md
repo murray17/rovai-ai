@@ -158,7 +158,7 @@ HistoryRestore、New；load 前 route 为 `LoadingReplay`，成功 response 后�
 assistant/tool/permission/usage/server request 全部静默隔离，并受 4096 event、8 MiB、30 秒限制。
 workspace、模型、权限、Host config 或 executable fingerprint 不兼容时不尝试 load；错误 ID、协议异常或
 超限持久记录 continuity lost、停止 Host、轮换 Binding 并建立新 Session。当前规范入口为
-[Runtime Launch and Verification v6](contracts/runtime-launch-and-verification-v6.md)。
+[Runtime Launch and Verification v7](contracts/runtime-launch-and-verification-v7.md)。
 
 隔离 Core smoke `pnpm smoke:trae-cold-resume` 进一步通过：首个 Host 的工具读取随机私密 marker 后删除
 源文件并重启 Core；新 Host 使用同一 Native Session ID 恢复 marker，Host ID 明确变化，恢复 Run 投影的

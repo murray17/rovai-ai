@@ -17,7 +17,7 @@ last_updated: 2026-08-18
 [ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
 [ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)、
 [ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)及
-[Runtime Launch and Verification v6](../contracts/runtime-launch-and-verification-v6.md)。实测版本和能力只由
+[Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 三层目录

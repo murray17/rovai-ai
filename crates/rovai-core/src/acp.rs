@@ -1583,21 +1583,17 @@ impl AcpRuntime {
                         return Err(error);
                     }
                 };
-                *self.session_result.write().await = Some(result.clone());
-                let session_id = result
-                    .get("sessionId")
-                    .and_then(Value::as_str)
-                    .unwrap_or(existing_session_id)
-                    .to_string();
-                if session_id != existing_session_id {
-                    self.host
-                        .unbind_session(existing_session_id, &self.owner)
-                        .await;
-                    self.host
-                        .bind_session(&session_id, &self.owner, AcpSessionPhase::loading_replay())
-                        .await?;
+                if let Some(returned_session_id) = result.get("sessionId").and_then(Value::as_str)
+                    && returned_session_id != existing_session_id
+                {
+                    let reason = format!(
+                        "ACP {method} returned a different Session ID than the exact restore target"
+                    );
+                    self.host.reject_loading_replay(reason.clone()).await;
+                    bail!(reason);
                 }
-                (session_id, true)
+                *self.session_result.write().await = Some(result);
+                (existing_session_id.to_string(), true)
             }
             AcpSessionContinuation::New => {
                 let result = self
@@ -3813,73 +3809,99 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn history_restore_protocol_anomaly_rejects_the_pending_load() {
-        let root = std::env::temp_dir().join(format!(
-            "rovai-acp-history-restore-protocol-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).unwrap();
-        let executable = root.join("traecli");
-        make_executable(
-            &executable,
-            r#"#!/bin/sh
+    async fn history_restore_protocol_anomalies_fail_closed() {
+        for (case_name, restore_response, expected_error) in [
+            ("invalid-json", "not-json-history", "invalid protocol JSON"),
+            (
+                "different-session-id",
+                r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-other"}}"#,
+                "different Session ID",
+            ),
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "rovai-acp-history-restore-{case_name}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("traecli");
+            let script = r#"#!/bin/sh
 IFS= read -r initialize || exit 1
 printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}'
 IFS= read -r load || exit 1
-printf '%s\n' 'not-json-history'
+printf '%s\n' '__RESTORE_RESPONSE__'
 while IFS= read -r ignored; do :; done
-"#,
-        );
+"#
+            .replace("__RESTORE_RESPONSE__", restore_response);
+            make_executable(&executable, &script);
 
-        let frozen = frozen_trae_runtime(&executable);
-        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
-        let (incoming, mut receiver) = mpsc::unbounded_channel();
-        let host = AcpHost::spawn(
-            &root,
-            &workspace,
-            PermissionSemantics::RuntimeManagedV2,
-            &frozen,
-            incoming,
-            None,
-            CompactionDetectorPolicy::Disabled,
-            true,
-            &BTreeMap::new(),
-            &root.join("private"),
-            None,
-        )
-        .await
-        .unwrap();
-        let runtime = AcpRuntime::from_host(
-            AcpRuntimeOwner {
-                agent_run_id: "agent-run-history-anomaly".to_string(),
-                execution_epoch: 1,
-            },
-            host.clone(),
-            "sha256:compatibility".to_string(),
-            "sha256:mcp".to_string(),
-            root.clone(),
-            None,
-            "runtime_managed".to_string(),
-        );
-        let error = runtime
-            .start_or_resume_session(
-                Some("session-old"),
-                AcpSessionCapabilities {
-                    can_resume: false,
-                    can_load_history: true,
-                },
-                TRAE_RUNTIME_DEFAULT_MODEL_ID,
-                &json!({}),
+            let frozen = frozen_trae_runtime(&executable);
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                None,
+                CompactionDetectorPolicy::Disabled,
+                true,
                 &BTreeMap::new(),
+                &root.join("private"),
+                None,
             )
             .await
-            .unwrap_err();
-        assert!(format!("{error:#}").contains("invalid protocol JSON"));
-        assert!(host.protocol_violated.load(Ordering::Acquire));
-        assert!(receiver.try_recv().is_err());
-        assert!(runtime.session_id().await.is_none());
-        host.shutdown().await;
-        std::fs::remove_dir_all(root).unwrap();
+            .unwrap();
+            let runtime = AcpRuntime::from_host(
+                AcpRuntimeOwner {
+                    agent_run_id: format!("agent-run-history-anomaly-{case_name}"),
+                    execution_epoch: 1,
+                },
+                host.clone(),
+                "sha256:compatibility".to_string(),
+                "sha256:mcp".to_string(),
+                root.clone(),
+                None,
+                "runtime_managed".to_string(),
+            );
+            let error = runtime
+                .start_or_resume_session(
+                    Some("session-old"),
+                    AcpSessionCapabilities {
+                        can_resume: false,
+                        can_load_history: true,
+                    },
+                    TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                    &json!({}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                format!("{error:#}").contains(expected_error),
+                "unexpected {case_name} error: {error:#}"
+            );
+            assert!(host.protocol_violated.load(Ordering::Acquire));
+            assert!(receiver.try_recv().is_err());
+            assert!(runtime.session_id().await.is_none());
+            assert!(runtime.verification_evidence().await.is_none());
+            assert!(!host.knows_session("session-old").await);
+            assert!(!host.knows_session("session-other").await);
+            {
+                let routes = host.routes.read().await;
+                assert!(!routes.contains_key("session-other"));
+                assert!(routes.keys().all(|session_id| session_id == "session-old"));
+                if case_name == "different-session-id" {
+                    assert!(matches!(
+                        routes.get("session-old").map(|route| &route.phase),
+                        Some(AcpSessionPhase::ProtocolViolated { .. })
+                    ));
+                }
+            }
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     #[tokio::test]
