@@ -23,6 +23,8 @@
     "skills:test": "node --test scripts/lib/skill-authoring.test.mjs",
     "core:build": "node scripts/build-core.mjs --release",
     "core:build:debug": "node scripts/build-core.mjs",
+    "core:build:macos:arm64": "node scripts/build-core.mjs --release --target-key macos-arm64",
+    "core:build:macos:x64": "node scripts/build-core.mjs --release --target-key macos-x64",
     "check:rust": "cargo check --workspace --all-targets",
     "test:rust:lib": "cargo test -p rovai-core --lib",
     "test:rust:cli": "cargo test -p rovai-core --bin rovai",
@@ -32,8 +34,10 @@
     "dev": "pnpm core:build:debug && node scripts/dev-desktop.mjs",
     "build:desktop": "electron-vite build",
     "build": "pnpm core:build && pnpm build:desktop",
+    "build:macos:arm64": "pnpm core:build:macos:arm64 && pnpm build:desktop",
+    "build:macos:x64": "pnpm core:build:macos:x64 && pnpm build:desktop",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm docs:test && pnpm docs:check && pnpm skills:test && pnpm skills:check && vitest run && node --test scripts/lib/check-rust-staged.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs",
+    "test": "pnpm docs:test && pnpm docs:check && pnpm skills:test && pnpm skills:check && vitest run && node --test scripts/lib/check-rust-staged.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/sidecar-targets.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs",
     "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
     "smoke:member-config": "pnpm core:build:debug && node scripts/smoke-member-config.mjs",
     "smoke:intake": "pnpm core:build:debug && node scripts/smoke-intake.mjs",
@@ -93,10 +97,10 @@
     "smoke:missing-send-recovery": "pnpm core:build:debug && node scripts/smoke-missing-send-recovery.mjs",
     "experiment:p1:copilot-native-turn": "node scripts/experiment-copilot-native-turn-reconciliation.mjs",
     "test:p1:copilot-native-turn-evidence": "node --test scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs",
-    "package:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=-",
-    "dist:mac": "pnpm build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 -c.mac.identity=-",
-    "dist:mac:release:arm64": "pnpm build && electron-builder --mac dmg --arm64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
-    "dist:mac:release:x64": "pnpm build && electron-builder --mac dmg --x64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true"
+    "package:mac": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=-",
+    "dist:mac": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 -c.mac.identity=-",
+    "dist:mac:release:arm64": "pnpm build:macos:arm64 && electron-builder --mac dmg --arm64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
+    "dist:mac:release:x64": "pnpm build:macos:x64 && electron-builder --mac dmg --x64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.19",
@@ -135,19 +139,19 @@
       "out/**/*",
       "package.json"
     ],
-    "extraResources": [
-      {
-        "from": "resources/bin/rovai-core",
-        "to": "bin/rovai-core"
-      },
-      {
-        "from": "resources/bin/rovai",
-        "to": "bin/rovai"
-      }
-    ],
     "afterPack": "scripts/after-pack.cjs",
     "mac": {
       "icon": "build/icon.png",
+      "extraResources": [
+        {
+          "from": "resources/bin/macos-${arch}/rovai-core",
+          "to": "bin/rovai-core"
+        },
+        {
+          "from": "resources/bin/macos-${arch}/rovai",
+          "to": "bin/rovai"
+        }
+      ],
       "binaries": [
         "Contents/Resources/bin/rovai-core",
         "Contents/Resources/bin/rovai"
@@ -167,6 +171,19 @@
       "target": [
         "dir",
         "dmg"
+      ],
+      "artifactName": "Rovai-ai-${version}-${arch}.${ext}"
+    },
+    "win": {
+      "extraResources": [
+        {
+          "from": "resources/bin/windows-x64/rovai-core.exe",
+          "to": "bin/rovai-core.exe"
+        },
+        {
+          "from": "resources/bin/windows-x64/rovai.exe",
+          "to": "bin/rovai.exe"
+        }
       ],
       "artifactName": "Rovai-ai-${version}-${arch}.${ext}"
     },

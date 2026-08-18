@@ -11,7 +11,13 @@ vi.mock('electron', () => ({
   }
 }))
 
-import { CoreClient, coreLaunchArguments, desktopSkillLibraryRoot } from './core-client'
+import {
+  CoreClient,
+  coreLaunchArguments,
+  desktopSkillLibraryRoot,
+  sidecarExecutableName,
+  sidecarTargetKey
+} from './core-client'
 
 const temporaryRoots: string[] = []
 
@@ -24,6 +30,15 @@ afterEach(() => {
 })
 
 describe('CoreClient planned shutdown', () => {
+  it('uses one closed target key and the native executable suffix', () => {
+    expect(sidecarTargetKey('darwin', 'arm64')).toBe('macos-arm64')
+    expect(sidecarTargetKey('darwin', 'x64')).toBe('macos-x64')
+    expect(sidecarTargetKey('win32', 'x64')).toBe('windows-x64')
+    expect(() => sidecarTargetKey('win32', 'arm64')).toThrow('Unsupported Rovai sidecar host')
+    expect(sidecarExecutableName('rovai-core', 'darwin')).toBe('rovai-core')
+    expect(sidecarExecutableName('rovai-core', 'win32')).toBe('rovai-core.exe')
+  })
+
   it('passes an isolated Skill Library root to Core', () => {
     expect(desktopSkillLibraryRoot('/tmp/rovai-accept/user-data', true)).toBe(
       '/tmp/rovai-accept/user-data/managed-skill-library'

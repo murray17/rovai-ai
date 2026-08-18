@@ -6,7 +6,7 @@ const packageMetadata = JSON.parse(readFileSync(
   'utf8'
 ))
 
-describe('macOS package metadata', () => {
+describe('desktop package metadata', () => {
   it('keeps the visible brand separate from Electron helper bundle identity', () => {
     expect(packageMetadata.productName).toBe('Rovai-ai')
     expect(packageMetadata.build.mac.extendInfo.CFBundleDisplayName).toBe('Rovai AI')
@@ -17,9 +17,39 @@ describe('macOS package metadata', () => {
     expect(packageMetadata.scripts).not.toHaveProperty('native:build:macos')
     expect(packageMetadata.scripts.dev).not.toContain('native:build:macos')
     expect(packageMetadata.scripts['build:desktop']).not.toContain('native:build:macos')
-    expect(packageMetadata.build.extraResources.map(({ to }: { to: string }) => to)).toEqual([
+    expect(packageMetadata.build.mac.extraResources.map(({ to }: { to: string }) => to)).toEqual([
       'bin/rovai-core',
       'bin/rovai'
     ])
+  })
+
+  it('packages only sidecars staged for the selected target', () => {
+    expect(packageMetadata.build.mac.extraResources).toEqual([
+      {
+        from: 'resources/bin/macos-${arch}/rovai-core',
+        to: 'bin/rovai-core'
+      },
+      {
+        from: 'resources/bin/macos-${arch}/rovai',
+        to: 'bin/rovai'
+      }
+    ])
+    expect(packageMetadata.build.win.extraResources).toEqual([
+      {
+        from: 'resources/bin/windows-x64/rovai-core.exe',
+        to: 'bin/rovai-core.exe'
+      },
+      {
+        from: 'resources/bin/windows-x64/rovai.exe',
+        to: 'bin/rovai.exe'
+      }
+    ])
+    expect(packageMetadata.build).not.toHaveProperty('extraResources')
+    expect(packageMetadata.scripts['dist:mac:release:arm64']).toContain(
+      'pnpm build:macos:arm64'
+    )
+    expect(packageMetadata.scripts['dist:mac:release:x64']).toContain(
+      'pnpm build:macos:x64'
+    )
   })
 })

@@ -113,7 +113,8 @@ export class CoreClient {
     const coreStartedAt = performance.now()
     console.info('[startup] stage=core_spawn')
     const child = spawn(binary, args, {
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: process.platform === 'win32'
     })
     let readyReported = false
     this.#child = child
@@ -336,15 +337,34 @@ function campOpenTraceId(params: unknown): string | null {
     : null
 }
 
+export function sidecarTargetKey(
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch
+): 'macos-arm64' | 'macos-x64' | 'windows-x64' {
+  if (platform === 'darwin' && arch === 'arm64') return 'macos-arm64'
+  if (platform === 'darwin' && arch === 'x64') return 'macos-x64'
+  if (platform === 'win32' && arch === 'x64') return 'windows-x64'
+  throw new Error(`Unsupported Rovai sidecar host: ${platform}-${arch}`)
+}
+
+export function sidecarExecutableName(
+  binary: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  return platform === 'win32' ? `${binary}.exe` : binary
+}
+
 function resolveCoreBinary(): string {
+  const executable = sidecarExecutableName('rovai-core')
+  const stagedTarget = sidecarTargetKey()
   const candidates = app.isPackaged
-    ? [join(process.resourcesPath, 'bin', 'rovai-core')]
+    ? [join(process.resourcesPath, 'bin', executable)]
     : [
         process.env.ROVAI_CORE_BIN,
         process.env.HORIZONWARD_CORE_BIN,
         process.env.LUMEN_CORE_BIN,
-        join(app.getAppPath(), 'resources', 'bin', 'rovai-core'),
-        join(process.cwd(), 'resources', 'bin', 'rovai-core')
+        join(app.getAppPath(), 'resources', 'bin', stagedTarget, executable),
+        join(process.cwd(), 'resources', 'bin', stagedTarget, executable)
       ]
 
   for (const candidate of candidates) {

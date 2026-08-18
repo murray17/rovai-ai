@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
+import { stagedSidecarPath } from './lib/sidecar-targets.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -859,7 +860,7 @@ async function connectCdp(url) {
 }
 
 function startCore(dataDirectory) {
-  const child = spawn(join(root, 'resources', 'bin', 'rovai-core'), [
+  const child = spawn(stagedSidecarPath(root, 'rovai-core'), [
     '--data-dir',
     dataDirectory,
     '--skill-library-root',
