@@ -182,7 +182,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v6](../contracts/run-process-detail-surface-v6.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v7](../contracts/run-process-detail-surface-v7.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 

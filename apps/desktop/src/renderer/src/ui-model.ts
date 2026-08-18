@@ -77,7 +77,7 @@ export function relativeTimeLabel(iso: string, now: Date = new Date()): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`
 }
 
-export type ActivityStatus = 'running' | 'completed' | 'failed' | 'waiting' | 'recorded'
+export type ActivityStatus = 'running' | 'completed' | 'failed' | 'waiting' | 'stopped' | 'recorded'
 
 export type LiveRuntimeEvent = {
   id: string
@@ -124,6 +124,15 @@ export type GitStatusEntry = {
 export type SemanticStatus = {
   label: string
   tone: 'neutral' | 'info' | 'attention' | 'success' | 'danger'
+}
+
+export function activityStatusForAgentRun(
+  activityStatus: ActivityStatus,
+  agentRunStatus: AgentRunView['status']
+): ActivityStatus {
+  return agentRunStatus === 'cancelled' && activityStatus === 'running'
+    ? 'stopped'
+    : activityStatus
 }
 
 export function agentRunPresentation(
@@ -691,6 +700,7 @@ function canonicalActivityStatus(
   if (!canonical) return fallback
   if (canonical.outcome === 'failed') return 'failed'
   if (canonical.outcome === 'succeeded') return 'completed'
+  if (canonical.outcome === 'cancelled') return 'stopped'
   if (canonical.outcome !== 'unknown') return 'recorded'
   if (canonical.phase === 'started' || canonical.phase === 'progress') return 'running'
   return canonical.phase === 'terminal' ? 'recorded' : fallback

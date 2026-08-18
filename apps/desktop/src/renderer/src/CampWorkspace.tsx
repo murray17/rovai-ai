@@ -32,6 +32,7 @@ import type {
 import { EmptyInline } from './ui-elements'
 import { StructuredMentionComposer } from './StructuredMentionComposer'
 import {
+  activityStatusForAgentRun,
   agentRunPresentation,
   agentRunWaitDetail,
   buildLiveExecutionProgress,
@@ -5672,14 +5673,15 @@ export function RunExecutionDisclosure({
         }
         if (item.kind !== 'tool') return null
         const step = item.step
+        const status = activityStatusForAgentRun(step.status, run.status)
         const fullEvidence = completeEvidence.byToolId.get(step.id)
         const hasDetail = Boolean(step.detail || fullEvidence)
         const summary = (
           <>
-            <ToolCallIcon activityDomain={step.activityDomain} status={step.status} />
+            <ToolCallIcon activityDomain={step.activityDomain} status={status} />
             <span className="tool-call-title">{step.title}</span>
-            <span className={`tool-call-result status-${step.status}`}>
-              {toolCallStatusLabel(step.status)}
+            <span className={`tool-call-result status-${status}`}>
+              {toolCallStatusLabel(status)}
             </span>
             {hasDetail && <span className="tool-call-chevron" aria-hidden="true">⌄</span>}
           </>
@@ -5687,7 +5689,7 @@ export function RunExecutionDisclosure({
         if (!hasDetail) {
           return (
             <div
-              className={`process-action tool-call-summary tool-call-static status-${step.status}`}
+              className={`process-action tool-call-summary tool-call-static status-${status}`}
               key={item.key}
             >
               {summary}
@@ -5695,7 +5697,7 @@ export function RunExecutionDisclosure({
           )
         }
         return (
-          <details className={`process-action tool-call-disclosure status-${step.status}`} key={item.key}>
+          <details className={`process-action tool-call-disclosure status-${status}`} key={item.key}>
             <summary className="tool-call-summary">{summary}</summary>
             {step.detail && (
               <ToolCallDetail
@@ -5820,6 +5822,7 @@ function toolCallStatusLabel(status: string): string {
     completed: '已完成',
     failed: '失败',
     waiting: '等待审批',
+    stopped: '已停止',
     recorded: '已记录'
   } as Record<string, string>)[status] ?? status
 }

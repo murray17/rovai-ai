@@ -115,6 +115,7 @@ import {
 import { MemoryLibrary } from './MemoryLibrary'
 import { SafeMarkdown } from './SafeMarkdown'
 import {
+  activityStatusForAgentRun,
   agentRunPresentation,
   agentRunStateTag,
   agentRunWaitDetail,
@@ -3203,6 +3204,25 @@ describe('task event projections', () => {
       kind: 'tool',
       step: { status: 'recorded' }
     })
+  })
+
+  it('projects cancelled activity and unfinished activity in a cancelled run as stopped', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'tool-cancelled', agentRunId: 'run-cancelled', eventType: 'runtime.action',
+      payload: { toolCallId: 'tool-1', status: 'cancelled' },
+      canonical: canonicalActivity('tool-1', {
+        activityDomain: 'shell', phase: 'terminal', outcome: 'cancelled'
+      }),
+      createdAt: '2026-08-18T02:59:19Z'
+    }], 'run-cancelled')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { status: 'stopped' }
+    })
+    expect(activityStatusForAgentRun('running', 'cancelled')).toBe('stopped')
+    expect(activityStatusForAgentRun('completed', 'cancelled')).toBe('completed')
+    expect(activityStatusForAgentRun('running', 'failed')).toBe('running')
   })
 
   it('does not present an ACP protocol kind as Copilot execution detail', () => {
