@@ -65,6 +65,7 @@ try {
       exactCompleteHistoryCount: desktop.exactCount,
       readyQueryEditDoesNotAnnounceNoMatch: desktop.readyQueryEdit,
       unloadedOlderTargetUsesBoundedWindow: desktop.loadedOlderTarget,
+      exactOccurrenceVisibilityInLongMessage: desktop.longMessageOccurrenceVisibility,
       enterAndShiftEnterWrap: desktop.wrapTraversal,
       escapeRestoresFocusAndReadingAnchor: desktop.escapeRestore,
       cssHighlightsAndCurrentMessageRail: desktop.highlightPresentation,
@@ -128,7 +129,12 @@ async function createFixture() {
     } else if (sequence === 3) {
       body = 'Orbit-Needle at the beginning of unloaded history.'
     } else if (sequence === 33) {
-      body = 'Middle ORBIT-NEEDLE and orbit-needle share one message.'
+      body = [
+        'ORBIT-NEEDLE at the top of one deliberately long message.',
+        ...Array.from({ length: 64 }, (_, index) =>
+          `Long message paragraph ${index + 1} keeps the two exact occurrences far apart.`),
+        'Final orbit-needle at the bottom of the same long message.'
+      ].join('\n\n')
     } else if (sequence === 64) {
       body = 'Final orbit-needle near the current reading position.'
     }
@@ -193,7 +199,19 @@ async function verifyConversationFind(cdp, fixture, context, screenshotPath) {
   assert(older.passiveHighlight && older.currentHighlight && older.currentRail === '1px',
     `Find highlights/current message rail were missing: ${JSON.stringify(older)}`)
 
-  await pressKey(cdp, 'Enter', 'Enter', 13, 8)
+  await pressKey(cdp, 'Enter', 'Enter', 13)
+  await waitForFindResult(cdp, '2 / 4', 'find-message-33')
+  const longMessageFirstOccurrence = await collectCurrentFindVisibility(cdp)
+  assert(longMessageFirstOccurrence.visible,
+    `The first occurrence in a long message was outside the safe viewport: ${JSON.stringify(longMessageFirstOccurrence)}`)
+
+  await pressKey(cdp, 'Enter', 'Enter', 13)
+  await waitForFindResult(cdp, '3 / 4', 'find-message-33')
+  const longMessageLastOccurrence = await collectCurrentFindVisibility(cdp)
+  assert(longMessageLastOccurrence.visible,
+    `The last occurrence in a long message was outside the safe viewport: ${JSON.stringify(longMessageLastOccurrence)}`)
+
+  await pressKey(cdp, 'Enter', 'Enter', 13)
   await waitForFindResult(cdp, '4 / 4', 'find-message-64')
   const layout = await collectFindLayout(cdp)
   assertFindLayout(layout, context)
@@ -237,11 +255,38 @@ async function verifyConversationFind(cdp, fixture, context, screenshotPath) {
     exactCount: initial,
     readyQueryEdit,
     loadedOlderTarget: older,
+    longMessageOccurrenceVisibility: {
+      first: longMessageFirstOccurrence,
+      last: longMessageLastOccurrence
+    },
     wrapTraversal: true,
     escapeRestore: { baseline, restored },
     highlightPresentation: older,
     layout
   }
+}
+
+async function collectCurrentFindVisibility(cdp) {
+  return evaluate(cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    const surface = document.querySelector('.conversation-find-surface')
+    const currentHighlight = CSS.highlights?.get('conversation-find-current')
+    const range = currentHighlight ? [...currentHighlight][0] : null
+    if (!timeline || !surface || !range) return { visible: false, reason: 'missing-target' }
+    const viewport = timeline.getBoundingClientRect()
+    const surfaceBounds = surface.getBoundingClientRect()
+    const target = range.getBoundingClientRect()
+    const safeTop = Math.max(viewport.top, surfaceBounds.bottom + 8)
+    const safeBottom = viewport.bottom - 12
+    return {
+      visible: target.top >= safeTop - 1 && target.bottom <= safeBottom + 1,
+      targetTop: target.top,
+      targetBottom: target.bottom,
+      safeTop,
+      safeBottom,
+      scrollTop: timeline.scrollTop
+    }
+  })()`)
 }
 
 async function verifyReadyQueryEditDoesNotAnnounceNoMatch(cdp) {

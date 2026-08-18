@@ -45,6 +45,7 @@ user/agent 消息正文，精确显示总数并循环定位。未加载的较早
 
 - Core 与 Contract 测试证明精确总数、大小写、Unicode scalar、非重叠、anchor、wrap 与公开正文排除边界；
 - 打包 App 以 65 条消息和 4 个公开正文命中验证完整历史，未加载的较早命中通过有界 around-window 进入时间线；
+- 同一条超长消息的首尾命中均以精确文字 Range 定位到悬浮查找条之外的安全可视区，无需再次手动滚动；
 - `1440×920` Day 与 `1040×700` Night/reduced-motion 均无查找条重叠或横向溢出；
 - 真实键盘验收覆盖 Enter/Shift+Enter、Esc anchor/focus 恢复、地图按钮焦点、地图 `Command+F` 返回会话与非 Camp 页面边界；
 - Impeccable finish review 结论为 `ship`；fresh documenter 确认稳定规则已进入局部 UI、Theme、Contract 与版本文档，根 `DESIGN.md` 无需改变。

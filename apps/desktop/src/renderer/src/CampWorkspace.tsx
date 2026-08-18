@@ -73,6 +73,8 @@ import {
 } from './camp-timeline-position'
 import {
   applyConversationFindHighlights,
+  centeredConversationFindScrollTop,
+  conversationFindCurrentRange,
   nextConversationFindIndex,
   pendingConversationFindStatus
 } from './camp-conversation-find'
@@ -1006,6 +1008,7 @@ export function CampWorkspace({
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
   const conversationFindInputRef = useRef<HTMLInputElement>(null)
   const conversationFindRequestGeneration = useRef(0)
   const conversationFindDebounceTimer = useRef<number | null>(null)
@@ -1551,9 +1554,32 @@ export function CampWorkspace({
         `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
       ) ?? null
       if (!target) throw new Error('命中消息暂时无法显示。')
-      target.scrollIntoView({ block: 'center', behavior: 'auto' })
       const timeline = timelineScrollRef.current
       if (timeline) {
+        const timelineBounds = timeline.getBoundingClientRect()
+        const findSurfaceBounds = conversationFindSurfaceRef.current?.getBoundingClientRect() ?? null
+        const currentRange = conversationFindCurrentRange(
+          timeline,
+          query,
+          selectedMatch.messageId,
+          selectedMatch.occurrenceIndex
+        )
+        const rangeBounds = currentRange?.getBoundingClientRect() ?? null
+        const targetBounds = rangeBounds && rangeBounds.width + rangeBounds.height > 0
+          ? rangeBounds
+          : target.getBoundingClientRect()
+        timeline.scrollTop = centeredConversationFindScrollTop({
+          currentScrollTop: timeline.scrollTop,
+          maximumScrollTop: timeline.scrollHeight - timeline.clientHeight,
+          viewportTop: timelineBounds.top,
+          viewportBottom: timelineBounds.bottom,
+          targetTop: targetBounds.top,
+          targetBottom: targetBounds.bottom,
+          topInset: findSurfaceBounds
+            ? Math.max(0, findSurfaceBounds.bottom - timelineBounds.top + 8)
+            : 0,
+          bottomInset: 12
+        })
         timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(timeline)
         timelineReadingPosition.current = {
           campId,
@@ -2892,7 +2918,7 @@ export function CampWorkspace({
           <div className={`camp-conversation-stage ${conversationFind.open ? 'conversation-find-open' : ''}`.trim()}>
             <div className={`conversation-floating-tools ${conversationFind.open ? 'find-open' : ''}`.trim()}>
               {conversationFind.open && (
-                <div className="conversation-find-surface">
+                <div className="conversation-find-surface" ref={conversationFindSurfaceRef}>
                   <form
                     className="conversation-find-form"
                     role="search"

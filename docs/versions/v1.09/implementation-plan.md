@@ -21,6 +21,7 @@ last_updated: 2026-08-18
 - [x] 地图状态自动切换会话，保持 Draft、Inspector 与执行台状态；
 - [x] 实现 live query、计数、Enter/Shift+Enter、按钮、Esc/关闭与失败重试；
 - [x] 旧命中复用 around-window，查找期间阻止 follow-latest 抢走阅读位置；
+- [x] 前后导航按精确 occurrence 文字 Range 居中，并避开悬浮查找条；
 - [x] 关闭后恢复打开前阅读位置与焦点。
 
 ## Checkpoint 3：视觉与可访问性
@@ -41,7 +42,7 @@ last_updated: 2026-08-18
 
 - `pnpm typecheck`、61 个 Vitest 文件共 409 项测试、`cargo test --workspace`、定向 slow-test、`cargo fmt --check` 与 Clippy 全部通过；
 - 文档版本、ADR diff freeze、ADR HISTORY 和文档测试通过；
-- 打包 App 专项验收覆盖完整历史、旧命中有界加载、循环导航、瞬时播报、Esc 恢复、地图焦点、非 Camp 边界和双尺寸双主题布局；
+- 打包 App 专项验收覆盖完整历史、旧命中有界加载、超长消息首尾 occurrence 可见性、循环导航、瞬时播报、Esc 恢复、地图焦点、非 Camp 边界和双尺寸双主题布局；
 - 仓库总入口 `pnpm test` 唯一失败是 `current-contract-conformance` 引用已经不存在的旧 Rust 测试名；同一失败存在于前置提交 `be0b89cf8786c2d085d4de18fbcc313897976e60`，本版未修改该 benchmark profile 或数据库迁移合同，不把它误记为 v1.09 回归。
 
 ## References

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  centeredConversationFindScrollTop,
   conversationFindRanges,
   nextConversationFindIndex,
   pendingConversationFindStatus
@@ -31,5 +32,29 @@ describe('conversation find helpers', () => {
   it('enters a pending status synchronously when a ready query is edited', () => {
     expect(pendingConversationFindStatus('next query')).toBe('searching')
     expect(pendingConversationFindStatus('   ')).toBe('idle')
+  })
+
+  it('centers the exact occurrence inside the unobstructed find viewport', () => {
+    expect(centeredConversationFindScrollTop({
+      currentScrollTop: 300,
+      maximumScrollTop: 900,
+      viewportTop: 100,
+      viewportBottom: 700,
+      targetTop: 680,
+      targetBottom: 700,
+      topInset: 60,
+      bottomInset: 20
+    })).toBe(570)
+
+    expect(centeredConversationFindScrollTop({
+      currentScrollTop: 300,
+      maximumScrollTop: 900,
+      viewportTop: 100,
+      viewportBottom: 700,
+      targetTop: 110,
+      targetBottom: 130,
+      topInset: 60,
+      bottomInset: 20
+    })).toBe(0)
   })
 })

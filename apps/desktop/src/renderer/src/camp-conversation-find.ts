@@ -3,6 +3,17 @@ export interface ConversationFindRange {
   end: number
 }
 
+export interface ConversationFindScrollMetrics {
+  currentScrollTop: number
+  maximumScrollTop: number
+  viewportTop: number
+  viewportBottom: number
+  targetTop: number
+  targetBottom: number
+  topInset?: number
+  bottomInset?: number
+}
+
 export type PendingConversationFindStatus = 'idle' | 'searching'
 
 const MATCH_HIGHLIGHT_NAME = 'conversation-find-match'
@@ -56,6 +67,21 @@ export function nextConversationFindIndex(
   return (current + direction + totalMatchCount) % totalMatchCount
 }
 
+export function centeredConversationFindScrollTop(
+  metrics: ConversationFindScrollMetrics
+): number {
+  const topInset = Math.max(0, metrics.topInset ?? 0)
+  const bottomInset = Math.max(0, metrics.bottomInset ?? 0)
+  const safeTop = Math.min(metrics.viewportBottom, metrics.viewportTop + topInset)
+  const safeBottom = Math.max(safeTop, metrics.viewportBottom - bottomInset)
+  const safeCenter = safeTop + ((safeBottom - safeTop) / 2)
+  const targetCenter = metrics.targetTop + ((metrics.targetBottom - metrics.targetTop) / 2)
+  return Math.min(
+    Math.max(0, metrics.maximumScrollTop),
+    Math.max(0, metrics.currentScrollTop + targetCenter - safeCenter)
+  )
+}
+
 interface HighlightRegistryLike {
   set(name: string, highlight: unknown): void
   delete(name: string): boolean
@@ -104,6 +130,31 @@ function searchableTextNodes(root: Element): Text[] {
     current = walker.nextNode()
   }
   return nodes
+}
+
+export function conversationFindCurrentRange(
+  timeline: HTMLElement,
+  query: string,
+  currentMessageId: string,
+  currentOccurrenceIndex: number
+): Range | null {
+  const message = timeline.querySelector<HTMLElement>(
+    `.conversation-bubble[data-message-id="${CSS.escape(currentMessageId)}"]`
+  )
+  if (!message || !query || currentOccurrenceIndex < 0) return null
+
+  let messageOccurrenceIndex = 0
+  for (const bodyRoot of message.querySelectorAll<HTMLElement>('.message-bubble, .final-copy')) {
+    const textNodes = searchableTextNodes(bodyRoot)
+    const text = textNodes.map((node) => node.data).join('')
+    for (const match of conversationFindRanges(text, query)) {
+      const range = domRangeForOffsets(textNodes, match.start, match.end)
+      if (!range) continue
+      if (messageOccurrenceIndex === currentOccurrenceIndex) return range
+      messageOccurrenceIndex += 1
+    }
+  }
+  return null
 }
 
 export function applyConversationFindHighlights(
