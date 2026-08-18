@@ -285,7 +285,7 @@ function moduleForSource(relativeSource, modules) {
 }
 
 function fullPlan(reason) {
-  return { route: "full", reason, scripts: ["test:rust:full"] };
+  return { route: "full", reason, scripts: ["test:rust:workspace-default"] };
 }
 
 export function classifyStagedRustChanges({ paths, mainSource, libSource }) {

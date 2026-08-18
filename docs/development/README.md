@@ -55,7 +55,8 @@ pnpm test:rust:staged
 `test:rust:staged` 只读取 Git index 中的 staged 文件。没有 Rust/Cargo 改动时跳过；单一
 Library、`rovai` CLI 或 `rovai-core` Main target 改动时先运行 `cargo check`，再运行对应
 target 测试；Cargo 配置、`src/lib.rs`、多 target、删除/重命名或无法可靠分类的改动自动回退到
-`cargo test --workspace`。详细路由见[测试与 Smoke Test](testing.md#staged-rust-路由)。
+`pnpm test:rust:workspace-default`（default-feature workspace）。详细路由见
+[测试与 Smoke Test](testing.md#staged-rust-路由)。
 
 `pnpm test` 会先运行 `pnpm docs:check`，验证唯一当前版本指针、版本目录 Front Matter
 和版本索引一致，并验证 ADR schema/生命周期/直接替代图、CURRENT/HISTORY、Architecture 索引及
@@ -75,12 +76,14 @@ pnpm docs:adr:generate -- --check
 push / PR 前运行完整 Rust 验证：
 
 ```bash
-pnpm test:rust:full
+pnpm test:rust:pr
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-Rust CI 还会执行 `cargo fmt --all --check`，并在 pull request 时保留完整测试和
-Clippy 覆盖。涉及桌面构建或跨边界改动时继续运行：
+`test:rust:pr` 明确串行执行 fast library、`rovai` CLI 和 slow integration 三个范围。
+`test:rust:workspace-default` 只运行 default-feature workspace；旧 `test:rust:full` 是该范围的
+兼容 alias，不代表 PR 或 all-features 门禁。Rust CI 还会执行 `cargo fmt --all --check` 和 Clippy。
+涉及桌面构建或跨边界改动时继续运行：
 
 ```bash
 pnpm build:desktop

@@ -109,19 +109,27 @@ pnpm docs:adr:generate -- --check
 | 仅 `crates/rovai-core/src/bin/rovai.rs` | `pnpm check:rust`、`pnpm test:rust:cli` |
 | 仅普通 Library 模块 | `pnpm check:rust`、`pnpm test:rust:lib` |
 | 仅 `rovai-core` Main 或其专属模块 | `pnpm check:rust`、`pnpm test:rust:core` |
-| Cargo/Rust 配置、`src/lib.rs`、多 target、删除/重命名、未知 Rust 路径或分类失败 | `pnpm test:rust:full` |
+| Cargo/Rust 配置、`src/lib.rs`、多 target、删除/重命名、未知 Rust 路径或分类失败 | `pnpm test:rust:workspace-default` |
 
 Main 专属模块由 staged `src/main.rs` 声明、但未由 staged `src/lib.rs` 导出的模块动态确定。
 脚本使用 NUL 分隔读取路径以支持空格等合法文件名；Git 读取、模块解析或分类失败都会 fail closed
 到全量测试，不会静默跳过。
+
+`test:rust:workspace-default` 的“workspace”仅指 default features。旧 `test:rust:full` 保留为同一
+范围的兼容 alias，不能据此声称 slow integration、PR gate 或 all-features 已完成。显式范围为：
+
+```bash
+pnpm test:rust:workspace-default
+pnpm test:rust:slow
+pnpm test:rust:pr
+```
 
 ### 完整 PR 验证
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p rovai-core --lib
-cargo test -p rovai-core --features slow-tests --lib slow_tests::
+pnpm test:rust:pr
 ```
 
 `.github/workflows/rust.yml` 在 pull request 时，对 Rust 源码、Cargo 文件和 Rust 构建/lint
