@@ -225,6 +225,9 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).not.toContain('.memory-page-kicker')
     expect(css).toMatch(/\.member-detail-scroll\s*\{[^}]*padding: 30px 26px 48px/)
     expect(css).toMatch(/\.member-detail-header\s*\{[^}]*-webkit-app-region: drag/)
+    expect(css).toMatch(
+      /html\[data-rovai-platform="win32"\] \*,\s*html\[data-rovai-platform="win32"\] \*::before,\s*html\[data-rovai-platform="win32"\] \*::after\s*\{[^}]*-webkit-app-region: no-drag !important;/
+    )
   })
 
   it('uses solid, rule-free headers for the approved Memory, Appearance, and Reminder pages', () => {

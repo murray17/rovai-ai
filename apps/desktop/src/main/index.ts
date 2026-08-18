@@ -49,6 +49,7 @@ import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
 import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
+import { windowChromeOptions } from './window-chrome'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -236,8 +237,6 @@ async function synchronizeCoreProjectAccessFromNavigation(): Promise<void> {
 
 const MIN_WINDOW_WIDTH = 1040
 const MIN_WINDOW_HEIGHT = 700
-const RAIL_BUTTON_INSET_X = 12
-const RAIL_BUTTON_INSET_Y = 14
 
 function createWindow(): void {
   if (!generalPreferences || !restorableLocations) {
@@ -262,11 +261,7 @@ function createWindow(): void {
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: APP_NAME,
-    titleBarStyle: 'hidden',
-    trafficLightPosition: {
-      x: RAIL_BUTTON_INSET_X,
-      y: RAIL_BUTTON_INSET_Y
-    },
+    ...windowChromeOptions(process.platform),
     backgroundColor: themeBackground(theme),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.js'),
