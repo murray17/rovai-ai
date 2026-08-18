@@ -5,6 +5,8 @@ pub(crate) mod private_storage;
 #[cfg(windows)]
 pub(crate) mod windows_security;
 
+pub use private_storage::{WindowsDataRootLayout, prepare_windows_data_root};
+
 /// Closed identity for build targets Rovai can ship.
 ///
 /// This is not host-envelope or Runtime Platform Admission evidence. Callers

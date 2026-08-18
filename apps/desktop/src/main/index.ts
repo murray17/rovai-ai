@@ -14,7 +14,7 @@ import type {
   StartupLocationMode,
   ThemePreference
 } from '@contracts'
-import { CoreClient, desktopSkillLibraryRoot } from './core-client'
+import { CoreClient, desktopSkillLibraryRoot, resolveCoreBinary } from './core-client'
 import {
   isThemePreference,
   nativeThemeSource,
@@ -50,6 +50,11 @@ import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
 import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
 import { windowChromeOptions } from './window-chrome'
+import {
+  bindWindowsDataRootBeforeReady,
+  prepareWindowsDataRoot,
+  resolveWindowsDataRoot
+} from './windows-data-root'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -161,12 +166,35 @@ const allowedMethods = new Set<CoreMethod>([
 const APP_NAME = 'Rovai AI'
 app.setName(APP_NAME)
 const hasExplicitUserDataDirectory = app.commandLine.hasSwitch('user-data-dir')
+let coreDataPath: string
+if (process.platform === 'win32') {
+  const windowsRoot = resolveWindowsDataRoot(
+    hasExplicitUserDataDirectory
+      ? app.commandLine.getSwitchValue('user-data-dir')
+      : null,
+    process.env.LOCALAPPDATA
+  )
+  const layout = prepareWindowsDataRoot(resolveCoreBinary(), windowsRoot)
+  bindWindowsDataRootBeforeReady(app, layout)
+  console.info(
+    `[startup] stage=windows_data_root_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
+  )
+  coreDataPath = layout.core
+} else {
+  const legacyDataPath = legacyUserDataPath(
+    app.getPath('appData'),
+    APP_NAME,
+    hasExplicitUserDataDirectory
+  )
+  if (legacyDataPath) app.setPath('userData', legacyDataPath)
+  coreDataPath = app.getPath('userData')
+}
 const isolatedAcceptanceInstance =
   process.env.ROVAI_ALLOW_ISOLATED_INSTANCE === '1'
   && hasExplicitUserDataDirectory
 const primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
-const core = new CoreClient()
+const core = new CoreClient(coreDataPath)
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
@@ -180,14 +208,7 @@ let navigationPreferences: NavigationPreferencesStore | null = null
 let quitDrainStarted = false
 let quitDrainCompleted = false
 const desktopSessions = new DesktopSessionRegistry()
-
-const legacyDataPath = legacyUserDataPath(
-  app.getPath('appData'),
-  APP_NAME,
-  app.commandLine.hasSwitch('user-data-dir')
-)
-if (legacyDataPath) app.setPath('userData', legacyDataPath)
-const memberAvatars = new MemberAvatarAssetService(app.getPath('userData'))
+const memberAvatars = new MemberAvatarAssetService(coreDataPath)
 
 function removeRetiredLoginItemRegistration(): void {
   if (process.platform !== 'darwin' || !app.isPackaged) return
@@ -351,10 +372,10 @@ if (primaryInstance) void app.whenReady().then(async () => {
     `[startup] stage=electron_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
   )
   removeRetiredLoginItemRegistration()
-  await deleteRetiredManagedDirectory(app.getPath('userData'))
+  await deleteRetiredManagedDirectory(coreDataPath)
   const userDataPath = app.getPath('userData')
-  const hadExistingCoreDatabase = existsSync(join(userDataPath, 'rovai.sqlite'))
-    || existsSync(join(userDataPath, 'lumen.sqlite'))
+  const hadExistingCoreDatabase = existsSync(join(coreDataPath, 'rovai.sqlite'))
+    || existsSync(join(coreDataPath, 'lumen.sqlite'))
   appearanceFilePath = join(userDataPath, 'appearance.json')
   const [
     loadedGeneralPreferences,
@@ -390,8 +411,9 @@ if (primaryInstance) void app.whenReady().then(async () => {
   core.start({
     removedSkillProjectRoots: removedSkillProjectRoots(),
     skillLibraryRoot: desktopSkillLibraryRoot(
-      app.getPath('userData'),
-      hasExplicitUserDataDirectory
+      coreDataPath,
+      hasExplicitUserDataDirectory,
+      process.platform
     ) ?? undefined
   })
 
@@ -670,7 +692,7 @@ ipcMain.handle(
     if (!(input instanceof Uint8Array) || input.byteLength > MAX_COMPOSER_ATTACHMENT_BYTES) {
       throw new Error('附件无效或超过 25 MiB。')
     }
-    const ingressDirectory = join(app.getPath('userData'), 'attachment-ingress')
+    const ingressDirectory = join(coreDataPath, 'attachment-ingress')
     await mkdir(ingressDirectory, { recursive: true, mode: 0o700 })
     await chmod(ingressDirectory, 0o700)
     const temporaryPath = join(ingressDirectory, `${randomUUID()}.tmp`)

@@ -157,6 +157,7 @@ use rovai_core::{
     platform::{
         HostPlatformKey,
         local_ipc::{LocalIpcListener, LocalIpcStream},
+        prepare_windows_data_root,
     },
     read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
@@ -9423,6 +9424,11 @@ fn probe_authentication_status(status: health::AgentRuntimeProbeStatus) -> &'sta
 }
 
 fn main() -> Result<()> {
+    if let Some(root) = parse_windows_data_root_preparation()? {
+        let layout = prepare_windows_data_root(&root)?;
+        println!("{}", serde_json::to_string(&layout)?);
+        return Ok(());
+    }
     let startup_started_at = Instant::now();
     // This snapshot is intentionally captured before Tokio exists. Runtime discovery and every
     // child launch receive it explicitly; Rovai never mutates process-global PATH.
@@ -13956,6 +13962,51 @@ fn parse_data_dir() -> Result<PathBuf> {
     parse_data_dir_from(std::env::args().skip(1))
 }
 
+fn parse_windows_data_root_preparation() -> Result<Option<PathBuf>> {
+    parse_windows_data_root_preparation_from(std::env::args().skip(1))
+}
+
+fn parse_windows_data_root_preparation_from(
+    args: impl IntoIterator<Item = String>,
+) -> Result<Option<PathBuf>> {
+    let mut args = args.into_iter();
+    let mut root = None;
+    let mut has_data_dir = false;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--prepare-windows-data-root" => {
+                let path = args
+                    .next()
+                    .map(PathBuf::from)
+                    .context("--prepare-windows-data-root requires a path")?;
+                if !path.is_absolute()
+                    || path.components().any(|component| {
+                        matches!(
+                            component,
+                            std::path::Component::CurDir | std::path::Component::ParentDir
+                        )
+                    })
+                {
+                    anyhow::bail!(
+                        "--prepare-windows-data-root requires a normalized absolute path"
+                    );
+                }
+                if root.replace(path).is_some() {
+                    anyhow::bail!("--prepare-windows-data-root may be provided only once");
+                }
+            }
+            "--data-dir" => {
+                has_data_dir = true;
+            }
+            _ => {}
+        }
+    }
+    if root.is_some() && has_data_dir {
+        anyhow::bail!("--prepare-windows-data-root and --data-dir are mutually exclusive");
+    }
+    Ok(root)
+}
+
 fn parse_skill_library_root() -> Result<PathBuf> {
     match parse_skill_library_root_from(std::env::args().skip(1))? {
         SkillLibraryRootSelection::Explicit(root) => Ok(root),
@@ -14547,6 +14598,54 @@ mod tests {
                 .unwrap_err()
             )
             .contains("only once")
+        );
+    }
+
+    #[test]
+    fn windows_data_root_preparation_is_explicit_absolute_and_exclusive() {
+        let root = std::env::temp_dir().join("rovai-windows-data-root");
+        assert_eq!(
+            parse_windows_data_root_preparation_from(vec![
+                "--prepare-windows-data-root".to_string(),
+                root.to_string_lossy().into_owned(),
+            ])
+            .unwrap(),
+            Some(root.clone())
+        );
+        assert_eq!(
+            parse_windows_data_root_preparation_from(Vec::new()).unwrap(),
+            None
+        );
+        assert!(
+            parse_windows_data_root_preparation_from(vec![
+                "--prepare-windows-data-root".to_string(),
+                "relative-root".to_string(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("normalized absolute")
+        );
+        assert!(
+            parse_windows_data_root_preparation_from(vec![
+                "--prepare-windows-data-root".to_string(),
+                root.to_string_lossy().into_owned(),
+                "--data-dir".to_string(),
+                root.join("Core").to_string_lossy().into_owned(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("mutually exclusive")
+        );
+        assert!(
+            parse_windows_data_root_preparation_from(vec![
+                "--data-dir".to_string(),
+                root.join("Core").to_string_lossy().into_owned(),
+                "--prepare-windows-data-root".to_string(),
+                root.to_string_lossy().into_owned(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("mutually exclusive")
         );
     }
 

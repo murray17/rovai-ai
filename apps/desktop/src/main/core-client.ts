@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { accessSync, constants } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve, win32 } from 'node:path'
 import { app } from 'electron'
 import type { CoreEvent, CoreMethod } from '@contracts'
 
@@ -41,11 +41,11 @@ export type CoreShutdownResult = {
 }
 
 export function coreLaunchArguments(
-  userDataPath: string,
+  dataDirectory: string,
   skillLibraryRoot: string | null,
   removedSkillProjectRoots: readonly string[]
 ): string[] {
-  const args = ['--data-dir', userDataPath]
+  const args = ['--data-dir', dataDirectory]
   if (skillLibraryRoot) args.push('--skill-library-root', skillLibraryRoot)
   else args.push('--use-default-skill-library')
   for (const executionRoot of removedSkillProjectRoots) {
@@ -55,12 +55,14 @@ export function coreLaunchArguments(
 }
 
 export function desktopSkillLibraryRoot(
-  userDataPath: string,
-  hasExplicitUserDataDirectory: boolean
+  dataDirectory: string,
+  hasExplicitUserDataDirectory: boolean,
+  platform: NodeJS.Platform = process.platform
 ): string | null {
-  return hasExplicitUserDataDirectory
-    ? join(userDataPath, 'managed-skill-library')
-    : null
+  if (!hasExplicitUserDataDirectory && platform !== 'win32') return null
+  return platform === 'win32'
+    ? win32.join(dataDirectory, 'managed-skill-library')
+    : join(dataDirectory, 'managed-skill-library')
 }
 
 type CoreStartOptions = {
@@ -84,6 +86,11 @@ export class CoreClient {
   #shutdownPromise: Promise<CoreShutdownResult> | null = null
   #removedSkillProjectRoots: string[] = []
   #skillLibraryRoot: string | null = null
+  readonly #dataDirectory: string
+
+  constructor(dataDirectory: string = app.getPath('userData')) {
+    this.#dataDirectory = dataDirectory
+  }
 
   setRemovedSkillProjectRoots(executionRoots: string[]): void {
     this.#removedSkillProjectRoots = [...new Set(executionRoots)]
@@ -104,9 +111,8 @@ export class CoreClient {
     }
 
     const binary = resolveCoreBinary()
-    const userDataPath = app.getPath('userData')
     const args = coreLaunchArguments(
-      userDataPath,
+      this.#dataDirectory,
       this.#skillLibraryRoot,
       this.#removedSkillProjectRoots
     )
@@ -354,7 +360,7 @@ export function sidecarExecutableName(
   return platform === 'win32' ? `${binary}.exe` : binary
 }
 
-function resolveCoreBinary(): string {
+export function resolveCoreBinary(): string {
   const executable = sidecarExecutableName('rovai-core')
   const stagedTarget = sidecarTargetKey()
   const candidates = app.isPackaged
@@ -369,13 +375,14 @@ function resolveCoreBinary(): string {
 
   for (const candidate of candidates) {
     if (!candidate) continue
+    const absoluteCandidate = resolve(candidate)
     try {
-      accessSync(candidate, constants.X_OK)
-      return candidate
+      accessSync(absoluteCandidate, constants.X_OK)
+      return absoluteCandidate
     } catch {
       // Try the next known location.
     }
   }
 
-  throw new Error(`Rovai AI Rust Core binary was not found. Checked: ${candidates.filter(Boolean).join(', ')}`)
+  throw new Error(`Rovai AI Rust Core binary was not found. Checked: ${candidates.filter(Boolean).map((candidate) => resolve(candidate as string)).join(', ')}`)
 }

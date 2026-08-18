@@ -44,6 +44,9 @@ describe('CoreClient planned shutdown', () => {
       '/tmp/rovai-accept/user-data/managed-skill-library'
     )
     expect(desktopSkillLibraryRoot('/daily/user-data', false)).toBeNull()
+    expect(desktopSkillLibraryRoot('C:\\Rovai AI\\Core', false, 'win32')).toBe(
+      'C:\\Rovai AI\\Core\\managed-skill-library'
+    )
     expect(coreLaunchArguments(
       '/tmp/rovai-accept/user-data',
       '/tmp/rovai-accept/user-data/managed-skill-library',

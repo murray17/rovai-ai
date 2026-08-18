@@ -4,6 +4,52 @@ use std::{
 };
 
 use anyhow::Result;
+use serde::Serialize;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowsDataRootLayout {
+    pub root: PathBuf,
+    pub core: PathBuf,
+    pub electron_user_data: PathBuf,
+    pub electron_session_data: PathBuf,
+    pub logs: PathBuf,
+    pub crash_dumps: PathBuf,
+}
+
+impl WindowsDataRootLayout {
+    pub fn from_root(root: &Path) -> Result<Self> {
+        if !root.is_absolute()
+            || root.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::CurDir | std::path::Component::ParentDir
+                )
+            })
+        {
+            anyhow::bail!(
+                "windows_storage.host_unsupported: Windows data root must be a normalized absolute path"
+            );
+        }
+        let electron = root.join("Electron");
+        Ok(Self {
+            root: root.to_path_buf(),
+            core: root.join("Core"),
+            electron_user_data: electron.join("User Data"),
+            electron_session_data: electron.join("Session Data"),
+            logs: root.join("Logs"),
+            crash_dumps: root.join("CrashDumps"),
+        })
+    }
+}
+
+/// Creates the complete Windows Desktop data-root layout with native private
+/// directory creation before Electron binds any of the paths.
+pub fn prepare_windows_data_root(root: &Path) -> Result<WindowsDataRootLayout> {
+    let layout = WindowsDataRootLayout::from_root(root)?;
+    prepare_windows_data_root_platform(&layout)?;
+    Ok(layout)
+}
 
 /// Creates or admits a private directory and returns its canonical path.
 ///
@@ -21,6 +67,29 @@ pub(crate) fn prepare_private_directory(path: &Path) -> Result<PathBuf> {
 /// mandatory before the handle is returned.
 pub(crate) fn open_private_read_write_file(path: &Path) -> Result<File> {
     open_private_read_write_file_platform(path)
+}
+
+#[cfg(windows)]
+fn prepare_windows_data_root_platform(layout: &WindowsDataRootLayout) -> Result<()> {
+    prepare_private_directory(&layout.root)?;
+    prepare_private_directory(&layout.core)?;
+    let electron = layout
+        .electron_user_data
+        .parent()
+        .expect("Windows Electron User Data always has an Electron parent");
+    prepare_private_directory(electron)?;
+    prepare_private_directory(&layout.electron_user_data)?;
+    prepare_private_directory(&layout.electron_session_data)?;
+    prepare_private_directory(&layout.logs)?;
+    prepare_private_directory(&layout.crash_dumps)?;
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn prepare_windows_data_root_platform(_layout: &WindowsDataRootLayout) -> Result<()> {
+    anyhow::bail!(
+        "windows_storage.host_unsupported: Windows data-root preparation requires Windows"
+    )
 }
 
 #[cfg(unix)]
@@ -535,4 +604,55 @@ fn prepare_private_directory_platform(_path: &Path) -> Result<PathBuf> {
 #[cfg(not(any(unix, windows)))]
 fn open_private_read_write_file_platform(_path: &Path) -> Result<File> {
     anyhow::bail!("private Rovai storage is unsupported on this platform")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_data_root_layout_has_closed_children() {
+        let root = std::env::temp_dir().join("rovai-windows-layout");
+        let layout = WindowsDataRootLayout::from_root(&root).unwrap();
+        assert_eq!(layout.root, root);
+        assert_eq!(layout.core, root.join("Core"));
+        assert_eq!(
+            layout.electron_user_data,
+            root.join("Electron").join("User Data")
+        );
+        assert_eq!(
+            layout.electron_session_data,
+            root.join("Electron").join("Session Data")
+        );
+        assert_eq!(layout.logs, root.join("Logs"));
+        assert_eq!(layout.crash_dumps, root.join("CrashDumps"));
+    }
+
+    #[test]
+    fn windows_data_root_layout_rejects_relative_or_parent_paths() {
+        assert!(WindowsDataRootLayout::from_root(Path::new("relative-root")).is_err());
+        let parent_path = std::env::temp_dir().join("child").join("..").join("root");
+        assert!(WindowsDataRootLayout::from_root(&parent_path).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_data_root_is_created_as_one_private_closed_layout() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-windows-data-root-{}", uuid::Uuid::new_v4()));
+        let layout = prepare_windows_data_root(&root).unwrap();
+        for directory in [
+            &layout.root,
+            &layout.core,
+            &layout.electron_user_data,
+            &layout.electron_session_data,
+            &layout.logs,
+            &layout.crash_dumps,
+        ] {
+            assert!(directory.is_dir(), "missing {}", directory.display());
+        }
+        let admitted_again = prepare_windows_data_root(&root).unwrap();
+        assert_eq!(admitted_again, layout);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }

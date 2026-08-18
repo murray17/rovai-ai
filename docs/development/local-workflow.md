@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-15
+last_updated: 2026-08-18
 ---
 
 # 本地开发与 App 隔离流程
@@ -25,11 +25,20 @@ last_updated: 2026-08-15
 `userData` 下的 `managed-skill-library/`；只隔离 SQLite、却继续共享日常 Skill Library 不构成完整隔离。
 
 无论通道如何，Core 都只接受显式绝对 `--data-dir`，并要求 Skill Library 选择恰好为以下一种：
-日常 Desktop 显式传入 `--use-default-skill-library`；Desktop 只要显式收到 `--user-data-dir`，以及
-其他开发、Smoke 或验收入口，都必须显式传入绝对 `--skill-library-root`。缺失或同时传入两种选择时，
+日常 macOS Desktop 显式传入 `--use-default-skill-library`；Windows Desktop、显式收到
+`--user-data-dir` 的 Desktop，以及其他开发、Smoke 或验收入口，都必须显式传入绝对
+`--skill-library-root`。缺失或同时传入两种选择时，
 Core 必须在创建、修复或清理 Skill Revision 前失败。Core 会在打开 SQLite 和执行 startup recovery
 之前独占 data-dir 下的 `.rovai-core-instance.lock`；第二个 Core 必须拒绝启动且不得修改数据库。
 该文件会保留供诊断使用，进程退出时释放的是操作系统锁，不要把“删除锁文件”当作并发修复手段。
+
+Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等于 Electron `userData`。Desktop 在
+`app.ready` 前先由 `rovai-core.exe --prepare-windows-data-root <root>` 原生创建并准入完整布局，再把 Core
+绑定到 `<root>\Core`，把 Electron `userData` / `sessionData` 分别绑定到
+`<root>\Electron\User Data` / `<root>\Electron\Session Data`，并将隔离 Skill Library 放在
+`<root>\Core\managed-skill-library`。验收方必须传入一个尚未被普通 `mkdir` 以继承 ACL 创建的目标 root；
+已有但不满足 protected DACL 的未知目录会按合同拒绝，而不是被静默修权后复用。macOS 的现有
+`--user-data-dir` 语义保持不变。
 
 ## AI 必读规则
 
