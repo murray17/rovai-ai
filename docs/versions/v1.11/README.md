@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.11
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -17,6 +17,8 @@ last_updated: 2026-08-19
 >
 > 前置版本：[v1.10 唯一 Camp ID 与安全公开 Runtime 失败](../v1.10/README.md)。v1.10 已完成并冻结为
 > historical。
+>
+> 后续版本：[v1.12 AgentRun 局部停止](../v1.12/README.md)。
 
 ## 版本目标
 

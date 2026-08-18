@@ -20,13 +20,13 @@ use crate::{
     skill_projection::SkillExposureSnapshot,
 };
 
-pub const READ_MODEL_SCHEMA_VERSION: i64 = 30;
+pub const READ_MODEL_SCHEMA_VERSION: i64 = 31;
 pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
-pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 1;
+pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 2;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
@@ -262,6 +262,9 @@ pub struct AgentRunView {
     pub completion_role: String,
     pub status: String,
     pub wait_reason: Option<String>,
+    pub cancel_requested_at: Option<String>,
+    pub cancel_reason_code: Option<String>,
+    pub cancel_acknowledged_at: Option<String>,
     pub terminal_resolution_source: Option<String>,
     pub terminal_reason_code: Option<String>,
     pub failure: Option<RuntimeFailureView>,
@@ -2298,6 +2301,9 @@ fn load_agent_runs(
                agent_run.responsibility_generation, agent_run.purpose,
                agent_run.completion_role,
                agent_run.status, agent_run.wait_reason,
+               agent_run.cancel_requested_at,
+               agent_run.cancel_reason_code,
+               agent_run.cancel_acknowledged_at,
                agent_run.terminal_resolution_source,
                agent_run.terminal_reason_code,
                agent_run.execution_epoch, agent_run.permission_semantics,
@@ -2392,25 +2398,28 @@ fn load_agent_runs(
                 row.get::<_, Option<String>>(10)?,
                 row.get::<_, Option<String>>(11)?,
                 row.get::<_, Option<String>>(12)?,
-                row.get::<_, i64>(13)?,
-                row.get::<_, String>(14)?,
-                row.get::<_, String>(15)?,
+                row.get::<_, Option<String>>(13)?,
+                row.get::<_, Option<String>>(14)?,
+                row.get::<_, Option<String>>(15)?,
                 row.get::<_, i64>(16)?,
-                row.get::<_, Option<String>>(17)?,
-                row.get::<_, Option<String>>(18)?,
+                row.get::<_, String>(17)?,
+                row.get::<_, String>(18)?,
                 row.get::<_, i64>(19)?,
-                row.get::<_, i64>(20)?,
-                row.get::<_, i64>(21)? != 0,
-                row.get::<_, Option<String>>(22)?,
-                row.get::<_, Option<String>>(23)?,
-                row.get::<_, Option<String>>(24)?,
-                row.get::<_, String>(25)?,
-                row.get::<_, i64>(26)?,
-                row.get::<_, String>(27)?,
-                row.get::<_, Option<String>>(28)?,
-                row.get::<_, Option<String>>(29)?,
+                row.get::<_, Option<String>>(20)?,
+                row.get::<_, Option<String>>(21)?,
+                row.get::<_, i64>(22)?,
+                row.get::<_, i64>(23)?,
+                row.get::<_, i64>(24)? != 0,
+                row.get::<_, Option<String>>(25)?,
+                row.get::<_, Option<String>>(26)?,
+                row.get::<_, Option<String>>(27)?,
+                row.get::<_, String>(28)?,
+                row.get::<_, i64>(29)?,
                 row.get::<_, String>(30)?,
                 row.get::<_, Option<String>>(31)?,
+                row.get::<_, Option<String>>(32)?,
+                row.get::<_, String>(33)?,
+                row.get::<_, Option<String>>(34)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2428,6 +2437,9 @@ fn load_agent_runs(
                 completion_role,
                 status,
                 wait_reason,
+                cancel_requested_at,
+                cancel_reason_code,
+                cancel_acknowledged_at,
                 terminal_resolution_source,
                 terminal_reason_code,
                 execution_epoch,
@@ -2462,6 +2474,9 @@ fn load_agent_runs(
                     completion_role,
                     status,
                     wait_reason,
+                    cancel_requested_at,
+                    cancel_reason_code,
+                    cancel_acknowledged_at,
                     terminal_resolution_source,
                     terminal_reason_code,
                     failure: public_runtime_failure_json

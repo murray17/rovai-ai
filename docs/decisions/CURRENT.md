@@ -17,7 +17,7 @@ last_updated: 2026-08-19
 
 ## Camp 与 Workspace
 
-- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Open](../architecture/camp-open-read-path.md)、[First-run](../architecture/first-run-onboarding.md)及相应[当前合同](../contracts/README.md)。
+- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v2](../contracts/camp-open-projection-v2.md)、[First-run](../architecture/first-run-onboarding.md)及相应[当前合同](../contracts/README.md)。
 - 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)。
 
 ## Member identity
@@ -33,7 +33,7 @@ last_updated: 2026-08-19
 ## Runtime execution 与 Security
 
 - 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)、[Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)和[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)。
-- 理由来源：[v0.16](../versions/v0.16/decisions.md)、[v0.17](../versions/v0.17/decisions.md)、[v0.19](../versions/v0.19/decisions.md)、[v0.20](../versions/v0.20/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.64](../versions/v0.64/decisions.md)、[v0.66](../versions/v0.66/decisions.md)、[v1.01](../versions/v1.01/decisions.md)、[v1.03](../versions/v1.03/decisions.md)、[v1.04](../versions/v1.04/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.11](../versions/v1.11/decisions.md)。
+- 理由来源：[v0.16](../versions/v0.16/decisions.md)、[v0.17](../versions/v0.17/decisions.md)、[v0.19](../versions/v0.19/decisions.md)、[v0.20](../versions/v0.20/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.64](../versions/v0.64/decisions.md)、[v0.66](../versions/v0.66/decisions.md)、[v1.01](../versions/v1.01/decisions.md)、[v1.03](../versions/v1.03/decisions.md)、[v1.04](../versions/v1.04/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.11](../versions/v1.11/decisions.md)、[v1.12](../versions/v1.12/decisions.md)。
 
 ## Session、Context 与 Bootstrap
 
@@ -62,8 +62,8 @@ last_updated: 2026-08-19
 
 ## Product 与 Renderer
 
-- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-navigation)、[UI 规范](../ui/README.md)、[Run Process Detail Surface v9](../contracts/run-process-detail-surface-v9.md)。
-- 理由来源：[v0.11](../versions/v0.11/decisions.md)、[v0.24](../versions/v0.24/decisions.md)、[v0.55](../versions/v0.55/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.84](../versions/v0.84/decisions.md)。
+- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-navigation)、[UI 规范](../ui/README.md)、[Run Process Detail Surface v10](../contracts/run-process-detail-surface-v10.md)。
+- 理由来源：[v0.11](../versions/v0.11/decisions.md)、[v0.24](../versions/v0.24/decisions.md)、[v0.55](../versions/v0.55/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.84](../versions/v0.84/decisions.md)、[v1.12](../versions/v1.12/decisions.md)。
 
 ## 文档治理
 

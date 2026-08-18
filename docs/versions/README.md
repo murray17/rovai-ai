@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.11
-last_updated: 2026-08-18
+current_version: v1.12
+last_updated: 2026-08-19
 ---
 
 # Rovai-ai 版本记录
@@ -162,4 +162,5 @@ last_updated: 2026-08-18
 | v1.08 | `historical` | 取消 Run 中未闭合活动的无动画“已停止”投影 | [v1.08/README.md](v1.08/README.md) |
 | v1.09 | `historical` | 完整 Camp 会话查找、Mode-aware Built-in CLI 与完整 Tool 结果交互 | [v1.09/README.md](v1.09/README.md) |
 | v1.10 | `historical` | 唯一 Rovai Camp ID clean break 与 Claude Code/Antigravity 安全公开失败 | [v1.10/README.md](v1.10/README.md) |
-| v1.11 | `current` | Runtime 模型目录 SWR、主动检查终态与真实执行模型校验 | [v1.11/README.md](v1.11/README.md) |
+| v1.11 | `historical` | Runtime 模型目录 SWR、主动检查终态与真实执行模型校验 | [v1.11/README.md](v1.11/README.md) |
+| v1.12 | `current` | User-only AgentRun 局部停止、立即写 fence 与权威状态投影 | [v1.12/README.md](v1.12/README.md) |

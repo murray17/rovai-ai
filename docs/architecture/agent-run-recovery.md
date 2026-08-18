@@ -67,9 +67,11 @@ accepted Runtime Input Delivery = unchanged
 CampTurn = recomputed
 ```
 
-CampTurn Stop 与 Execution Budget 到期经 cancellation coordinator 走相同 Run 终态；Stop 可使 CampTurn
-整体成为 cancelled，预算到期使其成为 failed，但 blocker Run 本身始终保留 outcome unknown。用户若要
-继续，必须检查 Workspace/Git/外部效果现场并发送新的后续任务；Core 不自动创建 successor。
+CampTurn Stop、AgentRun 局部 Stop 与 Execution Budget 到期经同一 cancellation coordinator 走 Run 终态。
+CampTurn Stop 可使整轮成为 cancelled；Run-local Stop 不设置 Turn cancel request，required Run 取消后由
+聚合得到 `failed / required_run_incomplete`，optional Run 不单独阻止完成；预算到期使 Turn 成为 failed。
+`recovery_blocked` 不提供普通 Run Stop，仍只允许既有“结束此运行”把 blocker 收敛为 outcome unknown。
+用户若要继续，必须检查 Workspace/Git/外部效果现场并发送新的后续任务；Core 不自动创建 successor。
 
 ## 5. 证据与观测
 

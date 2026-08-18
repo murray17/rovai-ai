@@ -29,7 +29,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | --- | --- |
 | [Camp Identity v1（当前）](camp-identity-v1.md) | 唯一 `rvcamp_` UUIDv7/Crockford 主键、strict boundary、SQLite/JSON/path 使用与 Native Session identity 分离 |
 | [First-run Onboarding v1（当前）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页持久状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口 |
-| [Camp Open Projection v1（当前）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace |
+| [Camp Open Projection v2（当前）](camp-open-projection-v2.md) | v1 methods/window 不变；AgentRun 独立取消请求事实、Camp Open schema 2 与 Read Model schema 31 |
+| [Camp Open Projection v1（历史）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace；不含 AgentRun 取消请求字段 |
 | [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [Camp Permanent Deletion v1（当前）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界 |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
@@ -129,7 +130,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v9（当前）](run-process-detail-surface-v9.md) | v8 执行过程合同不变；按 origin 显示 Claude Code/Antigravity 安全 failure，覆盖无 Evidence Run 与 Runtime 设置页 |
+| [Run Process Detail Surface v10（当前）](run-process-detail-surface-v10.md) | v9 执行过程合同不变；共享 Drawer 的 User-only AgentRun 局部停止、立即写 fence、权威请求状态与 required/optional 后果 |
+| [Run Process Detail Surface v9（历史）](run-process-detail-surface-v9.md) | v8 执行过程合同不变；按 origin 显示 Claude Code/Antigravity 安全 failure，覆盖无 Evidence Run 与 Runtime 设置页；不含 Run-local Stop |
 | [Run Process Detail Surface v8（历史）](run-process-detail-surface-v8.md) | v7 状态与位置合同不变；完整 Tool chronology、Built-in 公共结果 disclosure、长结果原位复制且无 standalone raw Evidence；不含 Runtime failure 呈现 |
 | [Run Process Detail Surface v7（历史）](run-process-detail-surface-v7.md) | v6 执行台位置合同不变；取消 Run 中仍为 running 或明确 cancelled 的活动使用无动画“已停止”展示，不含完整 chronology 与 Built-in 结果收口 |
 | [Run Process Detail Surface v6（历史）](run-process-detail-surface-v6.md) | v5 诚实终态投影加默认底部、可移入 Inspector 的唯一执行 console 与容器适配；不含取消 Run 的活动停止投影 |

@@ -1155,6 +1155,11 @@ button:disabled { opacity: 0.52; cursor: default; }
 .execution-model-params { min-width: 0; overflow: hidden; color: var(--brand-ink); font: 600 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
 .execution-drawer-header p { overflow: hidden; margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
 .execution-drawer-header .quiet-button { flex: 0 0 auto; }
+.execution-drawer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+.execution-run-stop-state { display: inline-flex; min-height: 28px; align-items: center; padding: 0 4px; font-size: 9.5px; font-weight: 720; white-space: nowrap; }
+.execution-run-stop-state.tone-attention { color: var(--attention); }
+.execution-run-stop-state.tone-neutral { color: var(--muted); }
+.execution-run-stop-button { min-width: 48px; }
 .execution-drawer-body { min-height: 0; overflow: auto; padding: 12px 20px 18px; overscroll-behavior: contain; scroll-behavior: smooth; }
 .execution-process-timeline { position: relative; display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .execution-process-timeline::before { position: absolute; top: 13px; bottom: 17px; left: 6px; width: 1px; background: var(--line-strong); content: ""; }
@@ -1215,6 +1220,8 @@ button:disabled { opacity: 0.52; cursor: default; }
 .execution-drawer-inspector .execution-model-params { max-width: 170px; }
 .execution-drawer-inspector .execution-drawer-header p { font-size: 9px; }
 .execution-drawer-inspector .execution-drawer-header .quiet-button { min-width: 28px; padding: 0 6px; }
+.execution-drawer-inspector .execution-drawer-actions { gap: 4px; }
+.execution-drawer-inspector .execution-run-stop-state { max-width: 112px; min-height: 20px; overflow: hidden; padding: 0; font-size: 8.5px; text-overflow: ellipsis; }
 .execution-drawer-inspector .execution-drawer-body { padding: 10px 10px 17px; }
 .execution-drawer-inspector .execution-process-card { padding: 9px; }
 .execution-drawer-inspector .execution-run-recipients { display: grid; grid-template-columns: auto minmax(0, 1fr); }
@@ -3951,6 +3958,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .dialog-heading h2 { margin: 5px 0 0; font: 700 21px/1.25 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
 .dialog-close { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: var(--surface-muted); cursor: pointer; font-size: 18px; }
 .dialog-content > p { margin: 12px 0 18px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.agent-run-stop-dialog { width: min(520px, calc(100vw - 48px)); border-top-color: var(--danger); }
+.agent-run-stop-fact { display: inline-flex; align-items: center; gap: 7px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; color: var(--faint); background: var(--surface-subtle); font-size: 10px; }
+.agent-run-stop-fact code { color: var(--ink); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
 
 .new-camp-dialog {
   position: fixed;

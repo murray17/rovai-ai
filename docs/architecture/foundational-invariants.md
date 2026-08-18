@@ -127,7 +127,7 @@ last_updated: 2026-08-19
 - Camp 只冻结 workspace binding 和成员关系，Git/Project 是可重观测投影而不是新聚合。新 Camp 不预创建 Conversation 或 Run；精确目标通过最终准入时才惰性创建 Conversation，多目标保持 all-or-none。永久删除默认要求 quiescent，force 只能在用户明确确认和持久停止/隔离边界后执行。
 - Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 membership/permission/fence 检查。失败产生诚实 Run 终态，不撤销已接受消息；ending Git observation 属于终态审计而不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
-- Stop 作用于整个 CampTurn 执行树。Core 先幂等持久取消意图、关闭新后代准入并标记当前 Run，再有界中断 Runtime；Composer 可在意图 accepted 后解锁，但只有可靠 Runtime 终态才能声称已取消，外部效果保持 `settled | unsettled | unknown` 的诚实状态。
+- Composer Stop 作用于整个 CampTurn 执行树；共享 ExecutionDrawer 的 Run Stop 只作用于当前 AgentRun，不写 Turn cancel request、不取消兄弟 Run/Delivery，也不创建公共时间线消息。两者都由 Core 先幂等持久取消意图并立即关闭相应 Run 的新领域写入，再由既有 coordinator 有界中断 Runtime；只有可靠 Runtime 终态才能声称已取消，外部效果保持 `settled | unsettled | unknown` 的诚实状态。
 
 <a id="collaboration-task"></a>
 
@@ -206,7 +206,7 @@ last_updated: 2026-08-19
 ### 恢复、取消与计划关闭
 
 - Runtime accepted input 只有在能证明原 Native Turn 的 identity、接受状态和可重连终态时才能恢复。证据不足进入 `recovery_blocked` 或 continuity-lost，不能重发可能已经产生外部效果的输入。
-- Cancellation 有“已请求”和“Runtime 已终结”两个阶段。发送中断失败、进程失联或超时不能被投影为确定取消；Run、Activity 和 UI 必须保留 unknown/unsettled。
+- Cancellation 有“已请求”和“Runtime 已终结”两个阶段。Run-local 请求提交即 fence 该 Run 的新 Camp/Task/Tool/A2A 写入，但不代表 Runtime 已退出；发送中断失败、进程失联或超时不能被投影为确定取消，Run、Activity 和 UI 必须保留 unknown/unsettled。
 - 计划关闭先持久化 shutdown cycle 和 product execution fence，阻止新 launch/terminal admission，再请求 Runtime 收敛并优先等待可靠终态。达到统一 deadline 后可以停止产品，但不能伪造 Runtime outcome。
 - Diagnostics 是严格只读、最小化数据的 Core view；修复必须是用户显式选择的独立动作。导出集中脱敏，不能把 secret、完整路径、模型输入或 Runtime 原始输出作为便利诊断数据。
 

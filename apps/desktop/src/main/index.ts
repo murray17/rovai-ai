@@ -124,6 +124,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.open',
   'camps.delete',
   'campTurns.cancel',
+  'agentRuns.cancel',
   'agentRuns.resolveRecoveryBlocker',
   'camps.snapshot',
   'camp.messages.page',

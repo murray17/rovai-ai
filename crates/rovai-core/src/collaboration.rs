@@ -3069,6 +3069,7 @@ fn actor_can_write_camp(
           AND conversation.agent_id = ?3
           AND agent_run.execution_epoch = ?4
           AND agent_run.status IN ('running', 'waiting')
+          AND agent_run.cancel_requested_at IS NULL
           AND camp_member.status = 'active'
           AND camp_member.leave_requested_at IS NULL
         "#,
@@ -7633,6 +7634,10 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(lead_created.result.status, CommandResultStatus::Applied);
+        let lead_created_id = lead_created.result.payload["taskId"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         database
             .connection()
@@ -7661,6 +7666,49 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(ordinary_cancel.result.code, "task.update_forbidden");
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp SET default_lead_agent_id = 'agent_1' WHERE id = ?1;
+                "#,
+                [&camp_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET cancel_requested_at = ?2,
+                    cancel_reason_code = 'user_requested_agent_run_stop'
+                WHERE id = ?1
+                "#,
+                params![source_agent_run_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        let fenced_update = service
+            .update_task(
+                &mut database,
+                &agent_envelope(
+                    "cancel-request-fences-lead-task-write",
+                    &camp_id,
+                    "agent_1",
+                    &source_agent_run_id,
+                    1,
+                    UpdateTaskCommand {
+                        task_id: lead_created_id,
+                        expected_version: 1,
+                        title: Some("取消后不得继续写入".to_string()),
+                        ..Default::default()
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            fenced_update.result.code, "task.not_found",
+            "a cancellation request immediately removes the Run's task read/write scope"
+        );
         assert_eq!(
             row_count(&database, "camp_message"),
             task_operation_messages,

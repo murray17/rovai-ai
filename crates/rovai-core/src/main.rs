@@ -159,12 +159,13 @@ use rovai_core::{
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
         AgentRunWorkspace, BindNativeSessionCommand, CampRuntimeCleanupTarget,
-        CancelCampTurnCommand, ClaimAgentRunCommand, ExecutionRuntimeService, FailAgentRunCommand,
-        MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, NativeSessionResumeDisposition,
-        NativeSessionResumeFailure, PermissionSemantics, PlannedShutdownAbortiveTerminal,
-        RebindAgentRunRuntimeCommand, RecordCancelledAgentRunEndingGitObservationCommand,
-        RejectAgentRunDispatchCommand, ResolveAcceptedInputRecoveryBlockerCommand,
-        RestartNativeSessionCommand, SucceedAgentRunCommand,
+        CancelAgentRunCommand, CancelCampTurnCommand, ClaimAgentRunCommand,
+        ExecutionRuntimeService, FailAgentRunCommand, MissingSendRecoveryBoundary,
+        MissingSendRecoveryCandidate, NativeSessionResumeDisposition, NativeSessionResumeFailure,
+        PermissionSemantics, PlannedShutdownAbortiveTerminal, RebindAgentRunRuntimeCommand,
+        RecordCancelledAgentRunEndingGitObservationCommand, RejectAgentRunDispatchCommand,
+        ResolveAcceptedInputRecoveryBlockerCommand, RestartNativeSessionCommand,
+        SucceedAgentRunCommand,
     },
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeLaunchPurpose,
@@ -333,6 +334,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "camp.messages.send"
             | "camp.attachments.prepareFromPath"
             | "campTurns.cancel"
+            | "agentRuns.cancel"
             | "runtime.pendingExecution.cancel"
     )
 }
@@ -4469,6 +4471,22 @@ impl Core {
                 let camp_id = params.command.camp_id.clone();
                 let mut database = self.database.lock().await;
                 let execution = ExecutionRuntimeService::default().request_camp_turn_cancellation(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                let should_notify = execution.result.status == CommandResultStatus::Accepted;
+                drop(database);
+                if should_notify {
+                    self.agent_run_cancellation_notify.notify_one();
+                }
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "agentRuns.cancel" => {
+                let params: UserCommandParams<CancelAgentRunCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = ExecutionRuntimeService::default().request_agent_run_cancellation(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
@@ -15394,6 +15412,7 @@ mod tests {
         ));
         assert!(request_runs_outside_main_queue("camp.messages.send"));
         assert!(request_runs_outside_main_queue("campTurns.cancel"));
+        assert!(request_runs_outside_main_queue("agentRuns.cancel"));
         assert!(request_runs_outside_main_queue(
             "runtime.pendingExecution.cancel"
         ));
