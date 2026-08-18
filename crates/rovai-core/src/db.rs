@@ -15880,7 +15880,7 @@ mod tests {
     fn database_loads_current_migration_state_for_admission() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-smoke-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let state = load_current_migration_state(database.connection())
             .expect("current migration markers should load");
         let (contract, schema): (String, i64) = database
@@ -15903,7 +15903,7 @@ mod tests {
     fn runtime_usage_v92_replaces_legacy_monitoring_without_backfill() {
         let directory =
             std::env::temp_dir().join(format!("rovai-runtime-usage-v92-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16051,7 +16051,7 @@ mod tests {
             "rovai-current-input-skill-v91-test-{}",
             Uuid::new_v4()
         ));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -16213,7 +16213,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v72_backfills_initial_runtime_evidence_without_overwriting_existing_values() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v72-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16277,7 +16277,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v73_removes_expected_output_without_losing_agent_runs() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v73-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16336,7 +16336,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v74_assigns_every_active_skill_to_all_runtime_groups_once() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v74-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16450,7 +16450,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v75_persists_skill_projection_root_access_without_reapplying_it() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v75-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("test database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -16510,7 +16510,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v79_preserves_v78_lineage_and_installs_notification_episodes_once() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v79-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -16639,7 +16639,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v80_adds_durable_controlled_shutdown_cycles() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v80-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -16692,7 +16692,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v81_adds_exact_notification_heads_up_invalidation_facts() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v81-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -16731,7 +16731,7 @@ mod tests {
     #[cfg(feature = "legacy-migration-tests")]
     fn v77_adds_planned_shutdown_terminal_provenance_and_turn_aggregate_reason() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v77-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_at(&directory);
         let migration_applied: i64 = database
             .connection()
             .query_row(
@@ -18350,7 +18350,7 @@ mod tests {
     fn v83_preserves_existing_composer_drafts_and_installs_null_reply_state() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v83-draft-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -18435,7 +18435,7 @@ mod tests {
     #[test]
     fn v84_clean_break_clears_only_memory_domain_state_and_admits_view_evidence() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v84-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -18616,7 +18616,7 @@ mod tests {
     fn v85_preserves_existing_drafts_without_inventing_continuation_routes() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v85-draft-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         database
             .connection()
             .execute_batch(
@@ -18706,7 +18706,7 @@ mod tests {
     fn v86_preserves_runtime_bindings_and_admits_only_the_new_trae_kind() {
         let directory =
             std::env::temp_dir().join(format!("rovai-db-v86-runtime-test-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).expect("database should open");
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
         crate::agent_profile::configure_test_runtime(&database, &["agent_1"]);
         database
             .connection()
@@ -20358,7 +20358,7 @@ mod tests {
     fn current_schema_contains_required_contract_objects() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-schema-test-{}", Uuid::new_v4()));
-        let database = Database::open(&directory).expect("database should open");
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let connection = database.connection();
 
         assert_migrations_applied(connection, &[58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92]);
