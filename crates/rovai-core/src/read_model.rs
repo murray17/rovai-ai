@@ -24,11 +24,13 @@ pub const EVENT_BATCH_SCHEMA_VERSION: i64 = 9;
 pub const NAVIGATION_SCHEMA_VERSION: i64 = 3;
 pub const EXECUTION_EVIDENCE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
+pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 const CAMP_MESSAGE_AROUND_RADIUS: i64 = 20;
+const CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS: usize = 512;
 const CAMP_OPEN_TASK_LIMIT: i64 = 100;
 const CAMP_OPEN_MESSAGE_LIMIT: i64 = 20;
 const CAMP_OPEN_DELIVERY_LIMIT: i64 = 200;
@@ -595,6 +597,28 @@ pub struct CampMessageAroundSnapshot {
     pub messages: Vec<CampMessageView>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CampMessageFindMatch {
+    pub message_id: String,
+    pub message_sequence: i64,
+    pub occurrence_index: i64,
+    pub start_offset: i64,
+    pub end_offset: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CampMessageFindSnapshot {
+    pub schema_version: i64,
+    pub through_global_sequence: i64,
+    pub camp_id: String,
+    pub query: String,
+    pub total_match_count: i64,
+    pub selected_match_index: Option<i64>,
+    pub r#match: Option<CampMessageFindMatch>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageDeliveryView {
@@ -1002,6 +1026,118 @@ impl ReadModelService {
             anchor_message_id: message_id.to_string(),
             source_available: anchor_sequence.is_some(),
             messages,
+        })
+    }
+
+    pub fn camp_messages_find(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        query: &str,
+        selected_match_index: Option<i64>,
+        anchor_message_id: Option<&str>,
+    ) -> Result<CampMessageFindSnapshot> {
+        let query_scalar_count = query.chars().count();
+        if query.trim().is_empty() {
+            anyhow::bail!("Camp Message find query must not be blank");
+        }
+        if query_scalar_count > CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS {
+            anyhow::bail!(
+                "Camp Message find query must not exceed {CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS} Unicode scalars"
+            );
+        }
+
+        let transaction = database.connection_mut().transaction()?;
+        let through_global_sequence = current_global_sequence(&transaction)?;
+        load_camp(&transaction, camp_id)?.context("Camp does not exist")?;
+        let anchor_sequence = match anchor_message_id {
+            Some(message_id) => transaction
+                .query_row(
+                    r#"
+                    SELECT sequence
+                    FROM camp_message
+                    WHERE camp_id = ?1
+                      AND id = ?2
+                      AND tombstoned_at IS NULL
+                    "#,
+                    params![camp_id, message_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?,
+            None => None,
+        };
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id, sequence, structured_content_json
+            FROM camp_message
+            WHERE camp_id = ?1
+              AND tombstoned_at IS NULL
+              AND author_type IN ('user', 'agent')
+            ORDER BY sequence ASC, id ASC
+            "#,
+        )?;
+        let rows = statement
+            .query_map([camp_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        drop(statement);
+
+        let mut matches = Vec::<CampMessageFindMatch>::new();
+        for (message_id, message_sequence, structured_content_json) in rows {
+            let content =
+                serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
+                    .map(normalize_content)
+                    .context("CampMessage Structured Content is invalid")?;
+            let body = render_structured_message_content(&transaction, &content)?;
+            for (occurrence_index, (start_offset, end_offset)) in
+                case_insensitive_scalar_match_ranges(&body, query)
+                    .into_iter()
+                    .enumerate()
+            {
+                matches.push(CampMessageFindMatch {
+                    message_id: message_id.clone(),
+                    message_sequence,
+                    occurrence_index: occurrence_index as i64,
+                    start_offset: start_offset as i64,
+                    end_offset: end_offset as i64,
+                });
+            }
+        }
+
+        let total_match_count = matches.len() as i64;
+        let normalized_selected_index = if total_match_count == 0 {
+            None
+        } else if let Some(index) = selected_match_index {
+            Some(index.rem_euclid(total_match_count))
+        } else {
+            Some(
+                anchor_sequence
+                    .and_then(|sequence| {
+                        matches
+                            .iter()
+                            .position(|candidate| candidate.message_sequence >= sequence)
+                    })
+                    .unwrap_or(0) as i64,
+            )
+        };
+        let selected_match = normalized_selected_index
+            .and_then(|index| matches.get(index as usize))
+            .cloned();
+        transaction.commit()?;
+
+        Ok(CampMessageFindSnapshot {
+            schema_version: CAMP_MESSAGE_FIND_SCHEMA_VERSION,
+            through_global_sequence,
+            camp_id: camp_id.to_string(),
+            query: query.to_string(),
+            total_match_count,
+            selected_match_index: normalized_selected_index,
+            r#match: selected_match,
         })
     }
 
@@ -1875,6 +2011,46 @@ fn render_structured_message_content(
     content: &[crate::camp_content::StructuredCampMessageSegment],
 ) -> Result<String> {
     render_current_plain_text(transaction, content)
+}
+
+fn case_insensitive_scalar_match_ranges(value: &str, query: &str) -> Vec<(usize, usize)> {
+    fn fold_with_source_offsets(value: &str) -> (Vec<char>, Vec<usize>) {
+        let mut folded = Vec::new();
+        let mut source_offsets = Vec::new();
+        for (source_offset, character) in value.chars().enumerate() {
+            for folded_character in character.to_lowercase() {
+                folded.push(folded_character);
+                source_offsets.push(source_offset);
+            }
+        }
+        (folded, source_offsets)
+    }
+
+    let (folded_value, source_offsets) = fold_with_source_offsets(value);
+    let (folded_query, _) = fold_with_source_offsets(query);
+    if folded_query.is_empty() || folded_query.len() > folded_value.len() {
+        return Vec::new();
+    }
+
+    let mut ranges = Vec::<(usize, usize)>::new();
+    let mut folded_offset = 0;
+    while folded_offset + folded_query.len() <= folded_value.len() {
+        if folded_value[folded_offset..folded_offset + folded_query.len()] == folded_query {
+            let start_offset = source_offsets[folded_offset];
+            let end_offset = source_offsets[folded_offset + folded_query.len() - 1] + 1;
+            let does_not_overlap = match ranges.last() {
+                Some((_, previous_end)) => start_offset >= *previous_end,
+                None => true,
+            };
+            if does_not_overlap {
+                ranges.push((start_offset, end_offset));
+            }
+            folded_offset += folded_query.len();
+        } else {
+            folded_offset += 1;
+        }
+    }
+    ranges
 }
 
 fn load_turns(
@@ -2974,6 +3150,27 @@ fn load_events(
     Ok(events)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::case_insensitive_scalar_match_ranges;
+
+    #[test]
+    fn conversation_find_ranges_are_case_insensitive_non_overlapping_unicode_scalars() {
+        assert_eq!(
+            case_insensitive_scalar_match_ranges("A中a İ", "a"),
+            vec![(0, 1), (2, 3)]
+        );
+        assert_eq!(
+            case_insensitive_scalar_match_ranges("İstanbul", "i\u{307}"),
+            vec![(0, 1)]
+        );
+        assert_eq!(
+            case_insensitive_scalar_match_ranges("aaaa", "aa"),
+            vec![(0, 2), (2, 4)]
+        );
+    }
+}
+
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
@@ -3433,6 +3630,176 @@ mod slow_tests {
             .unwrap();
         assert!(!tombstoned.source_available);
         assert!(tombstoned.messages.is_empty());
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn conversation_find_counts_public_body_occurrences_and_selects_a_bounded_target() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-read-model-conversation-find-{}",
+            Uuid::new_v4()
+        ));
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        let collaboration = CollaborationService::default();
+        let created = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "create-conversation-find-camp",
+                    None,
+                    CreateCampCommand::for_test(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                    ),
+                ),
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let transaction = database.connection_mut().transaction().unwrap();
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id, body,
+                        structured_content_json, content_digest, address_mode,
+                        addressed_agent_ids_json, tombstoned_at,
+                        version, created_at, updated_at
+                    ) VALUES (
+                        ?1, ?2, ?3, ?4, ?5, ?6,
+                        ?7, ?8, 'default', '[]', ?9,
+                        1, '2026-08-18T00:00:00Z', '2026-08-18T00:00:00Z'
+                    )
+                    "#,
+                )
+                .unwrap();
+            for (id, sequence, author_type, author_id, body, tombstoned_at) in [
+                (
+                    "find-message-1",
+                    1,
+                    "user",
+                    "local_user",
+                    "Needle one NEEDLE",
+                    None,
+                ),
+                (
+                    "find-message-2",
+                    2,
+                    "system",
+                    "system",
+                    "needle hidden system",
+                    None,
+                ),
+                (
+                    "find-message-3",
+                    3,
+                    "agent",
+                    "agent-test",
+                    "prefix needle suffix",
+                    None,
+                ),
+                (
+                    "find-message-4",
+                    4,
+                    "user",
+                    "local_user",
+                    "attachment only",
+                    None,
+                ),
+                (
+                    "find-message-5",
+                    5,
+                    "user",
+                    "local_user",
+                    "needle late",
+                    None,
+                ),
+                (
+                    "find-message-6",
+                    6,
+                    "user",
+                    "local_user",
+                    "needle tombstoned",
+                    Some("2026-08-18T01:00:00Z"),
+                ),
+            ] {
+                let content = serde_json::to_string(&vec![Segment::Text {
+                    text: body.to_string(),
+                }])
+                .unwrap();
+                statement
+                    .execute(params![
+                        id,
+                        camp_id,
+                        sequence,
+                        author_type,
+                        author_id,
+                        body,
+                        content,
+                        format!("sha256:{id}"),
+                        tombstoned_at,
+                    ])
+                    .unwrap();
+            }
+        }
+        transaction
+            .execute(
+                r#"
+                INSERT INTO message_attachment(
+                    id, camp_id, camp_message_id, conversation_message_id,
+                    position, display_name, media_type, byte_size,
+                    content_digest, storage_path, preview_kind,
+                    created_by_type, created_by_id, created_at
+                ) VALUES (
+                    'find-attachment', ?1, 'find-message-4', NULL,
+                    0, 'needle.txt', 'text/plain', 1,
+                    'sha256:find-attachment', '/tmp/find-attachment', 'none',
+                    'user', 'local_user', '2026-08-18T00:00:00Z'
+                )
+                "#,
+                [camp_id.as_str()],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+
+        let read_model = ReadModelService;
+        let anchored = read_model
+            .camp_messages_find(
+                &mut database,
+                &camp_id,
+                "needle",
+                None,
+                Some("find-message-3"),
+            )
+            .unwrap();
+        assert_eq!(anchored.schema_version, CAMP_MESSAGE_FIND_SCHEMA_VERSION);
+        assert_eq!(anchored.total_match_count, 4);
+        assert_eq!(anchored.selected_match_index, Some(2));
+        assert_eq!(
+            anchored.r#match,
+            Some(CampMessageFindMatch {
+                message_id: "find-message-3".to_string(),
+                message_sequence: 3,
+                occurrence_index: 0,
+                start_offset: 7,
+                end_offset: 13,
+            })
+        );
+
+        let wrapped = read_model
+            .camp_messages_find(&mut database, &camp_id, "NEEDLE", Some(-1), None)
+            .unwrap();
+        assert_eq!(wrapped.selected_match_index, Some(3));
+        assert_eq!(wrapped.r#match.unwrap().message_id, "find-message-5");
+        assert!(
+            read_model
+                .camp_messages_find(&mut database, &camp_id, "  ", None, None)
+                .is_err()
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

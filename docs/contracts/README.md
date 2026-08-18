@@ -36,6 +36,7 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 | --- | --- |
 | [First-run Onboarding v1（当前）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页持久状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口 |
 | [Camp Open Projection v1（当前）](camp-open-projection-v1.md) | Desktop `camps.enter/open/exists`、有界首屏投影、coverage/high-water、earlier message page 与 data-minimized trace |
+| [Camp Conversation Find v1（当前）](camp-conversation-find-v1.md) | Desktop 当前 Camp 公开 user/agent 正文的 exact count、单命中 traversal、Unicode scalar offset 与有界 around-window 定位 |
 | [Camp Permanent Deletion v1（当前）](camp-permanent-deletion-v1.md) | `camps.delete` force 字段、兼容 blocker、单事务物理删除、Runtime cleanup 与 Renderer 确认边界 |
 | [Benchmark Protocol v3（当前）](benchmark-protocol-v3.md) | 版本化 Run 信封、Product/Environment fingerprint、五层 Evidence、Adapter/derived projection、逐轴比较资格与 disclosure |
 | [Semantic Judge Views v1（当前）](semantic-judge-views-v1.md) | Process/Blinded Outcome 双视图、模型可见 evidence allowlist、本地 Evidence ID、双 Replica、逐项 reconciliation 与 Hard Outcome non-interference |

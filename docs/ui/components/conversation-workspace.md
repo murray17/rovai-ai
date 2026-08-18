@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Camp 会话工作区
@@ -79,6 +79,28 @@ Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和�
 或降低次要信息密度，不能遮住 Approval/Recovery Dock、Composer 或执行台。静态模式与 reduced motion
 停止角色移动、路线流光、脉冲和会合动画，但不能停止 Snapshot/Runtime 驱动的真实文字更新，也不能
 关闭无动画的静态闲时文案。
+
+## 当前会话查找
+
+CampWorkspace 挂载时，`Command+F`（macOS）或 `Ctrl+F`（Windows）打开当前 Camp 会话查找。地图
+状态必须先切回既有会话时间线再打开查找；Members、Memory、Settings、Quick Chat 等非 Camp 页面因
+没有挂载 CampWorkspace，不得注册或显示该查找条。用户从会话主动切到地图时，已打开的查找关闭且不
+恢复旧焦点；下一次快捷键仍按上述地图返回路径处理。
+
+查找条与会话/地图切换器组成右上角同一紧凑悬浮工具组，不占 Header 或新增工具栏。输入 180 ms 后查询
+当前 Camp 完整历史的公开 user/agent 正文；exact total、选中序号和目标由
+[Camp Conversation Find v1](../../contracts/camp-conversation-find-v1.md)拥有。附件、Task、Tool output、
+Approval、Inspector、地图文案、系统消息和其他 Camp 不属于结果。屏幕外或尚未加载的目标只通过有界
+around-window 合入时间线，不触发 earlier page 全量加载，也不改变 open coverage。
+
+`Enter` 前进、`Shift+Enter` 后退并在首尾循环；按钮提供同等能力。空查询显示输入提示，无结果显示
+“无匹配”，读取中保留可理解的忙碌状态，失败说明“暂时无法搜索完整会话”并原位提供“重试”。`Esc`
+或关闭按钮撤下高亮，恢复打开前的消息阅读锚点、follow-latest 状态与仍可见焦点；定位期间输入框保持
+焦点，后台消息不能把时间线拉回最新。
+
+所有已挂载公开正文命中使用主题语义高亮，当前 occurrence 使用更强背景与下划线；当前消息另有 1 px
+定位线，不能只靠颜色表达。结果以 `aria-live` 播报，图标按钮有动作名称，reduced motion 关闭浮层进入
+和 spinner 之外的非必要动画。
 
 ## A2A 会话消息
 

@@ -1363,6 +1363,31 @@ export interface CampMessageAroundParams {
   messageId: string
 }
 
+export interface CampMessageFindMatch {
+  messageId: string
+  messageSequence: number
+  occurrenceIndex: number
+  startOffset: number
+  endOffset: number
+}
+
+export interface CampMessageFindSnapshot {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  campId: string
+  query: string
+  totalMatchCount: number
+  selectedMatchIndex: number | null
+  match: CampMessageFindMatch | null
+}
+
+export interface CampMessageFindParams {
+  campId: string
+  query: string
+  selectedMatchIndex?: number | null
+  anchorMessageId?: string | null
+}
+
 interface MessageDeliveryBaseView {
   id: string
   messageId: string
@@ -2279,6 +2304,7 @@ export type CoreMethod =
   | 'camps.snapshot'
   | 'camp.messages.page'
   | 'camp.messages.around'
+  | 'camp.messages.find'
   | 'agentRunEvidence.getContent'
   | 'agentRunEvidence.list'
   | 'tasks.create'
