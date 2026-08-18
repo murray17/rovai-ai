@@ -98,3 +98,9 @@ jobs:
         run: >-
           cargo check --workspace --all-targets
           --target x86_64-pc-windows-msvc
+
+      - name: Exercise Windows managed process ownership
+        run: >-
+          cargo test -p rovai-core --lib
+          --target x86_64-pc-windows-msvc
+          managed_process

@@ -3,13 +3,14 @@ use std::{ffi::OsStr, io, process::ExitStatus, time::Duration};
 use anyhow::{Context, Result, anyhow, bail};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader},
-    process::{ChildStdin, ChildStdout, Command},
+    process::Command,
     task::JoinHandle,
     time::{Instant, timeout, timeout_at},
 };
 
 use crate::managed_process::{
-    ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+    ManagedChildStdin, ManagedChildStdout, ManagedProcess, ManagedProcessLaunchSpec,
+    ManagedProcessPurpose, ManagedStdinPolicy, ManagedWindowsArgvDialect,
 };
 
 pub const DEFAULT_CAPTURE_LIMIT: usize = 64 * 1024;
@@ -93,8 +94,8 @@ pub async fn run_bounded_command(
 
 pub struct RuntimeProbeProcess {
     child: ManagedProcess,
-    stdin: Option<ChildStdin>,
-    stdout: Option<BoundedLineReader<ChildStdout>>,
+    stdin: Option<ManagedChildStdin>,
+    stdout: Option<BoundedLineReader<ManagedChildStdout>>,
     stderr_task: Option<JoinHandle<io::Result<BoundedCapture>>>,
     cleanup_timeout: Duration,
     cleaned: bool,
@@ -128,19 +129,24 @@ impl RuntimeProbeProcess {
         })
     }
 
-    pub fn stdin_mut(&mut self) -> Result<&mut ChildStdin> {
+    pub fn stdin_mut(&mut self) -> Result<&mut ManagedChildStdin> {
         self.stdin
             .as_mut()
             .context("runtime_probe_stdin_unavailable")
     }
 
-    pub fn stdout_mut(&mut self) -> Result<&mut BoundedLineReader<ChildStdout>> {
+    pub fn stdout_mut(&mut self) -> Result<&mut BoundedLineReader<ManagedChildStdout>> {
         self.stdout
             .as_mut()
             .context("runtime_probe_stdout_unavailable")
     }
 
-    pub fn split_io(&mut self) -> Result<(&mut ChildStdin, &mut BoundedLineReader<ChildStdout>)> {
+    pub fn split_io(
+        &mut self,
+    ) -> Result<(
+        &mut ManagedChildStdin,
+        &mut BoundedLineReader<ManagedChildStdout>,
+    )> {
         match (&mut self.stdin, &mut self.stdout) {
             (Some(stdin), Some(stdout)) => Ok((stdin, stdout)),
             _ => bail!("runtime_probe_stdio_unavailable"),
@@ -247,6 +253,7 @@ fn spawn_managed_probe(
         command,
         ManagedProcessPurpose::RuntimeProbe,
         stdin_policy,
+        ManagedWindowsArgvDialect::MicrosoftCrt,
         ownership,
     )?;
     ManagedProcess::spawn(spec).context("runtime_probe_spawn_failed")

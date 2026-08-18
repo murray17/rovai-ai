@@ -22,7 +22,9 @@ use rovai_core::{
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
     managed_process::{
-        ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+        ManagedChildStderr, ManagedChildStdin, ManagedChildStdout, ManagedProcess,
+        ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+        ManagedWindowsArgvDialect,
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
@@ -33,7 +35,7 @@ use rovai_core::{
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{ChildStdin, Command},
+    process::Command,
     sync::{Mutex, RwLock, mpsc, oneshot},
     time::timeout,
 };
@@ -332,7 +334,7 @@ pub(crate) struct AcpHost {
     reported_version: Option<String>,
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
-    stdin: Mutex<ChildStdin>,
+    stdin: Mutex<ManagedChildStdin>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
     next_compaction_observation_sequence: AtomicU64,
@@ -431,6 +433,7 @@ impl AcpHost {
             &command,
             ManagedProcessPurpose::RuntimeHost,
             ManagedStdinPolicy::Piped,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("runtime-host:{}", frozen_runtime.adapter_kind.as_str()),
         )?;
         let mut child = ManagedProcess::spawn(spec).with_context(|| {
@@ -526,7 +529,7 @@ impl AcpHost {
         }
     }
 
-    fn spawn_stdout_reader(host: Arc<Self>, stdout: tokio::process::ChildStdout) {
+    fn spawn_stdout_reader(host: Arc<Self>, stdout: ManagedChildStdout) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             loop {
@@ -756,7 +759,7 @@ impl AcpHost {
         }
     }
 
-    fn spawn_stderr_reader(host: Arc<Self>, stderr: tokio::process::ChildStderr) {
+    fn spawn_stderr_reader(host: Arc<Self>, stderr: ManagedChildStderr) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {

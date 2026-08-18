@@ -22,7 +22,9 @@ use rovai_core::{
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     managed_process::{
-        ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+        ManagedChildStderr, ManagedChildStdin, ManagedChildStdout, ManagedProcess,
+        ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+        ManagedWindowsArgvDialect,
     },
     mcp::McpServerDefinition,
     runtime_discovery::configure_active_runtime_command,
@@ -30,7 +32,7 @@ use rovai_core::{
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{ChildStdin, Command},
+    process::Command,
     sync::{Mutex, RwLock, mpsc, oneshot},
     time::timeout,
 };
@@ -126,7 +128,7 @@ impl CodexRuntimeOwner {
 pub(crate) struct CodexHost {
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
-    stdin: Mutex<ChildStdin>,
+    stdin: Mutex<ManagedChildStdin>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
     routes: RwLock<HashMap<String, CodexThreadRoute>>,
@@ -176,6 +178,7 @@ impl CodexHost {
             &command,
             ManagedProcessPurpose::RuntimeHost,
             ManagedStdinPolicy::Piped,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
             "runtime-host:codex-cli",
         )?;
         let mut child = ManagedProcess::spawn(spec)
@@ -230,7 +233,7 @@ impl CodexHost {
         Ok(host)
     }
 
-    fn spawn_stdout_reader(host: Arc<Self>, stdout: tokio::process::ChildStdout) {
+    fn spawn_stdout_reader(host: Arc<Self>, stdout: ManagedChildStdout) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stdout).lines();
             loop {
@@ -336,7 +339,7 @@ impl CodexHost {
         });
     }
 
-    fn spawn_stderr_reader(host: Arc<Self>, stderr: tokio::process::ChildStderr) {
+    fn spawn_stderr_reader(host: Arc<Self>, stderr: ManagedChildStderr) {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {

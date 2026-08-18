@@ -16,6 +16,7 @@ use rovai_core::{
     agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID,
     managed_process::{
         ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+        ManagedWindowsArgvDialect,
     },
     runtime::{AgentRunWorkspace, PermissionSemantics},
     runtime_discovery::configure_active_runtime_command,
@@ -304,6 +305,7 @@ impl AntigravityAppRuntimeAdapter {
             &command,
             ManagedProcessPurpose::RuntimeOneShot,
             ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("agent-run:{}:antigravity-app", request.agent_run_id),
         )?;
         let mut child = ManagedProcess::spawn(spec)

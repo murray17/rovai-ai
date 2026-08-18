@@ -12,6 +12,7 @@ use rovai_core::{
     agent_runtime_adapter::CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID,
     managed_process::{
         ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+        ManagedWindowsArgvDialect,
     },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
@@ -313,6 +314,7 @@ impl ClaudeCodeCliRuntimeAdapter {
             &command,
             ManagedProcessPurpose::RuntimeOneShot,
             ManagedStdinPolicy::Piped,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("agent-run:{}:claude-code-cli", request.agent_run_id),
         )?;
         let mut child = ManagedProcess::spawn(spec).with_context(|| {
