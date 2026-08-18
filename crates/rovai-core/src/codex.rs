@@ -1,9 +1,6 @@
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
-    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -24,13 +21,16 @@ use rovai_core::{
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
+    managed_process::{
+        ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+    },
     mcp::McpServerDefinition,
     runtime_discovery::configure_active_runtime_command,
 };
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, Command},
+    process::{ChildStdin, Command},
     sync::{Mutex, RwLock, mpsc, oneshot},
     time::timeout,
 };
@@ -125,7 +125,7 @@ impl CodexRuntimeOwner {
 
 pub(crate) struct CodexHost {
     host_instance_id: String,
-    child: Mutex<Child>,
+    child: Mutex<ManagedProcess>,
     stdin: Mutex<ChildStdin>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
@@ -169,29 +169,25 @@ impl CodexHost {
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
         }
-        #[cfg(unix)]
-        command.as_std_mut().process_group(0);
         command
             .args(["app-server", "--listen", "stdio://"])
             .current_dir(cwd);
-        let mut child = command
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeHost,
+            ManagedStdinPolicy::Piped,
+            "runtime-host:codex-cli",
+        )?;
+        let mut child = ManagedProcess::spawn(spec)
             .with_context(|| format!("failed to start {} app-server", codex_path.display()))?;
         let stdin = child
-            .stdin
-            .take()
+            .take_stdin()
             .context("Codex app-server stdin was unavailable")?;
         let stdout = child
-            .stdout
-            .take()
+            .take_stdout()
             .context("Codex app-server stdout was unavailable")?;
         let stderr = child
-            .stderr
-            .take()
+            .take_stderr()
             .context("Codex app-server stderr was unavailable")?;
         let host = Arc::new(Self {
             host_instance_id: uuid::Uuid::new_v4().to_string(),
@@ -473,27 +469,12 @@ impl CodexHost {
     pub(crate) async fn shutdown_and_reap(&self) {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;
-        let pid = child.id();
-        #[cfg(unix)]
-        if let Some(pid) = pid {
-            // Every managed Runtime is its own process-group leader. Stop the
-            // complete tree so MCP and Adapter descendants cannot outlive it.
-            unsafe {
-                libc::killpg(pid as i32, libc::SIGTERM);
-            }
-        }
-        #[cfg(not(unix))]
-        let _ = child.start_kill();
+        let _ = child.request_graceful_termination();
         if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
-            #[cfg(unix)]
-            if let Some(pid) = pid {
-                unsafe {
-                    libc::killpg(pid as i32, libc::SIGKILL);
-                }
-            }
-            let _ = child.kill().await;
+            let _ = child.force_terminate_tree();
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
+        let _ = child.force_terminate_tree();
     }
 
     async fn rpc(&self, method: &str, params: Value) -> Result<Value> {

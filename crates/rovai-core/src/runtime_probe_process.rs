@@ -1,18 +1,15 @@
-use std::{
-    io,
-    process::{ExitStatus, Stdio},
-    time::Duration,
-};
-
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
+use std::{ffi::OsStr, io, process::ExitStatus, time::Duration};
 
 use anyhow::{Context, Result, anyhow, bail};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader},
-    process::{Child, ChildStdin, ChildStdout, Command},
+    process::{ChildStdin, ChildStdout, Command},
     task::JoinHandle,
     time::{Instant, timeout, timeout_at},
+};
+
+use crate::managed_process::{
+    ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
 };
 
 pub const DEFAULT_CAPTURE_LIMIT: usize = 64 * 1024;
@@ -61,17 +58,12 @@ pub async fn run_bounded_command(
     command: &mut Command,
     limits: ProbeCommandLimits,
 ) -> Result<BoundedCommandOutput> {
-    configure_probe_command(command, false);
-    let mut child = command.spawn().context("runtime_probe_spawn_failed")?;
-    let process_group_id = process_group_id(&child);
-    let mut tree_guard = ProcessTreeGuard::new(process_group_id);
+    let mut child = spawn_managed_probe(command, ManagedStdinPolicy::Null)?;
     let stdout = child
-        .stdout
-        .take()
+        .take_stdout()
         .context("runtime_probe_stdout_unavailable")?;
     let stderr = child
-        .stderr
-        .take()
+        .take_stderr()
         .context("runtime_probe_stderr_unavailable")?;
     let mut stdout_task = tokio::spawn(read_bounded(stdout, limits.stdout_bytes));
     let mut stderr_task = tokio::spawn(read_bounded(stderr, limits.stderr_bytes));
@@ -80,8 +72,7 @@ pub async fn run_bounded_command(
     let status = match timeout_at(deadline, child.wait()).await {
         Ok(result) => result.context("runtime_probe_wait_failed")?,
         Err(_) => {
-            terminate_process_tree(&mut child, process_group_id, limits.cleanup_timeout).await;
-            tree_guard.disarm();
+            terminate_process_tree(&mut child, limits.cleanup_timeout).await;
             abort_reader(&mut stdout_task).await;
             abort_reader(&mut stderr_task).await;
             bail!("runtime_probe_timed_out");
@@ -90,8 +81,7 @@ pub async fn run_bounded_command(
 
     // A successful leader can leave descendants holding inherited stdio. Always terminate the
     // probe-owned group before waiting for readers so completion remains bounded.
-    terminate_process_tree(&mut child, process_group_id, limits.cleanup_timeout).await;
-    tree_guard.disarm();
+    terminate_process_tree(&mut child, limits.cleanup_timeout).await;
     let stdout = join_reader(&mut stdout_task, limits.cleanup_timeout, "stdout").await?;
     let stderr = join_reader(&mut stderr_task, limits.cleanup_timeout, "stderr").await?;
     Ok(BoundedCommandOutput {
@@ -102,39 +92,12 @@ pub async fn run_bounded_command(
 }
 
 pub struct RuntimeProbeProcess {
-    child: Child,
-    process_group_id: Option<i32>,
+    child: ManagedProcess,
     stdin: Option<ChildStdin>,
     stdout: Option<BoundedLineReader<ChildStdout>>,
     stderr_task: Option<JoinHandle<io::Result<BoundedCapture>>>,
     cleanup_timeout: Duration,
     cleaned: bool,
-}
-
-struct ProcessTreeGuard {
-    process_group_id: Option<i32>,
-    armed: bool,
-}
-
-impl ProcessTreeGuard {
-    fn new(process_group_id: Option<i32>) -> Self {
-        Self {
-            process_group_id,
-            armed: true,
-        }
-    }
-
-    fn disarm(&mut self) {
-        self.armed = false;
-    }
-}
-
-impl Drop for ProcessTreeGuard {
-    fn drop(&mut self) {
-        if self.armed {
-            kill_process_group(self.process_group_id);
-        }
-    }
 }
 
 impl RuntimeProbeProcess {
@@ -145,24 +108,18 @@ impl RuntimeProbeProcess {
         max_line_bytes: usize,
         cleanup_timeout: Duration,
     ) -> Result<Self> {
-        configure_probe_command(command, true);
-        let mut child = command.spawn().context("runtime_probe_spawn_failed")?;
-        let process_group_id = process_group_id(&child);
+        let mut child = spawn_managed_probe(command, ManagedStdinPolicy::Piped)?;
         let stdin = child
-            .stdin
-            .take()
+            .take_stdin()
             .context("runtime_probe_stdin_unavailable")?;
         let stdout = child
-            .stdout
-            .take()
+            .take_stdout()
             .context("runtime_probe_stdout_unavailable")?;
         let stderr = child
-            .stderr
-            .take()
+            .take_stderr()
             .context("runtime_probe_stderr_unavailable")?;
         Ok(Self {
             child,
-            process_group_id,
             stdin: Some(stdin),
             stdout: Some(BoundedLineReader::new(stdout, stdout_bytes, max_line_bytes)),
             stderr_task: Some(tokio::spawn(read_bounded(stderr, stderr_bytes))),
@@ -193,7 +150,7 @@ impl RuntimeProbeProcess {
     pub async fn finish(mut self) -> Result<BoundedCapture> {
         self.stdin.take();
         self.stdout.take();
-        terminate_process_tree(&mut self.child, self.process_group_id, self.cleanup_timeout).await;
+        terminate_process_tree(&mut self.child, self.cleanup_timeout).await;
         self.cleaned = true;
         let mut stderr_task = self
             .stderr_task
@@ -208,8 +165,7 @@ impl Drop for RuntimeProbeProcess {
         if self.cleaned {
             return;
         }
-        kill_process_group(self.process_group_id);
-        let _ = self.child.start_kill();
+        let _ = self.child.force_terminate_tree();
         if let Some(task) = self.stderr_task.take() {
             task.abort();
         }
@@ -279,45 +235,38 @@ impl<R: AsyncRead + Unpin> BoundedLineReader<R> {
     }
 }
 
-fn configure_probe_command(command: &mut Command, interactive: bool) {
-    command
-        .stdin(if interactive {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    #[cfg(unix)]
-    command.as_std_mut().process_group(0);
+fn spawn_managed_probe(
+    command: &Command,
+    stdin_policy: ManagedStdinPolicy,
+) -> Result<ManagedProcess> {
+    let ownership = format!(
+        "runtime-probe:{}",
+        PathLabel(command.as_std().get_program())
+    );
+    let spec = ManagedProcessLaunchSpec::capture(
+        command,
+        ManagedProcessPurpose::RuntimeProbe,
+        stdin_policy,
+        ownership,
+    )?;
+    ManagedProcess::spawn(spec).context("runtime_probe_spawn_failed")
 }
 
-fn process_group_id(child: &Child) -> Option<i32> {
-    child.id().and_then(|pid| i32::try_from(pid).ok())
-}
-
-fn kill_process_group(process_group_id: Option<i32>) {
-    #[cfg(unix)]
-    if let Some(process_group_id) = process_group_id.filter(|value| *value > 1) {
-        // SAFETY: the ID comes from a child placed in a fresh process group immediately before
-        // spawn. It cannot name Rovai's group or a caller-owned group.
-        unsafe {
-            libc::killpg(process_group_id, libc::SIGKILL);
-        }
-    }
-    #[cfg(not(unix))]
-    let _ = process_group_id;
-}
-
-async fn terminate_process_tree(
-    child: &mut Child,
-    process_group_id: Option<i32>,
-    cleanup_timeout: Duration,
-) {
-    kill_process_group(process_group_id);
-    let _ = child.start_kill();
+async fn terminate_process_tree(child: &mut ManagedProcess, cleanup_timeout: Duration) {
+    let _ = child.force_terminate_tree();
     let _ = timeout(cleanup_timeout, child.wait()).await;
+}
+
+struct PathLabel<'a>(&'a OsStr);
+
+impl std::fmt::Display for PathLabel<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let path = std::path::Path::new(self.0);
+        path.file_name()
+            .unwrap_or(self.0)
+            .to_string_lossy()
+            .fmt(formatter)
+    }
 }
 
 async fn read_bounded<R: AsyncRead + Unpin>(

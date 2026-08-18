@@ -6,7 +6,6 @@ use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
-    process::Stdio,
     sync::Arc,
 };
 
@@ -15,6 +14,9 @@ use anyhow::{Context, Result};
 use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
     agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID,
+    managed_process::{
+        ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+    },
     runtime::{AgentRunWorkspace, PermissionSemantics},
     runtime_discovery::configure_active_runtime_command,
 };
@@ -297,24 +299,23 @@ impl AntigravityAppRuntimeAdapter {
         command.env("GIT_CONFIG_GLOBAL", "/dev/null");
         #[cfg(windows)]
         command.env("GIT_CONFIG_GLOBAL", "NUL");
-        let mut child = command
-            .current_dir(execution_root)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
+        command.current_dir(execution_root);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeOneShot,
+            ManagedStdinPolicy::Null,
+            format!("agent-run:{}:antigravity-app", request.agent_run_id),
+        )?;
+        let mut child = ManagedProcess::spawn(spec)
             .with_context(|| format!("failed to start {} in print mode", executable.display()))?;
         if let Some(handoff) = launch_handoff {
             let _ = handoff.send(());
         }
         let stdout = child
-            .stdout
-            .take()
+            .take_stdout()
             .context("Antigravity companion stdout was unavailable")?;
         let stderr = child
-            .stderr
-            .take()
+            .take_stderr()
             .context("Antigravity companion stderr was unavailable")?;
         let stdout_task = if structured_output {
             let resumable_native_session_id = request.resumable_native_session_id.clone();
@@ -348,7 +349,7 @@ impl AntigravityAppRuntimeAdapter {
                 }
                 _ = &mut interrupted => {
                     was_interrupted = true;
-                    let _ = child.kill().await;
+                    let _ = child.force_terminate_tree();
                     break child.wait().await.context("failed to reap interrupted Antigravity companion process")?;
                 }
                 _ = acceptance_poll.tick(), if !acceptance_emitted && request.input_accepted.is_some() => {
@@ -356,6 +357,7 @@ impl AntigravityAppRuntimeAdapter {
                 }
             }
         };
+        let _ = child.force_terminate_tree();
         if !acceptance_emitted {
             // A short-lived process can exit between polling ticks. Inspect the
             // now-closed log once more before classifying any terminal result.

@@ -1,11 +1,8 @@
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     fs::OpenOptions,
     io::Write,
     path::{Component, Path, PathBuf},
-    process::Stdio,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -24,6 +21,9 @@ use rovai_core::{
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
+    managed_process::{
+        ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+    },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
     runtime_discovery::{
@@ -33,7 +33,7 @@ use rovai_core::{
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStdin, Command},
+    process::{ChildStdin, Command},
     sync::{Mutex, RwLock, mpsc, oneshot},
     time::timeout,
 };
@@ -331,7 +331,7 @@ pub(crate) struct AcpHost {
     adapter_kind: AdapterKind,
     reported_version: Option<String>,
     host_instance_id: String,
-    child: Mutex<Child>,
+    child: Mutex<ManagedProcess>,
     stdin: Mutex<ChildStdin>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
@@ -381,8 +381,6 @@ impl AcpHost {
         if let Some(config) = &builtin_tools {
             config.configure_command(&mut command)?;
         }
-        #[cfg(unix)]
-        command.as_std_mut().process_group(0);
         let ephemeral_config = configure_runtime_command(
             &mut command,
             workspace,
@@ -428,22 +426,22 @@ impl AcpHost {
         } else {
             cwd
         };
-        let mut child = command
-            .current_dir(process_working_directory)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| {
-                format!(
-                    "failed to start {} as an ACP server",
-                    frozen_runtime.executable_path
-                )
-            })?;
-        let stdin = child.stdin.take().context("ACP stdin was unavailable")?;
-        let stdout = child.stdout.take().context("ACP stdout was unavailable")?;
-        let stderr = child.stderr.take().context("ACP stderr was unavailable")?;
+        command.current_dir(process_working_directory);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeHost,
+            ManagedStdinPolicy::Piped,
+            format!("runtime-host:{}", frozen_runtime.adapter_kind.as_str()),
+        )?;
+        let mut child = ManagedProcess::spawn(spec).with_context(|| {
+            format!(
+                "failed to start {} as an ACP server",
+                frozen_runtime.executable_path
+            )
+        })?;
+        let stdin = child.take_stdin().context("ACP stdin was unavailable")?;
+        let stdout = child.take_stdout().context("ACP stdout was unavailable")?;
+        let stderr = child.take_stderr().context("ACP stderr was unavailable")?;
         let host = Arc::new(Self {
             adapter_kind: frozen_runtime.adapter_kind,
             reported_version: frozen_runtime.reported_version.clone(),
@@ -1102,25 +1100,12 @@ impl AcpHost {
     pub(crate) async fn shutdown_and_reap(&self) {
         self.alive.store(false, Ordering::Release);
         let mut child = self.child.lock().await;
-        let pid = child.id();
-        #[cfg(unix)]
-        if let Some(pid) = pid {
-            unsafe {
-                libc::killpg(pid as i32, libc::SIGTERM);
-            }
-        }
-        #[cfg(not(unix))]
-        let _ = child.start_kill();
+        let _ = child.request_graceful_termination();
         if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
-            #[cfg(unix)]
-            if let Some(pid) = pid {
-                unsafe {
-                    libc::killpg(pid as i32, libc::SIGKILL);
-                }
-            }
-            let _ = child.kill().await;
+            let _ = child.force_terminate_tree();
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
+        let _ = child.force_terminate_tree();
         if let Some(root) = self.private_config_root.as_ref() {
             let _ = std::fs::remove_dir_all(root);
         }

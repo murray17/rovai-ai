@@ -3,7 +3,6 @@ use std::{
     error::Error as StdError,
     fmt,
     path::{Path, PathBuf},
-    process::Stdio,
     sync::Arc,
 };
 
@@ -11,6 +10,9 @@ use anyhow::{Context, Result};
 use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
     agent_runtime_adapter::CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID,
+    managed_process::{
+        ManagedProcess, ManagedProcessLaunchSpec, ManagedProcessPurpose, ManagedStdinPolicy,
+    },
     mcp::McpServerDefinition,
     runtime::{AgentRunWorkspace, PermissionSemantics},
     runtime_discovery::configure_active_runtime_command,
@@ -304,24 +306,23 @@ impl ClaudeCodeCliRuntimeAdapter {
             command.arg("--mcp-config").arg(config.path());
             Some(config)
         };
-        let mut child = command
-            .current_dir(execution_root)
-            // Frozen context can contain user messages and local paths. Send it
-            // over stdin so it never appears in `ps` or process diagnostics.
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| {
-                format!(
-                    "failed to start {} in Claude Code print mode",
-                    executable.display()
-                )
-            })?;
+        command.current_dir(execution_root);
+        // Frozen context can contain user messages and local paths. The managed
+        // process uses piped stdin so it never appears in argv or diagnostics.
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeOneShot,
+            ManagedStdinPolicy::Piped,
+            format!("agent-run:{}:claude-code-cli", request.agent_run_id),
+        )?;
+        let mut child = ManagedProcess::spawn(spec).with_context(|| {
+            format!(
+                "failed to start {} in Claude Code print mode",
+                executable.display()
+            )
+        })?;
         let mut stdin = child
-            .stdin
-            .take()
+            .take_stdin()
             .context("Claude Code stdin was unavailable")?;
         stdin
             .write_all(request.prompt.as_bytes())
@@ -336,12 +337,10 @@ impl ClaudeCodeCliRuntimeAdapter {
             let _ = handoff.send(());
         }
         let stdout = child
-            .stdout
-            .take()
+            .take_stdout()
             .context("Claude Code stdout was unavailable")?;
         let stderr = child
-            .stderr
-            .take()
+            .take_stderr()
             .context("Claude Code stderr was unavailable")?;
         let native_turn_id = format!(
             "claude-code:{}:{}",
@@ -361,10 +360,11 @@ impl ClaudeCodeCliRuntimeAdapter {
             status = child.wait() => status.context("failed to wait for Claude Code process")?,
             _ = &mut interrupted => {
                 was_interrupted = true;
-                let _ = child.kill().await;
+                let _ = child.force_terminate_tree();
                 child.wait().await.context("failed to reap interrupted Claude Code process")?
             }
         };
+        let _ = child.force_terminate_tree();
         let stdout = stdout_task
             .await
             .context("Claude Code stdout collector failed")??;

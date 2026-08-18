@@ -30,6 +30,7 @@ pub mod execution_evidence;
 pub mod gather;
 pub mod git;
 pub mod managed_blob;
+pub mod managed_process;
 pub mod mcp;
 pub mod mcp_import;
 pub mod mcp_projection;
