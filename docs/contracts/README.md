@@ -20,6 +20,18 @@ Architecture 解释组件如何组成，Version 文档记录交付范围；它�
 跨版本合同拥有的 JSON Schema 位于 [`schemas/`](schemas/) 并由独立 catalog 固定 raw-byte digest；不得为了新合同
 修改已冻结的历史 Version schema catalog。
 
+## 已完成模型上下文二次确认的 v1.07 提案（仍不构成当前入口）
+
+模型上下文 revision 1 已二次确认；下列合同自身仍为 `proposed`，不切换下方 accepted current 路由，也不
+表示实现、Schema、fixture 或版本常量已经变化：
+
+- [Camp Message Send v10 proposal](camp-message-send-v10.md)
+- [Built-in Tool Transport v15 proposal](builtin-tool-transport-v15.md)
+- [Camp History Retrieval v2 proposal](camp-history-v2.md)
+- [Gather v3 proposal](gather-v3.md)
+- [ContextManifest Evidence v17 proposal](context-manifest-evidence-v17.md)
+- [v1.07 模型上下文 revision 1](../versions/v1.07/model-context-change-a2a-public-only.md)
+
 | 合同 | 权威范围 |
 | --- | --- |
 | [First-run Onboarding v1（当前）](first-run-onboarding-v1.md) | Desktop 首次安装判定、三页持久状态、幂等 provisioning、`初次集结` 与第四页 Draft-only 入口 |
