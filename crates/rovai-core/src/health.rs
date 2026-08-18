@@ -16,6 +16,10 @@ use rovai_core::{
         RuntimeLaunchPurpose, configure_active_runtime_command, discover_static_runtime_version,
         runtime_launch_allowed,
     },
+    runtime_failure::{
+        RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
+        public_runtime_failure_from_output,
+    },
     runtime_probe_process::{
         BoundedCommandOutput, BoundedLineReader, DEFAULT_CAPTURE_LIMIT, DEFAULT_CLEANUP_TIMEOUT,
         DEFAULT_LINE_LIMIT, ProbeCommandLimits, RuntimeProbeProcess, run_bounded_command,
@@ -120,6 +124,7 @@ pub struct AgentRuntimeProbeResult {
     pub capabilities: Vec<String>,
     pub missing_capabilities: Vec<String>,
     pub detail: Option<String>,
+    pub failure: Option<RuntimeFailureView>,
     pub probed_at: String,
 }
 
@@ -203,20 +208,25 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
-        return ClaudeCodeCapabilityProbe {
-            result: agent_probe_result(
-                AdapterKind::ClaudeCodeCli.as_str(),
-                Some(path_text),
-                None,
-                None,
-                AgentRuntimeProbeStatus::NotInstalled,
-                Vec::new(),
-                claude_code_required_capabilities(),
-                Some("Configured Claude Code executable does not exist.".to_string()),
-                probed_at,
-            ),
-            model_aliases: Vec::new(),
-        };
+        let failure = public_probe_failure(
+            AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Environment,
+            RuntimeFailurePhase::Spawn,
+            "runtime_executable_unavailable",
+            "Claude Code 可执行文件不可用",
+            "Configured Claude Code executable does not exist.",
+            path,
+            false,
+        );
+        return claude_code_probe_failure(
+            path_text,
+            None,
+            None,
+            AgentRuntimeProbeStatus::NotInstalled,
+            "Configured Claude Code executable does not exist.".to_string(),
+            failure,
+            probed_at,
+        );
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
@@ -228,6 +238,17 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
             first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
         }
         Ok(output) => {
+            let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
+            let failure = public_probe_failure(
+                AdapterKind::ClaudeCodeCli,
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Execution,
+                "runtime_process_failed",
+                "Claude Code 版本检查失败",
+                &raw_detail,
+                &canonical,
+                true,
+            );
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
@@ -238,16 +259,29 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
                     output.status,
                     probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
                 ),
+                failure,
                 probed_at,
             );
         }
         Err(error) => {
+            let raw_detail = error.to_string();
+            let failure = public_probe_failure(
+                AdapterKind::ClaudeCodeCli,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_spawn_failed",
+                "无法启动 Claude Code 检查",
+                &raw_detail,
+                &canonical,
+                true,
+            );
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 None,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Claude Code: {error}"),
+                failure,
                 probed_at,
             );
         }
@@ -257,18 +291,54 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
     help_command.arg("--help");
     let help = bounded_output(&mut help_command, Duration::from_secs(15)).await;
     let help = match help {
-        Ok(output) => format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout.bytes),
-            String::from_utf8_lossy(&output.stderr.bytes)
-        ),
+        Ok(output) if output.status.success() => {
+            bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes)
+        }
+        Ok(output) => {
+            let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
+            let failure = public_probe_failure(
+                AdapterKind::ClaudeCodeCli,
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Execution,
+                "runtime_process_failed",
+                "Claude Code 能力检查失败",
+                &raw_detail,
+                &canonical,
+                true,
+            );
+            return claude_code_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!(
+                    "Claude Code help check failed with {} (outputDigest={})",
+                    output.status,
+                    probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
+                ),
+                failure,
+                probed_at,
+            );
+        }
         Err(error) => {
+            let raw_detail = error.to_string();
+            let failure = public_probe_failure(
+                AdapterKind::ClaudeCodeCli,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_spawn_failed",
+                "无法启动 Claude Code 能力检查",
+                &raw_detail,
+                &canonical,
+                true,
+            );
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Claude Code capabilities: {error}"),
+                failure,
                 probed_at,
             );
         }
@@ -295,21 +365,34 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
         }
     }
     if !missing.is_empty() {
-        return ClaudeCodeCapabilityProbe {
-            result: agent_probe_result(
-                AdapterKind::ClaudeCodeCli.as_str(),
-                Some(path_text),
-                reported_version,
-                fingerprint,
-                AgentRuntimeProbeStatus::MissingCapabilities,
-                capabilities,
-                missing,
-                Some(
-                    "Claude Code is missing flags required by Rovai-ai's print-mode integration."
-                        .to_string(),
-                ),
-                probed_at,
+        let raw_detail = format!("Missing required options: {}", missing.join(", "));
+        let failure = public_probe_failure(
+            AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Execution,
+            "runtime_capability_incompatible",
+            "当前 Claude Code 版本缺少 Rovai 所需能力",
+            &raw_detail,
+            &canonical,
+            false,
+        );
+        let mut result = agent_probe_result(
+            AdapterKind::ClaudeCodeCli.as_str(),
+            Some(path_text),
+            reported_version,
+            fingerprint,
+            AgentRuntimeProbeStatus::MissingCapabilities,
+            capabilities,
+            missing,
+            Some(
+                "Claude Code is missing flags required by Rovai-ai's print-mode integration."
+                    .to_string(),
             ),
+            probed_at,
+        );
+        result.failure = Some(failure);
+        return ClaudeCodeCapabilityProbe {
+            result,
             model_aliases: Vec::new(),
         };
     }
@@ -327,25 +410,73 @@ async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
                 // still the installed CLI's authoritative auth result.
                 .unwrap_or(true)
         }
-        Ok(_) => false,
+        Ok(output) => {
+            let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
+            let failure = public_probe_failure(
+                AdapterKind::ClaudeCodeCli,
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Authentication,
+                "runtime_authentication_required",
+                "需要登录 Claude Code",
+                &raw_detail,
+                &canonical,
+                true,
+            );
+            return claude_code_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::AuthenticationRequired,
+                format!(
+                    "Claude Code authentication check failed with {} (outputDigest={})",
+                    output.status,
+                    probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
+                ),
+                failure,
+                probed_at,
+            );
+        }
         Err(error) => {
+            let raw_detail = error.to_string();
+            let failure = public_probe_failure(
+                AdapterKind::ClaudeCodeCli,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_spawn_failed",
+                "无法启动 Claude Code 认证检查",
+                &raw_detail,
+                &canonical,
+                true,
+            );
             return claude_code_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Claude Code authentication: {error}"),
+                failure,
                 probed_at,
             );
         }
     };
     if !authenticated {
+        let failure = public_probe_failure(
+            AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Authentication,
+            "runtime_authentication_required",
+            "需要登录 Claude Code",
+            "Claude Code is not logged in.",
+            &canonical,
+            true,
+        );
         return claude_code_probe_failure(
             path_text,
             fingerprint,
             reported_version,
             AgentRuntimeProbeStatus::AuthenticationRequired,
             "Claude Code is not logged in.".to_string(),
+            failure,
             probed_at,
         );
     }
@@ -374,20 +505,25 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
     if !path.is_file() {
-        return AntigravityCapabilityProbe {
-            result: agent_probe_result(
-                AdapterKind::AntigravityApp.as_str(),
-                Some(path_text),
-                None,
-                None,
-                AgentRuntimeProbeStatus::NotInstalled,
-                Vec::new(),
-                antigravity_required_capabilities(),
-                Some("Configured Antigravity companion executable does not exist.".to_string()),
-                probed_at,
-            ),
-            models: Vec::new(),
-        };
+        let failure = public_probe_failure(
+            AdapterKind::AntigravityApp,
+            RuntimeFailureOrigin::Environment,
+            RuntimeFailurePhase::Spawn,
+            "runtime_executable_unavailable",
+            "Antigravity 可执行文件不可用",
+            "Configured Antigravity companion executable does not exist.",
+            path,
+            false,
+        );
+        return antigravity_probe_failure(
+            path_text,
+            None,
+            None,
+            AgentRuntimeProbeStatus::NotInstalled,
+            "Configured Antigravity companion executable does not exist.".to_string(),
+            failure,
+            probed_at,
+        );
     }
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let fingerprint = executable_fingerprint_async(canonical.clone()).await;
@@ -399,6 +535,17 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
             first_nonempty_line(&output.stdout.bytes, &output.stderr.bytes)
         }
         Ok(output) => {
+            let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
+            let failure = public_probe_failure(
+                AdapterKind::AntigravityApp,
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Execution,
+                "runtime_process_failed",
+                "Antigravity 版本检查失败",
+                &raw_detail,
+                &canonical,
+                true,
+            );
             return antigravity_probe_failure(
                 path_text,
                 fingerprint,
@@ -409,16 +556,29 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
                     output.status,
                     probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
                 ),
+                failure,
                 probed_at,
             );
         }
         Err(error) => {
+            let raw_detail = error.to_string();
+            let failure = public_probe_failure(
+                AdapterKind::AntigravityApp,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_spawn_failed",
+                "无法启动 Antigravity 检查",
+                &raw_detail,
+                &canonical,
+                true,
+            );
             return antigravity_probe_failure(
                 path_text,
                 fingerprint,
                 None,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Antigravity companion CLI: {error}"),
+                failure,
                 probed_at,
             );
         }
@@ -428,18 +588,54 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     help_command.arg("--help");
     let help = bounded_output(&mut help_command, Duration::from_secs(15)).await;
     let help = match help {
-        Ok(output) => format!(
-            "{}\n{}",
-            String::from_utf8_lossy(&output.stdout.bytes),
-            String::from_utf8_lossy(&output.stderr.bytes)
-        ),
+        Ok(output) if output.status.success() => {
+            bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes)
+        }
+        Ok(output) => {
+            let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
+            let failure = public_probe_failure(
+                AdapterKind::AntigravityApp,
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Execution,
+                "runtime_process_failed",
+                "Antigravity 能力检查失败",
+                &raw_detail,
+                &canonical,
+                true,
+            );
+            return antigravity_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!(
+                    "Antigravity help check failed with {} (outputDigest={})",
+                    output.status,
+                    probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
+                ),
+                failure,
+                probed_at,
+            );
+        }
         Err(error) => {
+            let raw_detail = error.to_string();
+            let failure = public_probe_failure(
+                AdapterKind::AntigravityApp,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_spawn_failed",
+                "无法启动 Antigravity 能力检查",
+                &raw_detail,
+                &canonical,
+                true,
+            );
             return antigravity_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 AgentRuntimeProbeStatus::ProbeFailed,
                 format!("failed to inspect Antigravity companion capabilities: {error}"),
+                failure,
                 probed_at,
             );
         }
@@ -464,21 +660,34 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
         }
     }
     if !missing.is_empty() {
-        return AntigravityCapabilityProbe {
-            result: agent_probe_result(
-                AdapterKind::AntigravityApp.as_str(),
-                Some(path_text),
-                reported_version,
-                fingerprint,
-                AgentRuntimeProbeStatus::MissingCapabilities,
-                capabilities,
-                missing,
-                Some(
-                    "Antigravity App's companion CLI is missing flags required by Rovai-ai."
-                        .to_string(),
-                ),
-                probed_at,
+        let raw_detail = format!("Missing required options: {}", missing.join(", "));
+        let failure = public_probe_failure(
+            AdapterKind::AntigravityApp,
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Execution,
+            "runtime_capability_incompatible",
+            "当前 Antigravity 版本缺少 Rovai 所需能力",
+            &raw_detail,
+            &canonical,
+            false,
+        );
+        let mut result = agent_probe_result(
+            AdapterKind::AntigravityApp.as_str(),
+            Some(path_text),
+            reported_version,
+            fingerprint,
+            AgentRuntimeProbeStatus::MissingCapabilities,
+            capabilities,
+            missing,
+            Some(
+                "Antigravity App's companion CLI is missing flags required by Rovai-ai."
+                    .to_string(),
             ),
+            probed_at,
+        );
+        result.failure = Some(failure);
+        return AntigravityCapabilityProbe {
+            result,
             models: Vec::new(),
         };
     }
@@ -496,12 +705,23 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
                 .filter_map(antigravity_model_identifier_from_line)
                 .collect::<Vec<_>>();
             if models.is_empty() {
+                let failure = public_probe_failure(
+                    AdapterKind::AntigravityApp,
+                    RuntimeFailureOrigin::Compatibility,
+                    RuntimeFailurePhase::ModelCatalog,
+                    "runtime_model_catalog_incompatible",
+                    "Antigravity 未返回可识别的模型列表",
+                    "Antigravity model discovery returned no model identifiers.",
+                    &canonical,
+                    false,
+                );
                 return antigravity_probe_failure(
                     path_text,
                     fingerprint,
                     reported_version,
                     AgentRuntimeProbeStatus::ProbeFailed,
                     "Antigravity model discovery returned no model identifiers".to_string(),
+                    failure,
                     probed_at,
                 );
             }
@@ -523,16 +743,11 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
             }
         }
         Ok(output) => {
-            let raw_detail = format!(
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout.bytes),
-                String::from_utf8_lossy(&output.stderr.bytes)
-            );
+            let raw_detail = bounded_probe_text(&output.stdout.bytes, &output.stderr.bytes);
             let lower = raw_detail.to_ascii_lowercase();
-            let status = if lower.contains("auth")
-                || lower.contains("login")
-                || lower.contains("credential")
-            {
+            let authentication_required =
+                lower.contains("auth") || lower.contains("login") || lower.contains("credential");
+            let status = if authentication_required {
                 AgentRuntimeProbeStatus::AuthenticationRequired
             } else {
                 AgentRuntimeProbeStatus::ProbeFailed
@@ -542,23 +757,60 @@ async fn antigravity_probe_at(path: &Path) -> AntigravityCapabilityProbe {
                 output.status,
                 probe_output_digest(&output.stdout.bytes, &output.stderr.bytes)
             );
+            let failure = public_probe_failure(
+                AdapterKind::AntigravityApp,
+                RuntimeFailureOrigin::Runtime,
+                if authentication_required {
+                    RuntimeFailurePhase::Authentication
+                } else {
+                    RuntimeFailurePhase::ModelCatalog
+                },
+                if authentication_required {
+                    "runtime_authentication_required"
+                } else {
+                    "runtime_process_failed"
+                },
+                if authentication_required {
+                    "需要登录 Antigravity"
+                } else {
+                    "Antigravity 模型检查失败"
+                },
+                &raw_detail,
+                &canonical,
+                true,
+            );
             antigravity_probe_failure(
                 path_text,
                 fingerprint,
                 reported_version,
                 status,
                 detail,
+                failure,
                 probed_at,
             )
         }
-        Err(error) => antigravity_probe_failure(
-            path_text,
-            fingerprint,
-            reported_version,
-            AgentRuntimeProbeStatus::ProbeFailed,
-            format!("failed to discover Antigravity models: {error}"),
-            probed_at,
-        ),
+        Err(error) => {
+            let raw_detail = error.to_string();
+            let failure = public_probe_failure(
+                AdapterKind::AntigravityApp,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_spawn_failed",
+                "无法启动 Antigravity 模型检查",
+                &raw_detail,
+                &canonical,
+                true,
+            );
+            antigravity_probe_failure(
+                path_text,
+                fingerprint,
+                reported_version,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                format!("failed to discover Antigravity models: {error}"),
+                failure,
+                probed_at,
+            )
+        }
     }
 }
 
@@ -592,26 +844,91 @@ fn probe_output_digest(stdout: &[u8], stderr: &[u8]) -> String {
     format!("sha256:{:x}", digest.finalize())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the probed Runtime and closed public failure fields stay explicit at this boundary"
+)]
+fn public_probe_failure(
+    runtime_kind: AdapterKind,
+    default_origin: RuntimeFailureOrigin,
+    phase: RuntimeFailurePhase,
+    default_code: &str,
+    default_summary: &str,
+    raw_detail: &str,
+    executable_path: &Path,
+    retryable: bool,
+) -> RuntimeFailureView {
+    let lower = raw_detail.to_ascii_lowercase();
+    let option_incompatible = [
+        "unknown option",
+        "unrecognized option",
+        "unsupported option",
+        "unknown command",
+        "unrecognized command",
+        "unsupported command",
+        "unknown argument",
+        "unrecognized argument",
+        "unsupported argument",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker));
+    let (origin, code, summary) = if option_incompatible {
+        (
+            RuntimeFailureOrigin::Compatibility,
+            "runtime_capability_incompatible",
+            match runtime_kind {
+                AdapterKind::ClaudeCodeCli => "当前 Claude Code 版本不支持所需命令",
+                AdapterKind::AntigravityApp => "当前 Antigravity 版本不支持所需命令",
+                _ => default_summary,
+            },
+        )
+    } else {
+        (default_origin, default_code, default_summary)
+    };
+    public_runtime_failure_from_output(
+        runtime_kind,
+        origin,
+        phase,
+        code,
+        summary,
+        Some(raw_detail),
+        &[(executable_path, "<runtime-executable>")],
+        retryable,
+    )
+}
+
+fn bounded_probe_text(stdout: &[u8], stderr: &[u8]) -> String {
+    format!(
+        "{}\n{}",
+        String::from_utf8_lossy(stdout),
+        String::from_utf8_lossy(stderr)
+    )
+}
+
 fn antigravity_probe_failure(
     path: String,
     fingerprint: Option<String>,
     reported_version: Option<String>,
     status: AgentRuntimeProbeStatus,
     detail: String,
+    failure: RuntimeFailureView,
     probed_at: String,
 ) -> AntigravityCapabilityProbe {
+    let status = public_probe_status(status, &failure);
+    let mut result = agent_probe_result(
+        AdapterKind::AntigravityApp.as_str(),
+        Some(path),
+        reported_version,
+        fingerprint,
+        status,
+        Vec::new(),
+        antigravity_required_capabilities(),
+        Some(detail),
+        probed_at,
+    );
+    result.failure = Some(failure);
     AntigravityCapabilityProbe {
-        result: agent_probe_result(
-            AdapterKind::AntigravityApp.as_str(),
-            Some(path),
-            reported_version,
-            fingerprint,
-            status,
-            Vec::new(),
-            antigravity_required_capabilities(),
-            Some(detail),
-            probed_at,
-        ),
+        result,
         models: Vec::new(),
     }
 }
@@ -622,21 +939,40 @@ fn claude_code_probe_failure(
     reported_version: Option<String>,
     status: AgentRuntimeProbeStatus,
     detail: String,
+    failure: RuntimeFailureView,
     probed_at: String,
 ) -> ClaudeCodeCapabilityProbe {
+    let status = public_probe_status(status, &failure);
+    let mut result = agent_probe_result(
+        AdapterKind::ClaudeCodeCli.as_str(),
+        Some(path),
+        reported_version,
+        fingerprint,
+        status,
+        Vec::new(),
+        claude_code_required_capabilities(),
+        Some(detail),
+        probed_at,
+    );
+    result.failure = Some(failure);
     ClaudeCodeCapabilityProbe {
-        result: agent_probe_result(
-            AdapterKind::ClaudeCodeCli.as_str(),
-            Some(path),
-            reported_version,
-            fingerprint,
-            status,
-            Vec::new(),
-            claude_code_required_capabilities(),
-            Some(detail),
-            probed_at,
-        ),
+        result,
         model_aliases: Vec::new(),
+    }
+}
+
+fn public_probe_status(
+    default_status: AgentRuntimeProbeStatus,
+    failure: &RuntimeFailureView,
+) -> AgentRuntimeProbeStatus {
+    if failure.origin == RuntimeFailureOrigin::Compatibility {
+        AgentRuntimeProbeStatus::MissingCapabilities
+    } else if failure.phase == RuntimeFailurePhase::Authentication
+        && failure.code == "runtime_authentication_required"
+    {
+        AgentRuntimeProbeStatus::AuthenticationRequired
+    } else {
+        default_status
     }
 }
 
@@ -2036,6 +2372,7 @@ fn probe_result(
         capabilities,
         missing_capabilities,
         detail,
+        failure: None,
         probed_at,
     }
 }
@@ -2061,6 +2398,7 @@ fn agent_probe_result(
         capabilities,
         missing_capabilities,
         detail,
+        failure: None,
         probed_at,
     }
 }
@@ -2366,6 +2704,48 @@ mod tests {
             Some("claude-sonnet-4-6")
         );
         assert!(antigravity_model_identifier_from_line("Fetching available models...").is_none());
+    }
+
+    #[test]
+    fn public_probe_failures_classify_auth_and_cli_incompatibility_without_paths() {
+        let executable = Path::new("/Users/example/private/bin/agy");
+        let incompatible = public_probe_failure(
+            AdapterKind::AntigravityApp,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::ModelCatalog,
+            "runtime_process_failed",
+            "Antigravity 模型检查失败",
+            "unknown command models at /Users/example/private/bin/agy",
+            executable,
+            true,
+        );
+        assert_eq!(incompatible.origin, RuntimeFailureOrigin::Compatibility);
+        assert_eq!(incompatible.code, "runtime_capability_incompatible");
+        assert_eq!(
+            public_probe_status(AgentRuntimeProbeStatus::ProbeFailed, &incompatible),
+            AgentRuntimeProbeStatus::MissingCapabilities
+        );
+        assert_eq!(
+            incompatible.detail.as_deref(),
+            Some("unknown command models at <runtime-executable>")
+        );
+
+        let authentication = public_probe_failure(
+            AdapterKind::ClaudeCodeCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Authentication,
+            "runtime_process_failed",
+            "Claude Code 认证检查失败",
+            "authentication required: token expired",
+            Path::new("/usr/local/bin/claude"),
+            true,
+        );
+        assert_eq!(authentication.code, "runtime_authentication_required");
+        assert_eq!(authentication.phase, RuntimeFailurePhase::Authentication);
+        assert_eq!(
+            public_probe_status(AgentRuntimeProbeStatus::ProbeFailed, &authentication),
+            AgentRuntimeProbeStatus::AuthenticationRequired
+        );
     }
 
     #[tokio::test]

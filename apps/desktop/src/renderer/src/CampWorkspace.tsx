@@ -56,6 +56,7 @@ import { writeClipboardText } from './clipboard'
 import { runtimeReadinessLabel } from './runtime-status'
 import { runtimeEditorInstallation } from './MemberRuntimeParameters'
 import { SafeMarkdown } from './SafeMarkdown'
+import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import { identityColorToken } from './theme'
 import { availableComposerSkillsForLead } from './composer-skill-picker'
 import { createStructuredMessageClipboardData } from './structured-message-clipboard'
@@ -6132,12 +6133,17 @@ export function RunExecutionDisclosure({
   const nonTerminal = NON_TERMINAL_RUNS.has(run.status)
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
   const cancellingActive = nonTerminal && cancelling && focused
-  const [open, setOpen] = useState(active)
+  const publicFailure = run.status === 'failed' ? run.failure : null
+  const hasPublicFailure = publicFailure !== null
+  const [open, setOpen] = useState(active || hasPublicFailure)
   const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
   const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
   useEffect(() => {
-    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(currentOpen, active || cancellingActive))
-  }, [active, cancellingActive])
+    setOpen((currentOpen) => executionDisclosureOpenAfterActivity(
+      currentOpen,
+      active || cancellingActive || hasPublicFailure
+    ))
+  }, [active, cancellingActive, hasPublicFailure])
 
   const durableEvidenceCount = Math.max(0, run.executionEvidenceCount)
   const historyNeeded = !nonTerminal && loadedEvidenceCount < durableEvidenceCount
@@ -6158,7 +6164,7 @@ export function RunExecutionDisclosure({
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
-  if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
+  if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning && !hasPublicFailure) {
     return null
   }
 
@@ -6183,6 +6189,7 @@ export function RunExecutionDisclosure({
 
   const content = (
     <div className="process-content">
+      {publicFailure && <RuntimeFailureNotice failure={publicFailure} />}
       {showUnsettledWarning && (
         <p className="execution-uncertain" role="status">
           仍有外部效果待确认

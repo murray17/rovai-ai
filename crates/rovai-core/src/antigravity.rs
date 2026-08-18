@@ -48,7 +48,6 @@ pub struct AntigravityRunRequest {
     pub runtime_events: Option<mpsc::UnboundedSender<AntigravityRuntimeEvent>>,
     pub launch_handoff: Option<oneshot::Sender<()>>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AntigravityInputAccepted {
     pub native_session_id: String,
@@ -395,7 +394,10 @@ impl AntigravityAppRuntimeAdapter {
                     true,
                 );
                 anyhow::Error::new(error)
-                    .context(format!("failed to start {} in print mode", executable.display()))
+                    .context(format!(
+                        "failed to start {} in print mode",
+                        executable.display()
+                    ))
                     .context(RuntimeFailureError::new(failure))
             })?;
         if let Some(handoff) = launch_handoff {
@@ -697,7 +699,8 @@ impl AntigravityAppRuntimeAdapter {
                 }
             }
             AntigravityStdoutCapture::Legacy(stdout) if stdout.truncated => {
-                let internal = anyhow::anyhow!("Antigravity final output exceeded the safety limit");
+                let internal =
+                    anyhow::anyhow!("Antigravity final output exceeded the safety limit");
                 let failure = antigravity_public_failure(
                     request,
                     &self.log_dir,
@@ -768,6 +771,10 @@ impl AntigravityAppRuntimeAdapter {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the Runtime request and closed public failure fields stay explicit at this boundary"
+)]
 fn antigravity_public_failure(
     request: &AntigravityRunRequest,
     log_dir: &Path,
@@ -1531,6 +1538,33 @@ mod tests {
     }
 
     #[test]
+    fn extracts_only_known_error_lines_from_private_logs() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-antigravity-private-error-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).expect("test directory should be created");
+        let log = root.join("runtime.log");
+        std::fs::write(
+            &log,
+            concat!(
+                "private prompt payload that must stay private\n",
+                "[ERROR] provider rate limit exceeded\n",
+                "private tool output that must stay private\n",
+                "failed: model unavailable\n",
+            ),
+        )
+        .expect("private log should be written");
+        let extracted =
+            read_known_antigravity_error_lines(&log).expect("known errors should parse");
+        assert!(extracted.contains("rate limit exceeded"));
+        assert!(extracted.contains("model unavailable"));
+        assert!(!extracted.contains("private prompt payload"));
+        assert!(!extracted.contains("private tool output"));
+        std::fs::remove_dir_all(root).expect("test directory should be removed");
+    }
+
+    #[test]
     fn accepts_only_a_session_bound_response_after_the_current_input_was_forwarded() {
         let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
         let response =
@@ -1800,6 +1834,63 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
         assert_eq!(antigravity_tool_kind("read_file"), "read");
         assert_eq!(antigravity_tool_kind("write_to_file"), "write");
         assert_eq!(antigravity_tool_kind("future_tool"), "tool");
+        std::fs::remove_dir_all(root).expect("temporary root should be removed");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn structured_runtime_failure_preserves_sanitized_provider_detail() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-antigravity-structured-failure-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let executable = root.join("fake-agy");
+        std::fs::write(
+            &executable,
+            r#"#!/bin/sh
+log_file=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--log-file" ]; then
+    shift
+    log_file="$1"
+  fi
+  shift
+done
+session_id="0bdd2166-d420-40c6-94be-70b93eb290c5"
+echo "Created conversation $session_id" >> "$log_file"
+printf '%s\n' '{"event":"init","conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","init":{}}'
+printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","status":"ERROR","error":"quota exceeded; api_key=private-key"}}'
+"#,
+        )
+        .expect("fake Antigravity companion should be written");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("fake Antigravity companion should be executable");
+        let adapter = AntigravityAppRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        let mut request =
+            fake_antigravity_request(&workspace, &executable, uuid::Uuid::new_v4().to_string());
+        request
+            .runtime
+            .capabilities
+            .push("output.stream_json".to_string());
+
+        let error = adapter
+            .run(request)
+            .await
+            .expect_err("structured Runtime failure must remain a typed failure");
+        let delivered = error
+            .downcast_ref::<AntigravityDeliveredFailure>()
+            .expect("structured final should prove the delivered turn ended");
+        assert_eq!(delivered.error_code, "runtime_quota_exceeded");
+        assert_eq!(delivered.failure.origin, RuntimeFailureOrigin::Runtime);
+        assert_eq!(delivered.failure.phase, RuntimeFailurePhase::Terminal);
+        let detail = delivered.failure.detail.as_deref().expect("safe detail");
+        assert!(detail.contains("quota exceeded"));
+        assert!(detail.contains("api_key=[redacted]"));
+        assert!(!detail.contains("private-key"));
         std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }
 

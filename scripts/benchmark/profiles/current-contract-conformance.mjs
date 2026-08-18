@@ -33,7 +33,7 @@ const criteria = [
   criterion('CCC-010', 'ContextManifest version is 17 and Context Formatter version is 19', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
-  criterion('CCC-011', 'Data Contract is v1.07 with projection schema 48', [
+  criterion('CCC-011', 'Data Contract is v1.10 with projection schema 49', [
     test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
     test('crates/rovai-core/src/db.rs', 'current_schema_contains_required_contract_objects')
   ]),
@@ -71,7 +71,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.9.0',
+  version: '1.10.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -89,8 +89,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.07-current-contract',
-    version: '1.9.0',
+    id: 'rovai-v1.10-current-contract',
+    version: '1.10.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

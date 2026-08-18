@@ -21,6 +21,18 @@ export interface RuntimeStatusPresentation {
   detail: string | null
 }
 
+function publicFailureDetail(
+  availability: ProductRuntimeAvailability,
+  fallback: string
+): string {
+  const failure = availability.failure
+  if (!failure) return fallback
+  const detail = failure.detail?.trim()
+  return detail && detail !== failure.summary
+    ? `${failure.summary}\n${detail}`
+    : failure.summary
+}
+
 const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
   unconfigured: '未配置 Agent 运行时',
   checking: '正在检查…',
@@ -80,22 +92,34 @@ export function runtimeAvailabilityPresentation(
         '后台刷新失败，当前继续使用最近一次可用结果。'
       )
     case 'authentication_required':
-      return presentation('authentication_required', '请先完成该 Agent 运行时的登录。')
+      return presentation(
+        'authentication_required',
+        publicFailureDetail(availability, '请先完成该 Agent 运行时的登录。')
+      )
     case 'needs_attention':
       return {
         status: 'unavailable',
         label: '需要处理',
-        detail: '最近一次 Runtime 验证未完成，请重试扫描或检查，并按诊断提示处理。'
+        detail: publicFailureDetail(
+          availability,
+          '最近一次 Runtime 验证未完成，请重试扫描或检查，并按诊断提示处理。'
+        )
       }
     case 'missing':
     case 'path_missing':
-      return presentation('not_installed', '本机未找到可用的 Agent 运行时入口。')
+      return presentation(
+        'not_installed',
+        publicFailureDetail(availability, '本机未找到可用的 Agent 运行时入口。')
+      )
     case 'incompatible':
       return presentation(
         'version_unsupported',
-        availability.reportedVersion
-          ? `当前版本 ${availability.reportedVersion} 不受支持，请更新后重试。`
-          : '当前版本或必要能力不受支持，请更新后重试。'
+        publicFailureDetail(
+          availability,
+          availability.reportedVersion
+            ? `当前版本 ${availability.reportedVersion} 不受支持，请更新后重试。`
+            : '当前版本或必要能力不受支持，请更新后重试。'
+        )
       )
     case 'disabled':
       return presentation('unavailable', '该 Agent 运行时已停用。')

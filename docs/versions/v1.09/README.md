@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.09
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-18
 >
 > 前置版本：[v1.08 取消 Run 的活动停止投影](../v1.08/README.md)。v1.08 以 `complete`
 > 冻结；本版不改写其 Renderer Activity 展示结论。
+>
+> 后续版本：[v1.10 Claude Code 与 Antigravity 的安全公开 Runtime 失败](../v1.10/README.md)。
 
 ## 版本目标
 

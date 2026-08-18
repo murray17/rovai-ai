@@ -24,6 +24,7 @@ use crate::{
     },
     db::Database,
     member_avatar::validate_member_avatar_update,
+    runtime_failure::RuntimeFailureView,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -470,6 +471,7 @@ pub struct AdapterProbeAttempt {
     pub executable_fingerprint: Option<String>,
     pub attempted_at: String,
     pub retry_after: Option<String>,
+    pub failure: Option<RuntimeFailureView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -712,6 +714,8 @@ pub struct RecordAdapterCapabilitySnapshotCommand {
     pub installation_id: String,
     pub expected_installation_version: i64,
     pub snapshot: AdapterCapabilitySnapshot,
+    #[serde(default)]
+    pub failure: Option<RuntimeFailureView>,
 }
 
 #[derive(Debug, Clone)]
@@ -743,6 +747,7 @@ pub struct ManagedProbeFailure<'a> {
     pub source: Option<InstallationSource>,
     pub failure_class: &'a str,
     pub diagnostic_code: &'a str,
+    pub failure: Option<&'a RuntimeFailureView>,
 }
 
 impl sealed::Sealed for RecordAdapterCapabilitySnapshotCommand {}
@@ -954,7 +959,7 @@ impl AgentProfileService {
                        attempt.id, attempt.status, attempt.failure_class,
                        attempt.diagnostic_code, attempt.candidate_path,
                        attempt.executable_fingerprint, attempt.attempted_at,
-                       attempt.retry_after
+                       attempt.retry_after, attempt.public_runtime_failure_json
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
@@ -1444,6 +1449,7 @@ impl AgentProfileService {
             verified.snapshot.executable_fingerprint.as_deref(),
             &verified.snapshot.last_attempted_at,
             None,
+            None,
         )?;
         if identity_changed {
             transaction.execute(
@@ -1646,7 +1652,14 @@ impl AgentProfileService {
             source,
             failure_class,
             diagnostic_code,
+            failure,
         } = failure;
+        if let Some(failure) = failure {
+            failure.validate()?;
+            if failure.runtime_kind != adapter_kind {
+                anyhow::bail!("public Runtime failure kind must match managed Adapter probe");
+            }
+        }
         let transaction = database.connection_mut().transaction()?;
         let existing = transaction
             .query_row(
@@ -1676,6 +1689,7 @@ impl AgentProfileService {
             fingerprint,
             &attempted_at,
             retry_after.as_deref(),
+            failure,
         )?;
         if failure_class != "transient" {
             transaction.execute(
@@ -2441,6 +2455,12 @@ impl AgentProfileService {
         envelope: &CommandEnvelope<RecordAdapterCapabilitySnapshotCommand>,
     ) -> Result<CommandExecution> {
         validate_snapshot(&envelope.payload.snapshot)?;
+        if let Some(failure) = envelope.payload.failure.as_ref() {
+            failure.validate()?;
+            if envelope.payload.snapshot.probe_status == "ready" {
+                anyhow::bail!("successful Runtime probe must not carry a public failure");
+            }
+        }
         let executable_identity = if matches!(
             envelope.payload.snapshot.probe_status.as_str(),
             "ready" | "light_ready" | "light_failed" | "installed_unverified"
@@ -2462,14 +2482,14 @@ impl AgentProfileService {
             None
         };
         self.gateway.execute(database, envelope, |transaction| {
-            let version = transaction
+            let installation = transaction
                 .query_row(
-                    "SELECT version FROM adapter_installation WHERE id = ?1",
+                    "SELECT version, adapter_kind FROM adapter_installation WHERE id = ?1",
                     [&envelope.payload.installation_id],
-                    |row| row.get::<_, i64>(0),
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
                 )
                 .optional()?;
-            let Some(version) = version else {
+            let Some((version, adapter_kind)) = installation else {
                 return Ok(CommandHandlerResult::rejected(
                     "adapter_installation.not_found",
                     json!({ "installationId": envelope.payload.installation_id }),
@@ -2477,6 +2497,11 @@ impl AgentProfileService {
             };
             if version != envelope.payload.expected_installation_version {
                 return Ok(version_conflict(version));
+            }
+            if let Some(failure) = envelope.payload.failure.as_ref()
+                && failure.runtime_kind.as_str() != adapter_kind
+            {
+                anyhow::bail!("public Runtime failure kind must match Adapter installation");
             }
             let snapshot = &envelope.payload.snapshot;
             let successful = snapshot.probe_status == "ready";
@@ -2596,25 +2621,17 @@ impl AgentProfileService {
                     failure_class,
                 )?
             };
-            transaction.execute(
-                r#"
-                INSERT INTO adapter_probe_attempt(
-                    id, installation_id, status, failure_class,
-                    diagnostic_code, candidate_path, executable_fingerprint,
-                    attempted_at, retry_after
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-                "#,
-                params![
-                    format!("adapter-probe-{}", Uuid::new_v4()),
-                    envelope.payload.installation_id,
-                    if successful { "ready" } else { "failed" },
-                    failure_class,
-                    diagnostic_code,
-                    candidate_path,
-                    snapshot.executable_fingerprint,
-                    snapshot.last_attempted_at,
-                    retry_after,
-                ],
+            insert_probe_attempt(
+                transaction,
+                &envelope.payload.installation_id,
+                if successful { "ready" } else { "failed" },
+                failure_class,
+                diagnostic_code,
+                &candidate_path,
+                snapshot.executable_fingerprint.as_deref(),
+                &snapshot.last_attempted_at,
+                retry_after.as_deref(),
+                envelope.payload.failure.as_ref(),
             )?;
             if successful {
                 transaction.execute(
@@ -2893,6 +2910,17 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
             executable_fingerprint: row.get(35)?,
             attempted_at: row.get(36)?,
             retry_after: row.get(37)?,
+            failure: row
+                .get::<_, Option<String>>(38)?
+                .map(|json| serde_json::from_str(&json))
+                .transpose()
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        38,
+                        rusqlite::types::Type::Text,
+                        error.into(),
+                    )
+                })?,
         })
     } else {
         None
@@ -3160,14 +3188,16 @@ fn insert_probe_attempt(
     executable_fingerprint: Option<&str>,
     attempted_at: &str,
     retry_after: Option<&str>,
+    failure: Option<&RuntimeFailureView>,
 ) -> Result<()> {
+    let public_runtime_failure_json = failure.map(serde_json::to_string).transpose()?;
     transaction.execute(
         r#"
         INSERT INTO adapter_probe_attempt(
             id, installation_id, status, failure_class,
             diagnostic_code, candidate_path, executable_fingerprint,
-            attempted_at, retry_after
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            attempted_at, retry_after, public_runtime_failure_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
         "#,
         params![
             format!("adapter-probe-{}", Uuid::new_v4()),
@@ -3179,6 +3209,7 @@ fn insert_probe_attempt(
             executable_fingerprint,
             attempted_at,
             retry_after,
+            public_runtime_failure_json,
         ],
     )?;
     Ok(())
@@ -5045,6 +5076,7 @@ mod slow_tests {
                         installation_id: installation_id.clone(),
                         expected_installation_version: 1,
                         snapshot: ready_snapshot.clone(),
+                        failure: None,
                     },
                 ),
             )
@@ -5204,6 +5236,7 @@ mod slow_tests {
                         installation_id: managed_installation_id.clone(),
                         expected_installation_version: 1,
                         snapshot: changed_schema,
+                        failure: None,
                     },
                 ),
             )
@@ -5623,6 +5656,7 @@ mod slow_tests {
                         installation_id: installation_id.clone(),
                         expected_installation_version: 1,
                         snapshot: ready_codex_snapshot(),
+                        failure: None,
                     },
                 ),
             )
@@ -5654,6 +5688,7 @@ mod slow_tests {
                             last_error: Some("probe failed".to_string()),
                             native_session_compatibility_key: None,
                         },
+                        failure: None,
                     },
                 ),
             )
@@ -5816,6 +5851,7 @@ mod slow_tests {
                         installation_id,
                         expected_installation_version: installation.version,
                         snapshot: live_snapshot,
+                        failure: None,
                     },
                 ),
             )
@@ -5892,6 +5928,7 @@ mod slow_tests {
                     source: Some(InstallationSource::LoginShell),
                     failure_class: "identity_changed",
                     diagnostic_code: "runtime_identity_changed",
+                    failure: None,
                 },
             )
             .unwrap();

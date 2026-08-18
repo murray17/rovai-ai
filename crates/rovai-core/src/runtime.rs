@@ -3867,8 +3867,13 @@ impl ExecutionRuntimeService {
         permit: &TerminalSettlementPermit,
         terminal: &PlannedShutdownAbortiveTerminal,
     ) -> Result<PlannedShutdownTerminalSettlement> {
-        let (agent_run_status, terminal_reason_code) =
-            planned_shutdown_abortive_terminal_facts(terminal.outcome)?;
+        let (agent_run_status, terminal_reason_code) = match terminal.outcome {
+            RuntimeTerminalOutcome::Failed => ("failed", "planned_shutdown_failed"),
+            RuntimeTerminalOutcome::Cancelled => ("cancelled", "planned_shutdown_cancelled"),
+            RuntimeTerminalOutcome::Succeeded => {
+                anyhow::bail!("planned shutdown abortive settlement cannot record success")
+            }
+        };
         if terminal.error_code.trim().is_empty() {
             anyhow::bail!("planned shutdown terminal errorCode must not be empty");
         }
@@ -4545,18 +4550,6 @@ fn validate_public_runtime_failure(
         anyhow::bail!("public Runtime failure code must match AgentRun errorCode");
     }
     Ok(())
-}
-
-fn planned_shutdown_abortive_terminal_facts(
-    outcome: RuntimeTerminalOutcome,
-) -> Result<(&'static str, &'static str)> {
-    match outcome {
-        RuntimeTerminalOutcome::Failed => Ok(("failed", "planned_shutdown_failed")),
-        RuntimeTerminalOutcome::Cancelled => Ok(("cancelled", "planned_shutdown_cancelled")),
-        RuntimeTerminalOutcome::Succeeded => {
-            anyhow::bail!("planned shutdown abortive settlement cannot record success")
-        }
-    }
 }
 
 pub(crate) fn recompute_camp_turn(
@@ -5279,6 +5272,7 @@ mod tests {
     use crate::{
         agent_profile::{
             AdapterKind, AdapterPermissionConfig, FrozenAgentRuntimeConfig, ResolvedModelSelection,
+            configure_test_runtime,
         },
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, ExecutionRequest,
@@ -5447,7 +5441,10 @@ mod tests {
 
     #[test]
     fn controlled_resume_is_persistently_fenced_after_a_crash_or_failure() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database();
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-resume-{}", Uuid::new_v4()));
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent_1"]);
         let now = chrono::Utc::now().to_rfc3339();
         database
             .connection()
@@ -5648,7 +5645,11 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn manual_native_session_restart_keeps_conversation_identity_and_generation() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database();
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-restart-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let mut database = Database::open(&directory).unwrap();
+        configure_test_runtime(&database, &["agent_1"]);
         let now = chrono::Utc::now().to_rfc3339();
         database
             .connection()
@@ -5773,9 +5774,13 @@ mod tests {
     fn claimed_run_for_planned_shutdown(
         completion_role: &str,
     ) -> (PathBuf, Database, String, String, String, i64) {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database();
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-planned-shutdown-settlement-{}",
+            Uuid::new_v4()
+        ));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -5806,6 +5811,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -6229,33 +6235,8 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
-    #[test]
-    fn planned_shutdown_abortive_terminal_outcomes_are_wait_reason_independent() {
-        for wait_reason in ["approval", "action_execution", "runtime_delivery"] {
-            for (outcome, expected) in [
-                (
-                    RuntimeTerminalOutcome::Failed,
-                    ("failed", "planned_shutdown_failed"),
-                ),
-                (
-                    RuntimeTerminalOutcome::Cancelled,
-                    ("cancelled", "planned_shutdown_cancelled"),
-                ),
-            ] {
-                assert_eq!(
-                    planned_shutdown_abortive_terminal_facts(outcome).unwrap(),
-                    expected,
-                    "wait reason {wait_reason} must not change terminal facts"
-                );
-            }
-        }
-        assert!(
-            planned_shutdown_abortive_terminal_facts(RuntimeTerminalOutcome::Succeeded).is_err()
-        );
-    }
-
     #[cfg(feature = "slow-tests")]
-    async fn planned_shutdown_failed_clears_live_waiting_state() {
+    async fn planned_shutdown_abortive_terminal_settles_live_waiting_runs() {
         struct WaitingTerminalState {
             run_status: String,
             wait_reason: Option<String>,
@@ -6270,8 +6251,11 @@ mod tests {
             turn_cancel_requested_at: Option<String>,
         }
 
-        for wait_reason in ["approval"] {
-            for outcome in [RuntimeTerminalOutcome::Failed] {
+        for wait_reason in ["approval", "action_execution", "runtime_delivery"] {
+            for outcome in [
+                RuntimeTerminalOutcome::Failed,
+                RuntimeTerminalOutcome::Cancelled,
+            ] {
                 let (
                     directory,
                     mut database,
@@ -6282,8 +6266,16 @@ mod tests {
                 ) = claimed_run_for_planned_shutdown("required");
                 mark_claimed_run_waiting(&database, &agent_run_id, wait_reason);
                 let permit = planned_terminal_permit(&agent_run_id, execution_epoch, outcome).await;
-                let (expected_run_status, expected_terminal_reason) =
-                    planned_shutdown_abortive_terminal_facts(outcome).unwrap();
+                let expected_run_status = match outcome {
+                    RuntimeTerminalOutcome::Failed => "failed",
+                    RuntimeTerminalOutcome::Cancelled => "cancelled",
+                    RuntimeTerminalOutcome::Succeeded => unreachable!(),
+                };
+                let expected_terminal_reason = match outcome {
+                    RuntimeTerminalOutcome::Failed => "planned_shutdown_failed",
+                    RuntimeTerminalOutcome::Cancelled => "planned_shutdown_cancelled",
+                    RuntimeTerminalOutcome::Succeeded => unreachable!(),
+                };
                 let settlement = ExecutionRuntimeService::default()
                     .settle_planned_shutdown_abortive_terminal(
                         &mut database,
@@ -6855,9 +6847,10 @@ mod tests {
 
     #[test]
     fn scheduler_serializes_one_conversation_and_increments_recovery_epoch() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database();
+        let directory = std::env::temp_dir().join(format!("rovai-runtime-test-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -6888,6 +6881,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent_2"]);
         let mut run_ids = Vec::new();
         for index in 0..2 {
             let turn = collaboration
@@ -7147,9 +7141,11 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn scheduler_can_reject_a_queued_run_without_starting_it_or_removing_its_message() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-dispatch-reject-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7180,6 +7176,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7207,6 +7204,15 @@ mod tests {
             .as_str()
             .unwrap()
             .to_string();
+        let public_failure = crate::runtime_failure::RuntimeFailureView::new(
+            AdapterKind::ClaudeCodeCli,
+            crate::runtime_failure::RuntimeFailureOrigin::Environment,
+            crate::runtime_failure::RuntimeFailurePhase::Execution,
+            "workspace_unavailable",
+            "Claude Code 的执行目录不可用",
+            Some("请选择一个可访问的项目目录".to_string()),
+            true,
+        );
         let runtime = ExecutionRuntimeService::default();
         let rejected = runtime
             .reject_agent_run_dispatch(
@@ -7219,7 +7225,7 @@ mod tests {
                         expected_version: 1,
                         error_code: "workspace_unavailable".to_string(),
                         error_detail: Some("workspace safety check failed".to_string()),
-                        failure: None,
+                        failure: Some(public_failure.clone()),
                         manual_retry_allowed: true,
                     },
                 ),
@@ -7254,6 +7260,15 @@ mod tests {
         assert!(state.2.is_none());
         assert!(state.3.is_none());
         assert_eq!(state.4, "workspace_unavailable");
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let run = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == run_id)
+            .unwrap();
+        assert_eq!(run.failure.as_ref(), Some(&public_failure));
         let message_count: i64 = database
             .connection()
             .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
@@ -7265,9 +7280,11 @@ mod tests {
 
     #[test]
     fn scheduler_rebinds_one_compatible_runtime_drift_and_preserves_initial_audit() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-rebind-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7298,6 +7315,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7466,9 +7484,11 @@ mod tests {
 
     #[test]
     fn persisted_deadline_exhausts_after_reopen_and_fences_dispatch_recovery_and_replay() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database();
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-budget-restart-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7499,6 +7519,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7674,9 +7695,11 @@ mod tests {
 
     #[test]
     fn camp_turn_cancellation_is_persisted_and_finalized_from_authoritative_state() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-cancel-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7707,6 +7730,7 @@ mod tests {
                 ),
             )
             .unwrap();
+        configure_test_runtime(&database, &["agent_2"]);
         let sent = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -7863,9 +7887,11 @@ mod tests {
 
     #[cfg(feature = "slow-tests")]
     fn away_members_keep_responsibility_but_wait_for_presence_before_dispatch() {
-        let (mut database, directory) = crate::test_support::seeded_runtime_database_fast();
+        let directory =
+            std::env::temp_dir().join(format!("rovai-runtime-fanout-{}", Uuid::new_v4()));
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = Database::open(&directory).unwrap();
         let collaboration = CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -7898,6 +7924,7 @@ mod tests {
                 )
                 .unwrap();
         }
+        configure_test_runtime(&database, &["agent_2", "agent_1"]);
         let queued = collaboration
             .send_test_camp_message(
                 &mut database,
@@ -8135,8 +8162,8 @@ mod tests {
             super::manual_native_session_restart_keeps_conversation_identity_and_generation();
         }
         #[tokio::test]
-        async fn planned_shutdown_failed_clears_live_waiting_state() {
-            super::planned_shutdown_failed_clears_live_waiting_state().await;
+        async fn planned_shutdown_abortive_terminal_settles_live_waiting_runs() {
+            super::planned_shutdown_abortive_terminal_settles_live_waiting_runs().await;
         }
         #[tokio::test]
         async fn planned_shutdown_optional_cancelled_does_not_block_turn_completion() {

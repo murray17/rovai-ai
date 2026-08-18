@@ -55,6 +55,7 @@ import {
   runtimeAvailabilityPresentation,
 } from './runtime-status'
 import { requestProductRuntimeCheck } from './runtime-check'
+import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import {
   type PendingRuntimeSubmission,
   persistedRuntimeChangeDisposition,
@@ -1514,6 +1515,7 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
                     ? '正在检查…'
                     : '检查可用性'}
                 </button>
+                {item?.failure && <RuntimeFailureNotice failure={item.failure} />}
               </article>
             )
           })}

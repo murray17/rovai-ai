@@ -138,6 +138,7 @@ function availability(
     },
     installationId: `installation-${runtimeKind}`,
     reportedVersion: 'runtime 1.0.0',
-    diagnosticCode: null
+    diagnosticCode: null,
+    failure: null
   }
 }

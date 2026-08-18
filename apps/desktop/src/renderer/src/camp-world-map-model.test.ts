@@ -51,6 +51,7 @@ function run(
     waitReason: null,
     terminalResolutionSource: null,
     terminalReasonCode: null,
+    failure: null,
     executionEpoch: 1,
     permissionSemantics: 'runtime_managed_v2',
     invocationKind: 'direct',

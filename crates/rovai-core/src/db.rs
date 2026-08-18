@@ -16653,10 +16653,14 @@ mod tests {
                     ON context_manifest(bootstrap_evidence_id);
                 ALTER TABLE agent_run DROP COLUMN skill_selection_snapshot_digest;
                 ALTER TABLE agent_run DROP COLUMN skill_selection_snapshot_json;
+                ALTER TABLE agent_run DROP COLUMN public_runtime_failure_json;
+                ALTER TABLE adapter_probe_attempt DROP COLUMN public_runtime_failure_json;
                 ALTER TABLE camp_message DROP COLUMN agent_addressing_mode;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 95;
+                DELETE FROM schema_migration WHERE version = 94;
                 DELETE FROM schema_migration WHERE version = 93;
                 DELETE FROM schema_migration WHERE version = 92;
                 DELETE FROM schema_migration WHERE version = 91;
@@ -16670,6 +16674,10 @@ mod tests {
         let agent_run_columns = table_columns(reopened.connection(), "agent_run").unwrap();
         assert!(agent_run_columns.contains(&"skill_selection_snapshot_json".to_string()));
         assert!(agent_run_columns.contains(&"skill_selection_snapshot_digest".to_string()));
+        assert!(agent_run_columns.contains(&"public_runtime_failure_json".to_string()));
+        let probe_attempt_columns =
+            table_columns(reopened.connection(), "adapter_probe_attempt").unwrap();
+        assert!(probe_attempt_columns.contains(&"public_runtime_failure_json".to_string()));
         let manifest_columns = table_columns(reopened.connection(), "context_manifest").unwrap();
         assert!(manifest_columns.contains(&"current_input_skill_resolution_json".to_string()));
         assert!(manifest_columns.contains(&"current_input_skill_resolution_digest".to_string()));
@@ -16681,7 +16689,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("formatter_version = 20"));
         let contract: (String, i64, i64) = reopened
             .connection()
             .query_row(
@@ -16694,7 +16702,7 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.07".to_string(), 48, 1));
+        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
         assert_eq!(
             reopened
                 .connection()

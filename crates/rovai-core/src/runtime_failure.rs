@@ -18,7 +18,6 @@ pub enum RuntimeFailureOrigin {
     Rovai,
     Unknown,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeFailurePhase {
@@ -67,7 +66,9 @@ impl RuntimeFailureView {
             self.runtime_kind,
             AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp
         ) {
-            anyhow::bail!("public Runtime failure is only supported for Claude Code or Antigravity");
+            anyhow::bail!(
+                "public Runtime failure is only supported for Claude Code or Antigravity"
+            );
         }
         if self.code.trim().is_empty()
             || self.code.len() > 120
@@ -117,6 +118,10 @@ impl fmt::Display for RuntimeFailureError {
 
 impl std::error::Error for RuntimeFailureError {}
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the closed public failure contract and sanitization inputs stay explicit at each boundary"
+)]
 pub fn public_runtime_failure_from_output(
     runtime_kind: AdapterKind,
     origin: RuntimeFailureOrigin,
@@ -198,7 +203,13 @@ fn classify_high_value_runtime_error(
     }
     if contains_any(
         lower,
-        &["rate limit", "rate-limit", "too many requests", "status 429", "http 429"],
+        &[
+            "rate limit",
+            "rate-limit",
+            "too many requests",
+            "status 429",
+            "http 429",
+        ],
     ) {
         return (
             RuntimeFailureOrigin::Runtime,
@@ -250,8 +261,14 @@ fn classify_high_value_runtime_error(
             false,
         );
     }
-    if contains_any(lower, &["permission denied", "access denied", "operation not permitted"])
-    {
+    if contains_any(
+        lower,
+        &[
+            "permission denied",
+            "access denied",
+            "operation not permitted",
+        ],
+    ) {
         return (
             RuntimeFailureOrigin::Runtime,
             default_phase,
@@ -289,21 +306,15 @@ pub fn sanitize_public_runtime_error(
     sensitive_paths: &[(&Path, &str)],
 ) -> Option<String> {
     let without_ansi = strip_ansi_and_controls(raw);
-    let mut paths = sensitive_paths
-        .iter()
-        .filter_map(|(path, replacement)| {
-            let text = path.to_string_lossy().to_string();
-            (!text.is_empty()).then(|| (text, (*replacement).to_string()))
-        })
-        .collect::<Vec<_>>();
-    if let Some(home) = dirs::home_dir() {
-        paths.push((home.to_string_lossy().to_string(), "<home>".to_string()));
+    let mut paths = Vec::new();
+    for (path, replacement) in sensitive_paths {
+        push_sensitive_path_variants(&mut paths, path, replacement);
     }
-    paths.push((
-        std::env::temp_dir().to_string_lossy().to_string(),
-        "<temp>".to_string(),
-    ));
-    paths.sort_by(|left, right| right.0.len().cmp(&left.0.len()));
+    if let Some(home) = dirs::home_dir() {
+        push_sensitive_path_variants(&mut paths, &home, "<home>");
+    }
+    push_sensitive_path_variants(&mut paths, &std::env::temp_dir(), "<temp>");
+    paths.sort_by_key(|entry| std::cmp::Reverse(entry.0.len()));
     paths.dedup_by(|left, right| left.0 == right.0);
 
     let mut lines = Vec::new();
@@ -318,6 +329,7 @@ pub fn sanitize_public_runtime_error(
                 redacted = redacted.replace(path, replacement);
             }
         }
+        redacted = redact_private_runtime_paths(redacted);
         redacted = redact_secret_values(redacted);
         if !redacted.trim().is_empty() {
             lines.push(redacted);
@@ -329,6 +341,32 @@ pub fn sanitize_public_runtime_error(
     let joined = lines.join("\n");
     let bounded = truncate_chars(&joined, PUBLIC_RUNTIME_ERROR_MAX_CHARS);
     (!bounded.trim().is_empty()).then_some(bounded)
+}
+
+fn push_sensitive_path_variants(paths: &mut Vec<(String, String)>, path: &Path, replacement: &str) {
+    let mut variants = vec![path.to_string_lossy().to_string()];
+    if let Ok(canonical) = path.canonicalize() {
+        variants.push(canonical.to_string_lossy().to_string());
+    }
+    for value in variants.clone() {
+        if let Some(private_alias) = value.strip_prefix("/private/") {
+            variants.push(format!("/{private_alias}"));
+        } else if value.starts_with("/var/") || value.starts_with("/tmp/") {
+            variants.push(format!("/private{value}"));
+        }
+    }
+    paths.extend(
+        variants
+            .into_iter()
+            .filter(|value| !value.is_empty())
+            .map(|value| (value, replacement.to_string())),
+    );
+}
+
+fn redact_private_runtime_paths(mut value: String) -> String {
+    value = value.replace("<runtime-private>", "<private-runtime>");
+    value = value.replace(".runtime-private", "<private-runtime>");
+    value.replace("runtime-private", "<private-runtime>")
 }
 
 fn strip_ansi_and_controls(raw: &str) -> String {
@@ -359,9 +397,7 @@ fn strip_ansi_and_controls(raw: &str) -> String {
                             index += 1;
                             break;
                         }
-                        if bytes[index] == 0x1b
-                            && bytes.get(index + 1).copied() == Some(b'\\')
-                        {
+                        if bytes[index] == 0x1b && bytes.get(index + 1).copied() == Some(b'\\') {
                             index += 2;
                             break;
                         }
@@ -381,24 +417,36 @@ fn strip_ansi_and_controls(raw: &str) -> String {
             _ => output.push(byte),
         }
     }
-    String::from_utf8_lossy(&output).into_owned()
+    String::from_utf8_lossy(&output)
+        .chars()
+        .filter(|character| !character.is_control() || *character == '\n')
+        .collect()
 }
 
 fn contains_private_payload_label(line: &str) -> bool {
-    let lower = line.trim_start().to_ascii_lowercase();
+    let normalized = line
+        .to_ascii_lowercase()
+        .chars()
+        .filter(|character| !character.is_whitespace() && !matches!(character, '"' | '\'' | '\\'))
+        .collect::<String>();
     [
         "prompt:",
         "prompt=",
-        "\"prompt\":",
-        "user message:",
+        "usermessage:",
+        "usermessage=",
         "user_message:",
-        "tool input:",
+        "user_message=",
+        "toolinput:",
+        "toolinput=",
         "tool_input:",
-        "tool output:",
+        "tool_input=",
+        "tooloutput:",
+        "tooloutput=",
         "tool_output:",
+        "tool_output=",
     ]
     .iter()
-    .any(|label| lower.starts_with(label))
+    .any(|label| normalized.contains(label))
 }
 
 fn redact_secret_values(mut value: String) -> String {
@@ -485,8 +533,7 @@ fn secret_assignment_bounds(
         value[start..]
             .char_indices()
             .find(|(_, character)| {
-                character.is_whitespace()
-                    || matches!(character, '"' | '\'' | ',' | ';' | '}' | ']')
+                character.is_whitespace() || matches!(character, '"' | '\'' | ',' | ';' | '}' | ']')
             })
             .map(|(offset, _)| start + offset)
             .unwrap_or(value.len())
@@ -517,6 +564,9 @@ mod tests {
             "authorization: Bearer top-secret-value\n",
             "api_key=another-secret\n",
             "Prompt: do not expose this user message\n",
+            "Error: tool_output: do not expose this tool payload\n",
+            r#"Error: {\"user_message\" : \"do not expose this JSON payload\"}"#,
+            "\n",
             "/Users/tester/project/.runtime-private/log at ",
             "/Applications/Claude.app/Contents/MacOS/claude\n",
             "fifth line must be dropped"
@@ -530,11 +580,25 @@ mod tests {
         assert!(!sanitized.contains("top-secret-value"));
         assert!(!sanitized.contains("another-secret"));
         assert!(!sanitized.contains("do not expose"));
+        assert!(!sanitized.contains("tool payload"));
         assert!(!sanitized.contains("/Users/tester/project"));
         assert!(!sanitized.contains("/Applications/Claude.app"));
+        assert!(!sanitized.contains("runtime-private"));
         assert!(sanitized.contains("authorization: [redacted]"));
-        assert!(sanitized.contains("<project>/.runtime-private/log"));
+        assert!(sanitized.contains("<project>/<private-runtime>/log"));
         assert!(sanitized.lines().count() <= PUBLIC_RUNTIME_ERROR_MAX_LINES);
+    }
+
+    #[test]
+    fn sanitizes_unicode_controls_and_private_var_aliases() {
+        let temporary = Path::new("/var/folders/example/runtime-private");
+        let sanitized = sanitize_public_runtime_error(
+            "failed\u{0085} at /private/var/folders/example/runtime-private/log",
+            &[(temporary, "<temp-runtime>")],
+        )
+        .unwrap();
+        assert_eq!(sanitized, "failed at <temp-runtime>/log");
+        assert!(!sanitized.chars().any(char::is_control));
     }
 
     #[test]
@@ -565,5 +629,50 @@ mod tests {
         );
         assert_eq!(compatibility.code, "runtime_stream_incompatible");
         assert_eq!(compatibility.origin, RuntimeFailureOrigin::Compatibility);
+    }
+
+    #[test]
+    fn classifies_auth_quota_model_and_permission_failures_with_stable_codes() {
+        let cases = [
+            (
+                "Authentication failed: token expired",
+                "runtime_authentication_required",
+                RuntimeFailurePhase::Authentication,
+                true,
+            ),
+            (
+                "Quota exceeded for this account",
+                "runtime_quota_exceeded",
+                RuntimeFailurePhase::Terminal,
+                false,
+            ),
+            (
+                "Model claude-test is not available for this account",
+                "runtime_model_unavailable",
+                RuntimeFailurePhase::Terminal,
+                false,
+            ),
+            (
+                "Permission denied while accessing the provider resource",
+                "runtime_permission_denied",
+                RuntimeFailurePhase::Terminal,
+                false,
+            ),
+        ];
+        for (detail, expected_code, expected_phase, expected_retryable) in cases {
+            let failure = public_runtime_failure_from_output(
+                AdapterKind::AntigravityApp,
+                RuntimeFailureOrigin::Runtime,
+                RuntimeFailurePhase::Terminal,
+                "runtime_terminal_failure",
+                "Antigravity 返回了失败结果",
+                Some(detail),
+                &[],
+                true,
+            );
+            assert_eq!(failure.code, expected_code);
+            assert_eq!(failure.phase, expected_phase);
+            assert_eq!(failure.retryable, expected_retryable);
+        }
     }
 }

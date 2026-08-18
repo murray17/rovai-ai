@@ -116,6 +116,7 @@ export interface AdapterProbeAttempt {
   executableFingerprint: string | null
   attemptedAt: string
   retryAfter: string | null
+  failure: RuntimeFailureView | null
 }
 
 export type InstallationSource =

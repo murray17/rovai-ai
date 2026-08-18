@@ -60,6 +60,28 @@ describe('Runtime user status projection', () => {
     })
   })
 
+  it('uses a safe public failure instead of the generic availability fallback', () => {
+    const result = runtimeAvailabilityPresentation({
+      ...availability('needs_attention', 'claude-code-cli'),
+      failure: {
+        runtimeKind: 'claude-code-cli',
+        origin: 'runtime',
+        phase: 'terminal',
+        code: 'runtime_rate_limited',
+        summary: '请求受到速率限制',
+        detail: '请稍后重试。',
+        retryable: true
+      }
+    })
+
+    expect(result).toEqual({
+      status: 'unavailable',
+      label: '需要处理',
+      detail: '请求受到速率限制\n请稍后重试。'
+    })
+    expect(result.detail).not.toContain('最近一次 Runtime 验证未完成')
+  })
+
   it('keeps an unsaved editor selection in product availability state', () => {
     const agent = {
       ...profile({
@@ -139,7 +161,8 @@ function availability(
     },
     installationId: status === 'ready' ? 'installation-kiro' : null,
     reportedVersion: found ? 'kiro-cli 2.15.1' : null,
-    diagnosticCode: null
+    diagnosticCode: null,
+    failure: null
   }
 }
 

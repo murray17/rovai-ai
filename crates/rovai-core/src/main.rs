@@ -864,6 +864,12 @@ struct ProductRuntimeDiagnostic {
     status: &'static str,
     diagnostic_code: String,
     priority: u8,
+    failure: Option<RuntimeFailureView>,
+}
+
+struct RuntimeDeepProbeResult {
+    snapshot: rovai_core::agent_profile::AdapterCapabilitySnapshot,
+    failure: Option<RuntimeFailureView>,
 }
 
 const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
@@ -1523,6 +1529,7 @@ impl Core {
                                 }
                                 .to_string(),
                                 priority: 2,
+                                failure: None,
                             },
                         );
                         let mut observation =
@@ -1857,6 +1864,9 @@ impl Core {
                             .and_then(|attempt| attempt.diagnostic_code.as_deref())
                             .or_else(|| product_diagnostic.map(|diagnostic| diagnostic.diagnostic_code.as_str()))
                             .or(discovery.diagnostic_code.as_deref()),
+                        "failure": relevant_probe_attempt
+                            .and_then(|attempt| attempt.failure.as_ref())
+                            .or_else(|| product_diagnostic.and_then(|diagnostic| diagnostic.failure.as_ref())),
                         "lastAttemptedAt": installation
                             .and_then(|installation| installation.snapshot.as_ref())
                             .map(|snapshot| snapshot.last_attempted_at.as_str())
@@ -2138,6 +2148,12 @@ impl Core {
                     source: existing.as_ref().map(|installation| installation.source),
                     failure_class: "path_missing",
                     diagnostic_code: "runtime_path_missing",
+                    failure: availability_environment_failure(
+                        kind,
+                        "runtime_executable_unavailable",
+                        "Runtime 可执行文件不可用",
+                    )
+                    .as_ref(),
                 },
             )?;
             if existing.is_none() {
@@ -2145,6 +2161,11 @@ impl Core {
                     &mut unresolved_diagnostic,
                     "path_missing",
                     "runtime_path_missing",
+                    availability_environment_failure(
+                        kind,
+                        "runtime_executable_unavailable",
+                        "Runtime 可执行文件不可用",
+                    ),
                 );
                 if let Some(diagnostic) = unresolved_diagnostic {
                     self.runtime_product_diagnostics
@@ -2162,6 +2183,11 @@ impl Core {
                     &mut unresolved_diagnostic,
                     "path_missing",
                     "runtime_path_missing",
+                    availability_environment_failure(
+                        kind,
+                        "runtime_executable_unavailable",
+                        "Runtime 可执行文件不可用",
+                    ),
                 );
                 if existing
                     .as_ref()
@@ -2178,6 +2204,12 @@ impl Core {
                             source: Some(source),
                             failure_class: "path_missing",
                             diagnostic_code: "runtime_path_missing",
+                            failure: availability_environment_failure(
+                                kind,
+                                "runtime_executable_unavailable",
+                                "Runtime 可执行文件不可用",
+                            )
+                            .as_ref(),
                         },
                     )?;
                 }
@@ -2203,12 +2235,23 @@ impl Core {
                             source: Some(source),
                             failure_class: "transient",
                             diagnostic_code: "runtime_fingerprint_failed",
+                            failure: availability_environment_failure(
+                                kind,
+                                "runtime_executable_unavailable",
+                                "无法读取 Runtime 可执行文件",
+                            )
+                            .as_ref(),
                         },
                     )?;
                     note_product_runtime_diagnostic(
                         &mut unresolved_diagnostic,
                         "transient",
                         "runtime_fingerprint_failed",
+                        availability_environment_failure(
+                            kind,
+                            "runtime_executable_unavailable",
+                            "无法读取 Runtime 可执行文件",
+                        ),
                     );
                     continue;
                 }
@@ -2271,8 +2314,14 @@ impl Core {
                 let database = self.database.lock().await;
                 return managed_runtime_is_ready(&database, kind);
             }
-            discover_runtime_version(&mut lightweight, &search).await;
-            if lightweight.reported_version.is_none() {
+            let deep_probe_reports_version = matches!(
+                kind,
+                AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp
+            );
+            if !deep_probe_reports_version {
+                discover_runtime_version(&mut lightweight, &search).await;
+            }
+            if !deep_probe_reports_version && lightweight.reported_version.is_none() {
                 let failure_class = if identity_changed {
                     "identity_changed"
                 } else {
@@ -2293,22 +2342,24 @@ impl Core {
                         source: Some(source),
                         failure_class,
                         diagnostic_code,
+                        failure: None,
                     },
                 )?;
                 note_product_runtime_diagnostic(
                     &mut unresolved_diagnostic,
                     failure_class,
                     diagnostic_code,
+                    None,
                 );
                 continue;
             }
-            let snapshot = match with_runtime_search_environment(
+            let deep_probe = match with_runtime_search_environment(
                 &search,
                 self.deep_probe_candidate(kind, &canonical, purpose),
             )
             .await
             {
-                Ok(snapshot) => snapshot,
+                Ok(deep_probe) => deep_probe,
                 Err(error) => {
                     eprintln!(
                         "Runtime deep probe construction failed for {} at {}: {error:#}",
@@ -2336,16 +2387,19 @@ impl Core {
                             source: Some(source),
                             failure_class,
                             diagnostic_code,
+                            failure: None,
                         },
                     )?;
                     note_product_runtime_diagnostic(
                         &mut unresolved_diagnostic,
                         failure_class,
                         diagnostic_code,
+                        None,
                     );
                     continue;
                 }
             };
+            let RuntimeDeepProbeResult { snapshot, failure } = deep_probe;
             if !self
                 .runtime_probe_identity_is_current(
                     kind,
@@ -2409,12 +2463,14 @@ impl Core {
                     source: Some(source),
                     failure_class,
                     diagnostic_code,
+                    failure: failure.as_ref(),
                 },
             )?;
             note_product_runtime_diagnostic(
                 &mut unresolved_diagnostic,
                 failure_class,
                 diagnostic_code,
+                failure,
             );
         }
         if existing.is_none()
@@ -4929,13 +4985,13 @@ impl Core {
         adapter_kind: rovai_core::agent_profile::AdapterKind,
         executable_path: &Path,
         purpose: RuntimeLaunchPurpose,
-    ) -> Result<rovai_core::agent_profile::AdapterCapabilitySnapshot> {
+    ) -> Result<RuntimeDeepProbeResult> {
         if !runtime_launch_allowed(adapter_kind, purpose) {
             anyhow::bail!("runtime_launch_disallowed_for_{purpose:?}");
         }
         let attempted_at = chrono::Utc::now().to_rfc3339();
         let registry = AgentRuntimeAdapterRegistry::default();
-        let snapshot = match adapter_kind {
+        let (snapshot, failure) = match adapter_kind {
             rovai_core::agent_profile::AdapterKind::CodexCli => {
                 let probe = health::codex_runtime_probe_at(executable_path).await;
                 let authentication_status = probe_authentication_status(probe.status).to_string();
@@ -4959,16 +5015,19 @@ impl Core {
                 } else {
                     probe_status_name(probe.status).to_string()
                 };
-                registry.codex_capability_snapshot(CodexProbeObservation {
-                    reported_version: probe.reported_version,
-                    executable_fingerprint: probe.executable_fingerprint,
-                    authentication_status,
-                    probe_status: status,
-                    capabilities: probe.capabilities,
-                    raw_model_catalog,
-                    attempted_at,
-                    last_error,
-                })?
+                (
+                    registry.codex_capability_snapshot(CodexProbeObservation {
+                        reported_version: probe.reported_version,
+                        executable_fingerprint: probe.executable_fingerprint,
+                        authentication_status,
+                        probe_status: status,
+                        capabilities: probe.capabilities,
+                        raw_model_catalog,
+                        attempted_at,
+                        last_error,
+                    })?,
+                    None,
+                )
             }
             kind @ (rovai_core::agent_profile::AdapterKind::OpencodeCli
             | rovai_core::agent_profile::AdapterKind::CopilotCli
@@ -4980,52 +5039,61 @@ impl Core {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
                         .await;
-                registry.acp_capability_snapshot(AcpProbeObservation {
-                    adapter_kind: kind,
-                    reported_version: probe.result.reported_version,
-                    executable_fingerprint: probe.result.executable_fingerprint,
-                    authentication_status: probe_authentication_status(probe.result.status)
-                        .to_string(),
-                    probe_status: probe_status_name(probe.result.status).to_string(),
-                    capabilities: probe.result.capabilities,
-                    initialize_result: probe.initialize_result,
-                    session_result: probe.session_result,
-                    attempted_at,
-                    last_error: probe.result.detail,
-                })?
+                (
+                    registry.acp_capability_snapshot(AcpProbeObservation {
+                        adapter_kind: kind,
+                        reported_version: probe.result.reported_version,
+                        executable_fingerprint: probe.result.executable_fingerprint,
+                        authentication_status: probe_authentication_status(probe.result.status)
+                            .to_string(),
+                        probe_status: probe_status_name(probe.result.status).to_string(),
+                        capabilities: probe.result.capabilities,
+                        initialize_result: probe.initialize_result,
+                        session_result: probe.session_result,
+                        attempted_at,
+                        last_error: probe.result.detail,
+                    })?,
+                    None,
+                )
             }
             rovai_core::agent_profile::AdapterKind::ClaudeCodeCli => {
                 let probe = health::claude_code_capability_probe_at(executable_path).await;
-                registry.claude_code_capability_snapshot(ClaudeCodeProbeObservation {
-                    reported_version: probe.result.reported_version,
-                    executable_fingerprint: probe.result.executable_fingerprint,
-                    authentication_status: probe_authentication_status(probe.result.status)
-                        .to_string(),
-                    probe_status: probe_status_name(probe.result.status).to_string(),
-                    capabilities: probe.result.capabilities,
-                    model_aliases: probe.model_aliases,
-                    attempted_at,
-                    last_error: probe.result.detail,
-                })?
+                let failure = probe.result.failure.clone();
+                let snapshot =
+                    registry.claude_code_capability_snapshot(ClaudeCodeProbeObservation {
+                        reported_version: probe.result.reported_version,
+                        executable_fingerprint: probe.result.executable_fingerprint,
+                        authentication_status: probe_authentication_status(probe.result.status)
+                            .to_string(),
+                        probe_status: probe_status_name(probe.result.status).to_string(),
+                        capabilities: probe.result.capabilities,
+                        model_aliases: probe.model_aliases,
+                        attempted_at,
+                        last_error: probe.result.detail,
+                    })?;
+                (snapshot, failure)
             }
             rovai_core::agent_profile::AdapterKind::AntigravityApp => {
                 let probe = health::antigravity_capability_probe_at(executable_path).await;
+                let failure = probe.result.failure.clone();
                 let builtin_cli_ready = bundled_cli_executable().is_ok_and(|path| path.is_file());
-                registry.antigravity_capability_snapshot(AntigravityProbeObservation {
-                    reported_version: probe.result.reported_version,
-                    executable_fingerprint: probe.result.executable_fingerprint,
-                    authentication_status: probe_authentication_status(probe.result.status)
-                        .to_string(),
-                    probe_status: probe_status_name(probe.result.status).to_string(),
-                    capabilities: probe.result.capabilities,
-                    models: probe.models,
-                    builtin_cli_ready,
-                    attempted_at,
-                    last_error: probe.result.detail,
-                })?
+                let snapshot =
+                    registry.antigravity_capability_snapshot(AntigravityProbeObservation {
+                        reported_version: probe.result.reported_version,
+                        executable_fingerprint: probe.result.executable_fingerprint,
+                        authentication_status: probe_authentication_status(probe.result.status)
+                            .to_string(),
+                        probe_status: probe_status_name(probe.result.status).to_string(),
+                        capabilities: probe.result.capabilities,
+                        models: probe.models,
+                        builtin_cli_ready,
+                        attempted_at,
+                        last_error: probe.result.detail,
+                    })?;
+                (snapshot, failure)
             }
         };
-        Ok(snapshot)
+        Ok(RuntimeDeepProbeResult { snapshot, failure })
     }
 
     async fn refresh_adapter_installation(
@@ -5089,13 +5157,14 @@ impl Core {
                         installation_id: installation.id,
                         expected_installation_version: installation.version,
                         snapshot,
+                        failure: None,
                     },
                 ),
             )?;
             return Ok(serde_json::to_value(execution.result)?);
         }
         let search = self.runtime_search_environment.read().await.clone();
-        let snapshot = with_runtime_search_environment(
+        let deep_probe = with_runtime_search_environment(
             &search,
             self.deep_probe_candidate(
                 installation.adapter_kind,
@@ -5112,7 +5181,8 @@ impl Core {
                 RecordAdapterCapabilitySnapshotCommand {
                     installation_id: installation.id,
                     expected_installation_version: installation.version,
-                    snapshot,
+                    snapshot: deep_probe.snapshot,
+                    failure: deep_probe.failure,
                 },
             ),
         )?;
@@ -6981,6 +7051,7 @@ impl Core {
                                             installation_id: installation.id.clone(),
                                             expected_installation_version: installation.version,
                                             snapshot,
+                                            failure: None,
                                         },
                                     },
                                 )
@@ -6999,7 +7070,7 @@ impl Core {
                     }
                 } else {
                     let search = self.runtime_search_environment.read().await.clone();
-                    let snapshot = with_runtime_search_environment(
+                    let deep_probe = with_runtime_search_environment(
                         &search,
                         self.deep_probe_candidate(
                             frozen_runtime.adapter_kind,
@@ -7008,8 +7079,8 @@ impl Core {
                         ),
                     )
                     .await;
-                    match snapshot {
-                        Ok(snapshot) => {
+                    match deep_probe {
+                        Ok(deep_probe) => {
                             let mut database = self.database.lock().await;
                             AgentProfileService::default()
                                 .record_snapshot(
@@ -7025,7 +7096,8 @@ impl Core {
                                         payload: RecordAdapterCapabilitySnapshotCommand {
                                             installation_id: installation.id.clone(),
                                             expected_installation_version: installation.version,
-                                            snapshot,
+                                            snapshot: deep_probe.snapshot,
+                                            failure: deep_probe.failure,
                                         },
                                     },
                                 )
@@ -7814,9 +7886,23 @@ impl Core {
                     && (accepted.native_session_id != result.native_session_id
                         || accepted.native_turn_id != result.native_turn_id)
                 {
-                    anyhow::bail!(
+                    return Err(anyhow::anyhow!(
                         "Claude Code terminal identity did not match its accepted input evidence"
-                    );
+                    ))
+                    .context(ClaudeCodeDeliveredFailure {
+                        native_session_id: accepted.native_session_id.clone(),
+                        native_turn_id: accepted.native_turn_id.clone(),
+                        error_code: "runtime_session_incompatible".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::ClaudeCodeCli,
+                            RuntimeFailureOrigin::Compatibility,
+                            RuntimeFailurePhase::Terminal,
+                            "runtime_session_incompatible",
+                            "Claude Code 返回了另一个会话的结果",
+                            None,
+                            false,
+                        ),
+                    });
                 }
                 result
             }
@@ -7827,9 +7913,20 @@ impl Core {
                         && (accepted.native_session_id != delivered.native_session_id
                             || accepted.native_turn_id != delivered.native_turn_id)
                     {
-                        anyhow::bail!(
-                            "Claude Code terminal identity did not match its accepted input evidence"
-                        );
+                        return Err(error).context(ClaudeCodeDeliveredFailure {
+                            native_session_id: accepted.native_session_id.clone(),
+                            native_turn_id: accepted.native_turn_id.clone(),
+                            error_code: "runtime_session_incompatible".to_string(),
+                            failure: RuntimeFailureView::new(
+                                AdapterKind::ClaudeCodeCli,
+                                RuntimeFailureOrigin::Compatibility,
+                                RuntimeFailurePhase::Terminal,
+                                "runtime_session_incompatible",
+                                "Claude Code 返回了另一个会话的结果",
+                                None,
+                                false,
+                            ),
+                        });
                     }
                     if accepted_input.is_none() {
                         let observed_acceptance = ClaudeCodeInputAccepted {
@@ -8750,6 +8847,7 @@ impl Core {
                     installation_id: execution.runtime.installation_id.clone(),
                     expected_installation_version: installation_version,
                     snapshot,
+                    failure: None,
                 },
             },
         )?;
@@ -8856,6 +8954,7 @@ impl Core {
                         installation_id: installation.id,
                         expected_installation_version: installation.version,
                         snapshot,
+                        failure: None,
                     },
                 },
             )
@@ -9121,6 +9220,7 @@ fn note_product_runtime_diagnostic(
     current: &mut Option<ProductRuntimeDiagnostic>,
     failure_class: &str,
     diagnostic_code: &str,
+    failure: Option<RuntimeFailureView>,
 ) {
     let (status, priority) = match failure_class {
         "authentication_required" => ("authentication_required", 4),
@@ -9138,6 +9238,7 @@ fn note_product_runtime_diagnostic(
         status,
         diagnostic_code: diagnostic_code.to_string(),
         priority,
+        failure,
     });
 }
 
@@ -11260,13 +11361,7 @@ async fn process_agent_run_acp_message(
             )
         };
         if let Ok(Some(execution)) = execution {
-            core.fail_claimed_agent_run(
-                &execution,
-                "action_audit_failed",
-                &error,
-                false,
-                None,
-            )
+            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error, false, None)
                 .await;
         }
         return;
@@ -13595,6 +13690,7 @@ async fn finalize_runtime_check(
                 status: "needs_attention",
                 diagnostic_code: diagnostic_code.clone(),
                 priority: 2,
+                failure: None,
             });
         eprintln!(
             "Runtime check {} for {} finalized with {} after {} ms",
@@ -13682,6 +13778,27 @@ fn unknown_one_shot_runtime_failure(
         summary,
         None,
         retryable,
+    ))
+}
+
+fn availability_environment_failure(
+    runtime_kind: AdapterKind,
+    error_code: &str,
+    summary: &str,
+) -> Option<RuntimeFailureView> {
+    let runtime_name = match runtime_kind {
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+        _ => return None,
+    };
+    Some(RuntimeFailureView::new(
+        runtime_kind,
+        RuntimeFailureOrigin::Environment,
+        RuntimeFailurePhase::Spawn,
+        error_code,
+        summary.replace("Runtime", runtime_name),
+        None,
+        true,
     ))
 }
 
@@ -15016,6 +15133,7 @@ mod tests {
                     executable_fingerprint: Some("sha256:test".to_string()),
                     attempted_at: last_successful_probe_at.to_string(),
                     retry_after: Some(retry_after.to_string()),
+                    failure: None,
                 }
             }),
             relocation_history: Vec::new(),
@@ -15058,6 +15176,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: now.to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
         assert_eq!(
             product_runtime_availability_status(
@@ -15083,6 +15202,7 @@ mod tests {
             status: "needs_attention",
             diagnostic_code: "runtime_probe_transient_failure".to_string(),
             priority: 2,
+            failure: None,
         };
         assert_eq!(
             product_runtime_availability_status(
@@ -15140,6 +15260,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
         assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
         assert_eq!(
@@ -15167,6 +15288,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: (now - chrono::Duration::seconds(1)).to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
 
         assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
@@ -15212,6 +15334,7 @@ mod tests {
             executable_fingerprint: Some("sha256:test".to_string()),
             attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
             retry_after: None,
+            failure: None,
         });
         assert_eq!(
             product_runtime_availability_status(
@@ -15227,16 +15350,23 @@ mod tests {
     #[test]
     fn unregistered_product_probe_diagnostics_preserve_the_most_actionable_status() {
         let mut diagnostic = None;
-        note_product_runtime_diagnostic(&mut diagnostic, "path_missing", "runtime_path_missing");
+        note_product_runtime_diagnostic(
+            &mut diagnostic,
+            "path_missing",
+            "runtime_path_missing",
+            None,
+        );
         note_product_runtime_diagnostic(
             &mut diagnostic,
             "authentication_required",
             "runtime_authentication_required",
+            None,
         );
         note_product_runtime_diagnostic(
             &mut diagnostic,
             "transient",
             "runtime_probe_transient_failure",
+            None,
         );
         let diagnostic = diagnostic.expect("diagnostic");
         assert_eq!(diagnostic.status, "authentication_required");

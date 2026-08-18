@@ -57,7 +57,6 @@ pub struct ClaudeCodeRunRequest {
     pub runtime_events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
     pub launch_handoff: Option<oneshot::Sender<()>>,
 }
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClaudeCodeInputAccepted {
     pub native_session_id: String,
@@ -537,6 +536,10 @@ impl ClaudeCodeCliRuntimeAdapter {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the Runtime request and closed public failure fields stay explicit at this boundary"
+)]
 fn claude_public_failure(
     request: &ClaudeCodeRunRequest,
     private_runtime_dir: &Path,
@@ -1417,6 +1420,9 @@ mod tests {
         assert_eq!(proof.native_session_id, session_id);
         assert_eq!(proof.native_turn_id, native_turn_id);
         assert_eq!(proof.error_code, "runtime_terminal_failure");
+        assert_eq!(proof.failure.origin, RuntimeFailureOrigin::Runtime);
+        assert_eq!(proof.failure.phase, RuntimeFailurePhase::Terminal);
+        assert_eq!(proof.failure.detail.as_deref(), Some("provider detail"));
 
         let mismatched = ClaudeCodeJsonResult {
             session_id: Some("5ade59ac-f87e-4827-8cf2-0e1f3ba720ea".to_string()),

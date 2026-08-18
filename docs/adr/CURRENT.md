@@ -114,7 +114,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
 - **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Windows Desktop Platform](../architecture/windows-desktop-platform.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)、[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)、[Windows Private Storage v1](../contracts/windows-private-storage-v1.md)、[Runtime Launch and Verification v7](../contracts/runtime-launch-and-verification-v7.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
+- **当前合同：** [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)、[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)、[Windows Private Storage v1](../contracts/windows-private-storage-v1.md)、[Runtime Launch and Verification v8](../contracts/runtime-launch-and-verification-v8.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |
@@ -292,7 +292,7 @@ Related: Runtime Activity 与 Execution Evidence 作为输入，不替代 Qualif
 
 - **何时阅读：** 修改产品身份、Renderer surface、Run detail 或稳定 UI/UX 合同时阅读。
 - **当前架构：** [Diagnostics Center](../architecture/diagnostics-center.md)；其他主题 architecture summary pending
-- **当前合同：** [Run Process Detail Surface v8](../contracts/run-process-detail-surface-v8.md)
+- **当前合同：** [Run Process Detail Surface v9](../contracts/run-process-detail-surface-v9.md)
 
 <!-- adr-current-primary:begin topic=product-renderer -->
 | ADR | Decision |

@@ -2128,6 +2128,7 @@ describe('task event projections', () => {
         responsibilityGeneration: 0, purpose: '实现复制',
         completionRole: 'required', status: 'running', waitReason: null, executionEpoch: 1,
         terminalResolutionSource: null, terminalReasonCode: null,
+        failure: null,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
         executionEvidenceCount: 3,
@@ -3271,6 +3272,36 @@ describe('task event projections', () => {
     expect(activityStatusForAgentRun('running', 'failed')).toBe('running')
   })
 
+  it('shows a failed Claude run public failure even when no execution evidence was recorded', () => {
+    const run: AgentRunView = {
+      id: 'run-claude-failed', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
+      responsibilityGeneration: 0, purpose: '检查仓库', completionRole: 'required',
+      status: 'failed', waitReason: null, executionEpoch: 1,
+      terminalResolutionSource: 'runtime_terminal', terminalReasonCode: null,
+      failure: {
+        runtimeKind: 'claude-code-cli', origin: 'runtime', phase: 'terminal',
+        code: 'runtime_rate_limited', summary: '请求受到速率限制',
+        detail: '请稍后重试。', retryable: true
+      },
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
+      a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
+      executionEvidenceCount: 0, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-18T00:00:00Z', startedAt: '2026-08-18T00:00:01Z',
+      endedAt: '2026-08-18T00:00:02Z', updatedAt: '2026-08-18T00:00:02Z'
+    }
+
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, campId: 'camp-1'
+    }))
+    expect(markup).toContain('<details class="execution-disclosure worked is-terminal" open="">')
+    expect(markup).toContain('Claude Code 返回错误')
+    expect(markup).toContain('请求受到速率限制')
+    expect(markup).toContain('请稍后重试。')
+    expect(markup).not.toContain('Rovai 内部错误')
+  })
+
   it('does not present an ACP protocol kind as Copilot execution detail', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'copilot-tool-call', agentRunId: 'run-copilot', eventType: 'runtime.action',
@@ -3300,6 +3331,7 @@ describe('task event projections', () => {
       responsibilityGeneration: 0, purpose: '检查工作区状态', completionRole: 'required',
       status: 'running', waitReason: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
+      failure: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
@@ -3395,6 +3427,7 @@ describe('task event projections', () => {
       responsibilityGeneration: 0, purpose: '读取 Camp 历史', completionRole: 'required',
       status: 'succeeded', waitReason: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
+      failure: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
@@ -3456,6 +3489,7 @@ describe('task event projections', () => {
       responsibilityGeneration: 0, purpose: '执行无输出 Bash 命令', completionRole: 'required',
       status: 'succeeded', waitReason: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
+      failure: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
@@ -3975,7 +4009,15 @@ describe('task event projections', () => {
         productAvailability('codex-cli', 'ready'),
         productAvailability('opencode-cli', 'found_uninspected'),
         productAvailability('copilot-cli', 'checking'),
-        productAvailability('claude-code-cli', 'authentication_required'),
+        productAvailability('claude-code-cli', 'authentication_required', {
+          runtimeKind: 'claude-code-cli',
+          origin: 'runtime',
+          phase: 'authentication',
+          code: 'runtime_authentication_required',
+          summary: 'Claude Code 尚未登录',
+          detail: '请先在终端完成 Claude Code 登录。',
+          retryable: true
+        }),
         productAvailability('antigravity-app', 'missing')
       ],
       searchEnvironment: {
@@ -4009,6 +4051,10 @@ describe('task event projections', () => {
     expect(markup).toContain('可用')
     expect(markup).toContain('正在检查…')
     expect(markup).toContain('需要登录')
+    expect(markup).toContain('Claude Code 返回错误')
+    expect(markup).toContain('Claude Code 尚未登录')
+    expect(markup).toContain('请先在终端完成 Claude Code 登录。')
+    expect(markup).not.toContain('Rovai 内部错误')
     expect(markup).toContain('未安装')
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
@@ -4105,7 +4151,8 @@ function codexInstallation(): AdapterInstallation {
 
 function productAvailability(
   runtimeKind: HealthStatus['runtimeAvailability'][number]['runtimeKind'],
-  status: HealthStatus['runtimeAvailability'][number]['status']
+  status: HealthStatus['runtimeAvailability'][number]['status'],
+  failure: HealthStatus['runtimeAvailability'][number]['failure'] = null
 ): HealthStatus['runtimeAvailability'][number] {
   return {
     runtimeKind,
@@ -4124,6 +4171,7 @@ function productAvailability(
     },
     installationId: status === 'ready' ? `installation-${runtimeKind}` : null,
     reportedVersion: status === 'missing' || status === 'detecting' ? null : `${runtimeKind} 1.0.0`,
-    diagnosticCode: null
+    diagnosticCode: null,
+    failure
   }
 }

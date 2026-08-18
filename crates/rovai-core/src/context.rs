@@ -7696,10 +7696,14 @@ mod slow_tests {
                 ALTER TABLE context_manifest_v92_test RENAME TO context_manifest;
                 CREATE INDEX context_manifest_blob_idx ON context_manifest(rendered_payload_blob_id);
                 CREATE INDEX context_manifest_bootstrap_idx ON context_manifest(bootstrap_evidence_id);
+                ALTER TABLE agent_run DROP COLUMN public_runtime_failure_json;
+                ALTER TABLE adapter_probe_attempt DROP COLUMN public_runtime_failure_json;
                 ALTER TABLE camp_message DROP COLUMN agent_addressing_mode;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.99', projection_schema_version = 47
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 95;
+                DELETE FROM schema_migration WHERE version = 94;
                 DELETE FROM schema_migration WHERE version = 93;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -7757,7 +7761,7 @@ mod slow_tests {
             .unwrap();
         assert!(manifest_schema.contains("run_fact_payload_json"));
         assert!(!manifest_schema.contains("run_notice_"));
-        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("formatter_version = 20"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         let contract: (String, i64, i64) = reopened
@@ -7772,7 +7776,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.07".to_string(), 48, 1));
+        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

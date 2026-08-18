@@ -142,6 +142,7 @@ function readyAvailability(): ProductRuntimeAvailability {
     },
     installationId: 'managed-codex',
     reportedVersion: '1.0.0',
-    diagnosticCode: null
+    diagnosticCode: null,
+    failure: null
   }
 }
