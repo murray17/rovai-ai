@@ -528,7 +528,7 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
         [],
         |row| row.get(0),
     );
-    let migration_state = load_current_migration_state(&connection);
+    let migration_state = load_current_migration_state(connection);
     Ok(matches!(
         (marker, projection_exists, migration_state),
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
