@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
@@ -7,7 +8,7 @@ use std::{
 #[cfg(unix)]
 use std::{
     collections::BTreeSet,
-    ffi::{CStr, CString, OsString},
+    ffi::{CStr, CString},
     os::fd::{AsRawFd, FromRawFd},
     os::unix::ffi::{OsStrExt, OsStringExt},
 };
@@ -49,6 +50,9 @@ const MAX_PREVIEW_EDGE: u64 = 16_384;
 const MAX_PREVIEW_PIXELS: u64 = 40_000_000;
 const ATTACHMENT_METADATA_FILE: &str = ".rovai-attachment.json";
 const ATTACHMENT_METADATA_SCHEMA_VERSION: u32 = 1;
+#[cfg(all(test, any(windows, feature = "slow-tests")))]
+const DIRECTORY_SNAPSHOT_FIXTURE_DIGEST: &str =
+    "sha256:69c6a7b4e706d0177bdcc3b806c25daac505628a8d9f22c4976fd5c93ef87501";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1670,36 +1674,16 @@ struct PreparedRow {
 }
 
 fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAttachment> {
-    let source_metadata = fs::symlink_metadata(source_path)
-        .with_context(|| format!("failed to inspect attachment {}", source_path.display()))?;
-    if source_metadata.file_type().is_symlink() {
-        anyhow::bail!("Attachment symlinks are not supported");
+    let mut source = open_source_without_following(source_path)?;
+    let opened = inspect_open_node(&source)?;
+    if opened.kind == OpenedNodeKind::Directory {
+        return copy_directory_snapshot(&source, destination);
     }
-    if source_metadata.is_dir() {
-        return copy_directory_snapshot(source_path, destination);
-    }
-    if !source_metadata.is_file() {
+    if opened.kind != OpenedNodeKind::RegularFile {
         anyhow::bail!("Only regular files and directories can be attached");
     }
-    if source_metadata.len() > MAX_ATTACHMENT_BYTES {
+    if fingerprint_size(&opened.fingerprint) > MAX_ATTACHMENT_BYTES {
         anyhow::bail!("Attachment exceeds the 25 MiB per-file limit");
-    }
-    let mut source_options = OpenOptions::new();
-    source_options.read(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        source_options.custom_flags(libc::O_NOFOLLOW);
-    }
-    let mut source = source_options
-        .open(source_path)
-        .with_context(|| format!("failed to open attachment {}", source_path.display()))?;
-    let opened_metadata = source.metadata()?;
-    if !opened_metadata.is_file()
-        || opened_metadata.len() != source_metadata.len()
-        || opened_metadata.len() > MAX_ATTACHMENT_BYTES
-    {
-        anyhow::bail!("Attachment changed while it was being opened");
     }
     let temporary = destination.with_file_name(format!(".{}.tmp", Uuid::new_v4()));
     let mut destination_options = OpenOptions::new();
@@ -1741,14 +1725,18 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAt
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if byte_size != opened_metadata.len() {
+    let after = inspect_open_node(&source)?;
+    if after.kind != OpenedNodeKind::RegularFile
+        || byte_size != fingerprint_size(&opened.fingerprint)
+        || after.fingerprint != opened.fingerprint
+    {
         drop(output);
         let _ = fs::remove_file(&temporary);
         anyhow::bail!("Attachment changed while it was being copied");
     }
     set_read_only(&temporary)?;
     drop(output);
-    fs::rename(&temporary, destination)?;
+    commit_temporary(&temporary, destination)?;
     sync_parent(destination)?;
     let inspection = inspect_prefix(&prefix, byte_size);
     Ok(PreparedAttachment {
@@ -1762,7 +1750,7 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAt
     })
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 #[derive(Debug)]
 struct DirectorySnapshotState {
     hasher: Sha256,
@@ -1783,30 +1771,29 @@ struct MetadataFingerprint {
     changed_nanoseconds: i64,
 }
 
-#[cfg(unix)]
-fn copy_directory_snapshot(source_path: &Path, destination: &Path) -> Result<PreparedAttachment> {
-    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+#[cfg(windows)]
+type MetadataFingerprint = crate::platform::windows_file_tree::FileFingerprint;
 
-    let source_before = fs::symlink_metadata(source_path)?;
-    if source_before.file_type().is_symlink() || !source_before.is_dir() {
+#[cfg(any(unix, windows))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OpenedNodeKind {
+    RegularFile,
+    Directory,
+    #[cfg(unix)]
+    Unsupported,
+}
+
+#[cfg(any(unix, windows))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OpenedNodeMetadata {
+    kind: OpenedNodeKind,
+    fingerprint: MetadataFingerprint,
+}
+
+#[cfg(any(unix, windows))]
+fn copy_directory_snapshot(source: &File, destination: &Path) -> Result<PreparedAttachment> {
+    if inspect_open_node(source)?.kind != OpenedNodeKind::Directory {
         anyhow::bail!("Attachment directory changed before snapshotting");
-    }
-    let mut source_options = OpenOptions::new();
-    source_options
-        .read(true)
-        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
-    let source = source_options.open(source_path).with_context(|| {
-        format!(
-            "failed to open attachment directory {}",
-            source_path.display()
-        )
-    })?;
-    let opened = source.metadata()?;
-    if !opened.is_dir()
-        || source_before.dev() != opened.dev()
-        || source_before.ino() != opened.ino()
-    {
-        anyhow::bail!("Attachment directory changed while it was being opened");
     }
 
     ensure_directory(destination)?;
@@ -1817,7 +1804,7 @@ fn copy_directory_snapshot(source_path: &Path, destination: &Path) -> Result<Pre
         byte_size: 0,
     };
     state.hasher.update(b"rovai-directory-snapshot-v1\0");
-    copy_open_directory(&source, destination, Path::new(""), 0, &mut state)?;
+    copy_open_directory(source, destination, Path::new(""), 0, &mut state)?;
     set_directory_read_only(destination)?;
     sync_parent(destination)?;
     Ok(PreparedAttachment {
@@ -1831,12 +1818,7 @@ fn copy_directory_snapshot(source_path: &Path, destination: &Path) -> Result<Pre
     })
 }
 
-#[cfg(not(unix))]
-fn copy_directory_snapshot(_source_path: &Path, _destination: &Path) -> Result<PreparedAttachment> {
-    anyhow::bail!("attachment_directory_snapshot_not_implemented_for_host")
-}
-
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn copy_open_directory(
     source: &File,
     destination: &Path,
@@ -1847,9 +1829,12 @@ fn copy_open_directory(
     if depth > MAX_DIRECTORY_DEPTH {
         anyhow::bail!("Attachment directory exceeds the 32-level depth limit");
     }
-    let before = metadata_fingerprint(&source.metadata()?);
-    hash_tree_entry(&mut state.hasher, b'D', relative_path, 0, None);
-    let names = read_directory_names(source)?;
+    let before = inspect_open_node(source)?;
+    if before.kind != OpenedNodeKind::Directory {
+        anyhow::bail!("Attachment directory changed while it was being copied");
+    }
+    hash_tree_entry(&mut state.hasher, b'D', relative_path, 0, None)?;
+    let names = read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?;
     for name in &names {
         state.entry_count = state
             .entry_count
@@ -1859,10 +1844,10 @@ fn copy_open_directory(
             anyhow::bail!("Attachment directory exceeds the 4000-entry limit");
         }
         let mut child = open_child_without_following(source, name)?;
-        let metadata = child.metadata()?;
+        let metadata = inspect_open_node(&child)?;
         let child_relative = relative_path.join(name);
         let child_destination = destination.join(name);
-        if metadata.is_dir() {
+        if metadata.kind == OpenedNodeKind::Directory {
             ensure_directory(&child_destination)?;
             copy_open_directory(
                 &child,
@@ -1872,7 +1857,7 @@ fn copy_open_directory(
                 state,
             )?;
             set_directory_read_only(&child_destination)?;
-        } else if metadata.is_file() {
+        } else if metadata.kind == OpenedNodeKind::RegularFile {
             state.file_count = state
                 .file_count
                 .checked_add(1)
@@ -1880,12 +1865,13 @@ fn copy_open_directory(
             if state.file_count > MAX_DIRECTORY_FILES {
                 anyhow::bail!("Attachment directory exceeds the 2000-file limit");
             }
-            if metadata.len() > MAX_ATTACHMENT_BYTES {
+            let child_size = fingerprint_size(&metadata.fingerprint);
+            if child_size > MAX_ATTACHMENT_BYTES {
                 anyhow::bail!(
                     "A file in the attachment directory exceeds the 25 MiB per-file limit"
                 );
             }
-            if state.byte_size.saturating_add(metadata.len()) > MAX_DRAFT_ATTACHMENT_BYTES {
+            if state.byte_size.saturating_add(child_size) > MAX_DRAFT_ATTACHMENT_BYTES {
                 anyhow::bail!("Attachment directory exceeds the 64 MiB total limit");
             }
             let copied = copy_open_regular_file(&mut child, &child_destination)?;
@@ -1899,7 +1885,7 @@ fn copy_open_directory(
                 &child_relative,
                 copied.byte_size,
                 Some(&copied.digest),
-            );
+            )?;
         } else {
             anyhow::bail!(
                 "Attachment directory contains an unsupported item: {}",
@@ -1907,23 +1893,29 @@ fn copy_open_directory(
             );
         }
     }
-    if names != read_directory_names(source)? || before != metadata_fingerprint(&source.metadata()?)
+    let after = inspect_open_node(source)?;
+    if names != read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?
+        || after.kind != OpenedNodeKind::Directory
+        || before.fingerprint != after.fingerprint
     {
         anyhow::bail!("Attachment directory changed while it was being copied");
     }
     Ok(())
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 struct CopiedDirectoryFile {
     byte_size: u64,
     digest: [u8; 32],
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn copy_open_regular_file(source: &mut File, destination: &Path) -> Result<CopiedDirectoryFile> {
-    let before = metadata_fingerprint(&source.metadata()?);
-    if before.size > MAX_ATTACHMENT_BYTES {
+    let before = inspect_open_node(source)?;
+    if before.kind != OpenedNodeKind::RegularFile {
+        anyhow::bail!("Attachment directory item changed type while it was being copied");
+    }
+    if fingerprint_size(&before.fingerprint) > MAX_ATTACHMENT_BYTES {
         anyhow::bail!("A file in the attachment directory exceeds the 25 MiB per-file limit");
     }
     let temporary = destination.with_file_name(format!(".{}.tmp", Uuid::new_v4()));
@@ -1963,19 +1955,47 @@ fn copy_open_regular_file(source: &mut File, destination: &Path) -> Result<Copie
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    if byte_size != before.size || before != metadata_fingerprint(&source.metadata()?) {
+    let after = inspect_open_node(source)?;
+    if after.kind != OpenedNodeKind::RegularFile
+        || byte_size != fingerprint_size(&before.fingerprint)
+        || before.fingerprint != after.fingerprint
+    {
         drop(output);
         let _ = fs::remove_file(&temporary);
         anyhow::bail!("A file in the attachment directory changed while it was being copied");
     }
     set_read_only(&temporary)?;
     drop(output);
-    fs::rename(&temporary, destination)?;
+    commit_temporary(&temporary, destination)?;
     sync_parent(destination)?;
     Ok(CopiedDirectoryFile {
         byte_size,
         digest: hasher.finalize().into(),
     })
+}
+
+#[cfg(unix)]
+fn open_source_without_following(path: &Path) -> Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC | libc::O_NONBLOCK);
+    match options.open(path) {
+        Ok(file) => Ok(file),
+        Err(error) if error.raw_os_error() == Some(libc::ELOOP) => {
+            anyhow::bail!("Attachment symlinks are not supported")
+        }
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to open attachment {}", path.display()))
+        }
+    }
+}
+
+#[cfg(windows)]
+fn open_source_without_following(path: &Path) -> Result<File> {
+    crate::platform::windows_file_tree::open_path_without_following(path)
 }
 
 #[cfg(unix)]
@@ -2004,8 +2024,13 @@ fn open_child_without_following(directory: &File, name: &OsString) -> Result<Fil
     Ok(unsafe { File::from_raw_fd(descriptor) })
 }
 
+#[cfg(windows)]
+fn open_child_without_following(directory: &File, name: &OsString) -> Result<File> {
+    crate::platform::windows_file_tree::open_child_without_following(directory, name)
+}
+
 #[cfg(unix)]
-fn read_directory_names(directory: &File) -> Result<Vec<OsString>> {
+fn read_directory_names(directory: &File, maximum_names: usize) -> Result<Vec<OsString>> {
     let duplicated = unsafe { libc::dup(directory.as_raw_fd()) };
     if duplicated < 0 {
         return Err(std::io::Error::last_os_error())
@@ -2029,6 +2054,10 @@ fn read_directory_names(directory: &File) -> Result<Vec<OsString>> {
             continue;
         }
         names.push(OsString::from_vec(bytes.to_vec()));
+        if names.len() > maximum_names {
+            unsafe { libc::closedir(stream) };
+            anyhow::bail!("Attachment directory exceeds the 4000-entry limit");
+        }
     }
     let close_result = unsafe { libc::closedir(stream) };
     if close_result != 0 {
@@ -2050,18 +2079,29 @@ fn read_directory_names(directory: &File) -> Result<Vec<OsString>> {
 }
 
 #[cfg(unix)]
-fn metadata_fingerprint(metadata: &fs::Metadata) -> MetadataFingerprint {
+fn inspect_open_node(file: &File) -> Result<OpenedNodeMetadata> {
     use std::os::unix::fs::MetadataExt;
 
-    MetadataFingerprint {
-        device: metadata.dev(),
-        inode: metadata.ino(),
-        size: metadata.size(),
-        modified_seconds: metadata.mtime(),
-        modified_nanoseconds: metadata.mtime_nsec(),
-        changed_seconds: metadata.ctime(),
-        changed_nanoseconds: metadata.ctime_nsec(),
-    }
+    let metadata = file.metadata()?;
+    let kind = if metadata.is_file() {
+        OpenedNodeKind::RegularFile
+    } else if metadata.is_dir() {
+        OpenedNodeKind::Directory
+    } else {
+        OpenedNodeKind::Unsupported
+    };
+    Ok(OpenedNodeMetadata {
+        kind,
+        fingerprint: MetadataFingerprint {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            size: metadata.size(),
+            modified_seconds: metadata.mtime(),
+            modified_nanoseconds: metadata.mtime_nsec(),
+            changed_seconds: metadata.ctime(),
+            changed_nanoseconds: metadata.ctime_nsec(),
+        },
+    })
 }
 
 #[cfg(unix)]
@@ -2071,7 +2111,7 @@ fn hash_tree_entry(
     relative_path: &Path,
     byte_size: u64,
     digest: Option<&[u8; 32]>,
-) {
+) -> Result<()> {
     let path = relative_path.as_os_str().as_bytes();
     hasher.update([kind]);
     hasher.update((path.len() as u64).to_be_bytes());
@@ -2080,6 +2120,68 @@ fn hash_tree_entry(
     if let Some(digest) = digest {
         hasher.update(digest);
     }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn inspect_open_node(file: &File) -> Result<OpenedNodeMetadata> {
+    use crate::platform::windows_file_tree::NodeKind;
+
+    let metadata = crate::platform::windows_file_tree::inspect_node(file)?;
+    Ok(OpenedNodeMetadata {
+        kind: match metadata.kind {
+            NodeKind::RegularFile => OpenedNodeKind::RegularFile,
+            NodeKind::Directory => OpenedNodeKind::Directory,
+        },
+        fingerprint: metadata.fingerprint,
+    })
+}
+
+#[cfg(windows)]
+fn read_directory_names(directory: &File, maximum_names: usize) -> Result<Vec<OsString>> {
+    crate::platform::windows_file_tree::read_directory_names(directory, maximum_names)
+}
+
+#[cfg(windows)]
+fn hash_tree_entry(
+    hasher: &mut Sha256,
+    kind: u8,
+    relative_path: &Path,
+    byte_size: u64,
+    digest: Option<&[u8; 32]>,
+) -> Result<()> {
+    let mut path = Vec::new();
+    for component in relative_path.components() {
+        let std::path::Component::Normal(name) = component else {
+            anyhow::bail!("Attachment directory produced a non-relative canonical path");
+        };
+        if !path.is_empty() {
+            path.push(b'/');
+        }
+        path.extend_from_slice(
+            name.to_str()
+                .context("Attachment filename is not valid Unicode")?
+                .as_bytes(),
+        );
+    }
+    hasher.update([kind]);
+    hasher.update((path.len() as u64).to_be_bytes());
+    hasher.update(&path);
+    hasher.update(byte_size.to_be_bytes());
+    if let Some(digest) = digest {
+        hasher.update(digest);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn fingerprint_size(fingerprint: &MetadataFingerprint) -> u64 {
+    fingerprint.size
+}
+
+#[cfg(windows)]
+fn fingerprint_size(fingerprint: &MetadataFingerprint) -> u64 {
+    fingerprint.size
 }
 
 #[derive(Debug)]
@@ -2499,7 +2601,7 @@ fn write_attachment_metadata(
         let _ = fs::remove_file(&temporary);
         return Err(error);
     }
-    fs::rename(&temporary, &destination)?;
+    commit_temporary(&temporary, &destination)?;
     sync_parent(&destination)?;
     Ok(())
 }
@@ -2705,10 +2807,19 @@ fn set_read_only(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(unix)]
 fn set_directory_read_only(path: &Path) -> Result<()> {
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
+    }
+    #[cfg(windows)]
+    {
+        // FILE_ATTRIBUTE_READONLY has no directory access-control semantics.
+        // The Windows managed root supplies the private DACL; freezing its
+        // descendant ACLs is owned by the separate private-storage checkpoint.
+        let _ = path;
+    }
     Ok(())
 }
 
@@ -2749,16 +2860,127 @@ fn make_owned_tree_removable(path: &Path) -> Result<()> {
         }
         if metadata.is_dir() {
             make_owned_tree_removable(&child_path)?;
+        } else {
+            allow_file_update(&child_path)?;
         }
     }
     Ok(())
 }
 
+fn allow_file_update(_path: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        crate::platform::windows_file_tree::clear_read_only(_path)?;
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn commit_temporary(source: &Path, destination: &Path) -> Result<()> {
+    fs::rename(source, destination)?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn commit_temporary(source: &Path, destination: &Path) -> Result<()> {
+    crate::platform::windows_file_tree::commit_temporary(source, destination)
+}
+
+#[cfg(unix)]
 fn sync_parent(path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
         File::open(parent)?.sync_all()?;
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn sync_parent(_path: &Path) -> Result<()> {
+    // Windows documents FlushFileBuffers for writable file handles, not as a
+    // directory-fsync primitive. Files are flushed before MOVEFILE_WRITE_THROUGH
+    // commits their same-directory rename in commit_temporary.
+    Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod windows_attachment_tests {
+    use std::process::Command;
+
+    use super::*;
+
+    #[test]
+    fn windows_attachment_directory_snapshot_is_deterministic() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-windows-attachment-snapshot-{}",
+            Uuid::new_v4()
+        ));
+        let source = fixture.join("项目资料");
+        fs::create_dir_all(source.join("docs/empty")).unwrap();
+        fs::write(source.join("README.md"), b"directory snapshot").unwrap();
+        fs::write(source.join("docs/plan.txt"), b"frozen plan").unwrap();
+        fs::write(source.join(".env.example"), b"TOKEN=example").unwrap();
+
+        let first = copy_and_inspect(&source, &fixture.join("snapshot-one")).unwrap();
+        let second = copy_and_inspect(&source, &fixture.join("snapshot-two")).unwrap();
+        assert_eq!(first.kind, "directory");
+        assert_eq!(first.file_count, 3);
+        assert_eq!(first.byte_size, second.byte_size);
+        assert_eq!(first.content_digest, second.content_digest);
+        assert_eq!(first.content_digest, DIRECTORY_SNAPSHOT_FIXTURE_DIGEST);
+        assert_eq!(
+            fs::read(first.path.join("docs/plan.txt")).unwrap(),
+            b"frozen plan"
+        );
+        assert!(first.path.join("docs/empty").is_dir());
+
+        let single =
+            copy_and_inspect(&source.join("README.md"), &fixture.join("single.txt")).unwrap();
+        assert_eq!(single.kind, "file");
+        assert_eq!(fs::read(&single.path).unwrap(), b"directory snapshot");
+
+        make_owned_tree_removable(&first.path).unwrap();
+        make_owned_tree_removable(&second.path).unwrap();
+        allow_file_update(&single.path).unwrap();
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn windows_attachment_directory_rejects_junctions() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-windows-attachment-reparse-{}",
+            Uuid::new_v4()
+        ));
+        let source = fixture.join("source");
+        let outside = fixture.join("outside");
+        let junction = source.join("linked-outside");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), b"must not be copied").unwrap();
+
+        let command = format!(
+            "mklink /J \"{}\" \"{}\"",
+            junction.display(),
+            outside.display()
+        );
+        let status = Command::new("cmd.exe")
+            .args(["/D", "/S", "/C", &command])
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to create the junction fixture");
+
+        let destination = fixture.join("snapshot");
+        let error = copy_and_inspect(&source, &destination)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("reparse point"), "unexpected error: {error}");
+        assert!(!destination.join("linked-outside/secret.txt").exists());
+
+        fs::remove_dir(&junction).unwrap();
+        if destination.exists() {
+            make_owned_tree_removable(&destination).unwrap();
+        }
+        fs::remove_dir_all(fixture).unwrap();
+    }
 }
 
 #[cfg(all(test, feature = "slow-tests"))]
@@ -3733,6 +3955,7 @@ mod slow_tests {
             }
         );
         assert!(digest.starts_with("sha256:"));
+        assert_eq!(digest, DIRECTORY_SNAPSHOT_FIXTURE_DIGEST);
 
         fs::write(source.join("docs/plan.txt"), b"changed original").unwrap();
         assert_eq!(

@@ -4,7 +4,7 @@ contract: camp-attachment
 version: 1
 status: accepted
 authority: camp-attachment-ingress-storage-read-model
-last_updated: 2026-08-13
+last_updated: 2026-08-18
 ---
 
 # Camp Attachment v1
@@ -45,10 +45,15 @@ CampSnapshot Read Model 从 schema 28 升为 schema 29，只增加 `kind / fileC
 
 1. Electron Preload 只通过 `webUtils.getPathForFile(file)` 把磁盘项目路径交给 Main；Renderer
    不获得绝对路径。没有磁盘路径的 Clipboard `File` 继续走有界 bytes ingress，并只能形成普通文件。
-2. Core 对顶层项目执行 `symlink_metadata`，目录遍历使用 `O_NOFOLLOW` 的已打开目录句柄和
-   `openat` 子项；复制期间目录名称集合、目录指纹或文件指纹变化时整项失败。
-3. 目录项按原始文件名 bytes 确定性排序。普通目录、空目录、普通文件与 dotfile 原样复制；
-   symlink、socket、FIFO、device 和其他特殊节点整项拒绝。
+2. Core 先以 no-follow 语义打开顶层项目，再从同一已打开句柄判型、复制和复核；Unix 目录遍历使用
+   `O_NOFOLLOW` 的目录句柄和 `openat` 子项，Windows 使用 `OPEN_REPARSE_POINT` 顶层句柄和以父目录
+   handle 为 `RootDirectory` 的单组件子项打开。Windows ingress 只接受规范化的绝对本地盘路径，不接受
+   volume root、UNC、device namespace、ADS 或 `.` / `..` 路径。复制期间目录名称集合、目录指纹或文件
+   指纹变化时整项失败。
+3. Unix 目录项按原始文件名 bytes 确定性排序。Windows 文件名必须可无损表示为 Unicode，并按不做
+   NFC/NFKC 或大小写折叠的 UTF-8 bytes 排序；canonical 相对路径固定使用 `/` 分隔，因此相同 Unicode
+   scalar sequence 的树在两个平台产生相同的 tree bytes。普通目录、空目录、普通文件与 dotfile 原样复制；symlink、
+   Windows reparse point、socket、FIFO、device、Win32 保留名/尾随空格或点和其他特殊节点整项拒绝。
 4. 树摘要为 `sha256:` 加 canonical tree bytes 的 SHA-256。canonical bytes 以
    `rovai-directory-snapshot-v1\0` 开头，随后按 preorder 写入目录记录和按名称排序的子项；
    文件记录包含相对路径、字节数和文件内容 SHA-256，目录记录包含相对路径。

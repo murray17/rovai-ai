@@ -116,3 +116,9 @@ jobs:
           cargo test -p rovai-core --all-targets
           --target x86_64-pc-windows-msvc
           windows_data_root
+
+      - name: Exercise Windows attachment traversal
+        run: >-
+          cargo test -p rovai-core --lib
+          --target x86_64-pc-windows-msvc
+          windows_attachment

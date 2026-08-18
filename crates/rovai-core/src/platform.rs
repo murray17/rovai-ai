@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 pub mod local_ipc;
 pub(crate) mod private_storage;
 #[cfg(windows)]
+pub(crate) mod windows_file_tree;
+#[cfg(windows)]
 pub(crate) mod windows_security;
 
 pub use private_storage::{WindowsDataRootLayout, prepare_windows_data_root};
