@@ -16,6 +16,7 @@ use crate::{
     db::Database,
     git::GitObservation,
     mcp_projection::McpExposureSnapshot,
+    runtime_failure::RuntimeFailureView,
     skill_projection::SkillExposureSnapshot,
 };
 
@@ -263,6 +264,7 @@ pub struct AgentRunView {
     pub wait_reason: Option<String>,
     pub terminal_resolution_source: Option<String>,
     pub terminal_reason_code: Option<String>,
+    pub failure: Option<RuntimeFailureView>,
     pub execution_epoch: i64,
     pub permission_semantics: String,
     pub invocation_kind: String,
@@ -2311,7 +2313,8 @@ fn load_agent_runs(
                agent_run.ending_git_observation_json,
                camp.project_path, agent_run.version,
                agent_run.created_at, agent_run.started_at,
-               agent_run.ended_at, agent_run.updated_at
+               agent_run.ended_at, agent_run.updated_at,
+               agent_run.public_runtime_failure_json
         FROM agent_run
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN camp ON camp.id = camp_turn.camp_id
@@ -2365,6 +2368,7 @@ fn load_agent_runs(
                 row.get::<_, Option<String>>(28)?,
                 row.get::<_, Option<String>>(29)?,
                 row.get::<_, String>(30)?,
+                row.get::<_, Option<String>>(31)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2402,6 +2406,7 @@ fn load_agent_runs(
                 started_at,
                 ended_at,
                 updated_at,
+                public_runtime_failure_json,
             )| {
                 Ok(AgentRunView {
                     id,
@@ -2417,6 +2422,10 @@ fn load_agent_runs(
                     wait_reason,
                     terminal_resolution_source,
                     terminal_reason_code,
+                    failure: public_runtime_failure_json
+                        .map(|value| serde_json::from_str(&value))
+                        .transpose()
+                        .context("AgentRun public Runtime failure is invalid")?,
                     execution_epoch,
                     permission_semantics,
                     invocation_kind,

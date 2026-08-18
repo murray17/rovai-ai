@@ -350,6 +350,30 @@ export type ProductRuntimeAvailabilityStatus =
   | 'disabled'
   | 'refresh_failed_using_last_success'
 
+export type RuntimeFailureOrigin =
+  | 'runtime'
+  | 'compatibility'
+  | 'environment'
+  | 'rovai'
+  | 'unknown'
+
+export type RuntimeFailurePhase =
+  | 'spawn'
+  | 'authentication'
+  | 'model_catalog'
+  | 'execution'
+  | 'terminal'
+
+export interface RuntimeFailureView {
+  runtimeKind: AdapterKind
+  origin: RuntimeFailureOrigin
+  phase: RuntimeFailurePhase
+  code: string
+  summary: string
+  detail: string | null
+  retryable: boolean
+}
+
 export interface ProductRuntimeAvailability {
   runtimeKind: AdapterKind
   status: ProductRuntimeAvailabilityStatus
@@ -358,6 +382,7 @@ export interface ProductRuntimeAvailability {
   installationId: string | null
   reportedVersion: string | null
   diagnosticCode: string | null
+  failure: RuntimeFailureView | null
   lastAttemptedAt?: string | null
   lastSuccessfulProbeAt?: string | null
 }
@@ -1008,6 +1033,7 @@ export interface AgentRunView {
     | 'planned_shutdown_failed'
     | 'planned_shutdown_cancelled'
     | null
+  failure: RuntimeFailureView | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
   invocationKind: 'direct' | 'a2a' | 'gather_completion'

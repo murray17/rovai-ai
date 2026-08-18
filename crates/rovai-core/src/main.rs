@@ -173,6 +173,9 @@ use rovai_core::{
         discover_static_runtime_version, is_executable_file, runtime_launch_allowed,
         with_runtime_search_environment,
     },
+    runtime_failure::{
+        RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
+    },
     runtime_resolution::RuntimeResolutionService,
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
@@ -5310,6 +5313,7 @@ impl Core {
                 "runtime_launch_admission_failed",
                 &error,
                 false,
+                None,
             )
             .await;
             return;
@@ -5337,22 +5341,50 @@ impl Core {
                     .await;
                 let delivered_one_shot_failure = error
                     .downcast_ref::<AntigravityDeliveredFailure>()
-                    .map(|failure| (failure.native_turn_id.clone(), failure.error_code))
+                    .map(|failure| {
+                        (
+                            failure.native_turn_id.clone(),
+                            failure.error_code.clone(),
+                            failure.failure.clone(),
+                        )
+                    })
                     .or_else(|| {
                         error
                             .downcast_ref::<ClaudeCodeDeliveredFailure>()
-                            .map(|failure| (failure.native_turn_id.clone(), failure.error_code))
+                            .map(|failure| {
+                                (
+                                    failure.native_turn_id.clone(),
+                                    failure.error_code.clone(),
+                                    failure.failure.clone(),
+                                )
+                            })
                     });
                 let runtime_terminal_observed = delivered_one_shot_failure.is_some();
+                let public_failure = delivered_one_shot_failure
+                    .as_ref()
+                    .map(|(_, _, failure)| failure.clone())
+                    .or_else(|| {
+                        error
+                            .downcast_ref::<RuntimeFailureError>()
+                            .map(|error| error.failure.clone())
+                    });
                 let error_code = if error.downcast_ref::<ContextPayloadTooLarge>().is_some() {
-                    "context_payload_too_large"
+                    "context_payload_too_large".to_string()
                 } else {
-                    delivered_one_shot_failure
+                    public_failure
                         .as_ref()
-                        .map(|(_, error_code)| *error_code)
-                        .unwrap_or("runtime_launch_failed")
+                        .map(|failure| failure.code.clone())
+                        .unwrap_or_else(|| "runtime_launch_failed".to_string())
                 };
-                if let Some((native_turn_id, delivered_error_code)) = delivered_one_shot_failure {
+                let public_failure = public_failure.or_else(|| {
+                    unknown_one_shot_runtime_failure(
+                        execution.runtime.adapter_kind,
+                        &error_code,
+                    )
+                });
+                if let Some((native_turn_id, delivered_error_code, delivered_failure)) =
+                    delivered_one_shot_failure
+                {
                     let ending_git_observation = core
                         .observe_run_git(
                             &execution.project_binding_kind,
@@ -5387,7 +5419,7 @@ impl Core {
                             execution.execution_epoch,
                             binding,
                             RuntimeTerminalOutcome::Failed,
-                            delivered_error_code,
+                            &delivered_error_code,
                         )
                         .await
                     {
@@ -5411,6 +5443,7 @@ impl Core {
                                         outcome: RuntimeTerminalOutcome::Failed,
                                         error_code: delivered_error_code.to_string(),
                                         error_detail: Some(format!("{error:#}")),
+                                        failure: Some(delivered_failure.clone()),
                                         manual_retry_allowed: true,
                                     },
                                 )
@@ -5445,9 +5478,10 @@ impl Core {
                             let failure_persisted = core
                                 .persist_claimed_agent_run_failure(
                                     &execution,
-                                    delivered_error_code,
+                                    &delivered_error_code,
                                     &error,
                                     true,
+                                    Some(delivered_failure),
                                     ending_git_observation,
                                 )
                                 .await;
@@ -5478,9 +5512,10 @@ impl Core {
                 }
                 core.fail_claimed_agent_run(
                     &execution,
-                    error_code,
+                    &error_code,
                     &error,
                     runtime_terminal_observed,
+                    public_failure,
                 )
                 .await;
                 core.planned_shutdown.remove_active(&active_key).await;
@@ -5515,6 +5550,7 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
     ) {
+        let public_failure = dispatch_public_failure(candidate, error_code);
         let rejection = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default().reject_agent_run_dispatch(
@@ -5532,6 +5568,7 @@ impl Core {
                         expected_version: candidate.version,
                         error_code: error_code.to_string(),
                         error_detail: Some(format!("{error:#}")),
+                        failure: public_failure,
                         manual_retry_allowed: error_code != "context_payload_too_large",
                     },
                 },
@@ -8280,7 +8317,16 @@ impl Core {
                     .context(AntigravityDeliveredFailure {
                         native_session_id: accepted.native_session_id.clone(),
                         native_turn_id: accepted.native_turn_id.clone(),
-                        error_code: "runtime_native_session_mismatch",
+                        error_code: "runtime_native_session_mismatch".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::AntigravityApp,
+                            RuntimeFailureOrigin::Compatibility,
+                            RuntimeFailurePhase::Terminal,
+                            "runtime_native_session_mismatch",
+                            "Antigravity 返回了另一个会话的结果",
+                            None,
+                            false,
+                        ),
                     });
                 }
                 result
@@ -8294,7 +8340,16 @@ impl Core {
                         return Err(error).context(AntigravityDeliveredFailure {
                             native_session_id: accepted.native_session_id.clone(),
                             native_turn_id: accepted.native_turn_id.clone(),
-                            error_code: "runtime_native_session_mismatch",
+                            error_code: "runtime_native_session_mismatch".to_string(),
+                            failure: RuntimeFailureView::new(
+                                AdapterKind::AntigravityApp,
+                                RuntimeFailureOrigin::Compatibility,
+                                RuntimeFailurePhase::Terminal,
+                                "runtime_native_session_mismatch",
+                                "Antigravity 返回了另一个会话的结果",
+                                None,
+                                false,
+                            ),
                         });
                     }
                     if let Some(error_code) = error
@@ -8306,7 +8361,16 @@ impl Core {
                     return Err(error).context(AntigravityDeliveredFailure {
                         native_session_id: accepted.native_session_id.clone(),
                         native_turn_id: accepted.native_turn_id.clone(),
-                        error_code: "runtime_failed_after_input_accepted",
+                        error_code: "runtime_failed_after_input_accepted".to_string(),
+                        failure: RuntimeFailureView::new(
+                            AdapterKind::AntigravityApp,
+                            RuntimeFailureOrigin::Unknown,
+                            RuntimeFailurePhase::Execution,
+                            "runtime_failed_after_input_accepted",
+                            "Antigravity 接受输入后未能完成运行",
+                            None,
+                            true,
+                        ),
                     });
                 }
                 if let Some(delivered) =
@@ -8807,6 +8871,7 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
         runtime_terminal_observed: bool,
+        public_failure: Option<RuntimeFailureView>,
     ) {
         if let Err(flush_error) = flush_runtime_monitoring_run(
             self,
@@ -8838,6 +8903,7 @@ impl Core {
                 error_code,
                 error,
                 runtime_terminal_observed,
+                public_failure,
                 ending_git_observation,
             )
             .await;
@@ -8851,6 +8917,7 @@ impl Core {
         error_code: &str,
         error: &anyhow::Error,
         runtime_terminal_observed: bool,
+        public_failure: Option<RuntimeFailureView>,
         ending_git_observation: Option<git::GitObservation>,
     ) -> bool {
         let failure = {
@@ -8872,6 +8939,7 @@ impl Core {
                     execution_epoch: execution.execution_epoch,
                     error_code: error_code.to_string(),
                     error_detail: Some(format!("{error:#}")),
+                    failure: public_failure,
                     manual_retry_allowed: true,
                     ending_git_observation,
                 },
@@ -8966,6 +9034,7 @@ impl Core {
                         execution_epoch,
                         error_code: "runtime_configuration_invalid".to_string(),
                         error_detail: Some(format!("{error:#}")),
+                        failure: None,
                         manual_retry_allowed: true,
                         ending_git_observation,
                     },
@@ -11191,7 +11260,13 @@ async fn process_agent_run_acp_message(
             )
         };
         if let Ok(Some(execution)) = execution {
-            core.fail_claimed_agent_run(&execution, "action_audit_failed", &error, false)
+            core.fail_claimed_agent_run(
+                &execution,
+                "action_audit_failed",
+                &error,
+                false,
+                None,
+            )
                 .await;
         }
         return;
@@ -11898,6 +11973,7 @@ async fn persist_acp_prompt_completion(
                             .map(str::to_string)
                             .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
                     ),
+                    failure: None,
                     manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
                 },
             )
@@ -11993,6 +12069,7 @@ async fn persist_acp_prompt_completion(
                             error_detail: Some(
                                 "ACP Runtime ended the prompt without an Agent message".to_string(),
                             ),
+                            failure: None,
                             manual_retry_allowed: true,
                             ending_git_observation: ending_git_observation.clone(),
                         },
@@ -12021,6 +12098,7 @@ async fn persist_acp_prompt_completion(
                                 .map(str::to_string)
                                 .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
                         ),
+                        failure: None,
                         manual_retry_allowed: stop_reason != "cancelled",
                         ending_git_observation,
                     },
@@ -12687,6 +12765,7 @@ async fn process_agent_run_codex_message(
                     outcome: planned_outcome,
                     error_code,
                     error_detail,
+                    failure: None,
                     manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
                 },
             )
@@ -12794,6 +12873,7 @@ async fn process_agent_run_codex_message(
                             error_detail: Some(
                                 "Codex completed the Turn without an Agent message".to_string(),
                             ),
+                            failure: None,
                             manual_retry_allowed: true,
                             ending_git_observation: ending_git_observation.clone(),
                         },
@@ -12827,6 +12907,7 @@ async fn process_agent_run_codex_message(
                                 completed.turn_id, completed.status
                             ),
                         }),
+                        failure: None,
                         manual_retry_allowed: true,
                         ending_git_observation,
                     },
@@ -13569,6 +13650,107 @@ fn take_runtime_check_activity(
 
 fn runtime_check_has_capacity(active_count: usize) -> bool {
     active_count < RUNTIME_CHECK_MAX_CONCURRENCY
+}
+
+fn unknown_one_shot_runtime_failure(
+    runtime_kind: AdapterKind,
+    error_code: &str,
+) -> Option<RuntimeFailureView> {
+    let runtime_name = match runtime_kind {
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+        _ => return None,
+    };
+    let (origin, summary, retryable) = if error_code == "context_payload_too_large" {
+        (
+            RuntimeFailureOrigin::Rovai,
+            "Rovai 无法安全生成本次 Runtime 输入".to_string(),
+            false,
+        )
+    } else {
+        (
+            RuntimeFailureOrigin::Unknown,
+            format!("{runtime_name} 未能完成运行"),
+            true,
+        )
+    };
+    Some(RuntimeFailureView::new(
+        runtime_kind,
+        origin,
+        RuntimeFailurePhase::Execution,
+        error_code,
+        summary,
+        None,
+        retryable,
+    ))
+}
+
+fn dispatch_public_failure(
+    candidate: &rovai_core::runtime::QueuedAgentRunCandidate,
+    error_code: &str,
+) -> Option<RuntimeFailureView> {
+    let runtime_kind = candidate
+        .effective_config
+        .get("adapterKind")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<AdapterKind>(value).ok())?;
+    let runtime_name = match runtime_kind {
+        AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::AntigravityApp => "Antigravity",
+        _ => return None,
+    };
+    let (origin, phase, summary, retryable) = match error_code {
+        "workspace_unavailable" => (
+            RuntimeFailureOrigin::Environment,
+            RuntimeFailurePhase::Spawn,
+            format!("{runtime_name} 的执行目录不可用"),
+            false,
+        ),
+        "runtime_configuration_invalid" => (
+            RuntimeFailureOrigin::Rovai,
+            RuntimeFailurePhase::Spawn,
+            "Rovai 无法生成有效的 Runtime 配置".to_string(),
+            false,
+        ),
+        "runtime_authentication_required" => (
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Authentication,
+            format!("需要登录 {runtime_name}"),
+            true,
+        ),
+        code if code.contains("path")
+            || code.contains("executable")
+            || code.contains("fingerprint") =>
+        {
+            (
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                format!("{runtime_name} 的本机运行环境不可用"),
+                false,
+            )
+        }
+        code if code.contains("incompatible") || code.contains("capability") => (
+            RuntimeFailureOrigin::Compatibility,
+            RuntimeFailurePhase::Execution,
+            format!("当前 {runtime_name} 版本与 Rovai 集成不兼容"),
+            false,
+        ),
+        _ => (
+            RuntimeFailureOrigin::Unknown,
+            RuntimeFailurePhase::Spawn,
+            format!("{runtime_name} 未能开始运行"),
+            true,
+        ),
+    };
+    Some(RuntimeFailureView::new(
+        runtime_kind,
+        origin,
+        phase,
+        error_code,
+        summary,
+        None,
+        retryable,
+    ))
 }
 
 fn runtime_check_writes_diagnostic(finalization: RuntimeCheckFinalization) -> bool {

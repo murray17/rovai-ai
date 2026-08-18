@@ -16,7 +16,11 @@ use rovai_core::{
     agent_profile::FrozenAgentRuntimeConfig,
     agent_runtime_adapter::ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID,
     runtime::{AgentRunWorkspace, PermissionSemantics},
-    runtime_discovery::configure_active_runtime_command,
+    runtime_discovery::{configure_active_runtime_command, is_executable_file},
+    runtime_failure::{
+        RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
+        public_runtime_failure_from_output,
+    },
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -68,7 +72,8 @@ pub struct AntigravityRunResult {
 pub struct AntigravityDeliveredFailure {
     pub native_session_id: String,
     pub native_turn_id: String,
-    pub error_code: &'static str,
+    pub error_code: String,
+    pub failure: RuntimeFailureView,
 }
 
 impl fmt::Display for AntigravityDeliveredFailure {
@@ -193,19 +198,80 @@ impl AntigravityAppRuntimeAdapter {
         interrupted: oneshot::Receiver<()>,
         launch_handoff: Option<oneshot::Sender<()>>,
     ) -> Result<AntigravityRunResult> {
+        let requested_execution_root = Path::new(&request.workspace.execution_root);
+        if !requested_execution_root.is_dir() {
+            let internal = anyhow::anyhow!(
+                "Antigravity companion execution directory no longer exists: {}",
+                requested_execution_root.display()
+            );
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_execution_directory_unavailable",
+                "Antigravity 的执行目录不可用",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(internal.context(RuntimeFailureError::new(failure)));
+        }
+        if let Some(root) = request.attachment_access_root.as_deref()
+            && !root.is_dir()
+        {
+            let internal = anyhow::anyhow!(
+                "Antigravity Camp Attachment access root is unavailable: {}",
+                root.display()
+            );
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_attachment_root_unavailable",
+                "Antigravity 的附件目录不可用",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(internal.context(RuntimeFailureError::new(failure)));
+        }
         let workspace_roots = canonical_antigravity_workspace_roots(
-            Path::new(&request.workspace.execution_root),
+            requested_execution_root,
             request.attachment_access_root.as_deref(),
-        )?;
+        )
+        .map_err(|error| {
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_execution_directory_unavailable",
+                "Antigravity 的本机目录不可访问",
+                Some(&error.to_string()),
+                false,
+            );
+            error.context(RuntimeFailureError::new(failure))
+        })?;
         let execution_root = workspace_roots
             .first()
             .context("Antigravity companion has no execution root")?;
         let executable = Path::new(&request.runtime.executable_path);
-        if !executable.is_file() {
-            anyhow::bail!(
-                "Antigravity companion executable no longer exists: {}",
+        if !is_executable_file(executable) {
+            let internal = anyhow::anyhow!(
+                "Antigravity companion executable is missing or not executable: {}",
                 executable.display()
             );
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_executable_unavailable",
+                "Antigravity 可执行文件不可用",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(internal.context(RuntimeFailureError::new(failure)));
         }
         let log_path = self.log_dir.join(format!(
             "{}-{}-{}.log",
@@ -213,7 +279,19 @@ impl AntigravityAppRuntimeAdapter {
             request.execution_epoch,
             uuid::Uuid::new_v4()
         ));
-        create_private_file(&log_path)?;
+        create_private_file(&log_path).map_err(|error| {
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Environment,
+                RuntimeFailurePhase::Spawn,
+                "runtime_private_directory_unavailable",
+                "Antigravity 的本机运行目录不可用",
+                Some(&error.to_string()),
+                false,
+            );
+            error.context(RuntimeFailureError::new(failure))
+        })?;
         let _log_guard = SensitiveLogGuard(log_path.clone());
 
         let permission_values = request
@@ -304,7 +382,22 @@ impl AntigravityAppRuntimeAdapter {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
-            .with_context(|| format!("failed to start {} in print mode", executable.display()))?;
+            .map_err(|error| {
+                let raw_detail = error.to_string();
+                let failure = antigravity_public_failure(
+                    request,
+                    &self.log_dir,
+                    RuntimeFailureOrigin::Environment,
+                    RuntimeFailurePhase::Spawn,
+                    "runtime_spawn_failed",
+                    "Antigravity 进程无法启动",
+                    Some(&raw_detail),
+                    true,
+                );
+                anyhow::Error::new(error)
+                    .context(format!("failed to start {} in print mode", executable.display()))
+                    .context(RuntimeFailureError::new(failure))
+            })?;
         if let Some(handoff) = launch_handoff {
             let _ = handoff.send(());
         }
@@ -359,11 +452,35 @@ impl AntigravityAppRuntimeAdapter {
         if !acceptance_emitted {
             // A short-lived process can exit between polling ticks. Inspect the
             // now-closed log once more before classifying any terminal result.
-            emit_input_accepted_if_observed(request, &log_path);
+            acceptance_emitted = emit_input_accepted_if_observed(request, &log_path);
         }
-        let stdout = stdout_task
+        let native_turn_id = format!("agy:{}:{}", request.agent_run_id, request.execution_epoch);
+        let stdout = match stdout_task
             .await
-            .context("Antigravity companion stdout collector failed")??;
+            .context("Antigravity companion stdout collector failed")?
+        {
+            Ok(stdout) => stdout,
+            Err(error) => {
+                let observed_native_session_id = read_native_session_id(&log_path).ok().flatten();
+                let failure = antigravity_public_failure(
+                    request,
+                    &self.log_dir,
+                    RuntimeFailureOrigin::Compatibility,
+                    RuntimeFailurePhase::Execution,
+                    "runtime_stream_incompatible",
+                    "Antigravity 返回了当前版本无法识别的输出",
+                    Some(&error.to_string()),
+                    false,
+                );
+                return Err(antigravity_failure_error(
+                    error,
+                    failure,
+                    observed_native_session_id.as_deref(),
+                    &native_turn_id,
+                    acceptance_emitted,
+                ));
+            }
+        };
         let stderr = stderr_task
             .await
             .context("Antigravity companion stderr collector failed")??;
@@ -371,78 +488,336 @@ impl AntigravityAppRuntimeAdapter {
             anyhow::bail!("Antigravity companion process was interrupted");
         }
         if !status.success() {
-            anyhow::bail!(
+            let stderr_detail = String::from_utf8_lossy(&stderr.bytes).trim().to_string();
+            let raw_detail = if stderr_detail.is_empty() {
+                read_known_antigravity_error_lines(&log_path).unwrap_or_default()
+            } else {
+                stderr_detail
+            };
+            let compatibility = unsupported_antigravity_command(&raw_detail);
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                if compatibility {
+                    RuntimeFailureOrigin::Compatibility
+                } else {
+                    RuntimeFailureOrigin::Runtime
+                },
+                RuntimeFailurePhase::Execution,
+                if compatibility {
+                    "runtime_cli_incompatible"
+                } else {
+                    "runtime_process_failed"
+                },
+                if compatibility {
+                    "当前 Antigravity 版本不支持 Rovai 所需的命令"
+                } else {
+                    "Antigravity 进程执行失败"
+                },
+                (!raw_detail.is_empty()).then_some(raw_detail.as_str()),
+                !compatibility,
+            );
+            let internal = anyhow::anyhow!(
                 "Antigravity companion process exited with {} (stderrBytes={}, stderrDigest={})",
                 status,
                 stderr.total_bytes,
                 stderr.digest
             );
+            let observed_native_session_id = read_native_session_id(&log_path).ok().flatten();
+            return Err(antigravity_failure_error(
+                internal,
+                failure,
+                observed_native_session_id.as_deref(),
+                &native_turn_id,
+                acceptance_emitted,
+            ));
         }
-        let native_session_id = read_native_session_id(&log_path)?.context(
-            "Antigravity companion completed without a verifiable conversation identifier",
-        )?;
+        let native_session_id = match read_native_session_id(&log_path)? {
+            Some(native_session_id) => native_session_id,
+            None => {
+                let stream_session_id = match &stdout {
+                    AntigravityStdoutCapture::Structured(capture) => {
+                        capture.conversation_id.as_deref()
+                    }
+                    AntigravityStdoutCapture::Legacy(_) => None,
+                };
+                let fallback_session_id = request
+                    .resumable_native_session_id
+                    .as_deref()
+                    .or(stream_session_id);
+                let internal = anyhow::anyhow!(
+                    "Antigravity companion completed without a verifiable conversation identifier"
+                );
+                let failure = antigravity_public_failure(
+                    request,
+                    &self.log_dir,
+                    RuntimeFailureOrigin::Compatibility,
+                    RuntimeFailurePhase::Terminal,
+                    "runtime_session_incompatible",
+                    "Antigravity 最终结果缺少会话标识",
+                    Some(&internal.to_string()),
+                    false,
+                );
+                return Err(antigravity_failure_error(
+                    internal,
+                    failure,
+                    fallback_session_id,
+                    &native_turn_id,
+                    fallback_session_id.is_some(),
+                ));
+            }
+        };
         if let Some(expected) = request.resumable_native_session_id.as_deref()
             && native_session_id != expected
         {
-            anyhow::bail!(
+            let internal = anyhow::anyhow!(
                 "Antigravity companion resumed a different conversation than requested (expected {expected}, observed {native_session_id})"
             );
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Compatibility,
+                RuntimeFailurePhase::Terminal,
+                "runtime_session_incompatible",
+                "Antigravity 返回了另一个会话的结果",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(antigravity_failure_error(
+                internal,
+                failure,
+                Some(expected),
+                &native_turn_id,
+                true,
+            ));
         }
-        let native_turn_id = format!("agy:{}:{}", request.agent_run_id, request.execution_epoch);
         let final_output = match stdout {
             AntigravityStdoutCapture::Structured(capture) => {
-                let result = capture
-                    .final_result
-                    .context("Antigravity stream-json output omitted its final result event")?;
+                let result = match capture.final_result {
+                    Some(result) => result,
+                    None => {
+                        let internal = anyhow::anyhow!(
+                            "Antigravity stream-json output omitted its final result event"
+                        );
+                        let failure = antigravity_public_failure(
+                            request,
+                            &self.log_dir,
+                            RuntimeFailureOrigin::Compatibility,
+                            RuntimeFailurePhase::Terminal,
+                            "runtime_missing_final_result",
+                            "Antigravity 未返回当前集成所需的最终结果",
+                            Some(&internal.to_string()),
+                            false,
+                        );
+                        return Err(antigravity_failure_error(
+                            internal,
+                            failure,
+                            Some(&native_session_id),
+                            &native_turn_id,
+                            true,
+                        ));
+                    }
+                };
                 if result.conversation_id != native_session_id {
-                    anyhow::bail!(
+                    let internal = anyhow::anyhow!(
                         "Antigravity stream targeted another conversation (expected {native_session_id}, observed {})",
                         result.conversation_id
                     );
+                    let failure = antigravity_public_failure(
+                        request,
+                        &self.log_dir,
+                        RuntimeFailureOrigin::Compatibility,
+                        RuntimeFailurePhase::Terminal,
+                        "runtime_session_incompatible",
+                        "Antigravity 返回了另一个会话的结果",
+                        Some(&internal.to_string()),
+                        false,
+                    );
+                    return Err(antigravity_failure_error(
+                        internal,
+                        failure,
+                        Some(&native_session_id),
+                        &native_turn_id,
+                        true,
+                    ));
                 }
                 if !result.status.eq_ignore_ascii_case("success") {
-                    return Err(AntigravityDeliveredFailure {
-                        native_session_id,
-                        native_turn_id,
-                        error_code: "runtime_terminal_failure",
-                    }
-                    .into());
+                    let raw_detail = result
+                        .error
+                        .as_deref()
+                        .or(result.message.as_deref())
+                        .or(result.response.as_deref());
+                    let failure = antigravity_public_failure(
+                        request,
+                        &self.log_dir,
+                        RuntimeFailureOrigin::Runtime,
+                        RuntimeFailurePhase::Terminal,
+                        "runtime_terminal_failure",
+                        "Antigravity 返回了失败结果",
+                        raw_detail,
+                        true,
+                    );
+                    let internal = anyhow::anyhow!(
+                        "Antigravity structured final result ended as {}: {}",
+                        result.status,
+                        raw_detail.unwrap_or("no Runtime error detail")
+                    );
+                    return Err(antigravity_failure_error(
+                        internal,
+                        failure,
+                        Some(&native_session_id),
+                        &native_turn_id,
+                        true,
+                    ));
                 }
-                result.response.trim().to_string()
+                match result.response {
+                    Some(response) => response.trim().to_string(),
+                    None => {
+                        let internal = anyhow::anyhow!(
+                            "Antigravity success result omitted its response field"
+                        );
+                        let failure = antigravity_public_failure(
+                            request,
+                            &self.log_dir,
+                            RuntimeFailureOrigin::Compatibility,
+                            RuntimeFailurePhase::Terminal,
+                            "runtime_missing_final_output",
+                            "Antigravity 最终结果缺少必要内容",
+                            Some(&internal.to_string()),
+                            false,
+                        );
+                        return Err(antigravity_failure_error(
+                            internal,
+                            failure,
+                            Some(&native_session_id),
+                            &native_turn_id,
+                            true,
+                        ));
+                    }
+                }
             }
             AntigravityStdoutCapture::Legacy(stdout) if stdout.truncated => {
-                return Err(AntigravityDeliveredFailure {
-                    native_session_id,
-                    native_turn_id,
-                    error_code: "runtime_output_too_large",
-                }
-                .into());
+                let internal = anyhow::anyhow!("Antigravity final output exceeded the safety limit");
+                let failure = antigravity_public_failure(
+                    request,
+                    &self.log_dir,
+                    RuntimeFailureOrigin::Compatibility,
+                    RuntimeFailurePhase::Terminal,
+                    "runtime_output_too_large",
+                    "Antigravity 返回的最终结果超出当前集成限制",
+                    Some(&internal.to_string()),
+                    false,
+                );
+                return Err(antigravity_failure_error(
+                    internal,
+                    failure,
+                    Some(&native_session_id),
+                    &native_turn_id,
+                    true,
+                ));
             }
             AntigravityStdoutCapture::Legacy(stdout) => match String::from_utf8(stdout.bytes) {
                 Ok(output) => output.trim().to_string(),
                 Err(_) => {
-                    return Err(AntigravityDeliveredFailure {
-                        native_session_id,
-                        native_turn_id,
-                        error_code: "runtime_invalid_final_output",
-                    }
-                    .into());
+                    let internal = anyhow::anyhow!("Antigravity final output was not valid UTF-8");
+                    let failure = antigravity_public_failure(
+                        request,
+                        &self.log_dir,
+                        RuntimeFailureOrigin::Compatibility,
+                        RuntimeFailurePhase::Terminal,
+                        "runtime_invalid_final_output",
+                        "Antigravity 返回的最终结果格式不受支持",
+                        Some(&internal.to_string()),
+                        false,
+                    );
+                    return Err(antigravity_failure_error(
+                        internal,
+                        failure,
+                        Some(&native_session_id),
+                        &native_turn_id,
+                        true,
+                    ));
                 }
             },
         };
         if final_output.is_empty() {
-            return Err(AntigravityDeliveredFailure {
-                native_session_id,
-                native_turn_id,
-                error_code: "runtime_missing_final_output",
-            }
-            .into());
+            let internal = anyhow::anyhow!("Antigravity final output was empty");
+            let failure = antigravity_public_failure(
+                request,
+                &self.log_dir,
+                RuntimeFailureOrigin::Compatibility,
+                RuntimeFailurePhase::Terminal,
+                "runtime_missing_final_output",
+                "Antigravity 最终结果缺少必要内容",
+                Some(&internal.to_string()),
+                false,
+            );
+            return Err(antigravity_failure_error(
+                internal,
+                failure,
+                Some(&native_session_id),
+                &native_turn_id,
+                true,
+            ));
         }
         Ok(AntigravityRunResult {
             native_session_id,
             native_turn_id,
             final_output,
         })
+    }
+}
+
+fn antigravity_public_failure(
+    request: &AntigravityRunRequest,
+    log_dir: &Path,
+    origin: RuntimeFailureOrigin,
+    phase: RuntimeFailurePhase,
+    code: &str,
+    summary: &str,
+    raw_detail: Option<&str>,
+    retryable: bool,
+) -> RuntimeFailureView {
+    let mut sensitive_paths = vec![
+        (Path::new(&request.workspace.execution_root), "<project>"),
+        (log_dir, "<runtime-private>"),
+        (
+            Path::new(&request.runtime.executable_path),
+            "<runtime-executable>",
+        ),
+    ];
+    if let Some(root) = request.attachment_access_root.as_deref() {
+        sensitive_paths.push((root, "<attachment-root>"));
+    }
+    public_runtime_failure_from_output(
+        rovai_core::agent_profile::AdapterKind::AntigravityApp,
+        origin,
+        phase,
+        code,
+        summary,
+        raw_detail,
+        &sensitive_paths,
+        retryable,
+    )
+}
+
+fn antigravity_failure_error(
+    internal: anyhow::Error,
+    failure: RuntimeFailureView,
+    native_session_id: Option<&str>,
+    native_turn_id: &str,
+    delivered: bool,
+) -> anyhow::Error {
+    if delivered && let Some(native_session_id) = native_session_id {
+        let error_code = failure.code.clone();
+        internal.context(AntigravityDeliveredFailure {
+            native_session_id: native_session_id.to_string(),
+            native_turn_id: native_turn_id.to_string(),
+            error_code,
+            failure,
+        })
+    } else {
+        internal.context(RuntimeFailureError::new(failure))
     }
 }
 
@@ -501,7 +876,9 @@ struct AntigravityStreamCapture {
 struct AntigravityJsonResult {
     conversation_id: String,
     status: String,
-    response: String,
+    response: Option<String>,
+    error: Option<String>,
+    message: Option<String>,
 }
 
 async fn capture_antigravity_stream<R>(
@@ -588,18 +965,39 @@ fn process_antigravity_stream_line(
                 .and_then(Value::as_str)
                 .context("Antigravity result omitted conversation_id")?;
             observe_antigravity_conversation(capture, expected_session_id, conversation_id)?;
+            let status = result
+                .get("status")
+                .and_then(Value::as_str)
+                .context("Antigravity result omitted status")?
+                .to_string();
+            let response = result
+                .get("response")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let error = result
+                .get("error")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let message = result
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            if status.eq_ignore_ascii_case("success") && response.is_none() {
+                anyhow::bail!("Antigravity success result omitted response");
+            }
+            if !status.eq_ignore_ascii_case("success")
+                && error.is_none()
+                && message.is_none()
+                && response.is_none()
+            {
+                anyhow::bail!("Antigravity failed result omitted error, message and response");
+            }
             capture.final_result = Some(AntigravityJsonResult {
                 conversation_id: conversation_id.to_string(),
-                status: result
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .context("Antigravity result omitted status")?
-                    .to_string(),
-                response: result
-                    .get("response")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
+                status,
+                response,
+                error,
+                message,
             });
         }
         Some(_) => {}
@@ -765,6 +1163,57 @@ where
         total_bytes,
         digest: format!("sha256:{:x}", digest.finalize()),
     })
+}
+
+fn unsupported_antigravity_command(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    [
+        "unknown command",
+        "unrecognized command",
+        "unsupported command",
+        "unknown option",
+        "unrecognized option",
+        "unsupported option",
+        "unknown argument",
+        "unrecognized argument",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+}
+
+fn read_known_antigravity_error_lines(path: &Path) -> Result<String> {
+    let mut bytes = Vec::new();
+    File::open(path)?
+        .take(MAX_LOG_INSPECTION_BYTES)
+        .read_to_end(&mut bytes)?;
+    let body = String::from_utf8_lossy(&bytes);
+    let mut matches = Vec::new();
+    for line in body.lines() {
+        let lower = line.to_ascii_lowercase();
+        if [
+            "[error]",
+            "error:",
+            "failed:",
+            "authentication",
+            "unauthorized",
+            "permission denied",
+            "unknown command",
+            "unknown option",
+            "model unavailable",
+            "model not found",
+            "quota exceeded",
+            "rate limit",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+        {
+            matches.push(line.trim().to_string());
+            if matches.len() == 4 {
+                break;
+            }
+        }
+    }
+    Ok(matches.join("\n"))
 }
 
 fn required_enum<'a>(

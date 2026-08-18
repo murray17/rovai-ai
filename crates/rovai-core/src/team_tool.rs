@@ -2429,6 +2429,7 @@ mod tests {
                             execution_epoch,
                             error_code: error_code.to_string(),
                             error_detail: None,
+                            failure: None,
                             manual_retry_allowed: false,
                             ending_git_observation: None,
                         },

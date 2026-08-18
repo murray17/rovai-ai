@@ -44,8 +44,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.07";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 48;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.10";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 49;
+const V094_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.07";
+const V094_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 48;
 const V092_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.98";
 const V092_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 46;
 const V091_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v0.96";
@@ -111,6 +113,7 @@ struct CurrentMigrationState {
     v91: bool,
     v92: bool,
     v93: bool,
+    v94: bool,
 }
 
 impl CurrentMigrationState {
@@ -120,6 +123,34 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94;
+        }
+        if self.v94 {
+            return false;
+        }
+        if contract == V094_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V094_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -555,7 +586,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 90),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 91),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 92),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 93)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 93),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 94)
         "#,
         [],
         |row| {
@@ -584,6 +616,7 @@ fn load_current_migration_state(
                 v91: row.get(21)?,
                 v92: row.get(22)?,
                 v93: row.get(23)?,
+                v94: row.get(24)?,
             })
         },
     )
@@ -1685,6 +1718,9 @@ impl Database {
             if !self.schema_migration_applied(93)? {
                 self.migrate_a2a_public_only_v93()?;
             }
+            if !self.schema_migration_applied(94)? {
+                self.migrate_public_runtime_failures_v94()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2013,6 +2049,9 @@ impl Database {
         }
         if !self.schema_migration_applied(93)? {
             self.migrate_a2a_public_only_v93()?;
+        }
+        if !self.schema_migration_applied(94)? {
+            self.migrate_public_runtime_failures_v94()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -11149,6 +11188,44 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_public_runtime_failures_v94(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            ALTER TABLE agent_run ADD COLUMN
+                public_runtime_failure_json TEXT
+                CHECK(
+                    public_runtime_failure_json IS NULL
+                    OR (
+                        json_valid(public_runtime_failure_json)
+                        AND json_type(public_runtime_failure_json) = 'object'
+                    )
+                );
+            ALTER TABLE adapter_probe_attempt ADD COLUMN
+                public_runtime_failure_json TEXT
+                CHECK(
+                    public_runtime_failure_json IS NULL
+                    OR (
+                        json_valid(public_runtime_failure_json)
+                        AND json_type(public_runtime_failure_json) = 'object'
+                    )
+                );
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.10', projection_schema_version = 49,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (94, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -15632,6 +15709,7 @@ mod tests {
             v91: version >= 91,
             v92: version >= 92,
             v93: version >= 93,
+            v94: version >= 94,
         }
     }
 
@@ -15642,6 +15720,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                94,
+            ),
+            (
+                "v1.07/schema-48",
+                V094_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V094_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 93,
             ),
             (
@@ -15766,7 +15850,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(93);
+        let current = migration_state_through(94);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -15836,7 +15920,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(93));
+        assert_eq!(state, migration_state_through(94));
         assert!(state.admits(&contract, schema));
         assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
 

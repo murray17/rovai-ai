@@ -31,6 +31,7 @@ use crate::{
         settle_materialized_delivery_for_agent_run,
     },
     planned_shutdown::{RuntimeTerminalOutcome, TerminalSettlementPermit},
+    runtime_failure::RuntimeFailureView,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -282,6 +283,8 @@ pub struct FailAgentRunCommand {
     pub execution_epoch: i64,
     pub error_code: String,
     pub error_detail: Option<String>,
+    #[serde(default)]
+    pub failure: Option<RuntimeFailureView>,
     pub manual_retry_allowed: bool,
     pub ending_git_observation: Option<GitObservation>,
 }
@@ -293,6 +296,7 @@ pub struct PlannedShutdownAbortiveTerminal {
     pub outcome: RuntimeTerminalOutcome,
     pub error_code: String,
     pub error_detail: Option<String>,
+    pub failure: Option<RuntimeFailureView>,
     pub manual_retry_allowed: bool,
 }
 
@@ -340,6 +344,8 @@ pub struct RejectAgentRunDispatchCommand {
     pub expected_version: i64,
     pub error_code: String,
     pub error_detail: Option<String>,
+    #[serde(default)]
+    pub failure: Option<RuntimeFailureView>,
     pub manual_retry_allowed: bool,
 }
 
@@ -3270,6 +3276,10 @@ impl ExecutionRuntimeService {
         if envelope.payload.error_code.trim().is_empty() {
             anyhow::bail!("AgentRun dispatch errorCode must not be empty");
         }
+        validate_public_runtime_failure(
+            &envelope.payload.error_code,
+            envelope.payload.failure.as_ref(),
+        )?;
         let execution = self.gateway.execute(database, envelope, |transaction| {
             if !matches!(
                 &envelope.actor,
@@ -3309,6 +3319,12 @@ impl ExecutionRuntimeService {
                 .error_detail
                 .as_ref()
                 .map(|detail| json!({ "detail": detail }).to_string());
+            let public_runtime_failure_json = envelope
+                .payload
+                .failure
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -3316,6 +3332,7 @@ impl ExecutionRuntimeService {
                     runtime_recovery_required = 0,
                     execution_lease_owner = NULL, execution_lease_expires_at = NULL,
                     last_error_code = ?2, last_error_details_ref = ?3,
+                    public_runtime_failure_json = ?7,
                     manual_retry_allowed = ?4,
                     ended_at = ?5, version = version + 1, updated_at = ?5
                 WHERE id = ?1 AND version = ?6
@@ -3336,6 +3353,7 @@ impl ExecutionRuntimeService {
                     i64::from(envelope.payload.manual_retry_allowed),
                     target.now,
                     envelope.payload.expected_version,
+                    public_runtime_failure_json,
                 ],
             )?;
             if updated != 1 {
@@ -3355,6 +3373,7 @@ impl ExecutionRuntimeService {
                     "phase": "dispatch_preflight",
                     "errorCode": envelope.payload.error_code,
                     "errorDetail": envelope.payload.error_detail,
+                    "failure": envelope.payload.failure,
                     "manualRetryAllowed": envelope.payload.manual_retry_allowed,
                 }),
             )?;
@@ -3421,6 +3440,10 @@ impl ExecutionRuntimeService {
         if envelope.payload.error_code.trim().is_empty() {
             anyhow::bail!("AgentRun errorCode must not be empty");
         }
+        validate_public_runtime_failure(
+            &envelope.payload.error_code,
+            envelope.payload.failure.as_ref(),
+        )?;
         let execution = self.gateway.execute(database, envelope, |transaction| {
             if !is_runtime_adapter(&envelope.actor) {
                 return Ok(rejected(
@@ -3446,6 +3469,12 @@ impl ExecutionRuntimeService {
                 .error_detail
                 .as_ref()
                 .map(|detail| json!({ "detail": detail }).to_string());
+            let public_runtime_failure_json = envelope
+                .payload
+                .failure
+                .as_ref()
+                .map(serde_json::to_string)
+                .transpose()?;
             let ending_git_observation = envelope
                 .payload
                 .ending_git_observation
@@ -3461,6 +3490,7 @@ impl ExecutionRuntimeService {
                     terminal_resolution_source = ?9,
                     terminal_reason_code = NULL,
                     last_error_code = ?2, last_error_details_ref = ?3,
+                    public_runtime_failure_json = ?10,
                     manual_retry_allowed = ?4,
                     ending_git_observation_json = ?8,
                     ended_at = ?5, version = version + 1, updated_at = ?5
@@ -3477,6 +3507,7 @@ impl ExecutionRuntimeService {
                     envelope.payload.execution_epoch,
                     ending_git_observation,
                     terminal_resolution_source,
+                    public_runtime_failure_json,
                 ],
             )?;
             if updated != 1 {
@@ -3492,6 +3523,7 @@ impl ExecutionRuntimeService {
                 &json!({
                     "errorCode": envelope.payload.error_code,
                     "errorDetail": envelope.payload.error_detail,
+                    "failure": envelope.payload.failure,
                     "manualRetryAllowed": envelope.payload.manual_retry_allowed,
                     "endingGitObservation": envelope.payload.ending_git_observation,
                     "terminalResolutionSource": terminal_resolution_source,
@@ -3845,6 +3877,7 @@ impl ExecutionRuntimeService {
         if terminal.error_code.trim().is_empty() {
             anyhow::bail!("planned shutdown terminal errorCode must not be empty");
         }
+        validate_public_runtime_failure(&terminal.error_code, terminal.failure.as_ref())?;
         if !permit.authorizes(
             &terminal.agent_run_id,
             terminal.execution_epoch,
@@ -3906,6 +3939,11 @@ impl ExecutionRuntimeService {
             .error_detail
             .as_ref()
             .map(|detail| json!({ "detail": detail }).to_string());
+        let public_runtime_failure_json = terminal
+            .failure
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()?;
         let manual_retry_allowed =
             terminal.outcome == RuntimeTerminalOutcome::Failed && terminal.manual_retry_allowed;
         let updated = transaction.execute(
@@ -3917,6 +3955,7 @@ impl ExecutionRuntimeService {
                 terminal_resolution_source = 'runtime_terminal',
                 terminal_reason_code = ?3,
                 last_error_code = ?4, last_error_details_ref = ?5,
+                public_runtime_failure_json = ?9,
                 manual_retry_allowed = ?6,
                 ended_at = ?7, version = version + 1, updated_at = ?7
             WHERE id = ?1 AND status IN ('running', 'waiting')
@@ -3931,6 +3970,7 @@ impl ExecutionRuntimeService {
                 i64::from(manual_retry_allowed),
                 target.now,
                 terminal.execution_epoch,
+                public_runtime_failure_json,
             ],
         )?;
         if updated != 1 {
@@ -3950,6 +3990,7 @@ impl ExecutionRuntimeService {
             &json!({
                 "errorCode": terminal.error_code,
                 "errorDetail": terminal.error_detail,
+                "failure": terminal.failure,
                 "manualRetryAllowed": manual_retry_allowed,
                 "terminalResolutionSource": "runtime_terminal",
                 "terminalReasonCode": terminal_reason_code,
@@ -4495,6 +4536,20 @@ fn is_runtime_adapter(actor: &ActorRef) -> bool {
         actor,
         ActorRef::System { component_id } if component_id.starts_with("runtime-adapter:")
     )
+}
+
+fn validate_public_runtime_failure(
+    error_code: &str,
+    failure: Option<&RuntimeFailureView>,
+) -> Result<()> {
+    let Some(failure) = failure else {
+        return Ok(());
+    };
+    failure.validate()?;
+    if failure.code != error_code {
+        anyhow::bail!("public Runtime failure code must match AgentRun errorCode");
+    }
+    Ok(())
 }
 
 pub(crate) fn recompute_camp_turn(
@@ -5952,6 +6007,7 @@ mod tests {
                     execution_epoch,
                     error_code: "runtime_launch_failed".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                     ending_git_observation: None,
                 },
@@ -6232,6 +6288,7 @@ mod tests {
                             error_detail: Some(format!(
                                 "Runtime returned {expected_run_status} while waiting for {wait_reason}"
                             )),
+                            failure: None,
                             manual_retry_allowed: false,
                         },
                     )
@@ -6324,6 +6381,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Cancelled,
                     error_code: "runtime_cancelled".to_string(),
                     error_detail: Some("Runtime confirmed cancellation".to_string()),
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6394,6 +6452,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Cancelled,
                     error_code: "runtime_cancelled".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6437,6 +6496,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6481,6 +6541,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
                     error_detail: Some("Provider returned a terminal failure".to_string()),
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -6609,6 +6670,7 @@ mod tests {
                         execution_epoch,
                         error_code: "provider_terminal_failure".to_string(),
                         error_detail: None,
+                        failure: None,
                         manual_retry_allowed: false,
                         ending_git_observation: None,
                     },
@@ -6641,6 +6703,7 @@ mod tests {
                     outcome: RuntimeTerminalOutcome::Failed,
                     error_code: "provider_terminal_failure".to_string(),
                     error_detail: None,
+                    failure: None,
                     manual_retry_allowed: false,
                 },
             )
@@ -7153,6 +7216,7 @@ mod tests {
                         expected_version: 1,
                         error_code: "workspace_unavailable".to_string(),
                         error_detail: Some("workspace safety check failed".to_string()),
+                        failure: None,
                         manual_retry_allowed: true,
                     },
                 ),
