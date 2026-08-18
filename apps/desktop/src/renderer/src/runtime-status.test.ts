@@ -3,11 +3,14 @@ import type {
   AdapterKind,
   AgentProfile,
   ProductRuntimeAvailability,
-  ProductRuntimeAvailabilityStatus
+  ProductRuntimeAvailabilityStatus,
+  RuntimePlatformAdmission
 } from '@contracts'
 import {
   memberRuntimePresentation,
+  runtimePlatformAdmissionFor,
   runtimeAvailabilityPresentation,
+  runtimeProductPresentation,
   runtimeReadinessLabel
 } from './runtime-status'
 
@@ -115,7 +118,46 @@ describe('Runtime user status projection', () => {
     expect(result.label).toBe('已安装')
     expect(result.detail).toContain('请重新检测或检查可用性')
   })
+
+  it('keeps Windows not-qualified distinct from machine availability', () => {
+    const admission = windowsAdmission('kiro-cli')
+
+    expect(runtimeProductPresentation(admission, null)).toEqual({
+      status: 'not_qualified',
+      label: 'Windows 尚未验证',
+      detail: '该 Agent 运行时尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。'
+    })
+    expect(runtimePlatformAdmissionFor(
+      'windows-x64',
+      [admission],
+      'kiro-cli'
+    )).toEqual(admission)
+  })
+
+  it('does not let persisted ready evidence override a denied platform row', () => {
+    const result = memberRuntimePresentation(
+      profile({ status: 'ready', blockers: [] }),
+      'kiro-cli',
+      availability('ready'),
+      false,
+      windowsAdmission('kiro-cli'),
+      true
+    )
+
+    expect(result.status).toBe('not_qualified')
+    expect(result.label).toBe('Windows 尚未验证')
+  })
 })
+
+function windowsAdmission(runtimeKind: AdapterKind): RuntimePlatformAdmission {
+  return {
+    runtimeKind,
+    platform: 'windows-x64',
+    status: 'not_qualified',
+    reasonCode: 'runtime_platform.qualification_evidence_missing',
+    evidenceRevision: null
+  }
+}
 
 function availability(
   status: ProductRuntimeAvailabilityStatus,

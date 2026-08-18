@@ -49,6 +49,7 @@ pub mod runtime;
 pub mod runtime_activity_mapping;
 pub mod runtime_basis;
 pub mod runtime_discovery;
+pub mod runtime_platform_admission;
 pub mod runtime_probe_process;
 pub mod runtime_resolution;
 pub mod skill;

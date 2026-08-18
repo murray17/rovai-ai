@@ -6,6 +6,7 @@ import type {
   OnboardingRuntimeSelection,
   OnboardingSnapshot,
   ProductRuntimeAvailability,
+  RuntimePlatformAdmission,
   ThemePreference
 } from '@contracts'
 import {
@@ -15,7 +16,12 @@ import {
 } from './MemberRuntimeParameters'
 import { MemberPortrait } from './MemberPortrait'
 import { BUILTIN_MEMBER_PRESETS, type BuiltinMemberPreset } from './member-presets'
-import { runtimeAvailabilityPresentation, type RuntimeStatusPresentation } from './runtime-status'
+import {
+  runtimeAvailabilityPresentation,
+  runtimePlatformAdmissionFor,
+  runtimeProductPresentation,
+  type RuntimeStatusPresentation
+} from './runtime-status'
 import antigravityLogo from './assets/runtime-logos/antigravity-color.svg'
 import claudeCodeLogo from './assets/runtime-logos/claudecode-color.svg'
 import codeBuddyLogo from './assets/runtime-logos/codebuddy-color.svg'
@@ -168,7 +174,7 @@ export function OnboardingFlow({
           <RuntimeStep
             member={selectedMember}
             selection={snapshot.runtimeSelection}
-            availability={health?.runtimeAvailability ?? []}
+            health={health}
             installations={installations}
             phase={runtimePhase}
             provisioning={snapshot.provisioning !== null}
@@ -291,7 +297,7 @@ function MemberStep({
 function RuntimeStep({
   member,
   selection,
-  availability,
+  health,
   installations,
   phase,
   provisioning,
@@ -303,7 +309,7 @@ function RuntimeStep({
 }: {
   member: BuiltinMemberPreset
   selection: OnboardingRuntimeSelection | null
-  availability: ProductRuntimeAvailability[]
+  health: HealthStatus | null
   installations: AdapterInstallation[]
   phase: OnboardingRuntimePhase
   provisioning: boolean
@@ -313,13 +319,22 @@ function RuntimeStep({
   onSelectionChange(selection: OnboardingRuntimeSelection | null): void
   onComplete(): void
 }): React.JSX.Element {
+  const availability = health?.runtimeAvailability ?? []
   const selectedAvailability = availability.find(
     (candidate) => candidate.runtimeKind === selection?.adapterKind
   ) ?? null
+  const selectedAdmission = selection
+    ? runtimePlatformAdmissionFor(
+        health?.hostPlatform ?? null,
+        health?.runtimePlatformAdmission ?? [],
+        selection.adapterKind
+      )
+    : null
   const selectedInstallation = selection
     ? runtimeEditorInstallation(installations, selection.adapterKind)
     : null
-  const selectedStatus = runtimeAvailabilityPresentation(
+  const selectedStatus = runtimeProductPresentation(
+    selectedAdmission,
     selectedAvailability,
     phase !== 'ready' && phase !== 'error'
   )
@@ -327,9 +342,13 @@ function RuntimeStep({
     phase,
     selection,
     selectedAvailability,
-    selectedInstallation
+    selectedInstallation,
+    selectedAdmission
   )
   const scanning = phase !== 'ready' && phase !== 'error'
+  const hasQualifiedRuntime = health?.runtimePlatformAdmission.some((row) => (
+    row.platform === health.hostPlatform && row.status === 'qualified'
+  )) ?? false
 
   return (
     <section className="onboarding-track onboarding-runtime-track" aria-labelledby="onboarding-runtime-title">
@@ -338,7 +357,7 @@ function RuntimeStep({
           <h1 id="onboarding-runtime-title">为{member.displayName}准备运行环境</h1>
           <p>Rovai 会检查本机。找到可用的 Agent 运行时后，再选择模型。</p>
         </div>
-        {!scanning && (
+        {!scanning && hasQualifiedRuntime && (
           <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>重新扫描</button>
         )}
       </header>
@@ -364,7 +383,7 @@ function RuntimeStep({
         <div className="onboarding-runtime-workspace">
           <section className="onboarding-runtime-panel">
             <header>
-              <span><strong>本机 Agent 运行时</strong><small>{scanning ? '正在读取本机环境' : '选择一个可用的运行入口'}</small></span>
+              <span><strong>本机 Agent 运行时</strong><small>{scanning ? '正在读取本机环境' : hasQualifiedRuntime ? '选择一个可用的运行入口' : '当前平台的 Runtime 资格状态'}</small></span>
               {scanning && <span className="onboarding-scan-status"><i />正在检查</span>}
             </header>
             {scanning
@@ -373,14 +392,19 @@ function RuntimeStep({
                   <div className="onboarding-runtime-list" role="radiogroup" aria-label="选择 Agent 运行时">
                     {ONBOARDING_PRODUCT_RUNTIMES.map((kind) => {
                       const item = availability.find((candidate) => candidate.runtimeKind === kind) ?? null
-                      const presentation = runtimeAvailabilityPresentation(item)
+                      const admission = runtimePlatformAdmissionFor(
+                        health?.hostPlatform ?? null,
+                        health?.runtimePlatformAdmission ?? [],
+                        kind
+                      )
+                      const presentation = runtimeProductPresentation(admission, item)
                       return (
                         <RuntimeRow
                           key={kind}
                           kind={kind}
                           presentation={presentation}
                           checked={selection?.adapterKind === kind}
-                          disabled={busy || provisioning}
+                          disabled={busy || provisioning || admission?.status !== 'qualified'}
                           onSelect={() => onSelectionChange(
                             onboardingRuntimeSelectionFor(kind, installations)
                           )}
@@ -522,10 +546,14 @@ export function onboardingRuntimeCanContinue(
   phase: OnboardingRuntimePhase,
   selection: OnboardingRuntimeSelection | null,
   availability: ProductRuntimeAvailability | null,
-  installation: AdapterInstallation | null
+  installation: AdapterInstallation | null,
+  admission: RuntimePlatformAdmission | null = null
 ): boolean {
   if (phase !== 'ready' || !selection?.model || !installation?.memberRuntimeDefaults) return false
-  const status = runtimeAvailabilityPresentation(availability).status
+  if (admission && admission.status !== 'qualified') return false
+  const status = admission
+    ? runtimeProductPresentation(admission, availability).status
+    : runtimeAvailabilityPresentation(availability).status
   if (status !== 'available' && status !== 'installed_unverified') return false
   if (status === 'installed_unverified' && selection.model.mode !== 'runtime_default') return false
   return selection.adapterKind === installation.adapterKind
@@ -545,6 +573,8 @@ function runtimeRowDetail(presentation: RuntimeStatusPresentation): string {
     not_installed: '本机未找到安装入口',
     version_unsupported: '更新后重新扫描',
     unavailable: '当前安装不可使用',
+    not_qualified: 'Windows 资格验证尚未完成',
+    unsupported: '当前平台不支持',
     unknown: '尚无可靠检查结果',
     unconfigured: '尚未配置'
   })[presentation.status]

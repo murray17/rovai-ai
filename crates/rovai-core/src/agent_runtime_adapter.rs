@@ -22,6 +22,11 @@ use crate::{
     command::canonical_json_digest,
     context_contract::native_binding_context_contract,
     mcp::McpServerDefinition,
+    platform::HostPlatformKey,
+    runtime_platform_admission::{
+        MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION, RuntimePlatformAdmission,
+        RuntimePlatformAdmissionReasonCode,
+    },
 };
 
 /// The stable, built-in boundary between Rovai-ai runtime configuration and a
@@ -419,6 +424,45 @@ pub struct AgentRuntimeAdapterRegistry {
 }
 
 impl AgentRuntimeAdapterRegistry {
+    pub fn platform_admission(
+        &self,
+        kind: AdapterKind,
+        platform: HostPlatformKey,
+    ) -> RuntimePlatformAdmission {
+        match platform {
+            HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64 => {
+                RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+                )
+            }
+            HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::not_qualified(
+                kind,
+                platform,
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            ),
+        }
+    }
+
+    pub fn platform_admission_matrix(&self) -> Vec<RuntimePlatformAdmission> {
+        AdapterKind::ALL
+            .into_iter()
+            .flat_map(|kind| {
+                HostPlatformKey::ALL
+                    .into_iter()
+                    .map(move |platform| self.platform_admission(kind, platform))
+            })
+            .collect()
+    }
+
+    pub fn current_platform_admission(
+        &self,
+        kind: AdapterKind,
+    ) -> Option<RuntimePlatformAdmission> {
+        HostPlatformKey::current().map(|platform| self.platform_admission(kind, platform))
+    }
+
     pub fn member_permission_defaults(&self, kind: AdapterKind) -> Value {
         match kind {
             AdapterKind::CodexCli => json!({

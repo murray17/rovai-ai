@@ -9,7 +9,9 @@ import {
 import type {
   AdapterKind,
   AgentProfile,
+  HostPlatformKey,
   ProductRuntimeAvailability,
+  RuntimePlatformAdmission,
   StoredCommandResult
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
@@ -17,6 +19,7 @@ import { PanelToggleIcon } from './PanelToggleIcon'
 import { localizeExecutionEngineTerms } from './product-copy'
 import {
   memberRuntimePresentation,
+  runtimePlatformAdmissionFor,
   type RuntimeUserStatus
 } from './runtime-status'
 import { identityColorToken } from './theme'
@@ -28,7 +31,13 @@ export type CompactRuntimeState = 'available' | 'action' | 'neutral'
 export function compactRuntimeState(status: RuntimeUserStatus): CompactRuntimeState {
   if (status === 'available') return 'available'
   if (status === 'unconfigured') return 'neutral'
-  if (status === 'checking' || status === 'unknown' || status === 'installed_unverified') return 'neutral'
+  if (
+    status === 'checking'
+    || status === 'unknown'
+    || status === 'installed_unverified'
+    || status === 'not_qualified'
+    || status === 'unsupported'
+  ) return 'neutral'
   return 'action'
 }
 
@@ -50,6 +59,8 @@ export function filterMembers(
 export function MemberSidebar({
   agents,
   runtimeAvailability,
+  hostPlatform = null,
+  runtimePlatformAdmission = [],
   runtimeDiscoveryPending,
   selectedAgentId,
   onSelect,
@@ -58,6 +69,8 @@ export function MemberSidebar({
 }: {
   agents: AgentProfile[]
   runtimeAvailability: ProductRuntimeAvailability[]
+  hostPlatform?: HostPlatformKey | null
+  runtimePlatformAdmission?: RuntimePlatformAdmission[]
   runtimeDiscoveryPending: boolean
   selectedAgentId: string | null
   onSelect(agentId: string, tab: MemberWorkspaceTab, focusRuntime: boolean): void
@@ -259,6 +272,14 @@ export function MemberSidebar({
                     busy={busy !== null}
                     dragOver={dragOverAgentId === agent.agentId && dragAgentId !== agent.agentId}
                     availability={runtimeAvailability.find((item) => item.runtimeKind === agent.runtimeConfiguration?.adapterKind) ?? null}
+                    admission={agent.runtimeConfiguration
+                      ? runtimePlatformAdmissionFor(
+                          hostPlatform,
+                          runtimePlatformAdmission,
+                          agent.runtimeConfiguration.adapterKind
+                        )
+                      : null}
+                    platformAdmissionKnown={hostPlatform !== null}
                     runtimeDiscoveryPending={runtimeDiscoveryPending}
                     onSelect={onSelect}
                     onMove={moveMember}
@@ -302,6 +323,8 @@ function MemberSidebarRow({
   busy,
   dragOver,
   availability,
+  admission,
+  platformAdmissionKnown,
   runtimeDiscoveryPending,
   onSelect,
   onMove,
@@ -317,6 +340,8 @@ function MemberSidebarRow({
   busy: boolean
   dragOver: boolean
   availability: ProductRuntimeAvailability | null
+  admission: RuntimePlatformAdmission | null
+  platformAdmissionKnown: boolean
   runtimeDiscoveryPending: boolean
   onSelect(agentId: string, tab: MemberWorkspaceTab, focusRuntime: boolean): void
   onMove(agent: AgentProfile, direction: -1 | 1): void
@@ -330,7 +355,9 @@ function MemberSidebarRow({
     agent,
     agent.runtimeConfiguration?.adapterKind ?? null,
     availability,
-    runtimeDiscoveryPending
+    runtimeDiscoveryPending,
+    admission,
+    platformAdmissionKnown
   )
   const compact = compactRuntimeState(runtime.status)
   const product = agent.runtimeConfiguration?.adapterKind

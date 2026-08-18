@@ -83,8 +83,8 @@ use rovai_core::{
         TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
     },
     command::{
-        ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandResultStatus,
-        DomainCommandGateway, canonical_json_digest,
+        ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandHandlerResult,
+        CommandResultStatus, DomainCommandGateway, canonical_json_digest,
     },
     compaction::{
         CompactionDetectorPolicy, CompactionObservationResult, DesiredCompactionDetectorPolicies,
@@ -154,7 +154,10 @@ use rovai_core::{
         PlannedShutdownCoordinator, RuntimeRouteBinding, RuntimeTerminalAdmission,
         RuntimeTerminalObservation, RuntimeTerminalOutcome, TerminalSettlementPermit,
     },
-    platform::local_ipc::{LocalIpcListener, LocalIpcStream},
+    platform::{
+        HostPlatformKey,
+        local_ipc::{LocalIpcListener, LocalIpcStream},
+    },
     read_model::{CampOpenProjection, READ_MODEL_SCHEMA_VERSION, ReadModelService},
     runtime::{
         AcknowledgeAgentRunCancellationCommand, AgentRunCancellationCandidate, AgentRunExecution,
@@ -172,6 +175,7 @@ use rovai_core::{
         discover_static_runtime_version, is_executable_file, runtime_launch_allowed,
         with_runtime_search_environment,
     },
+    runtime_platform_admission::RuntimePlatformAdmission,
     runtime_resolution::RuntimeResolutionService,
     skill::{
         CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
@@ -905,6 +909,48 @@ enum RuntimeCheckFinalization {
     CleanupOnly,
 }
 
+fn current_runtime_platform_admission(
+    runtime_kind: AdapterKind,
+) -> Option<RuntimePlatformAdmission> {
+    AgentRuntimeAdapterRegistry::default().current_platform_admission(runtime_kind)
+}
+
+fn current_platform_qualified_runtime_kinds() -> Vec<AdapterKind> {
+    AdapterKind::ALL
+        .into_iter()
+        .filter(|kind| {
+            current_runtime_platform_admission(*kind)
+                .as_ref()
+                .is_some_and(RuntimePlatformAdmission::is_qualified)
+        })
+        .collect()
+}
+
+fn current_runtime_platform_blocker(runtime_kind: AdapterKind) -> Option<CommandHandlerResult> {
+    match current_runtime_platform_admission(runtime_kind) {
+        Some(admission) if admission.is_qualified() => None,
+        Some(admission) => Some(CommandHandlerResult::rejected(
+            admission
+                .blocker_code()
+                .expect("a denied Runtime platform admission has a blocker code"),
+            json!({
+                "field": "runtime",
+                "runtimeKind": runtime_kind,
+                "platformAdmission": admission,
+            }),
+        )),
+        None => Some(CommandHandlerResult::rejected(
+            "runtime_platform_unsupported",
+            json!({
+                "field": "runtime",
+                "runtimeKind": runtime_kind,
+                "platform": null,
+                "reasonCode": "runtime_platform.adapter_not_implemented",
+            }),
+        )),
+    }
+}
+
 struct ClaudeInputAcceptanceTarget<'a> {
     delivery_id: &'a str,
     expected_native_session_id: &'a str,
@@ -1058,9 +1104,32 @@ fn runtime_diagnostic_checks(
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
+    let qualified_runtime_kinds = match (
+        runtime_health.get("hostPlatform").and_then(Value::as_str),
+        runtime_health
+            .get("runtimePlatformAdmission")
+            .and_then(Value::as_array),
+    ) {
+        (Some(host_platform), Some(admission)) => Some(
+            admission
+                .iter()
+                .filter(|row| {
+                    row.get("platform").and_then(Value::as_str) == Some(host_platform)
+                        && row.get("status").and_then(Value::as_str) == Some("qualified")
+                })
+                .filter_map(|row| row.get("runtimeKind")?.as_str().map(str::to_string))
+                .collect::<BTreeSet<_>>(),
+        ),
+        _ => None,
+    };
 
     AdapterKind::ALL
         .into_iter()
+        .filter(|kind| {
+            qualified_runtime_kinds
+                .as_ref()
+                .is_none_or(|qualified| qualified.contains(kind.as_str()))
+        })
         .map(|kind| {
             let current = availability.iter().find(|candidate| {
                 candidate.get("runtimeKind").and_then(Value::as_str) == Some(kind.as_str())
@@ -1386,6 +1455,7 @@ impl Core {
 
     async fn run_runtime_discovery(&self) {
         let search = self.runtime_search_environment.read().await.clone();
+        let qualified_runtime_kinds = current_platform_qualified_runtime_kinds();
         self.runtime_product_diagnostics.write().await.clear();
         let managed_installations = {
             let database = self.database.lock().await;
@@ -1406,7 +1476,8 @@ impl Core {
         };
         {
             let mut observations = self.runtime_discovery.write().await;
-            for kind in rovai_core::agent_profile::AdapterKind::ALL {
+            observations.retain(|kind, _| qualified_runtime_kinds.contains(kind));
+            for kind in qualified_runtime_kinds.iter().copied() {
                 let observation = RuntimeDiscoveryObservation::detecting(kind, search.generation());
                 observations.insert(kind, observation.clone());
                 emit(
@@ -1419,7 +1490,7 @@ impl Core {
 
         let mut path_tasks = tokio::task::JoinSet::new();
         let mut path_attempts = HashMap::new();
-        for kind in rovai_core::agent_profile::AdapterKind::ALL {
+        for kind in qualified_runtime_kinds {
             let search = search.clone();
             let managed_installation = managed_installations.get(&kind).cloned();
             let handle = path_tasks.spawn_blocking(move || {
@@ -1697,6 +1768,9 @@ impl Core {
     }
 
     async fn schedule_runtime_check(&self, kind: rovai_core::agent_profile::AdapterKind) -> bool {
+        if current_runtime_platform_blocker(kind).is_some() {
+            return false;
+        }
         self.enqueue_runtime_check(
             kind,
             RuntimeLaunchPurpose::AvailabilityCheck,
@@ -1721,6 +1795,9 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
     ) -> Result<bool> {
+        if current_runtime_platform_blocker(kind).is_some() {
+            return Ok(false);
+        }
         let (acknowledged, acknowledgement) = oneshot::channel();
         self.runtime_check_requests
             .send(RuntimeCheckRequest {
@@ -1743,6 +1820,9 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
     ) -> Result<bool> {
+        if let Some(blocker) = current_runtime_platform_blocker(kind) {
+            anyhow::bail!("{}: {}", blocker.code, blocker.payload);
+        }
         let (acknowledged, acknowledgement) = oneshot::channel();
         let (completed, completion) = oneshot::channel();
         self.runtime_check_requests
@@ -1798,6 +1878,10 @@ impl Core {
     }
 
     async fn runtime_health_payload(&self) -> Result<Value> {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let host_platform = HostPlatformKey::current();
+        let platform_admission = registry.platform_admission_matrix();
+        let qualified_runtime_kinds = current_platform_qualified_runtime_kinds();
         let observations = self.runtime_discovery.read().await.clone();
         let product_diagnostics = self.runtime_product_diagnostics.read().await.clone();
         let checking = self.runtime_check_activity.read().await.clone();
@@ -1806,7 +1890,7 @@ impl Core {
             AgentProfileService::default().list_installations(&database)?
         };
         let availability =
-            rovai_core::agent_profile::AdapterKind::ALL
+            qualified_runtime_kinds
                 .into_iter()
                 .map(|kind| {
                     let discovery = observations
@@ -1860,7 +1944,9 @@ impl Core {
                 })
                 .collect::<Vec<_>>();
         Ok(json!({
+            "hostPlatform": host_platform,
             "runtimeCatalog": catalog_entries(),
+            "runtimePlatformAdmission": platform_admission,
             "runtimeAvailability": availability,
             "searchEnvironment": self.runtime_search_environment.read().await.summary(),
         }))
@@ -2020,27 +2106,29 @@ impl Core {
                 runtime_usage_known,
                 &checked_at,
             )),
-            Err(_) => checks.extend(AdapterKind::ALL.into_iter().map(|kind| {
-                DiagnosticCheck::new(
-                    format!("runtime:{}", kind.as_str()),
-                    DiagnosticGroup::AgentRuntimes,
-                    "runtime",
-                    runtime_display_name(kind),
-                    DiagnosticStatus::Unknown,
-                    "runtime_snapshot_unavailable",
-                    "Current Runtime evidence could not be read",
-                )
-                .with_subject_id(kind.as_str())
-                .with_observed_at(&checked_at)
-                .with_fact(
-                    "usedByMemberCount",
-                    used_runtime_counts
-                        .get(&kind)
-                        .copied()
-                        .unwrap_or_default()
-                        .to_string(),
-                )
-            })),
+            Err(_) => checks.extend(current_platform_qualified_runtime_kinds().into_iter().map(
+                |kind| {
+                    DiagnosticCheck::new(
+                        format!("runtime:{}", kind.as_str()),
+                        DiagnosticGroup::AgentRuntimes,
+                        "runtime",
+                        runtime_display_name(kind),
+                        DiagnosticStatus::Unknown,
+                        "runtime_snapshot_unavailable",
+                        "Current Runtime evidence could not be read",
+                    )
+                    .with_subject_id(kind.as_str())
+                    .with_observed_at(&checked_at)
+                    .with_fact(
+                        "usedByMemberCount",
+                        used_runtime_counts
+                            .get(&kind)
+                            .copied()
+                            .unwrap_or_default()
+                            .to_string(),
+                    )
+                },
+            )),
         }
 
         DiagnosticsReport::new(checks)
@@ -3456,6 +3544,10 @@ impl Core {
             "members.runtime.set" => {
                 let params: UserCommandParams<SetMemberRuntimeConfigurationCommand> =
                     serde_json::from_value(request.params.clone())?;
+                if let Some(blocker) = current_runtime_platform_blocker(params.command.adapter_kind)
+                {
+                    return Ok(serde_json::to_value(blocker)?);
+                }
                 let agent_id = params.command.agent_id.clone();
                 let execution = {
                     let mut database = self.database.lock().await;
@@ -3482,6 +3574,21 @@ impl Core {
                 let params: UserCommandParams<ClearMemberRuntimeConfigurationCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let agent_id = params.command.agent_id.clone();
+                let configured_runtime_kind = {
+                    let database = self.database.lock().await;
+                    AgentProfileService::default()
+                        .get_profile(&database, &agent_id)?
+                        .and_then(|profile| {
+                            profile
+                                .runtime_configuration
+                                .map(|configuration| configuration.adapter_kind)
+                        })
+                };
+                if let Some(blocker) =
+                    configured_runtime_kind.and_then(current_runtime_platform_blocker)
+                {
+                    return Ok(serde_json::to_value(blocker)?);
+                }
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().clear_runtime(
                     &mut database,
@@ -3686,6 +3793,10 @@ impl Core {
             "runtime.installations.create" => {
                 let params: UserCommandParams<CreateAdapterInstallationCommand> =
                     serde_json::from_value(request.params.clone())?;
+                if let Some(blocker) = current_runtime_platform_blocker(params.command.adapter_kind)
+                {
+                    return Ok(serde_json::to_value(blocker)?);
+                }
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().create_installation(
                     &mut database,
@@ -3704,6 +3815,9 @@ impl Core {
                         .find(|installation| installation.id == params.command.installation_id)
                         .map(|installation| installation.adapter_kind)
                 };
+                if let Some(blocker) = adapter_kind.and_then(current_runtime_platform_blocker) {
+                    return Ok(serde_json::to_value(blocker)?);
+                }
                 let mut database = self.database.lock().await;
                 let execution = AgentProfileService::default().update_installation(
                     &mut database,
@@ -4920,6 +5034,9 @@ impl Core {
         executable_path: &Path,
         purpose: RuntimeLaunchPurpose,
     ) -> Result<rovai_core::agent_profile::AdapterCapabilitySnapshot> {
+        if let Some(blocker) = current_runtime_platform_blocker(adapter_kind) {
+            anyhow::bail!("{}: {}", blocker.code, blocker.payload);
+        }
         if !runtime_launch_allowed(adapter_kind, purpose) {
             anyhow::bail!("runtime_launch_disallowed_for_{purpose:?}");
         }
@@ -5030,6 +5147,9 @@ impl Core {
                 .find(|installation| installation.id == params.installation_id)
                 .context("Adapter installation does not exist")?
         };
+        if let Some(blocker) = current_runtime_platform_blocker(installation.adapter_kind) {
+            return Ok(serde_json::to_value(blocker)?);
+        }
         self.runtime_fleet
             .invalidate_adapter(installation.adapter_kind)
             .await;
@@ -6791,6 +6911,13 @@ impl Core {
         runtime: FrozenAgentRuntimeConfig,
         workspace: &AgentRunWorkspace,
     ) -> std::result::Result<(FrozenAgentRuntimeConfig, i64), RuntimeDispatchFailure> {
+        if let Some(blocker) = current_runtime_platform_blocker(runtime.adapter_kind) {
+            return Err(RuntimeDispatchFailure {
+                code: blocker.code,
+                error: anyhow::anyhow!("{}", blocker.payload),
+                effective_version: None,
+            });
+        }
         let blocker = {
             let database = self.database.lock().await;
             AgentProfileService::default().runtime_dispatch_blocker(&database, &runtime)
@@ -9495,7 +9622,7 @@ async fn run_core(
         output: output_tx.clone(),
         runtime_search_environment: RwLock::new(runtime_search_environment.clone()),
         runtime_discovery: RwLock::new(
-            rovai_core::agent_profile::AdapterKind::ALL
+            current_platform_qualified_runtime_kinds()
                 .into_iter()
                 .map(|kind| {
                     (
@@ -14903,6 +15030,63 @@ mod tests {
             .unwrap();
         assert_eq!(trae.status, DiagnosticStatus::Unknown);
         assert_eq!(trae.code, "runtime_verification_deferred");
+    }
+
+    #[test]
+    fn diagnostics_do_not_invent_machine_health_for_platform_denied_runtimes() {
+        let runtime_health = json!({
+            "hostPlatform": "windows-x64",
+            "runtimeCatalog": [{
+                "runtimeKind": "codex-cli",
+                "displayName": "Codex CLI"
+            }],
+            "runtimePlatformAdmission": [{
+                "runtimeKind": "codex-cli",
+                "platform": "windows-x64",
+                "status": "not_qualified",
+                "reasonCode": "runtime_platform.qualification_evidence_missing",
+                "evidenceRevision": null
+            }],
+            "runtimeAvailability": []
+        });
+
+        assert!(
+            runtime_diagnostic_checks(
+                &runtime_health,
+                &BTreeMap::from([(AdapterKind::CodexCli, 1)]),
+                true,
+                "2026-08-18T00:00:00Z",
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn diagnostics_keep_qualified_platform_rows_when_machine_evidence_is_missing() {
+        let runtime_health = json!({
+            "hostPlatform": "macos-arm64",
+            "runtimeCatalog": [{
+                "runtimeKind": "codex-cli",
+                "displayName": "Codex CLI"
+            }],
+            "runtimePlatformAdmission": [{
+                "runtimeKind": "codex-cli",
+                "platform": "macos-arm64",
+                "status": "qualified",
+                "reasonCode": null,
+                "evidenceRevision": "sha256:test-evidence"
+            }],
+            "runtimeAvailability": []
+        });
+
+        let checks = runtime_diagnostic_checks(
+            &runtime_health,
+            &BTreeMap::from([(AdapterKind::CodexCli, 1)]),
+            true,
+            "2026-08-18T00:00:00Z",
+        );
+        assert_eq!(checks.len(), 1);
+        assert_eq!(checks[0].code, "runtime_check_incomplete");
     }
 
     #[test]

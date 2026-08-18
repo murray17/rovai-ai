@@ -1,7 +1,9 @@
 import type {
   AdapterKind,
   AgentProfile,
-  ProductRuntimeAvailability
+  HostPlatformKey,
+  ProductRuntimeAvailability,
+  RuntimePlatformAdmission
 } from '@contracts'
 
 export type RuntimeUserStatus =
@@ -13,6 +15,8 @@ export type RuntimeUserStatus =
   | 'not_installed'
   | 'version_unsupported'
   | 'unavailable'
+  | 'not_qualified'
+  | 'unsupported'
   | 'unknown'
 
 export interface RuntimeStatusPresentation {
@@ -30,6 +34,8 @@ const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
   not_installed: '未安装',
   version_unsupported: '版本不支持',
   unavailable: '不可用',
+  not_qualified: 'Windows 尚未验证',
+  unsupported: '此平台不支持',
   unknown: '暂时无法确认'
 }
 
@@ -102,15 +108,52 @@ export function runtimeAvailabilityPresentation(
   }
 }
 
+export function runtimePlatformAdmissionFor(
+  hostPlatform: HostPlatformKey | null,
+  admissions: readonly RuntimePlatformAdmission[],
+  runtimeKind: AdapterKind
+): RuntimePlatformAdmission | null {
+  if (!hostPlatform) return null
+  return admissions.find((row) => (
+    row.platform === hostPlatform && row.runtimeKind === runtimeKind
+  )) ?? null
+}
+
+export function runtimeProductPresentation(
+  admission: RuntimePlatformAdmission | null,
+  availability: ProductRuntimeAvailability | null,
+  pending = false
+): RuntimeStatusPresentation {
+  if (!admission) {
+    return pending
+      ? presentation('checking')
+      : presentation('unknown', '尚无当前平台的 Runtime 准入信息。')
+  }
+  if (admission.status === 'not_qualified') {
+    return presentation(
+      'not_qualified',
+      '该 Agent 运行时尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。'
+    )
+  }
+  if (admission.status === 'unsupported') {
+    return presentation('unsupported', '该 Agent 运行时不支持当前平台。')
+  }
+  return runtimeAvailabilityPresentation(availability, pending)
+}
+
 export function memberRuntimePresentation(
   agent: AgentProfile,
   selectedRuntimeKind: AdapterKind | null,
   availability: ProductRuntimeAvailability | null,
-  pending = false
+  pending = false,
+  admission: RuntimePlatformAdmission | null = null,
+  platformAdmissionKnown = false
 ): RuntimeStatusPresentation {
   if (!selectedRuntimeKind) return presentation('unconfigured')
 
-  const availabilityStatus = runtimeAvailabilityPresentation(availability, pending)
+  const availabilityStatus = admission || platformAdmissionKnown
+    ? runtimeProductPresentation(admission, availability, pending)
+    : runtimeAvailabilityPresentation(availability, pending)
   const isPersistedSelection =
     selectedRuntimeKind === agent.runtimeConfiguration?.adapterKind
 
@@ -122,6 +165,8 @@ export function memberRuntimePresentation(
       || availabilityStatus.status === 'not_installed'
       || availabilityStatus.status === 'version_unsupported'
       || availabilityStatus.status === 'unavailable'
+      || availabilityStatus.status === 'not_qualified'
+      || availabilityStatus.status === 'unsupported'
     ) {
       return availabilityStatus
     }
@@ -139,6 +184,8 @@ export function memberRuntimePresentation(
       || availabilityStatus.status === 'not_installed'
       || availabilityStatus.status === 'version_unsupported'
       || availabilityStatus.status === 'unavailable'
+      || availabilityStatus.status === 'not_qualified'
+      || availabilityStatus.status === 'unsupported'
     ) {
       return availabilityStatus
     }
@@ -160,6 +207,8 @@ export function memberRuntimePresentation(
       || availabilityStatus.status === 'not_installed'
       || availabilityStatus.status === 'version_unsupported'
       || availabilityStatus.status === 'unavailable'
+      || availabilityStatus.status === 'not_qualified'
+      || availabilityStatus.status === 'unsupported'
     ) {
       return availabilityStatus
     }

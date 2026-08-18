@@ -3948,12 +3948,38 @@ describe('task event projections', () => {
     expect(markup).not.toContain('重新检查')
   })
 
+  it('preserves a historical Windows Runtime configuration as read-only', () => {
+    const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
+      agent: {
+        ...agentProfile(),
+        runtimeConfiguration: configuredRuntime('kiro-cli'),
+        runtimeReadiness: { status: 'ready', blockers: [] }
+      },
+      installations: [],
+      runtimeAvailability: [],
+      hostPlatform: 'windows-x64',
+      runtimePlatformAdmission: runtimeAdmissionRows('windows-x64', 'not_qualified'),
+      busy: null,
+      onSave: async () => undefined,
+      onClear: async () => undefined,
+      onOpenRuntimeSettings: () => undefined
+    }))
+
+    expect(markup).toContain('Windows 尚未验证')
+    expect(markup).toContain('这不是本机安装、登录或扫描故障')
+    expect(markup).toContain('当前平台仅可查看这份配置')
+    expect(markup).toContain('<select id="member-runtime-select" disabled="">')
+    expect(markup).not.toContain('前往 Agent 运行时')
+  })
+
   it('keeps all product checks visible without exposing diagnostic or installation details', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
       git: { installed: true, version: 'git version 2.0' },
+      hostPlatform: 'macos-arm64',
       runtimeCatalog: [],
+      runtimePlatformAdmission: runtimeAdmissionRows('macos-arm64', 'qualified'),
       runtimeAvailability: [
         productAvailability('codex-cli', 'ready'),
         productAvailability('opencode-cli', 'found_uninspected'),
@@ -4008,6 +4034,41 @@ describe('task event projections', () => {
     expect(markup).not.toContain('安装说明')
     expect(markup).not.toContain('高级诊断与自定义启动入口')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
+  })
+
+  it('renders Windows not-qualified rows without machine checks or rescan actions', () => {
+    const health: HealthStatus = {
+      core: { ok: true, version: '0.0.1', dataDir: 'C:\\Users\\test\\AppData\\Local\\Rovai AI' },
+      database: { ok: true, path: 'C:\\Users\\test\\AppData\\Local\\Rovai AI\\Core\\rovai.db' },
+      git: { installed: true, version: 'git version 2.0' },
+      hostPlatform: 'windows-x64',
+      runtimeCatalog: [],
+      runtimePlatformAdmission: runtimeAdmissionRows('windows-x64', 'not_qualified'),
+      runtimeAvailability: [],
+      searchEnvironment: {
+        generation: 1,
+        createdAt: '2026-08-18T00:00:00Z',
+        pathEntryCount: 0,
+        shell: {
+          status: 'unavailable',
+          interactive: false,
+          shellName: null,
+          entryCount: 0,
+          elapsedMillis: 0
+        }
+      }
+    }
+    const markup = renderToStaticMarkup(createElement(RuntimeInstallationsPanel, {
+      health,
+      installations: [],
+      onReload: async () => undefined
+    }))
+
+    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(10)
+    expect(markup.match(/不可检查/g)).toHaveLength(10)
+    expect(markup).not.toContain('检查可用性')
+    expect(markup).toContain('当前平台尚无可检测 Runtime')
+    expect(markup).toContain('这不是本机安装、登录或扫描故障')
   })
 })
 
@@ -4109,4 +4170,31 @@ function productAvailability(
     reportedVersion: status === 'missing' || status === 'detecting' ? null : `${runtimeKind} 1.0.0`,
     diagnosticCode: null
   }
+}
+
+function runtimeAdmissionRows(
+  platform: HealthStatus['hostPlatform'],
+  status: HealthStatus['runtimePlatformAdmission'][number]['status']
+): HealthStatus['runtimePlatformAdmission'] {
+  const runtimeKinds: HealthStatus['runtimePlatformAdmission'][number]['runtimeKind'][] = [
+    'codex-cli',
+    'opencode-cli',
+    'copilot-cli',
+    'claude-code-cli',
+    'kiro-cli',
+    'qoder-cli',
+    'codebuddy-cli',
+    'qwen-code',
+    'trae-cn-cli',
+    'antigravity-app'
+  ]
+  return runtimeKinds.map((runtimeKind) => ({
+    runtimeKind,
+    platform,
+    status,
+    reasonCode: status === 'qualified'
+      ? null
+      : 'runtime_platform.qualification_evidence_missing',
+    evidenceRevision: status === 'qualified' ? 'sha256:test-macos-evidence' : null
+  }))
 }

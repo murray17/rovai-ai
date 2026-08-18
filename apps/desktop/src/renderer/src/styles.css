@@ -3396,7 +3396,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .onboarding-runtime-state.status-version_unsupported,
 .onboarding-runtime-state.status-unavailable { color: var(--attention); background: var(--attention-soft); }
 .onboarding-runtime-state.status-checking { color: var(--info); background: var(--info-soft); }
+.onboarding-runtime-state.status-not_qualified { color: var(--brand-ink); background: var(--brand-soft); }
 .onboarding-runtime-state.status-not_installed,
+.onboarding-runtime-state.status-unsupported,
 .onboarding-runtime-state.status-unknown,
 .onboarding-runtime-state.status-unconfigured { color: var(--neutral); background: var(--neutral-soft); }
 .onboarding-scan-status { color: var(--info); background: var(--info-soft); }
@@ -4463,7 +4465,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   color: var(--attention);
   background: var(--attention-soft);
 }
-.runtime-installation-summary.status-not_installed {
+.runtime-installation-summary.status-not_installed,
+.runtime-installation-summary.status-not_qualified,
+.runtime-installation-summary.status-unsupported {
   margin-top: 12px;
   padding: 9px 10px;
   border-left: 3px solid var(--neutral);
@@ -4481,6 +4485,8 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .runtime-user-status.status-version_unsupported,
 .runtime-user-status.status-unavailable { color: var(--attention); }
 .runtime-user-status.status-not_installed,
+.runtime-user-status.status-not_qualified,
+.runtime-user-status.status-unsupported,
 .runtime-user-status.status-unknown { color: var(--neutral); }
 .runtime-status-detail { line-height: 1.5; }
 .member-runtime-parameters { margin-top: 9px; padding-top: 20px; border-top: 1px solid var(--line); background: transparent; }
@@ -5135,6 +5141,8 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .member-header-runtime.status-version_unsupported,
 .member-header-runtime.status-unavailable { color: var(--attention); }
 .member-header-runtime.status-checking,
+.member-header-runtime.status-not_qualified,
+.member-header-runtime.status-unsupported,
 .member-header-runtime.status-unknown { color: var(--info); }
 .member-detail-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .member-detail-actions,
@@ -5343,7 +5351,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .runtime-snapshot-badge.status-authentication_required,
 .runtime-snapshot-badge.status-version_unsupported { color: var(--attention); background: var(--attention-soft); }
 .runtime-snapshot-badge.status-unavailable { color: var(--danger); background: var(--danger-soft); }
-.runtime-snapshot-badge.status-not_installed { color: var(--neutral); background: var(--neutral-soft); }
+.runtime-snapshot-badge.status-not_installed,
+.runtime-snapshot-badge.status-unsupported { color: var(--neutral); background: var(--neutral-soft); }
+.runtime-snapshot-badge.status-not_qualified { color: var(--brand-ink); background: var(--brand-soft); }
 .runtime-snapshot-badge.status-unknown { color: var(--workspace-faint); }
 .path-field { display: flex; gap: 8px; }
 .path-field input { min-width: 0; }

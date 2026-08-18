@@ -16,8 +16,10 @@ import type {
   AgentProfile,
   CreateAgentProfileCommand,
   HealthStatus,
+  HostPlatformKey,
   MemberRemovalPreview,
   ProductRuntimeAvailability,
+  RuntimePlatformAdmission,
   SetAgentProfileAvatarCommand,
   StoredCommandResult,
   UpdateAgentProfileCommand
@@ -52,7 +54,8 @@ import {
 } from './MemberRuntimeParameters'
 import {
   memberRuntimePresentation,
-  runtimeAvailabilityPresentation,
+  runtimePlatformAdmissionFor,
+  runtimeProductPresentation,
 } from './runtime-status'
 import { requestProductRuntimeCheck } from './runtime-check'
 import {
@@ -79,6 +82,8 @@ type MembersViewProps = {
   topNotices?: ReactNode
   installations: AdapterInstallation[]
   runtimeAvailability: ProductRuntimeAvailability[]
+  hostPlatform?: HostPlatformKey | null
+  runtimePlatformAdmission?: RuntimePlatformAdmission[]
   runtimeDiscoveryPending: boolean
   selectedAgentId: string | null
   activeTab: MemberWorkspaceTab
@@ -126,6 +131,8 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
   topNotices,
   installations,
   runtimeAvailability,
+  hostPlatform = null,
+  runtimePlatformAdmission = [],
   runtimeDiscoveryPending,
   selectedAgentId,
   activeTab,
@@ -412,6 +419,8 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                 <MemberDetailHeader
                   agent={selectedAgent}
                   runtimeAvailability={runtimeAvailability}
+                  hostPlatform={hostPlatform}
+                  runtimePlatformAdmission={runtimePlatformAdmission}
                   runtimeDiscoveryPending={runtimeDiscoveryPending}
                   busy={busy}
                   onEdit={(trigger) => {
@@ -450,6 +459,8 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                     agent={selectedAgent}
                     installations={installations}
                     runtimeAvailability={runtimeAvailability}
+                    hostPlatform={hostPlatform}
+                    runtimePlatformAdmission={runtimePlatformAdmission}
                     runtimeDiscoveryPending={runtimeDiscoveryPending}
                     busy={busy}
                     onDirtyChange={setRuntimeDirty}
@@ -574,6 +585,8 @@ function MemberEmptyHeader(): React.JSX.Element {
 function MemberDetailHeader({
   agent,
   runtimeAvailability,
+  hostPlatform,
+  runtimePlatformAdmission,
   runtimeDiscoveryPending,
   busy,
   onEdit,
@@ -584,6 +597,8 @@ function MemberDetailHeader({
 }: {
   agent: AgentProfile
   runtimeAvailability: ProductRuntimeAvailability[]
+  hostPlatform: HostPlatformKey | null
+  runtimePlatformAdmission: RuntimePlatformAdmission[]
   runtimeDiscoveryPending: boolean
   busy: string | null
   onEdit(trigger: HTMLButtonElement): void
@@ -595,11 +610,20 @@ function MemberDetailHeader({
   const availability = runtimeAvailability.find(
     (item) => item.runtimeKind === agent.runtimeConfiguration?.adapterKind
   ) ?? null
+  const admission = agent.runtimeConfiguration
+    ? runtimePlatformAdmissionFor(
+        hostPlatform,
+        runtimePlatformAdmission,
+        agent.runtimeConfiguration.adapterKind
+      )
+    : null
   const runtime = memberRuntimePresentation(
     agent,
     agent.runtimeConfiguration?.adapterKind ?? null,
     availability,
-    runtimeDiscoveryPending
+    runtimeDiscoveryPending,
+    admission,
+    hostPlatform !== null
   )
   return (
     <header className="member-detail-header">
@@ -876,6 +900,8 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   agent: AgentProfile
   installations: AdapterInstallation[]
   runtimeAvailability: ProductRuntimeAvailability[]
+  hostPlatform?: HostPlatformKey | null
+  runtimePlatformAdmission?: RuntimePlatformAdmission[]
   runtimeDiscoveryPending?: boolean
   busy: string | null
   onDirtyChange?(dirty: boolean): void
@@ -886,6 +912,8 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   agent,
   installations,
   runtimeAvailability,
+  hostPlatform = null,
+  runtimePlatformAdmission = [],
   runtimeDiscoveryPending = false,
   busy,
   onDirtyChange,
@@ -908,6 +936,16 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   const currentStateKey = runtimeEditorStateKey({ selectedKind, draft })
   const dirty = currentStateKey !== baselineStateKey
   const availability = runtimeAvailability.find((item) => item.runtimeKind === selectedKind) ?? null
+  const selectedAdmission = selectedKind
+    ? runtimePlatformAdmissionFor(hostPlatform, runtimePlatformAdmission, selectedKind)
+    : null
+  const persistedAdmission = agent.runtimeConfiguration
+    ? runtimePlatformAdmissionFor(
+        hostPlatform,
+        runtimePlatformAdmission,
+        agent.runtimeConfiguration.adapterKind
+      )
+    : null
   const installation = useMemo(() => (
     selectedKind
       ? runtimeEditorInstallation(
@@ -919,12 +957,24 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     installations,
     selectedKind
   ])
-  const canSave = dirty && !conflict && (!selectedKind || draft !== null)
+  const runtimeMutationAdmission = selectedKind ? selectedAdmission : persistedAdmission
+  const persistedRuntimeLocked = hostPlatform !== null
+    && agent.runtimeConfiguration !== null
+    && persistedAdmission?.status !== 'qualified'
+  const runtimeMutationAllowed = hostPlatform === null
+    || (!selectedKind && agent.runtimeConfiguration === null)
+    || runtimeMutationAdmission?.status === 'qualified'
+  const canSave = dirty
+    && !conflict
+    && (!selectedKind || draft !== null)
+    && runtimeMutationAllowed
   const runtimeStatus = memberRuntimePresentation(
     agent,
     selectedKind || null,
     availability,
-    runtimeDiscoveryPending
+    runtimeDiscoveryPending,
+    selectedAdmission,
+    hostPlatform !== null
   )
   const reportedVersion = availability?.reportedVersion
     ?? installation?.snapshot?.reportedVersion
@@ -1027,7 +1077,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
           <select
             id="member-runtime-select"
             value={selectedKind}
-            disabled={busy !== null}
+            disabled={busy !== null || persistedRuntimeLocked}
             onChange={(event) => {
               const nextKind = event.target.value as AdapterKind | ''
               setSelectedKind(nextKind)
@@ -1043,7 +1093,15 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
           >
             <option value="">不选择 Agent 运行时</option>
             {PRODUCT_RUNTIMES.map((kind) => (
-              <option key={kind} value={kind}>{adapterLabel(kind)}</option>
+              <option
+                key={kind}
+                value={kind}
+                disabled={hostPlatform !== null && runtimePlatformAdmissionFor(
+                  hostPlatform,
+                  runtimePlatformAdmission,
+                  kind
+                )?.status !== 'qualified'}
+              >{adapterLabel(kind)}</option>
             ))}
           </select>
           </label>
@@ -1079,7 +1137,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
             adapterKind={selectedKind}
             installation={installation}
             draft={draft}
-            disabled={busy !== null}
+            disabled={busy !== null || !runtimeMutationAllowed}
             onChange={(nextDraft) => {
               setDraft(nextDraft)
               setSubmitError(null)
@@ -1097,7 +1155,9 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
         {submitError && <div className="inline-error">{submitError}</div>}
         <div className="member-form-actions">
           <span className={`member-runtime-save-state ${dirty ? 'is-dirty' : ''}`}>
-            {dirty ? '有未保存更改' : '当前配置已保存'}
+            {!runtimeMutationAllowed
+              ? '当前平台仅可查看这份配置'
+              : dirty ? '有未保存更改' : '当前配置已保存'}
           </span>
           <div>
             <button className="quiet-button" type="button" disabled={!dirty || busy !== null} onClick={resetFromAgent}>
@@ -1429,6 +1489,9 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const availability = health?.runtimeAvailability ?? []
+  const hasQualifiedRuntime = health?.runtimePlatformAdmission.some((row) => (
+    row.platform === health.hostPlatform && row.status === 'qualified'
+  )) ?? false
 
   const checkProduct = async (runtimeKind: AdapterKind): Promise<void> => {
     setBusy(`check-${runtimeKind}`)
@@ -1463,8 +1526,12 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
         title="Agent 运行时"
         description="管理本机 Agent 运行时及其可用状态。"
         aside={(
-          <button className="quiet-button" disabled={busy !== null} onClick={() => void rescan()}>
-            {busy === 'rescan' ? '正在重新检测…' : '重新检测全部'}
+          <button className="quiet-button" disabled={busy !== null || (health !== null && !hasQualifiedRuntime)} onClick={() => void rescan()}>
+            {busy === 'rescan'
+              ? '正在重新检测…'
+              : health === null
+                ? '重新检测全部'
+                : hasQualifiedRuntime ? '重新检测全部' : '当前平台尚无可检测 Runtime'}
           </button>
         )}
       />
@@ -1496,7 +1563,16 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
             }
             const runtimeKind = entry.runtimeKind
             const item = availability.find((candidate) => candidate.runtimeKind === runtimeKind)
-            const presentation = runtimeAvailabilityPresentation(item ?? null, health === null)
+            const admission = runtimePlatformAdmissionFor(
+              health?.hostPlatform ?? null,
+              health?.runtimePlatformAdmission ?? [],
+              runtimeKind
+            )
+            const presentation = runtimeProductPresentation(
+              admission,
+              item ?? null,
+              health === null
+            )
             return (
               <article key={runtimeKind} className="runtime-product-row">
                 <span className="runtime-product-logo" aria-hidden="true">
@@ -1504,15 +1580,17 @@ export function RuntimeInstallationsPanel({ health, onReload }: {
                 </span>
                 <div className="runtime-product-copy">
                   <strong>{adapterLabel(runtimeKind)}</strong>
-                  <small>{item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</small>
+                  <small>{admission?.status !== 'qualified'
+                    ? presentation.detail
+                    : item?.reportedVersion ?? adapterMaturityLabel(runtimeKind)}</small>
                 </div>
                 <span className={`runtime-snapshot-badge runtime-product-status status-${presentation.status}`}>
                   {presentation.label}
                 </span>
-                <button className="quiet-button runtime-product-check" disabled={busy !== null} onClick={() => void checkProduct(runtimeKind)}>
+                <button className="quiet-button runtime-product-check" disabled={busy !== null || admission?.status !== 'qualified'} onClick={() => void checkProduct(runtimeKind)}>
                   {busy === `check-${runtimeKind}`
                     ? '正在检查…'
-                    : '检查可用性'}
+                    : admission?.status === 'qualified' ? '检查可用性' : '不可检查'}
                 </button>
               </article>
             )

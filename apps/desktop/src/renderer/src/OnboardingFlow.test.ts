@@ -1,7 +1,12 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import type { AdapterInstallation, OnboardingSnapshot, ProductRuntimeAvailability } from '@contracts'
+import type {
+  AdapterInstallation,
+  OnboardingSnapshot,
+  ProductRuntimeAvailability,
+  RuntimePlatformAdmission
+} from '@contracts'
 import {
   OnboardingFlow,
   onboardingRuntimeCanContinue,
@@ -56,8 +61,25 @@ describe('first-run onboarding flow', () => {
       ...installation,
       installationClass: 'custom'
     })).toBe(false)
+    expect(onboardingRuntimeCanContinue(
+      'ready',
+      selection,
+      readyAvailability(),
+      installation,
+      windowsNotQualifiedAdmission()
+    )).toBe(false)
   })
 })
+
+function windowsNotQualifiedAdmission(): RuntimePlatformAdmission {
+  return {
+    runtimeKind: 'codex-cli',
+    platform: 'windows-x64',
+    status: 'not_qualified',
+    reasonCode: 'runtime_platform.qualification_evidence_missing',
+    evidenceRevision: null
+  }
+}
 
 function renderOnboarding(
   value: InProgress,

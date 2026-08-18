@@ -317,6 +317,28 @@ export interface ProductRuntimeCatalogEntry {
   commandName: string
 }
 
+export type HostPlatformKey = 'macos-arm64' | 'macos-x64' | 'windows-x64'
+
+export type RuntimePlatformAdmissionStatus = 'qualified' | 'not_qualified' | 'unsupported'
+
+export type RuntimePlatformAdmissionReasonCode =
+  | 'runtime_platform.qualification_evidence_missing'
+  | 'runtime_platform.adapter_not_implemented'
+  | 'runtime_platform.upstream_unsupported'
+  | 'runtime_platform.authentication_unqualified'
+  | 'runtime_platform.session_unqualified'
+  | 'runtime_platform.builtin_transport_unqualified'
+  | 'runtime_platform.lifecycle_unqualified'
+  | 'runtime_platform.filesystem_semantics_unqualified'
+
+export interface RuntimePlatformAdmission {
+  runtimeKind: AdapterKind
+  platform: HostPlatformKey
+  status: RuntimePlatformAdmissionStatus
+  reasonCode: RuntimePlatformAdmissionReasonCode | null
+  evidenceRevision: string | null
+}
+
 export type ProductRuntimeAvailabilityStatus =
   | 'detecting'
   | 'missing'
@@ -355,7 +377,9 @@ export interface HealthStatus {
     path: string
   }
   git: CommandHealth
+  hostPlatform: HostPlatformKey
   runtimeCatalog: ProductRuntimeCatalogEntry[]
+  runtimePlatformAdmission: RuntimePlatformAdmission[]
   runtimeAvailability: ProductRuntimeAvailability[]
   searchEnvironment: {
     generation: number

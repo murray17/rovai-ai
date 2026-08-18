@@ -2641,6 +2641,8 @@ export function App(): React.JSX.Element {
                   <MemberSidebar
                     agents={agents}
                     runtimeAvailability={health?.runtimeAvailability ?? []}
+                    hostPlatform={health?.hostPlatform ?? null}
+                    runtimePlatformAdmission={health?.runtimePlatformAdmission ?? []}
                     runtimeDiscoveryPending={health === null || healthLoading}
                     selectedAgentId={selectedMemberId}
                     onSelect={chooseMember}
@@ -2653,6 +2655,8 @@ export function App(): React.JSX.Element {
                     topNotices={inlineNotices}
                     installations={installations}
                     runtimeAvailability={health?.runtimeAvailability ?? []}
+                    hostPlatform={health?.hostPlatform ?? null}
+                    runtimePlatformAdmission={health?.runtimePlatformAdmission ?? []}
                     runtimeDiscoveryPending={health === null || healthLoading}
                     selectedAgentId={selectedMemberId}
                     activeTab={memberTab}
