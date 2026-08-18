@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Runtime Activity Mapping Registry
@@ -19,7 +19,7 @@ last_updated: 2026-08-17
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；实际 Probe 已证明稳定 `toolCallId`、结构化 permission request 与 started→terminal lifecycle；Terminal content 只作 display anchor | 受控 fixture 与固定 `printf` smoke 断言已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；当前安装真实 command-output smoke 通过，静态版本按 v0.87 边界保持 `null` |
-| `claude-code-cli` | Claude Code | Claude stream-json | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration，无 delta 时只用 success `result` fallback | partial + complete message 去重、started→terminal、narration/fallback 与 thinking/错误字段不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration 与 Session continuation smoke 通过 |
+| `claude-code-cli` | Claude Code | Claude stream-json | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration，无 delta 时只用 success `result` fallback | partial + complete message 去重、started→terminal、空输出 Bash 可展开、narration/fallback 与私有输入/thinking/错误字段不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration 与 Session continuation smoke 通过 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json lifecycle/output 与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
@@ -103,8 +103,9 @@ Client Terminal 不可用，因此不会读取 `terminalId` 或从私有 termina
 `--output-format stream-json --include-partial-messages` 中的 partial `content_block_start` 与完整 assistant
 `tool_use` 共同建立、去重同一个原生 tool-use ID；对应 user `tool_result` 结算 terminal。Bash 映射
 `shell.execute`，Read/Glob、Edit/Write、Grep/WebSearch 分别进入既有 file/tool domain；未知名称保持
-`tool.call`。只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result 进入 output，input、
-文件内容和其它 provider metadata 不公开。公开 `text_delta` 以 message/block-scoped item ID 投影为
+`tool.call`。只允许 Bash `tool_use.input.command` 进入公开 input，使没有 stdout/stderr 的命令仍可检查；
+只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result 进入 output。其它工具输入、文件内容和
+provider metadata 不公开。公开 `text_delta` 以 message/block-scoped item ID 投影为
 `agent.text.delta`；只有整次 Run 没有 text delta 时，才把已经公开的 success `result` 作为 narration
 fallback。`thinking_delta`、失败 result 和 provider metadata 不进入公开 Evidence；最终 Camp Message、
 Usage 与 Session 校验维持独立边界。

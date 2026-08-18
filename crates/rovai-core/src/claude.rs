@@ -490,6 +490,7 @@ struct ClaudeCodeStreamState {
     partial_tools: HashMap<u64, (String, String)>,
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
+    tool_inputs: HashMap<String, Value>,
 }
 
 async fn capture_claude_stream<R>(
@@ -632,8 +633,11 @@ fn normalize_claude_runtime_events(
                     .partial_tools
                     .insert(index, (tool_use_id.clone(), tool_name.clone()));
             }
-            if let Some(event) = claude_tool_started(state, tool_use_id, tool_name) {
-                normalized.push(event);
+            state
+                .tool_names
+                .insert(tool_use_id.clone(), tool_name.clone());
+            if let Some(input) = public_claude_tool_input(&tool_name, block.get("input")) {
+                state.tool_inputs.insert(tool_use_id, input);
             }
         }
         Some("stream_event")
@@ -702,6 +706,12 @@ fn normalize_claude_runtime_events(
                 let Some(tool_name) = nonempty_string(block.get("name")) else {
                     continue;
                 };
+                state
+                    .tool_names
+                    .insert(tool_use_id.clone(), tool_name.clone());
+                if let Some(input) = public_claude_tool_input(&tool_name, block.get("input")) {
+                    state.tool_inputs.insert(tool_use_id.clone(), input);
+                }
                 if let Some(event) = claude_tool_started(state, tool_use_id, tool_name) {
                     normalized.push(event);
                 }
@@ -727,6 +737,11 @@ fn normalize_claude_runtime_events(
                     continue;
                 }
                 let tool_name = state.tool_names.get(&tool_use_id).cloned();
+                if let Some(tool_name) = tool_name.clone()
+                    && let Some(event) = claude_tool_started(state, tool_use_id.clone(), tool_name)
+                {
+                    normalized.push(event);
+                }
                 let failed = block.get("is_error").and_then(Value::as_bool) == Some(true)
                     || event
                         .pointer("/tool_use_result/is_error")
@@ -791,6 +806,7 @@ fn claude_tool_started(
     state
         .tool_names
         .insert(tool_use_id.clone(), tool_name.clone());
+    let input = state.tool_inputs.get(&tool_use_id).cloned();
     state
         .started_tools
         .insert(tool_use_id.clone())
@@ -802,8 +818,20 @@ fn claude_tool_started(
                 "status": "in_progress",
                 "kind": kind,
                 "title": title,
+                "input": input,
             }),
         })
+}
+
+fn public_claude_tool_input(tool_name: &str, input: Option<&Value>) -> Option<Value> {
+    if !tool_name.eq_ignore_ascii_case("bash") {
+        return None;
+    }
+    input?
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())
+        .map(|command| Value::String(command.to_string()))
 }
 
 fn claude_tool_kind(tool_name: &str) -> &'static str {
@@ -1285,7 +1313,10 @@ mod tests {
                         "type": "tool_use",
                         "id": "toolu_bash_1",
                         "name": "Bash",
-                        "input": {"command": "printf CLAUDE_PRINTF_OK"}
+                        "input": {
+                            "command": "printf CLAUDE_PRINTF_OK",
+                            "privateProviderField": "CLAUDE_TOOL_INPUT_MUST_NOT_LEAK"
+                        }
                     }]}
                 }),
                 json!({
@@ -1346,6 +1377,7 @@ mod tests {
         assert_eq!(started.payload["toolCallId"], "toolu_bash_1");
         assert_eq!(started.payload["status"], "in_progress");
         assert_eq!(started.payload["kind"], "execute");
+        assert_eq!(started.payload["input"], "printf CLAUDE_PRINTF_OK");
         assert_eq!(completed.payload["toolCallId"], "toolu_bash_1");
         assert_eq!(completed.payload["status"], "completed");
         assert_eq!(completed.payload["output"], "CLAUDE_PRINTF_OK");
@@ -1353,6 +1385,11 @@ mod tests {
             !serde_json::to_string(&completed.payload)
                 .expect("normalized event should serialize")
                 .contains("CLAUDE_MUST_NOT_LEAK")
+        );
+        assert!(
+            !serde_json::to_string(&started.payload)
+                .expect("normalized event should serialize")
+                .contains("CLAUDE_TOOL_INPUT_MUST_NOT_LEAK")
         );
         assert!(
             runtime_event_receiver.try_recv().is_err(),

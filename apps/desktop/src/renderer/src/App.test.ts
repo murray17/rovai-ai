@@ -3250,6 +3250,61 @@ describe('task event projections', () => {
     expect(markup).not.toContain('>execute<')
   })
 
+  it('keeps a Claude Bash command expandable when the tool result has no output', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'claude-bash-started', agentRunId: 'run-claude', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'toolu-claude-bash', status: 'pending', kind: 'execute',
+        toolName: 'Bash', title: 'Bash',
+        input: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
+      },
+      canonical: canonicalActivity('toolu-claude-bash', {
+        activityDomain: 'shell', semanticKind: 'shell.execute',
+        presentationHint: 'Bash', phase: 'started', outcome: 'unknown'
+      }),
+      createdAt: '2026-08-18T00:00:00Z'
+    }, {
+      id: 'claude-bash-completed', agentRunId: 'run-claude', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
+        toolName: 'Bash', title: 'Bash', output: null
+      },
+      canonical: canonicalActivity('toolu-claude-bash', {
+        activityDomain: 'shell', semanticKind: 'shell.execute',
+        presentationHint: 'Bash', phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-08-18T00:00:01Z'
+    }], 'run-claude')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { title: 'Bash', status: 'completed' }
+    })
+    const item = progress.items[0]
+    if (item.kind !== 'tool') throw new Error('Expected Claude Bash tool progress')
+    expect(item.step.detail).toContain('ROVAI_CLAUDE_EMPTY_OUTPUT_OK')
+
+    const run: AgentRunView = {
+      id: 'run-claude', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
+      responsibilityGeneration: 0, purpose: '执行无输出 Bash 命令', completionRole: 'required',
+      status: 'succeeded', waitReason: null, executionEpoch: 1,
+      terminalResolutionSource: null, terminalReasonCode: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
+      a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
+      executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-18T00:00:00Z', startedAt: '2026-08-18T00:00:00Z',
+      endedAt: '2026-08-18T00:00:01Z', updatedAt: '2026-08-18T00:00:01Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(markup).toContain('tool-call-disclosure')
+    expect(markup).toContain('tool-call-chevron')
+    expect(markup).not.toContain('tool-call-static')
+  })
+
   it('uses the Core Codex presentation hint without parsing the command in Renderer', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'codex-command', agentRunId: 'run-codex', eventType: 'activity.started',

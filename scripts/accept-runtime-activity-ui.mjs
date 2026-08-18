@@ -66,8 +66,12 @@ const runtimes = [
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
   runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
-  runtime('claude', 'claude-code-cli', 'Claude Code', null, {
-    protocol: 'claude-stream-json', domain: 'runtime', semantic: 'runtime.run', runLevelOnly: true
+  runtime('claude', 'claude-code-cli', 'Claude Code', 'Bash', {
+    protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
+    evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {
+      toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
+      toolName: 'Bash', title: 'Bash', input: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'", output: null
+    }
   }),
   runtime('antigravity', 'antigravity-app', 'Antigravity', 'camp.message.send', {
     protocol: 'antigravity-log', domain: 'tool', semantic: 'tool.call',
@@ -371,8 +375,9 @@ try {
   const observed = await collectRuntimeRows(app.cdp)
   assertRuntimeRows(observed)
   const totalToolRows = observed.reduce((total, row) => total + row.toolTitles.length, 0)
-  assert(totalToolRows === 9,
-    `Expected exactly nine observed tool rows and one honest run-level row: ${JSON.stringify(observed)}`)
+  assert(totalToolRows === 10,
+    `Expected exactly ten observed structured tool rows: ${JSON.stringify(observed)}`)
+  const claudeCommandDisclosure = await verifyClaudeCommandDisclosure(app.cdp)
 
   const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
   const recoveryBlockerCapture = join(outputDir, 'runtime-activity-recovery-blocker.png')
@@ -651,7 +656,7 @@ try {
       executionDrawerResize,
       executionAutoFollow,
       boundedToolOutput,
-      claudeRunLevelDoesNotInventTools: observed.find((row) => row.runtime === 'Claude Code')?.toolTitles.length === 0,
+      claudeCommandDisclosure,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
       conversationPresentation,
       timelineFollowLatest,
@@ -2022,6 +2027,46 @@ async function verifyBoundedToolOutput(cdp) {
     && copied.buttonIcon === '✓',
   `Copy full Tool output did not use the complete public output field: ${JSON.stringify(copied)}`)
   return { ...presentation, copied }
+}
+
+async function verifyClaudeCommandDisclosure(cdp) {
+  const claudeAgentId = runtimes.find((entry) => entry.key === 'claude').agentId
+  const opened = await evaluate(cdp, `(() => {
+    const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .find((candidate) => candidate.dataset.agentId === ${JSON.stringify(claudeAgentId)})
+    chip?.click()
+    return Boolean(chip)
+  })()`)
+  assert(opened, 'Could not select the Claude Runtime process entry')
+  await waitForExpression(cdp, `(() => {
+    const selected = document.querySelector('.run-pulse-chip.is-selected')
+    return selected?.dataset.agentId === ${JSON.stringify(claudeAgentId)}
+  })()`)
+  await evaluate(cdp, `(() => {
+    document.querySelectorAll('.execution-drawer details.execution-disclosure:not([open]) > summary')
+      .forEach((summary) => summary.click())
+    return true
+  })()`)
+  await waitForExpression(cdp, `(() => [...document.querySelectorAll(
+    '.execution-drawer details.tool-call-disclosure .tool-call-title'
+  )].some((candidate) => candidate.textContent?.trim() === 'Bash'))()`)
+  const presentation = await evaluate(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'Bash')
+    disclosure?.querySelector('summary')?.click()
+    return {
+      found: Boolean(disclosure),
+      open: disclosure?.open ?? false,
+      detail: disclosure?.querySelector('.tool-call-detail pre')?.textContent ?? '',
+      staticCount: document.querySelectorAll('.execution-drawer .tool-call-static .tool-call-title').length
+    }
+  })()`)
+  assert(presentation.found
+    && presentation.open
+    && presentation.detail.includes('ROVAI_CLAUDE_EMPTY_OUTPUT_OK')
+    && presentation.staticCount === 0,
+  `Claude Bash command without output was not expandable: ${JSON.stringify(presentation)}`)
+  return presentation
 }
 
 async function verifyExecutionDrawerResizeControl(cdp) {

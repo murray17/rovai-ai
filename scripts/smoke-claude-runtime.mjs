@@ -193,12 +193,18 @@ try {
       && event.params?.agentRunId === commandRunId
       && String(event.params?.payload?.output ?? '').includes(commandMarker)
   )
+  const commandInputEvent = core.events.find((event) =>
+    event.method === 'runtime.action'
+      && event.params?.agentRunId === commandRunId
+      && String(event.params?.payload?.input ?? '').includes(commandMarker)
+  )
   const commandBinding = core.events.find((event) =>
     event.method === 'agent_run.native_session_bound'
       && event.params?.agentRunId === commandRunId
   )
   if (!commandRun
       || !commandOutputEvent
+      || !commandInputEvent
       || commandBinding?.params?.nativeThreadId !== nativeSessionId
       || commandRun.conversationId !== firstRun.conversationId) {
     throw new Error(`Claude Code Bash output was not projected on the resumed Conversation: ${JSON.stringify({
@@ -224,6 +230,7 @@ try {
     commandOutput: {
       marker: commandMarker,
       output: commandOutputEvent.params.payload.output,
+      input: commandInputEvent.params.payload.input,
       toolName: commandOutputEvent.params.payload.toolName,
       toolCallId: commandOutputEvent.params.payload.toolCallId
     },

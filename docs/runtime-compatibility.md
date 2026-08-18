@@ -179,9 +179,12 @@ Action/Approval 均为 0。恢复后的新文件工具与 Approval 成功，运�
 Claude Code 保持 `--output-format stream-json --include-partial-messages`，但现在同时消费 partial
 `tool_use`、完整 assistant tool block 与对应 `tool_result`。生命周期直接使用 Claude 原生 tool-use ID；
 Bash、Read、Edit、Write 等只映射到既有 Canonical Activity kind，Bash result 仅公开标准 Content Text
-或明确的 `stdout`/`stderr`。最终 `result`、Usage 与 Session 校验路径没有改变。确定性 stream fixture
+或明确的 `stdout`/`stderr`；Bash `tool_use.input.command` 是唯一公开 input 白名单，因此没有输出的
+Bash 也保留可展开的命令详情，其它工具输入、文件内容和 provider metadata 仍不公开。最终 `result`、
+Usage 与 Session 校验路径没有改变。确定性 stream fixture
 已证明 partial/full 去重、start/terminal 关联、command marker 可见及私有字段不泄露。真实 smoke 还会
-强制原生 `Bash` 执行固定 `printf`，并要求 marker 从对应 `runtime.action.payload.output` 取得、原生
+强制原生 `Bash` 执行固定 `printf`，并要求 command marker 同时从对应 started
+`runtime.action.payload.input` 和 terminal `runtime.action.payload.output` 取得、原生
 tool-use ID 存在且 Session/Conversation 连续。公开 `text_delta` 现在另行投影为 `agent.text.delta`；若整次
 Run 没有该公开 delta，只用通过 Session/terminal 校验的 success `result` 生成一次 narration fallback。
 原始 `thinking_delta`、失败 result 与 provider metadata 不进入 Evidence，最终 Camp Message 仍由 terminal
