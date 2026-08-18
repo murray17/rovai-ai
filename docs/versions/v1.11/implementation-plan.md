@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.11
 authority: implementation-and-acceptance-status
-status: in_progress
+status: complete
 last_updated: 2026-08-19
 ---
 
@@ -53,9 +53,9 @@ last_updated: 2026-08-19
 
 - [x] 使用隔离 userData 完成 packaged App 队员工作区 UI/键盘验收，不启动日常 App；
 - [x] 确认本版不需要调用真实 TRAE；fake ACP Session 已覆盖统一目录与执行期校验，未并发接触 TRAE 密钥/状态文件；
-- [ ] 确认工作树、提交与 main 集成顺序；
-- [ ] 推送 main；
-- [ ] 构建签名 App，隔离启动验证后替换 `/Applications/Rovai AI.app`。
+- [x] 确认工作树、提交与 main 集成顺序；
+- [x] 推送实现提交 `a9cf6e06` 到 main；
+- [x] 构建签名 App，隔离启动验证后替换 `/Applications/Rovai AI.app`，并从安装路径重新启动确认。
 
 ## References
 

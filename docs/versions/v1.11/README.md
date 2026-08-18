@@ -4,15 +4,15 @@ version: v1.11
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-08-19
 ---
 
 # Rovai-ai v1.11：Runtime 模型目录缓存与真实执行校验
 
-> 当前状态：Core/Renderer、自动门禁、签名打包与隔离队员工作区验收均已完成；尚未提交或推送 main，
-> 尚未替换 `/Applications/Rovai AI.app`。
+> 当前状态：Core/Renderer、自动门禁、签名打包与隔离队员工作区验收均已完成；实现提交
+> `a9cf6e06` 已推送 main，已替换并从 `/Applications/Rovai AI.app` 重新启动日常安装版。
 >
 > 前置版本：[v1.10 唯一 Camp ID 与安全公开 Runtime 失败](../v1.10/README.md)。v1.10 已完成并冻结为
 > historical。
