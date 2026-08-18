@@ -12,7 +12,9 @@ use crate::builtin_tool_transport::LocalIpcEndpoint;
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
-use tokio::net::windows::named_pipe::{NamedPipeServer, PipeMode, ServerOptions};
+use tokio::net::windows::named_pipe::{
+    ClientOptions, NamedPipeClient, NamedPipeServer, PipeMode, ServerOptions,
+};
 #[cfg(unix)]
 use tokio::net::{UnixListener, UnixStream};
 
@@ -173,6 +175,25 @@ pub struct LocalIpcStream {
     stream: NamedPipeServer,
 }
 
+/// Platform-neutral client stream for the bundled `rovai` CLI.
+///
+/// The caller owns framing, authentication, retries, and timeouts. This seam
+/// owns only endpoint selection and platform handle admission so Unix and
+/// Windows cannot drift into separate request/response implementations.
+pub struct LocalIpcClientStream {
+    #[cfg(unix)]
+    stream: UnixStream,
+    #[cfg(windows)]
+    stream: NamedPipeClient,
+}
+
+impl LocalIpcClientStream {
+    pub async fn connect(endpoint: &LocalIpcEndpoint) -> Result<Self> {
+        endpoint.validate()?;
+        connect_platform_stream(endpoint).await
+    }
+}
+
 impl AsyncRead for LocalIpcStream {
     fn poll_read(
         self: Pin<&mut Self>,
@@ -199,6 +220,70 @@ impl AsyncWrite for LocalIpcStream {
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
         AsyncWrite::poll_shutdown(Pin::new(&mut self.get_mut().stream), cx)
     }
+}
+
+impl AsyncRead for LocalIpcClientStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        AsyncRead::poll_read(Pin::new(&mut self.get_mut().stream), cx, buffer)
+    }
+}
+
+impl AsyncWrite for LocalIpcClientStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut TaskContext<'_>,
+        buffer: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        AsyncWrite::poll_write(Pin::new(&mut self.get_mut().stream), cx, buffer)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        AsyncWrite::poll_flush(Pin::new(&mut self.get_mut().stream), cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        AsyncWrite::poll_shutdown(Pin::new(&mut self.get_mut().stream), cx)
+    }
+}
+
+#[cfg(unix)]
+async fn connect_platform_stream(endpoint: &LocalIpcEndpoint) -> Result<LocalIpcClientStream> {
+    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
+        bail!("Unix client requires a Unix socket Built-in Tool endpoint");
+    };
+    let stream = UnixStream::connect(path)
+        .await
+        .context("failed to connect to the Built-in Tool Unix socket")?;
+    Ok(LocalIpcClientStream { stream })
+}
+
+#[cfg(windows)]
+async fn connect_platform_stream(endpoint: &LocalIpcEndpoint) -> Result<LocalIpcClientStream> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+
+    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
+        bail!("Windows client requires a named-pipe Built-in Tool endpoint");
+    };
+    let stream = ClientOptions::new()
+        .open(name)
+        .context("failed to connect to the Built-in Tool named pipe")?;
+    let non_inheritable =
+        unsafe { SetHandleInformation(stream.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) };
+    if non_inheritable == 0 {
+        return Err(io::Error::last_os_error())
+            .context("failed to make the Built-in Tool client handle non-inheritable");
+    }
+    Ok(LocalIpcClientStream { stream })
+}
+
+#[cfg(not(any(unix, windows)))]
+async fn connect_platform_stream(_endpoint: &LocalIpcEndpoint) -> Result<LocalIpcClientStream> {
+    bail!("Built-in Tool local IPC is unsupported on this platform")
 }
 
 #[cfg(unix)]
@@ -294,6 +379,9 @@ fn create_protected_named_pipe(name: &str, first_instance: bool) -> Result<Named
         return Err(std::io::Error::last_os_error())
             .context("failed to make the Built-in Tool named-pipe handle non-inheritable");
     }
+    descriptor
+        .verify_named_pipe_handle(server.as_raw_handle() as _)
+        .context("Built-in Tool named-pipe DACL failed post-creation admission")?;
     Ok(server)
 }
 
@@ -344,9 +432,11 @@ mod tests {
             0o600
         );
 
-        let client_path = socket_path.clone();
+        let client_endpoint = endpoint.clone();
         let client = tokio::spawn(async move {
-            let mut stream = UnixStream::connect(client_path).await.unwrap();
+            let mut stream = LocalIpcClientStream::connect(&client_endpoint)
+                .await
+                .unwrap();
             stream.write_all(b"ping").await.unwrap();
             let mut response = [0_u8; 4];
             stream.read_exact(&mut response).await.unwrap();
@@ -361,5 +451,96 @@ mod tests {
 
         drop(listener);
         assert!(!socket_path.exists());
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use std::{os::windows::io::AsRawHandle, time::Duration};
+
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use windows_sys::Win32::Foundation::{GetHandleInformation, HANDLE_FLAG_INHERIT};
+
+    use super::*;
+
+    fn test_endpoint() -> LocalIpcEndpoint {
+        LocalIpcEndpoint::WindowsNamedPipe {
+            name: format!(
+                r"\\.\pipe\rovai-ai-test-{}-{}",
+                std::process::id(),
+                uuid::Uuid::new_v4()
+            ),
+        }
+    }
+
+    fn assert_non_inheritable(raw_handle: std::os::windows::io::RawHandle) {
+        let mut flags = 0_u32;
+        assert_ne!(
+            unsafe { GetHandleInformation(raw_handle as _, &mut flags) },
+            0,
+            "GetHandleInformation failed: {}",
+            io::Error::last_os_error()
+        );
+        assert_eq!(flags & HANDLE_FLAG_INHERIT, 0);
+    }
+
+    #[tokio::test]
+    async fn windows_named_pipe_is_private_byte_mode_and_replenishes_before_dispatch() {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let endpoint = test_endpoint();
+            let mut listener = LocalIpcListener::bind(&endpoint).unwrap();
+            assert_non_inheritable(listener.listener.as_raw_handle());
+
+            let collision = LocalIpcListener::bind(&endpoint)
+                .err()
+                .expect("a second first instance must be rejected");
+            assert!(collision.to_string().contains("named pipe"));
+
+            let first_endpoint = endpoint.clone();
+            let first_client = tokio::spawn(async move {
+                let mut stream = LocalIpcClientStream::connect(&first_endpoint)
+                    .await
+                    .unwrap();
+                assert_non_inheritable(stream.stream.as_raw_handle());
+                stream.write_all(b"pi").await.unwrap();
+                tokio::task::yield_now().await;
+                stream.write_all(b"ng-one").await.unwrap();
+                let mut response = [0_u8; 8];
+                stream.read_exact(&mut response).await.unwrap();
+                response
+            });
+            let mut first_server = listener.accept().await.unwrap();
+            assert_non_inheritable(first_server.stream.as_raw_handle());
+
+            // The first accept replenishes the listener before returning the
+            // connected instance, so a second client can connect while the
+            // first request is still undispatched.
+            let second_endpoint = endpoint.clone();
+            let second_client = tokio::spawn(async move {
+                let mut stream = LocalIpcClientStream::connect(&second_endpoint)
+                    .await
+                    .unwrap();
+                stream.write_all(b"ping-two").await.unwrap();
+                let mut response = [0_u8; 8];
+                stream.read_exact(&mut response).await.unwrap();
+                response
+            });
+            let mut second_server = listener.accept().await.unwrap();
+
+            let mut first_request = [0_u8; 8];
+            first_server.read_exact(&mut first_request).await.unwrap();
+            assert_eq!(&first_request, b"ping-one");
+            first_server.write_all(b"pong-one").await.unwrap();
+
+            let mut second_request = [0_u8; 8];
+            second_server.read_exact(&mut second_request).await.unwrap();
+            assert_eq!(&second_request, b"ping-two");
+            second_server.write_all(b"pong-two").await.unwrap();
+
+            assert_eq!(&first_client.await.unwrap(), b"pong-one");
+            assert_eq!(&second_client.await.unwrap(), b"pong-two");
+        })
+        .await
+        .expect("Windows named-pipe lifecycle timed out");
     }
 }

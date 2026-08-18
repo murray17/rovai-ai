@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     env, fs,
     fs::OpenOptions,
-    io::{BufRead, BufReader, IsTerminal, Read, Write},
+    io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
     process::ExitCode,
     time::Duration,
@@ -28,8 +28,10 @@ use rovai_core::camp_message_send_teaching::{
     CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP,
 };
 use rovai_core::command::canonical_json_digest;
+use rovai_core::platform::local_ipc::LocalIpcClientStream;
 use serde::Serialize;
 use serde_json::{Map, Value, json};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
 const CORE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -38,7 +40,14 @@ const COMPACTION_HOOK_TIMEOUT: Duration = Duration::from_millis(500);
 const COMPACTION_HOOK_ATTEMPTS: usize = 3;
 
 fn main() -> ExitCode {
-    match run() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build();
+    let result = runtime
+        .context("failed to initialize the Rovai CLI local IPC runtime")
+        .and_then(|runtime| runtime.block_on(run()));
+    match result {
         Ok(code) => ExitCode::from(code),
         Err(_error) => {
             print_safe_cli_error();
@@ -47,13 +56,13 @@ fn main() -> ExitCode {
     }
 }
 
-fn run() -> Result<u8> {
+async fn run() -> Result<u8> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|arg| arg == "__compaction-hook") {
         // Runtime hooks are enhancement-only. Malformed input, unavailable
         // Core, and uncertain acknowledgements must never block compaction or
         // the AgentRun that triggered it.
-        let _ = run_compaction_hook(&args[1..]);
+        let _ = run_compaction_hook(&args[1..]).await;
         return Ok(0);
     }
     if args.as_slice() == ["--version"] || args.as_slice() == ["version"] {
@@ -123,7 +132,7 @@ fn run() -> Result<u8> {
         },
     };
 
-    let response = match send_with_retry(&context.core_endpoint, &request) {
+    let response = match send_with_retry(&context.core_endpoint, &request).await {
         Ok(response) => response,
         Err(BuiltinToolIpcFailure::OutcomeIndeterminate) => {
             println!(
@@ -164,7 +173,7 @@ fn run() -> Result<u8> {
     }
 }
 
-fn run_compaction_hook(args: &[String]) -> Result<()> {
+async fn run_compaction_hook(args: &[String]) -> Result<()> {
     let [
         adapter_flag,
         adapter_kind,
@@ -272,7 +281,7 @@ fn run_compaction_hook(args: &[String]) -> Result<()> {
     let staged_observation = stage_compaction_observation(&context_path, &outbox_record)?;
     let mut last_error = None;
     for attempt in 0..COMPACTION_HOOK_ATTEMPTS {
-        match send_compaction_hook(&context.core_endpoint, &request) {
+        match send_compaction_hook(&context.core_endpoint, &request).await {
             Ok(_response) => {
                 let _ = fs::remove_file(&staged_observation);
                 return Ok(());
@@ -280,7 +289,7 @@ fn run_compaction_hook(args: &[String]) -> Result<()> {
             Err(error) => last_error = Some(error),
         }
         if attempt + 1 < COMPACTION_HOOK_ATTEMPTS {
-            std::thread::sleep(Duration::from_millis(50));
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
     let error = last_error.context("compaction observation submission remained uncertain")?;
@@ -330,57 +339,18 @@ fn stage_compaction_observation(
     Ok(final_path)
 }
 
-#[cfg(unix)]
-fn send_compaction_hook(
+async fn send_compaction_hook(
     endpoint: &LocalIpcEndpoint,
     request: &CompactionHookIpcRequest,
 ) -> Result<CompactionHookIpcResponse> {
-    use std::os::unix::net::UnixStream;
-
-    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
-        bail!("compaction hook endpoint does not match this platform");
-    };
-
     let serialized = serde_json::to_vec(request)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
         bail!("compaction hook request is too large");
     }
-    let mut stream = UnixStream::connect(path)?;
-    stream.set_read_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
-    stream.set_write_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
-    stream.write_all(&serialized)?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-    let response = read_bounded_response(stream)?;
+    let response = exchange_local_ipc_frame(endpoint, &serialized, COMPACTION_HOOK_TIMEOUT)
+        .await
+        .map_err(|(_, error)| error)?;
     Ok(serde_json::from_str(&response)?)
-}
-
-#[cfg(windows)]
-fn send_compaction_hook(
-    endpoint: &LocalIpcEndpoint,
-    request: &CompactionHookIpcRequest,
-) -> Result<CompactionHookIpcResponse> {
-    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
-        bail!("compaction hook endpoint does not match this platform");
-    };
-    let serialized = serde_json::to_vec(request)?;
-    if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
-        bail!("compaction hook request is too large");
-    }
-    let mut stream = open_windows_named_pipe(name)?;
-    stream.write_all(&serialized)?;
-    stream.write_all(b"\n")?;
-    stream.flush()?;
-    let response = read_bounded_response(stream)?;
-    Ok(serde_json::from_str(&response)?)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn send_compaction_hook(
-    _endpoint: &LocalIpcEndpoint,
-    _request: &CompactionHookIpcRequest,
-) -> Result<CompactionHookIpcResponse> {
-    bail!("compaction hook relay is unavailable on this platform")
 }
 
 fn envelope_exit_code(
@@ -1235,47 +1205,31 @@ fn insert_direct_value(
     Ok(())
 }
 
-#[cfg(unix)]
-fn send_with_retry(
+async fn send_with_retry(
     endpoint: &LocalIpcEndpoint,
     request: &BuiltinToolIpcRequest,
 ) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
-    use std::os::unix::net::UnixStream;
-
-    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
-        return Err(BuiltinToolIpcFailure::Predictable);
-    };
-
     let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
         return Err(BuiltinToolIpcFailure::Predictable);
     }
     let mut dispatch_became_indeterminate = false;
-    for _attempt in 0..CORE_ATTEMPTS {
-        let Ok(mut stream) = UnixStream::connect(path) else {
-            continue;
-        };
-        if stream.set_read_timeout(Some(CORE_TIMEOUT)).is_err()
-            || stream.set_write_timeout(Some(CORE_TIMEOUT)).is_err()
-        {
-            continue;
-        }
-        if stream.write_all(&serialized).is_err()
-            || stream.write_all(b"\n").is_err()
-            || stream.flush().is_err()
-        {
-            dispatch_became_indeterminate = true;
-            continue;
-        }
-        match read_bounded_response(stream) {
-            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+    for attempt in 0..CORE_ATTEMPTS {
+        match exchange_local_ipc_frame(endpoint, &serialized, CORE_TIMEOUT).await {
+            Err((LocalIpcRoundTripFailure::InvalidFrame, _)) => {
                 return Err(BuiltinToolIpcFailure::Predictable);
             }
-            Err(_) => dispatch_became_indeterminate = true,
+            Err((LocalIpcRoundTripFailure::BeforeDispatch, _)) => {}
+            Err((LocalIpcRoundTripFailure::AfterDispatch, _)) => {
+                dispatch_became_indeterminate = true;
+            }
             Ok(response) => match serde_json::from_str(&response) {
                 Ok(response) => return Ok(response),
                 Err(_) => return Err(BuiltinToolIpcFailure::Predictable),
             },
+        }
+        if attempt + 1 < CORE_ATTEMPTS {
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
     Err(if dispatch_became_indeterminate {
@@ -1285,53 +1239,48 @@ fn send_with_retry(
     })
 }
 
-#[cfg(windows)]
-fn send_with_retry(
-    endpoint: &LocalIpcEndpoint,
-    request: &BuiltinToolIpcRequest,
-) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
-    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
-        return Err(BuiltinToolIpcFailure::Predictable);
-    };
-    let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
-    if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
-        return Err(BuiltinToolIpcFailure::Predictable);
-    }
-    let mut dispatch_became_indeterminate = false;
-    for _attempt in 0..CORE_ATTEMPTS {
-        let Ok(mut stream) = open_windows_named_pipe(name) else {
-            continue;
-        };
-        if stream.write_all(&serialized).is_err()
-            || stream.write_all(b"\n").is_err()
-            || stream.flush().is_err()
-        {
-            dispatch_became_indeterminate = true;
-            continue;
-        }
-        match read_bounded_response(stream) {
-            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
-                return Err(BuiltinToolIpcFailure::Predictable);
-            }
-            Err(_) => dispatch_became_indeterminate = true,
-            Ok(response) => match serde_json::from_str(&response) {
-                Ok(response) => return Ok(response),
-                Err(_) => return Err(BuiltinToolIpcFailure::Predictable),
-            },
-        }
-    }
-    Err(if dispatch_became_indeterminate {
-        BuiltinToolIpcFailure::OutcomeIndeterminate
-    } else {
-        BuiltinToolIpcFailure::Predictable
-    })
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalIpcRoundTripFailure {
+    BeforeDispatch,
+    AfterDispatch,
+    InvalidFrame,
 }
 
-fn read_bounded_response(stream: impl Read) -> std::io::Result<String> {
+async fn exchange_local_ipc_frame(
+    endpoint: &LocalIpcEndpoint,
+    serialized: &[u8],
+    timeout: Duration,
+) -> std::result::Result<String, (LocalIpcRoundTripFailure, anyhow::Error)> {
+    let mut stream = tokio::time::timeout(timeout, LocalIpcClientStream::connect(endpoint))
+        .await
+        .map_err(|error| (LocalIpcRoundTripFailure::BeforeDispatch, error.into()))?
+        .map_err(|error| (LocalIpcRoundTripFailure::BeforeDispatch, error))?;
+    tokio::time::timeout(timeout, async {
+        stream.write_all(serialized).await?;
+        stream.write_all(b"\n").await?;
+        stream.flush().await
+    })
+    .await
+    .map_err(|error| (LocalIpcRoundTripFailure::AfterDispatch, error.into()))?
+    .map_err(|error| (LocalIpcRoundTripFailure::AfterDispatch, error.into()))?;
+    tokio::time::timeout(timeout, read_bounded_response(stream))
+        .await
+        .map_err(|error| (LocalIpcRoundTripFailure::AfterDispatch, error.into()))?
+        .map_err(|error| {
+            let kind = if error.kind() == std::io::ErrorKind::InvalidData {
+                LocalIpcRoundTripFailure::InvalidFrame
+            } else {
+                LocalIpcRoundTripFailure::AfterDispatch
+            };
+            (kind, error.into())
+        })
+}
+
+async fn read_bounded_response(stream: impl AsyncRead + Unpin) -> std::io::Result<String> {
     let reader = BufReader::new(stream);
     let mut limited = reader.take((BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 2) as u64);
     let mut frame = Vec::new();
-    let read = limited.read_until(b'\n', &mut frame)?;
+    let read = limited.read_until(b'\n', &mut frame).await?;
     if read == 0 {
         return Err(std::io::Error::new(
             std::io::ErrorKind::UnexpectedEof,
@@ -1354,27 +1303,6 @@ fn read_bounded_response(stream: impl Read) -> std::io::Result<String> {
             "Built-in Tool IPC response is not UTF-8",
         )
     })
-}
-
-#[cfg(windows)]
-fn open_windows_named_pipe(name: &str) -> Result<std::fs::File> {
-    use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
-
-    let stream = OpenOptions::new().read(true).write(true).open(name)?;
-    if unsafe { SetHandleInformation(stream.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) } == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to make the Built-in Tool client handle non-inheritable");
-    }
-    Ok(stream)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn send_with_retry(
-    _endpoint: &LocalIpcEndpoint,
-    _request: &BuiltinToolIpcRequest,
-) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
-    Err(BuiltinToolIpcFailure::Predictable)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1880,6 +1808,8 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
 mod tests {
     use super::*;
     use rovai_core::builtin_tool_transport::{BuiltinToolAuth, builtin_tool_description};
+    #[cfg(windows)]
+    use rovai_core::platform::local_ipc::LocalIpcListener;
 
     fn request_for_ipc_test() -> BuiltinToolIpcRequest {
         BuiltinToolIpcRequest {
@@ -1899,14 +1829,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ipc_response_reader_requires_one_bounded_newline_delimited_utf8_frame() {
+    #[tokio::test]
+    async fn ipc_response_reader_requires_one_bounded_newline_delimited_utf8_frame() {
         assert_eq!(
-            read_bounded_response(std::io::Cursor::new(b"{\"ok\":true}\n")).unwrap(),
+            read_bounded_response(std::io::Cursor::new(b"{\"ok\":true}\n"))
+                .await
+                .unwrap(),
             r#"{"ok":true}"#
         );
         assert_eq!(
             read_bounded_response(std::io::Cursor::new(b"{}"))
+                .await
                 .unwrap_err()
                 .kind(),
             std::io::ErrorKind::InvalidData
@@ -1914,6 +1847,7 @@ mod tests {
         let oversized = vec![b'x'; BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 2];
         assert_eq!(
             read_bounded_response(std::io::Cursor::new(oversized))
+                .await
                 .unwrap_err()
                 .kind(),
             std::io::ErrorKind::InvalidData
@@ -2453,8 +2387,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn connection_preflight_failure_is_predictable() {
+    #[tokio::test]
+    async fn connection_preflight_failure_is_predictable() {
         let socket = std::path::PathBuf::from("/tmp").join(format!(
             "rv-missing-{}.sock",
             &Uuid::new_v4().to_string()[..8]
@@ -2463,14 +2397,16 @@ mod tests {
             path: socket.to_string_lossy().into_owned(),
         };
         assert_eq!(
-            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test())
+                .await
+                .unwrap_err(),
             BuiltinToolIpcFailure::Predictable
         );
     }
 
     #[cfg(unix)]
-    #[test]
-    fn response_loss_after_dispatch_is_indeterminate() {
+    #[tokio::test]
+    async fn response_loss_after_dispatch_is_indeterminate() {
         use std::os::unix::net::UnixListener;
 
         let socket = std::path::PathBuf::from("/tmp")
@@ -2486,7 +2422,9 @@ mod tests {
             }
         });
         assert_eq!(
-            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test())
+                .await
+                .unwrap_err(),
             BuiltinToolIpcFailure::OutcomeIndeterminate
         );
         server.join().unwrap();
@@ -2494,8 +2432,8 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[test]
-    fn malformed_core_response_is_a_predictable_protocol_failure() {
+    #[tokio::test]
+    async fn malformed_core_response_is_a_predictable_protocol_failure() {
         use std::os::unix::net::UnixListener;
 
         let socket = std::path::PathBuf::from("/tmp").join(format!(
@@ -2508,14 +2446,124 @@ mod tests {
         };
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
+            let mut byte = [0_u8; 1];
+            loop {
+                stream.read_exact(&mut byte).unwrap();
+                if byte[0] == b'\n' {
+                    break;
+                }
+            }
             stream.write_all(b"not-json\n").unwrap();
         });
         assert_eq!(
-            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test())
+                .await
+                .unwrap_err(),
             BuiltinToolIpcFailure::Predictable
         );
         server.join().unwrap();
         std::fs::remove_file(socket).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn windows_test_endpoint() -> LocalIpcEndpoint {
+        LocalIpcEndpoint::WindowsNamedPipe {
+            name: format!(
+                r"\\.\pipe\rovai-ai-cli-test-{}-{}",
+                std::process::id(),
+                Uuid::new_v4()
+            ),
+        }
+    }
+
+    #[cfg(windows)]
+    async fn respond_to_one_windows_request(
+        stream: rovai_core::platform::local_ipc::LocalIpcStream,
+        response: &[u8],
+    ) {
+        let (reader, mut writer) = tokio::io::split(stream);
+        let mut reader = BufReader::new(reader);
+        let mut request = Vec::new();
+        reader.read_until(b'\n', &mut request).await.unwrap();
+        assert_eq!(request.last(), Some(&b'\n'));
+        writer.write_all(response).await.unwrap();
+        writer.write_all(b"\n").await.unwrap();
+        writer.shutdown().await.unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_named_pipe_connection_preflight_failure_is_predictable() {
+        let endpoint = windows_test_endpoint();
+        assert_eq!(
+            send_with_retry(&endpoint, &request_for_ipc_test())
+                .await
+                .unwrap_err(),
+            BuiltinToolIpcFailure::Predictable
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_named_pipe_response_loss_after_dispatch_is_indeterminate() {
+        let endpoint = windows_test_endpoint();
+        let mut listener = LocalIpcListener::bind(&endpoint).unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..CORE_ATTEMPTS {
+                let stream = listener.accept().await.unwrap();
+                drop(stream);
+            }
+        });
+        assert_eq!(
+            send_with_retry(&endpoint, &request_for_ipc_test())
+                .await
+                .unwrap_err(),
+            BuiltinToolIpcFailure::OutcomeIndeterminate
+        );
+        server.await.unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_named_pipe_malformed_response_is_predictable() {
+        let endpoint = windows_test_endpoint();
+        let mut listener = LocalIpcListener::bind(&endpoint).unwrap();
+        let server = tokio::spawn(async move {
+            let stream = listener.accept().await.unwrap();
+            respond_to_one_windows_request(stream, b"not-json").await;
+        });
+        assert_eq!(
+            send_with_retry(&endpoint, &request_for_ipc_test())
+                .await
+                .unwrap_err(),
+            BuiltinToolIpcFailure::Predictable
+        );
+        server.await.unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_named_pipe_busy_instance_is_retried() {
+        let endpoint = windows_test_endpoint();
+        let mut listener = LocalIpcListener::bind(&endpoint).unwrap();
+        let blocker = LocalIpcClientStream::connect(&endpoint).await.unwrap();
+        let expected = BuiltinToolIpcResponse::ipc_error("test.response", "retry completed");
+        let serialized = serde_json::to_vec(&expected).unwrap();
+        let server = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(75)).await;
+            let blocked_stream = listener.accept().await.unwrap();
+            drop(blocked_stream);
+            drop(blocker);
+            let stream = listener.accept().await.unwrap();
+            respond_to_one_windows_request(stream, &serialized).await;
+        });
+        assert_eq!(
+            send_with_retry(&endpoint, &request_for_ipc_test())
+                .await
+                .unwrap(),
+            expected
+        );
+        server.await.unwrap();
     }
 
     #[test]

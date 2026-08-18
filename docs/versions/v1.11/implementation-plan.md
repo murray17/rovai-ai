@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.11
 authority: implementation-plan-and-acceptance
 status: in_progress
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # v1.11 Windows x64 实施与验收计划
@@ -34,7 +34,12 @@ last_updated: 2026-08-18
 
 ## Checkpoint 3：Transport、Renderer 与 Desktop 行为
 
-- [ ] 完成 secured Windows Named Pipe Built-in Tool Transport 的完整 v16 roundtrip/negative-path matrix；
+- [x] 将 `rovai` CLI 与 compaction hook 统一到同一异步 Local IPC client，Windows 与 Unix 共用 framing、超时、
+  重试和 outcome-indeterminate 分类；
+- [x] Named Pipe 每个实例使用 session logon SID + SYSTEM protected DACL，并在创建后回读 DACL；覆盖
+  first-instance、non-inheritable handle、partial byte frame、listener replenish、busy retry、malformed 与 response-loss；
+- [ ] 在固定 Windows CI 实跑 Named Pipe v16 matrix，并补齐 wrong token、stale lease、idempotent replay 与
+  compaction hook 的完整端到端证据；
 - [ ] 对照现有 macOS 页面实现同组件树的 frame、shortcut、copy、Explorer、路径与 Runtime availability 差异；
 - [ ] 完成 Forced Colors/High Contrast、keyboard-only、NVDA、中文 IME、DPI/zoom/Snap/multi-monitor 验收；
 - [ ] 用 Windows Interaction Delta HTML 作为差异清单，不以原型替代现有 macOS 视觉真源。

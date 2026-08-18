@@ -135,6 +135,12 @@ jobs:
           --target x86_64-pc-windows-msvc
           windows_skill_projection
 
+      - name: Exercise Windows Named Pipe transport
+        run: >-
+          cargo test -p rovai-core --all-targets
+          --target x86_64-pc-windows-msvc
+          windows_named_pipe
+
       - name: Exercise Windows private JSON replacement
         run: >-
           cargo test -p rovai-core --lib

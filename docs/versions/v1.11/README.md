@@ -6,16 +6,16 @@ authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Rovai-ai v1.11：Windows x64 产品实现与资格闭环
 
 > 当前状态：v1.05 形成的 Windows 长期 ADR、Contract、Architecture 与 Interaction Delta 继续有效；本版在
 > 已发布的 v1.10 基线上实施这些约束。平台 seam、native frame、Runtime 平台准入、native executable
-> resolver、原子 Job 启动、私有 Core/Desktop data root、handle-relative Attachment 与 managed Skill Library
-> 已进入代码；Windows Skill copy projection 正在完成。Windows client OS 验收、逐 Runtime 资格、NSIS 与签名
-> 尚未完成，因此不得宣称 Windows 已发布。
+> resolver、原子 Job 启动、私有 Core/Desktop data root、handle-relative Attachment、managed Skill Library、
+> crash-recoverable Skill Projection 与共享异步 Named Pipe client 已进入代码。固定 Windows CI 实跑、Windows
+> client OS 验收、逐 Runtime 资格、NSIS 与签名尚未完成，因此不得宣称 Windows 已发布。
 >
 > 前置版本：[v1.10 唯一 Camp ID 与安全公开 Runtime 失败](../v1.10/README.md)。
 
