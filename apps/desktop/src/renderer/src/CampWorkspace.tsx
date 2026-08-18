@@ -3742,7 +3742,18 @@ export function CampWorkspace({
               </button>
             </div>
             <div className="composer-actions">
-              {!executionBlocked && <span className="composer-hint">Enter</span>}
+              {!executionBlocked && (
+                <span className="composer-hint">
+                  <span className="sr-only">Enter 发送，Shift+Enter 换行</span>
+                  <span className="composer-hint-visual" aria-hidden="true">
+                    <kbd>↵</kbd>
+                    <span>发送</span>
+                    <span className="composer-hint-separator">·</span>
+                    <kbd>⇧↵</kbd>
+                    <span>换行</span>
+                  </span>
+                </span>
+              )}
               {executionBlocked
                 ? (
                     <button

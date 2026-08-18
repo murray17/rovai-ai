@@ -2590,7 +2590,10 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer-attachment-button:hover:not(:disabled), .composer-attachment-button:focus-visible { color: var(--ink); background: var(--surface-muted); }
 .composer-attachment-button:focus-visible { outline: 0; }
 .composer-attachment-button:disabled { cursor: default; opacity: .42; }
-.composer-hint { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--faint); background: var(--surface-subtle); font: 650 9px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.composer-hint { display: inline-flex; align-items: center; color: var(--faint); font-size: 9px; line-height: 1.2; white-space: nowrap; }
+.composer-hint-visual { display: inline-flex; align-items: center; gap: 4px; }
+.composer-hint kbd { display: inline-grid; min-width: 20px; height: 18px; padding: 0 4px; place-items: center; border: 1px solid var(--line); border-bottom-color: var(--line-strong); border-radius: 4px; background: var(--surface-subtle); font: 650 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.composer-hint-separator { margin: 0 1px; color: var(--line-strong); }
 .composer-send { min-height: 28px; padding: 5px 12px; border-radius: 6px; font-size: 12px; font-weight: 650; }
 .composer-stop { min-height: 28px; padding: 5px 14px; border-color: var(--danger); border-radius: 6px; color: var(--danger-contrast); background: var(--danger); font-size: 12px; font-weight: 700; }
 .composer-stop:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 82%, black); background: color-mix(in srgb, var(--danger) 82%, black); }
@@ -2630,6 +2633,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 @media (max-width: 1180px) {
   .conversation-drop-layer { margin: 7px; }
   .conversation-drop-callout { width: 280px; }
+}
+@media (max-width: 760px) {
+  .composer-hint { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .conversation-drop-layer { animation: none; }
