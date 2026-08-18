@@ -566,6 +566,7 @@ pub struct CodexRuntime {
     camp_id: Option<String>,
     host: Arc<CodexHost>,
     thread_id: RwLock<Option<String>>,
+    observed_model_id: RwLock<Option<String>>,
     action_items: Mutex<HashMap<String, Value>>,
     streamed_agent_text: Mutex<String>,
     completed_agent_message: RwLock<Option<String>>,
@@ -621,6 +622,7 @@ impl CodexRuntime {
             camp_id,
             host,
             thread_id: RwLock::new(None),
+            observed_model_id: RwLock::new(None),
             action_items: Mutex::new(HashMap::new()),
             streamed_agent_text: Mutex::new(String::new()),
             completed_agent_message: RwLock::new(None),
@@ -744,6 +746,7 @@ impl CodexRuntime {
     ) -> Result<String> {
         let (method, request) = thread_start_or_resume_request(cwd, existing_thread_id, options)?;
         let result = self.rpc(method, request).await?;
+        let observed_model_id = runtime_model_id_from_thread_response(&result);
         let thread_id = result
             .pointer("/thread/id")
             .and_then(Value::as_str)
@@ -751,6 +754,7 @@ impl CodexRuntime {
             .to_string();
         self.host.bind_thread(&thread_id, &self.owner).await?;
         *self.thread_id.write().await = Some(thread_id.clone());
+        *self.observed_model_id.write().await = observed_model_id;
         Ok(thread_id)
     }
 
@@ -818,6 +822,10 @@ impl CodexRuntime {
 
     pub async fn thread_id(&self) -> Option<String> {
         self.thread_id.read().await.clone()
+    }
+
+    pub async fn observed_model_id(&self) -> Option<String> {
+        self.observed_model_id.read().await.clone()
     }
 
     pub async fn turn_id(&self) -> Option<String> {
@@ -905,6 +913,15 @@ impl CodexRuntime {
     async fn send(&self, message: Value) -> Result<()> {
         self.host.send(message).await
     }
+}
+
+fn runtime_model_id_from_thread_response(response: &Value) -> Option<String> {
+    response
+        .get("model")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|model_id| !model_id.is_empty())
+        .map(str::to_string)
 }
 
 fn thread_start_or_resume_request(
@@ -1883,6 +1900,28 @@ mod tests {
         assert_eq!(resume_method, "thread/resume");
         assert_eq!(resume["threadId"], "thread-existing");
         assert_eq!(resume["developerInstructions"], "bootstrap-latest");
+    }
+
+    #[test]
+    fn thread_response_exposes_only_a_nonempty_runtime_model() {
+        assert_eq!(
+            runtime_model_id_from_thread_response(&json!({
+                "thread": {"id": "thread-1"},
+                "model": "gpt-5.6"
+            })),
+            Some("gpt-5.6".to_string())
+        );
+        assert_eq!(
+            runtime_model_id_from_thread_response(&json!({
+                "thread": {"id": "thread-1"},
+                "model": "  "
+            })),
+            None
+        );
+        assert_eq!(
+            runtime_model_id_from_thread_response(&json!({"thread": {"id": "thread-1"}})),
+            None
+        );
     }
 
     #[test]

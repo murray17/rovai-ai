@@ -1313,6 +1313,25 @@ fn append_additive_mcp_axes(capabilities: &mut Vec<String>, same_name_policy: Mc
     ));
 }
 
+pub fn acp_runtime_model_id_from_session(session_result: &Value) -> Option<String> {
+    session_result
+        .pointer("/models/currentModelId")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            session_result
+                .get("configOptions")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .find(|option| option.get("id").and_then(Value::as_str) == Some("model"))
+                .and_then(|option| option.get("currentValue"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|model_id| !model_id.is_empty())
+        .map(str::to_string)
+}
+
 pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<ModelDescriptor>> {
     let config_options = session_result
         .get("configOptions")
@@ -1322,14 +1341,7 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
     let model_config = config_options
         .iter()
         .find(|option| option.get("id").and_then(Value::as_str) == Some("model"));
-    let current_model = session_result
-        .pointer("/models/currentModelId")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            model_config
-                .and_then(|option| option.get("currentValue"))
-                .and_then(Value::as_str)
-        });
+    let current_model = acp_runtime_model_id_from_session(session_result);
     let mut values = session_result
         .pointer("/models/availableModels")
         .and_then(Value::as_array)
@@ -1372,7 +1384,7 @@ pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<Mode
         models.push(ModelDescriptor {
             id: id.to_string(),
             display_name: display_name.to_string(),
-            is_default: current_model == Some(id),
+            is_default: current_model.as_deref() == Some(id),
             hidden: false,
             deprecated: false,
             options: model_options.clone(),
@@ -2225,6 +2237,22 @@ mod tests {
         assert_eq!(snapshot.models.len(), 2);
         assert_eq!(snapshot.models[0].id, "opencode/current");
         assert!(snapshot.models[0].is_default);
+        assert_eq!(
+            acp_runtime_model_id_from_session(&json!({
+                "models": {"currentModelId": "native/current"}
+            })),
+            Some("native/current".to_string())
+        );
+        assert_eq!(
+            acp_runtime_model_id_from_session(&json!({
+                "configOptions": [{
+                    "id": "model",
+                    "currentValue": "opencode/current"
+                }]
+            })),
+            Some("opencode/current".to_string())
+        );
+        assert_eq!(acp_runtime_model_id_from_session(&json!({})), None);
         assert_eq!(snapshot.permission_options[0].key, "permission");
         assert!(snapshot.capabilities.contains(&"session.load".to_string()));
         assert!(

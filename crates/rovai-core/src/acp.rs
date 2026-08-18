@@ -22,7 +22,10 @@ use rovai_core::{
         RuntimePermissionOption,
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
-    agent_runtime_adapter::{acp_model_catalog_from_session, write_kiro_additive_agent_config},
+    agent_runtime_adapter::{
+        acp_model_catalog_from_session, acp_runtime_model_id_from_session,
+        write_kiro_additive_agent_config,
+    },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
@@ -1715,6 +1718,14 @@ impl AcpRuntime {
                 .await;
         }
         Ok(session_id)
+    }
+
+    pub async fn observed_model_id(&self) -> Option<String> {
+        self.session_result
+            .read()
+            .await
+            .as_ref()
+            .and_then(acp_runtime_model_id_from_session)
     }
 
     #[cfg(test)]
