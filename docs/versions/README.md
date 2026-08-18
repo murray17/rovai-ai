@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.08
+current_version: v1.09
 last_updated: 2026-08-18
 ---
 
@@ -159,4 +159,5 @@ last_updated: 2026-08-18
 | v1.05 | `historical` | Windows x64 技术设计闭环；产品代码、打包和真实 Runtime 资格未实施即冻结 | [v1.05/README.md](v1.05/README.md) |
 | v1.06 | `historical` | 统一单 Camp History target、Public A2A 历史可见性与安全 CLI 投影错误 | [v1.06/README.md](v1.06/README.md) |
 | v1.07 | `historical` | 显式 Public-only、A2A 边指导与 Principal 双投影提案；revision 1 确认后先冻结，随后作为独立交付实现 | [v1.07/README.md](v1.07/README.md) |
-| v1.08 | `current` | 取消 Run 中未闭合活动的无动画“已停止”投影 | [v1.08/README.md](v1.08/README.md) |
+| v1.08 | `historical` | 取消 Run 中未闭合活动的无动画“已停止”投影 | [v1.08/README.md](v1.08/README.md) |
+| v1.09 | `current` | 完整 Camp 会话查找、Mode-aware Built-in CLI 与完整 Tool 结果交互 | [v1.09/README.md](v1.09/README.md) |

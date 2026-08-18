@@ -140,6 +140,12 @@ Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--
 和短示例，不输出完整 JSON Schema、Envelope、receipt 或 catalog。Dotted canonical operation
 仍是 Core 内部语义身份，不能直接变成通用 Agent 命令。
 
+当 canonical input Schema 是清晰的 top-level discriminated `oneOf` 时，exact help 从各 branch 读取
+requiredness、const/enum、type、minimum/maximum、长度与 field scope，并按 Schema branch 顺序分组；
+只有定义和 requiredness 在所有 branch 完全一致的字段才进入 Common options。Flattened arguments 仍只
+负责识别全部合法 direct flag、field mapping、基本类型和任意参数顺序，不能作为 union requiredness 或
+字段作用域权威。不清晰的 union 回退 ordinary flat help，不猜 discriminator。
+
 Camp History exact help 保持三段职责：目标未知时用 `history.search` 跨授权历史 Camp 发现；目标已知时
 用 `camp.search --camp-id` 搜索一个 Camp；获得稳定消息 ID 后用 `camp.read --camp-id` 读取。Search/Read
 省略 `--camp-id` 时只解析当前 Camp，显式当前 ID 与省略等价，不会扩张为全历史或按 message ID 反查。
@@ -554,8 +560,15 @@ request/receipt 有显式可验证关联，它作为同一 Activity 的 supporti
 Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Shell 子进程共享当前 Run 身份，但
 系统不声称能够证明模型主观意图。
 
+- CLI 先从 direct flags、JSON stdin/heredoc 或 `--input-file` 三种互斥来源构造一个对象，再让所有来源
+  共用 catalog canonical input Schema validator；只有通过后才加载 lease/context 并发送 IPC。CLI 不添加
+  enum 同义词、业务默认值或 cursor 纠正，Core 继续保留权威校验；
 - CLI 参数或输入来源错误：Agent stdout 使用 `builtin_tool.invalid_input` + `fix_input`，退出码
-  `2`；其他 IPC/lease/catalog preflight 失败使用安全通用 structured error，退出码 `2`；
+  `2`。Schema failure 最多返回 4 条确定性字段 issue，顺序为 missing required、当前 mode 不允许、
+  enum/const、type、numeric bounds、string/array bounds；合法 mode 只解释选中 branch。Issue 只含
+  operation、mode、field/flag、reason、合法值/边界/valid modes，不含用户正文、input-file path、Schema
+  path、Rust error、IPC endpoint、lease 或凭据；其他 parse、IPC/lease/catalog preflight 失败继续使用安全
+  通用 structured error，退出码 `2`；
 - Core 业务拒绝：完整 Envelope 记录在 Core/Evidence，Agent stdout 输出业务 `error`，退出码 `1`；
 - 响应丢失：CLI 对同一 request identity 有界重试，Core 执行 Replay；Projection 不暴露 request
   identity；

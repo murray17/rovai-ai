@@ -3,13 +3,15 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-08-15
+last_updated: 2026-08-18
 ---
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v1](../contracts/camp-open-projection-v1.md)。本架构把“进入会话”、
-“继续阅读”和“检查运行详情”分成三个用途明确的接口，同时保持 SQLite Read Side 为唯一权威。
+字段与窗口见 [Camp Open Projection v1](../contracts/camp-open-projection-v1.md)与
+[Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
+“继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
+为唯一权威。
 
 ## Component authority
 
@@ -22,6 +24,7 @@ last_updated: 2026-08-15
 | Core Camp enter module | 在一次串行 request 中顺序执行 Default Lead reconcile 与 post-reconcile read；rejected 时 fail closed |
 | Core Camp open read model | 在单一 SQLite transaction 中组装有界首屏投影、coverage 与 high-water；不加载 Context Manifest/Action history |
 | Camp message history read | 以 stable sequence cursor 读取 earlier page；不回放 event 构造第二真源 |
+| Camp conversation find read | 扫描当前 Camp 公开 user/agent 正文投影，返回 exact total 与一个选中命中；不改变 Agent-facing discovery search，也不返回完整结果集 |
 | Run detail read | 在用户展开指定 Run 后复用 Evidence page/content 接口；不扩大普通 Camp open payload |
 | Full Camp snapshot | 兼容、诊断与定向测试面；保持纯读，但不服务普通 open/refresh |
 
@@ -57,6 +60,25 @@ Core event invalidates active Camp
 显示非阻塞进度。schema mismatch、Core restart、Camp mismatch 或 sequence regression 使缓存失效。
 Renderer 不通过 event replay 补齐权威对象。
 
+## Complete conversation find flow
+
+```text
+Command/Ctrl+F in mounted CampWorkspace
+  -> map view switches to the existing conversation surface
+  -> Renderer camp.messages.find(campId, query, selectedIndex?, visibleAnchor?)
+  -> Core exact scan in one read transaction
+  -> response contains total + one target only
+  -> target missing from mounted timeline
+       -> Renderer camp.messages.around(campId, messageId)
+       -> merge bounded anchored window without changing open coverage
+  -> center target, keep find input focused, highlight visible body occurrences
+```
+
+Find 不属于 Camp enter meaningful-paint 依赖，也不得预取完整历史。Renderer 的本地高亮只消费已挂载
+user/agent 正文节点；exact total、顺序和目标由 Core 响应拥有。查询、Camp 或 request generation 已变化时，
+旧 find/around 响应必须丢弃。关闭查找恢复打开前阅读位置与焦点，不修改 Draft、Inspector、Approval、
+执行台或领域已读状态。
+
 冷启动 route shell 只证明恢复目标已确定，不证明 Camp 存在或 Default Lead 已 reconcile。它不得设置
 `activeCampId`、触发 `campViewed`、提交下次恢复位置或启用 Notification navigation。Camp、Members 与
 Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Main Window Session 本地快照读取失败。
@@ -76,3 +98,4 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 - [ADR-0013](../adr/0013-managed-content-and-read-side-v2.md)
 - [ADR-0058](../adr/0058-collaboration-v4-presence-aware-admission.md)
 - [Camp Open Projection v1](../contracts/camp-open-projection-v1.md)
+- [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)

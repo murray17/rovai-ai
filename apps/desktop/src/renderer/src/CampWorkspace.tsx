@@ -15,6 +15,7 @@ import type {
   CampComposerReplyRecipient,
   CampMessageAttachmentView,
   CampMessageAroundSnapshot,
+  CampMessageFindSnapshot,
   CampMessageView,
   CampOpenCollectionCoverage,
   CampOpenMessageCoverage,
@@ -70,6 +71,13 @@ import {
   storedCampTimelineReadingPositionsWithUpdate,
   type CampTimelineReadingPosition
 } from './camp-timeline-position'
+import {
+  applyConversationFindHighlights,
+  centeredConversationFindScrollTop,
+  conversationFindCurrentRange,
+  nextConversationFindIndex,
+  pendingConversationFindStatus
+} from './camp-conversation-find'
 
 const NON_TERMINAL_RUNS = new Set(['queued', 'running', 'waiting'])
 const EXECUTION_EVIDENCE_PAGE_LIMIT = 1_000
@@ -94,6 +102,39 @@ type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
 type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
 type ReplyFocusModality = 'pointer' | 'keyboard'
+type ConversationFindStatus = 'idle' | 'searching' | 'loading_target' | 'ready' | 'error'
+
+interface ConversationFindState {
+  open: boolean
+  query: string
+  status: ConversationFindStatus
+  snapshot: CampMessageFindSnapshot | null
+  error: string | null
+}
+
+interface TimelineMessageAnchor {
+  messageId: string
+  topOffset: number
+}
+
+interface ConversationFindRestorePoint {
+  campId: string
+  scrollTop: number
+  followingLatest: boolean
+  anchor: TimelineMessageAnchor | null
+  focusedElement: HTMLElement | null
+}
+
+function visibleTimelineMessageAnchor(timeline: HTMLElement): TimelineMessageAnchor | null {
+  const viewport = timeline.getBoundingClientRect()
+  for (const message of timeline.querySelectorAll<HTMLElement>('[data-message-id]')) {
+    const bounds = message.getBoundingClientRect()
+    if (bounds.bottom <= viewport.top || bounds.top >= viewport.bottom) continue
+    const messageId = message.dataset.messageId
+    if (messageId) return { messageId, topOffset: bounds.top - viewport.top }
+  }
+  return null
+}
 
 export function composerDraftNeedsReplyRepair(draft: CampComposerDraftView | null): boolean {
   const intent = draft?.replyIntent
@@ -967,6 +1008,21 @@ export function CampWorkspace({
   const dragActivityTimer = useRef<number | null>(null)
   const attachmentPreparationQueue = useRef<Promise<void>>(Promise.resolve())
   const timelineScrollRef = useRef<HTMLDivElement>(null)
+  const conversationFindSurfaceRef = useRef<HTMLDivElement>(null)
+  const conversationFindInputRef = useRef<HTMLInputElement>(null)
+  const conversationFindRequestGeneration = useRef(0)
+  const conversationFindDebounceTimer = useRef<number | null>(null)
+  const conversationFindRestorePoint = useRef<ConversationFindRestorePoint | null>(null)
+  const conversationFindOpenRef = useRef(false)
+  const timelineVisibleAnchorRef = useRef<TimelineMessageAnchor | null>(null)
+  const [conversationFind, setConversationFind] = useState<ConversationFindState>({
+    open: false,
+    query: '',
+    status: 'idle',
+    snapshot: null,
+    error: null
+  })
+  conversationFindOpenRef.current = conversationFind.open
   const recipientRepairFirstOptionRef = useRef<HTMLButtonElement>(null)
   const autoSuppressedContinuationSourceRef = useRef<string | null>(null)
   const [anchoredMessages, setAnchoredMessages] = useState<CampMessageView[]>([])
@@ -1416,6 +1472,352 @@ export function CampWorkspace({
     for (const messageId of missingReplyIds) void loadReplyAnchorWindow(messageId)
   }, [loadReplyAnchorWindow, replyAnchorWindows, visibleCampMessages, visibleMessageById])
 
+  const focusConversationFindInput = useCallback((select = false): void => {
+    window.requestAnimationFrame(() => {
+      const input = conversationFindInputRef.current
+      input?.focus({ preventScroll: true })
+      if (select) input?.select()
+    })
+  }, [])
+
+  const requestConversationFind = useCallback(async (
+    query: string,
+    selectedMatchIndex: number | undefined,
+    anchorMessageId: string | null,
+    generation: number
+  ): Promise<void> => {
+    const campId = snapshot.camp.id
+    try {
+      const result = await window.rovai.request<CampMessageFindSnapshot>(
+        'camp.messages.find',
+        {
+          campId,
+          query,
+          ...(selectedMatchIndex === undefined ? {} : { selectedMatchIndex }),
+          ...(anchorMessageId ? { anchorMessageId } : {})
+        }
+      )
+      const hasValidSelection = result.totalMatchCount === 0
+        ? result.selectedMatchIndex === null && result.match === null
+        : result.selectedMatchIndex !== null
+          && result.selectedMatchIndex >= 0
+          && result.selectedMatchIndex < result.totalMatchCount
+          && result.match !== null
+      if (
+        result.schemaVersion !== 1
+        || result.campId !== campId
+        || result.query !== query
+        || result.totalMatchCount < 0
+        || !hasValidSelection
+      ) throw new Error('会话查找合同不兼容。')
+      if (conversationFindRequestGeneration.current !== generation) return
+
+      setConversationFind((current) => current.open && current.query === query
+        ? {
+            ...current,
+            snapshot: result,
+            status: result.match ? 'loading_target' : 'ready',
+            error: null
+          }
+        : current)
+
+      const selectedMatch = result.match
+      if (!selectedMatch) return
+      let target = timelineScrollRef.current?.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
+      ) ?? null
+      if (!target) {
+        const around = await window.rovai.request<CampMessageAroundSnapshot>(
+          'camp.messages.around',
+          { campId, messageId: selectedMatch.messageId }
+        )
+        if (
+          around.schemaVersion !== 1
+          || around.campId !== campId
+          || around.anchorMessageId !== selectedMatch.messageId
+          || !around.sourceAvailable
+          || !around.messages.some((message) => message.id === selectedMatch.messageId)
+        ) throw new Error('命中消息当前不可用。')
+        if (conversationFindRequestGeneration.current !== generation) return
+        setAnchoredMessages((current) => {
+          const merged = new Map(current.map((message) => [message.id, message]))
+          for (const message of around.messages) merged.set(message.id, message)
+          return [...merged.values()]
+        })
+      }
+
+      await new Promise<void>((resolve) => {
+        window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+      })
+      if (conversationFindRequestGeneration.current !== generation) return
+      target = timelineScrollRef.current?.querySelector<HTMLElement>(
+        `[data-message-id="${CSS.escape(selectedMatch.messageId)}"]`
+      ) ?? null
+      if (!target) throw new Error('命中消息暂时无法显示。')
+      const timeline = timelineScrollRef.current
+      if (timeline) {
+        const timelineBounds = timeline.getBoundingClientRect()
+        const findSurfaceBounds = conversationFindSurfaceRef.current?.getBoundingClientRect() ?? null
+        const currentRange = conversationFindCurrentRange(
+          timeline,
+          query,
+          selectedMatch.messageId,
+          selectedMatch.occurrenceIndex
+        )
+        const rangeBounds = currentRange?.getBoundingClientRect() ?? null
+        const targetBounds = rangeBounds && rangeBounds.width + rangeBounds.height > 0
+          ? rangeBounds
+          : target.getBoundingClientRect()
+        timeline.scrollTop = centeredConversationFindScrollTop({
+          currentScrollTop: timeline.scrollTop,
+          maximumScrollTop: timeline.scrollHeight - timeline.clientHeight,
+          viewportTop: timelineBounds.top,
+          viewportBottom: timelineBounds.bottom,
+          targetTop: targetBounds.top,
+          targetBottom: targetBounds.bottom,
+          topInset: findSurfaceBounds
+            ? Math.max(0, findSurfaceBounds.bottom - timelineBounds.top + 8)
+            : 0,
+          bottomInset: 12
+        })
+        timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(timeline)
+        timelineReadingPosition.current = {
+          campId,
+          position: {
+            scrollTop: Math.max(0, timeline.scrollTop),
+            followingLatest: false
+          }
+        }
+      }
+      focusConversationFindInput()
+      setConversationFind((current) => current.open && current.query === query
+        ? { ...current, status: 'ready', error: null }
+        : current)
+    } catch {
+      if (conversationFindRequestGeneration.current !== generation) return
+      setConversationFind((current) => current.open && current.query === query
+        ? {
+            ...current,
+            status: 'error',
+            error: '暂时无法搜索完整会话。'
+          }
+        : current)
+    }
+  }, [focusConversationFindInput, snapshot.camp.id])
+
+  const openConversationFind = useCallback((): void => {
+    if (!conversationFind.open) {
+      const timeline = timelineScrollRef.current
+      const storedPosition = timelineReadingPosition.current?.campId === snapshot.camp.id
+        ? timelineReadingPosition.current.position
+        : null
+      const anchor = timeline && !timeline.hidden
+        ? visibleTimelineMessageAnchor(timeline)
+        : timelineVisibleAnchorRef.current
+      timelineVisibleAnchorRef.current = anchor
+      conversationFindRestorePoint.current = {
+        campId: snapshot.camp.id,
+        scrollTop: Math.max(0, timeline?.scrollTop ?? storedPosition?.scrollTop ?? 0),
+        followingLatest: storedPosition?.followingLatest
+          ?? (timeline ? campTimelineIsNearBottom(
+            timeline.scrollTop,
+            timeline.scrollHeight,
+            timeline.clientHeight
+          ) : true),
+        anchor,
+        focusedElement: document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : null
+      }
+      if (timeline) {
+        timelineReadingPosition.current = {
+          campId: snapshot.camp.id,
+          position: { scrollTop: timeline.scrollTop, followingLatest: false }
+        }
+      }
+      setConversationFind((current) => ({
+        ...current,
+        open: true,
+        status: current.query.trim() ? 'searching' : 'idle',
+        snapshot: null,
+        error: null
+      }))
+      setConversationView('conversation')
+    }
+    focusConversationFindInput(true)
+  }, [conversationFind.open, focusConversationFindInput, snapshot.camp.id])
+
+  const closeConversationFind = useCallback((restore = true): void => {
+    conversationFindRequestGeneration.current += 1
+    if (conversationFindDebounceTimer.current !== null) {
+      window.clearTimeout(conversationFindDebounceTimer.current)
+      conversationFindDebounceTimer.current = null
+    }
+    setConversationFind((current) => ({
+      ...current,
+      open: false,
+      status: 'idle',
+      snapshot: null,
+      error: null
+    }))
+    const restorePoint = conversationFindRestorePoint.current
+    conversationFindRestorePoint.current = null
+    if (!restore || restorePoint?.campId !== snapshot.camp.id) return
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const timeline = timelineScrollRef.current
+        if (timeline) {
+          let nextScrollTop = restorePoint.scrollTop
+          const anchor = restorePoint.anchor
+          const anchorNode = anchor
+            ? timeline.querySelector<HTMLElement>(
+                `[data-message-id="${CSS.escape(anchor.messageId)}"]`
+              )
+            : null
+          if (anchorNode && anchor) {
+            const viewport = timeline.getBoundingClientRect()
+            nextScrollTop = timeline.scrollTop
+              + anchorNode.getBoundingClientRect().top
+              - viewport.top
+              - anchor.topOffset
+          }
+          timeline.scrollTop = Math.max(0, nextScrollTop)
+          timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(timeline)
+          timelineReadingPosition.current = {
+            campId: restorePoint.campId,
+            position: {
+              scrollTop: Math.max(0, timeline.scrollTop),
+              followingLatest: restorePoint.followingLatest
+            }
+          }
+        }
+        const previousFocus = restorePoint.focusedElement
+        if (previousFocus?.isConnected && previousFocus.getClientRects().length > 0) {
+          previousFocus.focus({ preventScroll: true })
+        } else {
+          timeline?.focus({ preventScroll: true })
+        }
+      })
+    })
+  }, [snapshot.camp.id])
+
+  const navigateConversationFind = (direction: 1 | -1): void => {
+    const snapshotResult = conversationFind.snapshot
+    const nextIndex = nextConversationFindIndex(
+      snapshotResult?.selectedMatchIndex ?? null,
+      snapshotResult?.totalMatchCount ?? 0,
+      direction
+    )
+    if (nextIndex === null || !conversationFind.query) return
+    const generation = conversationFindRequestGeneration.current + 1
+    conversationFindRequestGeneration.current = generation
+    setConversationFind((current) => ({ ...current, status: 'searching', error: null }))
+    void requestConversationFind(conversationFind.query, nextIndex, null, generation)
+  }
+
+  const retryConversationFind = (): void => {
+    if (!conversationFind.query.trim()) return
+    const generation = conversationFindRequestGeneration.current + 1
+    conversationFindRequestGeneration.current = generation
+    setConversationFind((current) => ({ ...current, status: 'searching', error: null }))
+    void requestConversationFind(
+      conversationFind.query,
+      conversationFind.snapshot?.selectedMatchIndex ?? undefined,
+      conversationFindRestorePoint.current?.anchor?.messageId ?? null,
+      generation
+    )
+  }
+
+  useEffect(() => {
+    if (conversationFindDebounceTimer.current !== null) {
+      window.clearTimeout(conversationFindDebounceTimer.current)
+      conversationFindDebounceTimer.current = null
+    }
+    const generation = conversationFindRequestGeneration.current + 1
+    conversationFindRequestGeneration.current = generation
+    if (!conversationFind.open) return undefined
+    if (!conversationFind.query.trim()) {
+      setConversationFind((current) => ({
+        ...current,
+        status: 'idle',
+        snapshot: null,
+        error: null
+      }))
+      return undefined
+    }
+    if (Array.from(conversationFind.query).length > 512) {
+      setConversationFind((current) => ({
+        ...current,
+        status: 'error',
+        snapshot: null,
+        error: '搜索内容不能超过 512 个字符。'
+      }))
+      return undefined
+    }
+    setConversationFind((current) => ({
+      ...current,
+      status: 'searching',
+      snapshot: null,
+      error: null
+    }))
+    conversationFindDebounceTimer.current = window.setTimeout(() => {
+      conversationFindDebounceTimer.current = null
+      void requestConversationFind(
+        conversationFind.query,
+        undefined,
+        conversationFindRestorePoint.current?.anchor?.messageId ?? null,
+        generation
+      )
+    }, 180)
+    return () => {
+      if (conversationFindDebounceTimer.current !== null) {
+        window.clearTimeout(conversationFindDebounceTimer.current)
+        conversationFindDebounceTimer.current = null
+      }
+    }
+  }, [
+    conversationFind.open,
+    conversationFind.query,
+    requestConversationFind
+  ])
+
+  useEffect(() => {
+    const handleFindShortcut = (event: globalThis.KeyboardEvent): void => {
+      if (
+        event.altKey
+        || (!event.metaKey && !event.ctrlKey)
+        || event.key.toLowerCase() !== 'f'
+      ) return
+      event.preventDefault()
+      openConversationFind()
+    }
+    window.addEventListener('keydown', handleFindShortcut)
+    return () => window.removeEventListener('keydown', handleFindShortcut)
+  }, [openConversationFind])
+
+  useLayoutEffect(() => {
+    const timeline = timelineScrollRef.current
+    if (
+      !timeline
+      || !conversationFind.open
+      || !conversationFind.query
+      || conversationView !== 'conversation'
+    ) return undefined
+    return applyConversationFindHighlights(
+      timeline,
+      conversationFind.query,
+      conversationFind.snapshot?.match?.messageId ?? null,
+      conversationFind.snapshot?.match?.occurrenceIndex ?? null
+    )
+  }, [
+    conversationFind.open,
+    conversationFind.query,
+    conversationFind.snapshot?.match?.messageId,
+    conversationFind.snapshot?.match?.occurrenceIndex,
+    conversationView,
+    visibleCampMessages
+  ])
+
   const syncReplyDraft = (draft: CampComposerDraftView): CampComposerDraftView => {
     applyComposerDraft(draft.campId, draft)
     setMessageContent(draft.content)
@@ -1628,6 +2030,20 @@ export function CampWorkspace({
   useEffect(() => {
     const campId = snapshot.camp.id
     let cancelled = false
+    conversationFindRequestGeneration.current += 1
+    if (conversationFindDebounceTimer.current !== null) {
+      window.clearTimeout(conversationFindDebounceTimer.current)
+      conversationFindDebounceTimer.current = null
+    }
+    conversationFindRestorePoint.current = null
+    timelineVisibleAnchorRef.current = null
+    setConversationFind({
+      open: false,
+      query: '',
+      status: 'idle',
+      snapshot: null,
+      error: null
+    })
     if (campLeaveTimer.current?.campId === campId) {
       window.clearTimeout(campLeaveTimer.current.timer)
       campLeaveTimer.current = null
@@ -1700,17 +2116,29 @@ export function CampWorkspace({
   useEffect(() => {
     const previousCount = previousPendingApprovalCount.current
     previousPendingApprovalCount.current = pendingApprovals.length
+    if (conversationFind.open) return
     if (pendingApprovals.length >= previousCount) return
     if (pendingApprovals.length === 0) {
       composerEditorRef.current?.focus()
     }
-  }, [pendingApprovals.length])
+  }, [conversationFind.open, pendingApprovals.length])
 
   useEffect(() => {
-    if (busy || composerSubmitting || replyRepairRequired || continuationRepairRequired) return
+    if (
+      conversationFindOpenRef.current
+      || busy
+      || composerSubmitting
+      || replyRepairRequired
+      || continuationRepairRequired
+    ) return
     if (approvalDockRef.current?.contains(document.activeElement)) return
     composerEditorRef.current?.focus()
-  }, [busy, composerSubmitting, continuationRepairRequired, replyRepairRequired])
+  }, [
+    busy,
+    composerSubmitting,
+    continuationRepairRequired,
+    replyRepairRequired
+  ])
 
   useEffect(() => {
     if (!notificationFocus?.active || notificationFocus.kind === 'approval') return
@@ -1794,11 +2222,12 @@ export function CampWorkspace({
     campId: string,
     scroll: HTMLElement
   ): void => {
+    timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(scroll)
     timelineReadingPosition.current = {
       campId,
       position: {
         scrollTop: Math.max(0, scroll.scrollTop),
-        followingLatest: campTimelineIsNearBottom(
+        followingLatest: !conversationFind.open && campTimelineIsNearBottom(
           scroll.scrollTop,
           scroll.scrollHeight,
           scroll.clientHeight
@@ -1813,7 +2242,7 @@ export function CampWorkspace({
       const current = timelineReadingPosition.current
       if (current) persistCampTimelineReadingPosition(current.campId, current.position)
     }, 180)
-  }, [])
+  }, [conversationFind.open])
 
   const followTimelineAfterUserSend = useCallback((campId: string): void => {
     const scroll = timelineScrollRef.current
@@ -2427,6 +2856,31 @@ export function CampWorkspace({
     taskCreationActive
   ])
 
+  const conversationFindTotal = conversationFind.snapshot?.totalMatchCount ?? 0
+  const conversationFindSelectedIndex = conversationFind.snapshot?.selectedMatchIndex ?? null
+  const conversationFindBusy = conversationFind.status === 'searching'
+    || conversationFind.status === 'loading_target'
+  const conversationFindCountLabel = conversationFind.snapshot
+    && conversationFindSelectedIndex !== null
+    ? `${conversationFindSelectedIndex + 1} / ${conversationFindTotal}`
+    : conversationFind.status === 'ready' && conversationFind.query.trim()
+      ? '无匹配'
+      : conversationFind.status === 'error'
+        ? '搜索失败'
+        : conversationFind.query.trim()
+          ? '正在查找'
+          : '输入关键词'
+  const conversationFindAnnouncement = conversationFind.error
+    ?? (conversationFindBusy
+      ? '正在查找当前会话'
+      : conversationFind.snapshot && conversationFindSelectedIndex !== null
+        ? `第 ${conversationFindSelectedIndex + 1} 项，共 ${conversationFindTotal} 项`
+        : conversationFind.status === 'ready' && conversationFind.query.trim()
+          ? '当前会话中没有匹配项'
+          : '')
+  const conversationFindNavigationDisabled = conversationFindBusy
+    || conversationFindTotal <= 0
+
   const executionDrawer = executionDrawerProcess ? (
     <ExecutionDrawer
       key={executionDrawerProcess.agentId}
@@ -2461,38 +2915,146 @@ export function CampWorkspace({
           onDragLeave={leaveAttachmentDropSurface}
           onDrop={dropAttachments}
         >
-          <div className="camp-conversation-stage">
-            <div className="camp-conversation-view-controls" role="group" aria-label="会话区视图">
-              <button
-                type="button"
-                aria-pressed={conversationView === 'conversation'}
-                onClick={() => setConversationView('conversation')}
-              >
-                会话
-              </button>
-              <button
-                type="button"
-                aria-pressed={conversationView === 'world'}
-                onClick={() => setConversationView('world')}
-              >
-                地图
-              </button>
-              {conversationView === 'world' && (
-                <button
-                  className="camp-world-map-route-toggle"
-                  type="button"
-                  aria-label={worldMapRoutesVisible ? '隐藏地图路线' : '展示地图路线'}
-                  aria-pressed={worldMapRoutesVisible}
-                  title={worldMapRoutesVisible ? '隐藏路线' : '展示路线'}
-                  onClick={() => setWorldMapRoutesVisible((visible) => !visible)}
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M5 18c2.2-4 3.2-7.4 7-7.4 3.1 0 3.1-4.6 7-4.6" />
-                    <circle cx="5" cy="18" r="1.8" />
-                    <circle cx="19" cy="6" r="1.8" />
-                  </svg>
-                </button>
+          <div className={`camp-conversation-stage ${conversationFind.open ? 'conversation-find-open' : ''}`.trim()}>
+            <div className={`conversation-floating-tools ${conversationFind.open ? 'find-open' : ''}`.trim()}>
+              {conversationFind.open && (
+                <div className="conversation-find-surface" ref={conversationFindSurfaceRef}>
+                  <form
+                    className="conversation-find-form"
+                    role="search"
+                    aria-label="查找当前会话"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      navigateConversationFind(1)
+                    }}
+                  >
+                    <svg className="conversation-find-glyph" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle cx="10.5" cy="10.5" r="5.5" />
+                      <path d="m15 15 4 4" />
+                    </svg>
+                    <input
+                      ref={conversationFindInputRef}
+                      type="text"
+                      value={conversationFind.query}
+                      aria-label="搜索当前会话"
+                      aria-describedby="conversation-find-status"
+                      placeholder="搜索当前会话"
+                      autoComplete="off"
+                      spellCheck={false}
+                      onChange={(event) => {
+                        const nextQuery = event.target.value
+                        setConversationFind((current) => ({
+                          ...current,
+                          query: nextQuery,
+                          status: pendingConversationFindStatus(nextQuery),
+                          snapshot: null,
+                          error: null
+                        }))
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.nativeEvent.isComposing) return
+                        if (event.key === 'Escape') {
+                          event.preventDefault()
+                          closeConversationFind()
+                          return
+                        }
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          navigateConversationFind(event.shiftKey ? -1 : 1)
+                        }
+                      }}
+                    />
+                    <span
+                      className={`conversation-find-count ${conversationFindBusy ? 'busy' : ''}`.trim()}
+                      aria-hidden="true"
+                    >
+                      {conversationFindBusy && <i className="conversation-find-spinner" />}
+                      {conversationFindCountLabel}
+                    </span>
+                    <span className="conversation-find-divider" aria-hidden="true" />
+                    <button
+                      className="conversation-find-icon-button"
+                      type="button"
+                      aria-label="上一个匹配项"
+                      title="上一个匹配项（Shift+Enter）"
+                      disabled={conversationFindNavigationDisabled}
+                      onClick={() => navigateConversationFind(-1)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 14 5-5 5 5" /></svg>
+                    </button>
+                    <button
+                      className="conversation-find-icon-button"
+                      type="button"
+                      aria-label="下一个匹配项"
+                      title="下一个匹配项（Enter）"
+                      disabled={conversationFindNavigationDisabled}
+                      onClick={() => navigateConversationFind(1)}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5" /></svg>
+                    </button>
+                    <button
+                      className="conversation-find-icon-button close"
+                      type="button"
+                      aria-label="关闭会话查找"
+                      title="关闭（Esc）"
+                      onClick={() => closeConversationFind()}
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m7 7 10 10M17 7 7 17" />
+                      </svg>
+                    </button>
+                  </form>
+                  {conversationFind.error && (
+                    <div className="conversation-find-error" role="alert">
+                      <span>{conversationFind.error}</span>
+                      <button type="button" onClick={retryConversationFind}>重试</button>
+                    </div>
+                  )}
+                  <span id="conversation-find-status" className="sr-only" aria-live="polite">
+                    {conversationFindAnnouncement}
+                  </span>
+                </div>
               )}
+              <div className="camp-conversation-view-controls" role="group" aria-label="会话区视图">
+                <button
+                  type="button"
+                  aria-pressed={conversationView === 'conversation'}
+                  onClick={() => setConversationView('conversation')}
+                >
+                  会话
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={conversationView === 'world'}
+                  onClick={(event) => {
+                    const trigger = event.currentTarget
+                    const preserveKeyboardFocus = event.detail === 0
+                    if (conversationFind.open) closeConversationFind(false)
+                    setConversationView('world')
+                    if (preserveKeyboardFocus) {
+                      window.requestAnimationFrame(() => trigger.focus({ preventScroll: true }))
+                    }
+                  }}
+                >
+                  地图
+                </button>
+                {conversationView === 'world' && (
+                  <button
+                    className="camp-world-map-route-toggle"
+                    type="button"
+                    aria-label={worldMapRoutesVisible ? '隐藏地图路线' : '展示地图路线'}
+                    aria-pressed={worldMapRoutesVisible}
+                    title={worldMapRoutesVisible ? '隐藏路线' : '展示路线'}
+                    onClick={() => setWorldMapRoutesVisible((visible) => !visible)}
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 18c2.2-4 3.2-7.4 7-7.4 3.1 0 3.1-4.6 7-4.6" />
+                      <circle cx="5" cy="18" r="1.8" />
+                      <circle cx="19" cy="6" r="1.8" />
+                    </svg>
+                  </button>
+                )}
+              </div>
             </div>
             <div
               className="timeline-scroll camp-timeline"
@@ -2506,7 +3068,7 @@ export function CampWorkspace({
               )}
             >
               <div className="timeline-track">
-              {messageHistory?.hasEarlier && (
+              {!conversationFind.open && messageHistory?.hasEarlier && (
                 <div className="camp-history-loader" role="status" aria-live="polite">
                   <button
                     className="quiet-button compact"
@@ -2521,7 +3083,7 @@ export function CampWorkspace({
                   </span>
                 </div>
               )}
-              {earlierMessageStatus === 'error' && messageHistory?.hasEarlier && (
+              {!conversationFind.open && earlierMessageStatus === 'error' && messageHistory?.hasEarlier && (
                 <div className="camp-history-error" role="alert">
                   <span>较早消息暂时没有加载。</span>
                   <button className="quiet-button compact" type="button" onClick={() => void loadEarlierMessages()}>
@@ -2611,7 +3173,7 @@ export function CampWorkspace({
                   )
                   items.push(
                     <article
-                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}`}
+                      className={`timeline-node conversation-bubble ${campMessage.authorType}${followsSameAuthor ? ' same-author' : ''}${conversationFind.open && conversationFind.snapshot?.match?.messageId === campMessage.id ? ' conversation-find-current-message' : ''}`}
                       key={campMessage.id}
                       data-message-id={campMessage.id}
                       data-camp-turn-id={campMessage.campTurnId ?? sourceRun?.campTurnId}
@@ -5552,8 +6114,6 @@ export function RunExecutionDisclosure({
   const active = executionDisclosureIsLiveOpen(run.status, focused, cancelling)
   const cancellingActive = nonTerminal && cancelling && focused
   const [open, setOpen] = useState(active)
-  const [expandedPayloads, setExpandedPayloads] = useState<Record<string, unknown>>({})
-  const [loadingEvidenceId, setLoadingEvidenceId] = useState<string | null>(null)
   const [historicalEvidence, setHistoricalEvidence] = useState<AgentRunExecutionEvidenceView[] | null>(null)
   const [historyStatus, setHistoryStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle')
   useEffect(() => {
@@ -5577,15 +6137,6 @@ export function RunExecutionDisclosure({
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
-  const visibleToolIds = new Set(processItems.flatMap((item) =>
-    item.kind === 'tool' ? [item.step.id] : []
-  ))
-  const standaloneCompleteEvidence = [
-    ...completeEvidence.unassigned,
-    ...[...completeEvidence.byToolId.entries()].flatMap(([toolId, evidence]) =>
-      visibleToolIds.has(toolId) ? [] : [evidence]
-    )
-  ]
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
   if (!nonTerminal && durableEvidenceCount === 0 && !hasProgress && truncatedEvidence.length === 0 && !showUnsettledWarning) {
@@ -5610,34 +6161,6 @@ export function RunExecutionDisclosure({
       setHistoryStatus('failed')
     }
   }
-
-  const renderCompleteEvidenceControl = (evidence: PresentableExecutionEvidence): JSX.Element => (
-    <div className="complete-evidence-control">
-      <button
-        className="quiet-button compact"
-        type="button"
-        disabled={loadingEvidenceId === evidence.id}
-        onClick={() => {
-          setLoadingEvidenceId(evidence.id)
-          void window.rovai.request<{ payload: unknown }>('agentRunEvidence.getContent', {
-            campId,
-            evidenceId: evidence.id
-          }).then((result) => {
-            setExpandedPayloads((current) => ({
-              ...current,
-              [evidence.id]: result.payload
-            }))
-          }).catch(() => undefined)
-            .finally(() => setLoadingEvidenceId(null))
-        }}
-      >
-        {loadingEvidenceId === evidence.id ? '正在读取…' : `查看完整${evidenceKindLabel(evidence.kind)}`}
-      </button>
-      {Object.prototype.hasOwnProperty.call(expandedPayloads, evidence.id) && (
-        <pre>{JSON.stringify(expandedPayloads[evidence.id], null, 2)}</pre>
-      )}
-    </div>
-  )
 
   const content = (
     <div className="process-content">
@@ -5675,7 +6198,7 @@ export function RunExecutionDisclosure({
         const step = item.step
         const status = activityStatusForAgentRun(step.status, run.status)
         const fullEvidence = completeEvidence.byToolId.get(step.id)
-        const hasDetail = Boolean(step.detail || fullEvidence)
+        const hasDetail = Boolean(step.detail)
         const summary = (
           <>
             <ToolCallIcon activityDomain={step.activityDomain} status={status} />
@@ -5706,7 +6229,6 @@ export function RunExecutionDisclosure({
                 completeEvidence={fullEvidence}
               />
             )}
-            {!step.detail && fullEvidence && renderCompleteEvidenceControl(fullEvidence)}
           </details>
         )
       })}
@@ -5724,11 +6246,6 @@ export function RunExecutionDisclosure({
           </button>
         </div>
       )}
-      {standaloneCompleteEvidence.map((evidence) => (
-        <div className="process-action complete-evidence-standalone" key={evidence.id}>
-          {renderCompleteEvidenceControl(evidence)}
-        </div>
-      ))}
       {nonTerminal && !cancelling && run.waitReason === 'recovery_blocked' && (
         <div className="process-recovery-blocker" role="status">
           <div>
@@ -5946,18 +6463,6 @@ function isPresentableExecutionEvidence(
   evidence: AgentRunExecutionEvidenceView
 ): evidence is PresentableExecutionEvidence {
   return evidence.kind !== 'reasoning_summary'
-}
-
-function evidenceKindLabel(kind: PresentableExecutionEvidence['kind']): string {
-  return ({
-    narration: '进展说明',
-    plan: '计划',
-    step: '步骤',
-    tool_call: '工具调用',
-    tool_result: '工具调用',
-    command: '工具调用',
-    file_change: '文件变更'
-  })[kind]
 }
 
 export function TaskPanel({

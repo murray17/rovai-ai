@@ -93,6 +93,7 @@ pnpm accept:member-avatar-ui
 pnpm accept:member-lifecycle-ui
 pnpm accept:notification-ui
 pnpm accept:sidebar-ui
+pnpm accept:conversation-find-ui
 pnpm accept:composer-skill-picker-ui
 pnpm accept:composer-skill-context
 pnpm accept:structured-mentions-ui
@@ -104,6 +105,7 @@ pnpm accept:onboarding-ui
 
 它们分别覆盖长期记忆、队员头像、队员生命周期、应用内通知、统一侧栏（含 Project/Camp 置顶、
 可恢复 Project 移除、跨重启隐藏、Quick Chat 焦点回退与 Core 数据保留）、结构化提及和
+当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
 Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
 Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
 当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、七个设置页、
@@ -182,7 +184,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v7](../contracts/run-process-detail-surface-v7.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v8](../contracts/run-process-detail-surface-v8.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -226,10 +228,14 @@ pnpm accept:runtime-activity-ui
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致；Claude Bash fixture 必须覆盖 terminal output 为 `null` 的情况，并证明仅凭
   公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。
+- 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
+  Built-in `camp.read/search` fixture 的顶层 `input/output` 为空、公共结果只在 `coreEnvelope.result` 时，
+  两条 Tool 行仍可展开，详情与复制文本不含 Envelope、request/receipt 或 canonical input。
 - 超过 Renderer 预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出只在原 Evidence `pre`
   中保留开头 10 行和明确截断提示；DOM 不包含中段或末尾。右上角只有一个 25px、无边框、具名的
   复制图标；真实点击必须按需读取完整 Evidence、只复制公开输出字段，并证明 8,000 行以上的中段与
-  末尾都进入剪贴板而 Evidence 外层 JSON 不进入。读取成功后图标与可访问名称反馈“已复制完整输出”。
+  末尾都进入剪贴板而 Evidence 外层 JSON 不进入。读取成功后图标与可访问名称反馈“已复制完整输出”；
+  DOM 不存在 standalone“查看完整工具调用”、`.complete-evidence-control` 或 raw Payload 展开面。
 
 ### Task Inspector 门禁
 

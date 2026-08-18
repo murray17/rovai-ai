@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.08
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -11,9 +11,11 @@ last_updated: 2026-08-18
 
 # Rovai-ai v1.08：取消 Run 的活动停止投影
 
-> 当前状态：设计、Renderer Contract、生产实现、隔离 UI 验收与 macOS 打包验证均已完成。
+> 历史状态：设计、Renderer Contract、生产实现、隔离 UI 验收与 macOS 打包验证均已完成。
 >
 > 前置版本：[v1.07 Public-only、A2A 指导与 Principal 投影提案](../v1.07/README.md)
+>
+> 后续版本：[v1.09 完整会话查找、Mode-aware CLI 与 Tool 结果交互](../v1.09/README.md)
 
 ## 版本目标
 
