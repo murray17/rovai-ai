@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.07
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: proposed
 implementation_status: not_started
@@ -11,11 +11,13 @@ last_updated: 2026-08-18
 
 # Rovai-ai v1.07：显式 Public-only、A2A 边指导与 Principal 投影
 
-> 当前状态：[模型上下文变更 revision 1](model-context-change-a2a-public-only.md) 已于
-> `2026-08-18T15:29:27+08:00` 由 `murray17` 二次确认；ADR 与合同仍为 proposal，implementation 仍为
-> `not_started`。本次确认不是开始实现指令，也不表示 Schema、当前 Contract 或版本常量已经改变。
+> 历史状态：[模型上下文变更 revision 1](model-context-change-a2a-public-only.md) 已于
+> `2026-08-18T15:29:27+08:00` 由 `murray17` 二次确认；ADR 与合同仍为 proposal。本版本在实现开始前
+> 冻结为 `historical/not_started`，未修改 Schema、当前 Contract 或版本常量。
 >
 > 前置版本：[v1.06 Camp History Target 与 Public A2A 可见性](../v1.06/README.md)
+>
+> 后续版本：[v1.08 取消 Run 的活动停止投影](../v1.08/README.md)
 
 ## 版本目标
 

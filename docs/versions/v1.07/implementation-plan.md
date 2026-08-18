@@ -6,14 +6,14 @@ status: not_started
 last_updated: 2026-08-18
 ---
 
-# v1.07 实施与验收计划（模型上下文已确认，尚未开始）
+# v1.07 实施与验收计划（模型上下文已确认，未实施即冻结）
 
 ## 计划状态与阻断条件
 
-本计划目前只固定提案范围，不授权实现。[模型上下文变更 revision 1](model-context-change-a2a-public-only.md)
+本计划只固定提案范围，未进入实现。[模型上下文变更 revision 1](model-context-change-a2a-public-only.md)
 已于 `2026-08-18T15:29:27+08:00` 由 `murray17` 二次确认；这只解除模型上下文治理门槛。开发者尚未要求
-开始实现，相关 ADR/Contract 仍未接受，因此 Checkpoint 1 及以后保持未开始；Rust/TypeScript、数据库
-Schema、共享 fixture、当前 Contract 入口与版本常量均不得修改。
+开始该提案实现，相关 ADR/Contract 仍未接受；v1.08 开始时本版本以 `not_started` 冻结，Checkpoint 1
+及以后保持未开始，Rust/TypeScript、数据库 Schema、共享 fixture、当前 Contract 入口与版本常量均未改变。
 
 ## Checkpoint 0：提案与二次确认
 

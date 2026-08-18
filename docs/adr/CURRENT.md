@@ -289,7 +289,7 @@ Related: Runtime Activity 与 Execution Evidence 作为输入，不替代 Qualif
 
 - **何时阅读：** 修改产品身份、Renderer surface、Run detail 或稳定 UI/UX 合同时阅读。
 - **当前架构：** [Diagnostics Center](../architecture/diagnostics-center.md)；其他主题 architecture summary pending
-- **当前合同：** [Run Process Detail Surface v6](../contracts/run-process-detail-surface-v6.md)
+- **当前合同：** [Run Process Detail Surface v7](../contracts/run-process-detail-surface-v7.md)
 
 <!-- adr-current-primary:begin topic=product-renderer -->
 | ADR | Decision |

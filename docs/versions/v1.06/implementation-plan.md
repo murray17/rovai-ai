@@ -76,6 +76,24 @@ Runtime，也不把 v1.05 未完成的 Windows 范围并入验收。
 - 未启动 Desktop、Core 或真实 Runtime；Built-in CLI smoke 的本版变更完成静态语法和确定性 Rust
   回归，未把 v1.05 Windows/Runtime 资格范围混入本版完成证据。
 
+## 完成后补充验收（2026-08-18）
+
+原始完成结论保留上面的“不启动真实 Runtime”边界；后续根据使用反馈扩展既有
+`smoke:builtin-cli` owner，并以 `ROVAI_BUILTIN_CLI_ADAPTERS=codex-cli pnpm smoke:builtin-cli`
+补充执行真实纵向验收：
+
+- 真实 Debug Core IPC 与真实 `rovai` contract-v13/ipc-v1 二进制启动成功；
+- Codex 先导 AgentRun 使用真实 lease/context 执行 `rovai send`，同一消息同时具有
+  `sourceAgentRunId`、`public_a2a` Message Delivery 与 `camp_message.public_a2a_sent` publication；
+- 历史 Camp 另包含一条通过标准附件 prepare/composer/send 路径写入的普通文件附件消息；
+- 另一个 Camp 的 AgentRun Manifest 明确冻结该历史 Camp，并由该 Run 自己的真实 lease/context
+  依次执行 `rovai history search`、显式 `rovai camp search --camp-id` 与
+  `rovai camp read --camp-id --mode item --message-id`；
+- 三段调用命中同一 Public A2A identity，附件 item 返回精确 attachment identity、`kind=file` 与
+  `fileCount=1`；完整十五项、successor new lease、lease fence 与清理均通过；
+- 实测 Runtime 为 `codex-cli 0.147.0`、模型为 `gpt-5.6-sol`；模型只负责执行测试生成的固定脚本，
+  业务结论仍由 Core IPC、CLI JSON、Manifest/Delivery/Event 与持久读取断言拥有。
+
 ## References
 
 - [v1.06 版本概览](README.md)

@@ -62,7 +62,10 @@ const runtimes = [
   runtime('opencode', 'opencode-cli', 'OpenCode', 'read_file', acp('read', 'read_file', 'file', 'file.read')),
   runtime('copilot', 'copilot-cli', 'GitHub Copilot', 'edit_file', acp('edit', 'edit_file', 'file', 'file.write', null)),
   runtime('kiro', 'kiro-cli', 'Kiro', 'execute', acp('execute', 'execute', 'shell', 'shell.execute')),
-  runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', acp('search', 'search_workspace', 'tool', 'tool.web.search')),
+  runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', {
+    ...acp('search', 'search_workspace', 'tool', 'tool.web.search'),
+    cancelledWithInProgressActivity: true
+  }),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
   runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
@@ -844,13 +847,14 @@ async function seedFixture() {
       const active = entry.key === 'codex'
       const recoveryBlocked = entry.key === 'copilot'
       const nonTerminal = active || recoveryBlocked
+      const terminalStatus = entry.cancelledWithInProgressActivity ? 'cancelled' : 'succeeded'
       const updatedAt = `2026-08-05T12:${String(index).padStart(2, '0')}:${active ? '01' : '02'}Z`
       return `(
         ${sqlLiteral(`run-${entry.key}`)}, ${sqlLiteral(`turn-${entry.key}`)},
         ${sqlLiteral(`conversation-${entry.key}`)}, 0, 0,
         ${sqlLiteral(`direct:${entry.agentId}`)}, 'initial',
         ${sqlLiteral(`验证 ${entry.runtimeName} Runtime Activity`)},
-        'required', '{}', ${sqlLiteral(nonTerminal ? 'queued' : 'succeeded')}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
+        'required', '{}', ${sqlLiteral(nonTerminal ? 'queued' : terminalStatus)}, ${sqlLiteral(`runtime-activity-${entry.key}`)},
         1, ${sqlLiteral(`2026-08-05T12:${String(index).padStart(2, '0')}:00Z`)},
         ${sqlNullable(active ? null : `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`)},
         ${sqlNullable(nonTerminal ? null : updatedAt)},
@@ -1454,6 +1458,7 @@ async function seedActivity(entry, index) {
   const runId = `run-${entry.key}`
   const operationId = `operation-${entry.key}`
   const occurredAt = `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`
+  const stoppedProjectionFixture = entry.cancelledWithInProgressActivity === true
   const evidence = entry.key === 'codex'
     ? [{
         id: 'evidence-codex-start', sequence: 1, eventType: 'activity.started', kind: entry.evidenceKind, phase: 'started',
@@ -1463,7 +1468,11 @@ async function seedActivity(entry, index) {
       }]
     : [{
         id: `evidence-${entry.key}`, sequence: 1, eventType: entry.eventType,
-        kind: 'tool_result', phase: 'completed', payload: entry.payload
+        kind: stoppedProjectionFixture ? 'tool_call' : 'tool_result',
+        phase: stoppedProjectionFixture ? 'started' : 'completed',
+        payload: stoppedProjectionFixture
+          ? { ...entry.payload, status: 'in_progress', output: null }
+          : entry.payload
       }]
   const preparedEvidence = []
   for (const item of evidence) {
@@ -1519,7 +1528,9 @@ async function seedActivity(entry, index) {
       ${sqlLiteral(runId)}, 1, ${sqlLiteral(operationId)}, 'activity-v1',
       ${sqlLiteral(entry.domain)}, ${sqlLiteral(entry.semantic)}, ${sqlNullable(toolName)},
       ${sqlLiteral(entry.presentationHint ?? entry.payload.title ?? toolName ?? '工具调用')},
-      'terminal', 'succeeded', ${sqlLiteral(entry.credibility ?? 'runtime_structured')},
+      ${sqlLiteral(stoppedProjectionFixture ? 'progress' : 'terminal')},
+      ${sqlLiteral(stoppedProjectionFixture ? 'unknown' : 'succeeded')},
+      ${sqlLiteral(entry.credibility ?? 'runtime_structured')},
       'fine_grained', ${sqlLiteral(entry.sourceAuthority ?? 'runtime')},
       ${sqlLiteral(JSON.stringify(evidenceIds))}, 1, ${evidence.length},
       ${evidence.length}, ${sqlLiteral(occurredAt)}, ${sqlLiteral(occurredAt)}
@@ -1619,6 +1630,12 @@ async function collectRuntimeRows(cdp) {
           .map((node) => node.textContent?.trim() ?? ''),
         expandableToolTitles: [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure .tool-call-title')]
           .map((node) => node.textContent?.trim() ?? ''),
+        toolResults: [...document.querySelectorAll('.execution-drawer .tool-call-result')].map((node) => ({
+          text: node.textContent?.trim() ?? '',
+          status: [...node.classList].find((name) => name.startsWith('status-'))?.slice(7) ?? null
+        })),
+        toolIconAnimations: [...document.querySelectorAll('.execution-drawer .tool-call-icon')]
+          .map((node) => getComputedStyle(node).animationName),
         toolSourceLabelCount: document.querySelectorAll('.execution-drawer .tool-call-source').length,
         hasVisibleSourceLabel: /Core 已验证|Runtime 报告/.test(
           document.querySelector('.execution-drawer')?.textContent ?? ''
@@ -2282,6 +2299,15 @@ function assertRuntimeRows(observed) {
     }
     assert(row.toolTitles.length === 1 && row.toolTitles[0] === expected.expectedToolName,
       `${expected.runtimeName} tool title mismatch: ${JSON.stringify(row)}`)
+    if (expected.cancelledWithInProgressActivity) {
+      assert(row.focusedStatus === 'cancelled'
+        && row.toolResults.length === 1
+        && row.toolResults[0].text === '已停止'
+        && row.toolResults[0].status === 'stopped'
+        && row.toolIconAnimations.length === 1
+        && row.toolIconAnimations[0] === 'none',
+      `${expected.runtimeName} cancelled Run did not stop its in-progress activity presentation: ${JSON.stringify(row)}`)
+    }
     if (expected.adapterKind === 'copilot-cli') {
       assert(row.staticToolTitles.length === 1
         && row.staticToolTitles[0] === expected.expectedToolName
