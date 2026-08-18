@@ -15,7 +15,7 @@ use crate::{
     camp_attachment::managed_attachment_summary,
     camp_content::{
         StructuredCampMessageContent, mentions_current_user, normalize_content,
-        render_current_plain_text, validate_content,
+        render_agent_plain_text, validate_content,
     },
     camp_message_publication::public_camp_message_publication_cte,
     db::Database,
@@ -920,7 +920,12 @@ fn load_current_body_candidates(
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    body_candidates(rows, query, budget, short)
+    let (mut candidates, mut incomplete) = body_candidates(rows, query, budget, short)?;
+    if query_matches_principal(query) {
+        incomplete |=
+            merge_current_principal_candidates(transaction, fence, query, budget, &mut candidates)?;
+    }
+    Ok((candidates, incomplete))
 }
 
 fn load_history_body_candidates(
@@ -1030,7 +1035,132 @@ fn load_history_body_candidates(
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    body_candidates(rows, query, budget, short)
+    let (mut candidates, mut incomplete) = body_candidates(rows, query, budget, short)?;
+    if query_matches_principal(query) {
+        incomplete |=
+            merge_history_principal_candidates(transaction, scope, query, budget, &mut candidates)?;
+    }
+    Ok((candidates, incomplete))
+}
+
+fn query_matches_principal(query: &str) -> bool {
+    fold_text(query).contains("@principal")
+}
+
+fn merge_current_principal_candidates(
+    transaction: &Transaction<'_>,
+    fence: &RunFence,
+    query: &str,
+    budget: usize,
+    candidates: &mut CandidateMap,
+) -> Result<bool> {
+    let remaining = budget.saturating_sub(candidates.len());
+    if remaining == 0 {
+        return Ok(true);
+    }
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT message.id, message.camp_id, message.sequence,
+               message.author_type, message.author_id,
+               message.reply_to_camp_message_id, message.body,
+               message.created_at, message.sequence, NULL
+        FROM camp_message AS message
+        WHERE message.camp_id = ?1
+          AND message.sequence <= ?2
+          AND message.tombstoned_at IS NULL
+          AND EXISTS (
+              SELECT 1 FROM json_each(message.structured_content_json) AS segment
+              WHERE json_extract(segment.value, '$.kind') = 'current_user_mention'
+                AND json_extract(segment.value, '$.userId') = 'local_user'
+          )
+        ORDER BY message.sequence DESC, message.id
+        LIMIT ?3
+        "#,
+    )?;
+    let mut rows = statement
+        .query_map(
+            params![
+                fence.current_camp_id,
+                fence.current_boundary,
+                (remaining + 1) as i64,
+            ],
+            message_search_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let incomplete = rows.len() > remaining;
+    rows.truncate(remaining);
+    merge_body_rows(candidates, rows, query);
+    Ok(incomplete)
+}
+
+fn merge_history_principal_candidates(
+    transaction: &Transaction<'_>,
+    scope: &HistorySearchScope<'_>,
+    query: &str,
+    budget: usize,
+    candidates: &mut CandidateMap,
+) -> Result<bool> {
+    let remaining = budget.saturating_sub(candidates.len());
+    if remaining == 0 {
+        return Ok(true);
+    }
+    let publication_cte = public_camp_message_publication_cte();
+    let sql = format!(
+        r#"
+        WITH {publication_cte}
+        SELECT message.id, message.camp_id, message.sequence,
+               message.author_type, message.author_id,
+               message.reply_to_camp_message_id, message.body,
+               message.created_at, publication.global_sequence, snapshot.camp_title
+        FROM context_manifest_history_camp AS snapshot
+        JOIN camp ON camp.id = snapshot.camp_id
+        JOIN camp_member
+          ON camp_member.camp_id = camp.id
+         AND camp_member.agent_id = ?2
+        JOIN agent_profile ON agent_profile.id = camp_member.agent_id
+        JOIN camp_message AS message ON message.camp_id = snapshot.camp_id
+        JOIN public_camp_message_publication AS publication
+          ON publication.message_id = message.id
+        WHERE snapshot.context_manifest_id = ?1
+          AND camp_member.status = 'active'
+          AND camp_member.leave_requested_at IS NULL
+          AND agent_profile.profile_status = 'present'
+          AND publication.global_sequence <= ?3
+          AND message.tombstoned_at IS NULL
+          AND message.camp_id IN (SELECT value FROM json_each(?4))
+          AND (?5 IS NULL OR julianday(message.created_at) >= julianday(?5))
+          AND (?6 IS NULL OR julianday(message.created_at) < julianday(?6))
+          AND EXISTS (
+              SELECT 1 FROM json_each(message.structured_content_json) AS segment
+              WHERE json_extract(segment.value, '$.kind') = 'current_user_mention'
+                AND json_extract(segment.value, '$.userId') = 'local_user'
+          )
+        ORDER BY publication.global_sequence DESC, message.camp_id, message.id
+        LIMIT ?7
+        "#,
+    );
+    let mut statement = transaction.prepare(&sql)?;
+    let camp_ids = serde_json::to_string(scope.camp_ids)?;
+    let from = scope.dates.lower_bound_parameter();
+    let to = scope.dates.upper_bound_parameter();
+    let mut rows = statement
+        .query_map(
+            params![
+                scope.fence.manifest_id,
+                scope.run.agent_id,
+                scope.fence.global_boundary,
+                camp_ids,
+                from,
+                to,
+                (remaining + 1) as i64,
+            ],
+            message_search_row,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let incomplete = rows.len() > remaining;
+    rows.truncate(remaining);
+    merge_body_rows(candidates, rows, query);
+    Ok(incomplete)
 }
 
 fn body_candidates(
@@ -1188,6 +1318,15 @@ fn merge_reference_rows(candidates: &mut CandidateMap, rows: Vec<MessageRow>, qu
     }
 }
 
+fn merge_body_rows(candidates: &mut CandidateMap, rows: Vec<MessageRow>, query: &str) {
+    for row in rows {
+        let key = (row.camp_id.clone(), row.id.clone());
+        candidates
+            .entry(key)
+            .or_insert_with(|| rank_message(row, query, false));
+    }
+}
+
 fn reproject_search_candidates(
     transaction: &Transaction<'_>,
     query: &str,
@@ -1201,6 +1340,7 @@ fn reproject_search_candidates(
         candidate.first_match_offset = first_match_offset;
         candidate.body_length = candidate.message.body.chars().count();
     }
+    candidates.retain(|_, candidate| candidate.exact_reference || candidate.occurrence_count > 0);
     Ok(())
 }
 
@@ -1737,7 +1877,7 @@ fn projected_message_body(transaction: &Transaction<'_>, message_id: &str) -> Re
         &content_json,
     )?);
     validate_content(&content)?;
-    render_current_plain_text(transaction, &content)
+    render_agent_plain_text(transaction, &content)
 }
 
 fn load_relative_messages(
@@ -2231,7 +2371,35 @@ mod slow_tests {
         )]);
         reproject_search_candidates(&transaction, "authoritative", &mut candidates).unwrap();
         let search = ranked_search_response(candidates, "authoritative", 10, false, false).unwrap();
-        assert_eq!(search["results"][0]["snippet"], "@你 authoritative body");
+        assert_eq!(
+            search["results"][0]["snippet"],
+            "@Principal authoritative body"
+        );
+
+        let mut principal_candidates = CandidateMap::new();
+        assert!(
+            !merge_current_principal_candidates(
+                &transaction,
+                &RunFence {
+                    manifest_id: "manifest-1".to_string(),
+                    current_camp_id: "camp-1".to_string(),
+                    current_boundary: 1,
+                    global_boundary: 1,
+                },
+                "@Principal",
+                8,
+                &mut principal_candidates,
+            )
+            .unwrap()
+        );
+        reproject_search_candidates(&transaction, "@Principal", &mut principal_candidates).unwrap();
+        let principal_search =
+            ranked_search_response(principal_candidates, "@Principal", 10, false, false).unwrap();
+        assert_eq!(principal_search["results"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            principal_search["results"][0]["snippet"],
+            "@Principal authoritative body"
+        );
 
         let rows = load_ordered_messages(
             &transaction,
@@ -2246,7 +2414,7 @@ mod slow_tests {
             None,
         )
         .unwrap();
-        assert_eq!(rows[0].body, "@你 authoritative body");
+        assert_eq!(rows[0].body, "@Principal authoritative body");
     }
 
     #[test]

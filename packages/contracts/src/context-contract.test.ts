@@ -1,16 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import fixture from '../fixtures/agent-run-context-v18.json'
+import fixture from '../fixtures/agent-run-context-v19.json'
 import type { ContextManifestView } from './index'
 
 describe('AgentRun context contract', () => {
-  it('uses the shared frozen v18 fixture', () => {
-    const formatterVersion: ContextManifestView['formatterVersion'] = 18
+  it('uses the shared frozen v19 fixture', () => {
+    const formatterVersion: ContextManifestView['formatterVersion'] = 19
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextDeliveryProfileVersion).toBe(3)
-    expect(fixture.contextManifestVersion).toBe(16)
+    expect(fixture.contextManifestVersion).toBe(17)
+    expect(fixture.messageProjectionAudience).toBe('agent_v1')
+    expect(fixture.dynamicContextSectionOrder.slice(-2)).toEqual(['A2A_GUIDANCE?', 'CURRENT_INPUT'])
     expect(fixture.dynamicContextSectionOrder.at(-1)).toBe('CURRENT_INPUT')
+    expect(fixture.a2aGuidance).toMatchObject({
+      evidenceSchemaVersion: 1,
+      omittedEvidence: { schemaVersion: 1, included: false },
+    })
     expect(fixture.collaborationState).toEqual({
       schemaVersion: 2,
       peerFields: ['agentId', 'name', 'teamRole', 'professionalResponsibilities'],
@@ -29,7 +35,8 @@ describe('AgentRun context contract', () => {
         senderName: 'Source Agent',
       },
       gatherCompletion: {
-        schemaVersion: 2,
+        schemaVersion: 3,
+        messageProjectionAudience: 'agent_v1',
         source: { type: 'gather_completed' },
         gatherId: 'gather-id',
         commandId: 'command-id',
@@ -38,6 +45,7 @@ describe('AgentRun context contract', () => {
           messageId: 'message-id',
           body: 'Original Gather request',
           contentDigest: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          projectedBodyDigest: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
         },
         items: [],
       },
