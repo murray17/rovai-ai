@@ -1040,15 +1040,7 @@ impl ReadModelService {
         selected_match_index: Option<i64>,
         anchor_message_id: Option<&str>,
     ) -> Result<CampMessageFindSnapshot> {
-        let query_scalar_count = query.chars().count();
-        if query.trim().is_empty() {
-            anyhow::bail!("Camp Message find query must not be blank");
-        }
-        if query_scalar_count > CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS {
-            anyhow::bail!(
-                "Camp Message find query must not exceed {CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS} Unicode scalars"
-            );
-        }
+        validate_camp_message_find_query(query)?;
 
         let transaction = database.connection_mut().transaction()?;
         let through_global_sequence = current_global_sequence(&transaction)?;
@@ -1090,47 +1082,24 @@ impl ReadModelService {
             .collect::<rusqlite::Result<Vec<_>>>()?;
         drop(statement);
 
-        let mut matches = Vec::<CampMessageFindMatch>::new();
+        let mut candidates = Vec::<CampMessageFindCandidate>::new();
         for (message_id, message_sequence, structured_content_json) in rows {
             let content =
                 serde_json::from_str::<StructuredCampMessageContent>(&structured_content_json)
                     .map(normalize_content)
                     .context("CampMessage Structured Content is invalid")?;
             let body = render_structured_message_content(&transaction, &content)?;
-            for (occurrence_index, (start_offset, end_offset)) in
-                case_insensitive_scalar_match_ranges(&body, query)
-                    .into_iter()
-                    .enumerate()
-            {
-                matches.push(CampMessageFindMatch {
-                    message_id: message_id.clone(),
-                    message_sequence,
-                    occurrence_index: occurrence_index as i64,
-                    start_offset: start_offset as i64,
-                    end_offset: end_offset as i64,
-                });
-            }
+            candidates.push(CampMessageFindCandidate {
+                message_id,
+                message_sequence,
+                body,
+            });
         }
 
+        let matches = flatten_camp_message_find_matches(candidates, query);
         let total_match_count = matches.len() as i64;
-        let normalized_selected_index = if total_match_count == 0 {
-            None
-        } else if let Some(index) = selected_match_index {
-            Some(index.rem_euclid(total_match_count))
-        } else {
-            Some(
-                anchor_sequence
-                    .and_then(|sequence| {
-                        matches
-                            .iter()
-                            .position(|candidate| candidate.message_sequence >= sequence)
-                    })
-                    .unwrap_or(0) as i64,
-            )
-        };
-        let selected_match = normalized_selected_index
-            .and_then(|index| matches.get(index as usize))
-            .cloned();
+        let (normalized_selected_index, selected_match) =
+            select_camp_message_find_match(&matches, selected_match_index, anchor_sequence);
         transaction.commit()?;
 
         Ok(CampMessageFindSnapshot {
@@ -2016,19 +1985,31 @@ fn render_structured_message_content(
     render_current_plain_text(transaction, content)
 }
 
-fn case_insensitive_scalar_match_ranges(value: &str, query: &str) -> Vec<(usize, usize)> {
-    fn fold_with_source_offsets(value: &str) -> (Vec<char>, Vec<usize>) {
-        let mut folded = Vec::new();
-        let mut source_offsets = Vec::new();
-        for (source_offset, character) in value.chars().enumerate() {
-            for folded_character in character.to_lowercase() {
-                folded.push(folded_character);
-                source_offsets.push(source_offset);
-            }
-        }
-        (folded, source_offsets)
+fn validate_camp_message_find_query(query: &str) -> Result<()> {
+    if query.trim().is_empty() {
+        anyhow::bail!("Camp Message find query must not be blank");
     }
+    if query.chars().count() > CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS {
+        anyhow::bail!(
+            "Camp Message find query must not exceed {CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS} Unicode scalars"
+        );
+    }
+    Ok(())
+}
 
+fn fold_with_source_offsets(value: &str) -> (Vec<char>, Vec<usize>) {
+    let mut folded = Vec::new();
+    let mut source_offsets = Vec::new();
+    for (source_offset, character) in value.chars().enumerate() {
+        for folded_character in character.to_lowercase() {
+            folded.push(folded_character);
+            source_offsets.push(source_offset);
+        }
+    }
+    (folded, source_offsets)
+}
+
+fn case_insensitive_scalar_match_ranges(value: &str, query: &str) -> Vec<(usize, usize)> {
     let (folded_value, source_offsets) = fold_with_source_offsets(value);
     let (folded_query, _) = fold_with_source_offsets(query);
     if folded_query.is_empty() || folded_query.len() > folded_value.len() {
@@ -2054,6 +2035,67 @@ fn case_insensitive_scalar_match_ranges(value: &str, query: &str) -> Vec<(usize,
         }
     }
     ranges
+}
+
+struct CampMessageFindCandidate {
+    message_id: String,
+    message_sequence: i64,
+    body: String,
+}
+
+fn flatten_camp_message_find_matches(
+    mut candidates: Vec<CampMessageFindCandidate>,
+    query: &str,
+) -> Vec<CampMessageFindMatch> {
+    candidates.sort_by(|left, right| {
+        left.message_sequence
+            .cmp(&right.message_sequence)
+            .then_with(|| left.message_id.cmp(&right.message_id))
+    });
+    candidates
+        .into_iter()
+        .flat_map(|candidate| {
+            case_insensitive_scalar_match_ranges(&candidate.body, query)
+                .into_iter()
+                .enumerate()
+                .map(
+                    move |(occurrence_index, (start_offset, end_offset))| CampMessageFindMatch {
+                        message_id: candidate.message_id.clone(),
+                        message_sequence: candidate.message_sequence,
+                        occurrence_index: occurrence_index as i64,
+                        start_offset: start_offset as i64,
+                        end_offset: end_offset as i64,
+                    },
+                )
+        })
+        .collect()
+}
+
+fn select_camp_message_find_match(
+    matches: &[CampMessageFindMatch],
+    requested_index: Option<i64>,
+    anchor_sequence: Option<i64>,
+) -> (Option<i64>, Option<CampMessageFindMatch>) {
+    let total_match_count = matches.len() as i64;
+    let selected_index = if total_match_count == 0 {
+        None
+    } else if let Some(index) = requested_index {
+        Some(index.rem_euclid(total_match_count))
+    } else {
+        Some(
+            anchor_sequence
+                .and_then(|sequence| {
+                    matches
+                        .iter()
+                        .position(|candidate| candidate.message_sequence >= sequence)
+                })
+                .unwrap_or(0) as i64,
+        )
+    };
+    let selected_match = selected_index
+        .and_then(|index| matches.get(index as usize))
+        .cloned();
+    (selected_index, selected_match)
 }
 
 fn load_turns(
@@ -3166,7 +3208,11 @@ fn load_events(
 
 #[cfg(test)]
 mod tests {
-    use super::case_insensitive_scalar_match_ranges;
+    use super::{
+        CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS, CampMessageFindCandidate,
+        case_insensitive_scalar_match_ranges, flatten_camp_message_find_matches,
+        select_camp_message_find_match, validate_camp_message_find_query,
+    };
 
     #[test]
     fn conversation_find_ranges_are_case_insensitive_non_overlapping_unicode_scalars() {
@@ -3182,6 +3228,64 @@ mod tests {
             case_insensitive_scalar_match_ranges("aaaa", "aa"),
             vec![(0, 2), (2, 4)]
         );
+    }
+
+    #[test]
+    fn conversation_find_flattens_orders_selects_and_wraps_without_a_database() {
+        let matches = flatten_camp_message_find_matches(
+            vec![
+                CampMessageFindCandidate {
+                    message_id: "later".to_string(),
+                    message_sequence: 2,
+                    body: "NEEDLE late".to_string(),
+                },
+                CampMessageFindCandidate {
+                    message_id: "first".to_string(),
+                    message_sequence: 1,
+                    body: "Needle 中 needle".to_string(),
+                },
+            ],
+            "needle",
+        );
+        assert_eq!(
+            matches
+                .iter()
+                .map(|item| (
+                    item.message_id.as_str(),
+                    item.occurrence_index,
+                    item.start_offset,
+                    item.end_offset,
+                ))
+                .collect::<Vec<_>>(),
+            vec![("first", 0, 0, 6), ("first", 1, 9, 15), ("later", 0, 0, 6),]
+        );
+
+        for (requested, anchor, expected_index, expected_message) in [
+            (Some(0), None, Some(0), Some("first")),
+            (Some(-1), None, Some(2), Some("later")),
+            (Some(4), None, Some(1), Some("first")),
+            (None, Some(2), Some(2), Some("later")),
+            (None, Some(3), Some(0), Some("first")),
+        ] {
+            let (selected_index, selected) =
+                select_camp_message_find_match(&matches, requested, anchor);
+            assert_eq!(selected_index, expected_index);
+            assert_eq!(
+                selected.as_ref().map(|item| item.message_id.as_str()),
+                expected_message
+            );
+        }
+        assert_eq!(
+            select_camp_message_find_match(&[], None, None),
+            (None, None)
+        );
+
+        assert!(validate_camp_message_find_query("  ").is_err());
+        assert!(
+            validate_camp_message_find_query(&"中".repeat(CAMP_MESSAGE_FIND_QUERY_MAX_SCALARS + 1))
+                .is_err()
+        );
+        assert!(validate_camp_message_find_query("中").is_ok());
     }
 }
 
@@ -3650,12 +3754,8 @@ mod slow_tests {
     }
 
     #[test]
-    fn conversation_find_counts_public_body_occurrences_and_selects_a_bounded_target() {
-        let directory = std::env::temp_dir().join(format!(
-            "rovai-read-model-conversation-find-{}",
-            Uuid::new_v4()
-        ));
-        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+    fn conversation_find_projects_only_current_camp_public_human_bodies() {
+        let (mut database, directory) = crate::test_support::fresh_schema_database_fast();
         let collaboration = CollaborationService::default();
         let created = collaboration
             .create_camp(
@@ -3673,6 +3773,22 @@ mod slow_tests {
             .as_str()
             .unwrap()
             .to_string();
+        let other = collaboration
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "create-other-conversation-find-camp",
+                    None,
+                    CreateCampCommand::for_test(
+                        directory
+                            .join("other-workspace")
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
+                ),
+            )
+            .unwrap();
+        let other_camp_id = other.result.payload["campId"].as_str().unwrap();
         let transaction = database.connection_mut().transaction().unwrap();
         {
             let mut statement = transaction
@@ -3691,9 +3807,10 @@ mod slow_tests {
                     "#,
                 )
                 .unwrap();
-            for (id, sequence, author_type, author_id, body, tombstoned_at) in [
+            for (id, message_camp_id, sequence, author_type, author_id, body, tombstoned_at) in [
                 (
                     "find-message-1",
+                    camp_id.as_str(),
                     1,
                     "user",
                     "local_user",
@@ -3702,6 +3819,7 @@ mod slow_tests {
                 ),
                 (
                     "find-message-2",
+                    camp_id.as_str(),
                     2,
                     "system",
                     "system",
@@ -3710,6 +3828,7 @@ mod slow_tests {
                 ),
                 (
                     "find-message-3",
+                    camp_id.as_str(),
                     3,
                     "agent",
                     "agent-test",
@@ -3718,6 +3837,7 @@ mod slow_tests {
                 ),
                 (
                     "find-message-4",
+                    camp_id.as_str(),
                     4,
                     "user",
                     "local_user",
@@ -3726,6 +3846,7 @@ mod slow_tests {
                 ),
                 (
                     "find-message-5",
+                    camp_id.as_str(),
                     5,
                     "user",
                     "local_user",
@@ -3734,11 +3855,21 @@ mod slow_tests {
                 ),
                 (
                     "find-message-6",
+                    camp_id.as_str(),
                     6,
                     "user",
                     "local_user",
                     "needle tombstoned",
                     Some("2026-08-18T01:00:00Z"),
+                ),
+                (
+                    "find-other-camp-message",
+                    other_camp_id,
+                    1,
+                    "user",
+                    "local_user",
+                    "needle hidden other camp",
+                    None,
                 ),
             ] {
                 let content = serde_json::to_string(&vec![Segment::Text {
@@ -3748,7 +3879,7 @@ mod slow_tests {
                 statement
                     .execute(params![
                         id,
-                        camp_id,
+                        message_camp_id,
                         sequence,
                         author_type,
                         author_id,
@@ -3804,15 +3935,105 @@ mod slow_tests {
             })
         );
 
-        let wrapped = read_model
-            .camp_messages_find(&mut database, &camp_id, "NEEDLE", Some(-1), None)
+        let selected = (0..anchored.total_match_count)
+            .map(|index| {
+                read_model
+                    .camp_messages_find(&mut database, &camp_id, "needle", Some(index), None)
+                    .unwrap()
+                    .r#match
+                    .unwrap()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selected
+                .iter()
+                .map(|item| (item.message_id.as_str(), item.occurrence_index))
+                .collect::<Vec<_>>(),
+            vec![
+                ("find-message-1", 0),
+                ("find-message-1", 1),
+                ("find-message-3", 0),
+                ("find-message-5", 0),
+            ]
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn conversation_find_returns_one_selected_match_from_the_transactional_high_water() {
+        let (mut database, directory) = crate::test_support::fresh_schema_database_fast();
+        let created = CollaborationService::default()
+            .create_camp(
+                &mut database,
+                &user_envelope(
+                    "create-find-snapshot-camp",
+                    None,
+                    CreateCampCommand::for_test(
+                        directory.join("workspace").to_string_lossy().to_string(),
+                    ),
+                ),
+            )
             .unwrap();
-        assert_eq!(wrapped.selected_match_index, Some(3));
-        assert_eq!(wrapped.r#match.unwrap().message_id, "find-message-5");
-        assert!(
-            read_model
-                .camp_messages_find(&mut database, &camp_id, "  ", None, None)
-                .is_err()
+        let camp_id = created.result.payload["campId"].as_str().unwrap();
+        let expected_high_water: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COALESCE(MAX(global_sequence), 0) FROM event_log",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        for (id, sequence, body) in [
+            ("find-snapshot-1", 1, "needle first needle"),
+            ("find-snapshot-2", 2, "final needle"),
+        ] {
+            let content = serde_json::to_string(&vec![Segment::Text {
+                text: body.to_string(),
+            }])
+            .unwrap();
+            transaction
+                .execute(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id, body,
+                        structured_content_json, content_digest, address_mode,
+                        addressed_agent_ids_json, version, created_at, updated_at
+                    ) VALUES (
+                        ?1, ?2, ?3, 'user', 'local_user', ?4,
+                        ?5, ?6, 'default', '[]', 1,
+                        '2026-08-18T00:00:00Z', '2026-08-18T00:00:00Z'
+                    )
+                    "#,
+                    params![id, camp_id, sequence, body, content, format!("sha256:{id}")],
+                )
+                .unwrap();
+        }
+        transaction.commit().unwrap();
+
+        let snapshot = ReadModelService
+            .camp_messages_find(
+                &mut database,
+                camp_id,
+                "needle",
+                None,
+                Some("find-snapshot-2"),
+            )
+            .unwrap();
+        assert_eq!(snapshot.through_global_sequence, expected_high_water);
+        assert_eq!(snapshot.total_match_count, 3);
+        assert_eq!(snapshot.selected_match_index, Some(2));
+        assert_eq!(
+            snapshot.r#match,
+            Some(CampMessageFindMatch {
+                message_id: "find-snapshot-2".to_string(),
+                message_sequence: 2,
+                occurrence_index: 0,
+                start_offset: 6,
+                end_offset: 12,
+            })
         );
 
         drop(database);
