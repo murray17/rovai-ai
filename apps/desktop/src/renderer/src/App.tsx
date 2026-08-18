@@ -116,10 +116,15 @@ type LoadState = 'loading' | 'ready' | 'error'
 type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
 export type SettingsSection = NavigationSettingsSection
-export type WindowDragStripPage = Extract<View, 'compose' | 'settings'>
+export type WindowDragStripPage = Extract<View, 'compose' | 'members' | 'memory' | 'settings'>
 
 export function windowDragStripPage(view: View): WindowDragStripPage | null {
-  return view === 'compose' || view === 'settings' ? view : null
+  return view === 'compose'
+    || view === 'members'
+    || view === 'memory'
+    || view === 'settings'
+    ? view
+    : null
 }
 
 export function startupGateShouldBeVisible(

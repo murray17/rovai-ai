@@ -1120,17 +1120,27 @@ describe('task event projections', () => {
     const settingsStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
       page: 'settings'
     }))
+    const membersStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'members'
+    }))
+    const memoryStrip = renderToStaticMarkup(createElement(WindowDragStrip, {
+      page: 'memory'
+    }))
     expect(composeStrip).toContain('window-drag-strip-compose')
     expect(settingsStrip).toContain('window-drag-strip-settings')
+    expect(membersStrip).toContain('window-drag-strip-members')
+    expect(memoryStrip).toContain('window-drag-strip-memory')
     expect(composeStrip).toContain('aria-hidden="true"')
     expect(settingsStrip).toContain('aria-hidden="true"')
+    expect(membersStrip).toContain('aria-hidden="true"')
+    expect(memoryStrip).toContain('aria-hidden="true"')
     expect(composeStrip).not.toContain('快速对话')
     expect(settingsStrip).not.toContain('设置')
     expect(windowDragStripPage('compose')).toBe('compose')
     expect(windowDragStripPage('settings')).toBe('settings')
+    expect(windowDragStripPage('members')).toBe('members')
+    expect(windowDragStripPage('memory')).toBe('memory')
     expect(windowDragStripPage('camp')).toBeNull()
-    expect(windowDragStripPage('members')).toBeNull()
-    expect(windowDragStripPage('memory')).toBeNull()
   })
 
   it('only acknowledges a Camp as viewed while that exact conversation is visible', () => {

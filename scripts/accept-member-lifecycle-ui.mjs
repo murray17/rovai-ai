@@ -147,10 +147,19 @@ try {
 
   await openMembers(running.cdp)
   const memberWorkbenchStructure = await evaluate(running.cdp, `({
-    hasBlankDragStrip: Boolean(document.querySelector('.window-drag-strip-members')),
+    hasWindowDragStrip: Boolean(document.querySelector('.window-drag-strip-members')),
+    dragStripTop: document.querySelector('.window-drag-strip-members')?.getBoundingClientRect().top,
+    dragStripLeft: document.querySelector('.window-drag-strip-members')?.getBoundingClientRect().left,
+    dragStripWidth: document.querySelector('.window-drag-strip-members')?.getBoundingClientRect().width,
+    dragStripHeight: document.querySelector('.window-drag-strip-members')?.getBoundingClientRect().height,
+    dragStripRegion: getComputedStyle(document.querySelector('.window-drag-strip-members'))
+      .getPropertyValue('-webkit-app-region'),
     contentTop: document.querySelector('.content.members-content')?.getBoundingClientRect().top,
+    contentWidth: document.querySelector('.content.members-content')?.getBoundingClientRect().width,
     workspaceTop: document.querySelector('.members-workspace')?.getBoundingClientRect().top,
     headerTop: document.querySelector('.member-detail-header')?.getBoundingClientRect().top,
+    headerRegion: getComputedStyle(document.querySelector('.member-detail-header'))
+      .getPropertyValue('-webkit-app-region'),
     workspaceTopBorder: getComputedStyle(document.querySelector('.members-view')).borderTopWidth,
     sidebarWidth: document.querySelector('.unified-sidebar')?.getBoundingClientRect().width,
     hasRoster: Boolean(document.querySelector('.member-sidebar')),
@@ -160,6 +169,18 @@ try {
     detailBackgroundImage: getComputedStyle(document.querySelector('.members-view')).backgroundImage,
     hasProjectNavigation: Boolean(document.querySelector('.navigation-projects')),
     duplicateRoster: Boolean(document.querySelector('.member-list, .member-workbench')),
+    sidebarActionClickable: (() => {
+      const target = document.querySelector('.member-sidebar-actions button')
+      const bounds = target?.getBoundingClientRect()
+      const hit = bounds ? document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2) : null
+      return Boolean(target && hit && (hit === target || target.contains(hit)))
+    })(),
+    detailActionClickable: (() => {
+      const target = document.querySelector('.member-detail-actions button, .member-detail-actions summary')
+      const bounds = target?.getBoundingClientRect()
+      const hit = bounds ? document.elementFromPoint(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2) : null
+      return Boolean(target && hit && (hit === target || target.contains(hit)))
+    })(),
     tabs: [...document.querySelectorAll('.member-tabs [role="tab"]')]
       .map((tab) => tab.textContent?.trim()),
     initialMember: document.querySelector('.member-detail-heading h1')?.textContent,
@@ -180,10 +201,16 @@ try {
     })()
   })`)
   assert(
-    !memberWorkbenchStructure.hasBlankDragStrip
+    memberWorkbenchStructure.hasWindowDragStrip
+      && Math.abs(memberWorkbenchStructure.dragStripTop) <= 0.5
+      && Math.abs(memberWorkbenchStructure.dragStripLeft - 270) <= 0.5
+      && Math.abs(memberWorkbenchStructure.dragStripWidth - memberWorkbenchStructure.contentWidth) <= 0.5
+      && Math.abs(memberWorkbenchStructure.dragStripHeight - 50) <= 0.5
+      && memberWorkbenchStructure.dragStripRegion === 'drag'
       && Math.abs(memberWorkbenchStructure.contentTop) <= 0.5
       && Math.abs(memberWorkbenchStructure.workspaceTop) <= 0.5
       && Math.abs(memberWorkbenchStructure.headerTop - 30) <= 0.75
+      && memberWorkbenchStructure.headerRegion !== 'drag'
       && memberWorkbenchStructure.workspaceTopBorder === '0px'
       && memberWorkbenchStructure.sidebarWidth === 270
       && memberWorkbenchStructure.hasRoster
@@ -192,6 +219,8 @@ try {
       && memberWorkbenchStructure.detailBackgroundImage === 'none'
       && memberWorkbenchStructure.hasProjectNavigation
       && !memberWorkbenchStructure.duplicateRoster
+      && memberWorkbenchStructure.sidebarActionClickable
+      && memberWorkbenchStructure.detailActionClickable
       && JSON.stringify(memberWorkbenchStructure.tabs) === JSON.stringify(['身份', '运行配置'])
       && memberWorkbenchStructure.initialMember === '叮叮'
       && memberWorkbenchStructure.headerControls.presenceHeight < 20
@@ -1113,7 +1142,7 @@ try {
       compactRuntimeShortcutSymbols: true,
       settingsRoundTripPreservesMemberSelection: true,
       longCampTitleEllipsisInGlobalNavigation: true,
-      fullHeightP2HeaderWithoutBlankDragStrip: true,
+      sharedFullWidthWindowDragStrip: true,
       campComposerMentionMenuVisibleAndKeyboardSelectable: true,
       inlineHeaderStatusAndRuntimeArrow: true,
       manualMemberTabsArrowHomeEndKeyboard: true,
