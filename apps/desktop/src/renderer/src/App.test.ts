@@ -1910,8 +1910,9 @@ describe('task event projections', () => {
     expect(markup).toContain('配置洛可的 Agent 运行时')
     expect(markup.indexOf('class="runtime-recovery-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
     expect(markup).toMatch(
-      /<div class="composer-actions"><span class="composer-hint">Enter<\/span><button class="primary-button composer-send"/
+      /<div class="composer-actions"><span class="composer-hint"><span class="sr-only">Enter 发送，Shift\+Enter 换行<\/span><span class="composer-hint-visual" aria-hidden="true"><kbd>↵<\/kbd><span>发送<\/span><span class="composer-hint-separator">·<\/span><kbd>⇧↵<\/kbd><span>换行<\/span><\/span><\/span><button class="primary-button composer-send"/
     )
+    expect(markup).not.toContain('<span class="composer-hint">Enter</span>')
     expect(markup).not.toContain('agent_run.runtime_not_ready')
     expect(markup).not.toContain('agent_1')
     expect(markup).not.toContain('Runtime')

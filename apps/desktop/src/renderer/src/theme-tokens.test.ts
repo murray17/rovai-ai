@@ -295,7 +295,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.composer-action-row\s*\{[^}]*justify-content:\s*space-between/)
     expect(css).toMatch(/\.composer-tools, \.composer-actions\s*\{[^}]*gap:\s*5px/)
     expect(css).toMatch(/\.composer-attachment-button\s*\{[^}]*width:\s*28px[^}]*height:\s*28px/)
-    expect(css).toMatch(/\.composer-hint\s*\{[^}]*border:\s*1px solid var\(--line\)[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.composer-hint\s*\{[^}]*display:\s*inline-flex[^}]*white-space:\s*nowrap/)
+    expect(css).toMatch(/\.composer-hint-visual\s*\{[^}]*display:\s*inline-flex[^}]*gap:\s*4px/)
+    expect(css).toMatch(/\.composer-hint kbd\s*\{[^}]*min-width:\s*20px[^}]*height:\s*18px[^}]*border:\s*1px solid var\(--line\)/)
+    expect(css).toMatch(/@media\s*\(max-width:\s*760px\)\s*\{[^}]*\.composer-hint\s*\{[^}]*display:\s*none/)
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
   })
 
