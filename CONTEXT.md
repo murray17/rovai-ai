@@ -1199,7 +1199,7 @@ The single Rovai-ai-managed AdapterInstallation that internally resolves an ordi
 _Avoid_: dynamically best Installation, per-Member Installation, custom wrapper
 
 **Verified Installation Relocation**:
-The automatic in-place replacement of a missing AdapterInstallation launch path after an ordered same-Adapter candidate passes full deep probing. It preserves the Installation identity and its Member references while replacing the current path and capability snapshot; frozen AgentRuns remain unchanged.
+The automatic in-place replacement of a missing AdapterInstallation launch path after an ordered same-Adapter candidate passes full deep probing. A failed alternate candidate is local attempt evidence and cannot stale the current Installation or its last-known-good model catalog. Only a successfully adopted candidate replaces the path, advances the generation and capability snapshot, and preserves the Installation identity and its Member references; frozen AgentRuns remain unchanged.
 _Avoid_: name-only rebinding, new Installation, rewriting frozen Run Runtime Configuration
 
 **Adapter Capability Snapshot**:
@@ -1207,7 +1207,7 @@ The latest successful persisted deep-probe evidence for one AdapterInstallation,
 _Avoid_: Runtime Discovery Observation, permanent compatibility claim, generic arbitrary-option form, execution admission
 
 **Adapter Probe Attempt**:
-One bounded deep inspection of an AdapterInstallation whose outcome may replace its successful Adapter Capability Snapshot or record a failed attempt and retry schedule without erasing that snapshot. Retaining prior evidence does not make it usable after the Installation becomes stale.
+One bounded deep inspection of an AdapterInstallation or ordered relocation candidate whose outcome may replace its successful Adapter Capability Snapshot or record a failed attempt and retry schedule without erasing that snapshot. Failure against a candidate other than the current canonical Installation is candidate-local and cannot mark the current snapshot stale. Retaining prior evidence does not make it usable after the current Installation itself becomes stale.
 _Avoid_: Adapter Capability Snapshot, Runtime Discovery Observation, readiness proof
 
 **Adapter Capability Snapshot Freshness**:
@@ -1223,7 +1223,7 @@ The application-level read state formed from Product Runtime Catalog membership,
 _Avoid_: Member readiness, persisted display label, direct rendering of internal discovery stages, execution admission
 
 **Runtime Resolution Job**:
-Deduplicated background work that resolves or refreshes a Product Runtime through discovery, verified Installation creation or relocation, and deep probing. Core schedules it after startup discovery, later discovery, Runtime installation or update, executable identity change, member Runtime switching, cache expiry, or an explicit user check. It owns no Renderer draft or Run input and is never a configuration-save or ordinary message-send gate; AgentRun dispatch independently checks the current Installation and frozen Run Runtime Configuration.
+Deduplicated background work that resolves or refreshes a Product Runtime through discovery, verified Installation creation or relocation, and deep probing. Core schedules it after startup discovery, later discovery, Runtime installation or update, executable identity change, a model Picker refresh request, cache expiry, an explicit user check, or Dispatch Preflight. Switching a Member's Runtime draft does not schedule it. It owns no Renderer draft or Run input and is never a configuration-save or ordinary message-send gate; AgentRun dispatch independently checks the current Installation and frozen Run Runtime Configuration.
 _Avoid_: AgentRun, form-submit preflight, message-send preflight, synchronous page check, Runtime fallback, mutable Run configuration
 
 **Pending Execution Intent**:
@@ -1255,7 +1255,7 @@ A Member model policy that persists one model identifier and only the model-spec
 _Avoid_: arbitrary model string, Runtime Default Model Selection with overrides, cross-Runtime model options
 
 **Member Runtime Configuration**:
-The atomically saved Product Runtime, model policy, and Adapter Permission Configuration for one AgentProfile. Changing the Runtime in an editor replaces only the draft until one version-checked save validates and replaces the whole persisted configuration against a ready Managed Default Installation and current capability snapshot. If validation cannot complete, nothing is persisted and the AgentProfile remains unconfigured; background discovery never synthesizes a partial or complete configuration.
+The atomically saved Product Runtime, model policy, and Adapter Permission Configuration for one AgentProfile. Changing the Runtime in an editor replaces only the draft until one version-checked save validates and replaces the whole persisted configuration against a Managed Default Installation. A Ready snapshot can validate the full configuration; Light Ready can validate only Runtime Default Model Selection and the Adapter's static permission descriptors. Every real dispatch still requires Ready through the uniform Dispatch Preflight. If validation cannot complete, nothing is persisted and the AgentProfile remains unconfigured; background discovery never synthesizes a partial or complete configuration.
 _Avoid_: adapter-only persisted selection, independent Runtime and parameter saves, cross-Runtime parameter retention, live form state, silently materialized configuration
 
 **Run Runtime Configuration**:

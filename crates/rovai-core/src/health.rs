@@ -2834,7 +2834,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn trae_health_probe_is_guarded_before_any_child_process_launch() {
+    async fn trae_health_probe_uses_the_uniform_runtime_launch_lifecycle() {
         let directory =
             env::temp_dir().join(format!("rovai-trae-health-guard-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
@@ -2856,11 +2856,17 @@ mod tests {
         )
         .await;
         assert_eq!(probe.result.status, AgentRuntimeProbeStatus::ProbeFailed);
-        assert_eq!(
-            probe.result.detail.as_deref(),
-            Some("runtime_launch_disallowed_for_health_probe")
+        assert!(
+            probe
+                .result
+                .detail
+                .as_deref()
+                .is_some_and(|detail| !detail.contains("runtime_launch_disallowed"))
         );
-        assert!(!marker.exists(), "health probe must not execute TRAE");
+        assert!(
+            marker.exists(),
+            "health probe must execute TRAE like every Runtime"
+        );
         std::fs::remove_dir_all(directory).unwrap();
     }
 

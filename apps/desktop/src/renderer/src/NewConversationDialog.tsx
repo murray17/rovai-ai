@@ -496,9 +496,7 @@ function RuntimeReadiness({ status }: {
 }): React.JSX.Element {
   const tone = status === 'ready' || status === 'light_ready'
     ? 'ready'
-    : status === 'installed_unverified'
-      ? 'deferred'
-      : 'attention'
+    : 'attention'
   return <span className={`new-camp-runtime-status ${tone}`}><i />{readinessLabel(status)}</span>
 }
 
@@ -506,7 +504,7 @@ function readinessLabel(status: CampCreationPreflight['presentMembers'][number][
   return status === 'ready' || status === 'light_ready'
     ? '可用'
     : status === 'installed_unverified'
-      ? '已安装，首次运行时验证'
+      ? '不可用，待检查'
     : status === 'runtime_not_configured'
       ? '未配置 Agent 运行时'
       : '不可用'
@@ -593,10 +591,8 @@ export function planInitialCampSelection(
     : preflight.presentMembers.find(
       (member) => memberIds.includes(member.agentId) && member.runtimeReadiness === 'ready'
     )?.agentId ?? preflight.presentMembers.find(
-      (member) => memberIds.includes(member.agentId) && (
-        member.runtimeReadiness === 'light_ready'
-        || member.runtimeReadiness === 'installed_unverified'
-      )
+      (member) => memberIds.includes(member.agentId)
+        && member.runtimeReadiness === 'light_ready'
     )?.agentId ?? memberIds[0] ?? ''
   return {
     memberIds,

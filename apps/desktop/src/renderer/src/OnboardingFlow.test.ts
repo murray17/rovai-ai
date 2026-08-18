@@ -61,6 +61,10 @@ describe('first-run onboarding flow', () => {
       ...installation,
       installationClass: 'custom'
     })).toBe(false)
+    expect(onboardingRuntimeCanContinue('ready', selection, {
+      ...readyAvailability(),
+      status: 'installed_unverified'
+    }, installation)).toBe(false)
   })
 })
 

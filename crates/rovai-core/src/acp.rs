@@ -1717,7 +1717,8 @@ impl AcpRuntime {
         Ok(session_id)
     }
 
-    pub async fn verification_evidence(&self) -> Option<(Value, Value)> {
+    #[cfg(test)]
+    async fn verification_evidence(&self) -> Option<(Value, Value)> {
         let initialize = self.host.initialize_result.read().await.clone()?;
         let session = self.session_result.read().await.clone()?;
         Some((initialize, session))
@@ -3650,7 +3651,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deferred_trae_verification_reuses_the_only_agent_process() {
+    async fn trae_agent_execution_starts_one_session_process_without_a_diagnostic_child() {
         let root =
             std::env::temp_dir().join(format!("rovai-trae-agent-process-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();

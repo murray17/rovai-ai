@@ -8,7 +8,6 @@ export type RuntimeUserStatus =
   | 'unconfigured'
   | 'checking'
   | 'available'
-  | 'installed_unverified'
   | 'authentication_required'
   | 'not_installed'
   | 'version_unsupported'
@@ -37,7 +36,6 @@ const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
   unconfigured: '未配置 Agent 运行时',
   checking: '正在检查…',
   available: '可用',
-  installed_unverified: '已安装',
   authentication_required: '需要登录',
   not_installed: '未安装',
   version_unsupported: '版本不支持',
@@ -78,8 +76,8 @@ export function runtimeAvailabilityPresentation(
       )
     case 'installed_unverified':
       return presentation(
-        'installed_unverified',
-        '已检测到 TRAE CLI，但尚未形成轻度启动证据；请重新检测或检查可用性。'
+        'unknown',
+        '旧安装尚未形成轻度启动证据；请重新检测或检查可用性。'
       )
     case 'ready':
       return presentation(
@@ -168,7 +166,7 @@ export function memberRuntimePresentation(
     }
     return presentation(
       'available',
-      '当前配置可用于发起任务；登录、模型与运行能力将在首次任务时确认。'
+      '当前配置可用于发起任务；登录、模型与运行能力将在任务的执行前检查中确认。'
     )
   }
 
@@ -188,8 +186,8 @@ export function memberRuntimePresentation(
       return availabilityStatus
     }
     return presentation(
-      'installed_unverified',
-      '已检测到 TRAE CLI，但尚未形成轻度启动证据；请重新检测或检查可用性。'
+      'unknown',
+      '旧安装尚未形成轻度启动证据；请重新检测或检查可用性。'
     )
   }
   if (blockerCodes.has('runtime_authentication_required')) {
@@ -234,7 +232,7 @@ export function runtimeReadinessLabel(
     runtime_not_configured: '未配置 Agent 运行时',
     needs_attention: '不可用',
     light_ready: '可用',
-    installed_unverified: '已安装，待检查',
+    installed_unverified: '不可用，待检查',
     ready: '可用'
   })[status]
 }

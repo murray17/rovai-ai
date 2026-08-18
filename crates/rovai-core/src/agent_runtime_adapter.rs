@@ -560,35 +560,6 @@ impl AgentRuntimeAdapterRegistry {
         }
     }
 
-    pub fn trae_installed_unverified_snapshot(
-        &self,
-        reported_version: Option<String>,
-        executable_fingerprint: String,
-        observed_at: String,
-    ) -> Result<AdapterCapabilitySnapshot> {
-        let permission_options = trae_static_permission_options();
-        let permission_schema_digest =
-            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
-        Ok(AdapterCapabilitySnapshot {
-            reported_version,
-            executable_fingerprint: Some(executable_fingerprint),
-            authentication_status: "unknown".to_string(),
-            probe_status: "installed_unverified".to_string(),
-            permission_schema_version: 1,
-            permission_schema_digest,
-            capabilities: Vec::new(),
-            protocols: Vec::new(),
-            models: Vec::new(),
-            permission_options,
-            observed_at: Some(observed_at.clone()),
-            last_attempted_at: observed_at,
-            last_successful_probe_at: None,
-            stale_at: None,
-            last_error: None,
-            native_session_compatibility_key: None,
-        })
-    }
-
     pub fn light_ready_snapshot(
         &self,
         kind: AdapterKind,

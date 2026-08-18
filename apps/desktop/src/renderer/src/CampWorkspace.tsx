@@ -866,14 +866,6 @@ export function emptyCampRuntimeSummary(
     || profile?.runtimeReadiness.status === 'light_ready'
   )).length
   if (readyCount === activeMembers.length) return 'Agent 运行时可用'
-  const deferredCount = profiles.filter(
-    (profile) => profile?.runtimeReadiness.status === 'installed_unverified'
-  ).length
-  if (readyCount + deferredCount === activeMembers.length && deferredCount > 0) {
-    return deferredCount === activeMembers.length
-      ? 'Agent 运行时已安装，将在首次运行时验证'
-      : `${readyCount}/${activeMembers.length} 个可用，其余将在首次运行时验证`
-  }
   if (readyCount === 0) return 'Agent 运行时不可用'
   return `${readyCount}/${activeMembers.length} 个 Agent 运行时可用`
 }

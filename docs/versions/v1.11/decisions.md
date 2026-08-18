@@ -219,3 +219,52 @@ model。显式模型在真实 Runtime Session/Host 建立后必须对当前实�
 - 继续把所有 391 行强制标成 `migrated`：会把历史局部替代重新引入当前规范。
 - 只按 `superseded_by` 过滤整份 ADR：Front Matter 无法表达局部替代。
 - 修改历史 ADR 状态或正文来补图：会破坏本次内容等价基线。
+
+<a id="v1-11-d03"></a>
+
+## V1.11-D03：统一 Runtime 深检生命周期与候选局部失败
+
+### 背景
+
+v1.11 已统一模型目录缓存，却仍继承 TRAE-only 启动限制：Installation Refresh、Health Probe 与 Dispatch
+Preflight 不得启动 TRAE，`light_ready`/旧 `installed_unverified` 可以绕过统一 `ready` 门禁，首次正式
+AgentRun 再承担专属补偿验证。这让同一 Product Runtime Catalog 继续维护两套执行准入语义；原始理由只是
+本机并发验收时多个 TRAE 进程竞争第三方密钥/状态文件，并不是产品必须不同。
+
+Runtime relocation 同时暴露出另一项身份归属问题：按搜索顺序探测备用 executable 时，若把每个候选的
+fingerprint 都与当前 Installation 比较，未被采用的候选失败也可能以 `identity_changed` 使当前
+last-known-good catalog 失效。候选失败不证明当前 Installation 身份发生变化。
+
+### 决定
+
+所有 Product Runtime 使用同一 purpose-scoped 深检生命周期。`light_ready` 仍可保存 runtime-default 与静态
+permission descriptor，但正式 AgentRun 必须先通过统一 Dispatch Preflight 达到 `ready`；TRAE 不再拥有
+execution-deferred 放行、首次 AgentRun 补偿、Installation Refresh 或 Health Probe 禁止分支。旧
+`installed_unverified` 只保留历史读取能力，不再是配置或执行入口。真实 TRAE acceptance/smoke 以串行调度
+隔离第三方本机状态。
+
+当前 Installation 的 canonical path 是 executable identity change 的唯一比较对象。其他搜索候选失败统一
+记录为 candidate-local transient attempt，不修改当前 snapshot 的 `stale_at`，也不使 LKG 失效。备用候选只有
+完成完整 deep probe 并被正式采用时，才能替换 Installation、推进 generation 和失效旧 catalog。
+
+### 后果
+
+- Runtime launch policy、Scheduler Dispatch Preflight、安装刷新和 Health Probe 不再维护 TRAE-only 产品分支。
+- `light_ready` 保持低副作用配置体验，但不再等价于任何 Runtime 的真实执行资格。
+- 搜索路径中的坏版本、旧版本或临时候选不能破坏当前 Installation 的成功目录；失败诊断仍可审计。
+- 本决定不新增 Migration、持久字段或 projection schema；不为人工修改、技术恢复或损坏数据增加兼容逻辑。
+
+### 被拒绝方案
+
+- 保留 TRAE 首次 AgentRun 验证，只统一 Picker：继续留下双执行路径并让 Health/刷新语义漂移。
+- 把 `installed_unverified` 提升为通用可执行状态：会让未验证认证、协议、模型与权限的 Runtime 绕过 `ready`。
+- 任一候选 fingerprint 不同即失效当前 snapshot：把搜索证据误当 Installation 身份，会摧毁无关 LKG。
+- 为 TRAE 增加专属缓存或验收锁产品状态：测试调度问题不应成为 Runtime wire 或产品状态。
+
+### 当前权威影响
+
+- [Runtime Catalog 与 Installation 不变量](../../architecture/foundational-invariants.md#runtime-catalog-installation)
+- [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
+- [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)
+- [首次训练 UI](../../ui/components/first-run-onboarding.md)
+- [Runtime 兼容性清单](../../runtime-compatibility.md)

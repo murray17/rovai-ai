@@ -127,14 +127,12 @@ pub enum RuntimeLaunchPurpose {
     AgentExecution,
 }
 
-pub fn runtime_launch_allowed(kind: AdapterKind, purpose: RuntimeLaunchPurpose) -> bool {
-    !matches!(kind, AdapterKind::TraeCnCli)
-        || matches!(
-            purpose,
-            RuntimeLaunchPurpose::DiscoveryVersion
-                | RuntimeLaunchPurpose::AvailabilityCheck
-                | RuntimeLaunchPurpose::AgentExecution
-        )
+pub fn runtime_launch_allowed(_kind: AdapterKind, _purpose: RuntimeLaunchPurpose) -> bool {
+    // Every current Product Runtime participates in the same purpose-scoped
+    // lifecycle. Keeping this gate central ensures new Adapters must still make
+    // an explicit launch-policy decision without reintroducing caller-local
+    // exceptions.
+    true
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -971,21 +969,18 @@ mod tests {
     }
 
     #[test]
-    fn runtime_launch_policy_allows_trae_light_and_user_authorized_checks() {
-        for purpose in [
-            RuntimeLaunchPurpose::InstallationRefresh,
-            RuntimeLaunchPurpose::HealthProbe,
-            RuntimeLaunchPurpose::DispatchPreflight,
-        ] {
-            assert!(!runtime_launch_allowed(AdapterKind::TraeCnCli, purpose));
-            assert!(runtime_launch_allowed(AdapterKind::CodexCli, purpose));
-        }
+    fn runtime_launch_policy_is_uniform_for_every_product_runtime() {
         for purpose in [
             RuntimeLaunchPurpose::DiscoveryVersion,
             RuntimeLaunchPurpose::AvailabilityCheck,
+            RuntimeLaunchPurpose::InstallationRefresh,
+            RuntimeLaunchPurpose::HealthProbe,
+            RuntimeLaunchPurpose::DispatchPreflight,
             RuntimeLaunchPurpose::AgentExecution,
         ] {
-            assert!(runtime_launch_allowed(AdapterKind::TraeCnCli, purpose));
+            for kind in AdapterKind::ALL {
+                assert!(runtime_launch_allowed(kind, purpose));
+            }
         }
     }
 

@@ -57,10 +57,21 @@ last_updated: 2026-08-19
 - [x] 推送实现提交 `a9cf6e06` 到 main；
 - [x] 构建签名 App，隔离启动验证后替换 `/Applications/Rovai AI.app`，并从安装路径重新启动确认。
 
+## 6. 2026-08-19 发布后修正
+
+- [x] 删除 TRAE-only launch policy、execution-deferred dispatch 与首次 AgentRun 补偿路径；
+- [x] 统一 Installation Refresh、Health Probe 和 Dispatch Preflight；
+- [x] 将未采用备用 executable candidate 的失败收口为 candidate-local transient attempt，并保护当前 LKG；
+- [x] 阻止旧 `installed_unverified` 继续 onboarding、配置或执行；
+- [x] 修复数字 ADR clean break 后 bundled `grill-duo-with-docs` 的 reference 路径；
+- [ ] 通过 Rust、TypeScript、Renderer、文档与 Desktop 全量门禁；
+- [ ] 推送 main，完成签名打包、隔离 App 验收并替换 `/Applications/Rovai AI.app`。
+
 ## References
 
 - [v1.11 版本概览](README.md)
 - [ADR-0220 的迁移后决定正文](decisions.md#adr-0220)
+- [V1.11-D03：统一 Runtime 深检生命周期与候选局部失败](decisions.md#v1-11-d03)
 - [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)
 - [本地 Runtime 工作流](../../development/local-workflow.md)

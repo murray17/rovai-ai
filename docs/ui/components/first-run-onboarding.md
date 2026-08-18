@@ -2,7 +2,7 @@
 document_type: ui-component-spec
 authority: first-run-onboarding-presentation
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-08-19
 ---
 
 # 首次训练与“初次集结”
@@ -24,10 +24,11 @@ last_updated: 2026-08-17
 
 扫描只表达“查找安装入口 / 执行无副作用的有界身份命令”，使用真实 discovery 与 managed Installation，且不
 自动启动登录、ACP、Session 或模型目录深检。`light_ready` 显示“可用”，严格表示 executable 已成功轻度启动、
-输出未超限且身份可识别，可以选择并尝试运行；支持文案说明登录、模型与能力将在显式检查或首次任务时确认。
+输出未超限且身份可识别，可以选择并尝试运行；支持文案说明登录、模型与能力将在显式检查或首次任务的统一
+Dispatch Preflight 中确认。
 只找到 executable 的 `found_uninspected` 不显示“正在检查”或“可用”。不可用、需要登录、版本不支持和
-旧 TRAE `installed_unverified` 不能被改写成深检 Ready；当前 TRAE light-ready 与模型目录行为使用统一 Runtime
-规则。
+旧 `installed_unverified` 不能被改写成深检 Ready，也不能继续 onboarding；页面引导用户先执行“检查可用性”。
+当前 TRAE light-ready、模型目录与 Dispatch Preflight 行为使用统一 Runtime 规则。
 
 模型字段复用队员运行配置的 schema 驱动组件。Runtime Default 不依赖 catalog；显式模型需要 24 小时内可服务
 且未失效的 catalog。打开 Picker 使用 Core-owned 60 秒 stale-while-revalidate，切换 Runtime 不触发 discovery。

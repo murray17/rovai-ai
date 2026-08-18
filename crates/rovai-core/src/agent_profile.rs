@@ -1305,15 +1305,7 @@ impl AgentProfileService {
                 json!({ "installationId": runtime.installation_id }),
             )));
         }
-        let execution_deferred = runtime.adapter_kind == AdapterKind::TraeCnCli
-            && runtime.model.source == "runtime_default"
-            && runtime.model.model_id == TRAE_RUNTIME_DEFAULT_MODEL_ID
-            && matches!(
-                probe_status.as_deref(),
-                Some("light_ready" | "installed_unverified")
-            )
-            && authentication_status.as_deref() == Some("unknown");
-        if probe_status.as_deref() != Some("ready") && !execution_deferred {
+        if probe_status.as_deref() != Some("ready") {
             return Ok(Some(runtime_blocker(
                 "runtime_probe_required",
                 json!({
@@ -1782,31 +1774,44 @@ impl AgentProfileService {
             transaction.commit()?;
             return Ok(());
         };
+        let targets_current_installation =
+            runtime_candidate_targets_installation(&previous_path, candidate_path);
+        let recorded_failure_class = if targets_current_installation {
+            failure_class
+        } else {
+            "transient"
+        };
+        let recorded_diagnostic_code = if targets_current_installation {
+            diagnostic_code
+        } else {
+            "runtime_alternate_candidate_probe_failed"
+        };
         let attempted_at = chrono::Utc::now().to_rfc3339();
-        let retry_after = next_probe_retry_after(&transaction, &installation_id, failure_class)?;
+        let retry_after =
+            next_probe_retry_after(&transaction, &installation_id, recorded_failure_class)?;
         insert_probe_attempt(
             &transaction,
             &installation_id,
             "failed",
-            failure_class,
-            Some(diagnostic_code),
+            recorded_failure_class,
+            Some(recorded_diagnostic_code),
             candidate_path,
             fingerprint,
             &attempted_at,
             retry_after.as_deref(),
             failure,
         )?;
-        if failure_class != "transient" {
+        if recorded_failure_class != "transient" {
             transaction.execute(
                 r#"
                 UPDATE adapter_capability_snapshot
                 SET stale_at = COALESCE(stale_at, ?2), last_error = ?3
                 WHERE installation_id = ?1
                 "#,
-                params![installation_id, attempted_at, diagnostic_code],
+                params![installation_id, attempted_at, recorded_diagnostic_code],
             )?;
         }
-        if failure_class == "path_missing" {
+        if recorded_failure_class == "path_missing" {
             transaction.execute(
                 r#"
                 UPDATE adapter_installation
@@ -1816,7 +1821,7 @@ impl AgentProfileService {
                 params![installation_id, attempted_at],
             )?;
         }
-        if candidate_path != previous_path {
+        if !targets_current_installation {
             let previous_fingerprint = transaction
                 .query_row(
                     r#"
@@ -2092,7 +2097,7 @@ impl AgentProfileService {
                 model: envelope.payload.model.clone(),
                 permissions: envelope.payload.permissions.clone(),
             };
-            if ready.execution_deferred && !matches!(binding.model, ModelSelection::RuntimeDefault)
+            if ready.preflight_required && !matches!(binding.model, ModelSelection::RuntimeDefault)
             {
                 return Ok(CommandHandlerResult::rejected(
                     "runtime_model_requires_verification",
@@ -3235,9 +3240,20 @@ fn is_static_snapshot_status(probe_status: &str) -> bool {
     )
 }
 
-fn is_execution_deferred_status(adapter_kind: AdapterKind, probe_status: Option<&str>) -> bool {
+fn is_preflight_required_status(probe_status: Option<&str>) -> bool {
     probe_status == Some("light_ready")
-        || (adapter_kind == AdapterKind::TraeCnCli && probe_status == Some("installed_unverified"))
+}
+
+fn runtime_candidate_targets_installation(installation_path: &str, candidate_path: &str) -> bool {
+    let installation_path = Path::new(installation_path);
+    let candidate_path = Path::new(candidate_path);
+    let canonical_installation = installation_path
+        .canonicalize()
+        .unwrap_or_else(|_| installation_path.to_path_buf());
+    let canonical_candidate = candidate_path
+        .canonicalize()
+        .unwrap_or_else(|_| candidate_path.to_path_buf());
+    canonical_installation == canonical_candidate
 }
 
 fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
@@ -3577,9 +3593,9 @@ pub(crate) fn resolve_frozen_runtime_binding(
             json!({ "installationId": installation_id }),
         )));
     }
-    let execution_deferred = is_execution_deferred_status(adapter_kind, probe_status.as_deref())
+    let preflight_required = is_preflight_required_status(probe_status.as_deref())
         && authentication_status.as_deref() == Some("unknown");
-    if probe_status.as_deref() != Some("ready") && !execution_deferred {
+    if probe_status.as_deref() != Some("ready") && !preflight_required {
         return Ok(Err(runtime_blocker(
             "runtime_probe_required",
             json!({
@@ -3609,14 +3625,14 @@ pub(crate) fn resolve_frozen_runtime_binding(
             json!({ "installationId": installation_id }),
         )));
     };
-    let effective_models_json = if execution_deferred {
+    let effective_models_json = if preflight_required {
         if !matches!(binding.model, ModelSelection::RuntimeDefault) {
             return Ok(Err(runtime_blocker(
                 "runtime_model_requires_verification",
                 json!({ "installationId": installation_id }),
             )));
         }
-        serde_json::to_string(&deferred_runtime_models(adapter_kind))?
+        serde_json::to_string(&provisional_runtime_models(adapter_kind))?
     } else {
         models_json
     };
@@ -3639,7 +3655,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
         serde_json::from_str(&capabilities_json).context("invalid Adapter capabilities")?;
     capabilities.sort();
     capabilities.dedup();
-    let protocols: Vec<String> = if execution_deferred {
+    let protocols: Vec<String> = if preflight_required {
         vec![provisional_runtime_protocol(adapter_kind).to_string()]
     } else {
         serde_json::from_str(&protocols_json).context("invalid Adapter protocols")?
@@ -3975,13 +3991,9 @@ fn runtime_readiness(
     let Some(probe_status) = probe_status else {
         return Ok(needs_attention("runtime_probe_required", None));
     };
-    if is_execution_deferred_status(adapter_kind, Some(&probe_status)) {
+    if is_preflight_required_status(Some(&probe_status)) {
         return Ok(RuntimeReadiness {
-            status: if probe_status == "light_ready" {
-                RuntimeReadinessStatus::LightReady
-            } else {
-                RuntimeReadinessStatus::InstalledUnverified
-            },
+            status: RuntimeReadinessStatus::LightReady,
             blockers: vec![RuntimeReadinessBlocker {
                 code: "runtime_verification_deferred".to_string(),
                 detail: None,
@@ -4035,7 +4047,7 @@ struct ConfigurableManagedRuntimeSnapshot {
     permission_schema_version: i64,
     models_json: String,
     permissions_json: String,
-    execution_deferred: bool,
+    preflight_required: bool,
     model_catalog_serviceable: bool,
 }
 
@@ -4064,17 +4076,12 @@ fn configurable_managed_runtime_snapshot(
                     OR
                     (snapshot.probe_status = 'light_ready'
                      AND snapshot.authentication_status = 'unknown')
-                    OR
-                    (?1 = 'trae-cn-cli'
-                     AND snapshot.probe_status = 'installed_unverified'
-                     AND snapshot.authentication_status = 'unknown')
               )
             "#,
             [adapter_kind.as_str()],
             |row| {
                 let probe_status = row.get::<_, String>(4)?;
-                let execution_deferred =
-                    is_execution_deferred_status(adapter_kind, Some(probe_status.as_str()));
+                let preflight_required = is_preflight_required_status(Some(probe_status.as_str()));
                 let last_successful_probe_at = row.get::<_, Option<String>>(5)?;
                 let model_catalog_serviceable = probe_status == "ready"
                     && last_successful_probe_at
@@ -4090,7 +4097,7 @@ fn configurable_managed_runtime_snapshot(
                 Ok(ConfigurableManagedRuntimeSnapshot {
                     installation_id: row.get(0)?,
                     permission_schema_version: row.get(1)?,
-                    models_json: if execution_deferred {
+                    models_json: if preflight_required {
                         let stored = row.get::<_, String>(2)?;
                         let models: Vec<ModelDescriptor> =
                             serde_json::from_str(&stored).map_err(|error| {
@@ -4100,10 +4107,11 @@ fn configurable_managed_runtime_snapshot(
                                     Box::new(error),
                                 )
                             })?;
-                        if execution_deferred && models.is_empty() {
-                            serde_json::to_string(&deferred_runtime_models(adapter_kind)).map_err(
-                                |error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)),
-                            )?
+                        if preflight_required && models.is_empty() {
+                            serde_json::to_string(&provisional_runtime_models(adapter_kind))
+                                .map_err(|error| {
+                                    rusqlite::Error::ToSqlConversionFailure(Box::new(error))
+                                })?
                         } else {
                             stored
                         }
@@ -4111,7 +4119,7 @@ fn configurable_managed_runtime_snapshot(
                         row.get(2)?
                     },
                     permissions_json: row.get(3)?,
-                    execution_deferred,
+                    preflight_required,
                     model_catalog_serviceable,
                 })
             },
@@ -4392,15 +4400,14 @@ fn member_runtime_defaults_for_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<Option<MemberRuntimeConfiguration>> {
-    let execution_deferred =
-        is_execution_deferred_status(adapter_kind, Some(snapshot.probe_status.as_str()))
-            && snapshot.authentication_status == "unknown"
-            && snapshot.executable_fingerprint.is_some()
-            && snapshot.stale_at.is_none();
+    let preflight_required = is_preflight_required_status(Some(snapshot.probe_status.as_str()))
+        && snapshot.authentication_status == "unknown"
+        && snapshot.executable_fingerprint.is_some()
+        && snapshot.stale_at.is_none();
     let ready = snapshot.probe_status == "ready"
         && snapshot.authentication_status == "authenticated"
         && snapshot.stale_at.is_none();
-    if !ready && !execution_deferred {
+    if !ready && !preflight_required {
         return Ok(None);
     }
     let model = ModelSelection::RuntimeDefault;
@@ -4415,8 +4422,8 @@ fn member_runtime_defaults_for_snapshot(
         model: model.clone(),
         permissions: permissions.clone(),
     };
-    let models_json = if execution_deferred {
-        serde_json::to_string(&deferred_runtime_models(adapter_kind))?
+    let models_json = if preflight_required {
+        serde_json::to_string(&provisional_runtime_models(adapter_kind))?
     } else {
         serde_json::to_string(&snapshot.models)?
     };
@@ -4438,7 +4445,7 @@ fn member_runtime_defaults_for_snapshot(
     }))
 }
 
-fn deferred_runtime_models(adapter_kind: AdapterKind) -> Vec<ModelDescriptor> {
+fn provisional_runtime_models(adapter_kind: AdapterKind) -> Vec<ModelDescriptor> {
     vec![ModelDescriptor {
         id: runtime_default_model_id(adapter_kind),
         display_name: format!("{} runtime default", adapter_kind.as_str()),
@@ -6015,7 +6022,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn trae_light_ready_installation_defers_deep_verification_to_the_real_session() {
+    fn light_ready_runtime_defaults_require_uniform_dispatch_preflight() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
         let executable_path = directory.join("traecli");
@@ -6099,13 +6106,11 @@ mod slow_tests {
         );
         assert_eq!(deferred.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
         assert!(deferred.capabilities.is_empty());
-        assert!(
-            service
-                .runtime_dispatch_blocker(&database, &deferred)
-                .unwrap()
-                .is_none(),
-            "light identity is sufficient to launch one real verification process"
-        );
+        let blocker = service
+            .runtime_dispatch_blocker(&database, &deferred)
+            .unwrap()
+            .expect("light-ready Runtime must run Dispatch Preflight before execution");
+        assert_eq!(blocker.code, "runtime_probe_required");
 
         let live_snapshot = AgentRuntimeAdapterRegistry::default()
             .trae_live_session_capability_snapshot(
@@ -6168,6 +6173,13 @@ mod slow_tests {
         assert_eq!(verified.reported_version, None);
         assert_eq!(verified.model.source, "runtime_default");
         assert_eq!(verified.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
+        assert!(
+            service
+                .runtime_dispatch_blocker(&database, &verified)
+                .unwrap()
+                .is_none(),
+            "the same Runtime may dispatch only after the unified deep probe reaches ready"
+        );
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();
@@ -6246,6 +6258,31 @@ mod slow_tests {
                 .as_ref()
                 .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
             Some("sha256:original")
+        );
+        assert_eq!(
+            rejected_candidate
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.stale_at.as_deref()),
+            None
+        );
+        assert_eq!(
+            rejected_candidate.model_catalog.status,
+            RuntimeModelCatalogCacheStatus::Fresh
+        );
+        assert_eq!(
+            rejected_candidate
+                .last_probe_attempt
+                .as_ref()
+                .map(|attempt| attempt.failure_class.as_str()),
+            Some("transient")
+        );
+        assert_eq!(
+            rejected_candidate
+                .last_probe_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.diagnostic_code.as_deref()),
+            Some("runtime_alternate_candidate_probe_failed")
         );
         assert_eq!(
             rejected_candidate.relocation_history[0].source,

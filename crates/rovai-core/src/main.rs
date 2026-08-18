@@ -54,8 +54,7 @@ use rovai_core::{
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
-        TRAE_RUNTIME_DEFAULT_MODEL_ID, executable_fingerprint as fingerprint_executable,
-        verify_executable_integrity,
+        executable_fingerprint as fingerprint_executable, verify_executable_integrity,
     },
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
@@ -170,8 +169,7 @@ use rovai_core::{
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeLaunchPurpose,
         RuntimeSearchEnvironment, catalog_entries, discover_runtime_path, discover_runtime_version,
-        discover_static_runtime_version, is_executable_file, runtime_launch_allowed,
-        with_runtime_search_environment,
+        is_executable_file, runtime_launch_allowed, with_runtime_search_environment,
     },
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -284,6 +282,10 @@ fn runtime_blocker_is_refreshable(code: &str) -> bool {
             | "runtime_path_invalid"
             | "runtime_probe_required"
     )
+}
+
+fn canonical_runtime_path(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 async fn run_with_cancellation_deadline<T>(
@@ -1676,17 +1678,29 @@ impl Core {
         &self,
         kind: AdapterKind,
         search_generation: u64,
+        executable_path: &Path,
         executable_fingerprint: &str,
     ) -> bool {
         if self.runtime_search_environment.read().await.generation() != search_generation {
             return false;
         }
-        self.runtime_discovery
-            .read()
-            .await
-            .get(&kind)
-            .and_then(|observation| observation.executable_fingerprint.as_deref())
-            .is_none_or(|current| current == executable_fingerprint)
+        let discovery = self.runtime_discovery.read().await;
+        let Some(observation) = discovery.get(&kind) else {
+            return true;
+        };
+        let observation_targets_candidate =
+            observation
+                .executable_path
+                .as_deref()
+                .is_some_and(|observed_path| {
+                    canonical_runtime_path(Path::new(observed_path))
+                        == canonical_runtime_path(executable_path)
+                });
+        !observation_targets_candidate
+            || observation
+                .executable_fingerprint
+                .as_deref()
+                .is_none_or(|current| current == executable_fingerprint)
     }
 
     async fn rescan_runtime_discovery(&self, interactive_shell: bool) -> Result<Value> {
@@ -2235,6 +2249,9 @@ impl Core {
                 self.runtime_search_environment.read().await.clone(),
             )
         };
+        let existing_canonical_path = existing
+            .as_ref()
+            .map(|installation| canonical_runtime_path(Path::new(&installation.executable_path)));
         let mut unresolved_diagnostic = None;
         let mut candidates = Vec::new();
         if let Some(installation) = existing.as_ref() {
@@ -2335,7 +2352,7 @@ impl Core {
                 }
                 continue;
             }
-            let canonical = path.canonicalize().unwrap_or(path);
+            let canonical = canonical_runtime_path(&path);
             let candidate_fingerprint = match fingerprint_executable(&canonical) {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
@@ -2376,11 +2393,13 @@ impl Core {
                     continue;
                 }
             };
-            let identity_changed = existing
-                .as_ref()
-                .and_then(|installation| installation.snapshot.as_ref())
-                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
-                .is_some_and(|previous| previous != candidate_fingerprint);
+            let targets_current_installation = existing_canonical_path.as_ref() == Some(&canonical);
+            let identity_changed = targets_current_installation
+                && existing
+                    .as_ref()
+                    .and_then(|installation| installation.snapshot.as_ref())
+                    .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
+                    .is_some_and(|previous| previous != candidate_fingerprint);
             let mut lightweight = RuntimeDiscoveryObservation {
                 runtime_kind: kind,
                 discovery_status: RuntimeDiscoveryStatus::Found,
@@ -2392,48 +2411,6 @@ impl Core {
                 observed_at: chrono::Utc::now().to_rfc3339(),
                 diagnostic_code: None,
             };
-            if !runtime_launch_allowed(kind, purpose) {
-                lightweight.reported_version = discover_static_runtime_version(kind, &canonical);
-                lightweight.diagnostic_code = lightweight
-                    .reported_version
-                    .is_none()
-                    .then(|| "runtime_version_unavailable_static_only".to_string());
-                let snapshot = AgentRuntimeAdapterRegistry::default()
-                    .trae_installed_unverified_snapshot(
-                        lightweight.reported_version.clone(),
-                        candidate_fingerprint.clone(),
-                        lightweight.observed_at.clone(),
-                    )?;
-                if !self
-                    .runtime_probe_identity_is_current(
-                        kind,
-                        search.generation(),
-                        &candidate_fingerprint,
-                    )
-                    .await
-                {
-                    return Ok(false);
-                }
-                let executable_path = canonical.to_string_lossy().to_string();
-                let mut database = self.database.lock().await;
-                AgentProfileService::default().commit_discovered_managed_installation(
-                    &mut database,
-                    DiscoveredManagedInstallation {
-                        adapter_kind: kind,
-                        executable_path: executable_path.clone(),
-                        command_name: kind.command_name().to_string(),
-                        source,
-                        auth_scope: "default".to_string(),
-                        snapshot,
-                    },
-                )?;
-                drop(database);
-                lightweight.executable_path = Some(executable_path);
-                self.publish_runtime_discovery(lightweight).await;
-                self.runtime_product_diagnostics.write().await.remove(&kind);
-                let database = self.database.lock().await;
-                return managed_runtime_is_ready(&database, kind);
-            }
             let deep_probe_reports_version = matches!(
                 kind,
                 AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp
@@ -2447,10 +2424,14 @@ impl Core {
                 } else {
                     "transient"
                 };
-                let diagnostic_code = lightweight
-                    .diagnostic_code
-                    .as_deref()
-                    .unwrap_or("runtime_version_failed");
+                let diagnostic_code = if targets_current_installation {
+                    lightweight
+                        .diagnostic_code
+                        .as_deref()
+                        .unwrap_or("runtime_version_failed")
+                } else {
+                    "runtime_alternate_candidate_probe_failed"
+                };
                 let mut database = self.database.lock().await;
                 AgentProfileService::default().record_managed_probe_failure(
                     &mut database,
@@ -2491,7 +2472,9 @@ impl Core {
                     } else {
                         "transient"
                     };
-                    let diagnostic_code = if identity_changed {
+                    let diagnostic_code = if !targets_current_installation {
+                        "runtime_alternate_candidate_probe_failed"
+                    } else if identity_changed {
                         "runtime_identity_changed"
                     } else {
                         "runtime_probe_transient_failure"
@@ -2524,6 +2507,7 @@ impl Core {
                 .runtime_probe_identity_is_current(
                     kind,
                     search.generation(),
+                    &canonical,
                     &candidate_fingerprint,
                 )
                 .await
@@ -2561,6 +2545,9 @@ impl Core {
                 return Ok(true);
             }
             let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
+                _ if !targets_current_installation => {
+                    ("transient", "runtime_alternate_candidate_probe_failed")
+                }
                 "not_installed" => ("path_missing", "runtime_path_missing"),
                 "authentication_required" => {
                     ("authentication_required", "runtime_authentication_required")
@@ -5264,38 +5251,6 @@ impl Core {
                 "payload": { "installationId": installation.id },
             }));
         }
-        if !runtime_launch_allowed(
-            installation.adapter_kind,
-            RuntimeLaunchPurpose::InstallationRefresh,
-        ) {
-            let path = Path::new(&installation.executable_path);
-            if !is_executable_file(path) {
-                anyhow::bail!("runtime_path_missing");
-            }
-            let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-            let fingerprint = fingerprint_executable(&canonical)?;
-            let observed_at = chrono::Utc::now().to_rfc3339();
-            let snapshot = AgentRuntimeAdapterRegistry::default()
-                .trae_installed_unverified_snapshot(
-                    discover_static_runtime_version(installation.adapter_kind, &canonical),
-                    fingerprint,
-                    observed_at,
-                )?;
-            let mut database = self.database.lock().await;
-            let execution = AgentProfileService::default().record_snapshot(
-                &mut database,
-                &user_command_envelope(
-                    params.command_id,
-                    RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation.id,
-                        expected_installation_version: installation.version,
-                        snapshot,
-                        failure: None,
-                    },
-                ),
-            )?;
-            return Ok(serde_json::to_value(execution.result)?);
-        }
         let search = self.runtime_search_environment.read().await.clone();
         let deep_probe = with_runtime_search_environment(
             &search,
@@ -5540,8 +5495,6 @@ impl Core {
                     "failed to launch AgentRun {}: {error:#}",
                     execution.agent_run_id
                 );
-                core.record_trae_execution_verification_failure(&execution, &error)
-                    .await;
                 let delivered_one_shot_failure = error
                     .downcast_ref::<AntigravityDeliveredFailure>()
                     .map(|failure| {
@@ -7155,106 +7108,50 @@ impl Core {
                 .await
                 .map(|_| ()),
             InstallationClass::Custom => {
-                if !runtime_launch_allowed(
-                    frozen_runtime.adapter_kind,
-                    RuntimeLaunchPurpose::DispatchPreflight,
-                ) {
-                    let path = Path::new(&installation.executable_path);
-                    let snapshot = (|| -> Result<_> {
-                        if !is_executable_file(path) {
-                            anyhow::bail!("runtime_path_missing");
-                        }
-                        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-                        AgentRuntimeAdapterRegistry::default().trae_installed_unverified_snapshot(
-                            discover_static_runtime_version(
-                                frozen_runtime.adapter_kind,
-                                &canonical,
-                            ),
-                            fingerprint_executable(&canonical)?,
-                            chrono::Utc::now().to_rfc3339(),
-                        )
-                    })();
-                    match snapshot {
-                        Ok(snapshot) => {
-                            let mut database = self.database.lock().await;
-                            AgentProfileService::default()
-                                .record_snapshot(
-                                    &mut database,
-                                    &CommandEnvelope {
-                                        command_id: uuid::Uuid::new_v4().to_string(),
-                                        actor: ActorRef::System {
-                                            component_id: "agent-run-scheduler".to_string(),
-                                        },
-                                        camp_id: Some(candidate.camp_id.clone()),
-                                        expected_versions: Vec::new(),
-                                        execution_epoch: None,
-                                        payload: RecordAdapterCapabilitySnapshotCommand {
-                                            installation_id: installation.id.clone(),
-                                            expected_installation_version: installation.version,
-                                            snapshot,
-                                            failure: None,
-                                        },
+                let search = self.runtime_search_environment.read().await.clone();
+                let deep_probe = with_runtime_search_environment(
+                    &search,
+                    self.deep_probe_candidate(
+                        frozen_runtime.adapter_kind,
+                        Path::new(&installation.executable_path),
+                        RuntimeLaunchPurpose::DispatchPreflight,
+                    ),
+                )
+                .await;
+                match deep_probe {
+                    Ok(deep_probe) => {
+                        let mut database = self.database.lock().await;
+                        AgentProfileService::default()
+                            .record_snapshot(
+                                &mut database,
+                                &CommandEnvelope {
+                                    command_id: uuid::Uuid::new_v4().to_string(),
+                                    actor: ActorRef::System {
+                                        component_id: "agent-run-scheduler".to_string(),
                                     },
-                                )
-                                .and_then(|execution| {
-                                    (execution.result.status == CommandResultStatus::Applied)
-                                        .then_some(())
-                                        .with_context(|| {
-                                            format!(
-                                                "Runtime static refresh was rejected: {} {}",
-                                                execution.result.code, execution.result.payload
-                                            )
-                                        })
-                                })
-                        }
-                        Err(error) => Err(error),
-                    }
-                } else {
-                    let search = self.runtime_search_environment.read().await.clone();
-                    let deep_probe = with_runtime_search_environment(
-                        &search,
-                        self.deep_probe_candidate(
-                            frozen_runtime.adapter_kind,
-                            Path::new(&installation.executable_path),
-                            RuntimeLaunchPurpose::DispatchPreflight,
-                        ),
-                    )
-                    .await;
-                    match deep_probe {
-                        Ok(deep_probe) => {
-                            let mut database = self.database.lock().await;
-                            AgentProfileService::default()
-                                .record_snapshot(
-                                    &mut database,
-                                    &CommandEnvelope {
-                                        command_id: uuid::Uuid::new_v4().to_string(),
-                                        actor: ActorRef::System {
-                                            component_id: "agent-run-scheduler".to_string(),
-                                        },
-                                        camp_id: Some(candidate.camp_id.clone()),
-                                        expected_versions: Vec::new(),
-                                        execution_epoch: None,
-                                        payload: RecordAdapterCapabilitySnapshotCommand {
-                                            installation_id: installation.id.clone(),
-                                            expected_installation_version: installation.version,
-                                            snapshot: deep_probe.snapshot,
-                                            failure: deep_probe.failure,
-                                        },
+                                    camp_id: Some(candidate.camp_id.clone()),
+                                    expected_versions: Vec::new(),
+                                    execution_epoch: None,
+                                    payload: RecordAdapterCapabilitySnapshotCommand {
+                                        installation_id: installation.id.clone(),
+                                        expected_installation_version: installation.version,
+                                        snapshot: deep_probe.snapshot,
+                                        failure: deep_probe.failure,
                                     },
-                                )
-                                .and_then(|execution| {
-                                    (execution.result.status == CommandResultStatus::Applied)
-                                        .then_some(())
-                                        .with_context(|| {
-                                            format!(
-                                                "Runtime refresh was rejected: {} {}",
-                                                execution.result.code, execution.result.payload
-                                            )
-                                        })
-                                })
-                        }
-                        Err(error) => Err(error),
+                                },
+                            )
+                            .and_then(|execution| {
+                                (execution.result.status == CommandResultStatus::Applied)
+                                    .then_some(())
+                                    .with_context(|| {
+                                        format!(
+                                            "Runtime refresh was rejected: {} {}",
+                                            execution.result.code, execution.result.payload
+                                        )
+                                    })
+                            })
                     }
+                    Err(error) => Err(error),
                 }
             }
         };
@@ -8879,13 +8776,6 @@ impl Core {
             }
             Err(error) => return Err(error),
         };
-        if execution.runtime.adapter_kind == AdapterKind::TraeCnCli
-            && execution.runtime.model.model_id == TRAE_RUNTIME_DEFAULT_MODEL_ID
-        {
-            self.record_trae_execution_verification(execution, &runtime)
-                .await
-                .context("failed to verify TRAE from its real AgentRun process")?;
-        }
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await
             .context("failed to bind ACP Native Session")?;
@@ -8959,165 +8849,6 @@ impl Core {
             }),
         );
         Ok(())
-    }
-
-    async fn record_trae_execution_verification(
-        &self,
-        execution: &AgentRunExecution,
-        runtime: &AcpRuntime,
-    ) -> Result<()> {
-        let (initialize_result, session_result) = runtime
-            .verification_evidence()
-            .await
-            .context("TRAE AgentRun process did not retain initialize/session evidence")?;
-        let observed_at = chrono::Utc::now().to_rfc3339();
-        let snapshot = AgentRuntimeAdapterRegistry::default()
-            .trae_live_session_capability_snapshot(
-                execution.runtime.reported_version.clone(),
-                execution.runtime.executable_fingerprint.clone(),
-                initialize_result,
-                session_result,
-                observed_at,
-            )?;
-        let installation_version = {
-            let database = self.database.lock().await;
-            AgentProfileService::default()
-                .list_installations(&database)?
-                .into_iter()
-                .find(|installation| installation.id == execution.runtime.installation_id)
-                .map(|installation| installation.version)
-                .context("TRAE Runtime installation disappeared during AgentRun startup")?
-        };
-        let mut database = self.database.lock().await;
-        let recorded = AgentProfileService::default().record_snapshot(
-            &mut database,
-            &CommandEnvelope {
-                command_id: uuid::Uuid::new_v4().to_string(),
-                actor: ActorRef::System {
-                    component_id: "trae-agent-run-verification".to_string(),
-                },
-                camp_id: Some(execution.camp_id.clone()),
-                expected_versions: Vec::new(),
-                execution_epoch: None,
-                payload: RecordAdapterCapabilitySnapshotCommand {
-                    installation_id: execution.runtime.installation_id.clone(),
-                    expected_installation_version: installation_version,
-                    snapshot,
-                    failure: None,
-                },
-            },
-        )?;
-        if recorded.result.status == CommandResultStatus::Rejected {
-            anyhow::bail!(
-                "TRAE live verification was rejected: {} {}",
-                recorded.result.code,
-                recorded.result.payload
-            );
-        }
-        Ok(())
-    }
-
-    async fn record_trae_execution_verification_failure(
-        &self,
-        execution: &AgentRunExecution,
-        error: &anyhow::Error,
-    ) {
-        if execution.runtime.adapter_kind != AdapterKind::TraeCnCli
-            || execution.runtime.model.model_id != TRAE_RUNTIME_DEFAULT_MODEL_ID
-        {
-            return;
-        }
-        let installation = {
-            let database = self.database.lock().await;
-            AgentProfileService::default()
-                .list_installations(&database)
-                .ok()
-                .and_then(|installations| {
-                    installations
-                        .into_iter()
-                        .find(|installation| installation.id == execution.runtime.installation_id)
-                })
-        };
-        let Some(installation) = installation else {
-            return;
-        };
-        if !installation.snapshot.as_ref().is_some_and(|snapshot| {
-            matches!(
-                snapshot.probe_status.as_str(),
-                "light_ready" | "installed_unverified"
-            )
-        }) {
-            return;
-        }
-        let detail = format!("{error:#}");
-        let lower = detail.to_ascii_lowercase();
-        let (probe_status, authentication_status) = if [
-            "login",
-            "log in",
-            "auth",
-            "credential",
-            "unauthorized",
-            "not signed in",
-        ]
-        .iter()
-        .any(|marker| lower.contains(marker))
-        {
-            ("authentication_required", "authentication_required")
-        } else if [
-            "did not negotiate acp v1",
-            "session response did not include sessionid",
-            "available permission modes",
-            "available default model",
-            "method not found",
-            "unsupported protocol",
-        ]
-        .iter()
-        .any(|marker| lower.contains(marker))
-        {
-            ("missing_capabilities", "authenticated")
-        } else {
-            ("probe_failed", "unknown")
-        };
-        let snapshot =
-            AgentRuntimeAdapterRegistry::default().acp_capability_snapshot(AcpProbeObservation {
-                adapter_kind: AdapterKind::TraeCnCli,
-                reported_version: execution.runtime.reported_version.clone(),
-                executable_fingerprint: Some(execution.runtime.executable_fingerprint.clone()),
-                authentication_status: authentication_status.to_string(),
-                probe_status: probe_status.to_string(),
-                capabilities: Vec::new(),
-                initialize_result: None,
-                session_result: None,
-                attempted_at: chrono::Utc::now().to_rfc3339(),
-                last_error: Some(detail),
-            });
-        let Ok(snapshot) = snapshot else {
-            return;
-        };
-        let result = {
-            let mut database = self.database.lock().await;
-            AgentProfileService::default().record_snapshot(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "trae-agent-run-verification".to_string(),
-                    },
-                    camp_id: Some(execution.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: RecordAdapterCapabilitySnapshotCommand {
-                        installation_id: installation.id,
-                        expected_installation_version: installation.version,
-                        snapshot,
-                        failure: None,
-                    },
-                },
-            )
-        };
-        if let Err(record_error) = result {
-            eprintln!("failed to record TRAE AgentRun verification failure: {record_error:#}");
-        }
     }
 
     async fn fail_claimed_agent_run(
@@ -9570,23 +9301,6 @@ fn runtime_attempt_precedes(attempt: &AdapterProbeAttempt, timestamp: &str) -> b
         return false;
     };
     attempted_at < last_successful_at
-}
-
-fn managed_runtime_is_ready(database: &Database, kind: AdapterKind) -> Result<bool> {
-    Ok(AgentProfileService::default()
-        .managed_installation(database, kind, "default")?
-        .as_ref()
-        .is_some_and(managed_installation_is_usable))
-}
-
-fn managed_installation_is_usable(installation: &AdapterInstallationView) -> bool {
-    installation.enabled
-        && installation.path_state == "valid"
-        && installation.snapshot.as_ref().is_some_and(|snapshot| {
-            snapshot.probe_status == "ready"
-                && snapshot.stale_at.is_none()
-                && snapshot.authentication_status == "authenticated"
-        })
 }
 
 fn classify_native_resume_failure(error: &anyhow::Error) -> NativeSessionResumeFailure {

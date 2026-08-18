@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Agent Runtime 兼容性清单
@@ -190,6 +190,20 @@ workspace、模型、权限、Host config 或 executable fingerprint 不兼容�
 Action/Approval 均为 0。恢复后的新文件工具与 Approval 成功，运行中 cancel 收敛为 cancelled 且目标文件
 不存在。随后把隔离数据库中的 Session ID 改为不存在值再次重启，Core 持久记录一次 continuity lost，换用
 新的 Session ID 并成功完成当前请求。
+
+### 2026-08-19 当前语义勘误：TRAE 统一深检生命周期
+
+上方 v0.87 与 2026-08-17 记录关于“Health、Installation Refresh、Dispatch Preflight 不启动 TRAE”以及
+`installed_unverified` 首次 AgentRun 验证的内容，是当时版本的历史证据，不再描述当前产品语义。v1.11 当前
+修正使 TRAE 与其他 Product Runtime 一样参加 Installation Refresh、Health Probe 和 Dispatch Preflight；
+`light_ready` 可以保存 runtime-default 与静态 permission descriptor，但正式 AgentRun 必须先统一达到
+`ready`。旧 `installed_unverified` 只可读取，不再进入 onboarding、配置或执行。真实 TRAE acceptance/smoke
+继续串行，第三方密钥/状态文件竞争由测试调度解决。
+
+本次没有改变上方 `0.120.52` 的真实协议、模型、权限、Session continuation、MCP 或 terminal 兼容证据，也
+没有据此宣称运行了新一轮真实 TRAE smoke。统一 launch-policy、fake ACP Health/Dispatch 与持久化回归测试
+拥有当前产品行为；当前规范入口为 [Runtime Launch and Verification v9](contracts/runtime-launch-and-verification-v9.md)
+和 [Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)。
 
 ### 2026-08-17 Runtime command output 协议修正
 
