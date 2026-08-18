@@ -267,34 +267,15 @@ fn restrict_private_file(path: &Path) -> Result<()> {
 fn create_protected_named_pipe(name: &str, first_instance: bool) -> Result<NamedPipeServer> {
     use std::{ffi::c_void, os::windows::io::AsRawHandle};
     use windows_sys::Win32::{
-        Foundation::{HANDLE_FLAG_INHERIT, LocalFree, SetHandleInformation},
-        Security::{PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES},
+        Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation},
+        Security::SECURITY_ATTRIBUTES,
     };
 
-    let user_sid = current_windows_logon_sid()?;
-    let sddl = format!("D:P(A;;GA;;;SY)(A;;GA;;;{user_sid})");
-    let sddl_wide = sddl
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect::<Vec<_>>();
-    let mut descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
-    let converted = unsafe {
-        windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW(
-            sddl_wide.as_ptr(),
-            windows_sys::Win32::Security::Authorization::SDDL_REVISION_1,
-            &mut descriptor,
-            std::ptr::null_mut(),
-        )
-    };
-    if converted == 0 || descriptor.is_null() {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to build the Built-in Tool named-pipe DACL");
-    }
-    let mut attributes = SECURITY_ATTRIBUTES {
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: descriptor,
-        bInheritHandle: 0,
-    };
+    use super::windows_security::{PrivateObjectKind, PrivateSecurityDescriptor};
+
+    let descriptor = PrivateSecurityDescriptor::new(PrivateObjectKind::NamedPipe)
+        .context("failed to build the Built-in Tool named-pipe DACL")?;
+    let mut attributes = descriptor.attributes();
     let mut options = ServerOptions::new();
     options
         .pipe_mode(PipeMode::Byte)
@@ -306,9 +287,6 @@ fn create_protected_named_pipe(name: &str, first_instance: bool) -> Result<Named
             &mut attributes as *mut SECURITY_ATTRIBUTES as *mut c_void,
         )
     };
-    unsafe {
-        LocalFree(descriptor);
-    }
     let server = created.context("failed to create protected Built-in Tool named pipe")?;
     let non_inheritable =
         unsafe { SetHandleInformation(server.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) };
@@ -317,78 +295,6 @@ fn create_protected_named_pipe(name: &str, first_instance: bool) -> Result<Named
             .context("failed to make the Built-in Tool named-pipe handle non-inheritable");
     }
     Ok(server)
-}
-
-#[cfg(windows)]
-fn current_windows_logon_sid() -> Result<String> {
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, LocalFree},
-        Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser},
-        System::Threading::{GetCurrentProcess, OpenProcessToken},
-    };
-
-    struct TokenHandle(windows_sys::Win32::Foundation::HANDLE);
-    impl Drop for TokenHandle {
-        fn drop(&mut self) {
-            unsafe {
-                CloseHandle(self.0);
-            }
-        }
-    }
-
-    let mut token = std::ptr::null_mut();
-    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to open the current process token");
-    }
-    let token = TokenHandle(token);
-    let mut required = 0_u32;
-    unsafe {
-        GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut required);
-    }
-    if required == 0 {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to size the current logon SID");
-    }
-    let mut buffer = vec![0_u8; required as usize];
-    if unsafe {
-        GetTokenInformation(
-            token.0,
-            TokenUser,
-            buffer.as_mut_ptr().cast(),
-            required,
-            &mut required,
-        )
-    } == 0
-    {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to read the current logon SID");
-    }
-    let token_user = unsafe { &*(buffer.as_ptr() as *const TOKEN_USER) };
-    let mut sid_text = std::ptr::null_mut();
-    if unsafe {
-        windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW(
-            token_user.User.Sid,
-            &mut sid_text,
-        )
-    } == 0
-        || sid_text.is_null()
-    {
-        return Err(std::io::Error::last_os_error())
-            .context("failed to format the current logon SID");
-    }
-    let length = unsafe {
-        let mut length = 0_usize;
-        while *sid_text.add(length) != 0 {
-            length += 1;
-        }
-        length
-    };
-    let result = String::from_utf16(unsafe { std::slice::from_raw_parts(sid_text, length) });
-    unsafe {
-        LocalFree(sid_text.cast());
-    }
-    Ok(result.context("current logon SID is not valid UTF-16")?)
 }
 
 #[cfg(all(test, unix))]

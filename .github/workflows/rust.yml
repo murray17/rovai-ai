@@ -104,3 +104,9 @@ jobs:
           cargo test -p rovai-core --lib
           --target x86_64-pc-windows-msvc
           managed_process
+
+      - name: Exercise Windows private storage admission
+        run: >-
+          cargo test -p rovai-core --lib
+          --target x86_64-pc-windows-msvc
+          core_data_dir_lock

@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 pub mod local_ipc;
+pub(crate) mod private_storage;
+#[cfg(windows)]
+pub(crate) mod windows_security;
 
 /// Closed identity for build targets Rovai can ship.
 ///

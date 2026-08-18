@@ -1,0 +1,538 @@
+use std::{
+    fs::File,
+    path::{Path, PathBuf},
+};
+
+use anyhow::Result;
+
+/// Creates or admits a private directory and returns its canonical path.
+///
+/// Windows uses native creation with a protected DACL and rejects an existing
+/// object that does not already satisfy the private-storage contract. Other
+/// platforms retain their established data-directory behavior.
+pub(crate) fn prepare_private_directory(path: &Path) -> Result<PathBuf> {
+    prepare_private_directory_platform(path)
+}
+
+/// Opens a retained private read/write file, creating it atomically when absent.
+///
+/// This is intentionally narrower than `OpenOptions`: callers cannot request a
+/// truncating or inheritable handle, and Windows existing-object admission is
+/// mandatory before the handle is returned.
+pub(crate) fn open_private_read_write_file(path: &Path) -> Result<File> {
+    open_private_read_write_file_platform(path)
+}
+
+#[cfg(unix)]
+fn prepare_private_directory_platform(path: &Path) -> Result<PathBuf> {
+    use anyhow::Context;
+
+    std::fs::create_dir_all(path).with_context(|| {
+        format!(
+            "failed to create private Rovai data directory {}",
+            path.display()
+        )
+    })?;
+    path.canonicalize().with_context(|| {
+        format!(
+            "failed to resolve private Rovai data directory {}",
+            path.display()
+        )
+    })
+}
+
+#[cfg(unix)]
+fn open_private_read_write_file_platform(path: &Path) -> Result<File> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    use anyhow::Context;
+
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .create(true)
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW);
+    let file = options
+        .open(path)
+        .with_context(|| format!("failed to open private file {}", path.display()))?;
+    if !file.metadata()?.is_file() {
+        anyhow::bail!("private path is not a regular file: {}", path.display());
+    }
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(file)
+}
+
+#[cfg(windows)]
+mod windows {
+    use std::{
+        ffi::OsStr,
+        fs::File,
+        io,
+        mem::size_of,
+        os::windows::{
+            ffi::OsStrExt,
+            io::{AsRawHandle, FromRawHandle, OwnedHandle},
+        },
+        path::{Component, Path, PathBuf, Prefix},
+        ptr::{null, null_mut},
+    };
+
+    use anyhow::{Context, Result, anyhow, bail};
+    use windows_sys::Win32::{
+        Foundation::{
+            ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS, GENERIC_READ, GENERIC_WRITE, HANDLE,
+            HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+        },
+        Storage::FileSystem::{
+            CREATE_NEW, CreateDirectoryW, CreateFileW, FILE_ATTRIBUTE_DIRECTORY,
+            FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
+            FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            FileAttributeTagInfo, FileIdInfo, GetDriveTypeW, GetFileInformationByHandleEx,
+            GetVolumeInformationW, GetVolumePathNameW, OPEN_EXISTING, READ_CONTROL,
+        },
+        System::WindowsProgramming::DRIVE_FIXED,
+    };
+
+    use crate::platform::windows_security::{PrivateObjectKind, PrivateSecurityDescriptor};
+
+    const HOST_UNSUPPORTED: &str = "windows_storage.host_unsupported";
+    const NOT_LOCAL: &str = "windows_storage.not_local";
+    const NOT_NTFS: &str = "windows_storage.not_ntfs";
+    const IDENTITY_UNAVAILABLE: &str = "windows_storage.identity_unavailable";
+    const REPARSE_ROOT_REJECTED: &str = "windows_storage.reparse_root_rejected";
+    const PRIVATE_ACL_INVALID: &str = "windows_storage.private_acl_invalid";
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct FileIdentity {
+        volume_serial_number: u64,
+        file_id: [u8; 16],
+    }
+
+    pub(super) fn prepare_private_directory(path: &Path) -> Result<PathBuf> {
+        validate_native_absolute_path(path)?;
+        if !path.exists() {
+            prepare_parent(path)?;
+            create_private_directory(path)?;
+        }
+
+        let opened = open_path(path, ExpectedObjectKind::Directory)?;
+        admit_volume(path)?;
+        let identity = file_identity(&opened)?;
+        verify_private_acl(
+            &opened,
+            PrivateObjectKind::Directory,
+            "private data directory",
+        )
+        .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))?;
+        let canonical = path.canonicalize().map_err(|error| {
+            blocker(
+                IDENTITY_UNAVAILABLE,
+                format!("failed to canonicalize {}: {error}", path.display()),
+            )
+        })?;
+        let reopened = open_path(&canonical, ExpectedObjectKind::Directory)?;
+        if file_identity(&reopened)? != identity {
+            bail!(
+                "{IDENTITY_UNAVAILABLE}: data directory identity changed during admission: {}",
+                path.display()
+            );
+        }
+        Ok(canonical)
+    }
+
+    pub(super) fn open_private_read_write_file(path: &Path) -> Result<File> {
+        validate_native_absolute_path(path)?;
+        let parent = path.parent().ok_or_else(|| {
+            blocker(
+                HOST_UNSUPPORTED,
+                format!("private file path has no parent: {}", path.display()),
+            )
+        })?;
+        let admitted_parent = prepare_private_directory(parent)?;
+        let parent_handle = open_path(&admitted_parent, ExpectedObjectKind::Directory)?;
+        let parent_identity = file_identity(&parent_handle)?;
+
+        let descriptor = PrivateSecurityDescriptor::new(PrivateObjectKind::File)
+            .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))?;
+        let attributes = descriptor.attributes();
+        let wide_path = wide_path(path)?;
+        let mut created = true;
+        let raw = unsafe {
+            // SAFETY: wide_path is NUL-terminated, attributes borrows the live
+            // descriptor, and all other arguments are value types. CREATE_NEW
+            // prevents opening an unknown existing object under creation ACLs.
+            CreateFileW(
+                wide_path.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                &attributes,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            )
+        };
+        let handle = if raw == INVALID_HANDLE_VALUE {
+            let error = io::Error::last_os_error();
+            if matches!(
+                error.raw_os_error().map(|code| code as u32),
+                Some(ERROR_FILE_EXISTS) | Some(ERROR_ALREADY_EXISTS)
+            ) {
+                created = false;
+                open_existing_private_file(path).map_err(|open_error| {
+                    blocker(
+                        PRIVATE_ACL_INVALID,
+                        format!(
+                            "failed to open existing private file {}: {open_error:#}",
+                            path.display()
+                        ),
+                    )
+                })?
+            } else {
+                return Err(error)
+                    .with_context(|| format!("failed to create private file {}", path.display()));
+            }
+        } else {
+            owned_handle(raw)?
+        };
+
+        clear_handle_inheritance(&handle)?;
+        let file_identity = inspect_handle(&handle, ExpectedObjectKind::File)?;
+        if file_identity.volume_serial_number != parent_identity.volume_serial_number {
+            bail!(
+                "{IDENTITY_UNAVAILABLE}: private file and parent resolved to different volumes: {}",
+                path.display()
+            );
+        }
+        verify_private_acl(&handle, PrivateObjectKind::File, "private file").map_err(|error| {
+            blocker(
+                PRIVATE_ACL_INVALID,
+                format!(
+                    "{} private file {} failed admission: {error:#}",
+                    if created { "new" } else { "existing" },
+                    path.display()
+                ),
+            )
+        })?;
+        Ok(File::from(handle))
+    }
+
+    fn prepare_parent(path: &Path) -> Result<()> {
+        let parent = path.parent().ok_or_else(|| {
+            blocker(
+                HOST_UNSUPPORTED,
+                format!("private directory has no parent: {}", path.display()),
+            )
+        })?;
+        if parent.exists() {
+            let parent_handle = open_path(parent, ExpectedObjectKind::Directory)?;
+            inspect_handle(&parent_handle, ExpectedObjectKind::Directory)?;
+            admit_volume(parent)?;
+        } else {
+            prepare_private_directory(parent)?;
+        }
+        Ok(())
+    }
+
+    fn create_private_directory(path: &Path) -> Result<()> {
+        let descriptor = PrivateSecurityDescriptor::new(PrivateObjectKind::Directory)
+            .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))?;
+        let attributes = descriptor.attributes();
+        let wide_path = wide_path(path)?;
+        let created = unsafe {
+            // SAFETY: wide_path is NUL-terminated and attributes borrows the
+            // live protected descriptor for the duration of the native call.
+            CreateDirectoryW(wide_path.as_ptr(), &attributes)
+        };
+        if created != 0 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if error.raw_os_error().map(|code| code as u32) == Some(ERROR_ALREADY_EXISTS) {
+            // Another creator won the race. It must pass the same exact policy;
+            // no permissions are changed here.
+            return Ok(());
+        }
+        Err(error).with_context(|| format!("failed to create private directory {}", path.display()))
+    }
+
+    #[derive(Debug, Clone, Copy)]
+    enum ExpectedObjectKind {
+        Directory,
+        File,
+    }
+
+    fn open_path(path: &Path, expected: ExpectedObjectKind) -> Result<OwnedHandle> {
+        let wide_path = wide_path(path)?;
+        let flags = FILE_FLAG_OPEN_REPARSE_POINT
+            | match expected {
+                ExpectedObjectKind::Directory => FILE_FLAG_BACKUP_SEMANTICS,
+                ExpectedObjectKind::File => FILE_ATTRIBUTE_NORMAL,
+            };
+        let raw = unsafe {
+            // SAFETY: wide_path is NUL-terminated. Null security attributes make
+            // the returned handle non-inheritable and OPEN_EXISTING never creates.
+            CreateFileW(
+                wide_path.as_ptr(),
+                FILE_READ_ATTRIBUTES | READ_CONTROL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                null(),
+                OPEN_EXISTING,
+                flags,
+                null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error())
+                .with_context(|| format!("failed to open storage object {}", path.display()));
+        }
+        let handle = owned_handle(raw)?;
+        clear_handle_inheritance(&handle)?;
+        inspect_handle(&handle, expected)?;
+        Ok(handle)
+    }
+
+    fn open_existing_private_file(path: &Path) -> Result<OwnedHandle> {
+        let wide_path = wide_path(path)?;
+        let raw = unsafe {
+            // SAFETY: wide_path is NUL-terminated. Null security attributes make
+            // the existing handle non-inheritable and OPEN_EXISTING never creates.
+            CreateFileW(
+                wide_path.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                null(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error())
+                .with_context(|| format!("failed to open private file {}", path.display()));
+        }
+        let handle = owned_handle(raw)?;
+        clear_handle_inheritance(&handle)?;
+        inspect_handle(&handle, ExpectedObjectKind::File)?;
+        Ok(handle)
+    }
+
+    fn inspect_handle(handle: &OwnedHandle, expected: ExpectedObjectKind) -> Result<FileIdentity> {
+        let mut attributes = FILE_ATTRIBUTE_TAG_INFO::default();
+        read_file_information(handle, FileAttributeTagInfo, &mut attributes)
+            .map_err(|error| blocker(IDENTITY_UNAVAILABLE, format!("{error:#}")))?;
+        if attributes.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            bail!("{REPARSE_ROOT_REJECTED}: storage object is a reparse point");
+        }
+        let is_directory = attributes.FileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0;
+        if is_directory != matches!(expected, ExpectedObjectKind::Directory) {
+            bail!("{IDENTITY_UNAVAILABLE}: storage object has the wrong type");
+        }
+        file_identity(handle)
+    }
+
+    fn file_identity(handle: &OwnedHandle) -> Result<FileIdentity> {
+        let mut info = FILE_ID_INFO::default();
+        read_file_information(handle, FileIdInfo, &mut info)
+            .map_err(|error| blocker(IDENTITY_UNAVAILABLE, format!("{error:#}")))?;
+        Ok(FileIdentity {
+            volume_serial_number: info.VolumeSerialNumber,
+            file_id: info.FileId.Identifier,
+        })
+    }
+
+    fn read_file_information<T>(handle: &OwnedHandle, class: i32, output: &mut T) -> Result<()> {
+        let read = unsafe {
+            // SAFETY: output points to the exact structure selected by each
+            // caller's FILE_INFO_BY_HANDLE_CLASS and has the declared size.
+            GetFileInformationByHandleEx(
+                handle.as_raw_handle(),
+                class,
+                (output as *mut T).cast(),
+                size_of::<T>() as u32,
+            )
+        };
+        if read == 0 {
+            Err(io::Error::last_os_error()).context("GetFileInformationByHandleEx failed")
+        } else {
+            Ok(())
+        }
+    }
+
+    fn verify_private_acl(
+        handle: &OwnedHandle,
+        kind: PrivateObjectKind,
+        label: &str,
+    ) -> Result<()> {
+        PrivateSecurityDescriptor::new(kind)
+            .and_then(|policy| policy.verify_file_handle(handle.as_raw_handle() as HANDLE))
+            .with_context(|| format!("{label} does not have the required protected DACL"))
+    }
+
+    fn admit_volume(path: &Path) -> Result<()> {
+        let wide_path = wide_path(path)?;
+        let mut volume_root = vec![0_u16; 32_768];
+        if unsafe {
+            // SAFETY: both buffers are live and volume_root advertises its exact
+            // capacity in UTF-16 code units.
+            GetVolumePathNameW(
+                wide_path.as_ptr(),
+                volume_root.as_mut_ptr(),
+                volume_root.len() as u32,
+            )
+        } == 0
+        {
+            return Err(blocker(
+                IDENTITY_UNAVAILABLE,
+                format!(
+                    "failed to resolve the storage volume for {}: {}",
+                    path.display(),
+                    io::Error::last_os_error()
+                ),
+            ));
+        }
+        let drive_type = unsafe {
+            // SAFETY: GetVolumePathNameW produced a NUL-terminated root path.
+            GetDriveTypeW(volume_root.as_ptr())
+        };
+        if drive_type != DRIVE_FIXED {
+            bail!(
+                "{NOT_LOCAL}: storage path is not on a local fixed volume: {}",
+                path.display()
+            );
+        }
+
+        let mut filesystem = [0_u16; 64];
+        if unsafe {
+            // SAFETY: the root path is NUL-terminated; unused optional outputs
+            // are null and filesystem has the advertised writable capacity.
+            GetVolumeInformationW(
+                volume_root.as_ptr(),
+                null_mut(),
+                0,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                filesystem.as_mut_ptr(),
+                filesystem.len() as u32,
+            )
+        } == 0
+        {
+            return Err(blocker(
+                IDENTITY_UNAVAILABLE,
+                format!(
+                    "failed to inspect the storage filesystem for {}: {}",
+                    path.display(),
+                    io::Error::last_os_error()
+                ),
+            ));
+        }
+        let filesystem = utf16_until_nul(&filesystem)?;
+        if !filesystem.eq_ignore_ascii_case("NTFS") {
+            bail!(
+                "{NOT_NTFS}: storage filesystem is {filesystem}, expected NTFS: {}",
+                path.display()
+            );
+        }
+        Ok(())
+    }
+
+    fn validate_native_absolute_path(path: &Path) -> Result<()> {
+        if !path.is_absolute() {
+            bail!(
+                "{HOST_UNSUPPORTED}: Windows private storage path must be absolute: {}",
+                path.display()
+            );
+        }
+        let prefix = path.components().next();
+        let supported = matches!(
+            prefix,
+            Some(Component::Prefix(component))
+                if matches!(component.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+        );
+        if !supported {
+            bail!(
+                "{NOT_LOCAL}: UNC, device, and non-drive storage paths are not admitted: {}",
+                path.display()
+            );
+        }
+        Ok(())
+    }
+
+    fn clear_handle_inheritance(handle: &OwnedHandle) -> Result<()> {
+        let cleared = unsafe {
+            // SAFETY: handle is live and owned; clearing HANDLE_FLAG_INHERIT
+            // cannot broaden its rights.
+            SetHandleInformation(handle.as_raw_handle(), HANDLE_FLAG_INHERIT, 0)
+        };
+        if cleared == 0 {
+            Err(io::Error::last_os_error()).context("failed to make storage handle non-inheritable")
+        } else {
+            Ok(())
+        }
+    }
+
+    fn owned_handle(raw: HANDLE) -> Result<OwnedHandle> {
+        if raw.is_null() || raw == INVALID_HANDLE_VALUE {
+            Err(io::Error::last_os_error()).context("Windows returned an invalid storage handle")
+        } else {
+            Ok(unsafe {
+                // SAFETY: raw is a newly returned, valid handle and ownership is
+                // transferred exactly once into OwnedHandle.
+                OwnedHandle::from_raw_handle(raw)
+            })
+        }
+    }
+
+    fn wide_path(path: &Path) -> Result<Vec<u16>> {
+        wide_os(path.as_os_str()).map_err(|error| {
+            blocker(
+                HOST_UNSUPPORTED,
+                format!("invalid Windows storage path {}: {error:#}", path.display()),
+            )
+        })
+    }
+
+    fn wide_os(value: &OsStr) -> Result<Vec<u16>> {
+        let mut wide = value.encode_wide().collect::<Vec<_>>();
+        if wide.contains(&0) {
+            bail!("path contains an interior NUL");
+        }
+        wide.push(0);
+        Ok(wide)
+    }
+
+    fn utf16_until_nul(value: &[u16]) -> Result<String> {
+        let length = value
+            .iter()
+            .position(|unit| *unit == 0)
+            .unwrap_or(value.len());
+        String::from_utf16(&value[..length]).context("Windows returned invalid UTF-16")
+    }
+
+    fn blocker(code: &'static str, detail: impl std::fmt::Display) -> anyhow::Error {
+        anyhow!("{code}: {detail}")
+    }
+}
+
+#[cfg(windows)]
+fn prepare_private_directory_platform(path: &Path) -> Result<PathBuf> {
+    windows::prepare_private_directory(path)
+}
+
+#[cfg(windows)]
+fn open_private_read_write_file_platform(path: &Path) -> Result<File> {
+    windows::open_private_read_write_file(path)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn prepare_private_directory_platform(_path: &Path) -> Result<PathBuf> {
+    anyhow::bail!("private Rovai storage is unsupported on this platform")
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_private_read_write_file_platform(_path: &Path) -> Result<File> {
+    anyhow::bail!("private Rovai storage is unsupported on this platform")
+}

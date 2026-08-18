@@ -1,11 +1,13 @@
 use std::{
-    fs::{File, OpenOptions},
+    fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
+
+use crate::platform::private_storage::{open_private_read_write_file, prepare_private_directory};
 
 pub const CORE_DATA_DIR_LOCK_FILE: &str = ".rovai-core-instance.lock";
 const MAX_OWNER_METADATA_BYTES: u64 = 8 * 1024;
@@ -32,20 +34,15 @@ pub struct CoreDataDirLock {
 
 impl CoreDataDirLock {
     pub fn acquire(data_dir: &Path) -> Result<Self> {
-        std::fs::create_dir_all(data_dir).with_context(|| {
+        let canonical_data_dir = prepare_private_directory(data_dir).with_context(|| {
             format!(
-                "failed to create Rovai Core data directory before locking {}",
-                data_dir.display()
-            )
-        })?;
-        let canonical_data_dir = data_dir.canonicalize().with_context(|| {
-            format!(
-                "failed to resolve Rovai Core data directory before locking {}",
+                "failed to prepare Rovai Core data directory before locking {}",
                 data_dir.display()
             )
         })?;
         let lock_path = canonical_data_dir.join(CORE_DATA_DIR_LOCK_FILE);
-        let mut file = open_lock_file(&lock_path)?;
+        let mut file = open_private_read_write_file(&lock_path)
+            .with_context(|| format!("failed to open Core lock file {}", lock_path.display()))?;
 
         match try_lock_exclusive(&file) {
             Ok(true) => {}
@@ -89,28 +86,6 @@ impl Drop for CoreDataDirLock {
     fn drop(&mut self) {
         unlock(&self.file);
     }
-}
-
-fn open_lock_file(path: &Path) -> Result<File> {
-    let mut options = OpenOptions::new();
-    options.create(true).read(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    }
-    let file = options
-        .open(path)
-        .with_context(|| format!("failed to open Core lock file {}", path.display()))?;
-    if !file.metadata()?.is_file() {
-        anyhow::bail!("Core lock path is not a regular file: {}", path.display());
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
-    Ok(file)
 }
 
 #[cfg(unix)]
@@ -193,6 +168,7 @@ mod tests {
                 "rovai-core-data-lock-{label}-{}",
                 uuid::Uuid::new_v4()
             ));
+            #[cfg(unix)]
             std::fs::create_dir_all(&path).unwrap();
             Self(path)
         }
@@ -256,6 +232,36 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(outside).unwrap(),
             "do not overwrite"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_existing_directory_with_inherited_acl_is_rejected() {
+        let directory = TestDirectory::new("inherited-directory");
+        std::fs::create_dir_all(&directory.0).unwrap();
+
+        let error = CoreDataDirLock::acquire(&directory.0).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("windows_storage.private_acl_invalid"),
+            "unexpected error: {error:#}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_existing_lock_file_with_inherited_acl_is_rejected() {
+        let directory = TestDirectory::new("inherited-file");
+        let lock = CoreDataDirLock::acquire(&directory.0).unwrap();
+        drop(lock);
+        let lock_path = directory.0.join(CORE_DATA_DIR_LOCK_FILE);
+        std::fs::remove_file(&lock_path).unwrap();
+        std::fs::write(&lock_path, b"unknown owner").unwrap();
+
+        let error = CoreDataDirLock::acquire(&directory.0).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("windows_storage.private_acl_invalid"),
+            "unexpected error: {error:#}"
         );
     }
 }
