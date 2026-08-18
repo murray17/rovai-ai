@@ -1813,7 +1813,7 @@ impl SkillLibraryService {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "slow-tests"))]
     pub(crate) fn install_bundled_skill_for_test(
         &self,
         database: &mut Database,

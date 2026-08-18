@@ -14,7 +14,6 @@ struct TestDatabaseTemplate {
     database_path: PathBuf,
 }
 
-#[cfg(feature = "slow-tests")]
 static FRESH_SCHEMA_TEMPLATE: OnceLock<TestDatabaseTemplate> = OnceLock::new();
 static SEEDED_RUNTIME_TEMPLATE: OnceLock<TestDatabaseTemplate> = OnceLock::new();
 
@@ -39,6 +38,7 @@ impl OwnedTestDatabase {
         drop(self.database.take());
     }
 
+    #[cfg(feature = "slow-tests")]
     pub(crate) fn reopen_production(&mut self) -> anyhow::Result<&mut Database> {
         self.close();
         self.database = Some(Database::open(&self.directory)?);
@@ -207,6 +207,7 @@ pub(crate) fn seeded_runtime_database_fast() -> (Database, PathBuf) {
     )
 }
 
+#[cfg(feature = "slow-tests")]
 pub(crate) fn seeded_runtime_database_fast_owned() -> OwnedTestDatabase {
     clone_template_owned(
         SEEDED_RUNTIME_TEMPLATE.get_or_init(|| build_template("seeded-template", true)),
@@ -215,7 +216,6 @@ pub(crate) fn seeded_runtime_database_fast_owned() -> OwnedTestDatabase {
     )
 }
 
-#[cfg(feature = "slow-tests")]
 pub(crate) fn fresh_schema_database_at(directory: &Path) -> Database {
     clone_template_to(
         FRESH_SCHEMA_TEMPLATE.get_or_init(|| build_template("fresh-template", false)),
@@ -224,7 +224,6 @@ pub(crate) fn fresh_schema_database_at(directory: &Path) -> Database {
     )
 }
 
-#[cfg(feature = "slow-tests")]
 pub(crate) fn fresh_schema_database_fast_at(directory: &Path) -> Database {
     clone_template_to(
         FRESH_SCHEMA_TEMPLATE.get_or_init(|| build_template("fresh-template", false)),
