@@ -14,7 +14,7 @@ viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v2](../../contracts/camp-open-projection-v2.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v3](../../contracts/camp-open-projection-v3.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -211,12 +211,17 @@ Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` �
 可访问名称的复制控件按需从 Core 读取，不能为了复制先把全文挂载进 Drawer。执行台不显示独立“查看完整
 工具调用”、standalone raw Evidence 或 Envelope JSON。复制失败保留预览并原位说明，证据使用 evidence
 token 与等宽结构。精确合同见
-[Run Process Detail Surface v10](../../contracts/run-process-detail-surface-v10.md)。
+[Run Process Detail Surface v11](../../contracts/run-process-detail-surface-v11.md)。
+
+使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
+“模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
+不增加本版字段；运行中后续换模不覆盖首值。长 ID 使用等宽单行省略并允许键盘聚焦取得完整 title，底部和
+Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run selection、移动焦点或创建 Toast/时间线消息。
 
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v10](../../contracts/run-process-detail-surface-v10.md)。
+[Run Process Detail Surface v11](../../contracts/run-process-detail-surface-v11.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -244,7 +249,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v10](../../contracts/run-process-detail-surface-v10.md)。
+[Run Process Detail Surface v11](../../contracts/run-process-detail-surface-v11.md)。
 
 ## Camp Composer
 

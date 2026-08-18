@@ -259,6 +259,15 @@ export function agentRunCountsAsExecuting(run: Pick<AgentRunView, 'status' | 'wa
   return NON_TERMINAL_RUNS.has(run.status) && run.waitReason !== 'recovery_blocked'
 }
 
+export function agentRunRuntimeModelPresentation(
+  runtimeModel: AgentRunView['runtimeModel']
+): { modelId: string; observed: boolean } | null {
+  if (!runtimeModel) return null
+  return runtimeModel.modelId
+    ? { modelId: runtimeModel.modelId, observed: true }
+    : { modelId: 'Agent 运行时默认', observed: false }
+}
+
 export type CampMessageSendReceipt = {
   campTurnId: string | null
   agentRunIds: string[]
@@ -4506,6 +4515,7 @@ function ExecutionDrawer({
                 && NON_TERMINAL_RUNS.has(run.status)
               const focused = run.id === resolvedFocusedRunId
               const state = agentRunPresentation(run, cancelling)
+              const runtimeModel = agentRunRuntimeModelPresentation(run.runtimeModel)
               const runDeliveries = deliveries.filter((delivery) =>
                 delivery.targetAgentRunId === run.id
                 || (delivery.targetAgentRunId === null && delivery.campTurnId === run.campTurnId)
@@ -4541,6 +4551,27 @@ function ExecutionDrawer({
                           </span>
                           {run.invocationKind === 'a2a' && <span>深度 {run.a2aDepth}</span>}
                           <span>本轮 <code>{shortIdentity(run.campTurnId)}</code></span>
+                          {runtimeModel && (
+                            <span
+                              className={`execution-run-model${runtimeModel.observed ? ' is-observed' : ' is-waiting'}`}
+                              role="status"
+                              aria-live="polite"
+                              aria-atomic="true"
+                              aria-label={runtimeModel.observed
+                                ? `${displayName}，${runIntervalLabel(run)}，实际模型 ${runtimeModel.modelId}，默认策略`
+                                : `${displayName}，${runIntervalLabel(run)}，实际模型尚未由 Agent 运行时报告，默认策略`}
+                            >
+                              模型{' '}
+                              <code
+                                dir="ltr"
+                                tabIndex={0}
+                                title={runtimeModel.modelId}
+                              >
+                                {runtimeModel.modelId}
+                              </code>
+                              {runtimeModel.observed && <small>· 默认</small>}
+                            </span>
+                          )}
                         </div>
                       </div>
                     </header>

@@ -66,6 +66,7 @@ import {
   agentExecutionProcesses,
   agentRunTerminalNote,
   agentRunCountsAsExecuting,
+  agentRunRuntimeModelPresentation,
   agentRunShowsUnsettledWarning,
   attachmentDragKind,
   attachmentDropIsBlocked,
@@ -175,6 +176,20 @@ function canonicalActivity(
   }
 }
 
+describe('AgentRun Runtime model presentation', () => {
+  it('shows Runtime defaults before observation and ignores fixed-model Runs', () => {
+    expect(agentRunRuntimeModelPresentation({ modelId: null })).toEqual({
+      modelId: 'Agent 运行时默认',
+      observed: false
+    })
+    expect(agentRunRuntimeModelPresentation({ modelId: 'gpt-5.6' })).toEqual({
+      modelId: 'gpt-5.6',
+      observed: true
+    })
+    expect(agentRunRuntimeModelPresentation(null)).toBeNull()
+  })
+})
+
 describe('cold startup route presentation', () => {
   it('removes the global gate as soon as Main Window Session returns a target', () => {
     expect(startupGateShouldBeVisible(null)).toBe(true)
@@ -280,7 +295,7 @@ describe('Camp snapshot cache', () => {
       updatedAt: '2026-08-14T00:00:00Z'
     }
     const previous = {
-      schemaVersion: 31,
+      schemaVersion: 32,
       throughGlobalSequence: 10,
       camp,
       members: [],
@@ -302,7 +317,7 @@ describe('Camp snapshot cache', () => {
       complete: true
     }
     const projection = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       throughGlobalSequence: 20,
       camp,
       members: [],
@@ -1922,7 +1937,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 31,
+      schemaVersion: 32,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2115,7 +2130,7 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 31,
+      schemaVersion: 32,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2167,7 +2182,7 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 31,
+      schemaVersion: 32,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
@@ -2208,6 +2223,7 @@ describe('task event projections', () => {
         completionRole: 'required', status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
         terminalResolutionSource: null, terminalReasonCode: null,
         failure: null,
+        runtimeModel: null,
         permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
         a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
         executionEvidenceCount: 3,
@@ -2776,7 +2792,7 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 31,
+      schemaVersion: 32,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -2888,7 +2904,7 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 31,
+      schemaVersion: 32,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3013,7 +3029,7 @@ describe('task event projections', () => {
 
   it('renders durable Task records below a single explicit creation action', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 31,
+      schemaVersion: 32,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
@@ -3363,6 +3379,7 @@ describe('task event projections', () => {
         code: 'runtime_rate_limited', summary: '请求受到速率限制',
         detail: '请稍后重试。', retryable: true
       },
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 0, hasUnsettledExternalEffects: false,
@@ -3411,6 +3428,7 @@ describe('task event projections', () => {
       status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
       failure: null,
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 1, hasUnsettledExternalEffects: false,
@@ -3507,6 +3525,7 @@ describe('task event projections', () => {
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
       failure: null,
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
@@ -3569,6 +3588,7 @@ describe('task event projections', () => {
       status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null, cancelAcknowledgedAt: null, executionEpoch: 1,
       terminalResolutionSource: null, terminalReasonCode: null,
       failure: null,
+      runtimeModel: null,
       permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
       a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
       executionEvidenceCount: 2, hasUnsettledExternalEffects: false,

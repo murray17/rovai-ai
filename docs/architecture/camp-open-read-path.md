@@ -8,7 +8,7 @@ last_updated: 2026-08-18
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v2](../contracts/camp-open-projection-v2.md)与
+字段与窗口见 [Camp Open Projection v3](../contracts/camp-open-projection-v3.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -55,6 +55,10 @@ Core event invalidates active Camp
   -> preserve explicitly loaded earlier message pages
 ```
 
+`agent_run.runtime_model_observed` 与其他 Run projection 变化共用上述 invalidation/refresh 路径。它只使
+`AgentRunView.runtimeModel` 从默认未观察态收敛到首个可信模型，不进入 timeline、CampMessage 或 Run detail
+Evidence，也不自动打开执行台或改变当前 selection。
+
 缓存只保存最近的有界投影。cache hit 可立即恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
 当前 Snapshot 清空，也不提前切换 route。普通请求在 400 ms 内不呈现 loading，超过预算只在目标导航行
 显示非阻塞进度。schema mismatch、Core restart、Camp mismatch 或 sequence regression 使缓存失效。
@@ -97,5 +101,5 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v2](../contracts/camp-open-projection-v2.md)
+- [Camp Open Projection v3](../contracts/camp-open-projection-v3.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)

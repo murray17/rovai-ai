@@ -46,8 +46,10 @@ pub struct Database {
     path: PathBuf,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.10";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 50;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.13";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 51;
+const V096_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.10";
+const V096_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 50;
 const V095_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.10";
 const V095_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 49;
 const V094_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.07";
@@ -126,6 +128,7 @@ struct CurrentMigrationState {
     v93: bool,
     v94: bool,
     v95: bool,
+    v96: bool,
 }
 
 impl CurrentMigrationState {
@@ -135,6 +138,36 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96;
+        }
+        if self.v96 {
+            return false;
+        }
+        if contract == V096_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V096_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -633,7 +666,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 92),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 93),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 94),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 95)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 95),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 96)
         "#,
         [],
         |row| {
@@ -664,6 +698,7 @@ fn load_current_migration_state(
                 v93: row.get(23)?,
                 v94: row.get(24)?,
                 v95: row.get(25)?,
+                v96: row.get(26)?,
             })
         },
     )
@@ -1815,6 +1850,9 @@ impl Database {
             if !self.schema_migration_applied(95)? {
                 self.migrate_camp_identity_v95()?;
             }
+            if !self.schema_migration_applied(96)? {
+                self.migrate_agent_run_runtime_model_v96()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2149,6 +2187,9 @@ impl Database {
         }
         if !self.schema_migration_applied(95)? {
             self.migrate_camp_identity_v95()?;
+        }
+        if !self.schema_migration_applied(96)? {
+            self.migrate_agent_run_runtime_model_v96()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -4203,7 +4244,6 @@ impl Database {
                     runtime_executable_fingerprint TEXT,
                     runtime_capabilities_json TEXT,
                     runtime_model_selection_json TEXT,
-                    runtime_observed_model_id TEXT,
                     runtime_permission_config_json TEXT,
                     runtime_binding_compatibility_digest TEXT,
                     runtime_executable_path TEXT,
@@ -11529,6 +11569,30 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_agent_run_runtime_model_v96(&mut self) -> Result<()> {
+        self.add_column_if_missing(
+            "agent_run",
+            "runtime_observed_model_id",
+            "runtime_observed_model_id TEXT",
+        )?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.13', projection_schema_version = 51,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (96, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -16014,6 +16078,7 @@ mod tests {
             v93: version >= 93,
             v94: version >= 94,
             v95: version >= 95,
+            v96: version >= 96,
         }
     }
 
@@ -16024,6 +16089,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                96,
+            ),
+            (
+                "v1.10/schema-50",
+                V096_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V096_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 95,
             ),
             (
@@ -16230,12 +16301,63 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(95));
+        assert_eq!(state, migration_state_through(96));
         assert!(state.admits(&contract, schema));
         assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v96_adds_nullable_agent_run_runtime_model_observation() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-agent-run-runtime-model-v96-{}",
+            Uuid::new_v4()
+        ));
+        let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                ALTER TABLE agent_run DROP COLUMN runtime_observed_model_id;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.10', projection_schema_version = 50
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 96;
+                "#,
+            )
+            .unwrap();
+        drop(database);
+
+        let reopened = Database::open(&directory).expect("v1.10/schema-50 should migrate to v96");
+        assert!(
+            table_columns(reopened.connection(), "agent_run")
+                .unwrap()
+                .contains(&"runtime_observed_model_id".to_string())
+        );
+        let contract: (String, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 96)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+            )
+        );
+        drop(reopened);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -16374,6 +16496,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.10', projection_schema_version = 49
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
                 PRAGMA foreign_keys = ON;
                 "#,
@@ -16383,19 +16506,28 @@ mod tests {
         drop(database);
 
         let reopened = Database::open(&source_directory).expect("v94 source should migrate to v95");
-        let contract: (String, i64, i64) = reopened
+        let contract: (String, i64, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 95)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 95),
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 96)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+                1,
+            )
+        );
         let manifest_schema: String = reopened
             .connection()
             .query_row(
@@ -16660,6 +16792,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
                 DELETE FROM schema_migration WHERE version = 94;
                 DELETE FROM schema_migration WHERE version = 93;
@@ -16703,7 +16836,14 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+            )
+        );
         assert_eq!(
             reopened
                 .connection()
@@ -20927,7 +21067,10 @@ mod tests {
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let connection = database.connection();
 
-        assert_migrations_applied(connection, &[58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92]);
+        assert_migrations_applied(
+            connection,
+            &[58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 96],
+        );
         assert_schema_objects(
             connection,
             "table",
@@ -21011,6 +21154,7 @@ mod tests {
             &["activation_state"],
             &["status", "archived_at"],
         );
+        assert_table_columns(connection, "agent_run", &["runtime_observed_model_id"], &[]);
 
         let manifest_schema: String = connection
             .query_row(

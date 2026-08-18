@@ -7702,6 +7702,7 @@ mod slow_tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.99', projection_schema_version = 47
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
                 DELETE FROM schema_migration WHERE version = 94;
                 DELETE FROM schema_migration WHERE version = 93;
@@ -7776,7 +7777,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.10".to_string(), 50, 1));
+        assert_eq!(contract, ("v1.13".to_string(), 51, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

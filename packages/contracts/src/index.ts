@@ -1355,7 +1355,7 @@ export interface DomainEventView {
 }
 
 export interface CampSnapshot {
-  schemaVersion: 31
+  schemaVersion: 32
   throughGlobalSequence: number
   camp: {
     id: string
@@ -1395,7 +1395,7 @@ export interface CampOpenMessageCoverage extends CampOpenCollectionCoverage {
 }
 
 export interface CampOpenProjection {
-  schemaVersion: 2
+  schemaVersion: 3
   throughGlobalSequence: number
   camp: CampSnapshot['camp']
   members: CampMemberView[]

@@ -18,15 +18,16 @@ const outputDir = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_OUTPUT_DIR
 const recoveryBlockerOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_RECOVERY_BLOCKER_ONLY === '1'
 const conversationDropZoneOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DROP_ZONE_ONLY === '1'
 const worldMapOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_WORLD_MAP_ONLY === '1'
+const runtimeModelOnly = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_MODEL_ONLY === '1'
 const databasePath = join(dataDir, 'rovai.sqlite')
 const debugPort = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT
   ? Number(process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_DEBUG_PORT)
   : await availableLoopbackPort()
-const campId = 'camp-runtime-activity-v055'
+const campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
 const campTitle = 'v0.55 Agent 执行过程验收'
-const composerLayoutCampId = 'camp-composer-layout-v056'
+const composerLayoutCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec1'
 const composerLayoutCampTitle = 'v0.56 Composer 布局验收'
-const ambientEncounterCampId = 'camp-world-map-ambient-v087-12'
+const ambientEncounterCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec2'
 const ambientEncounterCampTitle = 'v0.87 世界地图偶遇验收'
 const ambientEncounterAgentIds = Array.from({ length: 11 }, (_, index) => `agent_ambient_${index + 1}`)
 const runArticleSelector = 'article.timeline-node.conversation-bubble.agent'
@@ -153,7 +154,9 @@ try {
     }, null, 2))
   } else {
   await selectCampConversationView(app.cdp, 'conversation')
-  const timelineFollowLatest = await verifyTimelineFollowsLatestAcrossViewportResize(app.cdp)
+  const timelineFollowLatest = runtimeModelOnly
+    ? null
+    : await verifyTimelineFollowsLatestAcrossViewportResize(app.cdp)
   const conversationPresentation = await collectConversationPresentation(app.cdp)
   assert(conversationPresentation.articleCount === runtimes.length
     && conversationPresentation.articleBackgrounds.length === 1
@@ -348,6 +351,8 @@ try {
     && executionSidecar.selectedAgentId === activeAgentId
     && !executionSidecar.horizontalOverflow,
   `Inspector execution Sidecar contract failed: ${JSON.stringify(executionSidecar)}`)
+  const inspectorRuntimeModel = await collectFocusedRuntimeModelLayout(app.cdp)
+  assertFocusedRuntimeModelLayout(inspectorRuntimeModel, 'Inspector')
   const executionSidecarCapture = join(outputDir, 'runtime-activity-execution-sidecar.png')
   await capture(app.cdp, executionSidecarCapture)
 
@@ -375,11 +380,47 @@ try {
     && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
   `Execution console did not return to the production bottom surface: ${JSON.stringify({ returnedExecutionDock, returnedExecutionSelection })}`)
 
+  await setTheme(app.cdp, 'night')
+  const nightRuntimeModel = await collectFocusedRuntimeModelLayout(app.cdp)
+  assertFocusedRuntimeModelLayout(nightRuntimeModel, 'Night bottom Drawer')
+  const nightRuntimeModelCapture = join(outputDir, 'runtime-activity-model-night.png')
+  await capture(app.cdp, nightRuntimeModelCapture)
+  await setTheme(app.cdp, 'day')
+
   const observed = await collectRuntimeRows(app.cdp)
   assertRuntimeRows(observed)
   const totalToolRows = observed.reduce((total, row) => total + row.toolTitles.length, 0)
   assert(totalToolRows === 10,
     `Expected exactly ten observed structured tool rows: ${JSON.stringify(observed)}`)
+  const responsiveRuntimeModels = await verifyResponsiveRuntimeModelLayouts(app.cdp, outputDir)
+  if (runtimeModelOnly) {
+    const reportPath = join(outputDir, 'runtime-model-acceptance.json')
+    const report = {
+      ok: true,
+      mode: 'controlled-runtime-model-fixture',
+      app: basename(appPath),
+      fixtureRoot,
+      outputDir,
+      verified: {
+        runtimeCount: observed.length,
+        observedRuntimeCount: runtimes.filter((entry) => entry.observedModelId).length,
+        fallbackRuntimeCount: runtimes.filter((entry) =>
+          entry.modelSelectionSource === 'runtime_default' && !entry.observedModelId).length,
+        fixedModelRuntimeCount: runtimes.filter((entry) => entry.modelSelectionSource === 'explicit').length,
+        inspectorRuntimeModel,
+        nightRuntimeModel,
+        responsiveRuntimeModels
+      },
+      runtimes: observed,
+      captures: {
+        inspector: executionSidecarCapture,
+        night: nightRuntimeModelCapture,
+        ...responsiveRuntimeModels.captures
+      }
+    }
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+    console.log(JSON.stringify({ ...report, reportPath }, null, 2))
+  } else {
   const claudeCommandDisclosure = await verifyClaudeCommandDisclosure(app.cdp)
 
   const recoveryBlockerPresentation = await verifyRecoveryBlockerPresentation(app.cdp)
@@ -464,7 +505,8 @@ try {
       || wideComposerLayout.composerRouteRailCenterDelta <= 1)
     && !wideComposerLayout.inspectorCollapsed
     && wideComposerLayout.actionGap === 5
-    && wideComposerLayout.enterHint === 'Enter'
+    && wideComposerLayout.enterHint === 'Enter 发送，Shift+Enter 换行'
+    && wideComposerLayout.enterHintVisual === '↵发送·⇧↵换行'
     && wideComposerLayout.sendLabel === '发送'
     && wideComposerLayout.hintImmediatelyPrecedesSend
     && wideComposerLayout.hintToSendGap >= 4
@@ -574,6 +616,8 @@ try {
   })()`)
   await wait(200)
   const compactLayout = await collectCompactHandoffLayout(app.cdp)
+  const compactRuntimeModel = await collectFocusedRuntimeModelLayout(app.cdp)
+  assertFocusedRuntimeModelLayout(compactRuntimeModel, '1040x700 bottom Drawer')
   assert(compactLayout.viewportWidth === 1040 && compactLayout.viewportHeight === 700,
     `Compact viewport did not apply: ${JSON.stringify(compactLayout)}`)
   assert(compactLayout.documentScrollWidth <= compactLayout.viewportWidth + 1
@@ -624,6 +668,8 @@ try {
   })()`)
   await wait(150)
   const zoomedDrawerLayout = await collectZoomedDrawerLayout(app.cdp)
+  const zoomedRuntimeModel = await collectFocusedRuntimeModelLayout(app.cdp)
+  assertFocusedRuntimeModelLayout(zoomedRuntimeModel, '200% zoom bottom Drawer')
   assert(zoomedDrawerLayout.cssViewportWidth === 520
     && zoomedDrawerLayout.cssViewportHeight === 350
     && zoomedDrawerLayout.physicalViewportWidth === 1040
@@ -666,18 +712,23 @@ try {
       messageAuthorProfileTriggers,
       agentLevelProcessDock: agentDock,
       executionSidecar,
+      inspectorRuntimeModel,
+      nightRuntimeModel,
       executionReturnedToBottom: returnedExecutionSelection,
       recipientOnlyHandoffFooter: handoffFooter,
       wideComposerLayout,
       wideConversationLayout,
       recipientOnlyCompactLayout: compactLayout,
-      zoomedDrawerLayout
+      compactRuntimeModel,
+      zoomedDrawerLayout,
+      zoomedRuntimeModel
     },
     runtimes: observed,
     captures: {
       top: topCapture,
       authorPopover: authorPopoverCapture,
       executionSidecar: executionSidecarCapture,
+      nightRuntimeModel: nightRuntimeModelCapture,
       bottom: bottomCapture,
       toolOutput: toolOutputCapture,
       recoveryBlocker: recoveryBlockerCapture,
@@ -689,6 +740,7 @@ try {
   }
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   console.log(JSON.stringify({ ...report, reportPath }, null, 2))
+  }
   }
 } catch (error) {
   testFailure = error
@@ -722,14 +774,36 @@ if (testFailure || cleanupFailure) {
 }
 
 function runtime(key, adapterKind, runtimeName, expectedToolName, details) {
+  const modelFixture = runtimeModelFixture(key)
   return {
     key,
     agentId: `agent_${101 + runtimesLengthHint(key)}`,
     adapterKind,
     runtimeName,
     expectedToolName,
+    ...modelFixture,
     ...details
   }
+}
+
+function runtimeModelFixture(key) {
+  if (key === 'copilot') {
+    return { modelSelectionSource: 'explicit', observedModelId: null }
+  }
+  if (key === 'kiro') {
+    return { modelSelectionSource: 'runtime_default', observedModelId: null }
+  }
+  const modelIds = {
+    codex: 'gpt-5.6-codex-runtime-observation-preview-with-an-intentionally-long-identifier',
+    opencode: 'opencode/big-pickle',
+    qoder: 'qoder-enterprise-latest',
+    codebuddy: 'codebuddy/default-v2',
+    qwen: 'qwen3-coder-plus',
+    trae: 'trae-cn/default',
+    claude: 'claude-sonnet-4-6',
+    antigravity: 'gemini-3.1-pro-preview'
+  }
+  return { modelSelectionSource: 'runtime_default', observedModelId: modelIds[key] }
 }
 
 function runtimesLengthHint(key) {
@@ -859,7 +933,9 @@ async function seedFixture() {
         ${sqlNullable(active ? null : `2026-08-05T12:${String(index).padStart(2, '0')}:01Z`)},
         ${sqlNullable(nonTerminal ? null : updatedAt)},
         ${sqlLiteral(updatedAt)},
-        ${sqlLiteral(entry.adapterKind)}, ${sqlLiteral(entry.protocol)}
+        ${sqlLiteral(entry.adapterKind)}, ${sqlLiteral(entry.protocol)},
+        ${sqlLiteral(JSON.stringify({ source: entry.modelSelectionSource }))},
+        ${sqlNullable(entry.observedModelId)}
       )`
     }),
     `(
@@ -869,7 +945,8 @@ async function seedFixture() {
       'required', '{}', 'succeeded', 'runtime-activity-codex-history',
       1, '2026-08-05T11:58:00Z', '2026-08-05T11:58:01Z',
       '2026-08-05T11:58:02Z', '2026-08-05T11:58:02Z',
-      'codex-cli', 'codex-app-server'
+      'codex-cli', 'codex-app-server',
+      '{"source":"explicit","modelId":"gpt-5.6-fixed"}', NULL
     )`
   ].join(',\n')
   const messageRows = runtimes.map((entry, index) => {
@@ -983,7 +1060,8 @@ async function seedFixture() {
       responsibility_key, start_reason, purpose, completion_role,
       effective_config_json, status, idempotency_key, execution_epoch,
       created_at, started_at, ended_at, updated_at,
-      runtime_adapter_kind, runtime_protocol_version
+      runtime_adapter_kind, runtime_protocol_version,
+      runtime_model_selection_json, runtime_observed_model_id
     ) VALUES ${runRows};
     UPDATE agent_run
     SET status = 'waiting', wait_reason = 'recovery_blocked', runtime_recovery_required = 0,
@@ -1039,7 +1117,7 @@ async function seedFixture() {
       0, ${runtimes.length}, 0,
       3, '{"profileVersion":3,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
-      '[]', 19,
+      '[]', 20,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
       '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}',
       'agent_v1', '{"schemaVersion":1,"included":false}',
@@ -1145,6 +1223,7 @@ async function verifyTimelineFollowsLatestAcrossViewportResize(cdp) {
     dock.dataset.acceptanceDisplay = dock.style.display
     dock.style.display = 'none'
     timeline.scrollTop = timeline.scrollHeight
+    timeline.dispatchEvent(new Event('scroll', { bubbles: true }))
     return {
       clientHeight: timeline.clientHeight,
       scrollHeight: timeline.scrollHeight,
@@ -1171,11 +1250,28 @@ async function verifyTimelineFollowsLatestAcrossViewportResize(cdp) {
     }
   })()`, true)
   assert(resized, 'Timeline follow-latest acceptance lost the timeline and Agent dock')
+  await waitForExpression(cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    return Boolean(timeline)
+      && Math.abs(timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop) <= 1
+  })()`, 2_000)
+  const settled = await evaluate(cdp, `(() => {
+    const timeline = document.querySelector('.camp-timeline')
+    if (!timeline) return null
+    const maxScroll = Math.max(0, timeline.scrollHeight - timeline.clientHeight)
+    return {
+      clientHeight: timeline.clientHeight,
+      scrollHeight: timeline.scrollHeight,
+      scrollTop: timeline.scrollTop,
+      maxScroll,
+      distanceFromBottom: Math.abs(maxScroll - timeline.scrollTop)
+    }
+  })()`)
   assert(resized.clientHeight < prepared.clientHeight,
     `Agent dock did not shrink the timeline viewport: ${JSON.stringify({ prepared, resized })}`)
-  assert(resized.distanceFromBottom <= 1,
-    `Timeline did not remain at the latest message after its viewport shrank: ${JSON.stringify({ prepared, resized })}`)
-  return { prepared, resized }
+  assert(settled?.distanceFromBottom <= 1,
+    `Timeline did not remain at the latest message after its viewport shrank: ${JSON.stringify({ prepared, resized, settled })}`)
+  return { prepared, resized: settled }
 }
 
 async function collectConversationPresentation(cdp) {
@@ -1424,7 +1520,8 @@ async function collectWideComposerLayout(cdp) {
         : null,
       inspectorCollapsed: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
       actionGap: Number.parseFloat(actionStyle?.columnGap ?? actionStyle?.gap ?? '0'),
-      enterHint: hint?.textContent?.trim() ?? null,
+      enterHint: hint?.querySelector('.sr-only')?.textContent?.trim() ?? null,
+      enterHintVisual: hint?.querySelector('.composer-hint-visual')?.textContent?.replace(/\\s+/g, '').trim() ?? null,
       sendLabel: send?.textContent?.trim() ?? null,
       hintImmediatelyPrecedesSend: hint?.nextElementSibling === send,
       hintToSendGap: hintRect && sendRect ? sendRect.left - hintRect.right : null
@@ -1613,6 +1710,34 @@ async function collectRuntimeRows(cdp) {
       const spans = [...(meta?.querySelectorAll(':scope > span') ?? [])].map((span) => span.textContent?.trim() ?? '')
       const stages = [...document.querySelectorAll('.execution-drawer .execution-process-stage[data-agent-run-id]')]
       const focused = stages.find((stage) => stage.classList.contains('is-focused'))
+      const modelPresentations = stages.map((stage) => {
+        const model = stage.querySelector('.execution-run-model')
+        const code = model?.querySelector('code')
+        const style = code ? getComputedStyle(code) : null
+        return {
+          runId: stage.dataset.agentRunId ?? '',
+          count: stage.querySelectorAll('.execution-run-model').length,
+          text: model?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+          codeText: code?.textContent?.trim() ?? null,
+          defaultBadge: model?.querySelector('small')?.textContent?.trim() ?? null,
+          title: code?.getAttribute('title') ?? null,
+          tabIndex: code?.tabIndex ?? null,
+          role: model?.getAttribute('role') ?? null,
+          ariaLive: model?.getAttribute('aria-live') ?? null,
+          ariaAtomic: model?.getAttribute('aria-atomic') ?? null,
+          ariaLabel: model?.getAttribute('aria-label') ?? null,
+          observed: model?.classList.contains('is-observed') ?? false,
+          waiting: model?.classList.contains('is-waiting') ?? false,
+          whiteSpace: style?.whiteSpace ?? null,
+          overflowX: style?.overflowX ?? null,
+          textOverflow: style?.textOverflow ?? null,
+          fontFamily: style?.fontFamily ?? null,
+          clientWidth: code?.clientWidth ?? null,
+          scrollWidth: code?.scrollWidth ?? null
+        }
+      })
+      const focusedModelCode = focused?.querySelector('.execution-run-model code')
+      focusedModelCode?.focus({ preventScroll: true })
       return {
         member: selectedMember,
         agentId: ${JSON.stringify(expected.agentId)},
@@ -1625,6 +1750,10 @@ async function collectRuntimeRows(cdp) {
           focused?.querySelector('.execution-disclosure.run-live')
           || focused?.querySelector('details.execution-disclosure[open]')
         ),
+        focusedModelKeyboardReachable: Boolean(focusedModelCode && document.activeElement === focusedModelCode),
+        modelPresentations,
+        drawerHorizontalOverflow: (document.querySelector('.execution-drawer')?.scrollWidth ?? 0)
+          > (document.querySelector('.execution-drawer')?.clientWidth ?? 0) + 1,
         runSelectorCount: document.querySelectorAll(
           '.execution-run-list, .execution-run-item, [aria-label="选择 AgentRun"]'
         ).length,
@@ -1649,6 +1778,131 @@ async function collectRuntimeRows(cdp) {
     })()`))
   }
   return rows
+}
+
+async function collectFocusedRuntimeModelLayout(cdp) {
+  return evaluate(cdp, `(() => {
+    const stage = document.querySelector('.execution-process-stage.is-focused')
+    const model = stage?.querySelector('.execution-run-model')
+    const code = model?.querySelector('code')
+    const drawer = document.querySelector('.execution-drawer')
+    const style = code ? getComputedStyle(code) : null
+    code?.focus({ preventScroll: true })
+    return {
+      runId: stage?.dataset.agentRunId ?? null,
+      text: model?.textContent?.replace(/\\s+/g, ' ').trim() ?? null,
+      codeText: code?.textContent?.trim() ?? null,
+      defaultBadge: model?.querySelector('small')?.textContent?.trim() ?? null,
+      title: code?.getAttribute('title') ?? null,
+      tabIndex: code?.tabIndex ?? null,
+      role: model?.getAttribute('role') ?? null,
+      ariaLive: model?.getAttribute('aria-live') ?? null,
+      ariaAtomic: model?.getAttribute('aria-atomic') ?? null,
+      observed: model?.classList.contains('is-observed') ?? false,
+      waiting: model?.classList.contains('is-waiting') ?? false,
+      keyboardReachable: Boolean(code && document.activeElement === code),
+      whiteSpace: style?.whiteSpace ?? null,
+      overflowX: style?.overflowX ?? null,
+      textOverflow: style?.textOverflow ?? null,
+      clientWidth: code?.clientWidth ?? null,
+      scrollWidth: code?.scrollWidth ?? null,
+      drawerHorizontalOverflow: (drawer?.scrollWidth ?? 0) > (drawer?.clientWidth ?? 0) + 1
+    }
+  })()`)
+}
+
+function assertFocusedRuntimeModelLayout(layout, context) {
+  const expectedModelId = runtimes.find((entry) => entry.key === 'codex')?.observedModelId
+  assert(layout.runId === activeRunId
+    && layout.codeText === expectedModelId
+    && layout.title === expectedModelId
+    && layout.text?.startsWith('模型 ')
+    && layout.defaultBadge === '· 默认'
+    && layout.tabIndex === 0
+    && layout.role === 'status'
+    && layout.ariaLive === 'polite'
+    && layout.ariaAtomic === 'true'
+    && layout.observed
+    && !layout.waiting
+    && layout.keyboardReachable
+    && layout.whiteSpace === 'nowrap'
+    && layout.overflowX === 'hidden'
+    && layout.textOverflow === 'ellipsis'
+    && layout.scrollWidth > layout.clientWidth
+    && !layout.drawerHorizontalOverflow,
+  `${context} did not preserve the accessible, ellipsized runtime model: ${JSON.stringify(layout)}`)
+}
+
+async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
+  await evaluate(cdp, `(() => {
+    const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+      .find((candidate) => candidate.dataset.agentId === ${JSON.stringify(activeAgentId)})
+    chip?.click()
+    return Boolean(chip)
+  })()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId === ${JSON.stringify(activeRunId)}`)
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1040, height: 700, deviceScaleFactor: 1, mobile: false,
+    screenWidth: 1040, screenHeight: 700
+  })
+  await waitForExpression(cdp, `innerWidth === 1040 && innerHeight === 700`)
+  const compact = await collectFocusedRuntimeModelLayout(cdp)
+  assertFocusedRuntimeModelLayout(compact, '1040x700 bottom Drawer')
+  const compactCapture = join(capturesDirectory, 'runtime-model-compact-1040x700.png')
+  await capture(cdp, compactCapture)
+
+  await evaluate(cdp, `(() => {
+    document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')?.click()
+    return true
+  })()`)
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 520, height: 350, deviceScaleFactor: 2, mobile: false,
+    screenWidth: 1040, screenHeight: 700
+  })
+  await waitForExpression(cdp,
+    `innerWidth === 520 && innerHeight === 350 && Math.abs(devicePixelRatio - 2) < 0.01`)
+  await waitForExpression(cdp,
+    `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await focusExecutionDrawerResizeHandle(cdp)
+  await pressKey(cdp, 'End', 'End', 35)
+  await waitForExpression(cdp, `(() => {
+    const handle = document.querySelector('.execution-drawer-resize-handle')
+    const drawer = document.querySelector('.execution-drawer')
+    const now = Number(handle?.getAttribute('aria-valuenow') ?? 0)
+    return now === Number(handle?.getAttribute('aria-valuemax') ?? -1)
+      && Math.abs((drawer?.getBoundingClientRect().height ?? 0) - now) <= 1
+  })()`)
+  await evaluate(cdp, `(() => {
+    const body = document.querySelector('.execution-drawer-body')
+    const stage = document.querySelector('.execution-process-stage.is-focused')
+    if (!(body instanceof HTMLElement) || !(stage instanceof HTMLElement)) return false
+    body.scrollTop = Math.max(0, stage.offsetTop - 4)
+    return true
+  })()`)
+  await wait(150)
+  const zoom200 = await collectFocusedRuntimeModelLayout(cdp)
+  assertFocusedRuntimeModelLayout(zoom200, '200% zoom bottom Drawer')
+  const zoom200Capture = join(capturesDirectory, 'runtime-model-zoom-200.png')
+  await capture(cdp, zoom200Capture)
+
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 1440, height: 920, deviceScaleFactor: 1, mobile: false,
+    screenWidth: 1440, screenHeight: 920
+  })
+  await waitForExpression(cdp, `innerWidth === 1440 && innerHeight === 920`)
+  await evaluate(cdp, `(() => {
+    document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')?.click()
+    return true
+  })()`)
+  await waitForExpression(cdp,
+    `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  return {
+    compact,
+    zoom200,
+    captures: { compact: compactCapture, zoom200: zoom200Capture }
+  }
 }
 
 async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirectory) {
@@ -2200,7 +2454,7 @@ async function verifyExecutionDrawerResizeControl(cdp) {
     && keyboardSized.storedHeight === String(keyboardSized.now),
   `Keyboard resize or session persistence failed: ${JSON.stringify({ minimum, keyboardSized })}`)
 
-  await evaluate(cdp, `document.querySelector('.execution-drawer-header .quiet-button')?.click()`)
+  await evaluate(cdp, `document.querySelector('.execution-drawer-header [aria-label="收起执行详情"]')?.click()`)
   await waitForExpression(cdp, `!document.querySelector('.execution-drawer')`)
   await evaluate(cdp, `(() => {
     const chip = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
@@ -2329,6 +2583,45 @@ function assertRuntimeRows(observed) {
     assert(row, `Missing ${expected.runtimeName} row: ${JSON.stringify(observed)}`)
     assert(row.runSelectorCount === 0,
       `${expected.runtimeName} Drawer exposed an AgentRun selector: ${JSON.stringify(row)}`)
+    assert(row.drawerHorizontalOverflow === false,
+      `${expected.runtimeName} model metadata overflowed the Drawer: ${JSON.stringify(row)}`)
+    const currentModel = row.modelPresentations.find((entry) => entry.runId === `run-${expected.key}`)
+    assert(currentModel,
+      `${expected.runtimeName} current AgentRun model state was missing: ${JSON.stringify(row)}`)
+    if (expected.modelSelectionSource === 'explicit') {
+      assert(currentModel.count === 0,
+        `${expected.runtimeName} fixed-model Run exposed runtime-default metadata: ${JSON.stringify(row)}`)
+    } else {
+      const displayedModelId = expected.observedModelId ?? 'Agent 运行时默认'
+      assert(currentModel.count === 1
+        && currentModel.codeText === displayedModelId
+        && currentModel.title === displayedModelId
+        && currentModel.tabIndex === 0
+        && currentModel.role === 'status'
+        && currentModel.ariaLive === 'polite'
+        && currentModel.ariaAtomic === 'true'
+        && (expected.observedModelId
+          ? currentModel.ariaLabel?.includes(displayedModelId)
+          : currentModel.ariaLabel?.includes('实际模型尚未由 Agent 运行时报告'))
+        && currentModel.whiteSpace === 'nowrap'
+        && currentModel.overflowX === 'hidden'
+        && currentModel.textOverflow === 'ellipsis'
+        && /mono/i.test(currentModel.fontFamily ?? '')
+        && row.focusedModelKeyboardReachable,
+      `${expected.runtimeName} runtime-default model metadata contract failed: ${JSON.stringify(row)}`)
+      if (expected.observedModelId) {
+        assert(currentModel.observed
+          && !currentModel.waiting
+          && currentModel.text?.startsWith('模型 ')
+          && currentModel.defaultBadge === '· 默认',
+        `${expected.runtimeName} observed model was not rendered as the default-policy model: ${JSON.stringify(row)}`)
+      } else {
+        assert(currentModel.waiting
+          && !currentModel.observed
+          && currentModel.defaultBadge === null,
+        `${expected.runtimeName} missing observation did not retain the fallback label: ${JSON.stringify(row)}`)
+      }
+    }
     if (expected.agentId !== activeAgentId) {
       assert(row.runCount === 1 && row.focusedRunId === row.runIds[0],
         `${expected.runtimeName} historical execution could not be reopened: ${JSON.stringify(row)}`)
@@ -2336,6 +2629,13 @@ function assertRuntimeRows(observed) {
         assert(row.focusedEvidenceOpen,
           `${expected.runtimeName} historical evidence could not be expanded: ${JSON.stringify(row)}`)
       }
+    }
+    if (expected.agentId === activeAgentId) {
+      const historicalModel = row.modelPresentations.find((entry) => entry.runId === historicalRunId)
+      assert(historicalModel?.count === 0,
+        `Codex fixed-model historical Run exposed runtime-default metadata: ${JSON.stringify(row)}`)
+      assert(currentModel.scrollWidth > currentModel.clientWidth,
+        `Long Codex model id did not exercise single-line ellipsis: ${JSON.stringify(row)}`)
     }
     if (expected.expectedToolName === null) {
       assert(row.toolTitles.length === 0,

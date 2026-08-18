@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.12
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-19
 >
 > 前置版本：[v1.11 Runtime 模型目录缓存与真实执行校验](../v1.11/README.md)。v1.11 已完成并冻结为
 > historical。
+>
+> 后续版本：[v1.13 AgentRun 实际 Runtime 模型展示](../v1.13/README.md)。
 
 ## 版本目标
 

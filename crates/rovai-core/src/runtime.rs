@@ -6121,6 +6121,115 @@ mod tests {
         assert_eq!(updated, 1);
     }
 
+    #[test]
+    fn observed_runtime_model_is_default_only_epoch_fenced_and_write_once() {
+        let (directory, mut database, camp_id, _, agent_run_id, execution_epoch) =
+            claimed_run_for_planned_shutdown("required");
+        let runtime = ExecutionRuntimeService::default();
+        let initial_version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&agent_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET runtime_model_selection_json = ?2 WHERE id = ?1",
+                params![agent_run_id, json!({"source": "explicit"}).to_string()],
+            )
+            .unwrap();
+        assert!(
+            !runtime
+                .record_observed_runtime_model(
+                    &mut database,
+                    &agent_run_id,
+                    execution_epoch,
+                    "fixed-model-must-not-project",
+                )
+                .unwrap()
+        );
+
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET runtime_model_selection_json = ?2 WHERE id = ?1",
+                params![
+                    agent_run_id,
+                    json!({"source": "runtime_default"}).to_string()
+                ],
+            )
+            .unwrap();
+        assert!(
+            !runtime
+                .record_observed_runtime_model(
+                    &mut database,
+                    &agent_run_id,
+                    execution_epoch + 1,
+                    "wrong-epoch",
+                )
+                .unwrap()
+        );
+        assert!(
+            runtime
+                .record_observed_runtime_model(
+                    &mut database,
+                    &agent_run_id,
+                    execution_epoch,
+                    "  gpt-5.6  ",
+                )
+                .unwrap()
+        );
+        assert!(
+            !runtime
+                .record_observed_runtime_model(
+                    &mut database,
+                    &agent_run_id,
+                    execution_epoch,
+                    "later-model-must-not-overwrite",
+                )
+                .unwrap()
+        );
+
+        let state: (Option<String>, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT runtime_observed_model_id, version,
+                       (SELECT COUNT(*) FROM event_log
+                        WHERE event_type = 'agent_run.runtime_model_observed'
+                          AND entity_id = ?1)
+                FROM agent_run WHERE id = ?1
+                "#,
+                [&agent_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state.0.as_deref(), Some("gpt-5.6"));
+        assert_eq!(state.1, initial_version + 1);
+        assert_eq!(state.2, 1);
+
+        let snapshot = ReadModelService
+            .camp_snapshot(&mut database, &camp_id)
+            .unwrap();
+        let run = snapshot
+            .agent_runs
+            .iter()
+            .find(|run| run.id == agent_run_id)
+            .unwrap();
+        assert_eq!(
+            run.runtime_model
+                .as_ref()
+                .and_then(|model| model.model_id.as_deref()),
+            Some("gpt-5.6")
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     fn insert_test_runtime_input(
         database: &Database,
         agent_run_id: &str,

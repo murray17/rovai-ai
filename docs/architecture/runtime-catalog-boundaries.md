@@ -86,6 +86,11 @@ Picker catalog 只用于建立新的显式选择。既有已保存显式模型�
 仍在 Host/Session 建立后核对当前目录，不存在或无法核对即 fail closed。`runtime_default` 不依赖 catalog，
 内部 sentinel 只用于审计和冻结，Adapter 不向真实 Runtime 发送该 sentinel。
 
+成员配置只拥有模型策略，不拥有某次 Run 的实际模型。使用 `runtime_default` 时，Core 只能从当前
+Thread/Session 的 Runtime-native 结构化字段记录首个实际模型，并按 AgentRun execution epoch、default-only、
+write-once 持久化；catalog default、请求模型、冻结 sentinel、Usage 或自由文本都不能补推。无观测时 Read
+Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime failure；该事实也不反向改写配置或 catalog。
+
 ## 内部诊断与公开 Runtime failure
 
 Claude Code 与 Antigravity 的执行或显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
