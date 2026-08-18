@@ -1,69 +1,66 @@
 ---
 document_type: implementation-plan
 version: v1.11
-authority: implementation-plan-and-acceptance
-status: in_progress
+authority: implementation-and-acceptance-status
+status: complete
 last_updated: 2026-08-19
 ---
 
-# v1.11 Windows x64 实施与验收计划
+# v1.11 实施与验收计划
 
-## Checkpoint 0：v1.10 集成与版本治理
+## 1. 设计与版本切换
 
-- [x] 将 Windows worktree 合并至已发布的 v1.10 main，保留双方语义并通过 macOS 基线；
-- [x] 冻结 v1.10，建立唯一 current v1.11 与 Data Contract v1.11/schema 51；
-- [x] 继续采用 ADR-0210～0214 和当前 Windows Contracts，不把历史 v1.05 状态当作实施事实；
-- [ ] 完成本版所有代码后的文档全门禁和 base-aware CI 检查。
+- [x] 审核 60 秒 revalidate、24 小时最大服务、失败保留 LKG 与明确失效条件；
+- [x] 确认 Provider/account 自动失效仅使用稳定非敏感 Adapter evidence；
+- [x] 接受 ADR-0220 与 Runtime Launch and Verification v9；
+- [x] 冻结 v1.10，建立唯一 current v1.11；
+- [x] 确认不新增 Migration，Data Contract 保持 v1.10/schema 50/migration 95。
 
-## Checkpoint 1：平台、进程与私有文件系统
+## 2. Core 与 Adapter
 
-- [x] 建立 Windows x64 compile baseline、平台 local IPC seam、target-aware sidecar staging 与 native frame；
-- [x] 建立 Runtime platform admission、native executable resolver 与集中 managed process launcher；
-- [x] 实现创建时 Job/handle list 原子启动及 owner-loss cleanup 测试；
-- [x] 实现 Core/Desktop 私有 data root、local NTFS/DACL admission 与 handle-relative Attachment；
-- [ ] 在 Windows 10 22H2/11 真实环境完成进程 race、DACL、reparse、long-path 与 lifecycle 验收。
+- [x] 增加 Core-owned model catalog cache view、60 秒/24 小时分类和 serviceable 判断；
+- [x] 增加 `runtime.modelCatalog.open` 与 Runtime Check Manager 单飞/等待策略；
+- [x] 使主动 `runtime.product.check` 等待 terminal，并持久化 supervisor transient failure attempt；
+- [x] 允许 runtime default 脱离目录保存/冻结，保持 Claude/Agy/TRAE 既有 sentinel；
+- [x] Codex 与 ACP 在真实 Host/Session 目录中最终验证 explicit model，禁止 silent fallback；
+- [x] runtime default 对 Codex/ACP 不调用 set-model、不发送 model；
+- [x] 将 typed live model failure 映射到 AgentRun public error code。
 
-## Checkpoint 2：Skill Library 与 crash-recoverable Projection
+## 3. Renderer 与 contracts
 
-- [x] 实现 Windows logical-mode Skill import、bundled bootstrap、私有 Library copy 与完整 digest 重验；
-- [x] 实现 schema 2 journal、同父 staging/final/backup、多阶段恢复与 operationId DB 幂等；
-- [x] 将 NTFS entry identity 写入 journal/observation，并在 replace/delete/recovery 前与 digest、DACL 一起验证；
-- [x] 实现持久 `agent_run + execution_epoch + root_identity` registration 和 active Run 延迟更新；
-- [x] 覆盖 publish/replace/remove、Git exclude、project-owned drift、identity drift、ambiguous recovery 与全 transition crash injection；
-- [ ] 在固定 Windows CI 执行全部 Windows Skill projection lifecycle/crash tests，并保留通过证据。
+- [x] TypeScript contract、Desktop allowlist 与 runtime-check helper 接入新方法和终态结果；
+- [x] 队员页与 onboarding 共用受控 Radix model Picker；
+- [x] 实现即时缓存、后台刷新、blocking discovery、LKG failure、expired/invalidated/empty/loading 状态；
+- [x] 既有已保存模型按当前证据显示“当前目录未提供 / 缓存中未找到 / 尚未核对”；
+- [x] 明确排除人工修改或技术恢复损坏数据的迁移与修复兼容；
+- [x] 用 request generation 隔离 Runtime 切换后的旧异步结果；
+- [x] 在既有 Porcelain Day / Steel Night token、密度和焦点规则内补齐 Picker 样式。
 
-## Checkpoint 3：Transport、Renderer 与 Desktop 行为
+## 4. 自动验证
 
-- [x] 将 `rovai` CLI 与 compaction hook 统一到同一异步 Local IPC client，Windows 与 Unix 共用 framing、超时、
-  重试和 outcome-indeterminate 分类；
-- [x] Named Pipe 每个实例使用 session logon SID + SYSTEM protected DACL，并在创建后回读 DACL；覆盖
-  first-instance、non-inheritable handle、partial byte frame、listener replenish、busy retry、malformed 与 response-loss；
-- [ ] 在固定 Windows CI 实跑 Named Pipe v16 matrix，并补齐 wrong token、stale lease、idempotent replay 与
-  compaction hook 的完整端到端证据；
-- [ ] 对照现有 macOS 页面实现同组件树的 frame、shortcut、copy、Explorer、路径与 Runtime availability 差异；
-- [ ] 完成 Forced Colors/High Contrast、keyboard-only、NVDA、中文 IME、DPI/zoom/Snap/multi-monitor 验收；
-- [ ] 用 Windows Interaction Delta HTML 作为差异清单，不以原型替代现有 macOS 视觉真源。
+- [x] Rust Core all-targets check；
+- [x] TypeScript typecheck；
+- [x] 受影响 Renderer/contract 定向测试；
+- [x] cache 边界、runtime default sentinel 与过期 explicit 保存定向 Rust 测试；
+- [x] ACP/Codex fake real Host/Session explicit-model fail-closed 测试；
+- [x] Rust fmt 与 default/all-features strict Clippy；
+- [x] Rust fast lib、CLI、Core binary、slow 与 workspace all-features；
+- [x] 全量 `pnpm test` 与 desktop build；
+- [x] docs test/check/diff-aware CI/ADR generation；
+- [x] Impeccable detector 单次最终检查与 `git diff --check`。
 
-## Checkpoint 4：打包、升级与发布安全
+## 5. 真实验收与发布
 
-- [ ] 完成 target-isolated resources、x64 per-user NSIS、三个 PE 与 longPathAware manifest；
-- [ ] unpacked/installer verifier 校验架构、资源、manifest、hash 与 Core ready；
-- [ ] clean-user install/start/uninstall、data 保留、显式删除和 planned-shutdown upgrade 通过；
-- [ ] 完成 Electron/Core/CLI/installer Authenticode、RFC 3161 timestamp 与 release signer/hash 验证。
-
-## Checkpoint 5：逐 Runtime 资格与最终发布
-
-- [ ] 十个 Adapter 分别完成 Windows 10 22H2 与 Windows 11 的 immutable digest-bound evidence；
-- [ ] 未完成 Adapter 保持 `not_qualified` 且不可 discovery/check/install/select/migrate/execute；
-- [ ] macOS 全 Runtime、Transport、process-group、打包和 Renderer 回归通过；
-- [ ] 发布 support matrix、安装/升级/故障排查与已知限制后，才更新 Root README 并关闭 v1.11。
+- [x] 使用隔离 userData 完成 packaged App 队员工作区 UI/键盘验收，不启动日常 App；
+- [x] 确认本版不需要调用真实 TRAE；fake ACP Session 已覆盖统一目录与执行期校验，未并发接触 TRAE 密钥/状态文件；
+- [x] 确认工作树、提交与 main 集成顺序；
+- [x] 推送实现提交 `a9cf6e06` 到 main；
+- [x] 构建签名 App，隔离启动验证后替换 `/Applications/Rovai AI.app`，并从安装路径重新启动确认。
 
 ## References
 
 - [v1.11 版本概览](README.md)
-- [v1.05 历史设计快照](../v1.05/README.md)
-- [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
-- [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
-- [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
-- [Windows packaging guide](../../development/packaging-windows.md)
+- [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)
+- [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)
+- [本地 Runtime 工作流](../../development/local-workflow.md)

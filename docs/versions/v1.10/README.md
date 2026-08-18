@@ -16,7 +16,7 @@ last_updated: 2026-08-18
 >
 > 前置版本：[v1.09 完整会话查找、Mode-aware CLI 与 Tool 结果交互](../v1.09/README.md)。
 >
-> 后续版本：[v1.11 Windows x64 产品实现与资格闭环](../v1.11/README.md)。
+> 后续版本：[v1.11 Runtime 模型目录缓存与真实执行校验](../v1.11/README.md)。
 
 ## 版本目标
 

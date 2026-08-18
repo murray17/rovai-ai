@@ -115,7 +115,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 
 - **何时阅读：** 修改 Runtime ownership、权限、安全、Fleet、执行恢复或诊断读写边界时阅读。
 - **当前架构：** [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)、[Windows Desktop Platform](../architecture/windows-desktop-platform.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Diagnostics Center](../architecture/diagnostics-center.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)
-- **当前合同：** [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)、[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)、[Windows Private Storage v1](../contracts/windows-private-storage-v1.md)、[Runtime Launch and Verification v8](../contracts/runtime-launch-and-verification-v8.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
+- **当前合同：** [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)、[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)、[Windows Private Storage v1](../contracts/windows-private-storage-v1.md)、[Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)、[Diagnostics Center v1](../contracts/diagnostics-center-v1.md)、[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)、[Planned Shutdown v2](../contracts/planned-shutdown-v2.md)
 
 <!-- adr-current-primary:begin topic=runtime-execution-security -->
 | ADR | Decision |
@@ -144,6 +144,7 @@ Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 
 | [ADR-0210](0210-platform-qualified-product-runtime-admission.md) | Platform-Qualified Product Runtime Admission |
 | [ADR-0211](0211-atomic-windows-managed-process-launch.md) | Atomic Windows Managed Process Launch |
 | [ADR-0213](0213-windows-local-private-storage.md) | Windows Local Private Storage and Filesystem Admission |
+| [ADR-0220](0220-runtime-model-catalog-stale-while-revalidate.md) | Runtime Model Catalog Stale-While-Revalidate and Execution-Time Validation |
 <!-- adr-current-primary:end -->
 
 Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保留独立 primary。

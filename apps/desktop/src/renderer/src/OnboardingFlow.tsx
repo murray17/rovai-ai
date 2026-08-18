@@ -7,6 +7,7 @@ import type {
   OnboardingSnapshot,
   ProductRuntimeAvailability,
   RuntimePlatformAdmission,
+  RuntimeModelCatalogView,
   ThemePreference
 } from '@contracts'
 import {
@@ -103,6 +104,7 @@ export function OnboardingFlow({
   onShowMemberSelection,
   onCompleteMemberSelection,
   onRefreshRuntime,
+  onOpenModelCatalog,
   onRuntimeSelectionChange,
   onComplete
 }: {
@@ -120,6 +122,7 @@ export function OnboardingFlow({
   onShowMemberSelection(): void
   onCompleteMemberSelection(): void
   onRefreshRuntime(): void
+  onOpenModelCatalog(runtimeKind: AdapterKind): Promise<RuntimeModelCatalogView>
   onRuntimeSelectionChange(selection: OnboardingRuntimeSelection | null): void
   onComplete(): void
 }): React.JSX.Element {
@@ -181,6 +184,7 @@ export function OnboardingFlow({
             busy={busy}
             error={error}
             onRefresh={onRefreshRuntime}
+            onOpenModelCatalog={onOpenModelCatalog}
             onSelectionChange={onRuntimeSelectionChange}
             onComplete={onComplete}
           />
@@ -304,6 +308,7 @@ function RuntimeStep({
   busy,
   error,
   onRefresh,
+  onOpenModelCatalog,
   onSelectionChange,
   onComplete
 }: {
@@ -316,6 +321,7 @@ function RuntimeStep({
   busy: boolean
   error: string | null
   onRefresh(): void
+  onOpenModelCatalog(runtimeKind: AdapterKind): Promise<RuntimeModelCatalogView>
   onSelectionChange(selection: OnboardingRuntimeSelection | null): void
   onComplete(): void
 }): React.JSX.Element {
@@ -434,6 +440,7 @@ function RuntimeStep({
                         installation={selectedInstallation}
                         model={selection.model}
                         disabled={busy || provisioning || selectedStatus.status !== 'available'}
+                        onOpenModelCatalog={() => onOpenModelCatalog(selection.adapterKind)}
                         onChange={(model) => onSelectionChange({ ...selection, model })}
                       />
                     )

@@ -16,7 +16,8 @@ use uuid::Uuid;
 use crate::{
     agent_identity::allocate_agent_id,
     agent_runtime_adapter::{
-        AdapterRuntimeResolutionInput, AgentRuntimeAdapterRegistry, ExecutableFileIdentity,
+        ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
+        AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
         TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
     },
     collaboration::end_camp_membership,
@@ -401,6 +402,109 @@ pub struct ModelDescriptor {
     pub options: Vec<ModelOptionDescriptor>,
 }
 
+pub const MODEL_CATALOG_REVALIDATE_AFTER_SECONDS: i64 = 60;
+pub const MODEL_CATALOG_MAX_SERVICE_AGE_SECONDS: i64 = 24 * 60 * 60;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeModelCatalogCacheStatus {
+    Fresh,
+    Stale,
+    Expired,
+    Unavailable,
+    Invalidated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeModelCatalogCacheView {
+    pub status: RuntimeModelCatalogCacheStatus,
+    pub observed_at: Option<String>,
+    pub revalidate_after: Option<String>,
+    pub expires_at: Option<String>,
+}
+
+impl RuntimeModelCatalogCacheView {
+    pub fn is_serviceable(&self) -> bool {
+        matches!(
+            self.status,
+            RuntimeModelCatalogCacheStatus::Fresh | RuntimeModelCatalogCacheStatus::Stale
+        )
+    }
+
+    pub fn needs_revalidation(&self) -> bool {
+        self.status != RuntimeModelCatalogCacheStatus::Fresh
+    }
+}
+
+pub fn runtime_model_catalog_cache_view(
+    snapshot: Option<&AdapterCapabilitySnapshot>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> RuntimeModelCatalogCacheView {
+    let Some(snapshot) = snapshot else {
+        return RuntimeModelCatalogCacheView {
+            status: RuntimeModelCatalogCacheStatus::Unavailable,
+            observed_at: None,
+            revalidate_after: None,
+            expires_at: None,
+        };
+    };
+    if snapshot.stale_at.is_some() {
+        return RuntimeModelCatalogCacheView {
+            status: RuntimeModelCatalogCacheStatus::Invalidated,
+            observed_at: (snapshot.probe_status == "ready")
+                .then(|| snapshot.last_successful_probe_at.clone())
+                .flatten(),
+            revalidate_after: None,
+            expires_at: None,
+        };
+    }
+    if snapshot.probe_status != "ready" {
+        return RuntimeModelCatalogCacheView {
+            status: RuntimeModelCatalogCacheStatus::Unavailable,
+            observed_at: None,
+            revalidate_after: None,
+            expires_at: None,
+        };
+    }
+    let observed_at = snapshot.last_successful_probe_at.clone();
+    let Some(observed_at_value) = observed_at.as_deref() else {
+        return RuntimeModelCatalogCacheView {
+            status: RuntimeModelCatalogCacheStatus::Unavailable,
+            observed_at,
+            revalidate_after: None,
+            expires_at: None,
+        };
+    };
+    let Ok(observed_at_time) = chrono::DateTime::parse_from_rfc3339(observed_at_value)
+        .map(|value| value.with_timezone(&chrono::Utc))
+    else {
+        return RuntimeModelCatalogCacheView {
+            status: RuntimeModelCatalogCacheStatus::Unavailable,
+            observed_at,
+            revalidate_after: None,
+            expires_at: None,
+        };
+    };
+    let revalidate_after =
+        observed_at_time + chrono::Duration::seconds(MODEL_CATALOG_REVALIDATE_AFTER_SECONDS);
+    let expires_at =
+        observed_at_time + chrono::Duration::seconds(MODEL_CATALOG_MAX_SERVICE_AGE_SECONDS);
+    let status = if now >= expires_at {
+        RuntimeModelCatalogCacheStatus::Expired
+    } else if now >= revalidate_after {
+        RuntimeModelCatalogCacheStatus::Stale
+    } else {
+        RuntimeModelCatalogCacheStatus::Fresh
+    };
+    RuntimeModelCatalogCacheView {
+        status,
+        observed_at,
+        revalidate_after: Some(revalidate_after.to_rfc3339()),
+        expires_at: Some(expires_at.to_rfc3339()),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionOptionDescriptor {
@@ -454,6 +558,7 @@ pub struct AdapterInstallationView {
     pub version: i64,
     pub referenced_profile_count: i64,
     pub snapshot: Option<AdapterCapabilitySnapshot>,
+    pub model_catalog: RuntimeModelCatalogCacheView,
     pub member_runtime_defaults: Option<MemberRuntimeConfiguration>,
     pub last_probe_attempt: Option<AdapterProbeAttempt>,
     pub relocation_history: Vec<AdapterRelocationAudit>,
@@ -1999,6 +2104,14 @@ impl AgentProfileService {
                     json!({ "adapterKind": envelope.payload.adapter_kind }),
                 ));
             }
+            if matches!(binding.model, ModelSelection::Explicit { .. })
+                && !ready.model_catalog_serviceable
+            {
+                return Ok(CommandHandlerResult::rejected(
+                    "runtime_model_catalog_refresh_required",
+                    json!({ "adapterKind": envelope.payload.adapter_kind }),
+                ));
+            }
             if let Some(issue) = runtime_configuration_issue(
                 &ready.models_json,
                 ready.permission_schema_version,
@@ -2930,6 +3043,7 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
     } else {
         None
     };
+    let model_catalog = runtime_model_catalog_cache_view(snapshot.as_ref(), chrono::Utc::now());
     Ok(AdapterInstallationView {
         id: row.get(0)?,
         adapter_kind,
@@ -2944,6 +3058,7 @@ fn installation_from_row(row: &Row<'_>) -> rusqlite::Result<AdapterInstallationV
         version: row.get(10)?,
         referenced_profile_count: row.get(29)?,
         snapshot,
+        model_catalog,
         member_runtime_defaults: None,
         last_probe_attempt,
         relocation_history: Vec::new(),
@@ -3521,7 +3636,7 @@ pub(crate) fn resolve_frozen_runtime_binding(
 
     let models: Vec<ModelDescriptor> =
         serde_json::from_str(&effective_models_json).context("invalid Adapter model catalog")?;
-    let model = match resolve_model_selection(&models, &binding.model)? {
+    let model = match resolve_model_selection(adapter_kind, &models, &binding.model)? {
         Ok(model) => model,
         Err(blocker) => return Ok(Err(blocker)),
     };
@@ -3584,33 +3699,49 @@ pub(crate) fn resolve_frozen_runtime_binding(
 }
 
 fn resolve_model_selection(
+    adapter_kind: AdapterKind,
     models: &[ModelDescriptor],
     selection: &ModelSelection,
 ) -> Result<std::result::Result<ResolvedModelSelection, RuntimeConfigurationBlocker>> {
     let (source, model, configured_options) = match selection {
         ModelSelection::RuntimeDefault => {
-            let Some(model) = models
-                .iter()
-                .find(|model| model.is_default && !model.hidden && !model.deprecated)
-            else {
-                return Ok(Err(runtime_blocker(
-                    "runtime_default_model_unavailable",
-                    json!({}),
-                )));
-            };
-            ("runtime_default", model, None)
+            return Ok(Ok(ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: runtime_default_model_id(adapter_kind),
+                options: json!({}),
+            }));
         }
         ModelSelection::Explicit { model_id, options } => {
-            let Some(model) = models
-                .iter()
-                .find(|model| model.id == *model_id && !model.hidden && !model.deprecated)
-            else {
+            if model_id.trim().is_empty() {
                 return Ok(Err(runtime_blocker(
                     "runtime_model_unavailable",
                     json!({ "modelId": model_id }),
                 )));
+            }
+            let Some(configured_options) = options.as_object() else {
+                return Ok(Err(runtime_blocker(
+                    "runtime_model_options_invalid",
+                    json!({ "modelId": model_id }),
+                )));
             };
-            ("explicit", model, Some(options))
+            let model = models
+                .iter()
+                .find(|model| model.id == *model_id && !model.hidden && !model.deprecated);
+            if model.is_none() {
+                // The cached catalog is a configuration aid, not execution truth. Preserve a
+                // previously validated explicit selection so the real Runtime Session can make
+                // the final decision without silently falling back.
+                return Ok(Ok(ResolvedModelSelection {
+                    source: "explicit".to_string(),
+                    model_id: model_id.clone(),
+                    options: Value::Object(configured_options.clone()),
+                }));
+            }
+            (
+                "explicit",
+                model.expect("model was checked above"),
+                Some(options),
+            )
         }
     };
     let mut options = serde_json::Map::new();
@@ -3910,6 +4041,7 @@ struct ConfigurableManagedRuntimeSnapshot {
     models_json: String,
     permissions_json: String,
     execution_deferred: bool,
+    model_catalog_serviceable: bool,
 }
 
 fn configurable_managed_runtime_snapshot(
@@ -3921,7 +4053,7 @@ fn configurable_managed_runtime_snapshot(
             r#"
             SELECT installation.id, snapshot.permission_schema_version,
                    snapshot.model_catalog_json, snapshot.permission_options_json,
-                   snapshot.probe_status
+                   snapshot.probe_status, snapshot.last_successful_probe_at
             FROM adapter_installation AS installation
             JOIN adapter_capability_snapshot AS snapshot
               ON snapshot.installation_id = installation.id
@@ -3948,6 +4080,18 @@ fn configurable_managed_runtime_snapshot(
                 let probe_status = row.get::<_, String>(4)?;
                 let execution_deferred =
                     is_execution_deferred_status(adapter_kind, Some(probe_status.as_str()));
+                let last_successful_probe_at = row.get::<_, Option<String>>(5)?;
+                let model_catalog_serviceable = probe_status == "ready"
+                    && last_successful_probe_at
+                        .as_deref()
+                        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+                        .is_some_and(|observed_at| {
+                            chrono::Utc::now()
+                                < observed_at.with_timezone(&chrono::Utc)
+                                    + chrono::Duration::seconds(
+                                        MODEL_CATALOG_MAX_SERVICE_AGE_SECONDS,
+                                    )
+                        });
                 Ok(ConfigurableManagedRuntimeSnapshot {
                     installation_id: row.get(0)?,
                     permission_schema_version: row.get(1)?,
@@ -3973,6 +4117,7 @@ fn configurable_managed_runtime_snapshot(
                     },
                     permissions_json: row.get(3)?,
                     execution_deferred,
+                    model_catalog_serviceable,
                 })
             },
         )
@@ -4147,13 +4292,6 @@ fn runtime_configuration_issue(
     let issue = |code, payload| Some(RuntimeConfigurationIssue { code, payload });
     let models: Vec<ModelDescriptor> =
         serde_json::from_str(models_json).context("invalid Adapter model catalog")?;
-    if matches!(configuration.model, ModelSelection::RuntimeDefault)
-        && !models
-            .iter()
-            .any(|model| model.is_default && !model.hidden && !model.deprecated)
-    {
-        return Ok(issue("runtime_default_model_unavailable", json!({})));
-    }
     if let ModelSelection::Explicit { model_id, options } = &configuration.model {
         if model_id.trim().is_empty() {
             return Ok(issue(
@@ -4307,17 +4445,22 @@ fn member_runtime_defaults_for_snapshot(
 
 fn deferred_runtime_models(adapter_kind: AdapterKind) -> Vec<ModelDescriptor> {
     vec![ModelDescriptor {
-        id: if adapter_kind == AdapterKind::TraeCnCli {
-            TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string()
-        } else {
-            format!("{}://runtime-default", adapter_kind.as_str())
-        },
+        id: runtime_default_model_id(adapter_kind),
         display_name: format!("{} runtime default", adapter_kind.as_str()),
         is_default: true,
         hidden: false,
         deprecated: false,
         options: Vec::new(),
     }]
+}
+
+fn runtime_default_model_id(adapter_kind: AdapterKind) -> String {
+    match adapter_kind {
+        AdapterKind::ClaudeCodeCli => CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+        AdapterKind::TraeCnCli => TRAE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+        AdapterKind::AntigravityApp => ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+        _ => format!("{}://runtime-default", adapter_kind.as_str()),
+    }
 }
 
 fn permission_value_matches_descriptor(
@@ -4864,6 +5007,161 @@ mod slow_tests {
             last_error: None,
             native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
         }
+    }
+
+    #[test]
+    fn model_catalog_cache_has_distinct_revalidate_expiry_and_invalidation_states() {
+        let observed_at = chrono::DateTime::parse_from_rfc3339("2026-08-18T12:00:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        let mut snapshot = ready_codex_snapshot();
+        snapshot.last_successful_probe_at = Some(observed_at.to_rfc3339());
+
+        assert_eq!(
+            runtime_model_catalog_cache_view(
+                Some(&snapshot),
+                observed_at + chrono::Duration::seconds(59),
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Fresh
+        );
+        assert_eq!(
+            runtime_model_catalog_cache_view(
+                Some(&snapshot),
+                observed_at + chrono::Duration::seconds(60),
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Stale
+        );
+        assert_eq!(
+            runtime_model_catalog_cache_view(
+                Some(&snapshot),
+                observed_at + chrono::Duration::hours(24),
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Expired
+        );
+
+        snapshot.stale_at = Some("2026-08-18T12:00:30Z".to_string());
+        assert_eq!(
+            runtime_model_catalog_cache_view(Some(&snapshot), observed_at).status,
+            RuntimeModelCatalogCacheStatus::Invalidated
+        );
+
+        snapshot.stale_at = None;
+        snapshot.probe_status = "light_ready".to_string();
+        let light_cache = runtime_model_catalog_cache_view(Some(&snapshot), observed_at);
+        assert_eq!(
+            light_cache.status,
+            RuntimeModelCatalogCacheStatus::Unavailable
+        );
+        assert_eq!(light_cache.observed_at, None);
+    }
+
+    #[test]
+    fn runtime_default_freezes_without_catalog_and_preserves_adapter_sentinels() {
+        for (adapter_kind, expected_model_id) in [
+            (AdapterKind::CodexCli, "codex-cli://runtime-default"),
+            (
+                AdapterKind::ClaudeCodeCli,
+                CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID,
+            ),
+            (AdapterKind::TraeCnCli, TRAE_RUNTIME_DEFAULT_MODEL_ID),
+            (
+                AdapterKind::AntigravityApp,
+                ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID,
+            ),
+        ] {
+            let resolved =
+                resolve_model_selection(adapter_kind, &[], &ModelSelection::RuntimeDefault)
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(resolved.source, "runtime_default");
+            assert_eq!(resolved.model_id, expected_model_id);
+            assert_eq!(resolved.options, json!({}));
+        }
+    }
+
+    #[test]
+    fn expired_catalog_allows_runtime_default_but_rejects_new_explicit_selection() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let mut snapshot = ready_codex_snapshot();
+        let expired_at = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
+        snapshot.observed_at = Some(expired_at.clone());
+        snapshot.last_attempted_at = expired_at.clone();
+        snapshot.last_successful_probe_at = Some(expired_at);
+        service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot,
+                },
+            )
+            .unwrap();
+        let profile = service.get_profile(&database, "agent_1").unwrap().unwrap();
+        let permissions = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::CodexCli,
+            schema_version: 1,
+            values: json!({
+                "sandbox_mode": "workspace-write",
+                "approval_policy": "on-request",
+            }),
+        };
+        let default_result = service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "expired-catalog-runtime-default",
+                    SetMemberRuntimeConfigurationCommand {
+                        agent_id: profile.agent_id.clone(),
+                        expected_version: profile.version,
+                        adapter_kind: AdapterKind::CodexCli,
+                        model: ModelSelection::RuntimeDefault,
+                        permissions: permissions.clone(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            default_result.result.code,
+            "agent_profile.runtime_configured"
+        );
+
+        let configured = service
+            .get_profile(&database, &profile.agent_id)
+            .unwrap()
+            .unwrap();
+        let explicit_result = service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "expired-catalog-explicit-model",
+                    SetMemberRuntimeConfigurationCommand {
+                        agent_id: configured.agent_id,
+                        expected_version: configured.version,
+                        adapter_kind: AdapterKind::CodexCli,
+                        model: ModelSelection::Explicit {
+                            model_id: "gpt-test".to_string(),
+                            options: json!({}),
+                        },
+                        permissions,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            explicit_result.result.code,
+            "runtime_model_catalog_refresh_required"
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -5873,7 +6171,8 @@ mod slow_tests {
             .unwrap()
             .unwrap();
         assert_eq!(verified.reported_version, None);
-        assert_eq!(verified.model.model_id, "trae-default");
+        assert_eq!(verified.model.source, "runtime_default");
+        assert_eq!(verified.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

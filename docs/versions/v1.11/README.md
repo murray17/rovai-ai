@@ -1,100 +1,105 @@
 ---
 document_type: version-overview
 version: v1.11
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-08-19
 ---
 
-# Rovai-ai v1.11：Windows x64 产品实现与资格闭环
+# Rovai-ai v1.11：Runtime 模型目录缓存与真实执行校验
 
-> 当前状态：v1.05 形成的 Windows 长期 ADR、Contract、Architecture 与 Interaction Delta 继续有效；本版在
-> 已发布的 v1.10 基线上实施这些约束。平台 seam、native frame、Runtime 平台准入、native executable
-> resolver、原子 Job 启动、私有 Core/Desktop data root、handle-relative Attachment、managed Skill Library、
-> crash-recoverable Skill Projection 与共享异步 Named Pipe client 已进入代码。固定 Windows CI 实跑、Windows
-> client OS 验收、逐 Runtime 资格、NSIS 与签名尚未完成，因此不得宣称 Windows 已发布。
+> 当前状态：Core/Renderer、自动门禁、签名打包与隔离队员工作区验收均已完成；实现提交
+> `a9cf6e06` 已推送 main，已替换并从 `/Applications/Rovai AI.app` 重新启动日常安装版。
 >
-> 前置版本：[v1.10 唯一 Camp ID 与安全公开 Runtime 失败](../v1.10/README.md)。
+> 前置版本：[v1.10 唯一 Camp ID 与安全公开 Runtime 失败](../v1.10/README.md)。v1.10 已完成并冻结为
+> historical。
+>
+> 后续版本：[v1.12 Windows x64 产品实现与资格闭环](../v1.12/README.md)。
 
 ## 版本目标
 
-在不回退 v1.10 Camp identity、Runtime failure、macOS 能力和安全边界的前提下，交付 Windows 10 22H2+
-与 Windows 11 native x64 Desktop：Core/CLI/Desktop 可构建和安装，进程、IPC、私有存储、Attachment、MCP、
-Skill Projection 与 Renderer 具有真实 Windows backend；每个 Runtime 只有在独立证据完成后才可被选择和执行。
+队员切换 Agent Runtime 时继续保持零副作用；打开模型 Picker 后用统一 stale-while-revalidate 目录快速展示
+可选模型。60 秒后后台刷新，最后成功目录最多服务 24 小时，失败不覆盖 last-known-good。缓存只服务配置
+体验；显式模型仍由真实 Runtime Host/Session 最终核对，`runtime_default` 始终不发送显式 model。
 
-本版实现依据当前有效的 ADR-0210～0214、Windows Contracts 与 Windows Desktop Platform。历史 v1.05 只保留
-当时设计过程和未实施快照，不作为当前状态来源。
+本版同时修复主动“检查可用性”只返回已排队、Renderer 立即结束 busy，以及 manager timeout/panic 只写
+内存诊断的问题。正常既有配置中的未知模型在没有当前目录时显示“尚未核对”，不再被空 catalog 误判成
+“已失效”。TRAE 与其他 Product Runtime 使用同一模型目录产品语义；本机真实 Runtime 验收冲突由测试
+串行化解决。
+
+人工修改、技术恢复或其他不受支持方式产生的损坏数据不属于本版兼容、迁移或修复范围。
 
 ## 交付范围
 
-- 完成 `x86_64-pc-windows-msvc` 全 targets、Desktop sidecar staging、native frame 与平台目录布局；
-- 所有 Runtime/Probe/one-shot 通过原子 `CreateProcessW + STARTUPINFOEXW + JOB_LIST + HANDLE_LIST` launcher；
-- Windows Runtime search、native EXE/validated Node shim、file identity 与平台资格矩阵保持单一 Rust 权威；
-- `%LOCALAPPDATA%` Core/User Data/Session Data/Logs/CrashDumps 使用 local NTFS admission 和创建时 protected DACL；
-- Attachment 使用 retained handle 与 handle-relative traversal，拒绝 reparse、identity drift 与非准入存储；
-- Skill Library 使用 Windows logical mode；SkillProjection 使用同父目录 copy、schema 2 journal、operationId、
-  NTFS entry identity、持久 Run registration、bounded sharing retry 和 crash-window recovery；
-- 完成 secured Named Pipe Built-in Transport、Windows Renderer Interaction Delta、NSIS、PE/manifest verifier、
-  Authenticode 与真实 Windows 10/11 acceptance；
-- 十个 Adapter 逐一取得 digest-bound Windows evidence；未完成者保持 `not_qualified`。
+### 模型目录 SWR
 
-## 数据迁移
+- Installation read model 增加 `fresh | stale | expired | unavailable | invalidated` 和 Core 计算的
+  `observedAt / revalidateAfter / expiresAt`；
+- 只有 deep-probe `ready` 成功证据构成可服务模型目录，`light_ready` 与 `installed_unverified` 不伪装目录；
+- 新增 `runtime.modelCatalog.open`：fresh 直接返回、stale 即时返回并后台单飞刷新、其余状态等待 discovery；
+- 切换 Runtime 不调用 Picker-open interface，不启动 Runtime；
+- 刷新失败保留 last-known-good 与 failed Probe Attempt，不写空目录或 fallback；
+- executable/安装/capability 的确定变化直接失效；account/provider 仅在 Adapter 有稳定非敏感 identity
+  evidence 时自动比较。
 
-Migration 96 只接受已发布的 `v1.10 / projection schema 50`，安装：
+### 配置与真实执行
 
-- `skill_projection_observation.operation_id` 与唯一非空索引；
-- `skill_projection_observation.entry_identity`，绑定投影目录的 canonical volume/file ID；
-- `skill_projection_run_registration`，以 AgentRun execution epoch 和 canonical root identity 持久化 Windows
-  Execution Root Projection Gate；
-- Data Contract `v1.11 / projection schema 51`。
+- 新 explicit selection 只接受 24 小时内未失效目录；正常既有 explicit selection 保持原值；
+- `runtime_default` 无目录也可保存/冻结，并使用各 Adapter 既有 sentinel 作为内部 identity；
+- Codex 通过真实 Host `model/list` 完整分页核对 explicit model，runtime default 不向 Thread/Turn 传 model；
+- ACP 从真实 Session model/config catalog 核对后才 set model；缺失或目录不可读返回 typed failure，禁止
+  replacement Session 绕过或 silent fallback；
+- Claude Code 与 Antigravity 继续省略 runtime-default sentinel，由真实 one-shot 进程判定 explicit model；
+- AgentRun failure code 增加 `runtime_model_unavailable` 与 `runtime_model_catalog_unavailable` 的 typed 映射。
 
-该迁移不重写 ContextManifest 18、Formatter 20、Camp identity 或已有 Skill exposure。schema 51 无 downgrade
-reader；不满足精确 v1.10/schema 50 来源条件的 store 继续按既有 admission/quarantine 策略 fail closed。
+### 主动检查与 Renderer
+
+- `runtime.product.check` 等到 manager terminal 后返回 `completed/ready`，enqueue/manager 错误不再吞掉；
+- supervisor timeout/panic/join failure 尝试持久化 transient failed Probe Attempt；
+- 队员页与首次训练模型选择共用受控 Picker，支持 loading、后台刷新、失败保留、过期与失效状态；
+- 既有已保存模型按证据显示“当前目录未提供 / 缓存中未找到 / 尚未核对”；旧请求按 generation 隔离，不能
+  污染用户刚切换的 Runtime draft；
+- TRAE 没有独立 cache、Picker 或 refresh 分支；需要真实 TRAE 的验收用例串行运行。
+
+## 数据与兼容性
+
+本版复用 `adapter_capability_snapshot.last_successful_probe_at/stale_at` 与 `adapter_probe_attempt`。没有新增表、列、
+持久 JSON shape 或历史 reader，因此不新增 Migration；Data Contract 保持 `v1.10`、projection schema 50、
+migration 95。Runtime model catalog read model 与 Desktop method 是 additive 当前接口，不形成双写或旧 Picker
+兼容层。
 
 ## 验收边界
 
-- macOS workspace、Core tests、Desktop 与既有文档门禁保持通过；
-- Windows Rust 全 targets 和 Windows-only tests 在固定 CI image 编译并执行；
-- Skill journal 在每个 copy/rename/journal/DB/cleanup transition 的 crash injection 后可恢复或稳定关闭准入；
-- 相同内容但不同 NTFS file identity、project-owned、reparse、DACL drift 与 ambiguous journal 均保留且不覆盖；
-- Windows 10 22H2 与 Windows 11 的 native frame、DPI、Forced Colors、NVDA、IME、Explorer、安装/升级/卸载
-  由真实 client OS 验收；Windows Server CI 不替代这些证据；
-- 每个 `qualified` Runtime 独立覆盖 discovery、identity、authentication、first run、continuation、Built-in Tool、
-  approval、cancel、terminal、process cleanup 与 planned shutdown；
-- Electron EXE、`rovai-core.exe`、`rovai.exe` 和 installer 分别验证架构、manifest、hash、签名与时间戳后才可发布。
-
-## 明确不做
-
-- 不支持 Windows x86/ARM64、WSL Core、Linux、MSIX/Store、企业 MSI、系统服务或自动更新；
-- 不支持 UNC/network/removable/non-NTFS workspace，也不在安装器中修改 HKLM long-path policy；
-- 不使用 localhost TCP、PowerShell、通用 cmd/bat launcher、spawn 后 attach Job、PID 猜测或先创建后补 ACL；
-- 不用 Windows Server CI、三类 execution-shape 测试或 green build 代替逐 Runtime/client OS 资格；
-- 不建立第二套 Renderer 组件树、主题、信息架构或 Windows 专属产品世界。
+- 自动门禁覆盖 Rust fmt、严格 Clippy、default/all-features、Core/CLI/slow tests、TypeScript typecheck、
+  Renderer/contract tests、desktop build、docs check/CI/ADR generation 与 diff check；
+- ACP/Codex 使用受控本地 fake Host/Session 验证真实目录缺失时 fail closed；
+- TRAE acceptance/smoke 不并发，且不接触日常 App userData；
+- Renderer 在 Day/Night 既有 Porcelain/Steel 世界中验证键盘打开、焦点、loading/error/LKG/empty、长模型名与
+  Runtime 切换竞态；
+- 推送 main、打包和替换 `/Applications` 只在本版组合门禁完成并获得当前任务授权后执行。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v1.10 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.11。 |
-| ADR | 确认无需更新 | 实现继续遵守当前 ADR-0210～0214；本版未改变平台准入、原子启动、Transport、私有存储或 Skill copy 的长期取舍。 |
-| Contracts | 已更新 | [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)补足持久 Run registration、entry identity 与 migration 96；其余 Windows 合同语义不变。 |
-| Architecture | 已更新 | [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录 DB-backed root gate 与 schema 51；[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)继续组合其他平台边界。 |
-| UI | 确认无需更新 | 本版实现既有 [Windows Interaction Delta](../../ui/windows-interaction-delta.md)，尚未改变稳定交互规范或组件结构。 |
-| Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
-| Runtime compatibility | 确认无需更新 | 当前尚无新的真实 Windows Adapter 资格证据；所有 Windows 行继续保持 `not_qualified`。 |
-| Documentation routing | 已更新 | 版本指针、索引和本版 References 路由到 v1.11；Windows 长期任务入口保持指向当前 ADR/Contract/Architecture。 |
-| Root README | 确认无需更新 | Windows 尚未完成真实验收或发布，根 README 不提前声明常青 Windows 支持。 |
+| Version lifecycle | 已更新 | v1.10 冻结为 historical；本概览、实施计划与版本索引建立唯一 current v1.11。 |
+| ADR | 已更新 | [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)固定统一 SWR、LKG 与执行期显式模型校验边界。 |
+| Contracts | 已更新 | [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)定义 cache/read interface、终态检查和 AgentRun 校验。 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)加入模型目录 cache authority、Picker-open 与 TRAE 统一边界。 |
+| UI | 已更新 | 队员工作区 brief 与 UI 路由记录 Picker 的即时缓存、证据文案、错误和竞态要求。 |
+| Runtime Activity | 确认无需更新 | 本版不增加 Runtime Activity canonical kind、映射规则或展示语义。 |
+| Runtime compatibility | 确认无需更新 | 本版不改变已实测 Runtime 版本或兼容性结论；真实 Host 测试验证的是统一产品合同。 |
+| Documentation routing | 已更新 | 文档导航、ADR CURRENT 与 Contract 索引切换到 ADR-0220 和 Runtime v9。 |
+| Root README | 确认无需更新 | 项目定位、常青能力和支持 Runtime 范围不变，版本流水账不进入根 README。 |
 
 ## References
 
-- [实施与验收计划](implementation-plan.md)
-- [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
-- [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
-- [Windows Private Storage v1](../../contracts/windows-private-storage-v1.md)
-- [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
-- [Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)
-- [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
-- [Windows packaging guide](../../development/packaging-windows.md)
+- [v1.11 实施与验收计划](implementation-plan.md)
+- [ADR-0220](../../adr/0220-runtime-model-catalog-stale-while-revalidate.md)
+- [Runtime Launch and Verification v9](../../contracts/runtime-launch-and-verification-v9.md)
+- [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
+- [ADR-0204](../../adr/0204-on-demand-runtime-deep-verification.md)
+- [ADR-0208](../../adr/0208-user-authorized-trae-light-and-availability-verification.md)

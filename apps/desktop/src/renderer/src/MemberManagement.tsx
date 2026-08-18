@@ -57,7 +57,7 @@ import {
   runtimePlatformAdmissionFor,
   runtimeProductPresentation,
 } from './runtime-status'
-import { requestProductRuntimeCheck } from './runtime-check'
+import { openRuntimeModelCatalog, requestProductRuntimeCheck } from './runtime-check'
 import { RuntimeFailureNotice } from './RuntimeFailureNotice'
 import {
   type PendingRuntimeSubmission,
@@ -467,6 +467,7 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
                     onDirtyChange={setRuntimeDirty}
                     onSave={saveRuntime}
                     onClear={clearRuntime}
+                    onReload={onReload}
                     onOpenRuntimeSettings={onOpenRuntimeSettings}
                   />
                 </div>
@@ -908,6 +909,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   onDirtyChange?(dirty: boolean): void
   onSave(adapterKind: AdapterKind, draft: MemberRuntimeDraft | null): Promise<void>
   onClear(): Promise<void>
+  onReload(): Promise<void>
   onOpenRuntimeSettings(): void
 }>(function MemberRuntimeForm({
   agent,
@@ -920,6 +922,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
   onDirtyChange,
   onSave,
   onClear,
+  onReload,
   onOpenRuntimeSettings
 }, ref): React.JSX.Element {
   const initialStateRef = useRef<MemberRuntimeEditorState | null>(null)
@@ -1139,6 +1142,11 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
             installation={installation}
             draft={draft}
             disabled={busy !== null || !runtimeMutationAllowed}
+            onOpenModelCatalog={async () => {
+              const catalog = await openRuntimeModelCatalog(selectedKind)
+              await onReload()
+              return catalog
+            }}
             onChange={(nextDraft) => {
               setDraft(nextDraft)
               setSubmitError(null)

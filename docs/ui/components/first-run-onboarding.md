@@ -26,10 +26,12 @@ last_updated: 2026-08-17
 自动启动登录、ACP、Session 或模型目录深检。`light_ready` 显示“可用”，严格表示 executable 已成功轻度启动、
 输出未超限且身份可识别，可以选择并尝试运行；支持文案说明登录、模型与能力将在显式检查或首次任务时确认。
 只找到 executable 的 `found_uninspected` 不显示“正在检查”或“可用”。不可用、需要登录、版本不支持和
-TRAE `installed_unverified` 不能被改写成深检 Ready。
+旧 TRAE `installed_unverified` 不能被改写成深检 Ready；当前 TRAE light-ready 与模型目录行为使用统一 Runtime
+规则。
 
-模型字段复用队员运行配置的 schema 驱动组件。`light_ready` 与 `installed_unverified` 只允许 Runtime
-Default；显式模型需要已验证 catalog。页面只告诉用户选择 Runtime 与模型，权限取 Adapter 静态默认值且
+模型字段复用队员运行配置的 schema 驱动组件。Runtime Default 不依赖 catalog；显式模型需要 24 小时内可服务
+且未失效的 catalog。打开 Picker 使用 Core-owned 60 秒 stale-while-revalidate，切换 Runtime 不触发 discovery。
+页面只告诉用户选择 Runtime 与模型，权限取 Adapter 静态默认值且
 不在 onboarding 展示。
 
 ## 第四页

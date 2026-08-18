@@ -19,7 +19,8 @@ last_updated: 2026-08-18
 [ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
 [ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)、
 [ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)及
-[Runtime Launch and Verification v8](../contracts/runtime-launch-and-verification-v8.md)。实测版本和能力只由
+[ADR-0220](../adr/0220-runtime-model-catalog-stale-while-revalidate.md)及
+[Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -69,6 +70,25 @@ capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 统一收口 success、failure、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
 和整进程树 cleanup。
 
+## 模型目录缓存与执行事实
+
+模型目录是 Product Runtime Availability snapshot 的一部分，但其配置体验与执行事实分离。只有 deep probe
+形成的 `ready` 成功 snapshot 才是 catalog success；`light_ready`、`installed_unverified`、failed attempt
+或 synthetic runtime-default descriptor 不能冒充动态目录。Core 从成功时间统一投影 `fresh`（60 秒内）、
+`stale`（60 秒至 24 小时）、`expired`（24 小时及以上）、`unavailable` 与 `invalidated`，Renderer 不自行计算
+TTL。
+
+切换队员 Runtime 只读取 Installation，不启动进程。打开模型 Picker 才进入 `runtime.modelCatalog.open` seam：
+fresh 直接返回，stale 立即服务 last-known-good 并由 Check Manager 后台单飞刷新，其他状态等待一次用户动作
+授权的 Availability Check。刷新失败只追加 failed Probe Attempt，保留成功 snapshot；确定的 executable、安装
+或 capability identity 变化使目录立即失效。account/provider 变化只有 Adapter 提供稳定、非敏感 identity
+evidence 时才自动比较，不能从凭据内容或错误文案猜测。
+
+Picker catalog 只用于建立新的显式选择。既有已保存显式模型在目录暂不可用或 Provider 后续移除时保持原值，
+并按当前证据显示尚未核对或目录未提供；不为人工修改或技术恢复的损坏数据提供兼容修复。真实 AgentRun
+仍在 Host/Session 建立后核对当前目录，不存在或无法核对即 fail closed。`runtime_default` 不依赖 catalog，
+内部 sentinel 只用于审计和冻结，Adapter 不向真实 Runtime 发送该 sentinel。
+
 ## 内部诊断与公开 Runtime failure
 
 Claude Code 与 Antigravity 的执行或显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
@@ -83,7 +103,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v8](../contracts/runtime-launch-and-verification-v8.md)。
+[Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -110,6 +130,10 @@ Installation refresh、health/diagnostics 与 dispatch preflight 继续不启动
 任务输入。后继 AgentRun 通过 Fleet LRU 串行复用兼容 Host；失败使用该 Host 已有错误分类，不启动 diagnostic
 process。相同 path/fingerprint 且 Adapter permission schema digest 相同的轻检复扫保留 Ready；任一权限
 descriptor 改变时降级为 light snapshot，等待显式检查或下一次真实执行重新验证。
+
+TRAE 的模型 Picker、cache status、60 秒/24 小时窗口、失败保留和显式模型 AgentRun 校验与其他 Runtime
+共用同一模块。产品代码不增加 TRAE-specific cache 或 refresh policy；只有真实 Runtime acceptance/smoke
+在本机串行运行，避免第三方密钥或状态文件竞争。
 
 冷 Host HistoryRestore 只在 executable fingerprint、installation/protocol、Host config、canonical workspace、
 workspace access/isolation、模型和权限均兼容时尝试。Host initialize 后先把精确 Session route 标为

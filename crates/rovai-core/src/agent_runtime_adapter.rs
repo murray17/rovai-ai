@@ -1319,7 +1319,7 @@ fn acp_capability_snapshot(
     let session_result = observation.session_result.as_ref();
     let mut models = if ready {
         let session = session_result.context("ready ACP probe did not create a session")?;
-        match acp_models(session) {
+        match acp_model_catalog_from_session(session) {
             Ok(models) => models,
             Err(_)
                 if matches!(
@@ -1438,7 +1438,7 @@ fn append_additive_mcp_axes(capabilities: &mut Vec<String>, same_name_policy: Mc
     ));
 }
 
-fn acp_models(session_result: &Value) -> Result<Vec<ModelDescriptor>> {
+pub fn acp_model_catalog_from_session(session_result: &Value) -> Result<Vec<ModelDescriptor>> {
     let config_options = session_result
         .get("configOptions")
         .and_then(Value::as_array)

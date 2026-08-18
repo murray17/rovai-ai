@@ -4507,6 +4507,69 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .member-runtime-parameters-heading small { color: var(--muted); font-size: 10.5px; font-weight: 500; }
 .member-runtime-parameters-body { margin-top: 14px; padding: 0 0 4px; border: 0; }
 .runtime-parameter-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.runtime-model-field { min-width: 0; }
+.runtime-model-picker-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px 7px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--input);
+  text-align: left;
+  cursor: pointer;
+}
+.runtime-model-picker-trigger:hover:not(:disabled) { border-color: color-mix(in srgb, var(--line-strong) 55%, var(--brand) 45%); }
+.runtime-model-picker-trigger:focus-visible,
+.runtime-model-picker-trigger[aria-expanded="true"] { border-color: var(--focus); outline: 0; box-shadow: 0 0 0 2px var(--focus-soft); }
+.runtime-model-picker-trigger:disabled { cursor: not-allowed; opacity: .55; }
+.runtime-model-picker-trigger > span { display: grid; min-width: 0; gap: 2px; }
+.runtime-model-picker-trigger strong { overflow: hidden; font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-model-picker-trigger small { overflow: hidden; color: var(--faint); font-size: 9.5px; font-weight: 500; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-model-picker-trigger > svg { width: 16px; height: 16px; flex: 0 0 auto; fill: none; stroke: var(--faint); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; transition: transform 120ms ease; }
+.runtime-model-picker-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.runtime-model-picker-menu {
+  z-index: 120;
+  width: max(var(--radix-dropdown-menu-trigger-width), 280px);
+  max-width: min(440px, calc(100vw - 28px));
+  max-height: min(390px, var(--radix-dropdown-menu-content-available-height));
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-float);
+}
+.runtime-model-picker-heading { display: grid; gap: 2px; padding: 7px 8px 8px; border-bottom: 1px solid var(--line); }
+.runtime-model-picker-heading strong { font-size: 11px; }
+.runtime-model-picker-heading small { color: var(--faint); font-size: 9.5px; font-weight: 500; line-height: 1.45; }
+.runtime-model-picker-item {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  outline: 0;
+  cursor: pointer;
+}
+.runtime-model-picker-item[data-highlighted] { background: var(--surface-hover); }
+.runtime-model-picker-item[data-disabled] { color: var(--faint); cursor: default; opacity: .72; }
+.runtime-model-picker-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.runtime-model-picker-copy strong { overflow: hidden; font-size: 11.5px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-model-picker-copy small { overflow: hidden; color: var(--faint); font-size: 9.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.runtime-model-picker-copy small.is-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.runtime-model-picker-check { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; color: var(--brand-ink); }
+.runtime-model-picker-check svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; }
+.runtime-model-picker-state { display: flex; align-items: center; gap: 7px; margin-top: 4px; padding: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 10px; font-weight: 500; line-height: 1.45; }
+.runtime-model-picker-state.error { color: var(--attention); }
+.runtime-model-picker-state i { width: 12px; height: 12px; flex: 0 0 auto; border: 1.5px solid color-mix(in srgb, currentColor 28%, transparent); border-top-color: currentColor; border-radius: 50%; animation: camp-marker-spin 700ms linear infinite; }
 .runtime-parameter-empty,
 .runtime-parameter-unavailable { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .runtime-parameter-switch {

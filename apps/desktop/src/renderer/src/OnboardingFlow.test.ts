@@ -5,7 +5,8 @@ import type {
   AdapterInstallation,
   OnboardingSnapshot,
   ProductRuntimeAvailability,
-  RuntimePlatformAdmission
+  RuntimePlatformAdmission,
+  RuntimeModelCatalogView
 } from '@contracts'
 import {
   OnboardingFlow,
@@ -103,6 +104,18 @@ function renderOnboarding(
     onShowMemberSelection: () => undefined,
     onCompleteMemberSelection: () => undefined,
     onRefreshRuntime: () => undefined,
+    onOpenModelCatalog: async (): Promise<RuntimeModelCatalogView> => ({
+      runtimeKind: 'codex-cli',
+      cache: {
+        status: 'unavailable',
+        observedAt: null,
+        revalidateAfter: null,
+        expiresAt: null
+      },
+      models: [],
+      refreshStatus: 'failed',
+      diagnosticCode: null
+    }),
     onRuntimeSelectionChange: () => undefined,
     onComplete: () => undefined
   }))
@@ -134,6 +147,9 @@ function codexInstallation(): AdapterInstallation {
     version: 1,
     referencedProfileCount: 0,
     snapshot: null,
+    modelCatalog: {
+      status: 'unavailable', observedAt: null, revalidateAfter: null, expiresAt: null
+    },
     memberRuntimeDefaults: {
       adapterKind: 'codex-cli',
       model: { mode: 'runtime_default' },
