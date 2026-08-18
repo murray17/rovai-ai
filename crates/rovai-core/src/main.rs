@@ -7689,6 +7689,23 @@ impl Core {
                 "nativeTurnId": native_turn_id,
             }),
         );
+        if let Some(model_id) = runtime.observed_model_id().await
+            && let Err(error) = process_one_shot_runtime_event(
+                self,
+                output,
+                AdapterKind::CodexCli,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                "runtime.model.observed",
+                &json!({"modelId": model_id}),
+            )
+            .await
+        {
+            eprintln!(
+                "failed to persist Codex Runtime model observation for AgentRun {}: {error:#}",
+                execution.agent_run_id
+            );
+        }
         Ok(())
     }
 
@@ -8866,6 +8883,23 @@ impl Core {
                 "nativeTurnId": native_prompt_id,
             }),
         );
+        if let Some(model_id) = runtime.observed_model_id().await
+            && let Err(error) = process_one_shot_runtime_event(
+                self,
+                output,
+                execution.runtime.adapter_kind,
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                "runtime.model.observed",
+                &json!({"modelId": model_id}),
+            )
+            .await
+        {
+            eprintln!(
+                "failed to persist ACP Runtime model observation for AgentRun {}: {error:#}",
+                execution.agent_run_id
+            );
+        }
         Ok(())
     }
 
@@ -11409,6 +11443,34 @@ async fn process_one_shot_runtime_event(
     let Some(_runtime_route_permit) = core.planned_shutdown.enter_runtime_route().await else {
         return Ok(());
     };
+    if event_type == "runtime.model.observed" {
+        let model_id = payload
+            .get("modelId")
+            .and_then(Value::as_str)
+            .context("Runtime model observation omitted modelId")?;
+        let changed = {
+            let mut database = core.database.lock().await;
+            ExecutionRuntimeService::default().record_observed_runtime_model(
+                &mut database,
+                agent_run_id,
+                execution_epoch,
+                model_id,
+            )?
+        };
+        if changed {
+            emit(
+                output,
+                "agent_run.runtime_model_observed",
+                json!({
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "adapterKind": adapter_kind,
+                    "modelId": model_id.trim(),
+                }),
+            );
+        }
+        return Ok(());
+    }
     let Some(evidence) =
         persist_runtime_evidence(core, agent_run_id, execution_epoch, event_type, payload).await?
     else {

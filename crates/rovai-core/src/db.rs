@@ -4203,6 +4203,7 @@ impl Database {
                     runtime_executable_fingerprint TEXT,
                     runtime_capabilities_json TEXT,
                     runtime_model_selection_json TEXT,
+                    runtime_observed_model_id TEXT,
                     runtime_permission_config_json TEXT,
                     runtime_binding_compatibility_digest TEXT,
                     runtime_executable_path TEXT,

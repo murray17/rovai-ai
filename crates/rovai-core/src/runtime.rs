@@ -600,6 +600,83 @@ pub struct ExecutionRuntimeService {
 }
 
 impl ExecutionRuntimeService {
+    pub fn record_observed_runtime_model(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        model_id: &str,
+    ) -> Result<bool> {
+        let model_id = model_id.trim();
+        if model_id.is_empty() || model_id.len() > 512 {
+            anyhow::bail!("Observed Runtime model identifier is invalid");
+        }
+        let transaction = database
+            .connection_mut()
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let target = transaction
+            .query_row(
+                r#"
+                SELECT camp_turn.camp_id,
+                       json_extract(agent_run.runtime_model_selection_json, '$.source'),
+                       agent_run.runtime_observed_model_id
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                WHERE agent_run.id = ?1
+                  AND agent_run.execution_epoch = ?2
+                "#,
+                params![agent_run_id, execution_epoch],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((camp_id, model_source, existing_model_id)) = target else {
+            return Ok(false);
+        };
+        if model_source.as_deref() != Some("runtime_default") || existing_model_id.is_some() {
+            return Ok(false);
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let updated = transaction.execute(
+            r#"
+            UPDATE agent_run
+            SET runtime_observed_model_id = ?3,
+                version = version + 1,
+                updated_at = ?4
+            WHERE id = ?1
+              AND execution_epoch = ?2
+              AND runtime_observed_model_id IS NULL
+              AND json_extract(runtime_model_selection_json, '$.source') = 'runtime_default'
+            "#,
+            params![agent_run_id, execution_epoch, model_id, now],
+        )?;
+        if updated != 1 {
+            return Ok(false);
+        }
+        append_domain_event(
+            &transaction,
+            "agent_run.runtime_model_observed",
+            &camp_id,
+            ("agent_run", agent_run_id),
+            &ActorRef::System {
+                component_id: "runtime-adapter:model-observation".to_string(),
+            },
+            Some(execution_epoch),
+            &json!({
+                "agentRunId": agent_run_id,
+                "executionEpoch": execution_epoch,
+                "modelId": model_id,
+            }),
+        )?;
+        transaction.commit()?;
+        Ok(true)
+    }
+
     pub fn record_runtime_compatibility_digest(
         &self,
         database: &mut Database,

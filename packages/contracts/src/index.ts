@@ -1066,6 +1066,7 @@ export interface AgentRunView {
     | 'planned_shutdown_cancelled'
     | null
   failure: RuntimeFailureView | null
+  runtimeModel: { modelId: string | null } | null
   executionEpoch: number
   permissionSemantics: 'core_enforced_v1' | 'runtime_managed_v2'
   invocationKind: 'direct' | 'a2a' | 'gather_completion'

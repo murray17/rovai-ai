@@ -250,6 +250,12 @@ pub struct RunWorkspaceView {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct AgentRunRuntimeModelView {
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentRunView {
     pub id: String,
     pub camp_turn_id: String,
@@ -268,6 +274,7 @@ pub struct AgentRunView {
     pub terminal_resolution_source: Option<String>,
     pub terminal_reason_code: Option<String>,
     pub failure: Option<RuntimeFailureView>,
+    pub runtime_model: Option<AgentRunRuntimeModelView>,
     pub execution_epoch: i64,
     pub permission_semantics: String,
     pub invocation_kind: String,
@@ -2362,7 +2369,9 @@ fn load_agent_runs(
                camp.project_path, agent_run.version,
                agent_run.created_at, agent_run.started_at,
                agent_run.ended_at, agent_run.updated_at,
-               agent_run.public_runtime_failure_json
+               agent_run.public_runtime_failure_json,
+               json_extract(agent_run.runtime_model_selection_json, '$.source'),
+               agent_run.runtime_observed_model_id
         FROM agent_run
         JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
         JOIN camp ON camp.id = camp_turn.camp_id
@@ -2420,6 +2429,8 @@ fn load_agent_runs(
                 row.get::<_, Option<String>>(32)?,
                 row.get::<_, String>(33)?,
                 row.get::<_, Option<String>>(34)?,
+                row.get::<_, Option<String>>(35)?,
+                row.get::<_, Option<String>>(36)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -2461,6 +2472,8 @@ fn load_agent_runs(
                 ended_at,
                 updated_at,
                 public_runtime_failure_json,
+                runtime_model_source,
+                runtime_observed_model_id,
             )| {
                 Ok(AgentRunView {
                     id,
@@ -2483,6 +2496,10 @@ fn load_agent_runs(
                         .map(|value| serde_json::from_str(&value))
                         .transpose()
                         .context("AgentRun public Runtime failure is invalid")?,
+                    runtime_model: (runtime_model_source.as_deref() == Some("runtime_default"))
+                        .then_some(AgentRunRuntimeModelView {
+                            model_id: runtime_observed_model_id,
+                        }),
                     execution_epoch,
                     permission_semantics,
                     invocation_kind,

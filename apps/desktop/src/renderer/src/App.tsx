@@ -1469,7 +1469,11 @@ export function App(): React.JSX.Element {
           void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
         }, 80)
       }
-      if (event.method === 'agent_run.cancelled' || event.method === 'agent_run.recovery_blocker_resolved') {
+      if (
+        event.method === 'agent_run.cancelled'
+        || event.method === 'agent_run.recovery_blocker_resolved'
+        || event.method === 'agent_run.runtime_model_observed'
+      ) {
         const eventCampId = stringField(params, 'campId')
         const campId = activeCampIdRef.current
         if (campId && (!eventCampId || eventCampId === campId)) {
