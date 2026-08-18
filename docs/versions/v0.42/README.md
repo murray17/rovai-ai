@@ -16,7 +16,7 @@ last_updated: 2026-08-06
 >
 > 前置版本：[v0.41 Runtime Activity 统一观测语义](../v0.41/README.md)
 >
-> 长期决策：[ADR-0124](../../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)
+> 长期决策：[ADR-0124](decisions.md#adr-0124)
 >
 > 字段级真源：[Built-in Tool Transport v1](../../contracts/builtin-tool-transport-v1.md)
 >

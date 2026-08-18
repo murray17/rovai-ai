@@ -12,7 +12,7 @@ last_updated: 2026-08-17
 本合同冻结 v0.96 的 Monitoring Collection、Runtime Usage Observation、Native Session fact、单一只读
 快照、Coverage、Tool Duration 和 Cost layer。架构组合见
 [Runtime Monitoring](../architecture/runtime-monitoring.md)，长期来源与 clean-break 决策见
-[ADR-0201](../adr/0201-sparse-runtime-usage-and-clean-break-monitoring.md)。
+[ADR-0201](../versions/v0.96/decisions.md#adr-0201)。
 
 本合同只服务 Core → Electron Main → Renderer 的应用级运行监控。它不进入 Agent Built-in CLI、Runtime
 tool catalog、Camp/Conversation Message、Native Session Bootstrap、AgentRun Dynamic Context、Memory、FTS
@@ -548,12 +548,12 @@ Coverage、source/quality、受控 Runtime/model label 和 diagnostic code；保
 
 ## References
 
-- [ADR-0201](../adr/0201-sparse-runtime-usage-and-clean-break-monitoring.md)
+- [ADR-0201](../versions/v0.96/decisions.md#adr-0201)
 - [Runtime Monitoring architecture](../architecture/runtime-monitoring.md)
 - [v0.96 implementation plan](../versions/v0.96/implementation-plan.md)
 - [Runtime monitoring feasibility audit](../research/runtime-monitoring/README.md)
-- [ADR-0013](../adr/0013-managed-content-and-read-side-v2.md)
-- [ADR-0111](../adr/0111-core-owned-canonical-runtime-activity.md)
-- [ADR-0112](../adr/0112-immutable-execution-evidence-and-rebuildable-canonical-activity-projection.md)
-- [ADR-0117](../adr/0117-observation-capability-coverage-levels-across-runtime-adapters.md)
-- [ADR-0148](../adr/0148-read-only-diagnostics-and-data-minimized-export.md)
+- [ADR-0013](../versions/v0.06/decisions.md#adr-0013)
+- [ADR-0111](../versions/v0.41/decisions.md#adr-0111)
+- [ADR-0112](../versions/v0.41/decisions.md#adr-0112)
+- [ADR-0117](../versions/v0.41/decisions.md#adr-0117)
+- [ADR-0148](../versions/v0.51/decisions.md#adr-0148)

@@ -151,7 +151,7 @@ display-name alias 和 external MCP boundary 原样继承。
 
 ## References
 
-- [ADR-0191: Agent-Mediated Member Creation and Thirteen-Skill Inventory](../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)
+- [ADR-0191: Agent-Mediated Member Creation and Thirteen-Skill Inventory](../versions/v0.85/decisions.md#adr-0191)
 - [Built-in Tool Transport v11 (historical)](builtin-tool-transport-v11.md)
 - [Built-in Tool Runtime architecture](../architecture/builtin-tool-runtime.md)
-- [ADR-0056: Controlled Member Avatar Assets](../adr/0056-controlled-member-avatar-assets.md)
+- [ADR-0056: Controlled Member Avatar Assets](../versions/v0.14/decisions.md#adr-0056)

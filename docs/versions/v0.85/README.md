@@ -66,7 +66,7 @@ last_updated: 2026-08-15
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.84 冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.85。 |
-| ADR | 已更新 | [ADR-0191](../../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)替代 ADR-0181，冻结十三项 inventory、Agent 确认、direct-user authority、头像导入和 imported→official 晋升边界。 |
+| ADR | 已更新 | [ADR-0191](decisions.md#adr-0191)替代 ADR-0181，冻结十三项 inventory、Agent 确认、direct-user authority、头像导入和 imported→official 晋升边界。 |
 | Contracts | 已更新 | [Built-in Tool Transport v12](../../contracts/builtin-tool-transport-v12.md)替代 v11，增加第十四项 `member.create` 及其 input/result/error/idempotency/evidence 合同。 |
 | Architecture | 已更新 | [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 member.create 路由与 Core 头像 importer；[Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录十三项 inventory 和同名 imported 晋升。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)收窄显式发送后的自动聚焦抑制：仅保护可见的新建任务表单，浏览任务/队员仍可打开对应 AgentRun；不改变 Renderer wire。 |
@@ -78,7 +78,7 @@ last_updated: 2026-08-15
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0191](../../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)
+- [ADR-0191](decisions.md#adr-0191)
 - [Built-in Tool Transport v12](../../contracts/builtin-tool-transport-v12.md)
 - [`member-studio` bundled source](../../../skills/member-studio/SKILL.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

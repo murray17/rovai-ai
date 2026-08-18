@@ -104,7 +104,7 @@ last_updated: 2026-08-14
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.73 以尚有真实 Runtime/UI 验收缺口的事实冻结为 historical；v0.74 成为唯一 current，并新增本概览与[实施计划](implementation-plan.md) |
-| ADR | 已更新 | [ADR-0181](../../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)替代 ADR-0176，冻结十二项 inventory、management policy 与协作 Skill 的 Runtime 对齐边界 |
+| ADR | 已更新 | [ADR-0181](decisions.md#adr-0181)替代 ADR-0176，冻结十二项 inventory、management policy 与协作 Skill 的 Runtime 对齐边界 |
 | Contracts | 确认无需更新 | 本版本只消费 Camp Message Send v5、Message Delivery v2 与 Context Delivery Profile v3 的现有可信 sender、显式 recipient 和 Core-managed reply；不改变字段或 wire 语义 |
 | Architecture | 已更新 | [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)更新为十二项 official Skill、十项 Settings 可配置项与 Review Duo composition |
 | UI | 确认无需更新 | Skill Settings 继续使用既有通用列表与 identity-color 规则；新增一项数据行不改变 Renderer 交互或视觉合同 |
@@ -116,7 +116,7 @@ last_updated: 2026-08-14
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0181: Twelve-Skill Official Inventory and Runtime-Aligned Collaboration](../../adr/0181-twelve-skill-official-inventory-and-runtime-aligned-collaboration.md)
+- [ADR-0181: Twelve-Skill Official Inventory and Runtime-Aligned Collaboration](decisions.md#adr-0181)
 - [Camp Message Send v5](../../contracts/camp-message-send-v5.md)
 - [Message Delivery v2](../../contracts/message-delivery-v2.md)
 - [Context Delivery Profile v3](../../contracts/context-delivery-profile-v3.md)

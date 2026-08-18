@@ -107,7 +107,7 @@ AgentRun 非终态，下次启动继续进入 v0.64 的 Accepted-Input Recovery 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.65 的注意力/CLI 统一范围以未实施事实冻结为 historical/closed_incomplete，并保留其已完成的目录附件独立增量；v0.66 成为唯一 current，并新增本概览与实施计划 |
-| ADR | 已更新 | [ADR-0168](../../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)冻结独立 planned-shutdown lifecycle、同 generation terminal authority 与 CampTurn cancellation intent 不变量 |
+| ADR | 已更新 | [ADR-0168](decisions.md#adr-0168)冻结独立 planned-shutdown lifecycle、同 generation terminal authority 与 CampTurn cancellation intent 不变量 |
 | Contracts | 已更新 | 新增 [Planned Shutdown v1](../../contracts/planned-shutdown-v1.md)与[Run Process Detail Surface v5](../../contracts/run-process-detail-surface-v5.md) |
 | Architecture | 已更新 | 新增 [Planned Shutdown](../../architecture/planned-shutdown.md)，组合 launch admission、active registry、terminal guard、deadline 与 Desktop 边界 |
 | UI | 已更新 | 当前 Porcelain/Steel 规范路由 v5 terminal source 文案，并取消 cancelled Run 隐藏 unsettled warning 的旧规则 |
@@ -119,7 +119,7 @@ AgentRun 非终态，下次启动继续进入 v0.64 的 Accepted-Input Recovery 
 ## References
 
 - [v0.66 实施与验收计划](implementation-plan.md)
-- [ADR-0168](../../adr/0168-planned-shutdown-preserves-runtime-terminal-authority.md)
+- [ADR-0168](decisions.md#adr-0168)
 - [Planned Shutdown 架构](../../architecture/planned-shutdown.md)
 - [Planned Shutdown v1](../../contracts/planned-shutdown-v1.md)
 - [Run Process Detail Surface v5](../../contracts/run-process-detail-surface-v5.md)

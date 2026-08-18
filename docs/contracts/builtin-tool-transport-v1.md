@@ -16,7 +16,7 @@ last_updated: 2026-08-07
 describe`、Bootstrap 示例和版本验收必须引用或由本合同生成，不能各自维护变体。
 
 长期架构见 [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)，决策理由见
-[ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)。
+[ADR-0124](../versions/v0.42/decisions.md#adr-0124)。
 
 ## 1. 版本常量
 

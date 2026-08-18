@@ -81,7 +81,7 @@ capture、Barrier、completion 与恢复均复用统一 Message Delivery 权威�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.88 冻结为 historical；本概览、[实施计划](implementation-plan.md)、[实现规格](implementation-spec.md)与[版本索引](../README.md)建立唯一 current v0.89。 |
-| ADR | 已更新 | [ADR-0193](../../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)冻结持久 Barrier/Completion Delivery；[ADR-0194](../../adr/0194-mandatory-typed-gather-completion-current-input.md)冻结 mandatory typed completion input。 |
+| ADR | 已更新 | [ADR-0193](decisions.md#adr-0193)冻结持久 Barrier/Completion Delivery；[ADR-0194](decisions.md#adr-0194)冻结 mandatory typed completion input。 |
 | Contracts | 已更新 | 新增 Gather v1，并切换 Message Delivery v3、Camp Message Send v8、Built-in Tool Transport v13 与 ContextManifest Evidence v13。 |
 | Architecture | 已更新 | 新增[持久 Gather Barrier](../../architecture/durable-gather-barrier.md)，并更新公共 Delivery 与 Built-in Runtime 架构。 |
 | UI | 确认无需更新 | 不新增 Gather 卡片或交互；Renderer 只消费扩展后的 Delivery/Run 判别联合并继续正常渲染公共消息。 |

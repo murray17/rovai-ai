@@ -19,10 +19,10 @@ last_updated: 2026-08-06
 >
 > 后续版本：[v0.44 确定性有界原始公共消息上下文](../v0.44/README.md)
 >
-> 长期决策：[ADR-0125](../../adr/0125-runtime-native-additive-external-mcp-projection.md)、
-> [ADR-0126](../../adr/0126-codex-native-home-and-external-session-ownership.md)、
-> [ADR-0127](../../adr/0127-atomic-member-runtime-configuration.md)、
-> [ADR-0128](../../adr/0128-structured-draft-only-user-message-submission.md)
+> 长期决策：[ADR-0125](decisions.md#adr-0125)、
+> [ADR-0126](decisions.md#adr-0126)、
+> [ADR-0127](decisions.md#adr-0127)、
+> [ADR-0128](decisions.md#adr-0128)
 
 ## 版本目标
 

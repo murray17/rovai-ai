@@ -82,14 +82,14 @@ source. A non-leading or repeated Current User segment fails closed to the plain
 
 Exact `camp.read(mode="item")` continues to return separated `effectiveAgentRecipients` and
 `mentionsCurrentUser`. For the current Run's own accepted send, the exact item can use the narrowly bounded
-receipt-verification exception in [ADR-0170](../adr/0170-current-run-committed-self-write-exact-read.md). All collection
+receipt-verification exception in [ADR-0170](../versions/v0.67/decisions.md#adr-0170). All collection
 reads and all other post-boundary messages remain unavailable. Locator-absent recovery still cannot search, guess or
 resend.
 
 ## References
 
-- [ADR-0165: Core-Owned Current-User Message Attention](../adr/0165-core-owned-current-user-message-attention.md)
-- [ADR-0170: Current-Run Committed Self-Write Exact Read](../adr/0170-current-run-committed-self-write-exact-read.md)
+- [ADR-0165: Core-Owned Current-User Message Attention](../versions/v0.65/decisions.md#adr-0165)
+- [ADR-0170: Current-Run Committed Self-Write Exact Read](../versions/v0.67/decisions.md#adr-0170)
 - [Current User Attention v1 (historical)](current-user-attention-v1.md)
 - [Camp Message Send v4](camp-message-send-v4.md)
 - [Built-in Tool Transport v7](builtin-tool-transport-v7.md)

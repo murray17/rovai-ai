@@ -8,8 +8,8 @@ last_updated: 2026-08-13
 # AgentRun Recovery
 
 本文描述 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复边界。规范依据是
-[ADR-0164](../adr/0164-accepted-input-recovery-requires-proven-native-turn-reconciliation.md)。受控关闭后的 product
-fence 由 [ADR-0177](../adr/0177-controlled-shutdown-fences-product-execution.md)拥有；字段级状态与命令见
+[Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
+fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
 [Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)与
 [Planned Shutdown v2](../contracts/planned-shutdown-v2.md)。
 

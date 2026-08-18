@@ -15,8 +15,8 @@ last_updated: 2026-08-06
 > Current architecture note (2026-08-06): the isolated-Home remediation below is the historical
 > incident resolution, not the current product contract. v0.43 supersedes it with Codex Native Home,
 > app-server `config/read`, `NativeWinsSkip`, and thread-scoped additive MCP; see
-> [ADR-0125](../adr/0125-runtime-native-additive-external-mcp-projection.md) and
-> [ADR-0126](../adr/0126-codex-native-home-and-external-session-ownership.md).
+> [ADR-0125](../versions/v0.43/decisions.md#adr-0125) and
+> [ADR-0126](../versions/v0.43/decisions.md#adr-0126).
 
 ## Executive summary
 
@@ -280,9 +280,9 @@ verified until the artifact under test can be tied to the validated source.
 
 ## References
 
-- [ADR-0107: Camp-Member Isolated Codex Home and AgentRun-Scoped App Server](../adr/0107-camp-member-isolated-codex-home-and-agentrun-app-server.md)
+- [ADR-0107: Camp-Member Isolated Codex Home and AgentRun-Scoped App Server](../versions/v0.39/decisions.md#adr-0107)
 - [v0.39 Codex Isolated Home implementation contract](../versions/v0.39/codex-home-isolation.md)
 - [v0.39 implementation and acceptance evidence](../versions/v0.39/implementation-plan.md)
-- [ADR-0103: Canonical MCP JSON and Stable Assignment Identity](../adr/0103-canonical-mcp-json-and-stable-assignment-identity.md)
-- [ADR-0104: Rovai-Preferred MCP Projection and Non-Blocking External Degradation](../adr/0104-rovai-preferred-mcp-projection-and-external-degradation.md)
+- [ADR-0103: Canonical MCP JSON and Stable Assignment Identity](../versions/v0.37/decisions.md#adr-0103)
+- [ADR-0104: Rovai-Preferred MCP Projection and Non-Blocking External Degradation](../versions/v0.37/decisions.md#adr-0104)
 - [Fix commit `efc50da`](https://github.com/murray17/rovai-ai/commit/efc50daee7a95a078aaa25b8e5fc6cc1e2fa7cc3)

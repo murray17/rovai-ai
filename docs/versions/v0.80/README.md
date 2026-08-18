@@ -81,7 +81,7 @@ last_updated: 2026-08-14
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.79 已冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.80。 |
-| ADR | 已更新 | [ADR-0187](../../adr/0187-durable-composer-recipient-continuation.md)冻结 durable source、优先级、发送物化与无 fallback。 |
+| ADR | 已更新 | [ADR-0187](decisions.md#adr-0187)冻结 durable source、优先级、发送物化与无 fallback。 |
 | Contracts | 已更新 | [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)拥有新增字段、mutation、错误与迁移。 |
 | Architecture | 已更新 | [Camp Composer Draft 架构](../../architecture/camp-composer-draft.md)加入 continuation component authority 与 flow。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)与[结构化 Mention](../../ui/components/structured-mentions.md)冻结标签、互斥、修复、复制和 focus 合同。 |
@@ -93,6 +93,6 @@ last_updated: 2026-08-14
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0187](../../adr/0187-durable-composer-recipient-continuation.md)
+- [ADR-0187](decisions.md#adr-0187)
 - [Camp Composer Draft v2](../../contracts/camp-composer-draft-v2.md)
 - [延续路由交互稿](../../prototypes/composer-continuation-routing/index.html)

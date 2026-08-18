@@ -12,8 +12,8 @@ last_updated: 2026-08-15
 本合同冻结 Desktop 打开 Camp 的有界 wire shape。它只属于 Renderer → Electron Main → Core 的
 typed IPC，不进入 Agent Built-in CLI、Runtime tool catalog、Bootstrap 或模型上下文。
 
-长期权威继续遵守 [ADR-0013](../adr/0013-managed-content-and-read-side-v2.md) 的 SQLite Read Side / high-water
-边界与 [ADR-0058](../adr/0058-collaboration-v4-presence-aware-admission.md) 的 enter-before-read Default Lead
+长期权威继续遵守 [ADR-0013](../versions/v0.06/decisions.md#adr-0013) 的 SQLite Read Side / high-water
+边界与 [ADR-0058](../versions/v0.15/decisions.md#adr-0058) 的 enter-before-read Default Lead
 reconcile。完整 `camps.snapshot` 保留为纯读兼容与诊断接口，但不是普通打开或事件刷新入口。
 
 ## Methods

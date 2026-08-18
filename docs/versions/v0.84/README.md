@@ -48,7 +48,7 @@ last_updated: 2026-08-15
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.83 冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.84。 |
-| ADR | 已更新 | [ADR-0190](../../adr/0190-user-placeable-agent-execution-console.md)冻结默认底部、可移入 Inspector 且不复制执行事实的长期边界。 |
+| ADR | 已更新 | [ADR-0190](decisions.md#adr-0190)冻结默认底部、可移入 Inspector 且不复制执行事实的长期边界。 |
 | Contracts | 已更新 | [Run Process Detail Surface v6](../../contracts/run-process-detail-surface-v6.md)定义两种承载位置、列表方向、焦点与唯一详情 surface。 |
 | Architecture | 确认无需更新 | Core、Read Side、进程、传输和权威边界不变；这是 Renderer 内的可逆承载位置变化。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)记录执行台位置切换、条件式第三 Tab、纵向名册和响应式边界。 |
@@ -60,6 +60,6 @@ last_updated: 2026-08-15
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0190](../../adr/0190-user-placeable-agent-execution-console.md)
+- [ADR-0190](decisions.md#adr-0190)
 - [Run Process Detail Surface v6](../../contracts/run-process-detail-surface-v6.md)
 - [Camp 会话工作区 UI 合同](../../ui/components/conversation-workspace.md)

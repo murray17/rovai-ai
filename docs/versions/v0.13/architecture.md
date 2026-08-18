@@ -10,8 +10,8 @@ last_updated: 2026-07-27
 
 > 版本范围：[README.md](README.md)
 >
-> 跨版本约束：[ADR-0052](../../adr/0052-explicit-memory-revision-authority.md) ·
-> [ADR-0055](../../adr/0055-explicit-opt-in-provisional-companion-lessons.md)
+> 跨版本约束：[ADR-0052](decisions.md#adr-0052) ·
+> [ADR-0055](decisions.md#adr-0055)
 
 ## 1. 权威模型
 

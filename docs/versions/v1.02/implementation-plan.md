@@ -11,7 +11,7 @@ last_updated: 2026-08-17
 ## 计划状态与使用方式
 
 本计划实现 [Runtime Usage Monitoring v3](../../contracts/runtime-usage-monitoring-v3.md)，不改变
-[ADR-0205](../../adr/0205-minimal-runtime-usage-metering.md) 的长期数据模型。修改 Rust 测试遵守
+[ADR-0205](../v0.99/decisions.md#adr-0205) 的长期数据模型。修改 Rust 测试遵守
 [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)；真实 Runtime 遵守
 [本地 Runtime 工作流](../../development/local-workflow.md)。
 

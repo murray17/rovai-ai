@@ -15,8 +15,8 @@ last_updated: 2026-07-27
 > 前置版本：[v0.14 营地伙伴身份视觉与受管本地头像](../v0.14/README.md)
 >
 > 跨版本决策：
-> [ADR-0057](../../adr/0057-member-presence-and-retained-removal.md) ·
-> [ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md)
+> [ADR-0057](decisions.md#adr-0057) ·
+> [ADR-0058](decisions.md#adr-0058)
 >
 > 详细设计：[architecture.md](architecture.md)
 >

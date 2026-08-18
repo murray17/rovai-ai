@@ -16,9 +16,9 @@ last_updated: 2026-07-28
 > 前置版本：[v0.16 Runtime 权限归属与 Workspace 语义收敛](../v0.16/README.md)
 >
 > 跨版本决策：
-> [ADR-0061](../../adr/0061-durable-agent-inaccessible-execution-evidence.md) ·
-> [ADR-0062](../../adr/0062-interruptible-runs-and-unsettled-external-effects.md) ·
-> [ADR-0063](../../adr/0063-minimal-a2a-turn-envelope-and-reply-correlation.md)
+> [ADR-0061](decisions.md#adr-0061) ·
+> [ADR-0062](decisions.md#adr-0062) ·
+> [ADR-0063](decisions.md#adr-0063)
 >
 > 详细设计：[architecture.md](architecture.md)
 >

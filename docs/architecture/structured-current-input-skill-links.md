@@ -10,7 +10,7 @@ last_updated: 2026-08-17
 
 本文件说明 Picker identity、发送时冻结、SkillProjection preflight、start-time resolution、Context Formatter
 和 Runtime Adapter 的 Module seam。长期决定见
-[ADR-0203](../adr/0203-structured-current-input-skill-links.md)，字段级合同见
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)，字段级合同见
 [Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)与
 [ContextManifest Evidence v17](../contracts/context-manifest-evidence-v17.md)。
 
@@ -149,6 +149,6 @@ availability/resolution 和 rendered bytes。已有 Manifest 的 active Run reco
 - [Skill Projection Reconciliation](skill-projection-reconciliation.md)
 - [Built-in Tool Runtime](builtin-tool-runtime.md)
 - [Camp Composer Draft](camp-composer-draft.md)
-- [ADR-0105](../adr/0105-runtime-group-assigned-skill-delivery.md)
-- [ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)
-- [ADR-0203](../adr/0203-structured-current-input-skill-links.md)
+- [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)
+- [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)
+- [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)

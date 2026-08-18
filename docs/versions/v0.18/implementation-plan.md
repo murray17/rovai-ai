@@ -16,7 +16,7 @@ last_updated: 2026-07-28
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：
-> [ADR-0064](../../adr/0064-default-on-bounded-automatic-partner-memory.md)
+> [ADR-0064](decisions.md#adr-0064)
 
 ## 检查点 1：Policy、Migration 与 Contracts
 

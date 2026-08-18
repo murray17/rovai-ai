@@ -38,7 +38,7 @@ new collecting Gathers freeze schema v2.
 
 ## References
 
-- [ADR-0196](../adr/0196-self-contained-gather-completion-request.md)
+- [ADR-0196](../versions/v0.90/decisions.md#adr-0196)
 - [Gather v2](gather-v2.md)
 - [ContextManifest Evidence v13 (historical)](context-manifest-evidence-v13.md)
 - [Context Delivery Profile v3](context-delivery-profile-v3.md)

@@ -10,7 +10,7 @@ last_updated: 2026-08-17
 
 ## 计划状态与使用方式
 
-本计划实现 [ADR-0207](../../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)与
+本计划实现 [ADR-0207](decisions.md#adr-0207)与
 [Runtime Launch and Verification v4](../../contracts/runtime-launch-and-verification-v4.md)。修改 Rust 测试遵守
 [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)；启动 Core、Desktop、
 打包 App 或真实 Runtime 前遵守[本地 Runtime 工作流](../../development/local-workflow.md)。
@@ -51,6 +51,6 @@ last_updated: 2026-08-17
 ## References
 
 - [v1.01 版本概览](README.md)
-- [ADR-0207](../../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)
+- [ADR-0207](decisions.md#adr-0207)
 - [Runtime Launch and Verification v4](../../contracts/runtime-launch-and-verification-v4.md)
 - [本地 Runtime 工作流](../../development/local-workflow.md)

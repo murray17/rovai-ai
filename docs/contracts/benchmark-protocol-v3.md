@@ -82,7 +82,7 @@ Prompt、withheld verifier 和 reference answer 字段。私有 Bundle 继续由
 
 ## References
 
-- [ADR-0151](../adr/0151-versioned-benchmark-protocol-and-axis-comparability.md)
+- [ADR-0151](../versions/v0.53/decisions.md#adr-0151)
 - [Benchmark Protocol architecture](../architecture/benchmark-protocol.md)
 - [Semantic Judge Views v1](semantic-judge-views-v1.md)
 - [v0.53 overview](../versions/v0.53/README.md)

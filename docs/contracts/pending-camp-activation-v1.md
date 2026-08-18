@@ -58,6 +58,6 @@ after the database deletion succeeds.
 
 ## References
 
-- [ADR-0145](../adr/0145-core-owned-pending-camp-draft-activation.md)
-- [ADR-0080](../adr/0080-durable-camp-composer-draft-and-atomic-attachment-consumption.md)
-- [ADR-0128](../adr/0128-structured-draft-only-user-message-submission.md)
+- [ADR-0145](../versions/v0.49/decisions.md#adr-0145)
+- [ADR-0080](../versions/v0.25/decisions.md#adr-0080)
+- [ADR-0128](../versions/v0.43/decisions.md#adr-0128)

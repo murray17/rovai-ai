@@ -10,7 +10,7 @@ last_updated: 2026-08-01
 
 ## 权威与渠道边界
 
-本设计细化 [ADR-0087](../../adr/0087-core-owned-durable-in-app-notification-inbox.md)。Core
+本设计细化 [ADR-0087](decisions.md#adr-0087)。Core
 SQLite 是 In-App Notification 的唯一持久真源；Renderer 只呈现通知中心和临时浮层；
 Electron Main 不保存通知数据，也不创建 macOS 系统通知。
 

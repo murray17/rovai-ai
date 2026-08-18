@@ -11,9 +11,9 @@ last_updated: 2026-07-29
 > 版本范围：[README.md](README.md)
 >
 > 跨版本约束：
-> [ADR-0065](../../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md) ·
-> [ADR-0017](../../adr/0017-managed-skill-library-runtime-projection.md) ·
-> [ADR-0018](../../adr/0018-file-backed-mcp-library-runtime-projection.md)
+> [ADR-0065](decisions.md#adr-0065) ·
+> [ADR-0017](../v0.08/decisions.md#adr-0017) ·
+> [ADR-0018](../v0.09/decisions.md#adr-0018)
 
 ## 1. 产品 Runtime 目录
 

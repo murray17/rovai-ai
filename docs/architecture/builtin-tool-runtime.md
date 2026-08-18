@@ -18,46 +18,46 @@ last_updated: 2026-08-18
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v11 及更早 Transport 只保留
 historical 语义。决策理由见
-[ADR-0124](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
-[ADR-0212](../adr/0212-cross-platform-local-ipc-transport-v14.md)、
-[ADR-0217](../adr/0217-transport-v15-inherits-cross-platform-v14.md)、
-[ADR-0135](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)、
-[ADR-0215](../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)、
-[ADR-0136](../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与
-[ADR-0137](../adr/0137-one-time-task-linked-responsibility-admission.md)。Native Session context
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
+[History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)、
+[Durable Task 不变量](foundational-invariants.md#collaboration-task)与
+[Durable Task 不变量](foundational-invariants.md#collaboration-task)。Native Session context
 compaction 后的 Bootstrap 补发可靠性见
-[ADR-0138](../adr/0138-durable-bootstrap-redelivery-requirement.md)，版本拥有的 Runtime policy 与
+[Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)，版本拥有的 Runtime policy 与
 完整矩阵见 [Native Session Bootstrap Redelivery](native-session-bootstrap-redelivery.md)。Self/peer
 identity、Collaboration Projection 与输入水位见
-[ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)和
+[成员投影不变量](foundational-invariants.md#member-projection)和
 [Collaboration State v2](../contracts/collaboration-state-v2.md)。模型投影、ContextManifest Evidence、
 Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
-[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；whole-history
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；whole-history
 omission 的 bounded aggregate 边界见
-[ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md)和
-[ADR-0200](../adr/0200-compact-context-projection-and-structured-run-facts.md)、
+[公共上下文不变量](foundational-invariants.md#context-public-history)和
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、
 [ContextManifest Evidence v17](../contracts/context-manifest-evidence-v17.md)及
 [Run Facts v1](../contracts/run-facts-v1.md)。Task authority 与
 self-active awareness 见
-[ADR-0152](../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)；真实空集合
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；真实空集合
 的显式 clearing snapshot 见
-[ADR-0153](../adr/0153-explicit-empty-self-active-task-snapshot.md)。
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)。
 Send 的显式 caller return 与 Core-managed reply reference 见
-[ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)；显式 Agent 寻址意图硬门与
-Principal audience 投影分别见 [ADR-0216](../adr/0216-explicit-agent-addressing-intent-as-delivery-gate.md)和
-[ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)。
+[Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)；显式 Agent 寻址意图硬门与
+Principal audience 投影分别见 [History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)和
+[公共上下文不变量](foundational-invariants.md#context-public-history)。
 当前 Camp 显示名 inline alias 的事务内解析与 canonical freeze 见
-[ADR-0182](../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)，line-leading position
-门禁见 [ADR-0184](../adr/0184-line-leading-display-name-inline-addressing-alias.md)。
+[History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)，line-leading position
+门禁见 [History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)。
 Current User Attention 与 progressive CLI teaching 分别见
-[ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)和
-[ADR-0166](../adr/0166-progressive-built-in-cli-teaching.md)；完整十三项 official Skill inventory、Agent 主导队员创建、
+[Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)和
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)；完整十三项 official Skill inventory、Agent 主导队员创建、
 Runtime 对齐的 Camp 协作 Skill、四项固定 GitHub 来源与 management policy 见
-[ADR-0191](../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)。
+[Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)。
 Memory 单命令的局部 Transport 决策见
-[ADR-0180](../adr/0180-single-agent-memory-write-command.md)，独立 Hearth Review 与 actor-bounded mutation
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)，独立 Hearth Review 与 actor-bounded mutation
 组合见 [Online Memory Capture](online-memory-capture.md)。Complete exact-Scope View 与 copyable target
-合同见 [ADR-0186](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)。
+合同见 [Memory 读取与投影不变量](foundational-invariants.md#memory-read-projection)。
 
 ## 总体路径
 
@@ -338,7 +338,7 @@ Core 先使旧 snapshot 失效并停止复用该 Adapter 的 resident process，
 Core 才原子更新 Run effective config 与冗余 Runtime 列，记录 drift/rebound 事件，并重复 blocker 与
 executable integrity 校验。每个 Run 最多自动 rebind 一次；第二次漂移、身份变化、歧义或无法确认
 兼容性时 terminal fail。完整长期边界见
-[ADR-0156](../adr/0156-logical-runtime-identity-and-bounded-installation-rebind.md)。
+[Runtime Catalog 与 Installation 不变量](foundational-invariants.md#runtime-catalog-installation)。
 
 ## Bootstrap 与 Dynamic Context
 
@@ -402,7 +402,7 @@ continuation。原发起者失去 Default Lead 身份后仍完成本场纪要，
 `grill-duo`、`grill-duo-with-docs` 与 `review-duo` 同样使用 ordinary `user_managed` delivery。自然标题只
 提供公屏阅读线索；Skill 进入后使用可信 Current Input sender、显式 Agent recipient 和 reference closure
 中的真实 reply relation。Agent 不提供或选择 reply ID，Core 始终把新消息链接到当前 AgentRun trigger。
-两个 Grill 按 [ADR-0198](../adr/0198-bounded-open-round-grill-duo-skills.md)使用 Skill-owned 有界开放轮次：
+两个 Grill 按 [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)使用 Skill-owned 有界开放轮次：
 每轮包含 1–4 个前提已确认且彼此独立的问题，一条初始 A2A 邀请和一条固定搭档直接回复覆盖全轮；未回答题
 保留稳定编号与建议，改变的问题单独重新复核，当前轮关闭前不混入新题。它们不接入 Gather，也不创建 Core
 持久轮次。普通版排除领域词汇/ADR 维护；文档版把完整执行协议保留在自己的 `SKILL.md`，immutable Revision
@@ -410,7 +410,7 @@ continuation。原发起者失去 Default Lead 身份后仍完成本场纪要，
 返回 accepted 后结束；accepted 不代表接收方开始或完成。三个 CLI 动作只在各 Skill 的“消息方式”章节
 定义一次，其它阶段只说明本轮内容与推进条件，不复制命令示例。
 
-Review Duo 按 [ADR-0199](../adr/0199-session-semantic-four-message-review-duo.md)使用正常 Camp 会话中的
+Review Duo 按 [Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)使用正常 Camp 会话中的
 四消息拓扑：Lead 向固定搭档发送 Standards 请求，public-only 保存独立 Spec 结果；搭档直接返回一条
 Standards 结果后，Lead public-only 发布有界最终报告。四条消息携带相同的不可变 Git 或 patch 评审范围，
 Lead 只接受可信当前搭档对当前有效请求的直接回复，并且同一 Lead 在一个 Camp 中一次只推进一场未完成评审。
@@ -518,26 +518,26 @@ callback 必须 fail closed。Runtime detector 矩阵、signal completion 语义
 Runtime 环境开关与 Requirement 属于不同生命周期：前者由 Rovai 版本维护并在 Core process 启动
 时冻结，只控制新 compaction observation 的准入；后者属于一个 Binding generation，不能被后续
 disable 清除。首次 `disabled -> best_effort` 对既有可复用 Binding 幂等创建一次 Requirement，不轮换
-Native Session。完整语义见 [ADR-0139](../adr/0139-version-owned-bootstrap-redelivery-runtime-policy.md)。
+Native Session。完整语义见 [Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)。
 各 Runtime 只使用一个版本限定的 signal admission point；新 Requirement 能否进入当前输入以
 `RuntimeInputDelivery.prepared` 事务为截止，而非 transport send。具体见
-[ADR-0140](../adr/0140-runtime-specific-compaction-signal-admission-point.md)。
+[Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)。
 ContextManifest 与 Runtime Input Delivery 必须在一个 serialized Core preparation critical section
 中冻结 redelivery selection 和 combined budget；实现可以使用 unsendable staging Manifest，但在
 Delivery `prepared` 前不能释放数据库权威或把 payload 交给 transport。完整 identity-bearing overlay
 保持瞬时，不进入 Manifest 或持久 digest。见
-[ADR-0141](../adr/0141-atomic-bootstrap-redelivery-input-overlay.md)。Redelivery v2 的 reason marker、单句
+[Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)。Redelivery v2 的 reason marker、单句
 Core recovery authority 与 Envelope/Formatter version 见
-[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；它不改变这里的
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；它不改变这里的
 transient overlay、Delivery Evidence 或 accepted-ACK 边界。
 Runtime compaction callback 使用独立、窄权限且跨 AgentRun 的 Native Session Observer Lease；它不
 延长 Built-in Tool/Run lease。普通 Host 退出不创建 Requirement，只有具体 observation 的提交结果
 未知才允许一次保守 pending。见
-[ADR-0142](../adr/0142-native-session-scoped-compaction-observer-lease.md)。
+[Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)。
 六个目标 Runtime 的 detector 是 `best_effort` enhancement：与 Host 启动并行建立，失败或恢复不
 参与 Runtime Readiness/AgentRun admission，也不触发 one-shot fallback 或 gap 推断。既有 pending
 仍由 Delivery Gate 处理。见
-[ADR-0143](../adr/0143-best-effort-non-blocking-compaction-detector-capability.md)。
+[Session 与 Bootstrap 不变量](foundational-invariants.md#context-session-bootstrap)。
 
 ## Built-in CLI 与外部 MCP
 
@@ -551,7 +551,7 @@ Projection 和 Exposure Snapshot 管理；built-in operations 永不进入 `McpP
 Runtime MCP config 或 MCP runtime-name mapping。`rovai_team` 没有保留语义，同名外部 Server 只是
 普通第三方 MCP。新建 MCP Library 为空，Rovai-ai 不物化或恢复任何产品内置第三方 Server；定义只
 来自用户手动添加或确认导入。见
-[ADR-0197](../adr/0197-empty-user-owned-mcp-library.md)。
+[外部 MCP 不变量](foundational-invariants.md#skills-external-mcp)。
 
 ## Activity、Evidence 与故障边界
 

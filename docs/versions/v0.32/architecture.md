@@ -11,7 +11,7 @@ last_updated: 2026-08-03
 
 > 范围：[README.md](README.md)
 >
-> 决策：[ADR-0091](../../adr/0091-durable-member-calls-and-single-slot-a2a-resume.md)
+> 决策：[ADR-0091](decisions.md#adr-0091)
 >
 > 状态：[implementation-plan.md](implementation-plan.md)
 

@@ -59,7 +59,7 @@ Dialog，并明确列出本次过滤的队员、Lead 临时调整及不回写保
 空 Pending 不进入 Navigation，也不替换 Restorable Location；离开或下一次启动时由 Core 的窄校验清理。
 输入正文或准备附件后，它以“草稿”进入 Navigation 并可跨重启恢复。第一条消息只有在完整发送事务成功时
 才将 Pending 原子激活为正式 Camp；发送拒绝保留 Pending 与原 Draft。普通创建 Dialog 仍立即创建 Active
-Camp，因此用户显式确认的零消息 Camp 继续耐久存在。长期边界见 [ADR-0145](../../adr/0145-core-owned-pending-camp-draft-activation.md)。
+Camp，因此用户显式确认的零消息 Camp 继续耐久存在。长期边界见 [ADR-0145](decisions.md#adr-0145)。
 
 ## 官方双人追问 Skill
 
@@ -77,7 +77,7 @@ v0.49 把以下两个 Skill 加入 Rovai 官方受管集合；它们与既有官
 
 协作只使用当前 `camp.message.send` / `rovai send` 公共 A2A 与 Message Delivery。发送成功不代表搭档
 已经开始或完成，Skill 不轮询、不伪造第二观点，也不建立协议级自动回复义务。没有合格搭档时明确降级
-为单人逐项追问。长期边界见 [ADR-0144](../../adr/0144-self-contained-duo-grilling-bundled-skills.md)。
+为单人逐项追问。长期边界见 [ADR-0144](decisions.md#adr-0144)。
 
 ## 已确认的启动语义
 
@@ -208,7 +208,7 @@ Shell 内部演进的产品偏好与 Renderer 交互。Pending Camp 激活由 AD
 
 - [v0.49 生产设计](production-design.md)
 - [v0.49 实施与验收计划](implementation-plan.md)
-- [ADR-0144：自包含双人追问官方 Skill](../../adr/0144-self-contained-duo-grilling-bundled-skills.md)
-- [ADR-0145：Core-owned Pending Camp Draft](../../adr/0145-core-owned-pending-camp-draft-activation.md)
+- [ADR-0144：自包含双人追问官方 Skill](decisions.md#adr-0144)
+- [ADR-0145：Core-owned Pending Camp Draft](decisions.md#adr-0145)
 - [Arctic Dawn V3 设置与窗口合同](../../../apps/desktop/.impeccable/surfaces/settings-workspace.md)
 - [Rovai-ai 领域词汇表](../../../CONTEXT.md)

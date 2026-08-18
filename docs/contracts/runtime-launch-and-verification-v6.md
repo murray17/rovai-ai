@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 
 本合同继承 [v5](runtime-launch-and-verification-v5.md) 的 launch purpose、light discovery、显式检查、
 execution-deferred verification、权限默认、Prompt fence 与 response-only input ACK，并按
-[ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)增加 TRAE 冷 Session 恢复。
+[ADR-0209](../versions/v1.04/decisions.md#adr-0209)增加 TRAE 冷 Session 恢复。
 
 ## 1. Continuation selection
 
@@ -96,6 +96,6 @@ HistoryRestore/ACP resume 失败且当前 prompt 尚未发送时，Core 必须�
 ## References
 
 - [Runtime Launch and Verification v5（历史）](runtime-launch-and-verification-v5.md)
-- [ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)
+- [ADR-0209](../versions/v1.04/decisions.md#adr-0209)
 - [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
 - [TRAE ACP Probe](../research/trae-cli-runtime/probe/README.md)

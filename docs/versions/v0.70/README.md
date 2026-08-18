@@ -30,11 +30,11 @@ CampMessage 已经对用户可见；`--to-user` 只把当前这条公开消息�
 本版本不修改 `mentionUser=true` 的 Core 效果，不分析正文、不按 Agent 角色拒绝、不自动抑制连续
 Mention，也不从 reply、Task、父子 AgentRun、A2A 或历史消息继承 attention。
 
-Skill inventory 增量以 [ADR-0174](../../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)
+Skill inventory 增量以 [ADR-0174](decisions.md#adr-0174)
 替代七项集合，离线引入 `diagnosing-bugs`、`tdd` 与 `writing-for-agents`；不改变 Skill Library、
 Runtime Group Assignment 或权限模型。
 
-Camp 标题增量以 [ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)
+Camp 标题增量以 [ADR-0173](decisions.md#adr-0173)
 收窄首条用户消息的自动命名投影；不改变 Message、Mention 寻址或侧栏操作。
 
 ## 交付范围
@@ -87,9 +87,9 @@ Camp 标题增量以 [ADR-0173](../../adr/0173-leading-structured-mentions-exclu
 
 完整字段与长期边界由 [Camp Message Send v5](../../contracts/camp-message-send-v5.md)、
 [Built-in Tool Transport v8](../../contracts/builtin-tool-transport-v8.md)、
-[Current User Attention v2](../../contracts/current-user-attention-v2.md)、[ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)
-与 [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md) 拥有；自动 Camp 标题规则由
-[ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)拥有；实施证据见
+[Current User Attention v2](../../contracts/current-user-attention-v2.md)、[ADR-0165](../v0.65/decisions.md#adr-0165)
+与 [ADR-0166](../v0.65/decisions.md#adr-0166) 拥有；自动 Camp 标题规则由
+[ADR-0173](decisions.md#adr-0173)拥有；实施证据见
 [实施计划](implementation-plan.md)。
 
 ## 冻结边界
@@ -123,7 +123,7 @@ Camp 标题增量以 [ADR-0173](../../adr/0173-leading-structured-mentions-exclu
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.69 按已完成事实冻结为 historical；v0.70 成为唯一 current，并记录 User Attention 教学收窄范围与证据缺口 |
-| ADR | 已更新 | ADR-0165/0166 只增加当前 v5/v8 Contract References；新增 [ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)细化自动标题投影；[ADR-0174](../../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)替代七项 official inventory |
+| ADR | 已更新 | ADR-0165/0166 只增加当前 v5/v8 Contract References；新增 [ADR-0173](decisions.md#adr-0173)细化自动标题投影；[ADR-0174](decisions.md#adr-0174)替代七项 official inventory |
 | Contracts | 已更新 | 新增 Camp Message Send v5 与 Built-in Tool Transport v8；v4/v7 转为 historical current-entry，不改 Current User Attention v2 |
 | Architecture | 已更新 | Built-in Tool Runtime 与 Public A2A 路由到 v5/v8，并记录十项 inventory 与固定 GitHub 来源的离线边界 |
 | UI | 已更新 | Current User Attention 的 Renderer 合同不变；Settings surface 与 UI 验收同步十项普通列表和四项 GitHub 来源；[App Shell 与统一侧栏](../../ui/components/app-shell-navigation.md)明确自动标题投影与 Camp 行单一点击语义 |
@@ -148,10 +148,10 @@ Copilot CLI 两类用例都在接受输入后明确返回月度配额耗尽，�
 ## References
 
 - [v0.70 实施与验收计划](implementation-plan.md)
-- [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)
-- [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)
-- [ADR-0173](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)
-- [ADR-0174](../../adr/0174-ten-skill-official-inventory-and-pinned-matt-pocock-imports.md)
+- [ADR-0165](../v0.65/decisions.md#adr-0165)
+- [ADR-0166](../v0.65/decisions.md#adr-0166)
+- [ADR-0173](decisions.md#adr-0173)
+- [ADR-0174](decisions.md#adr-0174)
 - [Camp Message Send v5](../../contracts/camp-message-send-v5.md)
 - [Built-in Tool Transport v8](../../contracts/builtin-tool-transport-v8.md)
 - [Built-in Tool Runtime 架构](../../architecture/builtin-tool-runtime.md)

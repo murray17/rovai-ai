@@ -36,7 +36,7 @@ prior facts therefore cannot enter the new generation's mandatory Completion Inp
 
 ## References
 
-- [ADR-0195](../adr/0195-generation-scoped-last-gather-return.md)
+- [ADR-0195](../versions/v0.90/decisions.md#adr-0195)
 - [Message Delivery v3 (historical)](message-delivery-v3.md)
 - [Gather v2](gather-v2.md)
 - [Public A2A architecture](../architecture/public-a2a-message-delivery.md)

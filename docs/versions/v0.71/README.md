@@ -126,7 +126,7 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.70 以未执行九 Runtime v8 matrix 的事实冻结为 historical/closed_incomplete；v0.71 成为唯一 current，并承载受控关闭增量 |
-| ADR | 已更新 | ADR-0175 细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；新增 [ADR-0177](../../adr/0177-controlled-shutdown-fences-product-execution.md)冻结 product fence 与 unknown effects 分离；Grill Duo 标题与 Notification v3 精确失效修正不改变既有 ADR 决策 |
+| ADR | 已更新 | ADR-0175 细化通知真源、聚合、Journal 与 Renderer seam；ADR-0176 替代十项 official inventory 并冻结 system-required policy；新增 [ADR-0177](decisions.md#adr-0177)冻结 product fence 与 unknown effects 分离；Grill Duo 标题与 Notification v3 精确失效修正不改变既有 ADR 决策 |
 | Contracts | 已更新 | Notification Episode v3 替代 v2，冻结 Journal exact invalidation、顺序队列归约与 reset 清空；Current User Attention v3 继续拥有逐消息精确确认；SkillView 增加 management policy；[Planned Shutdown v2](../../contracts/planned-shutdown-v2.md)替代 v1 当前入口；Grill Duo 仍使用既有 CampMessage 与 caller-return 合同 |
 | Architecture | 已更新 | Notification Episode 架构补齐 Active/Heads-Up Eligible Attention、signal hydration、exact invalidation 和 Renderer cursor commit seam；Built-in Tool Runtime 与 Skill Projection 记录十一项 inventory 及系统必需自愈边界；Planned Shutdown 增加 durable cycle、writer fence、product settlement 与 startup compensation |
 | UI | 已更新 | 通知中心组件合同补齐 exact signal 呈现/点击/失效、“知道了”动作、overflow identity 与 reset 边界；Settings surface 同步九项可配置 Skill；[Camp 会话工作区](../../ui/components/conversation-workspace.md)同步关闭等待与 terminal unknown-effect 文案 |
@@ -140,9 +140,9 @@ Episode 更新通过最小 Change Journal 驱动浮层和增量刷新。
 - [实施与验收计划](implementation-plan.md)
 - [Notification Episode v3](../../contracts/notification-episode-v3.md)
 - [Current User Attention v3](../../contracts/current-user-attention-v3.md)
-- [ADR-0175](../../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
-- [ADR-0176](../../adr/0176-eleven-skill-official-inventory-and-system-required-operations.md)
-- [ADR-0177](../../adr/0177-controlled-shutdown-fences-product-execution.md)
+- [ADR-0175](decisions.md#adr-0175)
+- [ADR-0176](decisions.md#adr-0176)
+- [ADR-0177](decisions.md#adr-0177)
 - [Notification Episode 架构](../../architecture/notification-episodes.md)
 - [`campfire` bundled source](../../../skills/campfire/SKILL.md)
 - [Planned Shutdown v2](../../contracts/planned-shutdown-v2.md)

@@ -10,7 +10,7 @@ last_updated: 2026-08-18
 
 ## 计划状态与使用方式
 
-本计划实现 [ADR-0210～0214](../../adr/CURRENT.md)、[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
+本计划实现 [ADR-0210～0214](decisions.md#adr-0210)、[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
 及其五项当前合同。文档闭环完成前不进入产品代码；accepted ADR/Contract 只证明设计成立，不证明 Windows
 实现或发布。所有开发、Smoke 与 acceptance 使用隔离 data root，不触碰日常 App。
 

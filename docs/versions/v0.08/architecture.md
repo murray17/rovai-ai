@@ -13,13 +13,13 @@ last_updated: 2026-07-24
 > 版本范围：[README.md](README.md)
 >
 > 跨版本边界：
-> [ADR-0017](../../adr/0017-managed-skill-library-runtime-projection.md)
+> [ADR-0017](decisions.md#adr-0017)
 >
 > 相关约束：
-> [ADR-0001](../../adr/0001-core-transaction.md)、
-> [ADR-0009](../../adr/0009-reproducible-context-delivery.md)、
-> [ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)、
-> [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md)
+> [ADR-0001](../v0.02/decisions.md#adr-0001)、
+> [ADR-0009](../v0.05/decisions.md#adr-0009)、
+> [ADR-0013](../v0.06/decisions.md#adr-0013)、
+> [ADR-0016](../v0.06/decisions.md#adr-0016)
 
 ## 1. 目标与边界
 

@@ -118,7 +118,7 @@ retention 不变量，但有独立 configuration/pack/replica/review schema，�
 
 ## References
 
-- [ADR-0171](../adr/0171-opportunity-based-tool-interaction-measurement.md)
+- [ADR-0171](../versions/v0.68/decisions.md#adr-0171)
 - [Paired Collaboration Experiment v1](paired-collaboration-experiment-v1.md)
 - [Semantic Judge Views v1](semantic-judge-views-v1.md)
 - [Benchmark Protocol 架构](../architecture/benchmark-protocol.md)

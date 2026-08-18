@@ -15,7 +15,7 @@ last_updated: 2026-08-06
 
 本文冻结 AgentRun 公共消息上下文的第一版数值配置、字符计量、选择顺序、模型可见字段和
 ContextManifest 证据。架构理由与替代关系见
-[ADR-0129](../adr/0129-deterministic-bounded-raw-public-context-delivery.md)。
+[ADR-0129](../versions/v0.44/decisions.md#adr-0129)。
 
 ## 1. 所有权与版本
 

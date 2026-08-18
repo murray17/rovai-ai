@@ -15,7 +15,7 @@ last_updated: 2026-07-27
 >
 > 详细设计：[architecture.md](architecture.md)
 >
-> 跨版本决策：[ADR-0056](../../adr/0056-controlled-member-avatar-assets.md)
+> 跨版本决策：[ADR-0056](decisions.md#adr-0056)
 
 检查点按依赖顺序排列。`[x]` 只表示已有代码、Migration、测试或可复现 App
 证据；设计包、参考实现和 ADR `accepted` 不能作为实现完成证据。

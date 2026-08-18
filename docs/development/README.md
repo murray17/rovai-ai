@@ -59,19 +59,17 @@ target 测试；Cargo 配置、`src/lib.rs`、多 target、删除/重命名或�
 [测试与 Smoke Test](testing.md#staged-rust-路由)。
 
 `pnpm test` 会先运行 `pnpm docs:check`，验证唯一当前版本指针、版本目录 Front Matter
-和版本索引一致，并验证 ADR schema/生命周期/直接替代图、CURRENT/HISTORY、Architecture 索引及
+和版本索引一致，并验证 Version Decisions、迁移证据、当前权威覆盖、Architecture 索引及
 全仓 Markdown 本地链接；它还显式运行文档治理单测。只修改文档时，可以先运行：
 
 ```bash
 pnpm docs:test
 pnpm docs:check
 DOCS_BASE_REF=<目标分支 base SHA> pnpm docs:check:ci
-pnpm docs:adr:generate -- --check
 ```
 
-最后一条只验证生成式 HISTORY 未漂移；更新 HISTORY 时运行不带 `--check` 的
-`pnpm docs:adr:generate`。PR CI 必须提供真实 base SHA，本地缺少该参数时 `docs:check:adr`
-只运行 snapshot check 并明确报告 diff freeze skipped。
+PR CI 必须提供真实 base SHA；`docs:check:ci` 以它验证 historical
+`decisions.md` 未被静默改写，本地普通 `docs:check` 不伪造或推测 base。
 
 push / PR 前运行完整 Rust 验证：
 

@@ -95,7 +95,7 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 ## References
 
-- [ADR-0013](../adr/0013-managed-content-and-read-side-v2.md)
-- [ADR-0058](../adr/0058-collaboration-v4-presence-aware-admission.md)
+- [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
+- [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
 - [Camp Open Projection v1](../contracts/camp-open-projection-v1.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)

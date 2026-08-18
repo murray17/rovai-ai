@@ -68,7 +68,7 @@ own Runtime Platform Admission evidence includes v14 discovery, read, mutation, 
 
 ## References
 
-- [ADR-0212](../adr/0212-cross-platform-local-ipc-transport-v14.md)
+- [ADR-0212](../versions/v1.05/decisions.md#adr-0212)
 - [Built-in Tool Transport v13 (historical)](builtin-tool-transport-v13.md)
 - [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
 - [Tokio Named Pipe API](https://docs.rs/tokio/latest/tokio/net/windows/named_pipe/struct.ServerOptions.html)

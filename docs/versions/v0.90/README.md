@@ -61,7 +61,7 @@ generation 最后一条显式回传作为结果；Completion mandatory input 同
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.89 冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.90。 |
-| ADR | 已更新 | [ADR-0195](../../adr/0195-generation-scoped-last-gather-return.md)冻结 generation-scoped last-result/独立限额；[ADR-0196](../../adr/0196-self-contained-gather-completion-request.md)冻结完整请求输入。 |
+| ADR | 已更新 | [ADR-0195](decisions.md#adr-0195)冻结 generation-scoped last-result/独立限额；[ADR-0196](decisions.md#adr-0196)冻结完整请求输入。 |
 | Contracts | 已更新 | 切换 Gather v2、Camp Message Send v9、Message Delivery v4、ContextManifest Evidence v14 与 completion schema v2；Transport v13 wire 确认不变。 |
 | Architecture | 已更新 | 持久 Gather Barrier、Public A2A Delivery 与 Built-in Tool Runtime 组合新的预算、结果和 Context 权威。 |
 | UI | 确认无需更新 | 公开消息与现有 Delivery/Run 判别联合不变；本版本不新增 Renderer surface 或交互。 |

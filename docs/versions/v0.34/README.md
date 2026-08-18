@@ -74,7 +74,7 @@ Requirement 失败。
 
 ## Member Call 基线
 
-v0.34 以 [ADR-0099](../../adr/0099-cost-gated-independent-member-calls.md) 为唯一当前协议：
+v0.34 以 [ADR-0099](decisions.md#adr-0099) 为唯一当前协议：
 
 - `call_member` 只有 `recipient`、`content` 和可选 `taskId`；
 - 每次接受独立占用一个 A2A slot 并使逻辑深度增加一；
@@ -115,6 +115,6 @@ verifier 验证 12 个 present role、私有权限、引用闭包和不变 Hard 
 不冒充 LLM 语义正确性。
 
 本历史版本仍保持 `implementation_status: in_progress`：当前共享登录与普通 host session 明确不满足
-[ADR-0094](../../adr/0094-formal-qualification-isolation-and-effect-coverage.md)，仓库也没有可冒充
+[ADR-0094](decisions.md#adr-0094)，仓库也没有可冒充
 `tool_disabled_external_sandbox` 的正式 Judge provider。因而未生成隔离 Formal Trial、未发布正式 Pass
 Rate，也未将 synthetic Profile 当作操作系统隔离证据。

@@ -15,9 +15,9 @@ Runtime Input Delivery accepted evidence 是独立的合同/权威边界，不�
 shape 由 Formatter version 所有，Evidence shape 由 Manifest version 所有；Runtime Input Delivery 是
 投递/ACK authority，并继续携带既有投递 metadata，而不是新的内容版本轴。公共消息、Delivery 和 Context gate 的
 长期边界见 [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)，
-决策见 [ADR-0132](../adr/0132-public-reference-context-closure-profile-v2.md)；权责分层见
-[ADR-0147](../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)，当前 omission Evidence
-shape 见 [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md) 与
+决策见 [ADR-0132](../versions/v0.45/decisions.md#adr-0132)；权责分层见
+[ADR-0147](../versions/v0.50/decisions.md#adr-0147)，当前 omission Evidence
+shape 见 [ADR-0149](../versions/v0.52/decisions.md#adr-0149) 与
 [ContextManifest Evidence v9](context-manifest-evidence-v9.md)。
 
 ## 1. 不可变配置

@@ -78,7 +78,7 @@ fast path。剩余约 2–3 s 的总冷启动时间主要位于 macOS/Electron �
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.81 冻结为 historical；本概览、[实施计划](implementation-plan.md)与[版本索引](../README.md)建立唯一 current v0.82。 |
-| ADR | 已更新 | [ADR-0188](../../adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)冻结 bundled bootstrap 快速路径与 AgentRun 完整性门禁。 |
+| ADR | 已更新 | [ADR-0188](decisions.md#adr-0188)冻结 bundled bootstrap 快速路径与 AgentRun 完整性门禁。 |
 | Contracts | 已更新 | [Camp Open Projection v1](../../contracts/camp-open-projection-v1.md)增加 Desktop-only `camps.exists` 与启动恢复使用边界，不改变投影 shape。 |
 | Architecture | 已更新 | [Camp Open Read Path](../../architecture/camp-open-read-path.md)与[Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录两阶段恢复和 bootstrap/preflight 分工。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)记录冷启动候选 route shell 与局部 loading 合同。 |
@@ -91,4 +91,4 @@ fast path。剩余约 2–3 s 的总冷启动时间主要位于 macOS/Electron �
 
 - [实施与验收计划](implementation-plan.md)
 - [Camp Open Read Path](../../architecture/camp-open-read-path.md)
-- [ADR-0188](../../adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)
+- [ADR-0188](decisions.md#adr-0188)

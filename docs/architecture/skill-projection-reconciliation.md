@@ -10,18 +10,18 @@ last_updated: 2026-08-18
 
 本文件说明 Rovai Skill Library、execution-root SkillProjection 与 AgentRun
 SkillExposureSnapshot 的长期组件边界。决策理由见
-[ADR-0105](../adr/0105-runtime-group-assigned-skill-delivery.md)、
-[ADR-0158](../adr/0158-default-all-runtime-delivery-for-managed-skills.md)和
-[ADR-0161](../adr/0161-event-driven-root-scoped-skill-projection-reconciliation.md)。当前 official
+[Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)、
+[Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)和
+[Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)。当前 official
 inventory 与 system-required policy 见
-[ADR-0191](../adr/0191-agent-mediated-member-creation-and-thirteen-skill-inventory.md)。
+[Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)。
 bundled bootstrap 与执行完整性时机见
-[ADR-0188](../adr/0188-bundled-skill-bootstrap-fast-path-and-execution-integrity.md)。用户结构化选择与
+[Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)。用户结构化选择与
 `CURRENT_INPUT.skills` 的交叉边界见
-[ADR-0203](../adr/0203-structured-current-input-skill-links.md)和
+[ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)和
 [Structured Current Input Skill Links](structured-current-input-skill-links.md)。
 Windows copy backend 的 crash recovery 与执行根准入见
-[ADR-0214](../adr/0214-crash-recoverable-windows-skill-projection.md)和
+[Skill Library 与投影不变量](foundational-invariants.md#skills-library-projection)和
 [Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
 
 ## 三层状态

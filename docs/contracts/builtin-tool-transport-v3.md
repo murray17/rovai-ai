@@ -236,7 +236,7 @@ v0.46 does not accept v0.45 CLI command version, Agent output mode variables, `t
 generic invocation aliases, or old `camp.message.send` input. A supplied `campId`/`--camp-id` is
 `builtin_tool.invalid_input` with `fix_input`; it is not aliased or silently translated. Old replay
 records and old Rovai-owned App data are outside the contract and may be removed under the managed
-reset boundary in [ADR-0118](../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md).
+reset boundary in [ADR-0118](../versions/v0.41/decisions.md#adr-0118).
 
 Other cross-Camp read operations retain their explicit `campId` business input; this clean break is
 limited to Agent-facing `camp.message.send`.
@@ -250,8 +250,8 @@ business information.
 
 ## References
 
-- [ADR-0135: Compact Agent Output over Canonical Built-in Tool Envelope](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
+- [ADR-0135: Compact Agent Output over Canonical Built-in Tool Envelope](../versions/v0.46/decisions.md#adr-0135)
 - [Camp Message Send v2](camp-message-send-v2.md)
 - [Built-in Tool Transport v2 (historical)](builtin-tool-transport-v2.md)
-- [ADR-0124: CLI-Only Transport for Rovai Built-in Operations](../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)
+- [ADR-0124: CLI-Only Transport for Rovai Built-in Operations](../versions/v0.42/decisions.md#adr-0124)
 - [v0.46 implementation plan](../versions/v0.46/implementation-plan.md)

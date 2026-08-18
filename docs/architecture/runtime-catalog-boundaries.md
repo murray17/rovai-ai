@@ -3,23 +3,17 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Runtime Catalog Boundaries
 
-本文件定义 Runtime 名称出现在产品中时的权威分层。准入理由见
-[ADR-0065](../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)、
-[ADR-0066](../adr/0066-managed-product-runtime-resolution.md)与
-[ADR-0189](../adr/0189-settings-only-runtime-preview-outside-product-catalog.md)。主机平台准入由
-[ADR-0210](../adr/0210-platform-qualified-product-runtime-admission.md)与
+本文件定义 Runtime 名称出现在产品中时的权威分层。Catalog、Installation 与机器状态的长期边界见
+[Runtime Catalog 与 Installation 不变量](foundational-invariants.md#runtime-catalog-installation)。主机平台准入由
+[Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)与
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
-[ADR-0192](../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
-[ADR-0204](../adr/0204-on-demand-runtime-deep-verification.md)和
-[ADR-0207](../adr/0207-explicit-maximum-authority-member-runtime-defaults.md)、
-[ADR-0208](../adr/0208-user-authorized-trae-light-and-availability-verification.md)、
-[ADR-0209](../adr/0209-bounded-trae-cold-session-history-restore.md)及
-[ADR-0220](../adr/0220-runtime-model-catalog-stale-while-revalidate.md)及
+[Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
+[Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
 [Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 

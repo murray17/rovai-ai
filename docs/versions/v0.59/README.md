@@ -78,7 +78,7 @@ send——包括进度、public-only 或 addressed A2A send——都抑制兜底
 ## References
 
 - [v0.59 实施与验收计划](implementation-plan.md)
-- [ADR-0162](../../adr/0162-missing-send-recovery-publication.md)
+- [ADR-0162](decisions.md#adr-0162)
 - [Missing-Send Recovery Publication v1](../../contracts/missing-send-recovery-publication-v1.md)
 - [Public A2A Message 与 Message Delivery](../../architecture/public-a2a-message-delivery.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

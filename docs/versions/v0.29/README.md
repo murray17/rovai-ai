@@ -54,9 +54,9 @@ Agent Runtime 原生字段、六字段身份、独立保存边界与 Arctic Dawn
 - A3 HTML 是必须实际打开并交互核对的设计输入，不是生产字段、组件或静态数据真源。
 - 未被本版本明确替代的 Renderer 规则继续遵守
   [队员工作区策略](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)。
-- Runtime、模型与原生权限继续遵守 [ADR-0082](../../adr/0082-member-owned-runtime-parameters.md)。
-- 六字段身份与独立保存边界继续遵守 [ADR-0085](../../adr/0085-run-frozen-six-field-member-identity-context.md)。
-- Camp 共享摘要模型入口继续遵守 [ADR-0060](../../adr/0060-opaque-member-routing-identity.md)，
+- Runtime、模型与原生权限继续遵守 [ADR-0082](../v0.26/decisions.md#adr-0082)。
+- 六字段身份与独立保存边界继续遵守 [ADR-0085](../v0.27/decisions.md#adr-0085)。
+- Camp 共享摘要模型入口继续遵守 [ADR-0060](../v0.16/decisions.md#adr-0060)，
   不因 A3 未展示而删除。
 - v0.29 实施保持 Renderer-only；没有修改 Migration、SQLite、Core、IPC/Contracts 或
   Runtime Adapter 语义。

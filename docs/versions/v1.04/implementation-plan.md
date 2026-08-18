@@ -10,7 +10,7 @@ last_updated: 2026-08-18
 
 ## 计划状态与使用方式
 
-本计划实现 [ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)与
+本计划实现 [ADR-0209](decisions.md#adr-0209)与
 [Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)。Rust 测试遵守
 [准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)，真实 Runtime 遵守
 [本地 Runtime 工作流](../../development/local-workflow.md)。
@@ -67,5 +67,5 @@ last_updated: 2026-08-18
 ## References
 
 - [v1.04 版本概览](README.md)
-- [ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)
+- [ADR-0209](decisions.md#adr-0209)
 - [Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)

@@ -66,7 +66,7 @@ starter row presentation; after the user sends a message, the Camp behaves like 
 
 ## References
 
-- [ADR-0202: Desktop-Owned Pre-Core First-Run Admission and Checkpointed Product Provisioning](../adr/0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md)
+- [Camp 资源不变量](foundational-invariants.md#camp-resources)
 - [First-run Onboarding v1](../contracts/first-run-onboarding-v1.md)
 - [Camp Activation Lifecycle](camp-activation-lifecycle.md)
 - [Camp Composer Draft](camp-composer-draft.md)

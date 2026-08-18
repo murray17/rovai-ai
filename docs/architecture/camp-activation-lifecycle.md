@@ -49,5 +49,5 @@ Startup applies the same authority after attachment expiry cleanup, covering cra
 
 ## References
 
-- [ADR-0145](../adr/0145-core-owned-pending-camp-draft-activation.md)
+- [Camp 生命周期不变量](foundational-invariants.md#camp-lifecycle)
 - [Pending Camp Activation v1](../contracts/pending-camp-activation-v1.md)

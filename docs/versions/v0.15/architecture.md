@@ -11,8 +11,8 @@ last_updated: 2026-07-27
 > 版本范围：[README.md](README.md)
 >
 > 跨版本约束：
-> [ADR-0057](../../adr/0057-member-presence-and-retained-removal.md) ·
-> [ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md)
+> [ADR-0057](decisions.md#adr-0057) ·
+> [ADR-0058](decisions.md#adr-0058)
 >
 > 当时 UI 约束：Meridian（文件已删除，原文见 Git 历史；当前规范见
 > [Arctic Dawn](../../ui/README.md)）

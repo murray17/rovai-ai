@@ -18,9 +18,9 @@ last_updated: 2026-08-08
 >
 > 后续版本：[v0.47 Durable Task v2 与责任准入边界](../v0.47/README.md)
 >
-> 主要决策：[ADR-0135](../../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
->；相关长期边界：[ADR-0124](../../adr/0124-cli-only-transport-for-rovai-built-in-operations.md)、
-> [ADR-0118](../../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md)。
+> 主要决策：[ADR-0135](decisions.md#adr-0135)
+>；相关长期边界：[ADR-0124](../v0.42/decisions.md#adr-0124)、
+> [ADR-0118](../v0.41/decisions.md#adr-0118)。
 
 ## 版本目标
 
@@ -52,7 +52,7 @@ v0.46 把 Agent 使用 `rovai` 的边界收敛为“固定业务命令 + 精简�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | [版本索引](../README.md)以本版本为唯一 `current_version`；[v0.45](../v0.45/README.md) 已冻结为 historical，并修正 v0.44 遗留的 lifecycle 元数据漂移 |
-| ADR | 已更新 | [ADR-0135](../../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md) 冻结 Agent Result Projection 与 compact output 边界 |
+| ADR | 已更新 | [ADR-0135](decisions.md#adr-0135) 冻结 Agent Result Projection 与 compact output 边界 |
 | Contracts | 已更新 | [Built-in Tool Transport v3](../../contracts/builtin-tool-transport-v3.md)、[Camp Message Send v2](../../contracts/camp-message-send-v2.md)及[合同索引](../../contracts/README.md) |
 | Architecture | 已更新 | [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)与[Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)同步当前组件边界 |
 | UI | 确认无需更新 | 本版本没有 Renderer、交互或视觉合同变化 |

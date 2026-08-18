@@ -11,7 +11,7 @@ last_updated: 2026-08-18
 
 # Rovai-ai v1.04：TRAE Cold Resume 与历史重放隔离
 
-> 当前状态：[ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)与
+> 当前状态：[ADR-0209](decisions.md#adr-0209)与
 > [Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)已经接受；实现与
 > 验收已按[计划](implementation-plan.md)完成。
 >
@@ -70,6 +70,6 @@ last_updated: 2026-08-18
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0209](../../adr/0209-bounded-trae-cold-session-history-restore.md)
+- [ADR-0209](decisions.md#adr-0209)
 - [Runtime Launch and Verification v7](../../contracts/runtime-launch-and-verification-v7.md)
 - [TRAE ACP Probe](../../research/trae-cli-runtime/probe/README.md)

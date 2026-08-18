@@ -14,8 +14,8 @@ last_updated: 2026-07-31
 >
 > 前置版本：[v0.26 Member Runtime Parameters](../v0.26/README.md)
 >
-> 跨版本决策：[ADR-0085](../../adr/0085-run-frozen-six-field-member-identity-context.md) ·
-> [ADR-0086](../../adr/0086-single-current-built-in-member-appearance-set.md)
+> 跨版本决策：[ADR-0085](decisions.md#adr-0085) ·
+> [ADR-0086](decisions.md#adr-0086)
 >
 > 生产设计：[production-design.md](production-design.md)
 >

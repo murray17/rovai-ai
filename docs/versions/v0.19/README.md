@@ -15,7 +15,7 @@ last_updated: 2026-07-29
 > 前置版本：[v0.18 伙伴记忆自动形成与长期记忆工作台](../v0.18/README.md)
 >
 > 跨版本决策：
-> [ADR-0065](../../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)
+> [ADR-0065](decisions.md#adr-0065)
 >
 > 详细设计：[architecture.md](architecture.md)
 >

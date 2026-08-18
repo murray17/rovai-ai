@@ -35,7 +35,7 @@ last_updated: 2026-08-17
 ## Checkpoint 0：治理基线
 
 - [x] 开启唯一 current v0.98、冻结 v0.97 并记录 revision 1 二次确认；
-- [x] 接受 [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)；
+- [x] 接受 [ADR-0203](decisions.md#adr-0203)；
 - [x] 建立 [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)与
   [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)；
 - [x] 建立 Architecture/CONTEXT/UI/文档路由并生成 ADR HISTORY；
@@ -144,7 +144,7 @@ last_updated: 2026-08-17
 
 - [v0.98 版本概览](README.md)
 - [核心模型上下文变更 revision 1](model-context-change.md)
-- [ADR-0203](../../adr/0203-structured-current-input-skill-links.md)
+- [ADR-0203](decisions.md#adr-0203)
 - [Current Input Skill Links v1](../../contracts/current-input-skill-links-v1.md)
 - [ContextManifest Evidence v16](../../contracts/context-manifest-evidence-v16.md)
 - [Runtime Launch and Verification v3](../../contracts/runtime-launch-and-verification-v3.md)

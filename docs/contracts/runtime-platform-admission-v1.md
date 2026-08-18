@@ -9,7 +9,7 @@ last_updated: 2026-08-18
 # Runtime Platform Admission v1
 
 本合同拥有 Product Runtime 在精确主机平台上的产品级准入字段、错误和消费规则。准入理由见
-[ADR-0210](../adr/0210-platform-qualified-product-runtime-admission.md)；本机 discovery、Installation、Probe 与
+[ADR-0210](../versions/v1.05/decisions.md#adr-0210)；本机 discovery、Installation、Probe 与
 Ready 仍由 [Runtime Launch and Verification v7](runtime-launch-and-verification-v7.md)拥有。
 
 ## 1. Closed types
@@ -88,6 +88,6 @@ other Adapter identities.
 
 ## References
 
-- [ADR-0210](../adr/0210-platform-qualified-product-runtime-admission.md)
+- [ADR-0210](../versions/v1.05/decisions.md#adr-0210)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime compatibility register](../runtime-compatibility.md)

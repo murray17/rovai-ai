@@ -68,8 +68,8 @@ is not removed or increased.
 
 ## References
 
-- [ADR-0195](../adr/0195-generation-scoped-last-gather-return.md)
-- [ADR-0196](../adr/0196-self-contained-gather-completion-request.md)
+- [ADR-0195](../versions/v0.90/decisions.md#adr-0195)
+- [ADR-0196](../versions/v0.90/decisions.md#adr-0196)
 - [Camp Message Send v9](camp-message-send-v9.md)
 - [Message Delivery v4](message-delivery-v4.md)
 - [ContextManifest Evidence v16](context-manifest-evidence-v16.md)

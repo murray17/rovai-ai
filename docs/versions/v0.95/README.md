@@ -87,5 +87,5 @@ last_updated: 2026-08-16
 - [Skill 编写与 description 路由规范](../../development/skill-authoring.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)
-- [ADR-0198](../../adr/0198-bounded-open-round-grill-duo-skills.md)
-- [ADR-0199](../../adr/0199-session-semantic-four-message-review-duo.md)
+- [ADR-0198](../v0.92/decisions.md#adr-0198)
+- [ADR-0199](../v0.93/decisions.md#adr-0199)

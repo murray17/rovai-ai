@@ -81,9 +81,9 @@ App Shell 在不抢夺焦点的全局浮层中短暂显示实际缩放比例，�
 
 ## References
 
-- [ADR-0074: Quick Chat 全栈切换](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md)
-- [ADR-0078: Navigation projection](../../adr/0078-navigation-projection-and-sidebar-wordmark-boundary.md)
-- [ADR-0173: Generated Camp names exclude leading Structured Mentions](../../adr/0173-leading-structured-mentions-excluded-from-generated-camp-names.md)
+- [Camp Workspace 不变量](../../architecture/foundational-invariants.md#camp-workspace)
+- [产品与导航不变量](../../architecture/foundational-invariants.md#product-navigation)
+- [Camp 生命周期不变量](../../architecture/foundational-invariants.md#camp-lifecycle)
 - [v0.57 Project remove 实施计划](../../versions/v0.57/implementation-plan.md)
 - [v0.58 实施计划](../../versions/v0.58/implementation-plan.md)
 - [v0.61 实施计划](../../versions/v0.61/implementation-plan.md)

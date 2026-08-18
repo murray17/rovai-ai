@@ -41,7 +41,7 @@ NULL 和 collection epoch 必须先完成，避免先采数据后再猜分母。
 
 ## Checkpoint 0：合同、术语与 Fixture 目录
 
-- [x] 以 [ADR-0201](../../adr/0201-sparse-runtime-usage-and-clean-break-monitoring.md)为长期边界；
+- [x] 以 [ADR-0201](decisions.md#adr-0201)为长期边界；
 - [x] 以 [Runtime Monitoring v1](../../contracts/runtime-monitoring-v1.md)冻结 collection、observation、
   Native Session fact、查询与 metric shape；
 - [x] Core/TypeScript 只使用 CONTEXT 中的 Monitoring Collection Epoch、Monitoring Run Enrollment、

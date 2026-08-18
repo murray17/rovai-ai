@@ -26,7 +26,7 @@ does not close the GatherItem.
 
 ## References
 
-- [ADR-0195](../adr/0195-generation-scoped-last-gather-return.md)
+- [ADR-0195](../versions/v0.90/decisions.md#adr-0195)
 - [Camp Message Send v8 (historical)](camp-message-send-v8.md)
 - [Gather v2](gather-v2.md)
 - [Message Delivery v4](message-delivery-v4.md)

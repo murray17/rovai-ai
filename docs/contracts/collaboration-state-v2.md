@@ -11,7 +11,7 @@ last_updated: 2026-08-09
 
 Collaboration State v2 是 AgentRun Dynamic Context 中唯一的 peer routing identity 合同。它不拥有
 self identity、寻址准入或 Runtime 资格。Self/peer 生命周期的决策理由见
-[ADR-0146](../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)。
+[ADR-0146](../versions/v0.50/decisions.md#adr-0146)。
 
 ## 1. Model-visible shape
 

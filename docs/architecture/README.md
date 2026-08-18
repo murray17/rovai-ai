@@ -7,7 +7,7 @@ last_updated: 2026-08-18
 # 长期系统架构
 
 本目录保存跨版本长期存在的组件结构、职责和权威边界。字段级 wire shape 归
-[`docs/contracts/`](../contracts/README.md)，决策理由归 ADR，实施状态归当前 Version 文档。
+[`docs/contracts/`](../contracts/README.md)，决策理由归[版本决策](../decisions/README.md)，实施状态归当前 Version 文档。[当前基础架构不变量](foundational-invariants.md)收敛跨多个主题的长期边界，专题 Architecture 在此基础上说明组件组合。
 
 <!-- architecture-index:begin -->
 | 架构 | 内容 |
@@ -29,6 +29,7 @@ last_updated: 2026-08-18
 | [Camp Composer Draft](camp-composer-draft.md) | Structured Content、附件、持久 reply/continuation、显式接收者修复、发送物化、exact-revision user send 与 timeline projection 的组件权威 |
 | [Camp Open Read Path](camp-open-read-path.md) | Desktop 两阶段冷启动壳层、enter/reconcile、有界 SQLite open projection、渐进消息、当前会话精确查找/anchored 定位、Run detail、high-water/cache 与 meaningful-paint 后台维护边界 |
 | [First-run Onboarding](first-run-onboarding.md) | Desktop 首次安装 admission、三页持久状态、幂等 Core provisioning、`初次集结` restore 与 Draft-only 第四页边界 |
+| [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |
 | [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、bundled bootstrap 快速路径、root access ledger、事件驱动 dirty、当前 Run 完整校验 preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |
 | [Structured Current Input Skill Links](structured-current-input-skill-links.md) | Picker SkillMention、per-Run send snapshot、start-time desired state、verified Exposure、只读 Resolver、`CURRENT_INPUT.skills` 与 unchanged Adapter transport |
 | [Windows Desktop Platform](windows-desktop-platform.md) | Windows x64 host envelope、平台 seam、原子 Job 启动、Transport v14、私有 local storage、native frame、NSIS 与真实 Windows 验收组合 |

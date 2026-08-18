@@ -54,5 +54,5 @@ Task, Camp History, and Memory command schemas and help are unchanged from v5.
 
 - [Camp Message Send v3](camp-message-send-v3.md)
 - [Built-in Tool Transport v5 (historical)](builtin-tool-transport-v5.md)
-- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)
+- [ADR-0163: Explicit Caller Return and Core-Managed Reply Reference](../versions/v0.62/decisions.md#adr-0163)
 - [Built-in Tool Runtime architecture](../architecture/builtin-tool-runtime.md)

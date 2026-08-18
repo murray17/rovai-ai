@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
 model_context_change: false
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Rovai-ai v1.09：完整会话查找、Mode-aware CLI 与 Tool 结果交互
@@ -85,7 +85,7 @@ last_updated: 2026-08-18
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.08 以 `complete` 冻结为 historical；本概览、计划与版本索引建立唯一 current v1.09。 |
-| ADR | 确认无需更新 | 会话查找遵循 ADR-0013/0108 的既有 Read Side 边界；CLI 与 Tool 详情遵循 ADR-0166、ADR-0111/0112 的既有同源 help 和 Canonical Activity/Evidence 边界。 |
+| Decisions | 已更新 | 新增 `decisions.md` 的 V1.09-D01/V1.09-D02，记录当前权威收敛、数字 ADR clean break，以及历史局部替代/一次性迁移条款的规范内核归一；会话查找、CLI 和 Tool 详情的产品语义不因本次治理迁移改变。 |
 | Contracts | 已更新 | [Camp Conversation Find v1](../../contracts/camp-conversation-find-v1.md)固定精确查找 wire；[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)固定完整 chronology、Built-in 公共结果和原位复制。 |
 | Architecture | 已更新 | [Camp Open Read Path](../../architecture/camp-open-read-path.md)记录完整会话查找与 around-window；[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)记录 union-aware help、统一 pre-IPC Schema validation 与安全字段 issue。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)和 Day/Night 主题记录查找、高亮、完整 Tool 顺序、Built-in disclosure 与移除 standalone raw Evidence。 |
@@ -102,8 +102,8 @@ last_updated: 2026-08-18
 - [Camp Open Read Path](../../architecture/camp-open-read-path.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
-- [ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)
-- [ADR-0108](../../adr/0108-discovery-only-camp-message-search-and-sequence-paged-reads.md)
-- [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)
-- [ADR-0111](../../adr/0111-core-owned-canonical-runtime-activity.md)
-- [ADR-0112](../../adr/0112-immutable-execution-evidence-and-rebuildable-canonical-activity-projection.md)
+- [ADR-0013](../v0.06/decisions.md#adr-0013)
+- [ADR-0108](../v0.40/decisions.md#adr-0108)
+- [ADR-0166](../v0.65/decisions.md#adr-0166)
+- [ADR-0111](../v0.41/decisions.md#adr-0111)
+- [ADR-0112](../v0.41/decisions.md#adr-0112)

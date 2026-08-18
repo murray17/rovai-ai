@@ -11,10 +11,10 @@ last_updated: 2026-07-29
 > 版本范围：[README.md](README.md)
 >
 > 跨版本约束：
-> [ADR-0066](../../adr/0066-managed-product-runtime-resolution.md) ·
-> [ADR-0065](../../adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md) ·
-> [ADR-0007](../../adr/0007-portable-conversation-handoff.md) ·
-> [ADR-0062](../../adr/0062-interruptible-runs-and-unsettled-external-effects.md)
+> [ADR-0066](decisions.md#adr-0066) ·
+> [ADR-0065](../v0.19/decisions.md#adr-0065) ·
+> [ADR-0007](../v0.03/decisions.md#adr-0007) ·
+> [ADR-0062](../v0.17/decisions.md#adr-0062)
 
 ## 1. 三个相互独立的身份与证据层
 

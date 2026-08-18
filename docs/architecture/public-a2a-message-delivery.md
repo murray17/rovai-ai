@@ -14,21 +14,21 @@ last_updated: 2026-08-18
 [Message Delivery v4](../contracts/message-delivery-v4.md)、
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)、
 [Camp History Retrieval v2](../contracts/camp-history-v2.md)；决策理由见
-[ADR-0130](../adr/0130-public-a2a-message-and-unified-delivery.md)、
-[ADR-0131](../adr/0131-recipient-scoped-event-driven-delivery-recovery.md)、
-[ADR-0215](../adr/0215-unified-single-camp-history-target-and-publication-boundary.md)、
-[ADR-0216](../adr/0216-explicit-agent-addressing-intent-as-delivery-gate.md)与
-[ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)，显式 caller return 与 Core 管理
+[Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)、
+[Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)、
+[History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)、
+[History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)与
+[公共上下文不变量](foundational-invariants.md#context-public-history)，显式 caller return 与 Core 管理
 reply reference 见
-[ADR-0163](../adr/0163-explicit-caller-return-and-core-managed-reply-reference.md)，成功 Run 的 zero-send safety net 见
-[ADR-0162](../adr/0162-missing-send-recovery-publication.md)。
+[Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)，成功 Run 的 zero-send safety net 见
+[Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)。
 当前 Camp 显示名 inline alias 的 Core 解析与 canonical freeze 见
-[ADR-0182](../adr/0182-core-resolved-current-camp-display-name-inline-addressing-alias.md)，line-leading position
-门禁见 [ADR-0184](../adr/0184-line-leading-display-name-inline-addressing-alias.md)。
+[History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)，line-leading position
+门禁见 [History 与寻址不变量](foundational-invariants.md#collaboration-history-addressing)。
 Current User Attention 的身份、内容与原子通知决定见
-[ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)。
+[Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)。
 持久 Gather capture、Barrier 与 Completion Delivery 见
-[ADR-0193](../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)及
+[Gather 不变量](foundational-invariants.md#collaboration-gather)及
 [持久 Gather Barrier](durable-gather-barrier.md)。
 
 ## 1. 一条公共事实，多个收件人责任

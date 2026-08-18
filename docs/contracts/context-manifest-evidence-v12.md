@@ -80,5 +80,5 @@ body-lookalike fallback remains.
 - [Current User Attention v1](current-user-attention-v1.md)
 - [ContextManifest Evidence v11 (historical)](context-manifest-evidence-v11.md)
 - [Context Delivery Profile v3](context-delivery-profile-v3.md)
-- [ADR-0165](../adr/0165-core-owned-current-user-message-attention.md)
+- [ADR-0165](../versions/v0.65/decisions.md#adr-0165)
 - [Built-in Tool Runtime architecture](../architecture/builtin-tool-runtime.md)

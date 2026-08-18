@@ -141,7 +141,7 @@ alias 和 external MCP boundary 原样继承。
 
 ## References
 
-- [ADR-0186: Complete Exact-Scope Memory View](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)
+- [ADR-0186: Complete Exact-Scope Memory View](../versions/v0.78/decisions.md#adr-0186)
 - [Memory Capture v3](memory-capture-v3.md)
 - [Built-in Tool Transport v10 (historical)](builtin-tool-transport-v10.md)
 - [Built-in Tool Runtime architecture](../architecture/builtin-tool-runtime.md)

@@ -22,7 +22,7 @@ last_updated: 2026-08-13
 
 身份编辑支持圆形取景拖拽、缩放、键盘微调与实际尺寸预览。大图不能成为运行状态或权限判断的
 来源。精确资产控制与持久化边界见
-[ADR-0056](../../adr/0056-controlled-member-avatar-assets.md)。
+[成员投影不变量](../../architecture/foundational-invariants.md#member-projection)。
 
 队员页的当前局部结构见
 [`member-workspace` surface brief](../../../apps/desktop/.impeccable/surfaces/member-workspace.md)；

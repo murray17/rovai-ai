@@ -107,14 +107,14 @@ type ModelSelection =
 
 ### RT-03 Runtime 集成层与命名
 
-- **状态**：已确认，并提升为 [ADR-0006](../../adr/0006-multi-runtime-adapter-boundary.md)
+- **状态**：已确认，并提升为 [ADR-0006](decisions.md#adr-0006)
 - 跨版本规范由 ADR-0006 唯一维护；本节只记录 v0.03 影响。
 - v0.03 以内置方式注册 Codex、OpenCode、Copilot 与 AGY 四种 Adapter，不提供动态插件 ABI。
 - App Server、ACP 与 CLI Process 的协议差异由各 Adapter 吸收；OpenCode/Copilot 只共享类型化 ACP 驱动，不合并产品能力边界。
 
 ### RT-04 AdapterInstallation 的所有权
 
-- **状态**：已确认，并作为 [ADR-0006](../../adr/0006-multi-runtime-adapter-boundary.md) 的一部分长期维护
+- **状态**：已确认，并作为 [ADR-0006](decisions.md#adr-0006) 的一部分长期维护
 - v0.03 以应用级共享 `AdapterInstallation` 管理安装、探测和认证作用域；成员只保存对 Installation 的引用以及自己的模型与权限偏好。
 - 本版本的成员删除、Camp 关系和 Runtime 配置编辑均不能隐式删除共享 Installation；具体产品入口见 UI-03。
 
@@ -141,7 +141,7 @@ type ModelSelection =
 
 ### RT-07 Runtime 继承与跨 Adapter 交接
 
-- **状态**：已确认，并提升为 [ADR-0007](../../adr/0007-portable-conversation-handoff.md)
+- **状态**：已确认，并提升为 [ADR-0007](decisions.md#adr-0007)
 - 跨版本的配置继承、Native Binding、可移植上下文和 CAS 换绑协议由 ADR-0007 唯一维护。
 - v0.03 只提供成员级默认 Runtime 配置；已创建 Run 保持冻结配置，未显式覆盖的 Conversation 在下一次 Run 前按需完成惰性交接。
 - 版本验收要求逻辑 Conversation 连续、交接失败保留旧 Binding，并明确不承诺迁移上游隐藏上下文。
@@ -264,7 +264,7 @@ type AdapterPermissionConfig = {
 
 ### TM-11 成员 Runtime 变更的惰性交接
 
-- **状态**：已确认，并提升为 [ADR-0007](../../adr/0007-portable-conversation-handoff.md)
+- **状态**：已确认，并提升为 [ADR-0007](decisions.md#adr-0007)
 - v0.03 保存成员默认 Runtime 时只更新长期偏好；已创建 Run 不变，未显式覆盖的 Conversation 在下一次 Run 前按需交接。
 - 本版本必须在 UI 中区分“配置已保存”和“Conversation 已完成换绑”，并在交接失败时展示结构化阻塞原因；完整 Native Binding 与 CAS 协议只由 ADR-0007 维护。
 
@@ -342,7 +342,7 @@ type AdapterPermissionConfig = {
 
 ## 设计约束
 
-- Runtime 集成边界遵守 [ADR-0006](../../adr/0006-multi-runtime-adapter-boundary.md)，Conversation 交接遵守 [ADR-0007](../../adr/0007-portable-conversation-handoff.md)。
+- Runtime 集成边界遵守 [ADR-0006](decisions.md#adr-0006)，Conversation 交接遵守 [ADR-0007](decisions.md#adr-0007)。
 - 不假定四种 Runtime 拥有相同协议、模型目录、会话恢复或审批能力。
 - 模型和参数必须来自当前安装的能力探测；无法可靠发现时允许使用 Runtime 默认值，不伪造完整目录。
 - AGY 的 `runtime_default` 通过省略 `--model` 表达；内部目录占位值不得出现在用户可选模型中。

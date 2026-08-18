@@ -60,6 +60,6 @@ export
 
 ## References
 
-- [ADR-0148](../adr/0148-read-only-diagnostics-and-data-minimized-export.md)
+- [Runtime 平台安全不变量](foundational-invariants.md#runtime-platform-security)
 - [Diagnostics Center v1](../contracts/diagnostics-center-v1.md)
 - [v0.51 production design](../versions/v0.51/production-design.md)

@@ -81,7 +81,7 @@ message body, captured excerpt, fallback or completion Current Input.
 
 ## References
 
-- [ADR-0193](../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)
+- [ADR-0193](../versions/v0.89/decisions.md#adr-0193)
 - [Gather v1](gather-v1.md)
 - [Message Delivery v2 (historical)](message-delivery-v2.md)
 - [Public A2A architecture](../architecture/public-a2a-message-delivery.md)

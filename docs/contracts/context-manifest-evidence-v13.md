@@ -38,7 +38,7 @@ new mandatory trigger shape and 48 KiB Gather input bound are owned by Gather v1
 
 ## References
 
-- [ADR-0194](../adr/0194-mandatory-typed-gather-completion-current-input.md)
+- [ADR-0194](../versions/v0.89/decisions.md#adr-0194)
 - [Gather v1](gather-v1.md)
 - [ContextManifest Evidence v12 (historical)](context-manifest-evidence-v12.md)
 - [Context Delivery Profile v3](context-delivery-profile-v3.md)

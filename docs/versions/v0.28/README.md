@@ -14,7 +14,7 @@ last_updated: 2026-08-01
 >
 > 前置版本：[v0.27 Partner Identity Six Fields](../v0.27/README.md)
 >
-> 跨版本决策：[ADR-0087](../../adr/0087-core-owned-durable-in-app-notification-inbox.md)
+> 跨版本决策：[ADR-0087](decisions.md#adr-0087)
 >
 > 生产设计：[production-design.md](production-design.md)
 >

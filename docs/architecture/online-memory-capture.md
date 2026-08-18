@@ -10,10 +10,10 @@ last_updated: 2026-08-18
 
 本文组合在线 Skill discovery、Agent Memory Facade、direct mutation、Hearth review、formal Memory Store、
 live-authorized retrieval 与用户审核面。长期决策见
-[ADR-0178](../adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)、
-[ADR-0179](../adr/0179-normalized-memory-store-v3-with-isolated-hearth-review.md)和
-[ADR-0180](../adr/0180-single-agent-memory-write-command.md)和
-[ADR-0186](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)；精确字段与状态见
+[Memory 写入与存储不变量](foundational-invariants.md#memory-write-store)、
+[Memory 写入与存储不变量](foundational-invariants.md#memory-write-store)和
+[Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)和
+[Memory 读取与投影不变量](foundational-invariants.md#memory-read-projection)；精确字段与状态见
 [Memory Capture v3](../contracts/memory-capture-v3.md)，CLI transport 见
 [Built-in Tool Transport v15](../contracts/builtin-tool-transport-v15.md)。
 
@@ -238,6 +238,6 @@ Skill prose or FTS.
 - [Memory Capture v3](../contracts/memory-capture-v3.md)
 - [Built-in Tool Transport v15](../contracts/builtin-tool-transport-v15.md)
 - [Built-in Tool Runtime](builtin-tool-runtime.md)
-- [ADR-0068: Brokered Memory Retrieval](../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)
-- [ADR-0186: Complete Exact-Scope Memory View](../adr/0186-complete-exact-scope-memory-view-and-copyable-target.md)
+- [Memory 读取与投影不变量](foundational-invariants.md#memory-read-projection)
+- [Memory 读取与投影不变量](foundational-invariants.md#memory-read-projection)
 - [v0.78 implementation plan](../versions/v0.78/implementation-plan.md)

@@ -14,8 +14,8 @@ last_updated: 2026-07-27
 >
 > 详细设计：[architecture.md](architecture.md)
 >
-> 跨版本决策：[ADR-0052](../../adr/0052-explicit-memory-revision-authority.md) ·
-> [ADR-0055](../../adr/0055-explicit-opt-in-provisional-companion-lessons.md)
+> 跨版本决策：[ADR-0052](decisions.md#adr-0052) ·
+> [ADR-0055](decisions.md#adr-0055)
 
 检查点按依赖顺序排列，每步独立可验收。所有“已完成”状态均有代码、Migration、
 隔离测试或可复现验收证据。

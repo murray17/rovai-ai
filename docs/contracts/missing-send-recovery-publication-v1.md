@@ -133,6 +133,6 @@ by commit order: accepted send first suppresses; terminal success first publishe
 
 ## References
 
-- [ADR-0162](../adr/0162-missing-send-recovery-publication.md)
+- [ADR-0162](../versions/v0.59/decisions.md#adr-0162)
 - [Camp Message Send v2](camp-message-send-v2.md)
 - [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)

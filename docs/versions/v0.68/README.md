@@ -63,8 +63,8 @@ opportunity 而非调用量作为分母，确定性重放 Camp/Memory/A2A 的有
 - 只有 outcome equivalent/non-inferior 且双臂 measure compatible 时才计算效率 delta/ratio；更快失败不获奖励；
 - development/holdout、arm order、exclusion 和原始 pairs 均预注册并保留；单 pair 只作 diagnostic。
 
-完整稳定边界由 [ADR-0171](../../adr/0171-opportunity-based-tool-interaction-measurement.md)、
-[ADR-0172](../../adr/0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md)、
+完整稳定边界由 [ADR-0171](decisions.md#adr-0171)、
+[ADR-0172](decisions.md#adr-0172)、
 [Tool Interaction Measurement v1](../../contracts/tool-interaction-measurement-v1.md) 和
 [Paired Collaboration Experiment v1](../../contracts/paired-collaboration-experiment-v1.md) 拥有；实施证据见
 [实施计划](implementation-plan.md)。
@@ -95,8 +95,8 @@ opportunity 而非调用量作为分母，确定性重放 Camp/Memory/A2A 的有
 ## References
 
 - [v0.68 实施与验收计划](implementation-plan.md)
-- [ADR-0171](../../adr/0171-opportunity-based-tool-interaction-measurement.md)
-- [ADR-0172](../../adr/0172-paired-collaboration-value-and-outcome-conditioned-efficiency.md)
+- [ADR-0171](decisions.md#adr-0171)
+- [ADR-0172](decisions.md#adr-0172)
 - [Tool Interaction Measurement v1](../../contracts/tool-interaction-measurement-v1.md)
 - [Paired Collaboration Experiment v1](../../contracts/paired-collaboration-experiment-v1.md)
 - [Semantic Judge Views v1](../../contracts/semantic-judge-views-v1.md)

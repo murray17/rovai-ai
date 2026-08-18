@@ -13,7 +13,7 @@ last_updated: 2026-07-23
 >
 > 版本范围：[README.md](README.md)
 >
-> 跨版本约束：[ADR-0012](../../adr/0012-collaboration-v3-lightweight-task.md)、[ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)、[ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md)、[ADR-0015](../../adr/0015-action-safety-v2.md)、[ADR-0016](../../adr/0016-multi-runtime-execution-v2.md)
+> 跨版本约束：[ADR-0012](decisions.md#adr-0012)、[ADR-0013](decisions.md#adr-0013)、[ADR-0014](decisions.md#adr-0014)、[ADR-0015](decisions.md#adr-0015)、[ADR-0016](decisions.md#adr-0016)
 >
 > 文档规则：[文档导航](../../README.md)
 

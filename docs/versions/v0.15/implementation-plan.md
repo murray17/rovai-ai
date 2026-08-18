@@ -15,8 +15,8 @@ last_updated: 2026-07-27
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：
-> [ADR-0057](../../adr/0057-member-presence-and-retained-removal.md) ·
-> [ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md)
+> [ADR-0057](decisions.md#adr-0057) ·
+> [ADR-0058](decisions.md#adr-0058)
 
 检查点按依赖顺序实施。`[x]` 只表示存在代码、Migration、测试或可复现 App 证据；
 本文、外部设计包或 ADR `accepted` 不能作为实现完成证据。

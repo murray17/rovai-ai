@@ -74,6 +74,6 @@ Home、应用数据、SQLite、Runtime 或项目路径。
 
 - [v0.51 生产设计](production-design.md)
 - [v0.51 实施与验收计划](implementation-plan.md)
-- [ADR-0148](../../adr/0148-read-only-diagnostics-and-data-minimized-export.md)
+- [ADR-0148](decisions.md#adr-0148)
 - [Diagnostics Center v1](../../contracts/diagnostics-center-v1.md)
 - [Diagnostics Center Architecture](../../architecture/diagnostics-center.md)

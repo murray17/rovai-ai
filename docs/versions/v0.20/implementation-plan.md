@@ -15,7 +15,7 @@ last_updated: 2026-07-29
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：
-> [ADR-0066](../../adr/0066-managed-product-runtime-resolution.md)
+> [ADR-0066](decisions.md#adr-0066)
 
 `[x]` 只表示已有代码、Migration、自动测试或可复现验收证据。实施过程中不得为了勾选
 检查点而降低 Adapter 的认证、精确 MCP、权限或冻结边界。

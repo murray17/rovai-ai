@@ -9,7 +9,7 @@ last_updated: 2026-08-18
 # Managed Runtime Process v1
 
 本合同拥有 Core-managed Runtime/Probe 进程的跨平台启动接口与 Windows 原子 Job 语义。决策理由见
-[ADR-0211](../adr/0211-atomic-windows-managed-process-launch.md)。Runtime terminal 与领域终态仍由既有 AgentRun、
+[ADR-0211](../versions/v1.05/decisions.md#adr-0211)。Runtime terminal 与领域终态仍由既有 AgentRun、
 Fleet 与 Planned Shutdown 合同拥有；进程退出不是 Provider outcome。
 
 ## 1. Module interface
@@ -97,6 +97,6 @@ pipe handle。Main 被强制终止后，Core 必须在 deadline 内通过 stdin 
 
 ## References
 
-- [ADR-0211](../adr/0211-atomic-windows-managed-process-launch.md)
+- [ADR-0211](../versions/v1.05/decisions.md#adr-0211)
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Planned Shutdown](../architecture/planned-shutdown.md)

@@ -16,8 +16,8 @@ last_updated: 2026-08-04
 >
 > 前置版本：[v0.35 Native Session Member Identity Bootstrap](../v0.35/README.md)
 >
-> 跨版本决策：[ADR-0101](../../adr/0101-outcome-only-collaboration-value-qualification-cases.md)、
-> [ADR-0102](../../adr/0102-immutable-diagnostic-portfolio-authority.md)
+> 跨版本决策：[ADR-0101](decisions.md#adr-0101)、
+> [ADR-0102](decisions.md#adr-0102)
 >
 > 实施设计：[architecture.md](architecture.md)
 >
@@ -39,7 +39,7 @@ v0.34 已建立五层 Benchmark Evidence 与 Semantic Judge 协议，但公开 d
 重复，验证 Case 与证据链质量。
 
 本版本不把协作活动变成 Hard Gate，也不声称团队协作优于单 Agent。Hard Outcome 继续由
-[ADR-0095](../../adr/0095-layered-qualification-authority-and-semantic-review.md) 唯一决定；Portfolio
+[ADR-0095](../v0.34/decisions.md#adr-0095) 唯一决定；Portfolio
 只报告每个 Trial 和每个 Case 的诊断结论。
 
 ## 四个固定 Case

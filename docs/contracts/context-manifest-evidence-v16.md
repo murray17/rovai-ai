@@ -106,7 +106,7 @@ Manifest reuses the frozen payload, availability, resolution and Exposure byte-f
 
 ## References
 
-- [ADR-0203](../adr/0203-structured-current-input-skill-links.md)
+- [ADR-0203](../versions/v0.98/decisions.md#adr-0203)
 - [Current Input Skill Links v1](current-input-skill-links-v1.md)
 - [ContextManifest Evidence v15 (historical)](context-manifest-evidence-v15.md)
 - [Context Delivery Profile v3](context-delivery-profile-v3.md)

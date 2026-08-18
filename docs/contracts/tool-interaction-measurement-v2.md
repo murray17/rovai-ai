@@ -107,7 +107,7 @@ Task linkage，让模型看见反馈链，但 reply/task/time adjacency 仍只�
 
 ## References
 
-- [ADR-0171](../adr/0171-opportunity-based-tool-interaction-measurement.md)
+- [ADR-0171](../versions/v0.68/decisions.md#adr-0171)
 - [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md)
 - [Semantic Judge Views v1](semantic-judge-views-v1.md)
 - [Paired Collaboration Experiment v1](paired-collaboration-experiment-v1.md)

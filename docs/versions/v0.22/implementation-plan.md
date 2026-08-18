@@ -15,7 +15,7 @@ last_updated: 2026-07-29
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：
-> [ADR-0071](../../adr/0071-configured-camp-creation-and-lazy-conversations.md)
+> [ADR-0071](decisions.md#adr-0071)
 
 `[x]` 只表示已有文档、代码、Migration、自动测试或可复现验收证据。按顺序推进，但不得
 为了勾选检查点保留旧首条消息流程、降低 Core 结构准入或把 Conversation 再次改为 eager。

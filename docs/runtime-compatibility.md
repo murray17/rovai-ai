@@ -9,11 +9,11 @@ last_updated: 2026-08-18
 本文件维护 Agent Runtime 的本机实测证据和复核条件。它不是产品 Runtime Registry、
 Roadmap 或用户可见能力来源；正式目录以代码中的 `AdapterKind`、Migration、健康探测和
 测试为准。跨版本边界见
-[ADR-0065](adr/0065-verified-runtime-catalog-and-documentation-only-compatibility.md)与
-[ADR-0189](adr/0189-settings-only-runtime-preview-outside-product-catalog.md)。
+[Runtime Catalog 与 Installation 不变量](architecture/foundational-invariants.md#runtime-catalog-installation)与
+[Runtime Catalog 与 Installation 不变量](architecture/foundational-invariants.md#runtime-catalog-installation)。
 
 兼容性清单中的自然语言结论本身不会自动创建产品类型。v0.42 起，Rovai-owned built-in
-operations 的正式准入基线是 [ADR-0124](adr/0124-cli-only-transport-for-rovai-built-in-operations.md)：
+operations 的正式准入基线是 [Built-in 运输不变量](architecture/foundational-invariants.md#skills-builtin-transport)：
 Runtime 必须能执行 bundled `rovai` CLI，经 private local IPC 调用 Core Router。旧 Team、
 Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP config 已完全
 退出当前架构；用户 External MCP 是另一条独立能力，不参与 built-in tool 准入判断。
@@ -116,14 +116,14 @@ Session response 更新认证、模型、权限和 capability Ready，随后在�
 该规则不撤销上方 `0.120.52` 的准入结论，只改变产品何时重取本机动态证据。其他 Runtime 的启动/重扫执行
 Adapter 允许且无副作用的有界版本/身份命令；只有命令成功、输出未超限并识别到基础身份才写
 `light_ready` 静态证据。深检由显式单 Runtime 检查或首次真实任务触发；Adapter policy 仍可进一步收窄目的。
-规范边界见 [ADR-0192](adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)、
-[ADR-0204](adr/0204-on-demand-runtime-deep-verification.md)、
-[ADR-0207](adr/0207-explicit-maximum-authority-member-runtime-defaults.md)与
+规范边界见 [Runtime 进程与校验不变量](architecture/foundational-invariants.md#runtime-process-verification)、
+[Runtime 进程与校验不变量](architecture/foundational-invariants.md#runtime-process-verification)、
+[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)与
 [Runtime Launch and Verification v4](contracts/runtime-launch-and-verification-v4.md)。
 
 ### 2026-08-17 TRAE 启动轻检与用户授权检查复核
 
-v1.03 按 [ADR-0208](adr/0208-user-authorized-trae-light-and-availability-verification.md)调整当前产品边界，
+v1.03 按 [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)调整当前产品边界，
 不改写上方 v0.87 的历史理由。本机 `/Users/murray.xue/.local/share/trae-cli/trae-cli --version` 在一秒内成功
 返回 `trae-cli version 0.120.52`、build commit `6756e52a9238b6d493928e55b05127957dbfefb4`；启动与 rescan
 因此可以建立 `light_ready`，其含义仍只是 executable 可选择和尝试。
@@ -132,7 +132,7 @@ v1.03 按 [ADR-0208](adr/0208-user-authorized-trae-light-and-availability-verifi
 snapshot 所需的非空模型与 permission descriptor。该 Probe 使用 `permission_mode=default`、空 MCP 与隔离临时
 cwd，没有发送 session prompt、工具或模型请求；完整 Prompt/Approval/cancel 兼容性仍以上方准入记录和专项
 Smoke 为准。Health、Installation refresh 与 dispatch preflight 继续被 launch policy 拦截。当前规范入口为
-[ADR-0208](adr/0208-user-authorized-trae-light-and-availability-verification.md)与
+[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)与
 [Runtime Launch and Verification v5](contracts/runtime-launch-and-verification-v5.md)。
 
 ### 2026-08-17 Kiro trust-all 与 TRAE 最高权限默认复核
@@ -178,7 +178,7 @@ Evidence、Action 或最终输出。
 解析成位置参数的可能。当前 `0.120.52` 不能启用 Provider Resume。
 
 同一构建既有跨 Host `session/load` marker Probe 仍为正向证据。当前实现因此按
-[ADR-0209](adr/0209-bounded-trae-cold-session-history-restore.md)选择 same Host、ACP resume、受控
+[Runtime 恢复与关闭不变量](architecture/foundational-invariants.md#runtime-recovery-shutdown)选择 same Host、ACP resume、受控
 HistoryRestore、New；load 前 route 为 `LoadingReplay`，成功 response 后才发送当前 prompt。历史
 assistant/tool/permission/usage/server request 全部静默隔离，并受 4096 event、8 MiB、30 秒限制。
 workspace、模型、权限、Host config 或 executable fingerprint 不兼容时不尝试 load；错误 ID、协议异常或
@@ -459,7 +459,7 @@ Runtime 的 Built-in CLI 兼容性结论。完整时序与持久边界见
 ## External MCP 兼容性
 
 External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v0.43 已按
-[ADR-0125](adr/0125-runtime-native-additive-external-mcp-projection.md) 删除精确替换模型；下表记录
+[外部 MCP 不变量](architecture/foundational-invariants.md#skills-external-mcp) 删除精确替换模型；下表记录
 当前实现通道。代码与确定性测试已经通过，原生不同名保留、同名整项优先和真实 tool call 仍须
 完成 Checkpoint 7 实机矩阵后才能作为发布证据。
 

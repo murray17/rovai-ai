@@ -15,8 +15,8 @@ last_updated: 2026-07-28
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：
-> [ADR-0059](../../adr/0059-runtime-owned-resource-permissions.md) ·
-> [ADR-0060](../../adr/0060-opaque-member-routing-identity.md)
+> [ADR-0059](decisions.md#adr-0059) ·
+> [ADR-0060](decisions.md#adr-0060)
 
 检查点按依赖顺序实施。`[x]` 只表示存在对应文档、代码、Migration、测试或可复现
 App 证据；ADR `accepted` 不表示代码已经实现。

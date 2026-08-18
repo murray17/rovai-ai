@@ -58,7 +58,7 @@ last_updated: 2026-08-16
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.91 冻结为 historical；本概览、[实施计划](implementation-plan.md)与版本索引建立唯一 current v0.92。 |
-| ADR | 已更新 | [ADR-0198](../../adr/0198-bounded-open-round-grill-duo-skills.md)局部替代历史的一题一轮 Grill 行为，保持 inventory 与 transport 决定不变。 |
+| ADR | 已更新 | [ADR-0198](decisions.md#adr-0198)局部替代历史的一题一轮 Grill 行为，保持 inventory 与 transport 决定不变。 |
 | Contracts | 确认无需更新 | 轮次仍由 Skill 公共消息表达，不增加持久对象、Envelope、receipt、字段或错误语义。 |
 | Architecture | 已更新 | Built-in Tool Runtime 更新两份 Grill Skill 的有界开放轮次、自包含文件和当前直接回复边界。 |
 | UI | 确认无需更新 | 只调整 existing Skill 的 description 与 short description，不改变 Renderer 交互或稳定 UI 合同。 |
@@ -70,6 +70,6 @@ last_updated: 2026-08-16
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0198](../../adr/0198-bounded-open-round-grill-duo-skills.md)
+- [ADR-0198](decisions.md#adr-0198)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)
 - [Skill 编写与 description 路由规范](../../development/skill-authoring.md)

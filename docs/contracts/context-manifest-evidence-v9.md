@@ -61,4 +61,4 @@ ContextManifest v9 is current-only. Migration 69 deletes v8 technical context/de
 and Native Session watermarks while preserving completed business history. There is no v8/v9 union, nullable shim,
 or legacy parser.
 
-Decision rationale: [ADR-0149](../adr/0149-bounded-whole-history-omission-evidence.md).
+Decision rationale: [ADR-0149](../versions/v0.52/decisions.md#adr-0149).

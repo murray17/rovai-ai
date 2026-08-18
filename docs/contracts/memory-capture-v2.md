@@ -213,10 +213,10 @@ retention、publication reconciliation、Forget 与 migration 规则原样继承
 
 ## References
 
-- [ADR-0183: Scope-Identified Agent Memory Revision Targets](../adr/0183-scope-identified-agent-memory-revision-targets.md)
-- [ADR-0001: Core Transaction](../adr/0001-core-transaction.md)
-- [ADR-0026: Explicit Memory Supersession](../adr/0026-explicit-memory-supersession.md)
-- [ADR-0068: Brokered Memory Retrieval](../adr/0068-brokered-memory-retrieval-and-session-entrypoint.md)
-- [ADR-0178: Best-Effort Online Memory Capture](../adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)
+- [ADR-0183: Scope-Identified Agent Memory Revision Targets](../versions/v0.75/decisions.md#adr-0183)
+- [ADR-0001: Core Transaction](../versions/v0.02/decisions.md#adr-0001)
+- [ADR-0026: Explicit Memory Supersession](../versions/v0.10/decisions.md#adr-0026)
+- [ADR-0068: Brokered Memory Retrieval](../versions/v0.21/decisions.md#adr-0068)
+- [ADR-0178: Best-Effort Online Memory Capture](../versions/v0.73/decisions.md#adr-0178)
 - [Memory Capture v1 (historical)](memory-capture-v1.md)
 - [Built-in Tool Transport v10](builtin-tool-transport-v10.md)

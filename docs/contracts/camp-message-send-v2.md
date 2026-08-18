@@ -151,7 +151,7 @@ transport contract and does not expose `requestId`.
 
 v0.46 does not migrate, reinterpret, or replay old `camp.message.send` input, old replay records, or
 old Rovai-owned App data. Development cutover may use the managed clean reset defined by
-[ADR-0118](../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md): only its explicit
+[ADR-0118](../versions/v0.41/decisions.md#adr-0118): only its explicit
 Rovai-owned allowlist may be cleared. User workspaces, external Runtime state, Native Homes,
 credentials, and MCP configuration are never reset by this contract.
 
@@ -173,6 +173,6 @@ discovery command.
 
 - [Built-in Tool Transport v3](builtin-tool-transport-v3.md)
 - [Camp Message Send v1 (historical)](camp-message-send-v1.md)
-- [ADR-0135: Compact Agent Output over Canonical Built-in Tool Envelope](../adr/0135-compact-agent-output-over-canonical-built-in-tool-envelope.md)
-- [ADR-0118: Local Data Clean Break and Managed Reset Boundary](../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md)
+- [ADR-0135: Compact Agent Output over Canonical Built-in Tool Envelope](../versions/v0.46/decisions.md#adr-0135)
+- [ADR-0118: Local Data Clean Break and Managed Reset Boundary](../versions/v0.41/decisions.md#adr-0118)
 - [Public A2A Message and Message Delivery architecture](../architecture/public-a2a-message-delivery.md)

@@ -16,8 +16,8 @@ last_updated: 2026-08-02
 >
 > 前置版本：[v0.30 Antigravity 受证明 Team Bridge](../v0.30/README.md)
 >
-> 跨版本决策：[ADR-0089](../../adr/0089-attested-built-in-mcp-tool-parity.md)、
-> [ADR-0090](../../adr/0090-team-delivery-qualification-evidence-boundary.md)
+> 跨版本决策：[ADR-0089](decisions.md#adr-0089)、
+> [ADR-0090](decisions.md#adr-0090)
 >
 > 实施设计：[architecture.md](architecture.md)
 >

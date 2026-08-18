@@ -43,10 +43,10 @@ v3/3/11/8 是同一个尚未发布的 v0.50 草案最终版本轴，不因讨论
 继续拥有不变的选择算法和预算。Redelivery v1 已是 v0.48 持久合同，因此 marker/wording 改变形成
 v2/2。逐项审查与明确否决项见
 [Model Context Projection 设计审查](model-context-projection-review.md)，长期权威见
-[ADR-0147](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)；字段级实施与
+[ADR-0147](decisions.md#adr-0147)；字段级实施与
 验收由本版本实施计划、共享 fixture、Migration 68 和代码共同冻结。
 
-长期理由见 [ADR-0146](../../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)，
+长期理由见 [ADR-0146](decisions.md#adr-0146)，
 字段级 shape 与 ACK 规则见
 [Collaboration State v2](../../contracts/collaboration-state-v2.md)。
 
@@ -194,8 +194,8 @@ Evidence、Task/Public Output Charter 边界和 Redelivery v2 accepted/unknown �
 
 - [v0.50 实施与验收计划](implementation-plan.md)
 - [v0.50 Model Context Projection 设计审查](model-context-projection-review.md)
-- [ADR-0146：唯一 Self Identity 与 Peer Routing Projection](../../adr/0146-sole-native-session-self-identity-and-peer-routing-projection.md)
-- [ADR-0147：语义无损 Model Context Projection 与分层 Delivery Evidence](../../adr/0147-lossless-model-context-projection-and-layered-delivery-evidence.md)
+- [ADR-0146：唯一 Self Identity 与 Peer Routing Projection](decisions.md#adr-0146)
+- [ADR-0147：语义无损 Model Context Projection 与分层 Delivery Evidence](decisions.md#adr-0147)
 - [Collaboration State v2](../../contracts/collaboration-state-v2.md)
 - [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)
 - [Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)

@@ -27,7 +27,7 @@ v0.06 为 Team Tool 增加长期事项管理能力，让用户与 Agent 可以�
 
 本版本同时重新收口 Task 的领域语义、权限与可见性，并决定每轮动态工作上下文如何向 Lead 和普通成员呈现相关 Task。五个实施检查点均已完成：v17 协作断代、轻量 Task Core、授权读取边界、用户 Task IPC、Camp Inspector 管理面、Team MCP Task 工具、有预算的 `[TASK_CONTEXT]`、真实多 Agent 交接与恢复验收已经形成闭环。
 
-长期架构边界由 [ADR-0012](../../adr/0012-collaboration-v3-lightweight-task.md)、[ADR-0013](../../adr/0013-managed-content-and-read-side-v2.md)、[ADR-0014](../../adr/0014-stable-team-tool-gateway-v2.md)、[ADR-0015](../../adr/0015-action-safety-v2.md) 与 [ADR-0016](../../adr/0016-multi-runtime-execution-v2.md) 共同定义。
+长期架构边界由 [ADR-0012](decisions.md#adr-0012)、[ADR-0013](decisions.md#adr-0013)、[ADR-0014](decisions.md#adr-0014)、[ADR-0015](decisions.md#adr-0015) 与 [ADR-0016](decisions.md#adr-0016) 共同定义。
 
 ## 已确认决策
 

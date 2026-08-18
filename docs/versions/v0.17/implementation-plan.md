@@ -15,9 +15,9 @@ last_updated: 2026-07-28
 > 详细设计：[architecture.md](architecture.md)
 >
 > 跨版本决策：
-> [ADR-0061](../../adr/0061-durable-agent-inaccessible-execution-evidence.md) ·
-> [ADR-0062](../../adr/0062-interruptible-runs-and-unsettled-external-effects.md) ·
-> [ADR-0063](../../adr/0063-minimal-a2a-turn-envelope-and-reply-correlation.md)
+> [ADR-0061](decisions.md#adr-0061) ·
+> [ADR-0062](decisions.md#adr-0062) ·
+> [ADR-0063](decisions.md#adr-0063)
 
 `[x]` 只表示有对应文档、代码、Migration、测试或可复现 App 证据。ADR
 `accepted` 不表示实现完成。

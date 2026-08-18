@@ -15,7 +15,7 @@ last_updated: 2026-08-08
 >
 > 前置版本：[v0.43 Runtime-Native Additive MCP](../v0.43/README.md)
 >
-> 长期决策：[ADR-0129](../../adr/0129-deterministic-bounded-raw-public-context-delivery.md)
+> 长期决策：[ADR-0129](decisions.md#adr-0129)
 >
 > 字段合同：[Context Delivery Profile v1](../../contracts/context-delivery-profile-v1.md)
 

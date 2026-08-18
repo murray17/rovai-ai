@@ -6,8 +6,8 @@ last_updated: 2026-08-18
 
 # 长期接口合同
 
-本目录保存跨版本、字段级且可由测试直接验证的接口合同。ADR 解释为什么选择某个边界，
-Architecture 解释组件如何组成，Version 文档记录交付范围；它们都不复制本目录的完整 wire shape。
+本目录保存跨版本、字段级且可由测试直接验证的接口合同。[Version Decisions](../decisions/README.md)解释为什么选择某个边界，
+Architecture 解释组件如何组成，Version 概览记录交付范围；它们都不复制本目录的完整 wire shape。
 
 ## 生命周期
 

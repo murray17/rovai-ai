@@ -127,7 +127,7 @@ pending add；Forget 在清除正式正文前对目标全部尚未清除的 form
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | [v0.72](../v0.72/README.md)以 complete 事实冻结为 historical；v0.73 成为唯一 current，并新增本概览与[实施计划](implementation-plan.md) |
-| ADR | 已更新 | [ADR-0178](../../adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)替代 ADR-0069，[ADR-0179](../../adr/0179-normalized-memory-store-v3-with-isolated-hearth-review.md)替代 ADR-0070，[ADR-0180](../../adr/0180-single-agent-memory-write-command.md)局部替代 Transport Memory command/output 条款 |
+| ADR | 已更新 | [ADR-0178](decisions.md#adr-0178)替代 ADR-0069，[ADR-0179](decisions.md#adr-0179)替代 ADR-0070，[ADR-0180](decisions.md#adr-0180)局部替代 Transport Memory command/output 条款 |
 | Contracts | 已更新 | 新增 [Memory Capture v1](../../contracts/memory-capture-v1.md)与[Built-in Tool Transport v9](../../contracts/builtin-tool-transport-v9.md)，v8 降为 historical current-entry predecessor |
 | Architecture | 已更新 | 新增 [Online Memory Capture](../../architecture/online-memory-capture.md)，并把[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)切换为十二命令与 outcome union |
 | UI | 已更新 | [Memory workspace surface brief v2](../../../apps/desktop/.impeccable/surfaces/memory-workspace.md)改用独立 Review drawer、derived stale、body-free terminal 与 exact-version conflict 语义 |
@@ -139,9 +139,9 @@ pending add；Forget 在清除正式正文前对目标全部尚未清除的 form
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0178: Best-Effort Online Memory Capture](../../adr/0178-best-effort-online-memory-capture-and-actor-bounded-mutation.md)
-- [ADR-0179: Normalized Memory Store v3](../../adr/0179-normalized-memory-store-v3-with-isolated-hearth-review.md)
-- [ADR-0180: Single Agent Memory Write Command](../../adr/0180-single-agent-memory-write-command.md)
+- [ADR-0178: Best-Effort Online Memory Capture](decisions.md#adr-0178)
+- [ADR-0179: Normalized Memory Store v3](decisions.md#adr-0179)
+- [ADR-0180: Single Agent Memory Write Command](decisions.md#adr-0180)
 - [Memory Capture v1](../../contracts/memory-capture-v1.md)
 - [Built-in Tool Transport v9](../../contracts/builtin-tool-transport-v9.md)
 - [Online Memory Capture architecture](../../architecture/online-memory-capture.md)

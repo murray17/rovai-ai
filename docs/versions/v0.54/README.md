@@ -58,8 +58,8 @@ Camp 协作态势感知。User/Default Lead 统一定义责任，Assignee 只更
 ## References
 
 - [v0.54 实施与验收计划](implementation-plan.md)
-- [ADR-0152](../../adr/0152-lead-owned-task-responsibility-and-self-active-task-awareness.md)
-- [ADR-0153](../../adr/0153-explicit-empty-self-active-task-snapshot.md)
+- [ADR-0152](decisions.md#adr-0152)
+- [ADR-0153](decisions.md#adr-0153)
 - [Durable Task v3](../../contracts/durable-task-v3.md)
 - [Built-in Tool Transport v5](../../contracts/builtin-tool-transport-v5.md)
 - [Context Delivery Profile v3](../../contracts/context-delivery-profile-v3.md)

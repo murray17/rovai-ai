@@ -116,7 +116,7 @@ last_updated: 2026-08-14
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | [v0.75](../v0.75/README.md)按 complete 事实冻结为 historical；v0.76 成为唯一 current，并新增本概览与[实施计划](implementation-plan.md) |
-| ADR | 已更新 | 新增 [ADR-0184](../../adr/0184-line-leading-display-name-inline-addressing-alias.md)，局部收窄 ADR-0182 的 alias position |
+| ADR | 已更新 | 新增 [ADR-0184](decisions.md#adr-0184)，局部收窄 ADR-0182 的 alias position |
 | Contracts | 已更新 | 新增 [Camp Message Send v7](../../contracts/camp-message-send-v7.md)，v6 转为 historical current-entry；交付后以 [Notification Episode v4](../../contracts/notification-episode-v4.md)和 [Current User Attention v4](../../contracts/current-user-attention-v4.md)补充会话可见确认 |
 | Architecture | 已更新 | [Public A2A Message 与 Message Delivery](../../architecture/public-a2a-message-delivery.md)和[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)增加 line-leading alias ownership；[Notification Episode](../../architecture/notification-episodes.md)增加可见来源 seam |
 | UI | 已更新 | [会话工作区](../../ui/components/conversation-workspace.md)和[应用内提醒与会话未读](../../ui/components/notification-center.md)冻结普通进入会话后的精确可见确认、轻量提醒与 Camp 未读点 |
@@ -128,7 +128,7 @@ last_updated: 2026-08-14
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0184: Line-Leading Display-Name Inline Addressing Alias](../../adr/0184-line-leading-display-name-inline-addressing-alias.md)
+- [ADR-0184: Line-Leading Display-Name Inline Addressing Alias](decisions.md#adr-0184)
 - [Camp Message Send v7](../../contracts/camp-message-send-v7.md)
 - [Built-in Tool Transport v10](../../contracts/builtin-tool-transport-v10.md)
 - [Notification Episode v4](../../contracts/notification-episode-v4.md)

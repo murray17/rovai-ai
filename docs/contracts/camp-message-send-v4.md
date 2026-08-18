@@ -236,7 +236,7 @@ shortcuts.
 
 ## References
 
-- [ADR-0165: Core-Owned Current-User Message Attention](../adr/0165-core-owned-current-user-message-attention.md)
+- [ADR-0165: Core-Owned Current-User Message Attention](../versions/v0.65/decisions.md#adr-0165)
 - [Current User Attention v1](current-user-attention-v1.md)
 - [Message Delivery v2](message-delivery-v2.md)
 - [Built-in Tool Transport v7](builtin-tool-transport-v7.md)

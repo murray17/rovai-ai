@@ -36,7 +36,7 @@ Runtime Probe/认证/活跃 Host 尚未进入本版快照，不能从 enrolled R
 - 当前实施基线：`4b4fe088`；
 - [指标可采集性审计](../../research/runtime-monitoring/README.md)；
 - 用户提供的运行监控 HTML、Research 与 Codex Brief 只作为需求和原型输入，不拥有仓库合同；
-- [ADR-0201](../../adr/0201-sparse-runtime-usage-and-clean-break-monitoring.md)拥有长期权威边界；
+- [ADR-0201](decisions.md#adr-0201)拥有长期权威边界；
 - [Runtime Monitoring v1](../../contracts/runtime-monitoring-v1.md)拥有字段、查询、NULL、Coverage 与成本层级；
 - [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)拥有组件和采集/查询链。
 
@@ -140,7 +140,7 @@ Runtime Probe/认证/活跃 Host 尚未进入本版快照，不能从 enrolled R
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.95 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引和前后版本链接建立唯一 current v0.96。 |
-| ADR | 已更新 | [ADR-0201](../../adr/0201-sparse-runtime-usage-and-clean-break-monitoring.md)冻结稀疏 Usage、Evidence 分离、collection enrollment、成本粒度和无历史回填边界。 |
+| ADR | 已更新 | [ADR-0201](decisions.md#adr-0201)冻结稀疏 Usage、Evidence 分离、collection enrollment、成本粒度和无历史回填边界。 |
 | Contracts | 已更新 | [Runtime Monitoring v1](../../contracts/runtime-monitoring-v1.md)定义观察、Session fact、查询、Coverage、NULL、Tool duration 和 Cost wire。 |
 | Architecture | 已更新 | [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)定义 Transport parser、raw observation、projection、rollup、read side 和 Provider bucket 组件职责。 |
 | UI | 已更新 | 新增 [Runtime monitoring surface brief](../../../apps/desktop/.impeccable/surfaces/runtime-monitoring.md)，冻结 clean-break、稀疏 Coverage、成本分层、freshness、Tab 与状态矩阵；仍复用现有视觉系统。 |
@@ -153,7 +153,7 @@ Runtime Probe/认证/活跃 Host 尚未进入本版快照，不能从 enrolled R
 
 - [实施与验收计划](implementation-plan.md)
 - [指标可采集性审计](../../research/runtime-monitoring/README.md)
-- [ADR-0201](../../adr/0201-sparse-runtime-usage-and-clean-break-monitoring.md)
+- [ADR-0201](decisions.md#adr-0201)
 - [Runtime Monitoring v1](../../contracts/runtime-monitoring-v1.md)
 - [Runtime Monitoring 架构](../../architecture/runtime-monitoring.md)
 - [Runtime Activity Mapping 维护指南](../../runtime-activity/README.md)

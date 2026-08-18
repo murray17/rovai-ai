@@ -71,7 +71,7 @@ pre-release 数据库中已经冻结的错误 source bytes 都会 fail closed，
 ## References
 
 - [v0.52 实施与验收计划](implementation-plan.md)
-- [ADR-0149](../../adr/0149-bounded-whole-history-omission-evidence.md)
-- [ADR-0150](../../adr/0150-evidence-first-agent-codebase-analysis-bundled-skill.md)
+- [ADR-0149](decisions.md#adr-0149)
+- [ADR-0150](decisions.md#adr-0150)
 - [ContextManifest Evidence v9](../../contracts/context-manifest-evidence-v9.md)
 - [Context Delivery Profile v2](../../contracts/context-delivery-profile-v2.md)

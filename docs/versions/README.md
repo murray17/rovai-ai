@@ -7,7 +7,7 @@ last_updated: 2026-08-18
 
 # Rovai-ai 版本记录
 
-`docs/versions/` 保存版本目标、版本内设计过程、实施计划、验收记录和发布范围。开始使用前先阅读 [文档导航](../README.md)；跨版本长期约束以 [有效 ADR](../adr/README.md) 为准。
+`docs/versions/` 保存版本目标、版本内设计过程、实施计划、验收记录、决定理由和发布范围。开始使用前先阅读[文档导航](../README.md)；跨版本当前约束由 Architecture、Contracts、Context、UI 和 Development 直接拥有，决定治理见[版本决策](../decisions/README.md)。
 
 ## 生命周期
 
@@ -17,7 +17,7 @@ last_updated: 2026-08-18
 - 索引表中的唯一 `current` 行和各版本概览的 `lifecycle` 是该指针的状态投影，必须由
   `pnpm docs:check` 验证一致。
 - 历史文档只修复错字、失效链接、错误元数据或增加明确勘误，不根据新代码重写原始判断。
-- 需要跨版本长期成立的决定必须提升为 ADR；版本文档只保留版本影响和 ADR 链接。
+- 满足准入门槛的重要取舍记录在版本唯一的 `decisions.md`；当前语义必须同时写入相应当前权威文档。
 
 ## 版本切换清单
 
@@ -35,7 +35,7 @@ last_updated: 2026-08-18
 | 范围 | 必须判断的问题 | 规则入口 |
 | --- | --- | --- |
 | `Version lifecycle` | 旧/新版本概览、实施计划、Front Matter、索引和链接是否一致 | 本文件 |
-| `ADR` | 是否产生新的跨版本长期约束，或改变既有决定语义 | [ADR 索引与生命周期](../adr/README.md) |
+| `Decisions` | 是否形成满足准入门槛的重要取舍；是否同步更新当前权威和决定导航 | [版本决策治理](../decisions/README.md) |
 | `Contracts` | 字段级接口、Envelope、receipt、幂等、错误或投递语义是否变化 | [合同索引与生命周期](../contracts/README.md) |
 | `Architecture` | 组件职责、权威边界、进程或传输结构是否变化 | [长期架构索引](../architecture/README.md) |
 | `UI` | 是否改变跨版本 Renderer / UX 合同；版本局部设计不得自动提升为稳定规范 | [UI 规范索引](../ui/README.md) |

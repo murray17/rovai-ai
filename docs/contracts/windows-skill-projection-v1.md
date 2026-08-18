@@ -99,6 +99,6 @@ project-owned/drift: preserve them, record the issue and fail closed. Runtime-vi
 
 ## References
 
-- [ADR-0214](../adr/0214-crash-recoverable-windows-skill-projection.md)
+- [ADR-0214](../versions/v1.05/decisions.md#adr-0214)
 - [Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)
 - [Microsoft: Moving Directories](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-directories)

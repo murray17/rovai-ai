@@ -10,7 +10,7 @@ last_updated: 2026-08-01
 # v0.30 Antigravity 受证明 Team Bridge 实施设计
 
 > 跨版本规范以
-> [ADR-0088](../../adr/0088-attested-native-team-gateway-attachment.md) 为准。本文只把该决策
+> [ADR-0088](decisions.md#adr-0088) 为准。本文只把该决策
 > 收敛为 v0.30 的 Antigravity 实施边界和验收口径；对应实现与验收已经完成。
 
 ## 1. 平台 Spike 结论

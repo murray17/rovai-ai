@@ -14,9 +14,9 @@ last_updated: 2026-07-31
 >
 > 前置版本：[v0.25 Attachment Composer](../v0.25/README.md)
 >
-> 跨版本决策：[ADR-0082](../../adr/0082-member-owned-runtime-parameters.md)、
-> [ADR-0083](../../adr/0083-background-runtime-checks-and-actionable-status.md)、
-> [ADR-0084](../../adr/0084-conversation-surface-controls-and-stop-outcome-projection.md)
+> 跨版本决策：[ADR-0082](decisions.md#adr-0082)、
+> [ADR-0083](decisions.md#adr-0083)、
+> [ADR-0084](decisions.md#adr-0084)
 >
 > 生产设计：[production-design.md](production-design.md)
 >

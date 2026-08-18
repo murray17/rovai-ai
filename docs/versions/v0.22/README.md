@@ -15,9 +15,9 @@ last_updated: 2026-07-29
 > 前置版本：[v0.21 Native Session Bootstrap 与 AgentRun 动态上下文重构](../v0.21/README.md)
 >
 > 跨版本决策：
-> [ADR-0071](../../adr/0071-configured-camp-creation-and-lazy-conversations.md) ·
-> [ADR-0058](../../adr/0058-collaboration-v4-presence-aware-admission.md) ·
-> [ADR-0066](../../adr/0066-managed-product-runtime-resolution.md)
+> [ADR-0071](decisions.md#adr-0071) ·
+> [ADR-0058](../v0.15/decisions.md#adr-0058) ·
+> [ADR-0066](../v0.20/decisions.md#adr-0066)
 >
 > 详细设计：[architecture.md](architecture.md)
 >
@@ -84,7 +84,7 @@ CampTurn、AgentRuns 一起按需创建。这样协作结构、执行可用性�
 
 ## 架构状态
 
-[ADR-0071](../../adr/0071-configured-camp-creation-and-lazy-conversations.md) 已接受，并局部
+[ADR-0071](decisions.md#adr-0071) 已接受，并局部
 替代 ADR-0058 的首条消息建 Camp、全成员预建 Conversation、成员加入时预建
 Conversation 和“不持久化空 Camp”条款。ADR-0058 的 Presence、Default Lead、精确寻址、
 全目标执行准入、Task 与永久删除语义继续有效。

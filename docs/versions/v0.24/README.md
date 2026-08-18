@@ -18,13 +18,13 @@ last_updated: 2026-07-31
 >
 > 当前设计权威：[Arctic Dawn V3](../../ui/README.md)
 >
-> 跨版本决策：[ADR-0073](../../adr/0073-agent-authored-a2a-conversation-messages.md) ·
-> [ADR-0074](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md) ·
-> [ADR-0075](../../adr/0075-runtime-integrity-at-change-and-execution-boundaries.md) ·
-> [ADR-0076](../../adr/0076-message-first-agent-run-dispatch-boundary.md) ·
-> [ADR-0077](../../adr/0077-responsive-camp-turn-cancellation-boundary.md) ·
-> [ADR-0078](../../adr/0078-navigation-projection-and-sidebar-wordmark-boundary.md) ·
-> [ADR-0079](../../adr/0079-two-phase-cancellation-projection-and-bounded-runtime-interrupt.md)
+> 跨版本决策：[ADR-0073](decisions.md#adr-0073) ·
+> [ADR-0074](decisions.md#adr-0074) ·
+> [ADR-0075](decisions.md#adr-0075) ·
+> [ADR-0076](decisions.md#adr-0076) ·
+> [ADR-0077](decisions.md#adr-0077) ·
+> [ADR-0078](decisions.md#adr-0078) ·
+> [ADR-0079](decisions.md#adr-0079)
 >
 > 实施与验收：[implementation-plan.md](implementation-plan.md)
 
@@ -129,7 +129,7 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 - “快速对话”只在 Renderer 中采用项目式外观；底层继续使用独立
   `NavigationSnapshot.quickChat` 与 `quick_chat` binding，不进入
   `ProjectNavigationGroup`，不能作为 Project 置顶；其 Camp 可以分别置顶。
-- 按 [ADR-0074](../../adr/0074-quick-chat-ubiquitous-language-and-binding-identity.md)
+- 按 [ADR-0074](decisions.md#adr-0074)
   完成全栈语言迁移：Rust `QuickChat`、序列化 `quick_chat`、契约 `quickChat`、
   CSS/test `quick-chat`、受管目录 `quick-chat/`。
 - 不保留旧值、别名、双读或数据迁移；未发布协作数据直接重置，并永久删除精确旧
@@ -214,7 +214,7 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 
 ### Runtime 完整性校验边界
 
-- [ADR-0075](../../adr/0075-runtime-integrity-at-change-and-execution-boundaries.md)
+- [ADR-0075](decisions.md#adr-0075)
   将完整 SHA-256 移出消息发送热路径。
 - 成功探测持久保存文件大小、修改时间和平台文件标识；实际 Runtime 启动先比较轻量
   身份，只有身份变化或旧记录缺失时才重新完整哈希。
@@ -225,7 +225,7 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 
 ### 消息优先与 AgentRun 调度边界
 
-- [ADR-0076](../../adr/0076-message-first-agent-run-dispatch-boundary.md)
+- [ADR-0076](decisions.md#adr-0076)
   要求用户点击发送后先由 Renderer 乐观投影消息，Core 随后用一次短事务保存
   CampMessage、CampTurn 和 queued AgentRun。
 - `camp.messages.send` 不再创建 Pending Execution Intent，也不执行完整
@@ -237,7 +237,7 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
 
 ### 即时停止与取消协调边界
 
-- [ADR-0077](../../adr/0077-responsive-camp-turn-cancellation-boundary.md)
+- [ADR-0077](decisions.md#adr-0077)
   要求 Renderer 点击停止后立即显示本地“正在停止…”，取消请求只完成 SQLite
   权威落库和 fence 后返回，不同步刷新 Navigation 或重新激活 Camp。
 - 成功请求通过 Notify 立即唤醒取消协调器；500ms 扫描只作为恢复兜底。Runtime
@@ -245,7 +245,7 @@ v0.24 以 `rovai-arctic-dawn-v3-package` 为 Renderer 新一轮视觉与信息�
   立即刷新一次当前 Camp Snapshot。
 - ending Git observation 在取消事件之后后台采集和追加，仍属于 AgentRun 证据，
   但不再阻塞停止 ACK、取消终态或 Composer 恢复。
-- [ADR-0079](../../adr/0079-two-phase-cancellation-projection-and-bounded-runtime-interrupt.md)
+- [ADR-0079](decisions.md#adr-0079)
   将本地 `cancelling` 投影扩展到全部相关 Run 卡和 Activity，并在停止阶段取消运行
   动画；草稿保持可编辑，但新 Turn 继续由本地/权威执行状态共同阻止。
 - 同一批 AgentRun 的 Runtime interrupt 并行发送，使用独立的短 deadline；超时或

@@ -172,6 +172,6 @@ Journal 结构无需因 heads-up signal 水合而复制 presentation fields。
 ## References
 
 - [Notification Episode v1 (historical)](notification-episode-v1.md)
-- [ADR-0175](../adr/0175-core-owned-notification-occurrence-episode-and-change-journal.md)
+- [ADR-0175](../versions/v0.71/decisions.md#adr-0175)
 - [Current User Attention v3](current-user-attention-v3.md)
 - [Notification Episode 架构](../architecture/notification-episodes.md)

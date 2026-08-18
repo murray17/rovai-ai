@@ -99,7 +99,7 @@ React、浏览器存储或新建后的空数据库反推。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.96 冻结为 historical；本概览、[实施计划](implementation-plan.md)、版本索引与前后版本链接建立唯一 current v0.97。 |
-| ADR | 已更新 | [ADR-0202](../../adr/0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md)冻结 pre-Core Desktop admission、既有 Core authority 与检查点恢复边界。 |
+| ADR | 已更新 | [ADR-0202](decisions.md#adr-0202)冻结 pre-Core Desktop admission、既有 Core authority 与检查点恢复边界。 |
 | Contracts | 已更新 | [First-run Onboarding v1](../../contracts/first-run-onboarding-v1.md)定义 closed state、typed transition、冻结 provisioning payload、Camp 与 starter Draft-only 语义。 |
 | Architecture | 已更新 | [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)定义 Main、preload、Renderer gate、saga、Core service、Draft 与 restore store 的职责组合。 |
 | UI | 已更新 | [首次训练 UI](../../ui/components/first-run-onboarding.md)与 UI 索引记录 1040×700、双主题、页面结构、状态、键盘、错误及第四页呈现合同。 |
@@ -111,7 +111,7 @@ React、浏览器存储或新建后的空数据库反推。
 ## References
 
 - [实施与验收计划](implementation-plan.md)
-- [ADR-0202](../../adr/0202-desktop-owned-first-run-admission-and-checkpointed-provisioning.md)
+- [ADR-0202](decisions.md#adr-0202)
 - [First-run Onboarding v1](../../contracts/first-run-onboarding-v1.md)
 - [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)
 - [首次训练 UI](../../ui/components/first-run-onboarding.md)

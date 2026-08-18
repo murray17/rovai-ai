@@ -141,7 +141,7 @@ watchdog timing and forced-signal escalation remain v1-compatible.
 ## References
 
 - [Planned Shutdown v1 (historical)](planned-shutdown-v1.md)
-- [ADR-0177](../adr/0177-controlled-shutdown-fences-product-execution.md)
+- [ADR-0177](../versions/v0.71/decisions.md#adr-0177)
 - [Planned Shutdown architecture](../architecture/planned-shutdown.md)
 - [Accepted Input Recovery v1](accepted-input-recovery-v1.md)
 - [Run Process Detail Surface v5](run-process-detail-surface-v5.md)

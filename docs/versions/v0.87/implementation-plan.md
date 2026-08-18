@@ -42,7 +42,7 @@ last_updated: 2026-08-16
 ## Rust 测试退役说明
 
 旧的 ignored `real_trae_active_health_smoke` 要求 health check 主动启动 TRAE；该行为现在被
-[ADR-0192](../../adr/0192-purpose-scoped-runtime-launch-and-execution-deferred-verification.md)禁止，继续保留会把
+[ADR-0192](decisions.md#adr-0192)禁止，继续保留会把
 已废止行为误写成准入要求，因此移除。替代责任由三个层次共同承担：静态/health tripwire 证明检查零启动，
 fake ACP execution 证明真实任务只启动一次，AgentProfile lifecycle 测试证明同一执行证据可升级 Ready。
 

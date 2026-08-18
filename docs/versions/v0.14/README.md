@@ -14,7 +14,7 @@ last_updated: 2026-07-27
 >
 > 前置版本：[v0.13 伙伴经验自动沉淀与分级记忆权威](../v0.13/README.md)
 >
-> 跨版本决策：[ADR-0056](../../adr/0056-controlled-member-avatar-assets.md)
+> 跨版本决策：[ADR-0056](decisions.md#adr-0056)
 >
 > 详细设计：[architecture.md](architecture.md)
 >

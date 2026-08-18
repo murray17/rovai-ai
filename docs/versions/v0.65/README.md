@@ -64,7 +64,7 @@ clean-break 数据升级、完整门禁和九 Runtime 验收都完成后，v0.65
 
 v0.65 冻结前已经完成普通文件/目录联合附件：目录由 Core 形成有界、只读、不可跟随 symlink 的
 稳定快照，Renderer 只保留一个目录附件的用户意图，Runtime 读取受管目录根。该增量由
-[ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)、
+[ADR-0169](decisions.md#adr-0169)、
 [Camp Attachment v1](../../contracts/camp-attachment-v1.md)和
 [会话区拖放 UI](../../ui/components/conversation-drop-zone.md)独立拥有，不改变本版本两阶段统一范围仍未完成的事实。
 
@@ -101,7 +101,7 @@ v0.65 冻结前已经完成普通文件/目录联合附件：目录由 Core 形�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v0.64 按已完成事实冻结为 historical，v0.65 成为唯一 current，并新增统一范围、实现规格与两阶段计划 |
-| ADR | 已更新 | [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)冻结 `local_user`、正交 addressing 与原子通知；[ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)冻结 progressive CLI teaching；[ADR-0167](../../adr/0167-seven-skill-official-inventory.md)接替六项 inventory 并冻结完整七项 official Skill 集合与普通投递；[ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)独立冻结已实施的 Core-owned 目录快照 |
+| ADR | 已更新 | [ADR-0165](decisions.md#adr-0165)冻结 `local_user`、正交 addressing 与原子通知；[ADR-0166](decisions.md#adr-0166)冻结 progressive CLI teaching；[ADR-0167](decisions.md#adr-0167)接替六项 inventory 并冻结完整七项 official Skill 集合与普通投递；[ADR-0169](decisions.md#adr-0169)独立冻结已实施的 Core-owned 目录快照 |
 | Contracts | 已更新 | 新增 [Camp Message Send v4](../../contracts/camp-message-send-v4.md)、[Current User Attention v1](../../contracts/current-user-attention-v1.md)、[Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)、[ContextManifest Evidence v12](../../contracts/context-manifest-evidence-v12.md)和已实施的[Camp Attachment v1](../../contracts/camp-attachment-v1.md) |
 | Architecture | 已更新 | Public A2A 与 Built-in Tool Runtime 增加 User attention 轴、结构化正文投影、v7 help/Charter/Skill 分层和无 locator recovery stop |
 | UI | 已更新 | 当前 Porcelain/Steel 规范增加 Current User Mention、消息通知、独立浮层偏好与普通 official Skill 列表行为；已实施的目录附件拖放由[会话区拖放 UI](../../ui/components/conversation-drop-zone.md)记录 |
@@ -114,10 +114,10 @@ v0.65 冻结前已经完成普通文件/目录联合附件：目录由 Core 形�
 
 - [v0.65 实现规格](implementation-spec.md)
 - [v0.65 实施与验收计划](implementation-plan.md)
-- [ADR-0165](../../adr/0165-core-owned-current-user-message-attention.md)
-- [ADR-0166](../../adr/0166-progressive-built-in-cli-teaching.md)
-- [ADR-0167](../../adr/0167-seven-skill-official-inventory.md)
-- [ADR-0169](../../adr/0169-core-owned-directory-attachment-snapshots.md)
+- [ADR-0165](decisions.md#adr-0165)
+- [ADR-0166](decisions.md#adr-0166)
+- [ADR-0167](decisions.md#adr-0167)
+- [ADR-0169](decisions.md#adr-0169)
 - [Camp Message Send v4](../../contracts/camp-message-send-v4.md)
 - [Current User Attention v1](../../contracts/current-user-attention-v1.md)
 - [Built-in Tool Transport v7](../../contracts/builtin-tool-transport-v7.md)

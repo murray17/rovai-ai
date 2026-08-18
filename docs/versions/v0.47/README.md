@@ -19,8 +19,8 @@ last_updated: 2026-08-08
 > 后续版本：[v0.48 Native Session Compaction Bootstrap Redelivery](../v0.48/README.md)
 >
 > 主要决策：
-> [ADR-0136](../../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)、
-> [ADR-0137](../../adr/0137-one-time-task-linked-responsibility-admission.md)。字段级真源：
+> [ADR-0136](decisions.md#adr-0136)、
+> [ADR-0137](decisions.md#adr-0137)。字段级真源：
 > [Durable Task v2](../../contracts/durable-task-v2.md)、
 > [Built-in Tool Transport v4](../../contracts/builtin-tool-transport-v4.md)。
 
@@ -119,7 +119,7 @@ Transport v3 成为 historical；v3/v4 不在同一 App、Runtime process、leas
 
 v0.47 不迁移 v0.46 Task、旧 command result、旧 replay 或旧 catalog，不保留旧状态/字段 alias、
 dual schema、translation 或 runtime fallback。切换时依
-[ADR-0118](../../adr/0118-v041-local-data-clean-break-and-managed-reset-boundary.md)执行一次完整
+[ADR-0118](../v0.41/decisions.md#adr-0118)执行一次完整
 Rovai-owned App data clean reset。
 
 清理范围不得扩展到用户 workspace、外部 Runtime Home、Runtime config、credentials 或外部
@@ -158,7 +158,7 @@ v0.47 已按[实施与验收计划](implementation-plan.md)完成，主要证据
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | [版本索引](../README.md)把 v0.47 设为唯一 current；[v0.46](../v0.46/README.md)冻结为 historical，并补齐前后版本链接 |
-| ADR | 已更新 | [ADR-0136](../../adr/0136-durable-task-v2-responsibility-and-coordination-authority.md)与[ADR-0137](../../adr/0137-one-time-task-linked-responsibility-admission.md)冻结责任、权限、删除级联和一次性 admission；ADR-0057/0058 增加局部替代说明 |
+| ADR | 已更新 | [ADR-0136](decisions.md#adr-0136)与[ADR-0137](decisions.md#adr-0137)冻结责任、权限、删除级联和一次性 admission；ADR-0057/0058 增加局部替代说明 |
 | Contracts | 已更新 | [Durable Task v2](../../contracts/durable-task-v2.md)、[Built-in Tool Transport v4](../../contracts/builtin-tool-transport-v4.md)及[合同索引](../../contracts/README.md)成为当前入口，Transport v3 标记 historical |
 | Architecture | 已更新 | [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)更新为 v4、13 项命令、完整 canonical Task result 与显式 Agent projection；组件权威边界不另起新组件 |
 | UI | 已更新 | [v0.47 生产设计](production-design.md)、[UI 规范索引](../../ui/README.md)与[Camp 会话工作区](../../ui/components/conversation-workspace.md)冻结五态实时卡、Inspector 分层、冲突恢复和中文删除确认 |

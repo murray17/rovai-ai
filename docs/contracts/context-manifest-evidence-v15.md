@@ -63,7 +63,7 @@ Session and freshly materialized v15 Manifest are required for later work.
 
 ## References
 
-- [ADR-0200](../adr/0200-compact-context-projection-and-structured-run-facts.md)
+- [ADR-0200](../versions/v0.94/decisions.md#adr-0200)
 - [Run Facts v1](run-facts-v1.md)
 - [ContextManifest Evidence v14 (historical)](context-manifest-evidence-v14.md)
 - [Context Delivery Profile v3](context-delivery-profile-v3.md)
