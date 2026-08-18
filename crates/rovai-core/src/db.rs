@@ -5,6 +5,8 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+#[cfg(test)]
+use rusqlite::OpenFlags;
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -41,6 +43,13 @@ pub struct V2RecoverySummary {
 pub struct Database {
     connection: Connection,
     path: PathBuf,
+}
+
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TestDatabaseOpenMode {
+    FastIsolated,
+    ProductionLike,
 }
 
 const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.07";
@@ -493,6 +502,10 @@ fn has_current_data_contract(path: &Path) -> bool {
     let Ok(connection) = Connection::open(path) else {
         return false;
     };
+    connection_has_current_data_contract(&connection).unwrap_or(false)
+}
+
+fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     let marker = connection
         .query_row(
             r#"
@@ -516,14 +529,14 @@ fn has_current_data_contract(path: &Path) -> bool {
         |row| row.get(0),
     );
     let migration_state = load_current_migration_state(&connection);
-    matches!(
+    Ok(matches!(
         (marker, projection_exists, migration_state),
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
             if contract == CURRENT_DATA_CONTRACT_VERSION
                 && schema == CURRENT_PROJECTION_SCHEMA_VERSION
                 && classifier == V043_CLASSIFIER_VERSION
                 && migrations.admits(&contract, schema)
-    )
+    ))
 }
 
 fn load_current_migration_state(
@@ -985,6 +998,50 @@ impl Database {
         }
         database.seed_agents()?;
         Ok(database)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn open_verified_test_clone(
+        data_dir: &Path,
+        mode: TestDatabaseOpenMode,
+    ) -> Result<Self> {
+        let path = data_dir.join("rovai.sqlite");
+        if !path.is_file() {
+            anyhow::bail!(
+                "verified test clone requires an existing SQLite database at {}",
+                path.display()
+            );
+        }
+        let connection = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .with_context(|| format!("failed to open verified SQLite clone at {}", path.display()))?;
+        crate::monitoring::register_monitoring_sql_functions(&connection)?;
+        if !connection_has_current_data_contract(&connection)? {
+            anyhow::bail!(
+                "verified test clone is not at the current data contract: {}",
+                path.display()
+            );
+        }
+        match mode {
+            TestDatabaseOpenMode::FastIsolated => connection.execute_batch(
+                r#"
+                PRAGMA journal_mode = MEMORY;
+                PRAGMA synchronous = OFF;
+                PRAGMA temp_store = MEMORY;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )?,
+            TestDatabaseOpenMode::ProductionLike => connection.execute_batch(
+                r#"
+                PRAGMA journal_mode = WAL;
+                PRAGMA synchronous = NORMAL;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )?,
+        }
+        Ok(Self { connection, path })
     }
 
     pub fn path(&self) -> &Path {
