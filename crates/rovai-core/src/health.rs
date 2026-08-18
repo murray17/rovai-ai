@@ -12,6 +12,7 @@ use rovai_core::{
     agent_runtime_adapter::{
         KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint, write_kiro_additive_agent_config,
     },
+    managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
         RuntimeLaunchPurpose, configure_active_runtime_command, discover_static_runtime_version,
         runtime_launch_allowed,
@@ -1085,8 +1086,8 @@ struct TraePromptProbeObservation {
 }
 
 async fn run_trae_behavioral_probe(
-    stdin: &mut tokio::process::ChildStdin,
-    lines: &mut BoundedLineReader<tokio::process::ChildStdout>,
+    stdin: &mut ManagedChildStdin,
+    lines: &mut BoundedLineReader<ManagedChildStdout>,
     session_id: &str,
     session: &Value,
     probe_root: &Path,
@@ -1215,8 +1216,8 @@ async fn run_trae_behavioral_probe(
 }
 
 async fn run_trae_prompt_probe(
-    stdin: &mut tokio::process::ChildStdin,
-    lines: &mut BoundedLineReader<tokio::process::ChildStdout>,
+    stdin: &mut ManagedChildStdin,
+    lines: &mut BoundedLineReader<ManagedChildStdout>,
     session_id: &str,
     request_id: u64,
     prompt: &str,
@@ -1693,7 +1694,7 @@ pub async fn codex_model_catalog(path: &Path) -> Result<Value> {
     }
 }
 
-async fn write_json_line(stdin: &mut tokio::process::ChildStdin, value: &Value) -> Result<()> {
+async fn write_json_line(stdin: &mut ManagedChildStdin, value: &Value) -> Result<()> {
     stdin
         .write_all(serde_json::to_string(value)?.as_bytes())
         .await?;
@@ -1703,7 +1704,7 @@ async fn write_json_line(stdin: &mut tokio::process::ChildStdin, value: &Value) 
 }
 
 async fn read_rpc_result(
-    lines: &mut BoundedLineReader<tokio::process::ChildStdout>,
+    lines: &mut BoundedLineReader<ManagedChildStdout>,
     request_id: u64,
 ) -> Result<Value> {
     while let Some(line) = lines.next_line().await? {
