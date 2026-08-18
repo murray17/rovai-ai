@@ -1,4 +1,7 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::Path,
+};
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
@@ -6,19 +9,58 @@ use serde_json::{Map, Value, json};
 
 use crate::{command::canonical_json_digest, team_tool_catalog::builtin_tool_definitions};
 
-pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 13;
-pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 1;
+pub const BUILTIN_TOOL_CONTRACT_VERSION: u32 = 15;
+pub const BUILTIN_TOOL_IPC_PROTOCOL_VERSION: u32 = 2;
 pub const BUILTIN_TOOL_ENVELOPE_VERSION: u32 = 1;
 pub const BUILTIN_TOOL_RECEIPT_VERSION: u32 = 1;
-pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 13;
+pub const BUILTIN_TOOL_CLI_COMMAND_VERSION: u32 = 15;
 pub const BUILTIN_TOOL_AGENT_OUTPUT_CONTRACT_VERSION: u32 = 2;
-pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v13";
+pub const BUILTIN_TOOL_RUNTIME_CAPABILITY: &str = "builtin_cli.transport.v15";
 pub const BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES: usize = 1024 * 1024;
 pub const ROVAI_AGENT_CLI_ENV: &str = "ROVAI_AGENT_CLI";
 pub const ROVAI_CLI_CONTEXT_ENV: &str = "ROVAI_CLI_CONTEXT";
 pub const ROVAI_RUN_TMP_ENV: &str = "ROVAI_RUN_TMP";
 pub const COMPACTION_HOOK_IPC_PROTOCOL_VERSION: u32 = 1;
 pub const COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "transport", rename_all = "snake_case")]
+pub enum LocalIpcEndpoint {
+    UnixSocket { path: String },
+    WindowsNamedPipe { name: String },
+}
+
+impl LocalIpcEndpoint {
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::UnixSocket { path } => {
+                if path.trim().is_empty() || !Path::new(path).is_absolute() {
+                    bail!("Built-in Tool Unix socket endpoint must be absolute");
+                }
+            }
+            Self::WindowsNamedPipe { name } => {
+                let Some(suffix) = name.strip_prefix(r"\\.\pipe\rovai-ai-") else {
+                    bail!("Built-in Tool Windows named pipe endpoint is invalid");
+                };
+                let Some((process_id, instance_id)) = suffix.split_once('-') else {
+                    bail!("Built-in Tool Windows named pipe endpoint is invalid");
+                };
+                if process_id.is_empty()
+                    || !process_id.bytes().all(|byte| byte.is_ascii_digit())
+                    || process_id
+                        .parse::<u32>()
+                        .ok()
+                        .filter(|value| *value > 0)
+                        .is_none()
+                    || uuid::Uuid::parse_str(instance_id).is_err()
+                {
+                    bail!("Built-in Tool Windows named pipe endpoint is invalid");
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -33,7 +75,7 @@ pub struct BuiltinToolLeaseContext {
 pub struct BuiltinToolCliContext {
     pub contract_version: u32,
     pub ipc_protocol_version: u32,
-    pub core_socket: String,
+    pub core_endpoint: LocalIpcEndpoint,
     pub process_id: String,
     pub process_token: String,
     pub lease: Option<BuiltinToolLeaseContext>,
@@ -46,10 +88,8 @@ impl BuiltinToolCliContext {
         {
             bail!("Built-in Tool CLI context version is unsupported");
         }
-        if self.core_socket.trim().is_empty()
-            || self.process_id.trim().is_empty()
-            || self.process_token.trim().is_empty()
-        {
+        self.core_endpoint.validate()?;
+        if self.process_id.trim().is_empty() || self.process_token.trim().is_empty() {
             bail!("Built-in Tool CLI context is incomplete");
         }
         let lease = self
@@ -74,12 +114,12 @@ impl BuiltinToolCliContext {
     pub fn process_auth(&self) -> Result<(String, String)> {
         if self.contract_version != BUILTIN_TOOL_CONTRACT_VERSION
             || self.ipc_protocol_version != BUILTIN_TOOL_IPC_PROTOCOL_VERSION
-            || self.core_socket.trim().is_empty()
             || self.process_id.trim().is_empty()
             || self.process_token.trim().is_empty()
         {
             bail!("Built-in Tool process context is incomplete");
         }
+        self.core_endpoint.validate()?;
         Ok((self.process_id.clone(), self.process_token.clone()))
     }
 }
@@ -608,9 +648,11 @@ fn direct_arguments(input_schema: &Value) -> Vec<BuiltinToolArgument> {
 
 fn direct_argument_flag(field: &str) -> String {
     match field {
-        // Camp Message Send v5 intentionally exposes an attention-oriented CLI
+        // Principal attention is the canonical Agent-facing vocabulary. The
+        // legacy --to-user spelling is accepted only by the CLI parser and is
+        // deliberately absent from this discoverable operation catalog.
         // name while keeping the Core input free of a user-selectable identity.
-        "mentionUser" => "--to-user".to_string(),
+        "mentionUser" => "--to-principal".to_string(),
         _ => format!("--{}", camel_to_kebab(field)),
     }
 }
@@ -729,6 +771,7 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
         "camp.message.send" => {
             for code in [
                 "message.addressing_invalid",
+                "message.public_only_conflict",
                 "message.fanout_exceeded",
                 "message.a2a_depth_exhausted",
                 "message.task_recipient_ambiguous",
@@ -814,9 +857,7 @@ fn error_contracts(operation: &str) -> Vec<BuiltinToolErrorContract> {
 
 pub fn projection_identity(operation: &str) -> Result<&'static str> {
     match operation {
-        // The compact Agent projection is still the same two-field v1 shape;
-        // the domain send contract is v4 and remains hidden behind it.
-        "camp.message.send" => Ok("camp-message-send-v1"),
+        "camp.message.send" => Ok("camp-message-send-v2"),
         "team.gather" => Ok("gather-v1"),
         "memory.write" => Ok("memory-write-v2"),
         "member.create" | "team.create_task" | "team.get_task" | "team.list_tasks"
@@ -838,6 +879,7 @@ pub fn recovery_for_error_code(code: &str) -> BuiltinToolRecovery {
         || matches!(
             code,
             "message.reply_invalid"
+                | "message.public_only_conflict"
                 | "message.fanout_exceeded"
                 | "message.a2a_depth_exhausted"
                 | "message.task_recipient_ambiguous"
@@ -952,9 +994,9 @@ mod tests {
 
     #[test]
     fn cli_mapping_is_complete_unique_and_contract_valid() {
-        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 13);
-        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 13);
-        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v13");
+        assert_eq!(BUILTIN_TOOL_CONTRACT_VERSION, 15);
+        assert_eq!(BUILTIN_TOOL_CLI_COMMAND_VERSION, 15);
+        assert_eq!(BUILTIN_TOOL_RUNTIME_CAPABILITY, "builtin_cli.transport.v15");
         validate_builtin_tool_contract().unwrap();
         let operations = BUILTIN_TOOL_CLI_IDENTITIES
             .iter()
@@ -966,6 +1008,42 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(operations.len(), 15);
         assert_eq!(commands.len(), 15);
+    }
+
+    #[test]
+    fn local_ipc_endpoint_is_one_closed_tagged_transport() {
+        let unix = LocalIpcEndpoint::UnixSocket {
+            path: "/tmp/rovai-builtin-7/core.sock".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&unix).unwrap(),
+            json!({"transport": "unix_socket", "path": "/tmp/rovai-builtin-7/core.sock"})
+        );
+        unix.validate().unwrap();
+        let windows = LocalIpcEndpoint::WindowsNamedPipe {
+            name: r"\\.\pipe\rovai-ai-42-7b5db24c-4a43-4cab-9217-d982b08f7691".to_string(),
+        };
+        assert_eq!(
+            serde_json::to_value(&windows).unwrap(),
+            json!({
+                "transport": "windows_named_pipe",
+                "name": r"\\.\pipe\rovai-ai-42-7b5db24c-4a43-4cab-9217-d982b08f7691"
+            })
+        );
+        windows.validate().unwrap();
+        for invalid in [
+            r"\\server\pipe\rovai-ai-42-7b5db24c-4a43-4cab-9217-d982b08f7691",
+            r"\\.\pipe\rovai-ai-zero-7b5db24c-4a43-4cab-9217-d982b08f7691",
+            r"\\.\pipe\rovai-ai-42-not-a-uuid",
+        ] {
+            assert!(
+                LocalIpcEndpoint::WindowsNamedPipe {
+                    name: invalid.to_string()
+                }
+                .validate()
+                .is_err()
+            );
+        }
     }
 
     #[test]
@@ -1057,7 +1135,7 @@ mod tests {
                 .iter()
                 .find(|argument| argument.field == "mentionUser")
                 .map(|argument| argument.flag.as_str()),
-            Some("--to-user")
+            Some("--to-principal")
         );
         assert!(send.input_schema["properties"].get("campId").is_none());
         assert!(
@@ -1084,8 +1162,9 @@ mod tests {
             send.input_schema["properties"]["mentionUser"]["description"]
                 .as_str()
                 .is_some_and(|description| {
-                    description.contains("new unresolved user decision, answer, or action")
-                        && description.contains("Do not inherit it from prior messages")
+                    description
+                        .contains("new unresolved decision, answer, or action for the Principal")
+                        && description.contains("Principal attention is message-local")
                 })
         );
     }

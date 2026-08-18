@@ -115,6 +115,7 @@ import {
 import { MemoryLibrary } from './MemoryLibrary'
 import { SafeMarkdown } from './SafeMarkdown'
 import {
+  activityStatusForAgentRun,
   agentRunPresentation,
   agentRunStateTag,
   agentRunWaitDetail,
@@ -3141,6 +3142,35 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
   })
 
+  it('keeps the complete Tool chronology after more than twelve operations', () => {
+    const progress = buildLiveExecutionProgress(Array.from({ length: 15 }, (_, index) => ({
+      id: `tool-evidence-${index + 1}`,
+      agentRunId: 'run-long',
+      eventType: 'runtime.action',
+      payload: {
+        toolCallId: `tool-${index + 1}`,
+        status: 'completed',
+        output: `result-${index + 1}`
+      },
+      canonical: canonicalActivity(`tool-${index + 1}`, {
+        presentationHint: `Tool ${index + 1}`,
+        firstEvidenceSequence: index + 1,
+        lastEvidenceSequence: index + 1
+      }),
+      createdAt: `2026-08-18T00:00:${String(index).padStart(2, '0')}Z`
+    })), 'run-long')
+
+    expect(progress.items).toHaveLength(15)
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { id: 'tool-1', title: 'Tool 1', detail: 'result-1' }
+    })
+    expect(progress.items[14]).toMatchObject({
+      kind: 'tool',
+      step: { id: 'tool-15', title: 'Tool 15', detail: 'result-15' }
+    })
+  })
+
   it('preserves canonical identity when rebuilding terminal execution history', () => {
     const canonical = canonicalActivity('command-1', {
       activityDomain: 'shell', semanticKind: 'shell.execute',
@@ -3205,6 +3235,25 @@ describe('task event projections', () => {
     })
   })
 
+  it('projects cancelled activity and unfinished activity in a cancelled run as stopped', () => {
+    const progress = buildLiveExecutionProgress([{
+      id: 'tool-cancelled', agentRunId: 'run-cancelled', eventType: 'runtime.action',
+      payload: { toolCallId: 'tool-1', status: 'cancelled' },
+      canonical: canonicalActivity('tool-1', {
+        activityDomain: 'shell', phase: 'terminal', outcome: 'cancelled'
+      }),
+      createdAt: '2026-08-18T02:59:19Z'
+    }], 'run-cancelled')
+
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { status: 'stopped' }
+    })
+    expect(activityStatusForAgentRun('running', 'cancelled')).toBe('stopped')
+    expect(activityStatusForAgentRun('completed', 'cancelled')).toBe('completed')
+    expect(activityStatusForAgentRun('running', 'failed')).toBe('running')
+  })
+
   it('does not present an ACP protocol kind as Copilot execution detail', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'copilot-tool-call', agentRunId: 'run-copilot', eventType: 'runtime.action',
@@ -3248,6 +3297,106 @@ describe('task event projections', () => {
     expect(markup).not.toContain('tool-call-disclosure')
     expect(markup).not.toContain('tool-call-chevron')
     expect(markup).not.toContain('>execute<')
+  })
+
+  it('opens Built-in Camp results in their Tool rows and copies only the public result', () => {
+    const readResult = {
+      mode: 'item',
+      message: { messageId: 'message-1', body: '完整消息正文' }
+    }
+    const searchResult = {
+      results: Array.from({ length: 14 }, (_, index) => ({
+        messageId: `message-${index + 1}`,
+        snippet: `search-result-${index + 1}`
+      })),
+      truncated: false,
+      searchIncomplete: false
+    }
+    const builtInEvent = (
+      operation: 'camp.read' | 'camp.search',
+      result: unknown,
+      sequence: number
+    ) => ({
+      id: `${operation}-${sequence}`,
+      agentRunId: 'run-builtins',
+      eventType: 'runtime.action',
+      payload: {
+        toolCallId: `${operation}-${sequence}`,
+        status: 'completed',
+        kind: 'builtin_tool_invocation',
+        sourceAuthority: 'core',
+        canonicalTool: operation,
+        input: null,
+        output: null,
+        operationProjection: {
+          operation,
+          canonicalInput: { mustNotAppear: 'private-input-projection' },
+          canonicalResult: result
+        },
+        coreEnvelope: {
+          contractVersion: 1,
+          ok: true,
+          operation,
+          requestId: `private-request-${sequence}`,
+          receipt: `private-receipt-${sequence}`,
+          result
+        }
+      },
+      canonical: canonicalActivity(`${operation}-${sequence}`, {
+        toolName: operation,
+        presentationHint: operation,
+        firstEvidenceSequence: sequence,
+        lastEvidenceSequence: sequence
+      }),
+      createdAt: `2026-08-18T00:00:0${sequence}Z`
+    })
+    const events = [
+      builtInEvent('camp.read', readResult, 1),
+      builtInEvent('camp.search', searchResult, 2)
+    ]
+    const progress = buildLiveExecutionProgress(events, 'run-builtins')
+    expect(progress.items).toHaveLength(2)
+    expect(progress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: { title: 'camp.read' }
+    })
+    const readItem = progress.items[0]
+    if (readItem.kind !== 'tool') throw new Error('Expected camp.read Tool progress')
+    expect(JSON.parse(readItem.step.detail)).toEqual(readResult)
+    expect(readItem.step.detail).not.toContain('coreEnvelope')
+    expect(readItem.step.detail).not.toContain('private-request-1')
+
+    const copied = executionEvidenceCopyText('runtime.action', events[1].payload)
+    expect(copied).not.toBeNull()
+    expect(JSON.parse(copied ?? 'null')).toEqual(searchResult)
+    expect(copied).not.toContain('private-input-projection')
+    expect(copied).not.toContain('private-request-2')
+
+    const run: AgentRunView = {
+      id: 'run-builtins', campTurnId: 'turn-1', conversationId: 'conversation-builtins',
+      agentId: 'agent-builtins', taskId: null, responsibilityKey: 'direct:agent-builtins',
+      responsibilityGeneration: 0, purpose: '读取 Camp 历史', completionRole: 'required',
+      status: 'succeeded', waitReason: null, executionEpoch: 1,
+      terminalResolutionSource: null, terminalReasonCode: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct', triggerDeliveryGeneration: 0,
+      a2aParentAgentRunId: null, a2aRootAgentRunId: null, a2aDepth: 0,
+      executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-18T00:00:00Z', startedAt: '2026-08-18T00:00:00Z',
+      endedAt: '2026-08-18T00:00:02Z', updatedAt: '2026-08-18T00:00:02Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(markup.match(/tool-call-disclosure/g)).toHaveLength(2)
+    expect(markup).toContain('tool-output-copy-button')
+    expect(markup).toContain('search-result-1')
+    expect(markup).not.toContain('search-result-14')
+    expect(markup).not.toContain('complete-evidence-control')
+    expect(markup).not.toContain('complete-evidence-standalone')
+    expect(markup).not.toContain('查看完整工具调用')
+    expect(markup).not.toContain('private-input-projection')
+    expect(markup).not.toContain('private-request-2')
   })
 
   it('keeps a Claude Bash command expandable when the tool result has no output', () => {

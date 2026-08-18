@@ -77,6 +77,7 @@
     "accept:member-lifecycle-ui": "node scripts/accept-member-lifecycle-ui.mjs",
     "accept:notification-ui": "node scripts/accept-notification-ui.mjs",
     "accept:sidebar-ui": "node scripts/accept-sidebar-ui.mjs",
+    "accept:conversation-find-ui": "node scripts/accept-conversation-find-ui.mjs",
     "accept:composer-skill-picker-ui": "node scripts/accept-structured-mentions-ui.mjs --skill-picker-only",
     "accept:composer-skill-context": "node scripts/accept-structured-mentions-ui.mjs --skill-context-smoke",
     "accept:structured-mentions-ui": "node scripts/accept-structured-mentions-ui.mjs",

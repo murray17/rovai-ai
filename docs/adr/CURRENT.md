@@ -79,7 +79,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 
 - **何时阅读：** 修改 A2A、Task、Message、Delivery、协作责任或公共输出时阅读。
 - **当前架构：** [Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)
-- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v9](../contracts/camp-message-send-v9.md)、[Camp History Retrieval v1](../contracts/camp-history-v1.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Gather v2](../contracts/gather-v2.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
+- **当前合同：** [Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v10](../contracts/camp-message-send-v10.md)、[Camp History Retrieval v2](../contracts/camp-history-v2.md)、[Current User Attention v4](../contracts/current-user-attention-v4.md)、[Gather v3](../contracts/gather-v3.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)
 
 <!-- adr-current-primary:begin topic=collaboration-task-message -->
 | ADR | Decision |
@@ -105,6 +105,7 @@ Related: ADR-0100 的 Session identity delivery 位于 session-context-bootstrap
 | [ADR-0193](0193-durable-gather-barrier-over-unified-message-delivery.md) | Durable Gather Barrier over Unified Message Delivery |
 | [ADR-0195](0195-generation-scoped-last-gather-return.md) | Generation-Scoped Last Gather Return with Independent Bound |
 | [ADR-0215](0215-unified-single-camp-history-target-and-publication-boundary.md) | Unified Single-Camp History Target and Public Message Publication Boundary |
+| [ADR-0216](0216-explicit-agent-addressing-intent-as-delivery-gate.md) | Explicit Agent Addressing Intent as the Delivery Gate |
 <!-- adr-current-primary:end -->
 
 Related: Context selection、Self/Peer identity 与 Runtime admission 从相应 primary 主题进入。
@@ -150,7 +151,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 
 - **何时阅读：** 修改 Native Session、Bootstrap、Dynamic Context、Profile、redelivery 或 accepted-input ACK 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Structured Current Input Skill Links](../architecture/structured-current-input-skill-links.md)、[Native Session Bootstrap Redelivery](../architecture/native-session-bootstrap-redelivery.md)、[Public A2A Message 与 Message Delivery](../architecture/public-a2a-message-delivery.md)
-- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)、[ContextManifest Evidence v16](../contracts/context-manifest-evidence-v16.md)、[Run Facts v1](../contracts/run-facts-v1.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
+- **当前合同：** [Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)、[Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)、[ContextManifest Evidence v17](../contracts/context-manifest-evidence-v17.md)、[Run Facts v1](../contracts/run-facts-v1.md)、[Collaboration State v2](../contracts/collaboration-state-v2.md)
 
 <!-- adr-current-primary:begin topic=session-context-bootstrap -->
 | ADR | Decision |
@@ -175,6 +176,7 @@ Related: Session redelivery、Skill/MCP projection 与 Qualification 分别保�
 | [ADR-0196](0196-self-contained-gather-completion-request.md) | Self-Contained Gather Request in Mandatory Completion Input |
 | [ADR-0200](0200-compact-context-projection-and-structured-run-facts.md) | Compact AgentRun Context Projection and Structured Run Facts |
 | [ADR-0203](0203-structured-current-input-skill-links.md) | Structured Current Input Skill Links |
+| [ADR-0218](0218-audience-specific-principal-message-projection.md) | Audience-Specific Principal Message Projection |
 <!-- adr-current-primary:end -->
 
 Related: Member identity、Message delivery、Memory entrypoint 与 Evidence 仍从各自 primary 主题进入。
@@ -206,7 +208,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 
 - **何时阅读：** 修改 Skill/MCP projection、Built-in transport、CLI、catalog 或 Agent output 时阅读。
 - **当前架构：** [Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md)、[Windows Desktop Platform](../architecture/windows-desktop-platform.md)
-- **当前合同：** [Built-in Tool Transport v14](../contracts/builtin-tool-transport-v14.md)、[Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)
+- **当前合同：** [Built-in Tool Transport v15](../contracts/builtin-tool-transport-v15.md)、[Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)
 
 <!-- adr-current-primary:begin topic=skills-mcp-builtins -->
 | ADR | Decision |
@@ -231,6 +233,7 @@ Related: Session entrypoint 与 Built-in operation 只作为交叉导航，不�
 | [ADR-0199](0199-session-semantic-four-message-review-duo.md) | Session-Semantic Four-Message Review Duo |
 | [ADR-0212](0212-cross-platform-local-ipc-transport-v14.md) | Cross-Platform Local IPC for Built-in Tool Transport v14 |
 | [ADR-0214](0214-crash-recoverable-windows-skill-projection.md) | Crash-Recoverable Windows Skill Projection |
+| [ADR-0217](0217-transport-v15-inherits-cross-platform-v14.md) | Built-in Tool Transport v15 Inherits the Cross-Platform v14 Wire |
 <!-- adr-current-primary:end -->
 
 Related: [ADR-0203](0203-structured-current-input-skill-links.md)在 Session/Context 主题拥有 primary，细化用户
@@ -289,7 +292,7 @@ Related: Runtime Activity 与 Execution Evidence 作为输入，不替代 Qualif
 
 - **何时阅读：** 修改产品身份、Renderer surface、Run detail 或稳定 UI/UX 合同时阅读。
 - **当前架构：** [Diagnostics Center](../architecture/diagnostics-center.md)；其他主题 architecture summary pending
-- **当前合同：** [Run Process Detail Surface v6](../contracts/run-process-detail-surface-v6.md)
+- **当前合同：** [Run Process Detail Surface v8](../contracts/run-process-detail-surface-v8.md)
 
 <!-- adr-current-primary:begin topic=product-renderer -->
 | ADR | Decision |

@@ -2,7 +2,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use anyhow::{Context, Result};
 use rusqlite::{OptionalExtension, Transaction, params};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -42,6 +42,31 @@ pub const CAMP_MESSAGE_SEND_TOOL_NAME: &str = "camp.message.send";
 pub const CAMP_MESSAGE_SEND_MAX_BODY_BYTES: usize = 32 * 1024;
 pub const CAMP_MESSAGE_SEND_MAX_FANOUT: usize = 16;
 pub const MESSAGE_DELIVERY_MAX_A2A_DEPTH: i64 = 5;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentAddressingMode {
+    #[default]
+    Automatic,
+    PublicOnly,
+}
+
+impl AgentAddressingMode {
+    pub fn from_public_only(public_only: bool) -> Self {
+        if public_only {
+            Self::PublicOnly
+        } else {
+            Self::Automatic
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Automatic => "automatic",
+            Self::PublicOnly => "public_only",
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -490,6 +515,7 @@ pub struct SendPublicA2aMessage<'a> {
     pub current_a2a_depth: i64,
     pub body: &'a str,
     pub explicit_recipients: &'a [String],
+    pub agent_addressing_mode: AgentAddressingMode,
     pub mention_user: bool,
     pub task_id: Option<&'a str>,
     pub operation: PublicA2aOperation<'a>,
@@ -570,20 +596,56 @@ pub fn persist_public_a2a_message(
             ));
         }
     }
+    if !is_gather && request.agent_addressing_mode == AgentAddressingMode::PublicOnly {
+        let mut conflicting_fields = Vec::new();
+        if !request.explicit_recipients.is_empty() {
+            conflicting_fields.push("to");
+        }
+        if request.task_id.is_some() {
+            conflicting_fields.push("taskId");
+        }
+        if !conflicting_fields.is_empty() {
+            return Ok(rejected_with_details(
+                "message.public_only_conflict",
+                "--public-only cannot be combined with Agent-routing inputs.",
+                json!({
+                    "conflictingFields": conflicting_fields,
+                    "newRequestIdRequired": true,
+                }),
+            ));
+        }
+    }
     let reply_to_camp_message_id =
         load_trigger_reply_reference(transaction, request.source_agent_run_id, request.camp_id)?;
-    let active_agents = load_active_camp_agents(transaction, request.camp_id)?;
+    let automatic_addressing =
+        is_gather || request.agent_addressing_mode == AgentAddressingMode::Automatic;
+    let active_agents = if automatic_addressing {
+        load_active_camp_agents(transaction, request.camp_id)?
+    } else {
+        Vec::new()
+    };
     let active_agent_ids = active_agents
         .iter()
         .map(|agent| agent.agent_id.clone())
         .collect::<HashSet<_>>();
-    let inline = parse_inline_addressing(request.body, &active_agents);
-    let explicit_order = stable_unique(
-        request
-            .explicit_recipients
-            .iter()
-            .map(|recipient| recipient.trim().to_string()),
-    );
+    let inline = if automatic_addressing {
+        parse_inline_addressing(request.body, &active_agents)
+    } else {
+        InlineAddressing {
+            occurrences: Vec::new(),
+            malformed: Vec::new(),
+        }
+    };
+    let explicit_order = if automatic_addressing {
+        stable_unique(
+            request
+                .explicit_recipients
+                .iter()
+                .map(|recipient| recipient.trim().to_string()),
+        )
+    } else {
+        Vec::new()
+    };
     let inline_order = stable_unique(
         inline
             .occurrences
@@ -620,8 +682,16 @@ pub fn persist_public_a2a_message(
     );
     candidate_sources.extend(inline_order.iter().cloned().map(|value| ("inline", value)));
 
-    let ancestor_agent_ids = load_lineage_agent_ids(transaction, request.source_agent_run_id)?;
-    let immediate_caller = load_immediate_caller(transaction, request.source_agent_run_id)?;
+    let ancestor_agent_ids = if automatic_addressing {
+        load_lineage_agent_ids(transaction, request.source_agent_run_id)?
+    } else {
+        BTreeSet::new()
+    };
+    let immediate_caller = if automatic_addressing {
+        load_immediate_caller(transaction, request.source_agent_run_id)?
+    } else {
+        None
+    };
     for (source, value) in &candidate_sources {
         let is_immediate_caller = !is_gather
             && immediate_caller
@@ -1015,11 +1085,12 @@ pub fn persist_public_a2a_message(
             reply_to_camp_message_id, camp_turn_id, agent_run_id,
             tombstoned_at, version, created_at, updated_at,
             effective_recipient_ids_json, recipient_set_digest,
-            recipient_presentation_json, source_operation_id
+            recipient_presentation_json, source_operation_id,
+            agent_addressing_mode
         ) VALUES (
             ?1, ?2, ?3, 'agent', ?4, ?5, ?6, ?7, ?8,
             ?9, ?10, ?11, ?12, ?5,
-            NULL, 1, ?13, ?13, ?10, ?14, ?15, ?16
+            NULL, 1, ?13, ?13, ?10, ?14, ?15, ?16, ?17
         )
         "#,
         params![
@@ -1039,6 +1110,11 @@ pub fn persist_public_a2a_message(
             recipient_set_digest,
             recipient_presentation_json,
             request.command_id,
+            if is_gather {
+                None
+            } else {
+                Some(request.agent_addressing_mode.as_str())
+            },
         ],
     )?;
     index_camp_message(
@@ -1296,12 +1372,18 @@ pub fn persist_public_a2a_message(
         &actor,
         Some(request.execution_epoch),
         &json!({
+            "schemaVersion": 2,
             "messageId": message_id,
             "campTurnId": request.camp_turn_id,
             "effectiveRecipients": effective_recipients,
             "recipientSetDigest": recipient_set_digest,
             "deliveryIds": delivery_ids,
-            "publicOnly": delivery_ids.is_empty(),
+            "recipientFree": delivery_ids.is_empty(),
+            "agentAddressingMode": if is_gather {
+                Value::Null
+            } else {
+                Value::String(request.agent_addressing_mode.as_str().to_string())
+            },
             "operation": if is_gather { "gather" } else { "send" },
         }),
     )?;
@@ -1349,6 +1431,7 @@ pub fn persist_public_a2a_message(
             "messageId": message_id,
             "visibility": "camp_public",
             "campTurnId": request.camp_turn_id,
+            "agentAddressingMode": request.agent_addressing_mode,
             "effectiveRecipients": effective_recipients,
             "recipientPresentation": recipient_presentation,
             "recipientSetDigest": recipient_set_digest,

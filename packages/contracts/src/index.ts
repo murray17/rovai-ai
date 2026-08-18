@@ -1194,12 +1194,15 @@ export interface ContextManifestView {
   skillExposureDigest: string
   currentInputSkillResolution: CurrentInputSkillResolution
   currentInputSkillResolutionDigest: string
+  messageProjectionAudience: 'agent_v1'
+  a2aGuidanceEvidence: unknown
+  a2aGuidanceEvidenceDigest: string
   mcpExposure: McpExposureSnapshot
   mcpExposureDigest: string
   mcpProjectionDigest: string
   selfActiveTaskEvidence: unknown
   selfActiveTaskEvidenceDigest: string
-  formatterVersion: 18
+  formatterVersion: 19
   renderedPayloadDigest: string
   delivery: RuntimeInputDeliveryView | null
   createdAt: string
@@ -1361,6 +1364,31 @@ export interface CampMessageAroundSnapshot {
 export interface CampMessageAroundParams {
   campId: string
   messageId: string
+}
+
+export interface CampMessageFindMatch {
+  messageId: string
+  messageSequence: number
+  occurrenceIndex: number
+  startOffset: number
+  endOffset: number
+}
+
+export interface CampMessageFindSnapshot {
+  schemaVersion: 1
+  throughGlobalSequence: number
+  campId: string
+  query: string
+  totalMatchCount: number
+  selectedMatchIndex: number | null
+  match: CampMessageFindMatch | null
+}
+
+export interface CampMessageFindParams {
+  campId: string
+  query: string
+  selectedMatchIndex?: number | null
+  anchorMessageId?: string | null
 }
 
 interface MessageDeliveryBaseView {
@@ -2279,6 +2307,7 @@ export type CoreMethod =
   | 'camps.snapshot'
   | 'camp.messages.page'
   | 'camp.messages.around'
+  | 'camp.messages.find'
   | 'agentRunEvidence.getContent'
   | 'agentRunEvidence.list'
   | 'tasks.create'

@@ -128,6 +128,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camps.snapshot',
   'camp.messages.page',
   'camp.messages.around',
+  'camp.messages.find',
   'agentRunEvidence.getContent',
   'agentRunEvidence.list',
   'tasks.create',

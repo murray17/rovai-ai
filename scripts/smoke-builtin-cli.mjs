@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -17,6 +17,9 @@ const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const skillLibraryRoot = join(fixtureRoot, 'skill-library')
 const historyMarker = 'ROVAI_BUILTIN_HISTORY_V1'
+const historyPublicA2aMarker = 'ROVAI_BUILTIN_HISTORY_PUBLIC_A2A_V1'
+const historyAttachmentMarker = 'ROVAI_BUILTIN_HISTORY_ATTACHMENT_V1'
+const historySeedCompletionMarker = 'ROVAI_BUILTIN_HISTORY_SEED_OK'
 const expectedOperations = [
   'camp.list',
   'camp.message.send',
@@ -123,6 +126,41 @@ try {
     execution: null
   })
 
+  const historySeedSpecification = runtimeSpecifications[0]
+  const historySeedScriptPath = join(projectRoot, 'seed-historical-public-a2a.sh')
+  const historySeedEvidencePath = join(projectRoot, '.historical-public-a2a-message-id')
+  await writeFile(
+    historySeedScriptPath,
+    historyPublicationScript({
+      recipientProfileId: historySeedSpecification.recipientProfileId,
+      marker: historyPublicA2aMarker,
+      completionMarker: historySeedCompletionMarker,
+      evidencePath: historySeedEvidencePath
+    }),
+    { mode: 0o755 }
+  )
+  await chmod(historySeedScriptPath, 0o755)
+  const historicalPublicA2a = await seedHistoricalPublicA2a(core, {
+    specification: historySeedSpecification,
+    campId: historyCampId,
+    scriptPath: historySeedScriptPath,
+    evidencePath: historySeedEvidencePath,
+    marker: historyPublicA2aMarker,
+    completionMarker: historySeedCompletionMarker
+  })
+
+  const historyAttachmentSourcePath = join(projectRoot, 'historical-attachment.txt')
+  await writeFile(
+    historyAttachmentSourcePath,
+    `${historyAttachmentMarker}: attachment content stays outside Agent output.\n`,
+    { mode: 0o600 }
+  )
+  const historicalAttachment = await createHistoricalAttachmentMessage(core.request, {
+    campId: historyCampId,
+    sourcePath: historyAttachmentSourcePath,
+    marker: historyAttachmentMarker
+  })
+
   for (const specification of runtimeSpecifications) {
     specification.currentMarker = `ROVAI_CURRENT_${specification.slug.toUpperCase()}_V1`
     specification.successMarker = `ROVAI_BUILTIN_CLI_${specification.slug.toUpperCase()}_OK`
@@ -153,6 +191,11 @@ try {
         ...specification,
         historyCampId,
         historyMarker,
+        historyPublicA2aMarker,
+        historyPublicA2aMessageId: historicalPublicA2a.messageId,
+        historyAttachmentMarker,
+        historyAttachmentMessageId: historicalAttachment.messageId,
+        historyAttachmentId: historicalAttachment.attachmentId,
         recipientProfileId: specification.recipientProfileId
       }),
       { mode: 0o755 }
@@ -175,6 +218,18 @@ try {
       marker: specification.successMarker,
       timeoutMs: 720_000
     })
+    const sourceManifest = sourceSnapshot.contextManifests.find((manifest) =>
+      manifest.agentRunId === source.agentRunId
+    )
+    if (specification.campId === historyCampId
+        || !sourceManifest
+        || !sourceManifest.historyCamps.some((camp) => camp.campId === historyCampId)) {
+      throw new Error(`${specification.adapterKind} did not freeze the historical Camp in the querying Run Manifest: ${JSON.stringify({
+        queryingCampId: specification.campId,
+        historyCampId,
+        sourceManifest
+      })}`)
+    }
     specification.installation = (await core.request('runtime.installations.list')).find((candidate) =>
       candidate.adapterKind === specification.adapterKind
         && candidate.installationClass === 'managed_default'
@@ -258,12 +313,24 @@ try {
     )) {
       throw new Error(`${specification.adapterKind} resumed lease did not execute camp.list`)
     }
+    const sendEvidence = JSON.parse(await readFile(specification.sendEvidencePath, 'utf8'))
+    const expectedSendMessageIds = new Set([
+      sendEvidence.publicMessageId,
+      sendEvidence.directUserOnlyMessageId,
+      sendEvidence.stdinUserOnlyMessageId
+    ])
     const successorExactReads = resumedEvidence.filter((entry) =>
       entry.payload?.canonicalTool === 'camp.read'
         && entry.payload?.status === 'completed'
         && entry.payload?.sourceAuthority === 'core'
+        && expectedSendMessageIds.has(
+          entry.payload?.operationProjection?.canonicalInput?.messageId
+        )
     )
-    if (successorExactReads.length !== 3) {
+    const verifiedSendMessageIds = new Set(successorExactReads.map((entry) =>
+      entry.payload.operationProjection.canonicalInput.messageId
+    ))
+    if (verifiedSendMessageIds.size !== expectedSendMessageIds.size) {
       throw new Error(`${specification.adapterKind} successor Run did not verify all three stable Send locators: ${JSON.stringify(resumedEvidence)}`)
     }
     const resumedContextPath = (await readFile(specification.resumeContextPathFile, 'utf8')).trim()
@@ -324,6 +391,10 @@ try {
       legacySendJsonRejected: true,
       sendInputSources: ['direct_flags', 'stdin', 'input_file'],
       exactAddressingVerifiedInSuccessorRun: true,
+      crossCampManifestId: sourceManifest.id,
+      historicalPublicA2aMessageId: historicalPublicA2a.messageId,
+      historicalAttachmentMessageId: historicalAttachment.messageId,
+      historicalAttachmentId: historicalAttachment.attachmentId,
       successorExactReadCount: successorExactReads.length,
       staleVersionConflict: true,
       initialLeaseFenced: true,
@@ -335,11 +406,19 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 13,
-    ipcProtocolVersion: 1,
+    contractVersion: 15,
+    ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
     expectedOperations,
+    historyEvidence: {
+      campId: historyCampId,
+      seedAdapterKind: historySeedSpecification.adapterKind,
+      publicA2aMessageId: historicalPublicA2a.messageId,
+      publicA2aDeliveryId: historicalPublicA2a.deliveryId,
+      attachmentMessageId: historicalAttachment.messageId,
+      attachmentId: historicalAttachment.attachmentId
+    },
     results,
     fixtureRetained: keepFixture ? fixtureRoot : null
   }, null, 2))
@@ -349,7 +428,10 @@ try {
   throw error
 } finally {
   if (core) await core.stop()
-  if (!keepFixture) await rm(fixtureRoot, { recursive: true, force: true })
+  if (!keepFixture) {
+    await makeAttachmentTreeRemovable(dataDir)
+    await rm(fixtureRoot, { recursive: true, force: true })
+  }
 }
 
 function nativeSessionIdForRun(events, agentRunId, startedEvent) {
@@ -368,9 +450,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v13')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v15')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v13: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v15: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -453,6 +535,100 @@ async function sendCampMessage(request, input) {
     draftRevision: saved.revision,
     execution: input.execution
   })
+}
+
+async function seedHistoricalPublicA2a(coreClient, input) {
+  const sent = await sendCampMessage(coreClient.request, {
+    campId: input.campId,
+    agentId: input.specification.agentId,
+    body: [
+      'Run the generated historical Public A2A seed script with your native shell tool.',
+      'The Runtime process already has the real ROVAI_AGENT_CLI, ROVAI_CLI_CONTEXT, and ROVAI_RUN_TMP lease environment.',
+      'Do not modify or replace the script.',
+      `/bin/bash ${JSON.stringify(input.scriptPath)}`,
+      `After it exits 0, reply with exactly ${input.completionMarker}.`
+    ].join('\n'),
+    execution: {
+      taskId: null,
+      purpose: 'Create one historical Public A2A through the real Built-in CLI and Message Delivery path.',
+      completionRole: 'required'
+    }
+  })
+  const commandResult = sent.commandResult ?? sent
+  const agentRunId = commandResult.payload?.agentRunIds?.[0]
+  if (commandResult.status !== 'accepted' || !agentRunId) {
+    throw new Error(`Historical Public A2A seed Run was not accepted: ${JSON.stringify(sent)}`)
+  }
+  const snapshot = await waitForRun(coreClient, input.campId, agentRunId, {
+    marker: input.completionMarker,
+    timeoutMs: 480_000
+  })
+  const messageId = (await readFile(input.evidencePath, 'utf8')).trim()
+  const message = snapshot.messages.find((candidate) => candidate.id === messageId)
+  const delivery = snapshot.messageDeliveries.find((candidate) =>
+    candidate.messageId === messageId
+      && candidate.deliveryKind === 'public_a2a'
+      && candidate.recipientAgentId === input.specification.recipientProfileId
+  )
+  const publication = snapshot.timeline.find((event) =>
+    event.eventType === 'camp_message.public_a2a_sent'
+      && event.entityId === messageId
+  )
+  if (message?.body !== input.marker
+      || message.sourceAgentRunId !== agentRunId
+      || !delivery
+      || !publication) {
+    throw new Error(`Historical Public A2A did not traverse Message Delivery and publication: ${JSON.stringify({
+      agentRunId,
+      messageId,
+      message,
+      delivery,
+      publication
+    })}`)
+  }
+  return { messageId, deliveryId: delivery.id, sourceAgentRunId: agentRunId }
+}
+
+async function createHistoricalAttachmentMessage(request, input) {
+  const draft = await request('camp.composerDraft.get', { campId: input.campId })
+  const prepared = await request('camp.attachments.prepareFromPath', {
+    campId: input.campId,
+    expectedRevision: draft.revision,
+    sourcePath: input.sourcePath,
+    displayName: 'historical-attachment.txt'
+  })
+  const attachment = prepared.attachments?.[0]
+  if (prepared.attachments?.length !== 1
+      || attachment?.state !== 'ready'
+      || attachment?.previewKind !== 'none') {
+    throw new Error(`Historical attachment preparation failed: ${JSON.stringify(prepared)}`)
+  }
+  const saved = await request('camp.composerDraft.save', {
+    campId: input.campId,
+    expectedRevision: prepared.revision,
+    content: [{ kind: 'text', text: input.marker }]
+  })
+  await request('camp.messages.send', {
+    commandId: crypto.randomUUID(),
+    campId: input.campId,
+    draftRevision: saved.revision,
+    execution: null
+  })
+  const snapshot = await request('camps.snapshot', { campId: input.campId })
+  const message = snapshot.messages.find((candidate) =>
+    candidate.body === input.marker
+      && candidate.attachments?.some((candidateAttachment) => candidateAttachment.id === attachment.id)
+  )
+  const projectedAttachment = message?.attachments?.find((candidate) => candidate.id === attachment.id)
+  if (!message
+      || projectedAttachment?.kind !== 'file'
+      || projectedAttachment.fileCount !== 1) {
+    throw new Error(`Historical attachment message was not persisted with its public shape: ${JSON.stringify({
+      attachment,
+      message
+    })}`)
+  }
+  return { messageId: message.id, attachmentId: attachment.id }
 }
 
 async function startVerificationRun(coreClient, specification, resumed) {
@@ -704,7 +880,9 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'camp.message.send':
       return {
         messageId: envelope.result.messageId,
-        effectiveRecipients: envelope.result.effectiveRecipients
+        agentAddressingMode: envelope.result.agentAddressingMode,
+        effectiveRecipients: envelope.result.effectiveRecipients,
+        deliveryIds: envelope.result.deliveryIds
       }
     case 'team.gather':
       return selectFields(envelope.result, [
@@ -776,6 +954,31 @@ function exitCodeAccepted(options, code) {
   return options.expectedCodes?.includes(code) ?? (code === expectedExitCode(options))
 }
 
+function historyPublicationScript(input) {
+  return `#!/bin/bash
+set -euo pipefail
+
+CLI="\${ROVAI_AGENT_CLI:?ROVAI_AGENT_CLI is required}"
+CONTEXT="\${ROVAI_CLI_CONTEXT:?ROVAI_CLI_CONTEXT is required}"
+RUN_TMP="\${ROVAI_RUN_TMP:?ROVAI_RUN_TMP is required}"
+JQ="$(command -v jq)"
+test -x "$CLI"
+test -f "$CONTEXT"
+test -d "$RUN_TMP"
+test "$(stat -f '%Lp' "$CONTEXT")" = "600"
+
+public_send="$("$CLI" send --to ${shellQuote(input.recipientProfileId)} --body ${shellQuote(input.marker)})"
+printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
+  (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
+  and .agentAddressingMode == "automatic"
+  and .effectiveRecipients == [$recipient]
+  and (.deliveryIds | length) == 1
+' >/dev/null
+printf '%s\n' "$public_send" | "$JQ" -er '.messageId' > ${shellQuote(input.evidencePath)}
+printf '%s\n' ${shellQuote(input.completionMarker)}
+`
+}
+
 function verificationScript(input) {
   const taskCreate = JSON.stringify({
     title: `CLI transport task ${input.adapterKind}`,
@@ -788,7 +991,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v13 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v15 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -799,9 +1002,8 @@ function verificationScript(input) {
     retrievalKeys: [`hearth-${input.slug.slice(0, 14)}`]
   })
   const publicSend = JSON.stringify({
-    body: `Run rovai send --to-user --body 'ROVAI_PUBLIC_A2A_${input.slug.toUpperCase()}_ACK' exactly once, then finish. Do not reply to another Agent.`,
-    to: [input.recipientProfileId],
-    mentionUser: true
+    body: `Publish exactly one important-result notification with rovai send --public-only --to-principal --body 'ROVAI_PUBLIC_A2A_${input.slug.toUpperCase()}_RESULT', then finish. Do not route to any Agent.`,
+    to: [input.recipientProfileId]
   })
   return `#!/bin/bash
 set -euo pipefail
@@ -832,7 +1034,10 @@ assert_success() {
     and (has("result") | not)
     and (has("error") | not)
     and (if $operation == "camp.message.send"
-         then (.messageId | type) == "string" and (.effectiveRecipients | type) == "array"
+         then (.messageId | type) == "string"
+           and (.agentAddressingMode == "automatic" or .agentAddressingMode == "public_only")
+           and (.effectiveRecipients | type) == "array"
+           and (.deliveryIds | type) == "array"
          elif $operation == "memory.write"
          then ((.outcome == "effective" and (.memoryId | type) == "string" and (.revisionId | type) == "string")
            or (.outcome == "review_pending" and (.reviewItemId | type) == "string"))
@@ -855,22 +1060,25 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v13 ipc-v1'
+"$CLI" --version | grep -q 'contract-v15 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
 printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry.")}
 send_help="$("$CLI" send --help)"
-printf '%s\n' "$send_help" | grep -Fq -- '--to-user'
-printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary Camp messages are already visible to the user.'
-printf '%s\n' "$send_help" | grep -Fq -- 'exact active Camp member @display-name alias is accepted only as the first non-whitespace token on a line'
-printf '%s\n' "$send_help" | grep -Fq -- 'put trailing routing on a dedicated final line'
-printf '%s\n' "$send_help" | grep -Fq -- '[] means no Agent was routed.'
-printf '%s\n' "$send_help" | grep -Fq -- 'User attention is message-local and is never inherited'
-printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please review and report back'"
-if printf '%s\n' "$send_help" | grep -Fq -- 'rovai send --to agent_5 --to-user'; then
+printf '%s\n' "$send_help" | grep -Fq -- '--public-only'
+printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'
+if printf '%s\n' "$send_help" | grep -Fq -- '--to-user'; then
   exit 1
 fi
+printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary public Camp messages are already visible to the Principal.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Guarantee that this public message wakes no Agent.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Agent addressing schedules concrete continuing work, not CC.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Always inspect agentAddressingMode, effectiveRecipients, and deliveryIds.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Principal attention is message-local and is never inherited'
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --public-only --body 'Final conclusion: the failure is a client-version regression.'"
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'"
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'"
 gather_help="$("$CLI" gather --help)"
 printf '%s\n' "$gather_help" | grep -Eq -- '--to[[:space:]]+field=to type=array repeatable'
 printf '%s\n' "$gather_help" | grep -Fq -- 'Gather is asynchronous.'
@@ -1001,22 +1209,58 @@ camp_read="$("$CLI" camp read --input-file "$RUN_TMP/camp-read.json")"
 assert_success "$camp_read" 'camp.read'
 printf '%s\n' "$camp_read" | "$JQ" -e --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" '.campId == $campId and .items[0].messageId == $messageId' >/dev/null
 
-STEP=history_search
-history_search="$("$CLI" history search --query ${shellQuote(input.historyMarker)} --limit 5)"
+STEP=history_search_public_a2a
+history_search="$("$CLI" history search --query ${shellQuote(input.historyPublicA2aMarker)} --limit 5)"
 assert_success "$history_search" 'history.search'
-printf '%s\n' "$history_search" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} '.results | any(.campId == $campId)' >/dev/null
-history_message_id="$(printf '%s\n' "$history_search" | "$JQ" -er --arg campId ${shellQuote(input.historyCampId)} '.results | map(select(.campId == $campId))[0].messageId')"
-STEP=camp_search_historical
-camp_search_historical="$("$CLI" camp search --camp-id ${shellQuote(input.historyCampId)} --query ${shellQuote(input.historyMarker)} --limit 5)"
+printf '%s\n' "$history_search" | "$JQ" -e \
+  --arg campId ${shellQuote(input.historyCampId)} \
+  --arg messageId ${shellQuote(input.historyPublicA2aMessageId)} \
+  '.results | any(.campId == $campId and .messageId == $messageId)' >/dev/null
+STEP=camp_search_historical_public_a2a
+camp_search_historical="$("$CLI" camp search --camp-id ${shellQuote(input.historyCampId)} --query ${shellQuote(input.historyPublicA2aMarker)} --limit 5)"
 assert_success "$camp_search_historical" 'camp.search'
-printf '%s\n' "$camp_search_historical" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} --arg messageId "$history_message_id" '
+printf '%s\n' "$camp_search_historical" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} --arg messageId ${shellQuote(input.historyPublicA2aMessageId)} '
   .results | any(.campId == $campId and .messageId == $messageId and (has("campTitle") | not))
 ' >/dev/null
-STEP=camp_read_historical
-camp_read_historical="$("$CLI" camp read --camp-id ${shellQuote(input.historyCampId)} --mode item --message-id "$history_message_id")"
+STEP=camp_read_historical_public_a2a
+camp_read_historical="$("$CLI" camp read --camp-id ${shellQuote(input.historyCampId)} --mode item --message-id ${shellQuote(input.historyPublicA2aMessageId)})"
 assert_success "$camp_read_historical" 'camp.read'
-printf '%s\n' "$camp_read_historical" | "$JQ" -e --arg campId ${shellQuote(input.historyCampId)} --arg messageId "$history_message_id" '
-  .campId == $campId and .items[0].messageId == $messageId
+printf '%s\n' "$camp_read_historical" | "$JQ" -e \
+  --arg campId ${shellQuote(input.historyCampId)} \
+  --arg messageId ${shellQuote(input.historyPublicA2aMessageId)} \
+  --arg body ${shellQuote(input.historyPublicA2aMarker)} '
+  .campId == $campId
+  and .items[0].messageId == $messageId
+  and .items[0].authorType == "agent"
+  and .items[0].body == $body
+' >/dev/null
+
+STEP=camp_search_historical_attachment
+camp_search_historical_attachment="$("$CLI" camp search --camp-id ${shellQuote(input.historyCampId)} --query ${shellQuote(input.historyAttachmentMarker)} --limit 5)"
+assert_success "$camp_search_historical_attachment" 'camp.search'
+printf '%s\n' "$camp_search_historical_attachment" | "$JQ" -e --arg messageId ${shellQuote(input.historyAttachmentMessageId)} '
+  .results | any(.messageId == $messageId and (has("campTitle") | not))
+' >/dev/null
+STEP=camp_read_historical_attachment
+camp_read_historical_attachment="$("$CLI" camp read --camp-id ${shellQuote(input.historyCampId)} --mode item --message-id ${shellQuote(input.historyAttachmentMessageId)})"
+assert_success "$camp_read_historical_attachment" 'camp.read'
+printf '%s\n' "$camp_read_historical_attachment" | "$JQ" -e \
+  --arg campId ${shellQuote(input.historyCampId)} \
+  --arg messageId ${shellQuote(input.historyAttachmentMessageId)} \
+  --arg attachmentId ${shellQuote(input.historyAttachmentId)} \
+  --arg body ${shellQuote(input.historyAttachmentMarker)} '
+  .campId == $campId
+  and .items[0].messageId == $messageId
+  and .items[0].body == $body
+  and .items[0].attachmentCount == 1
+  and .items[0].attachmentsTruncated == false
+  and .items[0].attachmentOmittedCount == 0
+  and (.items[0].attachments | length) == 1
+  and .items[0].attachments[0].attachmentId == $attachmentId
+  and .items[0].attachments[0].name == "historical-attachment.txt"
+  and .items[0].attachments[0].kind == "file"
+  and .items[0].attachments[0].fileCount == 1
+  and (.items[0].attachments[0].mediaType | startswith("text/plain"))
 ' >/dev/null
 
 cat > "$RUN_TMP/public-send.json" <<'ROVAI_JSON'
@@ -1026,8 +1270,10 @@ STEP=camp_message_send
 public_send="$("$CLI" send --input-file "$RUN_TMP/public-send.json")"
 assert_success "$public_send" 'camp.message.send'
 printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
-  (keys | sort) == ["effectiveRecipients", "messageId"]
+  (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
+  and .agentAddressingMode == "automatic"
   and .effectiveRecipients == [$recipient]
+  and (.deliveryIds | length) == 1
 ' >/dev/null
 public_message_id="$(printf '%s\n' "$public_send" | "$JQ" -er '.messageId')"
 
@@ -1043,18 +1289,25 @@ printf '%s\n' "$gather_result" | "$JQ" -e --arg recipient ${shellQuote(input.rec
 ' >/dev/null
 gather_id="$(printf '%s\n' "$gather_result" | "$JQ" -er '.gatherId')"
 
-STEP=camp_message_send_direct_user_only
-user_only="$("$CLI" send --to-user --body ${shellQuote(`Direct user-only ${input.adapterKind}`)})"
+STEP=camp_message_send_direct_public_only_principal
+user_only="$("$CLI" send --public-only --to-principal --body ${shellQuote(`Direct Principal decision ${input.adapterKind}`)})"
 assert_success "$user_only" 'camp.message.send'
 printf '%s\n' "$user_only" | "$JQ" -e '
-  (keys | sort) == ["effectiveRecipients", "messageId"]
+  (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
+  and .agentAddressingMode == "public_only"
   and .effectiveRecipients == []
+  and .deliveryIds == []
 ' >/dev/null
 user_only_id="$(printf '%s\n' "$user_only" | "$JQ" -er '.messageId')"
 
-STEP=camp_message_send_stdin_user_only
-stdin_user_only="$(printf '%s\n' ${shellQuote(JSON.stringify({ body: `Stdin user-only ${input.adapterKind}`, mentionUser: true }))} | "$CLI" send)"
+STEP=camp_message_send_stdin_public_only_principal
+stdin_user_only="$(printf '%s\n' ${shellQuote(JSON.stringify({ body: `Stdin Principal decision ${input.adapterKind}`, mentionUser: true, publicOnly: true }))} | "$CLI" send)"
 assert_success "$stdin_user_only" 'camp.message.send'
+printf '%s\n' "$stdin_user_only" | "$JQ" -e '
+  .agentAddressingMode == "public_only"
+  and .effectiveRecipients == []
+  and .deliveryIds == []
+' >/dev/null
 stdin_user_only_id="$(printf '%s\n' "$stdin_user_only" | "$JQ" -er '.messageId')"
 
 STEP=freeze_send_locators
@@ -1157,7 +1410,7 @@ printf '%s\n' "$public_read" | "$JQ" -e \
   --arg recipient ${shellQuote(input.recipientProfileId)} '
     .items[0].messageId == $messageId
     and .items[0].addressing.effectiveAgentRecipients == [$recipient]
-    and .items[0].addressing.mentionsCurrentUser == true
+    and .items[0].addressing.mentionsCurrentUser == false
   ' >/dev/null
 
 for key in directUserOnlyMessageId stdinUserOnlyMessageId; do
@@ -1268,4 +1521,16 @@ async function runCapture(command, args, options = {}) {
 
 function delay(milliseconds) {
   return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
+}
+
+async function makeAttachmentTreeRemovable(dataDirectory) {
+  await makeDirectoryTreeRemovable(join(dataDirectory, 'camp-attachments'))
+}
+
+async function makeDirectoryTreeRemovable(directory) {
+  await chmod(directory, 0o700).catch(() => undefined)
+  const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+  await Promise.all(entries
+    .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink())
+    .map((entry) => makeDirectoryTreeRemovable(join(directory, entry.name))))
 }

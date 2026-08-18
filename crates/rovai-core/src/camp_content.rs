@@ -7,6 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::command::canonical_json_digest;
 use crate::current_user::{CURRENT_USER_ID, CurrentUserResolver};
 
+pub const AGENT_MESSAGE_PROJECTION_AUDIENCE: &str = "agent_v1";
+pub const AGENT_PRINCIPAL_DISPLAY_NAME: &str = "Principal";
+
 pub type StructuredCampMessageContent = Vec<StructuredCampMessageSegment>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +211,22 @@ pub fn render_current_plain_text(
     )
 }
 
+/// Renders Structured Camp Message Content for an Agent-owned surface.
+///
+/// Current User Mentions remain structured at rest. Only this projection seam
+/// presents that identity as the stable Agent-facing `@Principal` token; human
+/// projections continue to use the localized current-user display name.
+pub fn render_agent_plain_text(
+    connection: &Connection,
+    content: &[StructuredCampMessageSegment],
+) -> Result<String> {
+    render_plain_text_for_connection_with_current_user(
+        connection,
+        content,
+        AGENT_PRINCIPAL_DISPLAY_NAME,
+    )
+}
+
 fn render_plain_text_for_connection_with_current_user(
     connection: &Connection,
     content: &[StructuredCampMessageSegment],
@@ -286,7 +305,7 @@ pub fn canonical_content_digest(content: &[StructuredCampMessageSegment]) -> Res
 mod tests {
     use super::{
         StructuredCampMessageSegment as Segment, canonical_content_digest, member_mention_ids,
-        mentions_current_user, normalize_content, render_plain_text,
+        mentions_current_user, normalize_content, render_agent_plain_text, render_plain_text,
         render_plain_text_with_current_user, validate_content, validate_user_authored_content,
     };
     use crate::current_user::CURRENT_USER_ID;
@@ -440,6 +459,11 @@ mod tests {
         assert_eq!(
             render_plain_text_with_current_user(&content, |_| None, "You").unwrap(),
             "@You 请选择方案"
+        );
+        let connection = Connection::open_in_memory().unwrap();
+        assert_eq!(
+            render_agent_plain_text(&connection, &content).unwrap(),
+            "@Principal 请选择方案"
         );
         assert_eq!(digest, canonical_content_digest(&content).unwrap());
     }

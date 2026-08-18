@@ -77,7 +77,7 @@ export function relativeTimeLabel(iso: string, now: Date = new Date()): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`
 }
 
-export type ActivityStatus = 'running' | 'completed' | 'failed' | 'waiting' | 'recorded'
+export type ActivityStatus = 'running' | 'completed' | 'failed' | 'waiting' | 'stopped' | 'recorded'
 
 export type LiveRuntimeEvent = {
   id: string
@@ -124,6 +124,15 @@ export type GitStatusEntry = {
 export type SemanticStatus = {
   label: string
   tone: 'neutral' | 'info' | 'attention' | 'success' | 'danger'
+}
+
+export function activityStatusForAgentRun(
+  activityStatus: ActivityStatus,
+  agentRunStatus: AgentRunView['status']
+): ActivityStatus {
+  return agentRunStatus === 'cancelled' && activityStatus === 'running'
+    ? 'stopped'
+    : activityStatus
 }
 
 export function agentRunPresentation(
@@ -350,7 +359,7 @@ export function buildLiveExecutionProgress(
       const rawOutput = stringField(item, 'aggregatedOutput')
         ?? stringField(item, 'output')
       const structuredOutput = rawOutput === null && item.output != null
-        ? jsonPreview(item.output)
+        ? fullEvidenceValue(item.output)
         : null
       const detail = rawOutput !== null
         ? stripAnsi(rawOutput)
@@ -382,11 +391,7 @@ export function buildLiveExecutionProgress(
       upsertStep({
         id: itemId,
         title,
-        detail: Object.prototype.hasOwnProperty.call(payload, 'output') && payload.output != null
-          ? jsonPreview(payload.output)
-          : Object.prototype.hasOwnProperty.call(payload, 'input') && payload.input != null
-            ? jsonPreview(payload.input)
-            : '',
+        detail: runtimeActionEvidenceText(payload) ?? '',
         status: canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType)),
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
@@ -412,7 +417,7 @@ export function buildLiveExecutionProgress(
     }
   }
 
-  const stepById = new Map(steps.slice(-12).map((step) => [step.id, step]))
+  const stepById = new Map(steps.map((step) => [step.id, step]))
   const items = itemOrder.flatMap((key): ExecutionProgressItem[] => {
     if (key === 'plan') {
       const explanation = planExplanation.trim().slice(-2_000)
@@ -555,11 +560,6 @@ export function statusLabel(status: string): string {
   return ({ pending: '已排队', in_progress: '进行中', running: '执行中', waiting: '等待处理', completed: '已完成', succeeded: '已完成', failed: '失败', cancelled: '已取消' } as Record<string, string>)[status] ?? status
 }
 
-export function jsonPreview(value: unknown): string {
-  const text = JSON.stringify(value, null, 2) ?? String(value)
-  return text.length > 8_000 ? `${text.slice(0, 8_000)}\n…（已截断）` : text
-}
-
 function stripAnsi(value: string): string {
   return value.replace(/\u001B(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007]*(?:\u0007|\u001B\\))/g, '')
 }
@@ -601,6 +601,27 @@ function fullEvidenceValue(value: unknown): string | null {
   return JSON.stringify(value, null, 2) ?? String(value)
 }
 
+function runtimeActionEvidenceText(payload: Record<string, unknown>): string | null {
+  const coreOwnedBuiltIn = stringField(payload, 'sourceAuthority') === 'core'
+    && stringField(payload, 'canonicalTool') !== null
+  if (coreOwnedBuiltIn) {
+    const coreEnvelope = asRecord(payload.coreEnvelope)
+    if (Object.prototype.hasOwnProperty.call(coreEnvelope, 'result') && coreEnvelope.result != null) {
+      return fullEvidenceValue(coreEnvelope.result)
+    }
+    if (Object.prototype.hasOwnProperty.call(coreEnvelope, 'error') && coreEnvelope.error != null) {
+      return fullEvidenceValue(coreEnvelope.error)
+    }
+    const operationProjection = asRecord(payload.operationProjection)
+    if (Object.prototype.hasOwnProperty.call(operationProjection, 'canonicalResult')
+      && operationProjection.canonicalResult != null) {
+      return fullEvidenceValue(operationProjection.canonicalResult)
+    }
+  }
+  return fullEvidenceValue(payload.output)
+    ?? fullEvidenceValue(payload.input)
+}
+
 export function executionEvidenceCopyText(
   eventType: AgentRunExecutionEvidenceView['eventType'],
   payloadValue: unknown
@@ -616,8 +637,7 @@ export function executionEvidenceCopyText(
       ?? stringField(item, 'status')
   }
   if (eventType === 'runtime.action') {
-    return fullEvidenceValue(payload.output)
-      ?? fullEvidenceValue(payload.input)
+    return runtimeActionEvidenceText(payload)
   }
   if (eventType === 'command.output.delta') {
     return fullEvidenceValue(payload.delta ?? payload.output)
@@ -691,6 +711,7 @@ function canonicalActivityStatus(
   if (!canonical) return fallback
   if (canonical.outcome === 'failed') return 'failed'
   if (canonical.outcome === 'succeeded') return 'completed'
+  if (canonical.outcome === 'cancelled') return 'stopped'
   if (canonical.outcome !== 'unknown') return 'recorded'
   if (canonical.phase === 'started' || canonical.phase === 'progress') return 'running'
   return canonical.phase === 'terminal' ? 'recorded' : fallback

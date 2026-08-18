@@ -4,7 +4,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, OnceLock},
 };
 
 const BUILTIN_TOOL_REPLAY_CACHE_CAPACITY: usize = 1_024;
@@ -14,7 +14,7 @@ use rovai_core::{
     builtin_tool_transport::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION, BuiltinToolAuth,
         BuiltinToolCliContext, BuiltinToolInvocationEnvelope, BuiltinToolLeaseContext,
-        ROVAI_AGENT_CLI_ENV, ROVAI_CLI_CONTEXT_ENV, ROVAI_RUN_TMP_ENV,
+        LocalIpcEndpoint, ROVAI_AGENT_CLI_ENV, ROVAI_CLI_CONTEXT_ENV, ROVAI_RUN_TMP_ENV,
     },
     command::canonical_json_digest,
     team_tool::BuiltinToolBindingCredential,
@@ -33,7 +33,7 @@ pub(crate) struct BuiltinToolProcessConfig {
 
 struct BuiltinToolProcessConfigInner {
     cli_executable: PathBuf,
-    core_socket: PathBuf,
+    core_endpoint: LocalIpcEndpoint,
     process_root: PathBuf,
     context_path: PathBuf,
     run_tmp: PathBuf,
@@ -61,15 +61,13 @@ impl Drop for BuiltinToolProcessConfigInner {
 impl BuiltinToolProcessConfig {
     pub(crate) fn create(
         cli_executable: &Path,
-        core_socket: &Path,
+        core_endpoint: &LocalIpcEndpoint,
         private_root: &Path,
     ) -> Result<Self> {
-        if !cli_executable.is_absolute()
-            || !core_socket.is_absolute()
-            || !private_root.is_absolute()
-        {
+        if !cli_executable.is_absolute() || !private_root.is_absolute() {
             bail!("Built-in Tool process paths must be absolute");
         }
+        core_endpoint.validate()?;
         if !cli_executable.is_file() {
             bail!(
                 "bundled Rovai Agent CLI is unavailable: {}",
@@ -91,7 +89,7 @@ impl BuiltinToolProcessConfig {
         let config = Self {
             inner: Arc::new(BuiltinToolProcessConfigInner {
                 cli_executable: cli_executable.to_path_buf(),
-                core_socket: core_socket.to_path_buf(),
+                core_endpoint: core_endpoint.clone(),
                 context_path: process_root.join("context.json"),
                 run_tmp,
                 process_root,
@@ -150,7 +148,7 @@ impl BuiltinToolProcessConfig {
         let document = BuiltinToolCliContext {
             contract_version: BUILTIN_TOOL_CONTRACT_VERSION,
             ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
-            core_socket: self.inner.core_socket.to_string_lossy().into_owned(),
+            core_endpoint: self.inner.core_endpoint.clone(),
             process_id: self.inner.process_id.clone(),
             process_token: self.inner.process_token.clone(),
             lease,
@@ -449,10 +447,32 @@ pub(crate) fn bundled_cli_executable() -> Result<PathBuf> {
     Ok(directory.join(name))
 }
 
-pub(crate) fn builtin_tool_socket_path() -> PathBuf {
-    PathBuf::from("/tmp")
-        .join(format!("rovai-builtin-{}", std::process::id()))
-        .join("core.sock")
+pub(crate) fn builtin_tool_endpoint() -> LocalIpcEndpoint {
+    static ENDPOINT: OnceLock<LocalIpcEndpoint> = OnceLock::new();
+    ENDPOINT
+        .get_or_init(|| {
+            #[cfg(windows)]
+            {
+                LocalIpcEndpoint::WindowsNamedPipe {
+                    name: format!(
+                        r"\\.\pipe\rovai-ai-{}-{}",
+                        std::process::id(),
+                        uuid::Uuid::new_v4()
+                    ),
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                LocalIpcEndpoint::UnixSocket {
+                    path: PathBuf::from("/tmp")
+                        .join(format!("rovai-builtin-{}", std::process::id()))
+                        .join("core.sock")
+                        .to_string_lossy()
+                        .into_owned(),
+                }
+            }
+        })
+        .clone()
 }
 
 pub(crate) fn request_digest(operation: &str, input: &serde_json::Value) -> Result<String> {
@@ -538,9 +558,10 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("rovai-builtin-test-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
-        let config =
-            BuiltinToolProcessConfig::create(&executable(), &root.join("core.sock"), &root)
-                .unwrap();
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: root.join("core.sock").to_string_lossy().into_owned(),
+        };
+        let config = BuiltinToolProcessConfig::create(&executable(), &endpoint, &root).unwrap();
         let registry = BuiltinToolLeaseRegistry::default();
         let first = registry
             .bind(&config, "run-1", 1, &binding())

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.06
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-18
 > [实施计划](implementation-plan.md)完成。
 >
 > 前置版本：[v1.05 Windows x64 平台闭环](../v1.05/README.md)
+>
+> 后续版本：[v1.07 A2A Public-only 与 Principal 投影提案](../v1.07/README.md)
 
 ## 版本目标
 

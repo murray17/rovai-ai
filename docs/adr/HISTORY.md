@@ -227,4 +227,7 @@ generated_from: docs/adr-front-matter
 | [ADR-0213](0213-windows-local-private-storage.md) | Windows Local Private Storage and Filesystem Admission | `accepted` | `cross-version` | [v1.05](../versions/v1.05/README.md) | — |
 | [ADR-0214](0214-crash-recoverable-windows-skill-projection.md) | Crash-Recoverable Windows Skill Projection | `accepted` | `cross-version` | [v1.05](../versions/v1.05/README.md) | — |
 | [ADR-0215](0215-unified-single-camp-history-target-and-publication-boundary.md) | Unified Single-Camp History Target and Public Message Publication Boundary | `accepted` | `cross-version` | [v1.06](../versions/v1.06/README.md) | — |
+| [ADR-0216](0216-explicit-agent-addressing-intent-as-delivery-gate.md) | Explicit Agent Addressing Intent as the Delivery Gate | `accepted` | `cross-version` | [v1.07](../versions/v1.07/README.md) | — |
+| [ADR-0217](0217-transport-v15-inherits-cross-platform-v14.md) | Built-in Tool Transport v15 Inherits the Cross-Platform v14 Wire | `accepted` | `cross-version` | [v1.07](../versions/v1.07/README.md) | — |
+| [ADR-0218](0218-audience-specific-principal-message-projection.md) | Audience-Specific Principal Message Projection | `accepted` | `cross-version` | [v1.07](../versions/v1.07/README.md) | — |
 <!-- adr-history:end -->

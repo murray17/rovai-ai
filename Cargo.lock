@@ -786,6 +786,7 @@ dependencies = [
  "toml",
  "url",
  "uuid",
+ "windows-sys",
 ]
 
 [[package]]

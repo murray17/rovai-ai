@@ -12,7 +12,10 @@ use crate::{
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
     },
-    camp_message_send_teaching::CAMP_MESSAGE_SEND_TO_USER_SCHEMA_DESCRIPTION,
+    camp_message_send_teaching::{
+        CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION,
+        CAMP_MESSAGE_SEND_TO_PRINCIPAL_SCHEMA_DESCRIPTION,
+    },
     collaboration::{
         CollaborationService, CreateTaskCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
         TaskAssigneeUpdate, TaskDetail, TaskListPage, TaskListQuery, TaskStatus, UpdateTaskCommand,
@@ -27,8 +30,9 @@ use crate::{
     gather::GATHER_TOOL_NAME,
     member_studio::MEMBER_CREATE_TOOL_NAME,
     message_delivery::{
-        CAMP_MESSAGE_SEND_MAX_BODY_BYTES, CAMP_MESSAGE_SEND_TOOL_NAME, PublicA2aOperation,
-        SendPublicA2aMessage, dispatch_accepted_deliveries, persist_public_a2a_message,
+        AgentAddressingMode, CAMP_MESSAGE_SEND_MAX_BODY_BYTES, CAMP_MESSAGE_SEND_TOOL_NAME,
+        PublicA2aOperation, SendPublicA2aMessage, dispatch_accepted_deliveries,
+        persist_public_a2a_message,
     },
 };
 
@@ -68,6 +72,8 @@ pub struct CampMessageSendInput {
     pub to: Vec<String>,
     #[serde(default)]
     pub mention_user: bool,
+    #[serde(default)]
+    pub public_only: bool,
     pub task_id: Option<String>,
 }
 
@@ -148,6 +154,7 @@ pub struct CampMessageSendCommand {
     body: String,
     to: Vec<String>,
     mention_user: bool,
+    agent_addressing_mode: AgentAddressingMode,
     task_id: Option<String>,
 }
 
@@ -498,7 +505,12 @@ impl TeamToolService {
                 "mentionUser": {
                     "type": "boolean",
                     "default": false,
-                    "description": CAMP_MESSAGE_SEND_TO_USER_SCHEMA_DESCRIPTION
+                    "description": CAMP_MESSAGE_SEND_TO_PRINCIPAL_SCHEMA_DESCRIPTION
+                },
+                "publicOnly": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": CAMP_MESSAGE_SEND_PUBLIC_ONLY_SCHEMA_DESCRIPTION
                 },
                 "taskId": {
                     "type": "string",
@@ -1028,6 +1040,9 @@ impl TeamToolService {
                 body: invocation.input.body.clone(),
                 to: invocation.input.to.clone(),
                 mention_user: invocation.input.mention_user,
+                agent_addressing_mode: AgentAddressingMode::from_public_only(
+                    invocation.input.public_only,
+                ),
                 task_id: invocation.input.task_id.clone(),
             };
             let replay_envelope = CommandEnvelope {
@@ -1061,6 +1076,9 @@ impl TeamToolService {
             body: invocation.input.body.clone(),
             to: invocation.input.to.clone(),
             mention_user: invocation.input.mention_user,
+            agent_addressing_mode: AgentAddressingMode::from_public_only(
+                invocation.input.public_only,
+            ),
             task_id: invocation.input.task_id.clone(),
         };
         let envelope = CommandEnvelope {
@@ -1122,6 +1140,7 @@ impl TeamToolService {
                     current_a2a_depth: current.a2a_depth,
                     body: &envelope.payload.body,
                     explicit_recipients: &envelope.payload.to,
+                    agent_addressing_mode: envelope.payload.agent_addressing_mode,
                     mention_user: envelope.payload.mention_user,
                     task_id: envelope.payload.task_id.as_deref(),
                     operation: PublicA2aOperation::Send,
@@ -1292,6 +1311,7 @@ impl TeamToolService {
                     current_a2a_depth: current.a2a_depth,
                     body: &envelope.payload.body,
                     explicit_recipients: &envelope.payload.to,
+                    agent_addressing_mode: AgentAddressingMode::Automatic,
                     mention_user: false,
                     task_id: None,
                     operation: PublicA2aOperation::Gather {
@@ -1607,7 +1627,7 @@ fn validate_public_send_invocation(invocation: &CampMessageSendInvocation) -> Re
             "Public message body exceeds the 32 KiB send limit",
         ));
     }
-    if invocation.input.to.len() > 16 {
+    if !invocation.input.public_only && invocation.input.to.len() > 16 {
         return Err(invocation_error(
             "message.fanout_exceeded",
             "The explicit recipient input exceeds the absolute fanout limit of 16",
@@ -2167,6 +2187,7 @@ mod tests {
                     body: body.to_string(),
                     to: to.iter().map(|value| (*value).to_string()).collect(),
                     mention_user: false,
+                    public_only: false,
                     task_id: None,
                 },
             }
@@ -2720,6 +2741,163 @@ mod tests {
         assert_eq!(durable_replay.result.payload["messageId"], message_id);
     }
 
+    #[test]
+    fn public_only_rejects_routing_fields_and_bypasses_every_agent_addressing_effect() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let before: (i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*),
+                       (SELECT SUM(a2a_run_slots_allocated) FROM camp_turn)
+                FROM camp_message
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        let mut conflict = fixture.public_send_invocation(
+            "public-only-conflict",
+            "must not persist",
+            &["agent_2"],
+        );
+        conflict.input.public_only = true;
+        conflict.input.task_id = Some("task-not-loaded".to_string());
+        let rejected = service
+            .send_public_message(&mut fixture.database, &conflict)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "message.public_only_conflict");
+        assert_eq!(
+            rejected.result.payload,
+            json!({
+                "message": "--public-only cannot be combined with Agent-routing inputs.",
+                "details": {
+                    "conflictingFields": ["to", "taskId"],
+                    "newRequestIdRequired": true,
+                }
+            })
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            before.0
+        );
+
+        let literal_body = "@agent_2 谢谢\n@芝士 收口";
+        let mut invocation = fixture.public_send_invocation(
+            "public-only-literal-agent-lookalikes",
+            literal_body,
+            &[],
+        );
+        invocation.input.public_only = true;
+        invocation.input.mention_user = true;
+        let sent = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        assert_eq!(sent.result.payload["agentAddressingMode"], "public_only");
+        assert_eq!(sent.result.payload["effectiveRecipients"], json!([]));
+        assert_eq!(sent.result.payload["deliveryIds"], json!([]));
+        let message_id = sent.result.payload["messageId"].as_str().unwrap();
+        let persisted: (String, String, String, String, i64, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT body, structured_content_json, agent_addressing_mode,
+                       effective_recipient_ids_json,
+                       (SELECT COUNT(*) FROM camp_message_mention
+                        WHERE camp_message_id = message.id),
+                       (SELECT COUNT(*) FROM message_delivery
+                        WHERE message_id = message.id)
+                FROM camp_message AS message
+                WHERE id = ?1
+                "#,
+                [message_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(persisted.0, format!("@你 {literal_body}"));
+        assert_eq!(
+            serde_json::from_str::<Value>(&persisted.1).unwrap(),
+            json!([
+                {"kind": "current_user_mention", "userId": "local_user"},
+                {"kind": "text", "text": literal_body},
+            ])
+        );
+        assert_eq!(persisted.2, "public_only");
+        assert_eq!(persisted.3, "[]");
+        assert_eq!(persisted.4, 0);
+        assert_eq!(persisted.5, 0);
+        let event: Value = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT payload_json FROM event_log
+                WHERE event_type = 'camp_message.public_a2a_sent'
+                  AND entity_id = ?1
+                "#,
+                [message_id],
+                |row| row.get::<_, String>(0),
+            )
+            .map(|payload| serde_json::from_str(&payload).unwrap())
+            .unwrap();
+        assert_eq!(event["schemaVersion"], 2);
+        assert_eq!(event["operation"], "send");
+        assert_eq!(event["agentAddressingMode"], "public_only");
+        assert_eq!(event["recipientFree"], true);
+        assert_eq!(event["effectiveRecipients"], json!([]));
+        assert_eq!(event["deliveryIds"], json!([]));
+        assert!(event.get("publicOnly").is_none());
+        let after_slots: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT SUM(a2a_run_slots_allocated) FROM camp_turn",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(after_slots, before.1);
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM notification_occurrence WHERE semantic = 'user_mention' AND source_message_id = ?1",
+                    [message_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+
+        let replay = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert!(replay.replayed);
+        assert_eq!(replay.result.payload["agentAddressingMode"], "public_only");
+        assert_eq!(replay.result.payload["messageId"], message_id);
+    }
+
     /// Admission owner: one Gather atomically freezes one request, canonical Items,
     /// optional forward responsibilities and the separately reserved completion slot.
     #[cfg(feature = "slow-tests")]
@@ -2971,8 +3149,14 @@ mod tests {
             )
             .map(|value| serde_json::from_str(&value).unwrap())
             .unwrap();
-        assert_eq!(completion_input["schemaVersion"], 2);
+        assert_eq!(completion_input["schemaVersion"], 3);
+        assert_eq!(completion_input["messageProjectionAudience"], "agent_v1");
         assert_eq!(completion_input["request"]["body"], "请分析并公开回复队长");
+        assert!(
+            completion_input["request"]["projectedBodyDigest"]
+                .as_str()
+                .is_some_and(|digest| digest.starts_with("sha256:") && digest.len() == 71)
+        );
         assert_eq!(completion_input["items"][0]["activeRetryGeneration"], 0);
         assert_eq!(
             completion_input["items"][0]["capturedMessages"]
@@ -2987,6 +3171,15 @@ mod tests {
                 .as_str()
                 .unwrap()
                 .ends_with("最后一条完整公开结论")
+        );
+        assert_eq!(
+            completion_input["items"][0]["capturedMessages"][0]["bodyProjectionAudience"],
+            "agent_v1"
+        );
+        assert!(
+            completion_input["items"][0]["capturedMessages"][0]["projectedBodyDigest"]
+                .as_str()
+                .is_some_and(|digest| digest.starts_with("sha256:") && digest.len() == 71)
         );
         assert!(completion_input["items"][0]["fallbackSummary"].is_null());
         let ready: (String, String, String) = fixture
@@ -3187,10 +3380,16 @@ mod tests {
         assert_eq!(recipient_agent_id, "agent_1");
         assert_eq!(target_conversation_id, original_conversation_id);
         let completion_input: Value = serde_json::from_str(&completion_input).unwrap();
-        assert_eq!(completion_input["schemaVersion"], 2);
+        assert_eq!(completion_input["schemaVersion"], 3);
+        assert_eq!(completion_input["messageProjectionAudience"], "agent_v1");
         assert_eq!(
             completion_input["request"]["body"],
             "请分析；无需另发消息，最终输出即可"
+        );
+        assert!(
+            completion_input["request"]["projectedBodyDigest"]
+                .as_str()
+                .is_some_and(|digest| digest.starts_with("sha256:") && digest.len() == 71)
         );
         assert_eq!(completion_input["items"][0]["capturedMessages"], json!([]));
         assert_eq!(
@@ -3198,43 +3397,78 @@ mod tests {
             fallback
         );
 
-        // Upgrade compatibility owner: an already-ready v1 completion remains
-        // exact input after v2 becomes current instead of being rebuilt.
-        let mut legacy_input = completion_input;
-        legacy_input
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_profile
+                SET selected_runtime_adapter_kind = NULL,
+                    default_runtime_installation_id = NULL,
+                    default_model_selection_json = NULL,
+                    default_permission_config_json = NULL
+                WHERE id = 'agent_1'
+                "#,
+                [],
+            )
+            .unwrap();
+        let source_run_id = fixture.source_run_id.clone();
+        fixture.succeed_run(
+            &source_run_id,
+            fixture.source_epoch,
+            "Lead 结束等待 completion",
+        );
+        assert_eq!(
+            fixture
+                .database
+                .connection()
+                .query_row(
+                    "SELECT wait_condition FROM message_delivery WHERE id = ?1",
+                    [&completion_delivery_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "runtime_unavailable"
+        );
+
+        // Clean-break owner: a ready pre-v3 completion is not admitted or
+        // rebuilt after the projection contract changes.
+        let mut obsolete_input = completion_input;
+        obsolete_input["schemaVersion"] = json!(2);
+        obsolete_input
             .as_object_mut()
             .unwrap()
-            .remove("schemaVersion");
-        legacy_input.as_object_mut().unwrap().remove("request");
-        for item in legacy_input["items"].as_array_mut().unwrap() {
-            item.as_object_mut()
-                .unwrap()
-                .remove("activeRetryGeneration");
-        }
-        let legacy_input_json = serde_json::to_string(&legacy_input).unwrap();
-        let legacy_input_digest =
-            format!("sha256:{:x}", Sha256::digest(legacy_input_json.as_bytes()));
-        let mut legacy_frozen: Value = serde_json::from_str(&completion_frozen_snapshot).unwrap();
-        let legacy_frozen_object = legacy_frozen.as_object_mut().unwrap();
-        legacy_frozen_object.insert("completionInputSchemaVersion".into(), json!(1));
-        legacy_frozen_object.insert("completionInputDigest".into(), json!(legacy_input_digest));
-        legacy_frozen_object.insert(
-            "completionInputByteLength".into(),
-            json!(legacy_input_json.len()),
+            .remove("messageProjectionAudience");
+        obsolete_input["request"]
+            .as_object_mut()
+            .unwrap()
+            .remove("projectedBodyDigest");
+        let obsolete_input_json = serde_json::to_string(&obsolete_input).unwrap();
+        let obsolete_input_digest = format!(
+            "sha256:{:x}",
+            Sha256::digest(obsolete_input_json.as_bytes())
         );
-        legacy_frozen_object.remove("frozenContext");
+        let mut obsolete_frozen: Value = serde_json::from_str(&completion_frozen_snapshot).unwrap();
+        let obsolete_frozen_object = obsolete_frozen.as_object_mut().unwrap();
+        obsolete_frozen_object.insert("completionInputSchemaVersion".into(), json!(2));
+        obsolete_frozen_object.insert("completionInputDigest".into(), json!(obsolete_input_digest));
+        obsolete_frozen_object.insert(
+            "completionInputByteLength".into(),
+            json!(obsolete_input_json.len()),
+        );
+        obsolete_frozen_object.remove("frozenContext");
         fixture
             .database
             .connection()
             .execute(
                 r#"
                 UPDATE gather_record
-                SET completion_input_schema_version = 1,
+                SET completion_input_schema_version = 2,
                     completion_input_json = ?2,
                     completion_input_digest = ?3
                 WHERE id = ?1;
                 "#,
-                params![gather_id, legacy_input_json, legacy_input_digest],
+                params![gather_id, obsolete_input_json, obsolete_input_digest],
             )
             .unwrap();
         fixture
@@ -3244,39 +3478,32 @@ mod tests {
                 "UPDATE message_delivery SET frozen_snapshot_json = ?2 WHERE id = ?1",
                 params![
                     completion_delivery_id,
-                    serde_json::to_string(&legacy_frozen).unwrap()
+                    serde_json::to_string(&obsolete_frozen).unwrap()
                 ],
             )
             .unwrap();
-        let source_run_id = fixture.source_run_id.clone();
-        fixture.succeed_run(
-            &source_run_id,
-            fixture.source_epoch,
-            "Lead 结束等待 legacy completion",
-        );
-        let legacy_completion_context: String = fixture
+        configure_test_runtime(&fixture.database, &["agent_1"]);
+        let error = crate::message_delivery::dispatch_delivery(
+            &mut fixture.database,
+            &completion_delivery_id,
+            DeliveryDispatchTrigger::RuntimeReady,
+            true,
+        )
+        .unwrap_err();
+        assert!(format!("{error:#}").contains("Gather Completion input evidence is inconsistent"));
+        let completion_run_count: i64 = fixture
             .database
             .connection()
             .query_row(
-                "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",
+                r#"
+                SELECT COUNT(*) FROM agent_run
+                WHERE trigger_message_delivery_id = ?1
+                "#,
                 [&completion_delivery_id],
                 |row| row.get(0),
             )
             .unwrap();
-        let legacy_completion_context: Value =
-            serde_json::from_str(&legacy_completion_context).unwrap();
-        let rendered = legacy_completion_context["frozenContext"]["renderedPayload"]
-            .as_str()
-            .unwrap();
-        let current_input_json = rendered
-            .rsplit_once("[CURRENT_INPUT]\n")
-            .and_then(|(_, suffix)| suffix.split_once("\n[/CURRENT_INPUT]"))
-            .map(|(value, _)| value)
-            .unwrap();
-        let recovered_legacy_input: Value = serde_json::from_str(current_input_json).unwrap();
-        assert_eq!(recovered_legacy_input, legacy_input);
-        assert!(recovered_legacy_input.get("schemaVersion").is_none());
-        assert!(recovered_legacy_input.get("request").is_none());
+        assert_eq!(completion_run_count, 0);
     }
 
     /// Cancellation owner: cancelling a waiting Completion Delivery must also

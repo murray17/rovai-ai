@@ -11,6 +11,7 @@ use std::{
 use anyhow::{Context, Result, bail};
 use rovai_core::builtin_tool_cli_output::{
     outcome_indeterminate_agent_error, output_contract_mismatch_agent_error, project_envelope,
+    validate_schema,
 };
 use rovai_core::builtin_tool_transport::{
     BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
@@ -18,13 +19,16 @@ use rovai_core::builtin_tool_transport::{
     BuiltinToolCliIdentity, BuiltinToolDescription, BuiltinToolIpcRequest,
     BuiltinToolIpcRequestBody, BuiltinToolIpcResponse, COMPACTION_HOOK_IPC_PROTOCOL_VERSION,
     COMPACTION_OBSERVATION_OUTBOX_SCHEMA_VERSION, CompactionHookIpcRequest,
-    CompactionHookIpcResponse, CompactionObservationOutboxRecord, ROVAI_CLI_CONTEXT_ENV,
-    ROVAI_RUN_TMP_ENV, builtin_tool_description, builtin_tool_identity_by_command,
+    CompactionHookIpcResponse, CompactionObservationOutboxRecord, LocalIpcEndpoint,
+    ROVAI_CLI_CONTEXT_ENV, ROVAI_RUN_TMP_ENV, builtin_tool_description,
+    builtin_tool_identity_by_command,
 };
 use rovai_core::camp_message_send_teaching::{
-    CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_TO_USER_HELP,
+    CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
+    CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP,
 };
 use rovai_core::command::canonical_json_digest;
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
@@ -70,63 +74,56 @@ fn run() -> Result<u8> {
         return Ok(0);
     }
     if is_family_help(&args) {
-        print_invalid_input();
+        print_invalid_input(None);
         return Ok(2);
     }
     if invocation_identity(&args).is_none() {
-        print_invalid_input();
+        print_invalid_input(None);
         return Ok(2);
     }
 
-    let context = load_context()?;
-    let auth = context.auth()?;
-    let request = match args.as_slice() {
+    let (operation, input) = match args.as_slice() {
         [command, rest @ ..] if matches!(command.as_str(), "send" | "gather") => {
             let identity = builtin_tool_identity_by_command(command, "")
                 .with_context(|| format!("unknown Rovai command: rovai {command}"))?;
             let description = builtin_tool_description(identity.operation)?;
-            let input = match parse_operation_input(&description, rest) {
+            let input = match parse_and_validate_operation_input(&description, rest) {
                 Ok(input) => input,
-                Err(_) => {
-                    print_invalid_input();
+                Err(failure) => {
+                    print_invalid_input(Some(&failure));
                     return Ok(2);
                 }
             };
-            BuiltinToolIpcRequest {
-                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
-                auth,
-                body: BuiltinToolIpcRequestBody::Invoke {
-                    request_id: Uuid::new_v4().to_string(),
-                    operation: identity.operation.to_string(),
-                    input,
-                },
-            }
+            (identity.operation.to_string(), input)
         }
         [group, action, rest @ ..] => {
             let identity = builtin_tool_identity_by_command(group, action)
                 .with_context(|| format!("unknown Rovai command: rovai {group} {action}"))?;
             let description = builtin_tool_description(identity.operation)?;
-            let input = match parse_operation_input(&description, rest) {
+            let input = match parse_and_validate_operation_input(&description, rest) {
                 Ok(input) => input,
-                Err(_) => {
-                    print_invalid_input();
+                Err(failure) => {
+                    print_invalid_input(Some(&failure));
                     return Ok(2);
                 }
             };
-            BuiltinToolIpcRequest {
-                ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
-                auth,
-                body: BuiltinToolIpcRequestBody::Invoke {
-                    request_id: Uuid::new_v4().to_string(),
-                    operation: identity.operation.to_string(),
-                    input,
-                },
-            }
+            (identity.operation.to_string(), input)
         }
         _ => bail!("invalid Rovai command; run `rovai --help`"),
     };
+    let context = load_context()?;
+    let auth = context.auth()?;
+    let request = BuiltinToolIpcRequest {
+        ipc_protocol_version: BUILTIN_TOOL_IPC_PROTOCOL_VERSION,
+        auth,
+        body: BuiltinToolIpcRequestBody::Invoke {
+            request_id: Uuid::new_v4().to_string(),
+            operation,
+            input,
+        },
+    };
 
-    let response = match send_with_retry(Path::new(&context.core_socket), &request) {
+    let response = match send_with_retry(&context.core_endpoint, &request) {
         Ok(response) => response,
         Err(BuiltinToolIpcFailure::OutcomeIndeterminate) => {
             println!(
@@ -275,7 +272,7 @@ fn run_compaction_hook(args: &[String]) -> Result<()> {
     let staged_observation = stage_compaction_observation(&context_path, &outbox_record)?;
     let mut last_error = None;
     for attempt in 0..COMPACTION_HOOK_ATTEMPTS {
-        match send_compaction_hook(Path::new(&context.core_socket), &request) {
+        match send_compaction_hook(&context.core_endpoint, &request) {
             Ok(_response) => {
                 let _ = fs::remove_file(&staged_observation);
                 return Ok(());
@@ -335,30 +332,52 @@ fn stage_compaction_observation(
 
 #[cfg(unix)]
 fn send_compaction_hook(
-    socket: &Path,
+    endpoint: &LocalIpcEndpoint,
     request: &CompactionHookIpcRequest,
 ) -> Result<CompactionHookIpcResponse> {
     use std::os::unix::net::UnixStream;
+
+    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
+        bail!("compaction hook endpoint does not match this platform");
+    };
 
     let serialized = serde_json::to_vec(request)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
         bail!("compaction hook request is too large");
     }
-    let mut stream = UnixStream::connect(socket)?;
+    let mut stream = UnixStream::connect(path)?;
     stream.set_read_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
     stream.set_write_timeout(Some(COMPACTION_HOOK_TIMEOUT))?;
     stream.write_all(&serialized)?;
     stream.write_all(b"\n")?;
     stream.flush()?;
-    let mut reader = BufReader::new(stream);
-    let mut response = String::new();
-    reader.read_line(&mut response)?;
+    let response = read_bounded_response(stream)?;
     Ok(serde_json::from_str(&response)?)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn send_compaction_hook(
-    _socket: &Path,
+    endpoint: &LocalIpcEndpoint,
+    request: &CompactionHookIpcRequest,
+) -> Result<CompactionHookIpcResponse> {
+    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
+        bail!("compaction hook endpoint does not match this platform");
+    };
+    let serialized = serde_json::to_vec(request)?;
+    if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
+        bail!("compaction hook request is too large");
+    }
+    let mut stream = open_windows_named_pipe(name)?;
+    stream.write_all(&serialized)?;
+    stream.write_all(b"\n")?;
+    stream.flush()?;
+    let response = read_bounded_response(stream)?;
+    Ok(serde_json::from_str(&response)?)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn send_compaction_hook(
+    _endpoint: &LocalIpcEndpoint,
     _request: &CompactionHookIpcRequest,
 ) -> Result<CompactionHookIpcResponse> {
     bail!("compaction hook relay is unavailable on this platform")
@@ -417,6 +436,666 @@ fn load_context() -> Result<BuiltinToolCliContext> {
         .with_context(|| format!("invalid Built-in Tool context {}", path.display()))
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct CliInputField {
+    field: String,
+    flag: String,
+    required: bool,
+    value_kind: String,
+    accepted_types: Vec<String>,
+    constant: Option<Value>,
+    allowed_values: Vec<Value>,
+    minimum: Option<i64>,
+    maximum: Option<i64>,
+    min_length: Option<usize>,
+    max_length: Option<usize>,
+    min_items: Option<usize>,
+    max_items: Option<usize>,
+    repeatable: bool,
+}
+
+#[derive(Debug, Clone)]
+struct CliInputVariant {
+    discriminator_value: Value,
+    fields: Vec<CliInputField>,
+}
+
+#[derive(Debug, Clone)]
+struct CliDiscriminatedInput {
+    discriminator_field: String,
+    variants: Vec<CliInputVariant>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CliInputIssueReason {
+    MissingRequired,
+    NotAllowedForMode,
+    InvalidEnum,
+    InvalidType,
+    BelowMinimum,
+    AboveMaximum,
+    BelowMinLength,
+    AboveMaxLength,
+    BelowMinItems,
+    AboveMaxItems,
+    MissingMode,
+    UnknownMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CliInputIssue {
+    field: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flag: Option<String>,
+    reason: CliInputIssueReason,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    allowed_values: Vec<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    minimum: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    maximum: Option<i64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    valid_modes: Vec<String>,
+    #[serde(skip)]
+    expected_type: Option<String>,
+}
+
+impl CliInputIssue {
+    fn for_field(field: &CliInputField, reason: CliInputIssueReason) -> Self {
+        Self {
+            field: field.field.clone(),
+            flag: Some(field.flag.clone()),
+            reason,
+            allowed_values: field.allowed_values.clone(),
+            minimum: None,
+            maximum: None,
+            valid_modes: Vec::new(),
+            expected_type: Some(field.value_kind.clone()),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CliInputFailure {
+    message: String,
+    details: Option<Value>,
+}
+
+impl CliInputFailure {
+    fn generic() -> Self {
+        Self {
+            message: "Command input does not match the accepted arguments.".to_string(),
+            details: None,
+        }
+    }
+}
+
+fn parse_and_validate_operation_input(
+    description: &BuiltinToolDescription,
+    args: &[String],
+) -> std::result::Result<Value, CliInputFailure> {
+    let input = parse_operation_input(description, args).map_err(|_| CliInputFailure::generic())?;
+    if validate_schema(&input, &description.input_schema).is_err() {
+        return Err(explain_input_validation_failure(description, &input));
+    }
+    Ok(input)
+}
+
+fn discriminated_input_variants(
+    description: &BuiltinToolDescription,
+) -> Option<CliDiscriminatedInput> {
+    let branches = description.input_schema.get("oneOf")?.as_array()?;
+    if branches.len() < 2 {
+        return None;
+    }
+    let first_properties = branches.first()?.get("properties")?.as_object()?;
+    let discriminator_fields = first_properties
+        .iter()
+        .filter_map(|(field, property)| {
+            let first_constant = property.get("const")?;
+            let constants = branches
+                .iter()
+                .map(|branch| branch.get("properties")?.get(field)?.get("const").cloned())
+                .collect::<Option<Vec<_>>>()?;
+            let all_distinct = constants.iter().enumerate().all(|(index, constant)| {
+                constants
+                    .iter()
+                    .take(index)
+                    .all(|previous| previous != constant)
+            });
+            (constants.first() == Some(first_constant) && all_distinct).then(|| field.clone())
+        })
+        .collect::<Vec<_>>();
+    let [discriminator_field] = discriminator_fields.as_slice() else {
+        return None;
+    };
+    let variants = branches
+        .iter()
+        .map(|branch| {
+            let discriminator_value = branch
+                .get("properties")?
+                .get(discriminator_field)?
+                .get("const")?
+                .clone();
+            Some(CliInputVariant {
+                discriminator_value,
+                fields: cli_input_fields(description, branch)?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(CliDiscriminatedInput {
+        discriminator_field: discriminator_field.clone(),
+        variants,
+    })
+}
+
+fn cli_input_fields(
+    description: &BuiltinToolDescription,
+    schema: &Value,
+) -> Option<Vec<CliInputField>> {
+    let properties = schema.get("properties")?.as_object()?;
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    Some(
+        properties
+            .iter()
+            .map(|(field, property)| {
+                let argument = description
+                    .arguments
+                    .iter()
+                    .find(|argument| argument.field == *field);
+                let value_kind = argument
+                    .map(|argument| argument.value_kind.clone())
+                    .unwrap_or_else(|| cli_schema_value_kind(property));
+                CliInputField {
+                    field: field.clone(),
+                    flag: argument
+                        .map(|argument| argument.flag.clone())
+                        .unwrap_or_else(|| format!("--{}", camel_to_kebab_cli(field))),
+                    required: required.contains(&field.as_str()),
+                    accepted_types: cli_schema_types(property),
+                    constant: property.get("const").cloned(),
+                    allowed_values: property
+                        .get("enum")
+                        .and_then(Value::as_array)
+                        .cloned()
+                        .unwrap_or_default(),
+                    minimum: property.get("minimum").and_then(Value::as_i64),
+                    maximum: property.get("maximum").and_then(Value::as_i64),
+                    min_length: property
+                        .get("minLength")
+                        .and_then(Value::as_u64)
+                        .map(|value| value as usize),
+                    max_length: property
+                        .get("maxLength")
+                        .and_then(Value::as_u64)
+                        .map(|value| value as usize),
+                    min_items: property
+                        .get("minItems")
+                        .and_then(Value::as_u64)
+                        .map(|value| value as usize),
+                    max_items: property
+                        .get("maxItems")
+                        .and_then(Value::as_u64)
+                        .map(|value| value as usize),
+                    repeatable: argument.is_some_and(|argument| argument.repeatable)
+                        || value_kind == "array",
+                    value_kind,
+                }
+            })
+            .collect(),
+    )
+}
+
+fn cli_schema_types(schema: &Value) -> Vec<String> {
+    if let Some(kind) = schema.get("type").and_then(Value::as_str) {
+        return vec![kind.to_string()];
+    }
+    if let Some(kinds) = schema.get("type").and_then(Value::as_array) {
+        return kinds
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect();
+    }
+    if let Some(constant) = schema.get("const") {
+        return vec![cli_value_kind(constant).to_string()];
+    }
+    if let Some(value) = schema
+        .get("enum")
+        .and_then(Value::as_array)
+        .and_then(|values| values.first())
+    {
+        return vec![cli_value_kind(value).to_string()];
+    }
+    Vec::new()
+}
+
+fn cli_schema_value_kind(schema: &Value) -> String {
+    cli_schema_types(schema)
+        .into_iter()
+        .find(|kind| kind != "null")
+        .unwrap_or_else(|| "json".to_string())
+}
+
+fn cli_value_kind(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(number) if number.is_i64() || number.is_u64() => "integer",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
+}
+
+fn camel_to_kebab_cli(value: &str) -> String {
+    let mut output = String::with_capacity(value.len());
+    for character in value.chars() {
+        if character.is_ascii_uppercase() {
+            output.push('-');
+            output.push(character.to_ascii_lowercase());
+        } else {
+            output.push(character);
+        }
+    }
+    output
+}
+
+fn explain_input_validation_failure(
+    description: &BuiltinToolDescription,
+    input: &Value,
+) -> CliInputFailure {
+    let Some(object) = input.as_object() else {
+        return CliInputFailure::generic();
+    };
+    let (mode, issues) = if let Some(discriminated) = discriminated_input_variants(description) {
+        explain_discriminated_input_failure(description, &discriminated, object)
+    } else {
+        let Some(fields) = cli_input_fields(description, &description.input_schema) else {
+            return CliInputFailure::generic();
+        };
+        (
+            None,
+            explain_variant_fields(description, &fields, object, None),
+        )
+    };
+    if issues.is_empty() {
+        return CliInputFailure::generic();
+    }
+    let issues = issues.into_iter().take(4).collect::<Vec<_>>();
+    let mut details = Map::new();
+    details.insert(
+        "operation".to_string(),
+        Value::String(description.name.clone()),
+    );
+    if let Some(mode) = &mode {
+        details.insert("mode".to_string(), Value::String(mode.clone()));
+    }
+    details.insert(
+        "issues".to_string(),
+        serde_json::to_value(&issues).unwrap_or_else(|_| Value::Array(Vec::new())),
+    );
+    CliInputFailure {
+        message: format_cli_input_issue_message(&description.name, mode.as_deref(), &issues),
+        details: Some(Value::Object(details)),
+    }
+}
+
+fn explain_discriminated_input_failure(
+    description: &BuiltinToolDescription,
+    discriminated: &CliDiscriminatedInput,
+    object: &Map<String, Value>,
+) -> (Option<String>, Vec<CliInputIssue>) {
+    let allowed_values = discriminated
+        .variants
+        .iter()
+        .map(|variant| variant.discriminator_value.clone())
+        .collect::<Vec<_>>();
+    let Some(discriminator_value) = object.get(&discriminated.discriminator_field) else {
+        return (
+            None,
+            vec![CliInputIssue {
+                field: discriminated.discriminator_field.clone(),
+                flag: description
+                    .arguments
+                    .iter()
+                    .find(|argument| argument.field == discriminated.discriminator_field)
+                    .map(|argument| argument.flag.clone()),
+                reason: if discriminated.discriminator_field == "mode" {
+                    CliInputIssueReason::MissingMode
+                } else {
+                    CliInputIssueReason::MissingRequired
+                },
+                allowed_values,
+                minimum: None,
+                maximum: None,
+                valid_modes: Vec::new(),
+                expected_type: Some("string".to_string()),
+            }],
+        );
+    };
+    let Some(variant) = discriminated
+        .variants
+        .iter()
+        .find(|variant| variant.discriminator_value == *discriminator_value)
+    else {
+        return (
+            None,
+            vec![CliInputIssue {
+                field: discriminated.discriminator_field.clone(),
+                flag: description
+                    .arguments
+                    .iter()
+                    .find(|argument| argument.field == discriminated.discriminator_field)
+                    .map(|argument| argument.flag.clone()),
+                reason: if discriminated.discriminator_field == "mode" {
+                    CliInputIssueReason::UnknownMode
+                } else {
+                    CliInputIssueReason::InvalidEnum
+                },
+                allowed_values,
+                minimum: None,
+                maximum: None,
+                valid_modes: Vec::new(),
+                expected_type: Some("string".to_string()),
+            }],
+        );
+    };
+    let mode = variant.discriminator_value.as_str().map(str::to_string);
+    let issues = explain_variant_fields(description, &variant.fields, object, Some(discriminated));
+    (mode, issues)
+}
+
+fn explain_variant_fields(
+    description: &BuiltinToolDescription,
+    fields: &[CliInputField],
+    object: &Map<String, Value>,
+    discriminated: Option<&CliDiscriminatedInput>,
+) -> Vec<CliInputIssue> {
+    let mut issues = Vec::new();
+
+    for field in fields.iter().filter(|field| field.required) {
+        if !object.contains_key(&field.field) {
+            issues.push(CliInputIssue::for_field(
+                field,
+                CliInputIssueReason::MissingRequired,
+            ));
+        }
+    }
+
+    for field_name in object.keys() {
+        if fields.iter().any(|field| field.field == *field_name) {
+            continue;
+        }
+        let valid_modes = discriminated.map_or_else(Vec::new, |discriminated| {
+            discriminated
+                .variants
+                .iter()
+                .filter(|variant| {
+                    variant
+                        .fields
+                        .iter()
+                        .any(|field| field.field == *field_name)
+                })
+                .filter_map(|variant| variant.discriminator_value.as_str().map(str::to_string))
+                .collect()
+        });
+        issues.push(CliInputIssue {
+            field: field_name.clone(),
+            flag: description
+                .arguments
+                .iter()
+                .find(|argument| argument.field == *field_name)
+                .map(|argument| argument.flag.clone()),
+            reason: CliInputIssueReason::NotAllowedForMode,
+            allowed_values: Vec::new(),
+            minimum: None,
+            maximum: None,
+            valid_modes,
+            expected_type: None,
+        });
+    }
+
+    for field in fields {
+        let Some(value) = object.get(&field.field) else {
+            continue;
+        };
+        let invalid_constant = field
+            .constant
+            .as_ref()
+            .is_some_and(|constant| constant != value);
+        let invalid_enum = !field.allowed_values.is_empty()
+            && !field.allowed_values.iter().any(|allowed| allowed == value);
+        if invalid_constant || invalid_enum {
+            let mut issue = CliInputIssue::for_field(field, CliInputIssueReason::InvalidEnum);
+            if issue.allowed_values.is_empty()
+                && let Some(constant) = &field.constant
+            {
+                issue.allowed_values.push(constant.clone());
+            }
+            issues.push(issue);
+        }
+    }
+
+    for field in fields {
+        let Some(value) = object.get(&field.field) else {
+            continue;
+        };
+        if !field.accepted_types.is_empty()
+            && !field
+                .accepted_types
+                .iter()
+                .any(|kind| cli_value_matches_type(value, kind))
+        {
+            issues.push(CliInputIssue::for_field(
+                field,
+                CliInputIssueReason::InvalidType,
+            ));
+        }
+    }
+
+    for field in fields {
+        let Some(value) = object.get(&field.field) else {
+            continue;
+        };
+        let Some(number) = value.as_i64() else {
+            continue;
+        };
+        if let Some(minimum) = field.minimum
+            && number < minimum
+        {
+            let mut issue = CliInputIssue::for_field(field, CliInputIssueReason::BelowMinimum);
+            issue.minimum = Some(minimum);
+            issues.push(issue);
+        }
+        if let Some(maximum) = field.maximum
+            && number > maximum
+        {
+            let mut issue = CliInputIssue::for_field(field, CliInputIssueReason::AboveMaximum);
+            issue.maximum = Some(maximum);
+            issues.push(issue);
+        }
+    }
+
+    for field in fields {
+        let Some(value) = object.get(&field.field) else {
+            continue;
+        };
+        if let Some(text) = value.as_str() {
+            let length = text.chars().count();
+            if let Some(minimum) = field.min_length
+                && length < minimum
+            {
+                let mut issue =
+                    CliInputIssue::for_field(field, CliInputIssueReason::BelowMinLength);
+                issue.minimum = Some(minimum as i64);
+                issues.push(issue);
+            }
+            if let Some(maximum) = field.max_length
+                && length > maximum
+            {
+                let mut issue =
+                    CliInputIssue::for_field(field, CliInputIssueReason::AboveMaxLength);
+                issue.maximum = Some(maximum as i64);
+                issues.push(issue);
+            }
+        }
+        if let Some(values) = value.as_array() {
+            if let Some(minimum) = field.min_items
+                && values.len() < minimum
+            {
+                let mut issue = CliInputIssue::for_field(field, CliInputIssueReason::BelowMinItems);
+                issue.minimum = Some(minimum as i64);
+                issues.push(issue);
+            }
+            if let Some(maximum) = field.max_items
+                && values.len() > maximum
+            {
+                let mut issue = CliInputIssue::for_field(field, CliInputIssueReason::AboveMaxItems);
+                issue.maximum = Some(maximum as i64);
+                issues.push(issue);
+            }
+        }
+    }
+
+    issues
+}
+
+fn cli_value_matches_type(value: &Value, kind: &str) -> bool {
+    match kind {
+        "object" => value.is_object(),
+        "array" => value.is_array(),
+        "string" => value.is_string(),
+        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
+        "number" => value.is_number(),
+        "boolean" => value.is_boolean(),
+        "null" => value.is_null(),
+        _ => true,
+    }
+}
+
+fn format_cli_input_issue_message(
+    operation: &str,
+    mode: Option<&str>,
+    issues: &[CliInputIssue],
+) -> String {
+    let context = mode.map_or_else(
+        || operation.to_string(),
+        |mode| format!("{operation} {mode}"),
+    );
+    let clauses = issues
+        .iter()
+        .map(|issue| {
+            let flag = issue.flag.as_deref().unwrap_or(&issue.field);
+            match issue.reason {
+                CliInputIssueReason::MissingMode => format!(
+                    "requires {flag} <{}>",
+                    pipe_separated_values(&issue.allowed_values)
+                ),
+                CliInputIssueReason::UnknownMode | CliInputIssueReason::InvalidEnum => format!(
+                    "accepts only {} for {flag}",
+                    human_join_values(&issue.allowed_values)
+                ),
+                CliInputIssueReason::MissingRequired => {
+                    if issue.allowed_values.is_empty() {
+                        format!("requires {flag}")
+                    } else {
+                        format!(
+                            "requires {flag} <{}>",
+                            pipe_separated_values(&issue.allowed_values)
+                        )
+                    }
+                }
+                CliInputIssueReason::NotAllowedForMode => {
+                    if issue.valid_modes.len() == 1 {
+                        format!("{flag} is valid only in {} mode", issue.valid_modes[0])
+                    } else if issue.valid_modes.is_empty() {
+                        format!("does not accept {flag}")
+                    } else {
+                        format!(
+                            "{flag} is valid only in {} modes",
+                            human_join_strings(&issue.valid_modes)
+                        )
+                    }
+                }
+                CliInputIssueReason::InvalidType => format!(
+                    "requires {flag} to be {}",
+                    issue
+                        .expected_type
+                        .as_deref()
+                        .unwrap_or("the documented type")
+                ),
+                CliInputIssueReason::BelowMinimum => format!(
+                    "requires {flag} to be at least {}",
+                    issue.minimum.unwrap_or_default()
+                ),
+                CliInputIssueReason::AboveMaximum => format!(
+                    "requires {flag} to be at most {}",
+                    issue.maximum.unwrap_or_default()
+                ),
+                CliInputIssueReason::BelowMinLength => format!(
+                    "requires {flag} to contain at least {} characters",
+                    issue.minimum.unwrap_or_default()
+                ),
+                CliInputIssueReason::AboveMaxLength => format!(
+                    "requires {flag} to contain at most {} characters",
+                    issue.maximum.unwrap_or_default()
+                ),
+                CliInputIssueReason::BelowMinItems => format!(
+                    "requires {flag} at least {} time(s)",
+                    issue.minimum.unwrap_or_default()
+                ),
+                CliInputIssueReason::AboveMaxItems => format!(
+                    "accepts {flag} at most {} time(s)",
+                    issue.maximum.unwrap_or_default()
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+    format!("{context} {}.", clauses.join("; "))
+}
+
+fn pipe_separated_values(values: &[Value]) -> String {
+    values
+        .iter()
+        .map(compact_cli_value)
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn human_join_values(values: &[Value]) -> String {
+    human_join_strings(&values.iter().map(compact_cli_value).collect::<Vec<_>>())
+}
+
+fn human_join_strings(values: &[String]) -> String {
+    match values {
+        [] => "the documented values".to_string(),
+        [value] => value.clone(),
+        [left, right] => format!("{left} or {right}"),
+        _ => format!(
+            "{}, or {}",
+            values[..values.len() - 1].join(", "),
+            values.last().expect("non-empty values")
+        ),
+    }
+}
+
+fn compact_cli_value(value: &Value) -> String {
+    value
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| value.to_string())
+}
+
 fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) -> Result<Value> {
     let argument_by_flag = description
         .arguments
@@ -444,8 +1123,13 @@ fn parse_operation_input(description: &BuiltinToolDescription, args: &[String]) 
         let (flag, inline_value) = raw
             .split_once('=')
             .map_or((raw.as_str(), None), |(flag, value)| (flag, Some(value)));
+        let canonical_flag = if description.name == "camp.message.send" && flag == "--to-user" {
+            "--to-principal"
+        } else {
+            flag
+        };
         let argument = argument_by_flag
-            .get(flag)
+            .get(canonical_flag)
             .with_context(|| format!("unknown argument for {}: {flag}", description.name))?;
         if input_file.is_some() {
             bail!("--input-file cannot be combined with direct arguments");
@@ -553,10 +1237,14 @@ fn insert_direct_value(
 
 #[cfg(unix)]
 fn send_with_retry(
-    socket: &Path,
+    endpoint: &LocalIpcEndpoint,
     request: &BuiltinToolIpcRequest,
 ) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
     use std::os::unix::net::UnixStream;
+
+    let LocalIpcEndpoint::UnixSocket { path } = endpoint else {
+        return Err(BuiltinToolIpcFailure::Predictable);
+    };
 
     let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
     if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
@@ -564,7 +1252,7 @@ fn send_with_retry(
     }
     let mut dispatch_became_indeterminate = false;
     for _attempt in 0..CORE_ATTEMPTS {
-        let Ok(mut stream) = UnixStream::connect(socket) else {
+        let Ok(mut stream) = UnixStream::connect(path) else {
             continue;
         };
         if stream.set_read_timeout(Some(CORE_TIMEOUT)).is_err()
@@ -579,13 +1267,12 @@ fn send_with_retry(
             dispatch_became_indeterminate = true;
             continue;
         }
-        let mut reader = BufReader::new(stream);
-        let mut response = String::new();
-        match reader.read_line(&mut response) {
-            Ok(0) | Err(_) => {
-                dispatch_became_indeterminate = true;
+        match read_bounded_response(stream) {
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                return Err(BuiltinToolIpcFailure::Predictable);
             }
-            Ok(_) => match serde_json::from_str(&response) {
+            Err(_) => dispatch_became_indeterminate = true,
+            Ok(response) => match serde_json::from_str(&response) {
                 Ok(response) => return Ok(response),
                 Err(_) => return Err(BuiltinToolIpcFailure::Predictable),
             },
@@ -598,9 +1285,93 @@ fn send_with_retry(
     })
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn send_with_retry(
-    _socket: &Path,
+    endpoint: &LocalIpcEndpoint,
+    request: &BuiltinToolIpcRequest,
+) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
+    let LocalIpcEndpoint::WindowsNamedPipe { name } = endpoint else {
+        return Err(BuiltinToolIpcFailure::Predictable);
+    };
+    let serialized = serde_json::to_vec(request).map_err(|_| BuiltinToolIpcFailure::Predictable)?;
+    if serialized.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES {
+        return Err(BuiltinToolIpcFailure::Predictable);
+    }
+    let mut dispatch_became_indeterminate = false;
+    for _attempt in 0..CORE_ATTEMPTS {
+        let Ok(mut stream) = open_windows_named_pipe(name) else {
+            continue;
+        };
+        if stream.write_all(&serialized).is_err()
+            || stream.write_all(b"\n").is_err()
+            || stream.flush().is_err()
+        {
+            dispatch_became_indeterminate = true;
+            continue;
+        }
+        match read_bounded_response(stream) {
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                return Err(BuiltinToolIpcFailure::Predictable);
+            }
+            Err(_) => dispatch_became_indeterminate = true,
+            Ok(response) => match serde_json::from_str(&response) {
+                Ok(response) => return Ok(response),
+                Err(_) => return Err(BuiltinToolIpcFailure::Predictable),
+            },
+        }
+    }
+    Err(if dispatch_became_indeterminate {
+        BuiltinToolIpcFailure::OutcomeIndeterminate
+    } else {
+        BuiltinToolIpcFailure::Predictable
+    })
+}
+
+fn read_bounded_response(stream: impl Read) -> std::io::Result<String> {
+    let reader = BufReader::new(stream);
+    let mut limited = reader.take((BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 2) as u64);
+    let mut frame = Vec::new();
+    let read = limited.read_until(b'\n', &mut frame)?;
+    if read == 0 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::UnexpectedEof,
+            "Built-in Tool IPC response ended before a frame",
+        ));
+    }
+    if frame.last() != Some(&b'\n') || frame.len() > BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 1 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Built-in Tool IPC response exceeds the frame limit",
+        ));
+    }
+    frame.pop();
+    if frame.last() == Some(&b'\r') {
+        frame.pop();
+    }
+    String::from_utf8(frame).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Built-in Tool IPC response is not UTF-8",
+        )
+    })
+}
+
+#[cfg(windows)]
+fn open_windows_named_pipe(name: &str) -> Result<std::fs::File> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+
+    let stream = OpenOptions::new().read(true).write(true).open(name)?;
+    if unsafe { SetHandleInformation(stream.as_raw_handle() as _, HANDLE_FLAG_INHERIT, 0) } == 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("failed to make the Built-in Tool client handle non-inheritable");
+    }
+    Ok(stream)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn send_with_retry(
+    _endpoint: &LocalIpcEndpoint,
     _request: &BuiltinToolIpcRequest,
 ) -> std::result::Result<BuiltinToolIpcResponse, BuiltinToolIpcFailure> {
     Err(BuiltinToolIpcFailure::Predictable)
@@ -673,16 +1444,32 @@ fn write_output_contract_mismatch_diagnostic(
     Ok(path)
 }
 
-fn print_invalid_input() {
+fn print_invalid_input(failure: Option<&CliInputFailure>) {
+    let mut error = Map::new();
+    error.insert(
+        "code".to_string(),
+        Value::String("builtin_tool.invalid_input".to_string()),
+    );
+    error.insert(
+        "message".to_string(),
+        Value::String(
+            failure
+                .map(|failure| failure.message.clone())
+                .unwrap_or_else(|| {
+                    "Command input does not match the accepted arguments.".to_string()
+                }),
+        ),
+    );
+    error.insert(
+        "recovery".to_string(),
+        Value::String("fix_input".to_string()),
+    );
+    if let Some(details) = failure.and_then(|failure| failure.details.clone()) {
+        error.insert("details".to_string(), details);
+    }
     println!(
         "{}",
-        serde_json::to_string(&json!({
-            "error": {
-                "code": "builtin_tool.invalid_input",
-                "message": "Command input does not match the accepted arguments.",
-                "recovery": "fix_input"
-            }
-        }))
+        serde_json::to_string(&json!({"error": error}))
         .unwrap_or_else(|_| {
             "{\"error\":{\"code\":\"builtin_tool.invalid_input\",\"message\":\"Command input does not match the accepted arguments.\",\"recovery\":\"fix_input\"}}".to_string()
         })
@@ -699,11 +1486,36 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
     let mut output = String::new();
     writeln!(
         output,
-        "rovai {}\n{}\n\nInput: direct flags, JSON stdin/heredoc, or --input-file <path>\n",
+        "rovai {}\n{}\n\nInput: direct flags, JSON stdin/heredoc, or --input-file <path>. Choose exactly one input source.\n",
         description.command.join(" "),
         description.summary
     )
     .expect("writing help to a String cannot fail");
+    let rendered_discriminated = discriminated_input_variants(description).is_some_and(|input| {
+        render_discriminated_input_help(&mut output, description, &input);
+        true
+    });
+    if !rendered_discriminated {
+        render_flat_input_help(&mut output, description);
+        let examples = operation_help_examples(&description.name);
+        writeln!(output, "\nExamples:").expect("writing help to a String cannot fail");
+        for example in examples {
+            writeln!(output, "  {example}").expect("writing help to a String cannot fail");
+        }
+    }
+    if description.name == "team.gather" {
+        writeln!(
+            output,
+            "\nGather is asynchronous. After acceptance, end the current Lead Run. Do not poll, repeat Gather, or wait synchronously; Rovai delivers one FIFO completion after every member Run is terminal. Member progress returns stay public, but only the last accepted return from each current Run/retry generation is included as its captured result, so the member's final send must contain the complete conclusion. Captured returns do not consume the ordinary A2A allowance and are limited to 16 per Item/retry generation."
+        )
+        .expect("writing help to a String cannot fail");
+    }
+    output
+}
+
+fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescription) {
+    use std::fmt::Write as _;
+
     for argument in &description.arguments {
         writeln!(
             output,
@@ -720,11 +1532,10 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
         )
         .expect("writing help to a String cannot fail");
         if description.name == "camp.message.send" && argument.field == "to" {
-            writeln!(
-                output,
-                "      Optional canonical Agent ID to wake; repeat for multiple recipients. Display names are accepted only as inline aliases."
-            )
-            .expect("writing help to a String cannot fail");
+            write_indented_help(output, CAMP_MESSAGE_SEND_TO_HELP);
+        }
+        if description.name == "camp.message.send" && argument.field == "publicOnly" {
+            write_indented_help(output, CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP);
         }
         if description.name == "team.gather" && argument.field == "to" {
             writeln!(
@@ -734,13 +1545,7 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
             .expect("writing help to a String cannot fail");
         }
         if description.name == "camp.message.send" && argument.field == "mentionUser" {
-            for line in CAMP_MESSAGE_SEND_TO_USER_HELP.lines() {
-                if line.is_empty() {
-                    writeln!(output).expect("writing help to a String cannot fail");
-                } else {
-                    writeln!(output, "      {line}").expect("writing help to a String cannot fail");
-                }
-            }
+            write_indented_help(output, CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP);
         }
         if description.name == "memory.view" && argument.field == "scope" {
             writeln!(output, "      One of: hearth, companion, relationship.")
@@ -777,19 +1582,256 @@ fn operation_help_text(description: &BuiltinToolDescription) -> String {
             .expect("writing help to a String cannot fail");
         }
     }
-    let examples = operation_help_examples(&description.name);
-    writeln!(output, "\nExamples:").expect("writing help to a String cannot fail");
-    for example in examples {
-        writeln!(output, "  {example}").expect("writing help to a String cannot fail");
+}
+
+fn render_discriminated_input_help(
+    output: &mut String,
+    description: &BuiltinToolDescription,
+    input: &CliDiscriminatedInput,
+) {
+    use std::fmt::Write as _;
+
+    let common_fields = discriminated_common_fields(input);
+    if !common_fields.is_empty() {
+        writeln!(output, "Common options:").expect("writing help to a String cannot fail");
+        for required in [true, false] {
+            let fields = common_fields
+                .iter()
+                .copied()
+                .filter(|field| field.required == required)
+                .collect::<Vec<_>>();
+            if fields.is_empty() {
+                continue;
+            }
+            writeln!(
+                output,
+                "  {}:",
+                if required { "Required" } else { "Optional" }
+            )
+            .expect("writing help to a String cannot fail");
+            for field in fields {
+                render_cli_input_field(output, description, field);
+            }
+        }
+        writeln!(output).expect("writing help to a String cannot fail");
     }
-    if description.name == "team.gather" {
+
+    for variant in &input.variants {
+        let mode = compact_cli_value(&variant.discriminator_value);
         writeln!(
             output,
-            "\nGather is asynchronous. After acceptance, end the current Lead Run. Do not poll, repeat Gather, or wait synchronously; Rovai delivers one FIFO completion after every member Run is terminal. Member progress returns stay public, but only the last accepted return from each current Run/retry generation is included as its captured result, so the member's final send must contain the complete conclusion. Captured returns do not consume the ordinary A2A allowance and are limited to 16 per Item/retry generation."
+            "{} {mode}:",
+            capitalize_cli_label(&input.discriminator_field)
+        )
+        .expect("writing help to a String cannot fail");
+        for required in [true, false] {
+            let mut fields = variant
+                .fields
+                .iter()
+                .filter(|field| {
+                    field.required == required
+                        && !common_fields
+                            .iter()
+                            .any(|common| common.field == field.field)
+                })
+                .collect::<Vec<_>>();
+            fields.sort_by_key(|field| {
+                (
+                    usize::from(field.field != input.discriminator_field),
+                    field.field.as_str(),
+                )
+            });
+            if fields.is_empty() {
+                continue;
+            }
+            writeln!(
+                output,
+                "  {}:",
+                if required { "Required" } else { "Optional" }
+            )
+            .expect("writing help to a String cannot fail");
+            for field in fields {
+                render_cli_input_field(output, description, field);
+            }
+        }
+        let examples = operation_help_examples_for_variant(&description.name, &mode);
+        if !examples.is_empty() {
+            writeln!(output, "  Examples:").expect("writing help to a String cannot fail");
+            for example in examples {
+                writeln!(output, "    {example}").expect("writing help to a String cannot fail");
+            }
+        }
+        writeln!(output).expect("writing help to a String cannot fail");
+    }
+
+    if description.name == "camp.read" {
+        writeln!(
+            output,
+            "Direction semantics:\n  before = move toward lower sequence numbers / older messages.\n           Without a cursor, begin with the newest visible page.\n  after  = move toward higher sequence numbers / newer messages.\n           Without a cursor, begin with the oldest visible page.\n\nDo not use older, newer, backward, or forward as direction values."
         )
         .expect("writing help to a String cannot fail");
     }
-    output
+}
+
+fn discriminated_common_fields(input: &CliDiscriminatedInput) -> Vec<&CliInputField> {
+    let Some(first) = input.variants.first() else {
+        return Vec::new();
+    };
+    first
+        .fields
+        .iter()
+        .filter(|candidate| candidate.field != input.discriminator_field)
+        .filter(|candidate| {
+            input.variants.iter().skip(1).all(|variant| {
+                variant
+                    .fields
+                    .iter()
+                    .find(|field| field.field == candidate.field)
+                    == Some(*candidate)
+            })
+        })
+        .collect()
+}
+
+fn render_cli_input_field(
+    output: &mut String,
+    description: &BuiltinToolDescription,
+    field: &CliInputField,
+) {
+    use std::fmt::Write as _;
+
+    let placeholder = if let Some(constant) = &field.constant {
+        format!(" <{}>", compact_cli_value(constant))
+    } else if !field.allowed_values.is_empty() {
+        format!(" <{}>", pipe_separated_values(&field.allowed_values))
+    } else if field.value_kind == "boolean" {
+        String::new()
+    } else {
+        format!(" <{}>", field.value_kind)
+    };
+    writeln!(output, "    {}{}", field.flag, placeholder)
+        .expect("writing help to a String cannot fail");
+    writeln!(output, "        JSON field: {}", field.field)
+        .expect("writing help to a String cannot fail");
+    if let Some(constant) = &field.constant {
+        writeln!(output, "        Constant: {}", compact_cli_value(constant))
+            .expect("writing help to a String cannot fail");
+    }
+    if !field.allowed_values.is_empty() {
+        writeln!(
+            output,
+            "        Allowed values: {}",
+            field
+                .allowed_values
+                .iter()
+                .map(compact_cli_value)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .expect("writing help to a String cannot fail");
+    }
+    if let Some(minimum) = field.minimum {
+        writeln!(output, "        Minimum: {minimum}")
+            .expect("writing help to a String cannot fail");
+    }
+    if let Some(maximum) = field.maximum {
+        writeln!(output, "        Maximum: {maximum}")
+            .expect("writing help to a String cannot fail");
+    }
+    if let Some(minimum) = field.min_length {
+        writeln!(output, "        Minimum length: {minimum}")
+            .expect("writing help to a String cannot fail");
+    }
+    if let Some(maximum) = field.max_length {
+        writeln!(output, "        Maximum length: {maximum}")
+            .expect("writing help to a String cannot fail");
+    }
+    if let Some(minimum) = field.min_items {
+        writeln!(output, "        Minimum items: {minimum}")
+            .expect("writing help to a String cannot fail");
+    }
+    if let Some(maximum) = field.max_items {
+        writeln!(output, "        Maximum items: {maximum}")
+            .expect("writing help to a String cannot fail");
+    }
+    if field.repeatable {
+        writeln!(output, "        Repeat the flag for multiple values.")
+            .expect("writing help to a String cannot fail");
+    }
+    if matches!(description.name.as_str(), "camp.search" | "camp.read") && field.field == "campId" {
+        writeln!(
+            output,
+            "        Omit for the current Camp; pass an authorized frozen historical Camp ID to target that Camp only."
+        )
+        .expect("writing help to a String cannot fail");
+    }
+    if description.name == "camp.read" && field.field == "cursor" {
+        writeln!(
+            output,
+            "        Pass the nextCursor returned by the previous page."
+        )
+        .expect("writing help to a String cannot fail");
+    }
+    if description.name == "memory.view" && field.field == "scope" {
+        writeln!(output, "        One of: hearth, companion, relationship.")
+            .expect("writing help to a String cannot fail");
+    }
+    if description.name == "memory.view" && field.field == "counterpartyAgentId" {
+        writeln!(
+            output,
+            "        Required only when --scope relationship selects an exact pair."
+        )
+        .expect("writing help to a String cannot fail");
+    }
+}
+
+fn capitalize_cli_label(value: &str) -> String {
+    let mut characters = value.chars();
+    characters.next().map_or_else(String::new, |first| {
+        format!("{}{}", first.to_uppercase(), characters.as_str())
+    })
+}
+
+fn operation_help_examples_for_variant(
+    operation: &str,
+    discriminator_value: &str,
+) -> &'static [&'static str] {
+    match (operation, discriminator_value) {
+        ("camp.read", "item") => &[
+            "rovai camp read --mode item --message-id '<message-id>'",
+            "rovai camp read --camp-id '<camp-id>' --mode item --message-id '<message-id>' --body-offset 0 --body-limit 4000",
+        ],
+        ("camp.read", "around") => &[
+            "rovai camp read --mode around --message-id '<message-id>' --before 5 --after 5",
+            "rovai camp read --before 5 --message-id '<message-id>' --mode around",
+        ],
+        ("camp.read", "thread") => &[
+            "rovai camp read --mode thread --message-id '<message-id>' --direction before --limit 20",
+            "rovai camp read --camp-id '<camp-id>' --mode thread --message-id '<message-id>' --direction after --cursor 123 --limit 20",
+        ],
+        ("camp.read", "timeline") => &[
+            "rovai camp read --mode timeline --direction before --limit 20",
+            "rovai camp read --camp-id '<camp-id>' --mode timeline --direction before --cursor 123 --limit 20",
+        ],
+        ("memory.view", "hearth") => &["rovai memory view --scope hearth"],
+        ("memory.view", "companion") => &["rovai memory view --scope companion"],
+        ("memory.view", "relationship") => {
+            &["rovai memory view --scope relationship --counterparty-agent-id agent_3"]
+        }
+        _ => &[],
+    }
+}
+
+fn write_indented_help(output: &mut String, help: &str) {
+    use std::fmt::Write as _;
+
+    for line in help.lines() {
+        if line.is_empty() {
+            writeln!(output).expect("writing help to a String cannot fail");
+        } else {
+            writeln!(output, "      {line}").expect("writing help to a String cannot fail");
+        }
+    }
 }
 
 fn operation_help_examples(operation: &str) -> &'static [&'static str] {
@@ -818,7 +1860,9 @@ fn operation_help_examples(operation: &str) -> &'static [&'static str] {
         ],
         "camp.read" => &[
             "rovai camp read --mode item --message-id '<message-id>'",
-            "rovai camp read --camp-id '<camp-id>' --mode item --message-id '<message-id>'",
+            "rovai camp read --mode around --message-id '<message-id>' --before 5 --after 5",
+            "rovai camp read --mode thread --message-id '<message-id>' --direction before --limit 20",
+            "rovai camp read --mode timeline --direction before --limit 20",
         ],
         "history.search" => &["rovai history search --query 'amount'"],
         "memory.view" => &[
@@ -853,6 +1897,27 @@ mod tests {
                 input: json!({}),
             },
         }
+    }
+
+    #[test]
+    fn ipc_response_reader_requires_one_bounded_newline_delimited_utf8_frame() {
+        assert_eq!(
+            read_bounded_response(std::io::Cursor::new(b"{\"ok\":true}\n")).unwrap(),
+            r#"{"ok":true}"#
+        );
+        assert_eq!(
+            read_bounded_response(std::io::Cursor::new(b"{}"))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        let oversized = vec![b'x'; BUILTIN_TOOL_MAX_IPC_REQUEST_BYTES + 2];
+        assert_eq!(
+            read_bounded_response(std::io::Cursor::new(oversized))
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::InvalidData
+        );
     }
 
     #[test]
@@ -1008,8 +2073,27 @@ mod tests {
         let read = builtin_tool_description("camp.read").unwrap();
         let read_help = operation_help_text(&read);
         assert!(read_help.contains("Omit for the current Camp"));
+        assert_eq!(read_help.matches("--camp-id <string>").count(), 1);
+        let item_index = read_help.find("Mode item:").unwrap();
+        let around_index = read_help.find("Mode around:").unwrap();
+        let thread_index = read_help.find("Mode thread:").unwrap();
+        let timeline_index = read_help.find("Mode timeline:").unwrap();
+        assert!(
+            item_index < around_index
+                && around_index < thread_index
+                && thread_index < timeline_index
+        );
+        assert!(read_help.contains("--direction <before|after>"));
+        assert!(read_help.contains("Allowed values: before, after"));
+        assert!(read_help.contains("--cursor <integer>"));
+        assert!(read_help.contains("Minimum: 1"));
+        assert!(read_help.contains("Maximum: 20"));
+        assert!(read_help.contains("Do not use older, newer, backward, or forward"));
+        assert!(read_help[item_index..around_index].contains("--body-offset <integer>"));
+        assert!(read_help[around_index..thread_index].contains("--before <integer>"));
+        assert!(!read_help[timeline_index..].contains("--before <integer>"));
         assert_eq!(
-            parse_operation_input(
+            parse_and_validate_operation_input(
                 &read,
                 &[
                     "--mode".to_string(),
@@ -1022,12 +2106,157 @@ mod tests {
             json!({"mode": "item", "messageId": "msg_123"})
         );
         assert_eq!(
+            parse_and_validate_operation_input(
+                &read,
+                &[
+                    "--before".to_string(),
+                    "5".to_string(),
+                    "--message-id".to_string(),
+                    "msg_123".to_string(),
+                    "--mode".to_string(),
+                    "around".to_string(),
+                ],
+            )
+            .unwrap(),
+            json!({"mode": "around", "messageId": "msg_123", "before": 5})
+        );
+        assert_eq!(
             operation_help_examples("camp.read"),
             [
                 "rovai camp read --mode item --message-id '<message-id>'",
-                "rovai camp read --camp-id '<camp-id>' --mode item --message-id '<message-id>'",
+                "rovai camp read --mode around --message-id '<message-id>' --before 5 --after 5",
+                "rovai camp read --mode thread --message-id '<message-id>' --direction before --limit 20",
+                "rovai camp read --mode timeline --direction before --limit 20",
             ]
         );
+        let missing_mode = parse_and_validate_operation_input(
+            &read,
+            &["--message-id".to_string(), "msg_123".to_string()],
+        )
+        .unwrap_err();
+        assert_eq!(
+            missing_mode.details.unwrap()["issues"][0],
+            json!({
+                "field": "mode",
+                "flag": "--mode",
+                "reason": "missing_mode",
+                "allowedValues": ["item", "around", "thread", "timeline"]
+            })
+        );
+        let unknown_mode = parse_and_validate_operation_input(
+            &read,
+            &["--mode".to_string(), "archive".to_string()],
+        )
+        .unwrap_err();
+        assert_eq!(
+            unknown_mode.details.unwrap()["issues"][0]["reason"],
+            "unknown_mode"
+        );
+        for direction in ["backward", "older", "newer", "forward"] {
+            let failure = parse_and_validate_operation_input(
+                &read,
+                &[
+                    "--mode".to_string(),
+                    "timeline".to_string(),
+                    "--direction".to_string(),
+                    direction.to_string(),
+                ],
+            )
+            .unwrap_err();
+            assert_eq!(
+                failure.details.unwrap()["issues"][0],
+                json!({
+                    "field": "direction",
+                    "flag": "--direction",
+                    "reason": "invalid_enum",
+                    "allowedValues": ["before", "after"]
+                })
+            );
+        }
+        let missing_direction = parse_and_validate_operation_input(
+            &read,
+            &["--mode".to_string(), "timeline".to_string()],
+        )
+        .unwrap_err();
+        assert_eq!(
+            missing_direction.message,
+            "camp.read timeline requires --direction <before|after>."
+        );
+        assert_eq!(
+            missing_direction.details.as_ref().unwrap(),
+            &json!({
+                "operation": "camp.read",
+                "mode": "timeline",
+                "issues": [{
+                    "field": "direction",
+                    "flag": "--direction",
+                    "reason": "missing_required",
+                    "allowedValues": ["before", "after"]
+                }]
+            })
+        );
+        let wrong_mode_field = parse_and_validate_operation_input(
+            &read,
+            &[
+                "--mode".to_string(),
+                "timeline".to_string(),
+                "--before".to_string(),
+                "5".to_string(),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(
+            wrong_mode_field.message,
+            "camp.read timeline requires --direction <before|after>; --before is valid only in around mode."
+        );
+        assert_eq!(
+            wrong_mode_field.details.as_ref().unwrap()["issues"],
+            json!([{
+                "field": "direction",
+                "flag": "--direction",
+                "reason": "missing_required",
+                "allowedValues": ["before", "after"]
+            }, {
+                "field": "before",
+                "flag": "--before",
+                "reason": "not_allowed_for_mode",
+                "validModes": ["around"]
+            }])
+        );
+        let cursor_zero = parse_and_validate_operation_input(
+            &read,
+            &[
+                "--mode".to_string(),
+                "timeline".to_string(),
+                "--direction".to_string(),
+                "before".to_string(),
+                "--cursor".to_string(),
+                "0".to_string(),
+            ],
+        )
+        .unwrap_err();
+        assert_eq!(
+            cursor_zero.details.unwrap()["issues"][0]["reason"],
+            "below_minimum"
+        );
+        assert_eq!(
+            cursor_zero.message,
+            "camp.read timeline requires --cursor to be at least 1."
+        );
+
+        let input_file =
+            env::temp_dir().join(format!("rovai-camp-read-input-{}.json", Uuid::new_v4()));
+        fs::write(&input_file, r#"{"mode":"timeline"}"#).unwrap();
+        let input_file_failure = parse_and_validate_operation_input(
+            &read,
+            &[
+                "--input-file".to_string(),
+                input_file.to_string_lossy().into_owned(),
+            ],
+        )
+        .unwrap_err();
+        fs::remove_file(input_file).unwrap();
+        assert_eq!(input_file_failure.details, missing_direction.details);
         assert_eq!(
             operation_help_examples("history.search"),
             ["rovai history search --query 'amount'"]
@@ -1095,20 +2324,17 @@ mod tests {
             )
             .is_err()
         );
-        assert!(description.summary.contains("canonical inline @agent_N"));
         assert!(
             description
                 .summary
-                .contains("exact active Camp member @display-name")
+                .contains("restricted inline Agent addressing")
         );
-        assert!(description.summary.contains("inspect effectiveRecipients"));
-        assert!(
-            description
-                .summary
-                .contains("first non-whitespace token on a line")
-        );
+        assert!(description.summary.contains("agentAddressingMode"));
+        assert!(description.summary.contains("effectiveRecipients"));
+        assert!(description.summary.contains("deliveryIds"));
         assert!(description.summary.contains("public-only"));
-        assert!(description.summary.contains("--to-user"));
+        assert!(description.summary.contains("--to-principal"));
+        assert!(!description.summary.contains("--to-user"));
         let to = description
             .arguments
             .iter()
@@ -1116,26 +2342,47 @@ mod tests {
             .unwrap();
         assert_eq!(to.flag, "--to");
         assert!(to.repeatable);
-        let to_user = description
+        let public_only = description
+            .arguments
+            .iter()
+            .find(|argument| argument.field == "publicOnly")
+            .unwrap();
+        assert_eq!(public_only.flag, "--public-only");
+        assert_eq!(public_only.value_kind, "boolean");
+        assert!(!public_only.repeatable);
+        assert!(!public_only.required);
+        let to_principal = description
             .arguments
             .iter()
             .find(|argument| argument.field == "mentionUser")
             .unwrap();
-        assert_eq!(to_user.flag, "--to-user");
-        assert_eq!(to_user.value_kind, "boolean");
-        assert!(!to_user.repeatable);
-        assert!(!to_user.required);
+        assert_eq!(to_principal.flag, "--to-principal");
+        assert_eq!(to_principal.value_kind, "boolean");
+        assert!(!to_principal.repeatable);
+        assert!(!to_principal.required);
         assert_eq!(
             parse_operation_input(
                 &description,
                 &[
-                    "--to-user".to_string(),
+                    "--to-principal".to_string(),
                     "--body".to_string(),
                     "Choose A or B".to_string(),
                 ]
             )
             .unwrap(),
             json!({"body": "Choose A or B", "mentionUser": true})
+        );
+        assert_eq!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--to-user".to_string(),
+                    "--body".to_string(),
+                    "Legacy spelling".to_string(),
+                ]
+            )
+            .unwrap(),
+            json!({"body": "Legacy spelling", "mentionUser": true})
         );
         let input_file =
             std::env::temp_dir().join(format!("rovai-send-v4-input-{}.json", Uuid::new_v4()));
@@ -1160,21 +2407,24 @@ mod tests {
         assert_eq!(
             operation_help_examples("camp.message.send"),
             [
-                "rovai send --body 'Status update'",
-                "rovai send --to agent_5 --body 'Please review and report back'",
-                "rovai send --to-user --body 'Please choose A or B'",
+                "rovai send --public-only --body 'Final conclusion: the failure is a client-version regression.'",
+                "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'",
+                "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'",
             ]
         );
         let help = operation_help_text(&description);
-        assert!(help.contains("Ordinary Camp messages are already visible to the user."));
-        assert!(help.contains("new unresolved user decision, answer, or action"));
-        assert!(help.contains("User attention is message-local"));
-        assert!(help.contains("does not represent user approval"));
-        assert!(help.contains("whitespace or end-of-body"));
-        assert!(help.contains("dedicated final line"));
-        assert!(help.contains("[] means no Agent was routed"));
-        assert!(help.contains("Display names are accepted only as inline aliases"));
-        assert!(!help.contains("--to agent_5 --to-user"));
+        assert!(
+            help.contains("Ordinary public Camp messages are already visible to the Principal.")
+        );
+        assert!(help.contains("new unresolved decision, answer, or action for the Principal"));
+        assert!(help.contains("Principal attention is message-local"));
+        assert!(help.contains("does not represent approval"));
+        assert!(help.contains("Agent addressing schedules concrete continuing work, not CC."));
+        assert!(help.contains("This option is invalid with --public-only."));
+        assert!(help.contains("Restricted inline Agent addressing is disabled"));
+        assert!(help.contains("It may be combined with --to-principal."));
+        assert!(!help.contains("--to-user"));
+        assert!(!help.contains("--to agent_5 --public-only"));
     }
 
     #[test]
@@ -1209,8 +2459,11 @@ mod tests {
             "rv-missing-{}.sock",
             &Uuid::new_v4().to_string()[..8]
         ));
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: socket.to_string_lossy().into_owned(),
+        };
         assert_eq!(
-            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
             BuiltinToolIpcFailure::Predictable
         );
     }
@@ -1223,6 +2476,9 @@ mod tests {
         let socket = std::path::PathBuf::from("/tmp")
             .join(format!("rv-loss-{}.sock", &Uuid::new_v4().to_string()[..8]));
         let listener = UnixListener::bind(&socket).unwrap();
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: socket.to_string_lossy().into_owned(),
+        };
         let server = std::thread::spawn(move || {
             for _ in 0..CORE_ATTEMPTS {
                 let (stream, _) = listener.accept().unwrap();
@@ -1230,7 +2486,7 @@ mod tests {
             }
         });
         assert_eq!(
-            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
             BuiltinToolIpcFailure::OutcomeIndeterminate
         );
         server.join().unwrap();
@@ -1247,12 +2503,15 @@ mod tests {
             &Uuid::new_v4().to_string()[..8]
         ));
         let listener = UnixListener::bind(&socket).unwrap();
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: socket.to_string_lossy().into_owned(),
+        };
         let server = std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             stream.write_all(b"not-json\n").unwrap();
         });
         assert_eq!(
-            send_with_retry(&socket, &request_for_ipc_test()).unwrap_err(),
+            send_with_retry(&endpoint, &request_for_ipc_test()).unwrap_err(),
             BuiltinToolIpcFailure::Predictable
         );
         server.join().unwrap();

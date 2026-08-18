@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # Camp 会话工作区
@@ -79,6 +79,29 @@ Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和�
 或降低次要信息密度，不能遮住 Approval/Recovery Dock、Composer 或执行台。静态模式与 reduced motion
 停止角色移动、路线流光、脉冲和会合动画，但不能停止 Snapshot/Runtime 驱动的真实文字更新，也不能
 关闭无动画的静态闲时文案。
+
+## 当前会话查找
+
+CampWorkspace 挂载时，`Command+F`（macOS）或 `Ctrl+F`（Windows）打开当前 Camp 会话查找。地图
+状态必须先切回既有会话时间线再打开查找；Members、Memory、Settings、Quick Chat 等非 Camp 页面因
+没有挂载 CampWorkspace，不得注册或显示该查找条。用户从会话主动切到地图时，已打开的查找关闭且不
+恢复旧焦点；下一次快捷键仍按上述地图返回路径处理。
+
+查找条与会话/地图切换器组成右上角同一紧凑悬浮工具组，不占 Header 或新增工具栏。输入 180 ms 后查询
+当前 Camp 完整历史的公开 user/agent 正文；exact total、选中序号和目标由
+[Camp Conversation Find v1](../../contracts/camp-conversation-find-v1.md)拥有。附件、Task、Tool output、
+Approval、Inspector、地图文案、系统消息和其他 Camp 不属于结果。屏幕外或尚未加载的目标只通过有界
+around-window 合入时间线，不触发 earlier page 全量加载，也不改变 open coverage。
+
+`Enter` 前进、`Shift+Enter` 后退并在首尾循环；按钮提供同等能力。空查询显示输入提示，无结果显示
+“无匹配”，读取中保留可理解的忙碌状态，失败说明“暂时无法搜索完整会话”并原位提供“重试”。`Esc`
+或关闭按钮撤下高亮，恢复打开前的消息阅读锚点、follow-latest 状态与仍可见焦点；定位期间输入框保持
+焦点，后台消息不能把时间线拉回最新。
+
+所有已挂载公开正文命中使用主题语义高亮，当前 occurrence 使用更强背景与下划线；当前消息另有 1 px
+定位线，不能只靠颜色表达。结果以 `aria-live` 播报，图标按钮有动作名称，reduced motion 关闭浮层进入
+和 spinner 之外的非必要动画。每次首次查询或前后导航都必须以当前 occurrence 的文字 Range 定位，而不是
+只把整条消息居中；Range 落在扣除悬浮查找条后的安全可视区中央，长消息中的首尾命中无需用户再次滚动。
 
 ## A2A 会话消息
 
@@ -179,9 +202,21 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 显示时保留“执行”Tab、Agent 与 Run。位置切换后焦点进入另一位置的对应切换控件，详情关闭/Escape
 优先返回仍连接的真实过程入口，无法返回时落到当前位置切换控件。
 
-命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。超长 Tool 输出只渲染有界的
-开头预览；完整内容由轻量、Icon-only 且有可访问名称的复制控件按需从 Core 读取，不能为了复制
-先把全文挂载进 Drawer。复制失败保留预览并原位说明，证据使用 evidence token 与等宽结构。
+命令、文件操作及其失败作为可展开 Tool Call 留在对应 Run stage。已读取 Evidence 中的 Tool chronology
+完整保留，不用最后 N 项切片静默删除较早操作，也不增加第二条“较早 N 项”时间线。Built-in Tool 从
+Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
+静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
+
+超长 Tool 输出只在原 disclosure 渲染有界开头预览；完整内容由该次展开结果内轻量、Icon-only 且有
+可访问名称的复制控件按需从 Core 读取，不能为了复制先把全文挂载进 Drawer。执行台不显示独立“查看完整
+工具调用”、standalone raw Evidence 或 Envelope JSON。复制失败保留预览并原位说明，证据使用 evidence
+token 与等宽结构。精确合同见
+[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)。
+
+当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
+“已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
+也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
+[Run Process Detail Surface v8](../../contracts/run-process-detail-surface-v8.md)。
 
 `waiting/recovery_blocked` 显示“结果待确认”，不得显示 spinner 或“恢复中”。Recovery Blocker
 必须说明 Runtime 已接受任务、重启后最终结果未知、原请求不会自动重发，并提供唯一“结束此运行”
