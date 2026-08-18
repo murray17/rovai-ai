@@ -40,6 +40,20 @@ const skills: ComposerSkillOption[] = [{
 }]
 
 describe('StructuredMentionComposer', () => {
+  it('keeps the empty placeholder adjacent to the editor for native IME visibility control', () => {
+    const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
+      id: 'empty-composer',
+      value: [],
+      members,
+      placeholder: '继续提问…',
+      ariaLabel: '写消息',
+      onChange: () => undefined,
+      onSubmit: () => undefined
+    }))
+
+    expect(markup).toContain('</div><span class="structured-mention-placeholder"')
+  })
+
   it('renders repeated member occurrences and one all-members occurrence as atomic tokens', () => {
     const markup = renderToStaticMarkup(createElement(StructuredMentionComposer, {
       id: 'structured-composer',

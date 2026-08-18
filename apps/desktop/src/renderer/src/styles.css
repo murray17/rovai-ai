@@ -2494,6 +2494,7 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .structured-mention-composer { width: 100%; }
 .structured-mention-editor { width: 100%; max-height: 180px; overflow-y: auto; outline: 0; }
 .structured-mention-editor:focus-visible { outline: 0; }
+.structured-mention-editor:not(:empty) + .structured-mention-placeholder { visibility: hidden; }
 .composer-reply-region { display: grid; min-width: 0; gap: 4px; padding: 1px 0 2px; }
 .composer-reply-line {
   display: grid;
