@@ -1564,67 +1564,78 @@ impl SkillLibraryService {
             repaired_count: 0,
         };
         for definition in BUNDLED_SKILLS {
-            if definition.name.starts_with("rovai-") {
-                anyhow::bail!("official Skill names must not use the rovai- prefix");
-            }
-            let expected = bundled_candidate_snapshot(definition)?;
-            let promoted = promote_imported_skill_to_official(database, definition.name)?;
-            if promoted {
+            self.install_bundled_definition(database, definition, &mut report)?;
+        }
+        Ok(report)
+    }
+
+    fn install_bundled_definition(
+        &self,
+        database: &mut Database,
+        definition: &BundledDefinition,
+        report: &mut BundledSkillBootstrapReport,
+    ) -> Result<()> {
+        if definition.name.starts_with("rovai-") {
+            anyhow::bail!("official Skill names must not use the rovai- prefix");
+        }
+        let expected = bundled_candidate_snapshot(definition)?;
+        let promoted = promote_imported_skill_to_official(database, definition.name)?;
+        if promoted {
+            report.changed = true;
+        }
+        let existing = load_existing_skill_by_name(database, definition.name)?;
+        if !promoted
+            && let Some(existing) = existing.as_ref().filter(|value| {
+                value.current_digest == expected.content_digest
+                    && value.current_source_type == SkillRevisionSourceType::Bundled
+            })
+            && bundled_revision_tree_matches(
+                &self.revision_content_path(&existing.id, &existing.current_revision_id),
+                definition,
+            )?
+        {
+            report.fast_path_count += 1;
+            if restore_system_required_skill_configuration(database, definition.name)? {
                 report.changed = true;
             }
-            let existing = load_existing_skill_by_name(database, definition.name)?;
-            if !promoted
-                && let Some(existing) = existing.as_ref().filter(|value| {
-                    value.current_digest == expected.content_digest
-                        && value.current_source_type == SkillRevisionSourceType::Bundled
-                })
-                && bundled_revision_tree_matches(
-                    &self.revision_content_path(&existing.id, &existing.current_revision_id),
-                    definition,
-                )?
-            {
-                report.fast_path_count += 1;
-                if restore_system_required_skill_configuration(database, definition.name)? {
-                    report.changed = true;
-                }
-                continue;
-            }
+            return Ok(());
+        }
 
-            let token = format!("bundled-{}-{}", definition.name, Uuid::new_v4());
-            let staging_root = self.root.join(".staging").join(token);
-            let source = staging_root.join(definition.name);
-            materialize_bundled_definition(&source, definition)?;
-            let verified = stage_candidate(
-                &source,
-                definition.name,
+        let token = format!("bundled-{}-{}", definition.name, Uuid::new_v4());
+        let staging_root = self.root.join(".staging").join(token);
+        let source = staging_root.join(definition.name);
+        materialize_bundled_definition(&source, definition)?;
+        let verified = stage_candidate(
+            &source,
+            definition.name,
+            &staging_root.join(format!(".verify-{}", definition.name)),
+        )?;
+        report.materialized_count += 1;
+        if verified.content_digest != expected.content_digest
+            || verified.file_count != expected.file_count
+            || verified.total_bytes != expected.total_bytes
+        {
+            anyhow::bail!(
+                "materialized bundled Skill {} does not match its embedded definition",
+                definition.name
+            );
+        }
+        if existing.as_ref().is_some_and(|value| {
+            value.current_digest == verified.content_digest
+                && value.current_source_type == SkillRevisionSourceType::Bundled
+        }) {
+            let existing = existing
+                .as_ref()
+                .context("Bundled Skill disappeared during verification")?;
+            let current_content =
+                self.revision_content_path(&existing.id, &existing.current_revision_id);
+            remove_directory_if_present(&current_content)?;
+            publish_directory(
                 &staging_root.join(format!(".verify-{}", definition.name)),
+                &current_content,
             )?;
-            report.materialized_count += 1;
-            if verified.content_digest != expected.content_digest
-                || verified.file_count != expected.file_count
-                || verified.total_bytes != expected.total_bytes
-            {
-                anyhow::bail!(
-                    "materialized bundled Skill {} does not match its embedded definition",
-                    definition.name
-                );
-            }
-            if existing.as_ref().is_some_and(|value| {
-                value.current_digest == verified.content_digest
-                    && value.current_source_type == SkillRevisionSourceType::Bundled
-            }) {
-                let existing = existing
-                    .as_ref()
-                    .context("Bundled Skill disappeared during verification")?;
-                let current_content =
-                    self.revision_content_path(&existing.id, &existing.current_revision_id);
-                remove_directory_if_present(&current_content)?;
-                publish_directory(
-                    &staging_root.join(format!(".verify-{}", definition.name)),
-                    &current_content,
-                )?;
-                database.connection().execute(
-                    r#"
+            database.connection().execute(
+                r#"
                         INSERT INTO event_log(
                             event_id, event_type, payload_json,
                             entity_type, entity_id, actor_type, actor_id, created_at
@@ -1633,175 +1644,196 @@ impl SkillLibraryService {
                             'skill', ?3, 'system', 'skill-library-bootstrap', ?4
                         )
                         "#,
-                    params![
-                        Uuid::new_v4().to_string(),
-                        serde_json::to_string(&json!({
-                            "skillId": existing.id,
-                            "revisionId": existing.current_revision_id,
-                            "contentDigest": existing.current_digest,
-                        }))?,
-                        existing.id,
-                        Utc::now().to_rfc3339(),
-                    ],
-                )?;
-                report.repaired_count += 1;
-                report.changed = true;
-                if restore_system_required_skill_configuration(database, definition.name)? {
-                    report.changed = true;
-                }
-                remove_directory_if_present(&staging_root)?;
-                continue;
-            }
-            let skill_id = existing
-                .as_ref()
-                .map(|value| value.id.clone())
-                .unwrap_or_else(|| Uuid::new_v4().to_string());
-            let revision_id = Uuid::new_v4().to_string();
-            let final_content = self.revision_content_path(&skill_id, &revision_id);
-            publish_directory(
-                &staging_root.join(format!(".verify-{}", definition.name)),
-                &final_content,
+                params![
+                    Uuid::new_v4().to_string(),
+                    serde_json::to_string(&json!({
+                        "skillId": existing.id,
+                        "revisionId": existing.current_revision_id,
+                        "contentDigest": existing.current_digest,
+                    }))?,
+                    existing.id,
+                    Utc::now().to_rfc3339(),
+                ],
             )?;
-            let command = PublishBundledSkillCommand {
-                name: definition.name.to_string(),
-                content_digest: verified.content_digest.clone(),
-            };
-            let envelope = CommandEnvelope {
-                command_id: format!(
-                    "bundled-skill:{}:{}",
-                    definition.name, verified.content_digest
-                ),
-                actor: ActorRef::System {
-                    component_id: "skill-library-bootstrap".to_string(),
-                },
-                camp_id: None,
-                expected_versions: Vec::new(),
-                execution_epoch: None,
-                payload: command,
-            };
-            let now = Utc::now().to_rfc3339();
-            let mut source_metadata = json!({
-                "bundled": true,
-                "appVersion": env!("CARGO_PKG_VERSION"),
-            });
-            if let (Some(repository), Some(revision)) =
-                (definition.upstream_repository, definition.upstream_revision)
-            {
-                source_metadata["upstream"] = json!({
-                    "repository": repository,
-                    "revision": revision,
-                });
+            report.repaired_count += 1;
+            report.changed = true;
+            if restore_system_required_skill_configuration(database, definition.name)? {
+                report.changed = true;
             }
-            let existing_id = existing.as_ref().map(|value| value.id.clone());
-            let existing_version = existing.as_ref().map(|value| value.version);
-            let verified_for_handler = StagedCandidate {
-                name: verified.name,
-                description: verified.description,
-                content_digest: verified.content_digest,
-                risk_summary: verified.risk_summary,
-                file_count: verified.file_count,
-                total_bytes: verified.total_bytes,
-                source_path: "rovai://bundled".to_string(),
-                relative_content_path: String::new(),
-            };
-            let skill_id_for_handler = skill_id.clone();
-            let revision_id_for_handler = revision_id.clone();
-            let result = self.gateway.execute(database, &envelope, |transaction| {
-                if let Some(existing_id) = &existing_id {
-                    insert_revision(
-                        transaction,
-                        &revision_id_for_handler,
-                        existing_id,
-                        &verified_for_handler,
-                        SkillRevisionSourceType::Bundled,
-                        &source_metadata,
-                        &now,
-                    )?;
-                    transaction.execute(
-                        r#"
+            remove_directory_if_present(&staging_root)?;
+            return Ok(());
+        }
+        let skill_id = existing
+            .as_ref()
+            .map(|value| value.id.clone())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
+        let revision_id = Uuid::new_v4().to_string();
+        let final_content = self.revision_content_path(&skill_id, &revision_id);
+        publish_directory(
+            &staging_root.join(format!(".verify-{}", definition.name)),
+            &final_content,
+        )?;
+        let command = PublishBundledSkillCommand {
+            name: definition.name.to_string(),
+            content_digest: verified.content_digest.clone(),
+        };
+        let envelope = CommandEnvelope {
+            command_id: format!(
+                "bundled-skill:{}:{}",
+                definition.name, verified.content_digest
+            ),
+            actor: ActorRef::System {
+                component_id: "skill-library-bootstrap".to_string(),
+            },
+            camp_id: None,
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: command,
+        };
+        let now = Utc::now().to_rfc3339();
+        let mut source_metadata = json!({
+            "bundled": true,
+            "appVersion": env!("CARGO_PKG_VERSION"),
+        });
+        if let (Some(repository), Some(revision)) =
+            (definition.upstream_repository, definition.upstream_revision)
+        {
+            source_metadata["upstream"] = json!({
+                "repository": repository,
+                "revision": revision,
+            });
+        }
+        let existing_id = existing.as_ref().map(|value| value.id.clone());
+        let existing_version = existing.as_ref().map(|value| value.version);
+        let verified_for_handler = StagedCandidate {
+            name: verified.name,
+            description: verified.description,
+            content_digest: verified.content_digest,
+            risk_summary: verified.risk_summary,
+            file_count: verified.file_count,
+            total_bytes: verified.total_bytes,
+            source_path: "rovai://bundled".to_string(),
+            relative_content_path: String::new(),
+        };
+        let skill_id_for_handler = skill_id.clone();
+        let revision_id_for_handler = revision_id.clone();
+        let result = self.gateway.execute(database, &envelope, |transaction| {
+            if let Some(existing_id) = &existing_id {
+                insert_revision(
+                    transaction,
+                    &revision_id_for_handler,
+                    existing_id,
+                    &verified_for_handler,
+                    SkillRevisionSourceType::Bundled,
+                    &source_metadata,
+                    &now,
+                )?;
+                transaction.execute(
+                    r#"
                         UPDATE skill
                         SET current_revision_id = ?1, version = version + 1,
                             updated_at = ?2
                         WHERE id = ?3 AND version = ?4 AND origin = 'official'
                         "#,
-                        params![revision_id_for_handler, now, existing_id, existing_version],
-                    )?;
-                    transaction.execute(
-                        r#"
+                    params![revision_id_for_handler, now, existing_id, existing_version],
+                )?;
+                transaction.execute(
+                    r#"
                         UPDATE skill_group_assignment
                         SET revision_id = ?1, updated_at = ?2
                         WHERE skill_id = ?3
                         "#,
-                        params![revision_id_for_handler, now, existing_id],
-                    )?;
-                } else {
-                    transaction.execute(
-                        r#"
+                    params![revision_id_for_handler, now, existing_id],
+                )?;
+            } else {
+                transaction.execute(
+                    r#"
                         INSERT INTO skill(
                             id, name, origin, enabled, lifecycle_status,
                             current_revision_id, version, created_at, updated_at
                         ) VALUES (?1, ?2, 'official', 1, 'active', NULL, 1, ?3, ?3)
                         "#,
-                        params![skill_id_for_handler, verified_for_handler.name, now],
-                    )?;
-                    insert_revision(
-                        transaction,
-                        &revision_id_for_handler,
-                        &skill_id_for_handler,
-                        &verified_for_handler,
-                        SkillRevisionSourceType::Bundled,
-                        &source_metadata,
-                        &now,
-                    )?;
-                    transaction.execute(
-                        "UPDATE skill SET current_revision_id = ?1 WHERE id = ?2",
-                        params![revision_id_for_handler, skill_id_for_handler],
-                    )?;
-                    insert_default_group_assignments(
-                        transaction,
-                        &skill_id_for_handler,
-                        &revision_id_for_handler,
-                        &now,
-                    )?;
-                }
-                append_skill_event(
-                    transaction,
-                    "skill.revision_published",
-                    &skill_id_for_handler,
-                    &envelope.actor,
-                    json!({
-                        "skillId": skill_id_for_handler,
-                        "revisionId": revision_id_for_handler,
-                        "contentDigest": verified_for_handler.content_digest,
-                        "origin": "official",
-                    }),
+                    params![skill_id_for_handler, verified_for_handler.name, now],
                 )?;
-                Ok(CommandHandlerResult::applied(
-                    if existing_id.is_some() {
-                        "bundled_skill_updated"
-                    } else {
-                        "bundled_skill_installed"
-                    },
-                    json!({
-                        "skillId": skill_id_for_handler,
-                        "revisionId": revision_id_for_handler,
-                    }),
-                    Some(EntityReference {
-                        entity_type: "skill".to_string(),
-                        entity_id: skill_id_for_handler.clone(),
-                    }),
-                ))
-            });
-            if result.is_err() {
-                let _ =
-                    remove_directory_if_present(final_content.parent().unwrap_or(&final_content));
+                insert_revision(
+                    transaction,
+                    &revision_id_for_handler,
+                    &skill_id_for_handler,
+                    &verified_for_handler,
+                    SkillRevisionSourceType::Bundled,
+                    &source_metadata,
+                    &now,
+                )?;
+                transaction.execute(
+                    "UPDATE skill SET current_revision_id = ?1 WHERE id = ?2",
+                    params![revision_id_for_handler, skill_id_for_handler],
+                )?;
+                insert_default_group_assignments(
+                    transaction,
+                    &skill_id_for_handler,
+                    &revision_id_for_handler,
+                    &now,
+                )?;
             }
-            result?;
-            restore_system_required_skill_configuration(database, definition.name)?;
-            report.changed = true;
-            remove_directory_if_present(&staging_root)?;
+            append_skill_event(
+                transaction,
+                "skill.revision_published",
+                &skill_id_for_handler,
+                &envelope.actor,
+                json!({
+                    "skillId": skill_id_for_handler,
+                    "revisionId": revision_id_for_handler,
+                    "contentDigest": verified_for_handler.content_digest,
+                    "origin": "official",
+                }),
+            )?;
+            Ok(CommandHandlerResult::applied(
+                if existing_id.is_some() {
+                    "bundled_skill_updated"
+                } else {
+                    "bundled_skill_installed"
+                },
+                json!({
+                    "skillId": skill_id_for_handler,
+                    "revisionId": revision_id_for_handler,
+                }),
+                Some(EntityReference {
+                    entity_type: "skill".to_string(),
+                    entity_id: skill_id_for_handler.clone(),
+                }),
+            ))
+        });
+        if result.is_err() {
+            let _ = remove_directory_if_present(final_content.parent().unwrap_or(&final_content));
         }
-        Ok(report)
+        result?;
+        restore_system_required_skill_configuration(database, definition.name)?;
+        report.changed = true;
+        remove_directory_if_present(&staging_root)?;
+        Ok(())
+    }
+
+    #[cfg(all(test, feature = "slow-tests"))]
+    pub(crate) fn install_bundled_skill_for_test(
+        &self,
+        database: &mut Database,
+        name: &str,
+    ) -> Result<SkillView> {
+        let definition = BUNDLED_SKILLS
+            .iter()
+            .find(|definition| definition.name == name)
+            .with_context(|| format!("unknown bundled Skill {name}"))?;
+        let mut report = BundledSkillBootstrapReport {
+            changed: strip_official_skill_name_prefixes(database)?,
+            fast_path_count: 0,
+            materialized_count: 0,
+            repaired_count: 0,
+        };
+        self.install_bundled_definition(database, definition, &mut report)?;
+        self.list(database)?
+            .into_iter()
+            .find(|skill| skill.name == name)
+            .with_context(|| format!("bundled Skill {name} was not installed"))
     }
 
     pub fn cleanup_expired_staging(&self) -> Result<()> {

@@ -89,7 +89,11 @@ test("Cargo, lib root, unknown Rust, shared, and multi-target changes run full t
     ["crates/rovai-core/src/library.rs", "crates/rovai-core/src/bin/rovai.rs"],
   ];
   for (const paths of scenarios) {
-    assert.deepEqual(classify(paths).scripts, ["test:rust:full"], paths.join(", "));
+    assert.deepEqual(
+      classify(paths).scripts,
+      ["test:rust:workspace-default"],
+      paths.join(", "),
+    );
   }
 });
 
@@ -166,19 +170,19 @@ test("the staged runner prints the required skip message and invokes no pnpm scr
 
 test("staged inspection and module classification failures fall back to full tests", async () => {
   const inspectionFailure = await runScenario({ listError: new Error("git failed") });
-  assert.deepEqual(inspectionFailure.scripts, ["test:rust:full"]);
+  assert.deepEqual(inspectionFailure.scripts, ["test:rust:workspace-default"]);
   assert.equal(inspectionFailure.plan.route, "full");
 
   const classificationFailure = await runScenario({
     paths: ["crates/rovai-core/src/core_only.rs"],
     readError: new Error("index read failed"),
   });
-  assert.deepEqual(classificationFailure.scripts, ["test:rust:full"]);
+  assert.deepEqual(classificationFailure.scripts, ["test:rust:workspace-default"]);
   assert.equal(classificationFailure.plan.route, "full");
 });
 
 test("Rust deletes and renames fall back to full tests", async () => {
   const result = await runScenario({ destructivePaths: ["crates/rovai-core/src/action.rs"] });
-  assert.deepEqual(result.scripts, ["test:rust:full"]);
+  assert.deepEqual(result.scripts, ["test:rust:workspace-default"]);
   assert.equal(result.plan.route, "full");
 });

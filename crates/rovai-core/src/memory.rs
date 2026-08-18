@@ -1212,7 +1212,7 @@ mod slow_tests {
     #[test]
     fn user_memory_has_single_effective_revision_with_actor_and_keys() {
         let directory = std::env::temp_dir().join(format!("rovai-memory-v2-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let execution = MemoryService::default()
             .create(
                 &mut database,
@@ -1246,7 +1246,7 @@ mod slow_tests {
     fn hearth_count_capacity_remains_32_and_rejections_are_durable() {
         let directory =
             std::env::temp_dir().join(format!("rovai-memory-capacity-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let service = MemoryService::default();
         let mut memory_ids = Vec::new();
         for index in 0..HEARTH_MAX_COUNT {
@@ -1330,7 +1330,7 @@ mod slow_tests {
     fn hearth_body_quota_checks_transaction_final_state_and_lifecycle_release() {
         let directory =
             std::env::temp_dir().join(format!("rovai-memory-body-capacity-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let service = MemoryService::default();
         let mut memories = Vec::new();
         for index in 0..8 {
@@ -1549,7 +1549,7 @@ mod slow_tests {
             "rovai-memory-identity-body-capacity-{}",
             Uuid::new_v4()
         ));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         configure_test_runtime(&database, &["agent_1", "agent_2", "agent_3"]);
         let service = MemoryService::default();
 
@@ -1697,7 +1697,7 @@ mod slow_tests {
             "rovai-memory-supersession-atomic-{}",
             Uuid::new_v4()
         ));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         configure_test_runtime(&database, &["agent_1"]);
         let service = MemoryService::default();
         let predecessor = service
@@ -1819,7 +1819,7 @@ mod slow_tests {
             "rovai-memory-supersession-capacity-{}",
             Uuid::new_v4()
         ));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         configure_test_runtime(&database, &["agent_1"]);
         let service = MemoryService::default();
         let predecessor = service
@@ -1935,7 +1935,7 @@ mod slow_tests {
     fn forget_clears_body_keys_and_search_index() {
         let directory =
             std::env::temp_dir().join(format!("rovai-memory-forget-{}", Uuid::new_v4()));
-        let mut database = Database::open(&directory).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
         let created = MemoryService::default()
             .create(
                 &mut database,
