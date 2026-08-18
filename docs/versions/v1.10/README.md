@@ -4,15 +4,15 @@ version: v1.10
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: true
 last_updated: 2026-08-18
 ---
 
 # Rovai-ai v1.10：唯一 Camp ID 与安全公开 Runtime 失败
 
-> 当前状态：唯一 Camp identity clean break 与 Claude Code/Antigravity 安全公开失败均已实现；最终集成门禁、
-> macOS 打包验收、main 推送和 Applications 提升由本版本收口统一完成。
+> 当前状态：唯一 Camp identity clean break 与 Claude Code/Antigravity 安全公开失败均已实现；最终组合门禁、
+> arm64 macOS 打包与严格签名检查、隔离启动验收、main 推送和 `/Applications/Rovai AI.app` 提升均已完成。
 >
 > 前置版本：[v1.09 完整会话查找、Mode-aware CLI 与 Tool 结果交互](../v1.09/README.md)。
 

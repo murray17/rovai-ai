@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.10
 authority: implementation-plan-and-acceptance
-status: in_progress
+status: complete
 last_updated: 2026-08-18
 ---
 
@@ -52,13 +52,16 @@ last_updated: 2026-08-18
 - [x] `pnpm test`、`pnpm build:desktop` 与完整文档治理通过；
 - [x] `cargo fmt --all --check`、严格 Clippy、`cargo test -p rovai-core --lib` 与 `git diff --check` 通过；
 - [x] Runtime 独立提交已进入 Camp ID 集成分支，migration 顺序固定为 94→95、schema 49→50；
-- [ ] 最终集成全量门禁、macOS package/签名/arm64/隔离 userData 验收、main push 与 Applications 提升完成。
+- [x] 最终集成全量门禁、macOS package/签名/arm64/隔离 userData 验收、main push 与 Applications 提升完成。
 
 最终组合门禁：`pnpm test` 通过 62 个 Vitest 文件/421 项测试与 187 项脚本测试；Rust PR 三段通过
 244 项 fast library、15 项 CLI 与 258 项 slow integration；workspace all-features 通过 532 项 library、
 15 项 CLI 与 97 项 core binary（4 项手工真实 Runtime smoke 按约束 ignored）。默认与 all-features 严格
 Clippy、TypeScript typecheck、desktop build、migration 91/95 定向测试、diff-aware docs CI、ADR generation、
-formatter 与 diff check 均通过。
+formatter 与 diff check 均通过。`8a2d14e4` 已推送 `main`；其 arm64 App、Core 与 CLI 通过 strict codesign，
+bundle 内 Core/CLI Mach-O UUID 与 release 产物一致。`dist` 和安装位置分别使用全新隔离 `userData` 启动至
+Core ready，均确认 Data Contract `v1.10`、projection schema 50、migration 95；最终安装位置为
+`/Applications/Rovai AI.app`，安装版受控退出无未解决执行。
 
 ## 测试准入说明
 
