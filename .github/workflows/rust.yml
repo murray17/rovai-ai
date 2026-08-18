@@ -16,6 +16,7 @@ on:
       - ".rustfmt.toml"
       - "clippy.toml"
       - ".clippy.toml"
+      - ".github/workflows/rust.yml"
 permissions:
   contents: read
 
@@ -77,3 +78,23 @@ jobs:
       - name: Run database smoke tests
         run: >-
           cargo test -p rovai-core --features slow-tests --lib slow_tests::
+
+  windows-x64-check:
+    name: Windows x64 compile gate
+    runs-on: windows-2022
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Restore Cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check all Windows targets
+        run: >-
+          cargo check --workspace --all-targets
+          --target x86_64-pc-windows-msvc

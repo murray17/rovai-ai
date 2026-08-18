@@ -193,10 +193,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
-    net::{UnixListener, UnixStream},
     sync::{Mutex, Notify, RwLock, mpsc, oneshot},
     time::{Duration, MissedTickBehavior},
 };
+
+#[cfg(unix)]
+use tokio::net::{UnixListener, UnixStream};
+
+#[cfg(unix)]
+type BuiltinToolListener = UnixListener;
+
+#[cfg(not(unix))]
+struct BuiltinToolListener;
 
 const RUNTIME_CANCELLATION_INTERRUPT_TIMEOUT: Duration = Duration::from_secs(2);
 const RUNTIME_CANCELLATION_FENCE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -13556,11 +13564,6 @@ fn restrict_private_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn restrict_private_directory(_path: &Path) -> Result<()> {
-    Ok(())
-}
-
 fn emit(output: &mpsc::UnboundedSender<String>, method: &str, params: Value) {
     let message = json!({"method": method, "params": params});
     if let Ok(serialized) = serde_json::to_string(&message) {
@@ -13602,7 +13605,8 @@ async fn write_output(
     Ok(())
 }
 
-fn bind_builtin_tool_listener(socket_path: &Path) -> Result<UnixListener> {
+#[cfg(unix)]
+fn bind_builtin_tool_listener(socket_path: &Path) -> Result<BuiltinToolListener> {
     let directory = socket_path
         .parent()
         .context("Built-in Tool socket path has no parent directory")?;
@@ -13635,9 +13639,15 @@ fn bind_builtin_tool_listener(socket_path: &Path) -> Result<UnixListener> {
     Ok(listener)
 }
 
+#[cfg(not(unix))]
+fn bind_builtin_tool_listener(_socket_path: &Path) -> Result<BuiltinToolListener> {
+    anyhow::bail!("builtin_tool_named_pipe_not_implemented")
+}
+
+#[cfg(unix)]
 async fn serve_builtin_tool_ipc(
     core: Arc<Core>,
-    listener: UnixListener,
+    listener: BuiltinToolListener,
     socket_path: PathBuf,
     mut shutdown: oneshot::Receiver<()>,
 ) {
@@ -13673,6 +13683,16 @@ async fn serve_builtin_tool_ipc(
     let _ = std::fs::remove_file(socket_path);
 }
 
+#[cfg(not(unix))]
+async fn serve_builtin_tool_ipc(
+    _core: Arc<Core>,
+    _listener: BuiltinToolListener,
+    _socket_path: PathBuf,
+    _shutdown: oneshot::Receiver<()>,
+) {
+}
+
+#[cfg(unix)]
 async fn handle_builtin_tool_connection(core: Arc<Core>, stream: UnixStream) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut lines = BufReader::new(reader).lines();

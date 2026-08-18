@@ -1,11 +1,16 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, OpenOptions},
+    fs,
+    path::{Component, Path, PathBuf},
+    str::FromStr,
+};
+
+#[cfg(unix)]
+use std::{
+    fs::OpenOptions,
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink},
-    path::{Component, Path, PathBuf},
     process::Command,
-    str::FromStr,
 };
 
 use anyhow::{Context, Result};
@@ -22,8 +27,11 @@ use crate::{
     skill::{SkillLibraryService, SkillView},
 };
 
+#[cfg(unix)]
 const GIT_EXCLUDE_BEGIN: &str = "# BEGIN ROVAI MANAGED SKILL PROJECTIONS";
+#[cfg(unix)]
 const GIT_EXCLUDE_END: &str = "# END ROVAI MANAGED SKILL PROJECTIONS";
+#[cfg(unix)]
 const MANAGED_GIT_EXCLUDE_MARKERS: [(&str, &str); 3] = [
     (GIT_EXCLUDE_BEGIN, GIT_EXCLUDE_END),
     (
@@ -1631,6 +1639,7 @@ fn delete_observation(
     Ok(())
 }
 
+#[cfg(unix)]
 fn publish_managed_link(target: &Path, entry_path: &Path, replace: bool) -> Result<()> {
     let parent = entry_path
         .parent()
@@ -1672,6 +1681,11 @@ fn publish_managed_link(target: &Path, entry_path: &Path, replace: bool) -> Resu
         });
     }
     Ok(())
+}
+
+#[cfg(not(unix))]
+fn publish_managed_link(_target: &Path, _entry_path: &Path, _replace: bool) -> Result<()> {
+    anyhow::bail!("windows_skill_projection_not_implemented")
 }
 
 fn cleanup_safe_temporary_links(
@@ -2034,6 +2048,7 @@ fn list_observations_for_root(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+#[cfg(unix)]
 fn update_git_exclude(execution_root: &Path, managed_entries: &BTreeSet<PathBuf>) -> Result<()> {
     let top_level = run_git_path(execution_root, &["rev-parse", "--show-toplevel"])?;
     let Some(top_level) = top_level else {
@@ -2101,10 +2116,17 @@ fn update_git_exclude(execution_root: &Path, managed_entries: &BTreeSet<PathBuf>
     Ok(())
 }
 
+#[cfg(not(unix))]
+fn update_git_exclude(_execution_root: &Path, _managed_entries: &BTreeSet<PathBuf>) -> Result<()> {
+    anyhow::bail!("windows_skill_projection_not_implemented")
+}
+
+#[cfg(unix)]
 fn run_git_path(cwd: &Path, arguments: &[&str]) -> Result<Option<String>> {
     run_git_path_with_executable(cwd, arguments, std::ffi::OsStr::new("git"))
 }
 
+#[cfg(unix)]
 fn run_git_path_with_executable(
     cwd: &Path,
     arguments: &[&str],
@@ -2129,6 +2151,7 @@ fn run_git_path_with_executable(
     Ok((!value.is_empty()).then_some(value))
 }
 
+#[cfg(unix)]
 fn strip_managed_exclude_block(content: &str) -> Result<(String, bool)> {
     let mut output = String::new();
     let mut expected_end = None;
@@ -2167,6 +2190,7 @@ fn strip_managed_exclude_block(content: &str) -> Result<(String, bool)> {
     Ok((output, block_count > 0))
 }
 
+#[cfg(unix)]
 fn path_to_git_pattern(path: &Path) -> String {
     path.components()
         .filter_map(|component| match component {
@@ -2178,6 +2202,7 @@ fn path_to_git_pattern(path: &Path) -> String {
         .join("/")
 }
 
+#[cfg(unix)]
 fn escape_gitignore_component(component: &str) -> String {
     let mut escaped = String::with_capacity(component.len());
     for character in component.chars() {
@@ -2200,7 +2225,7 @@ fn to_sql_error(error: anyhow::Error) -> rusqlite::Error {
     )
 }
 
-#[cfg(all(test, feature = "slow-tests"))]
+#[cfg(all(test, feature = "slow-tests", unix))]
 mod slow_tests {
     use super::*;
     use crate::{

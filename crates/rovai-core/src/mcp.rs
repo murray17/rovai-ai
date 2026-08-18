@@ -1,9 +1,14 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File, OpenOptions},
+    fs,
+    path::{Path, PathBuf},
+};
+
+#[cfg(unix)]
+use std::{
+    fs::{File, OpenOptions},
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
@@ -477,19 +482,26 @@ impl McpConfigStore {
     }
 
     pub fn repair_permissions(&self) -> Result<()> {
-        if let Some(parent) = self.path.parent()
-            && parent.exists()
+        #[cfg(not(unix))]
         {
-            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).with_context(|| {
-                format!("failed to restrict MCP directory {}", parent.display())
-            })?;
+            anyhow::bail!("windows_private_storage_not_implemented");
         }
-        if self.path.exists() {
-            fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600)).with_context(
-                || format!("failed to restrict MCP config {}", self.path.display()),
-            )?;
+        #[cfg(unix)]
+        {
+            if let Some(parent) = self.path.parent()
+                && parent.exists()
+            {
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).with_context(
+                    || format!("failed to restrict MCP directory {}", parent.display()),
+                )?;
+            }
+            if self.path.exists() {
+                fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600)).with_context(
+                    || format!("failed to restrict MCP config {}", self.path.display()),
+                )?;
+            }
+            Ok(())
         }
-        Ok(())
     }
 
     pub fn create(
@@ -906,13 +918,13 @@ impl McpConfigStore {
                     "MCP configuration exceeds the 1 MiB limit",
                     None,
                 )),
-                permission_issue: metadata.permissions().mode() & 0o077 != 0,
+                permission_issue: private_permission_issue(&metadata)?,
             });
         }
         let bytes = fs::read(&self.path)
             .with_context(|| format!("failed to read MCP config {}", self.path.display()))?;
         let digest = bytes_digest(&bytes);
-        let permission_issue = metadata.permissions().mode() & 0o077 != 0;
+        let permission_issue = private_permission_issue(&metadata)?;
         let mut config = match parse_json_no_duplicates::<McpConfigFile>(&bytes) {
             Ok(config) => config,
             Err(error) => {
@@ -1000,6 +1012,7 @@ impl McpConfigStore {
         })
     }
 
+    #[cfg(unix)]
     fn write_new(&self, config: &McpConfigFile) -> Result<()> {
         let parent = self
             .path
@@ -1030,6 +1043,12 @@ impl McpConfigStore {
         }
     }
 
+    #[cfg(not(unix))]
+    fn write_new(&self, _config: &McpConfigFile) -> Result<()> {
+        anyhow::bail!("windows_private_storage_not_implemented")
+    }
+
+    #[cfg(unix)]
     fn write(&self, config: &McpConfigFile) -> Result<()> {
         let parent = self
             .path
@@ -1056,8 +1075,14 @@ impl McpConfigStore {
         }
         result
     }
+
+    #[cfg(not(unix))]
+    fn write(&self, _config: &McpConfigFile) -> Result<()> {
+        anyhow::bail!("windows_private_storage_not_implemented")
+    }
 }
 
+#[cfg(unix)]
 fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     let mut file = OpenOptions::new()
         .create_new(true)
@@ -1067,6 +1092,16 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
     file.write_all(bytes)?;
     file.sync_all()?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn private_permission_issue(metadata: &fs::Metadata) -> Result<bool> {
+    Ok(metadata.permissions().mode() & 0o077 != 0)
+}
+
+#[cfg(not(unix))]
+fn private_permission_issue(_metadata: &fs::Metadata) -> Result<bool> {
+    anyhow::bail!("windows_private_storage_not_implemented")
 }
 
 fn parse_single_public_entry(
@@ -1506,6 +1541,7 @@ fn sensitive_key(key: &str) -> bool {
         .any(|part| normalized.contains(part))
 }
 
+#[cfg(unix)]
 fn canonical_bytes(config: &McpConfigFile) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec_pretty(config)?;
     bytes.push(b'\n');

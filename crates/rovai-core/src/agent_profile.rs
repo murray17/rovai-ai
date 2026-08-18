@@ -1,9 +1,11 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    os::unix::fs::PermissionsExt,
     path::Path,
     str::FromStr,
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
@@ -1486,8 +1488,11 @@ impl AgentProfileService {
         if discovered.source == InstallationSource::Custom {
             anyhow::bail!("managed Installation cannot use a custom source");
         }
+        #[cfg(unix)]
         let executable_is_usable = std::fs::metadata(&discovered.executable_path)
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
+        #[cfg(not(unix))]
+        let executable_is_usable = false;
         let executable_identity =
             observe_executable_file_identity(Path::new(&discovered.executable_path)).ok();
 

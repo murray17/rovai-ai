@@ -2249,7 +2249,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
     candidates.into_iter().find(|path| path.is_file())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};

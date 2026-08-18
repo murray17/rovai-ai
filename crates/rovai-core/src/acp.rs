@@ -3469,7 +3469,7 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
     Ok(canonical)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::runtime_fleet::AgentRuntimeFleetConfig;

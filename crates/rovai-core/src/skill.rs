@@ -1,11 +1,16 @@
 use std::{
     collections::{BTreeMap, BTreeSet, HashSet},
-    fs::{self, File, OpenOptions},
-    io::{Read, Write},
-    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    fs,
     path::{Component, Path, PathBuf},
     process::Command,
     time::Duration,
+};
+
+#[cfg(unix)]
+use std::{
+    fs::{File, OpenOptions},
+    io::{Read, Write},
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
 };
 
 use anyhow::{Context, Result};
@@ -2479,6 +2484,7 @@ fn bundled_revision_tree_matches(
     Ok(actual == expected)
 }
 
+#[cfg(unix)]
 fn collect_revision_tree_metadata(
     content_root: &Path,
     relative: &Path,
@@ -2514,6 +2520,16 @@ fn collect_revision_tree_metadata(
     Ok(files.len() <= MAX_SKILL_FILES)
 }
 
+#[cfg(not(unix))]
+fn collect_revision_tree_metadata(
+    _content_root: &Path,
+    _relative: &Path,
+    _depth: usize,
+    _files: &mut BTreeMap<String, (u32, u64)>,
+) -> Result<bool> {
+    anyhow::bail!("windows_private_storage_not_implemented")
+}
+
 #[derive(Debug, Default)]
 struct CandidateCollector {
     records: Vec<FileDigestRecord>,
@@ -2531,6 +2547,7 @@ struct FileDigestRecord {
     digest: [u8; 32],
 }
 
+#[cfg(unix)]
 fn copy_candidate_tree(
     source_root: &Path,
     destination_root: &Path,
@@ -2622,6 +2639,18 @@ fn copy_candidate_tree(
     Ok(())
 }
 
+#[cfg(not(unix))]
+fn copy_candidate_tree(
+    _source_root: &Path,
+    _destination_root: &Path,
+    _relative: &Path,
+    _depth: usize,
+    _collector: &mut CandidateCollector,
+) -> Result<()> {
+    anyhow::bail!("windows_private_storage_not_implemented")
+}
+
+#[cfg(unix)]
 fn inspect_candidate_node(
     source_root: &Path,
     relative: &Path,
@@ -2695,6 +2724,16 @@ fn inspect_candidate_node(
         digest: digest.finalize().into(),
     });
     Ok(())
+}
+
+#[cfg(not(unix))]
+fn inspect_candidate_node(
+    _source_root: &Path,
+    _relative: &Path,
+    _depth: usize,
+    _collector: &mut CandidateCollector,
+) -> Result<()> {
+    anyhow::bail!("windows_private_storage_not_implemented")
 }
 
 fn digest_records(records: &[FileDigestRecord]) -> String {
@@ -3110,6 +3149,7 @@ fn restore_system_required_skill_configuration(
     Ok(changed)
 }
 
+#[cfg(unix)]
 fn materialize_bundled_definition(
     destination: &Path,
     definition: &BundledDefinition,
@@ -3133,6 +3173,14 @@ fn materialize_bundled_definition(
     Ok(())
 }
 
+#[cfg(not(unix))]
+fn materialize_bundled_definition(
+    _destination: &Path,
+    _definition: &BundledDefinition,
+) -> Result<()> {
+    anyhow::bail!("windows_private_storage_not_implemented")
+}
+
 fn validate_staging_token(token: &str) -> Result<()> {
     Uuid::parse_str(token).context("Skill import staging token is invalid")?;
     Ok(())
@@ -3143,6 +3191,7 @@ fn validate_stable_id(value: &str, label: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let parent = path.parent().context("JSON path has no parent")?;
     fs::create_dir_all(parent)?;
@@ -3159,9 +3208,20 @@ fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(unix))]
+fn write_json_atomically<T: Serialize>(_path: &Path, _value: &T) -> Result<()> {
+    anyhow::bail!("windows_private_storage_not_implemented")
+}
+
+#[cfg(unix)]
 fn restrict_private_directory(path: &Path) -> Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
         .with_context(|| format!("failed to restrict {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn restrict_private_directory(_path: &Path) -> Result<()> {
+    anyhow::bail!("windows_private_storage_not_implemented")
 }
 
 fn remove_directory_if_present(path: &Path) -> Result<()> {
@@ -3199,7 +3259,7 @@ fn anyhow_to_sql_error(error: anyhow::Error) -> rusqlite::Error {
     ))
 }
 
-#[cfg(all(test, feature = "slow-tests"))]
+#[cfg(all(test, feature = "slow-tests", unix))]
 mod slow_tests {
     use super::*;
     use crate::command::ActorRef;

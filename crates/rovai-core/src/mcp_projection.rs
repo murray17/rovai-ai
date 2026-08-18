@@ -1,14 +1,20 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    fs::{self, File, OpenOptions},
+    fs,
+    path::{Path, PathBuf},
+};
+
+#[cfg(unix)]
+use std::{
+    fs::{File, OpenOptions},
     io::Write,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
-    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -23,6 +29,7 @@ use crate::{
 };
 
 const MCP_PROJECTION_SCHEMA_VERSION: u32 = 2;
+#[cfg(unix)]
 const MAX_PROJECTION_BYTES: u64 = 2 * 1024 * 1024;
 pub const LEGACY_EMPTY_MCP_EXPOSURE_DIGEST: &str = "sha256:legacy-empty-mcp-exposure";
 pub const LEGACY_EMPTY_MCP_PROJECTION_DIGEST: &str = "sha256:legacy-empty-mcp-projection";
@@ -279,6 +286,7 @@ impl McpProjectionService {
         self.publish_bytes(request.agent_run_id, request.execution_epoch, &bytes)
     }
 
+    #[cfg(unix)]
     fn publish_bytes(&self, agent_run_id: &str, execution_epoch: i64, bytes: &[u8]) -> Result<()> {
         ensure_or_create_private_directory(&self.root)?;
         let run_root = self.run_root(agent_run_id);
@@ -309,6 +317,16 @@ impl McpProjectionService {
             let _ = fs::remove_dir_all(&temporary);
         }
         result
+    }
+
+    #[cfg(not(unix))]
+    fn publish_bytes(
+        &self,
+        _agent_run_id: &str,
+        _execution_epoch: i64,
+        _bytes: &[u8],
+    ) -> Result<()> {
+        anyhow::bail!("windows_private_storage_not_implemented")
     }
 
     fn load_and_validate(
@@ -768,6 +786,7 @@ fn validate_frozen_exposure(
     Ok(())
 }
 
+#[cfg(unix)]
 fn read_private_projection_bytes(path: &Path) -> Result<(Vec<u8>, String)> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_file() {
@@ -784,6 +803,12 @@ fn read_private_projection_bytes(path: &Path) -> Result<(Vec<u8>, String)> {
     Ok((bytes, digest))
 }
 
+#[cfg(not(unix))]
+fn read_private_projection_bytes(_path: &Path) -> Result<(Vec<u8>, String)> {
+    anyhow::bail!("windows_private_storage_not_implemented")
+}
+
+#[cfg(unix)]
 fn ensure_or_create_private_directory(path: &Path) -> Result<()> {
     if path.exists() {
         return ensure_private_directory(path);
@@ -794,6 +819,7 @@ fn ensure_or_create_private_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn ensure_private_directory(path: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.file_type().is_dir() {
@@ -808,7 +834,12 @@ fn ensure_private_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
+#[cfg(not(unix))]
+fn ensure_private_directory(_path: &Path) -> Result<()> {
+    anyhow::bail!("windows_private_storage_not_implemented")
+}
+
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use crate::mcp::{

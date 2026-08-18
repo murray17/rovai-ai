@@ -4,19 +4,26 @@ use std::{
     ffi::{OsStr, OsString},
     fs,
     future::Future,
-    io::Read,
-    os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{OnceLock, RwLock},
-    thread,
     time::{Duration, Instant},
 };
 
+#[cfg(unix)]
+use std::{
+    io::Read,
+    os::unix::{fs::PermissionsExt, process::CommandExt},
+    process::Command,
+    thread,
+};
+
 use anyhow::{Context, Result};
+#[cfg(target_os = "macos")]
 use plist::Value as PlistValue;
 use serde::Serialize;
 use tokio::process::Command as TokioCommand;
+#[cfg(unix)]
 use uuid::Uuid;
 
 use crate::{
@@ -25,8 +32,10 @@ use crate::{
     runtime_probe_process::{ProbeCommandLimits, run_bounded_command},
 };
 
+#[cfg(unix)]
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
+#[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
 const GO_BUILD_INFO_MAGIC: &[u8] = b"\xff Go buildinf:";
@@ -416,6 +425,7 @@ pub fn discover_static_runtime_version(kind: AdapterKind, executable: &Path) -> 
     static_bundle_version(executable).or_else(|| static_go_main_module_version(executable))
 }
 
+#[cfg(target_os = "macos")]
 fn static_bundle_version(executable: &Path) -> Option<String> {
     let contents = executable.ancestors().find(|ancestor| {
         ancestor.file_name() == Some(OsStr::new("Contents"))
@@ -432,6 +442,11 @@ fn static_bundle_version(executable: &Path) -> Option<String> {
         .map(str::trim)
         .find(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn static_bundle_version(_executable: &Path) -> Option<String> {
+    None
 }
 
 fn static_go_main_module_version(executable: &Path) -> Option<String> {
@@ -548,6 +563,7 @@ async fn bounded_version_command(
     Ok(first_line.chars().take(256).collect())
 }
 
+#[cfg(unix)]
 fn capture_shell_path(interactive: bool) -> (ShellPathStatus, Option<String>, Vec<PathBuf>) {
     let Some(shell) = env::var_os("SHELL").filter(|value| !value.is_empty()) else {
         return (ShellPathStatus::Unavailable, None, Vec::new());
@@ -565,6 +581,12 @@ fn capture_shell_path(interactive: bool) -> (ShellPathStatus, Option<String>, Ve
     capture_shell_path_from(&shell_path, interactive, SHELL_PATH_TIMEOUT)
 }
 
+#[cfg(not(unix))]
+fn capture_shell_path(_interactive: bool) -> (ShellPathStatus, Option<String>, Vec<PathBuf>) {
+    (ShellPathStatus::Unavailable, None, Vec::new())
+}
+
+#[cfg(unix)]
 fn capture_shell_path_from(
     shell_path: &Path,
     interactive: bool,
@@ -705,11 +727,18 @@ fn push_candidate(
     });
 }
 
+#[cfg(unix)]
 pub fn is_executable_file(path: &Path) -> bool {
     fs::metadata(path)
         .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }
 
+#[cfg(not(unix))]
+pub fn is_executable_file(_path: &Path) -> bool {
+    false
+}
+
+#[cfg(target_os = "macos")]
 fn known_macos_runtime_directories() -> Vec<PathBuf> {
     let mut result = vec![
         PathBuf::from("/opt/homebrew/bin"),
@@ -748,6 +777,11 @@ fn known_macos_runtime_directories() -> Vec<PathBuf> {
     result
 }
 
+#[cfg(not(target_os = "macos"))]
+fn known_macos_runtime_directories() -> Vec<PathBuf> {
+    Vec::new()
+}
+
 pub fn catalog_entries() -> Vec<BTreeMap<&'static str, &'static str>> {
     AdapterKind::ALL
         .into_iter()
@@ -761,7 +795,7 @@ pub fn catalog_entries() -> Vec<BTreeMap<&'static str, &'static str>> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

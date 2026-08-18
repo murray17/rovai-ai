@@ -1,11 +1,15 @@
 use std::{
-    collections::BTreeSet,
-    ffi::{CStr, CString, OsString},
     fs::{self, File, OpenOptions},
     io::{Read, Write},
+    path::{Path, PathBuf},
+};
+
+#[cfg(unix)]
+use std::{
+    collections::BTreeSet,
+    ffi::{CStr, CString, OsString},
     os::fd::{AsRawFd, FromRawFd},
     os::unix::ffi::{OsStrExt, OsStringExt},
-    path::{Path, PathBuf},
 };
 
 use anyhow::{Context, Result};
@@ -1758,6 +1762,7 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAt
     })
 }
 
+#[cfg(unix)]
 #[derive(Debug)]
 struct DirectorySnapshotState {
     hasher: Sha256,
@@ -1766,6 +1771,7 @@ struct DirectorySnapshotState {
     byte_size: u64,
 }
 
+#[cfg(unix)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MetadataFingerprint {
     device: u64,
@@ -1777,6 +1783,7 @@ struct MetadataFingerprint {
     changed_nanoseconds: i64,
 }
 
+#[cfg(unix)]
 fn copy_directory_snapshot(source_path: &Path, destination: &Path) -> Result<PreparedAttachment> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
 
@@ -1824,6 +1831,12 @@ fn copy_directory_snapshot(source_path: &Path, destination: &Path) -> Result<Pre
     })
 }
 
+#[cfg(not(unix))]
+fn copy_directory_snapshot(_source_path: &Path, _destination: &Path) -> Result<PreparedAttachment> {
+    anyhow::bail!("attachment_directory_snapshot_not_implemented_for_host")
+}
+
+#[cfg(unix)]
 fn copy_open_directory(
     source: &File,
     destination: &Path,
@@ -1901,11 +1914,13 @@ fn copy_open_directory(
     Ok(())
 }
 
+#[cfg(unix)]
 struct CopiedDirectoryFile {
     byte_size: u64,
     digest: [u8; 32],
 }
 
+#[cfg(unix)]
 fn copy_open_regular_file(source: &mut File, destination: &Path) -> Result<CopiedDirectoryFile> {
     let before = metadata_fingerprint(&source.metadata()?);
     if before.size > MAX_ATTACHMENT_BYTES {
@@ -1963,6 +1978,7 @@ fn copy_open_regular_file(source: &mut File, destination: &Path) -> Result<Copie
     })
 }
 
+#[cfg(unix)]
 fn open_child_without_following(directory: &File, name: &OsString) -> Result<File> {
     let name_bytes = name.as_os_str().as_bytes();
     let c_name = CString::new(name_bytes).context("Attachment name contains a NUL byte")?;
@@ -1988,6 +2004,7 @@ fn open_child_without_following(directory: &File, name: &OsString) -> Result<Fil
     Ok(unsafe { File::from_raw_fd(descriptor) })
 }
 
+#[cfg(unix)]
 fn read_directory_names(directory: &File) -> Result<Vec<OsString>> {
     let duplicated = unsafe { libc::dup(directory.as_raw_fd()) };
     if duplicated < 0 {
@@ -2032,6 +2049,7 @@ fn read_directory_names(directory: &File) -> Result<Vec<OsString>> {
     Ok(names)
 }
 
+#[cfg(unix)]
 fn metadata_fingerprint(metadata: &fs::Metadata) -> MetadataFingerprint {
     use std::os::unix::fs::MetadataExt;
 
@@ -2046,6 +2064,7 @@ fn metadata_fingerprint(metadata: &fs::Metadata) -> MetadataFingerprint {
     }
 }
 
+#[cfg(unix)]
 fn hash_tree_entry(
     hasher: &mut Sha256,
     kind: u8,
@@ -2651,22 +2670,22 @@ fn ensure_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn allow_directory_update(path: &Path) -> Result<()> {
+fn allow_directory_update(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        fs::set_permissions(_path, fs::Permissions::from_mode(0o700))?;
     }
     Ok(())
 }
 
-fn restrict_discovery(path: &Path) -> Result<()> {
+fn restrict_discovery(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         // Known opaque child paths remain traversable, while the Camp directory
         // itself cannot be listed to discover attachments beyond a frozen input.
-        fs::set_permissions(path, fs::Permissions::from_mode(0o100))?;
+        fs::set_permissions(_path, fs::Permissions::from_mode(0o100))?;
     }
     Ok(())
 }
@@ -2686,18 +2705,10 @@ fn set_read_only(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn set_directory_read_only(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
-    }
-    #[cfg(not(unix))]
-    {
-        let mut permissions = fs::metadata(path)?.permissions();
-        permissions.set_readonly(true);
-        fs::set_permissions(path, permissions)?;
-    }
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o500))?;
     Ok(())
 }
 

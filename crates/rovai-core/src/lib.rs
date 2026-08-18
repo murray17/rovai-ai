@@ -43,6 +43,7 @@ pub mod message_delivery;
 pub mod monitoring;
 pub mod notification;
 pub mod planned_shutdown;
+pub mod platform;
 pub mod read_model;
 pub mod runtime;
 pub mod runtime_activity_mapping;
