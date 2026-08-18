@@ -313,12 +313,24 @@ try {
     )) {
       throw new Error(`${specification.adapterKind} resumed lease did not execute camp.list`)
     }
+    const sendEvidence = JSON.parse(await readFile(specification.sendEvidencePath, 'utf8'))
+    const expectedSendMessageIds = new Set([
+      sendEvidence.publicMessageId,
+      sendEvidence.directUserOnlyMessageId,
+      sendEvidence.stdinUserOnlyMessageId
+    ])
     const successorExactReads = resumedEvidence.filter((entry) =>
       entry.payload?.canonicalTool === 'camp.read'
         && entry.payload?.status === 'completed'
         && entry.payload?.sourceAuthority === 'core'
+        && expectedSendMessageIds.has(
+          entry.payload?.operationProjection?.canonicalInput?.messageId
+        )
     )
-    if (successorExactReads.length !== 3) {
+    const verifiedSendMessageIds = new Set(successorExactReads.map((entry) =>
+      entry.payload.operationProjection.canonicalInput.messageId
+    ))
+    if (verifiedSendMessageIds.size !== expectedSendMessageIds.size) {
       throw new Error(`${specification.adapterKind} successor Run did not verify all three stable Send locators: ${JSON.stringify(resumedEvidence)}`)
     }
     const resumedContextPath = (await readFile(specification.resumeContextPathFile, 'utf8')).trim()
@@ -394,8 +406,8 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 13,
-    ipcProtocolVersion: 1,
+    contractVersion: 15,
+    ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
     expectedOperations,
@@ -438,9 +450,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v13')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v15')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v13: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v15: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -868,7 +880,9 @@ function projectEnvelopeForMeasurement(envelope) {
     case 'camp.message.send':
       return {
         messageId: envelope.result.messageId,
-        effectiveRecipients: envelope.result.effectiveRecipients
+        agentAddressingMode: envelope.result.agentAddressingMode,
+        effectiveRecipients: envelope.result.effectiveRecipients,
+        deliveryIds: envelope.result.deliveryIds
       }
     case 'team.gather':
       return selectFields(envelope.result, [
@@ -955,8 +969,10 @@ test "$(stat -f '%Lp' "$CONTEXT")" = "600"
 
 public_send="$("$CLI" send --to ${shellQuote(input.recipientProfileId)} --body ${shellQuote(input.marker)})"
 printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
-  (keys | sort) == ["effectiveRecipients", "messageId"]
+  (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
+  and .agentAddressingMode == "automatic"
   and .effectiveRecipients == [$recipient]
+  and (.deliveryIds | length) == 1
 ' >/dev/null
 printf '%s\n' "$public_send" | "$JQ" -er '.messageId' > ${shellQuote(input.evidencePath)}
 printf '%s\n' ${shellQuote(input.completionMarker)}
@@ -975,7 +991,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v13 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v15 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -986,9 +1002,8 @@ function verificationScript(input) {
     retrievalKeys: [`hearth-${input.slug.slice(0, 14)}`]
   })
   const publicSend = JSON.stringify({
-    body: `Run rovai send --to-user --body 'ROVAI_PUBLIC_A2A_${input.slug.toUpperCase()}_ACK' exactly once, then finish. Do not reply to another Agent.`,
-    to: [input.recipientProfileId],
-    mentionUser: true
+    body: `Publish exactly one important-result notification with rovai send --public-only --to-principal --body 'ROVAI_PUBLIC_A2A_${input.slug.toUpperCase()}_RESULT', then finish. Do not route to any Agent.`,
+    to: [input.recipientProfileId]
   })
   return `#!/bin/bash
 set -euo pipefail
@@ -1019,7 +1034,10 @@ assert_success() {
     and (has("result") | not)
     and (has("error") | not)
     and (if $operation == "camp.message.send"
-         then (.messageId | type) == "string" and (.effectiveRecipients | type) == "array"
+         then (.messageId | type) == "string"
+           and (.agentAddressingMode == "automatic" or .agentAddressingMode == "public_only")
+           and (.effectiveRecipients | type) == "array"
+           and (.deliveryIds | type) == "array"
          elif $operation == "memory.write"
          then ((.outcome == "effective" and (.memoryId | type) == "string" and (.revisionId | type) == "string")
            or (.outcome == "review_pending" and (.reviewItemId | type) == "string"))
@@ -1042,22 +1060,25 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v13 ipc-v1'
+"$CLI" --version | grep -q 'contract-v15 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
 printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry.")}
 send_help="$("$CLI" send --help)"
-printf '%s\n' "$send_help" | grep -Fq -- '--to-user'
-printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary Camp messages are already visible to the user.'
-printf '%s\n' "$send_help" | grep -Fq -- 'exact active Camp member @display-name alias is accepted only as the first non-whitespace token on a line'
-printf '%s\n' "$send_help" | grep -Fq -- 'put trailing routing on a dedicated final line'
-printf '%s\n' "$send_help" | grep -Fq -- '[] means no Agent was routed.'
-printf '%s\n' "$send_help" | grep -Fq -- 'User attention is message-local and is never inherited'
-printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please review and report back'"
-if printf '%s\n' "$send_help" | grep -Fq -- 'rovai send --to agent_5 --to-user'; then
+printf '%s\n' "$send_help" | grep -Fq -- '--public-only'
+printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'
+if printf '%s\n' "$send_help" | grep -Fq -- '--to-user'; then
   exit 1
 fi
+printf '%s\n' "$send_help" | grep -Fq -- 'Ordinary public Camp messages are already visible to the Principal.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Guarantee that this public message wakes no Agent.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Agent addressing schedules concrete continuing work, not CC.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Always inspect agentAddressingMode, effectiveRecipients, and deliveryIds.'
+printf '%s\n' "$send_help" | grep -Fq -- 'Principal attention is message-local and is never inherited'
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --public-only --body 'Final conclusion: the failure is a client-version regression.'"
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'"
+printf '%s\n' "$send_help" | grep -Fq -- "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'"
 gather_help="$("$CLI" gather --help)"
 printf '%s\n' "$gather_help" | grep -Eq -- '--to[[:space:]]+field=to type=array repeatable'
 printf '%s\n' "$gather_help" | grep -Fq -- 'Gather is asynchronous.'
@@ -1249,8 +1270,10 @@ STEP=camp_message_send
 public_send="$("$CLI" send --input-file "$RUN_TMP/public-send.json")"
 assert_success "$public_send" 'camp.message.send'
 printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
-  (keys | sort) == ["effectiveRecipients", "messageId"]
+  (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
+  and .agentAddressingMode == "automatic"
   and .effectiveRecipients == [$recipient]
+  and (.deliveryIds | length) == 1
 ' >/dev/null
 public_message_id="$(printf '%s\n' "$public_send" | "$JQ" -er '.messageId')"
 
@@ -1266,18 +1289,25 @@ printf '%s\n' "$gather_result" | "$JQ" -e --arg recipient ${shellQuote(input.rec
 ' >/dev/null
 gather_id="$(printf '%s\n' "$gather_result" | "$JQ" -er '.gatherId')"
 
-STEP=camp_message_send_direct_user_only
-user_only="$("$CLI" send --to-user --body ${shellQuote(`Direct user-only ${input.adapterKind}`)})"
+STEP=camp_message_send_direct_public_only_principal
+user_only="$("$CLI" send --public-only --to-principal --body ${shellQuote(`Direct Principal decision ${input.adapterKind}`)})"
 assert_success "$user_only" 'camp.message.send'
 printf '%s\n' "$user_only" | "$JQ" -e '
-  (keys | sort) == ["effectiveRecipients", "messageId"]
+  (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
+  and .agentAddressingMode == "public_only"
   and .effectiveRecipients == []
+  and .deliveryIds == []
 ' >/dev/null
 user_only_id="$(printf '%s\n' "$user_only" | "$JQ" -er '.messageId')"
 
-STEP=camp_message_send_stdin_user_only
-stdin_user_only="$(printf '%s\n' ${shellQuote(JSON.stringify({ body: `Stdin user-only ${input.adapterKind}`, mentionUser: true }))} | "$CLI" send)"
+STEP=camp_message_send_stdin_public_only_principal
+stdin_user_only="$(printf '%s\n' ${shellQuote(JSON.stringify({ body: `Stdin Principal decision ${input.adapterKind}`, mentionUser: true, publicOnly: true }))} | "$CLI" send)"
 assert_success "$stdin_user_only" 'camp.message.send'
+printf '%s\n' "$stdin_user_only" | "$JQ" -e '
+  .agentAddressingMode == "public_only"
+  and .effectiveRecipients == []
+  and .deliveryIds == []
+' >/dev/null
 stdin_user_only_id="$(printf '%s\n' "$stdin_user_only" | "$JQ" -er '.messageId')"
 
 STEP=freeze_send_locators
@@ -1380,7 +1410,7 @@ printf '%s\n' "$public_read" | "$JQ" -e \
   --arg recipient ${shellQuote(input.recipientProfileId)} '
     .items[0].messageId == $messageId
     and .items[0].addressing.effectiveAgentRecipients == [$recipient]
-    and .items[0].addressing.mentionsCurrentUser == true
+    and .items[0].addressing.mentionsCurrentUser == false
   ' >/dev/null
 
 for key in directUserOnlyMessageId stdinUserOnlyMessageId; do

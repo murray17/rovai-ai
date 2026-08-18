@@ -1,16 +1,15 @@
 ---
 document_type: contract
 contract: builtin-tool-transport-v15
-status: proposed
+status: accepted
 target_version: v1.07
 last_updated: 2026-08-18
 ---
 
-# Built-in Tool Transport v15 (Proposal)
+# Built-in Tool Transport v15
 
-Model-context revision 1 is confirmed. This proposal would replace
-[Built-in Tool Transport v14](builtin-tool-transport-v14.md) only after its own acceptance and implementation; v14
-remains the accepted current contract. v15 inherits every v14 endpoint, IPC and security requirement,
+Model-context revision 1 is confirmed. This contract replaces
+[Built-in Tool Transport v14](builtin-tool-transport-v14.md) as the current entry. v15 inherits every v14 endpoint, IPC and security requirement,
 including the required discriminated `LocalIpcEndpoint`, IPC protocol v2, Unix Socket, protected Windows Named Pipe,
 Envelope/receipt/replay, process/lease identity, idempotency, single-JSON stdout and the fifteen-command catalog.
 
@@ -133,5 +132,5 @@ Socket/IPC2. Windows requires the same matrix over its secured Named Pipe for ea
 
 - [ADR-0217](../adr/0217-transport-v15-inherits-cross-platform-v14.md)
 - [Built-in Tool Transport v14 (accepted predecessor)](builtin-tool-transport-v14.md)
-- [Camp Message Send v10 proposal](camp-message-send-v10.md)
+- [Camp Message Send v10](camp-message-send-v10.md)
 - [Built-in Tool Agent Output Projection v1](builtin-tool-agent-output-projection-v1.md)

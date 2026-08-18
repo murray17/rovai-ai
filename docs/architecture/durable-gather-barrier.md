@@ -3,14 +3,14 @@ document_type: architecture
 architecture: durable-gather-barrier
 authority: gather-component-boundaries
 status: accepted
-last_updated: 2026-08-16
+last_updated: 2026-08-18
 ---
 
 # 持久 Gather Barrier 架构
 
 本架构组合 [ADR-0193](../adr/0193-durable-gather-barrier-over-unified-message-delivery.md)、
 [ADR-0195](../adr/0195-generation-scoped-last-gather-return.md)、
-[ADR-0196](../adr/0196-self-contained-gather-completion-request.md)、[Gather v2](../contracts/gather-v2.md)
+[ADR-0196](../adr/0196-self-contained-gather-completion-request.md)、[Gather v3](../contracts/gather-v3.md)
 与 [Message Delivery v4](../contracts/message-delivery-v4.md)。
 
 ## 组件与权威
@@ -68,15 +68,16 @@ of resolving the current Default Lead, but otherwise uses recipient FIFO, attemp
 capacity, Context preflight and explicit interrupted recovery. Materialization validates that Conversation still belongs
 to the initiator and CAS-writes completionRunId.
 
-Formatter v18 projects the Barrier snapshot as mandatory `gather_completed` Current Input, including the full durable
-request and current-generation Item/result evidence. Public history selection may include the same messages, but
-duplicates do not change snapshot authority. Recovery reads frozen Context bytes; it never re-runs the Barrier or
-reselects results. Migration 91 removes incompatible frozen Context and nonterminal Gather technical state; there is
-no Formatter v17 recovery reader after the v0.98 clean break.
+Formatter v19 projects the Barrier snapshot as mandatory `gather_completed` Current Input v3, including the full durable
+request and current-generation Item/result evidence. Structured request and captured return bodies use the `agent_v1`
+audience (`@Principal`), carry projected-body digests, and bound captured excerpts at UTF-8 scalar boundaries. Public
+history selection may include the same messages, but duplicates do not change snapshot authority. Recovery reads frozen
+Context bytes; it never re-runs the Barrier or reselects results. Migration 93 removes incompatible frozen Context and
+nonterminal Gather technical state; there is no v1/v2 Completion Input reader after the clean break.
 
 ## Cancellation and read projection
 
 CampTurn Stop, Camp close and initiator leave mark collecting/ready/completing Gather cancelled and cancel pending
 completion within the same lifecycle transaction. A Default Lead change is intentionally ignored. Read Side exposes
-Delivery/Run discriminants for diagnostics and avoids adding completion to public request recipients. V2 has no Gather
+Delivery/Run discriminants for diagnostics and avoids adding completion to public request recipients. V3 has no Gather
 card or private result surface.

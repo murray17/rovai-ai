@@ -88,3 +88,10 @@ last_updated: 2026-08-18
 - [模型上下文变更 revision 1](model-context-change-a2a-public-only.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)
 - [本地 Runtime 工作流](../../development/local-workflow.md)
+
+## 冻结后独立执行记录（2026-08-18）
+
+本计划的 `not_started` 与未勾选 Checkpoint 保留 v1.08 切换时的冻结快照。后续独立交付已完成代码层的
+Checkpoint 1～5 与关键负向/治理覆盖：PublicOnly parser 前硬门、Principal 双投影、A2A exact guidance
+evidence、Gather v3、Transport v15/IPC2、Session Charter、Schema 48/Migration 93 及 clean-break quarantine
+均已实现。最终打包、安装与完整验证结果由本次独立交付提交记录承载，不追溯改写本历史计划状态。

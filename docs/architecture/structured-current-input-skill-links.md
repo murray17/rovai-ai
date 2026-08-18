@@ -12,7 +12,7 @@ last_updated: 2026-08-17
 和 Runtime Adapter 的 Module seam。长期决定见
 [ADR-0203](../adr/0203-structured-current-input-skill-links.md)，字段级合同见
 [Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)与
-[ContextManifest Evidence v16](../contracts/context-manifest-evidence-v16.md)。
+[ContextManifest Evidence v17](../contracts/context-manifest-evidence-v17.md)。
 
 ## Authority flow
 
@@ -112,7 +112,7 @@ claim/freeze AgentRun
   -> load persisted selection snapshot + verify digest
   -> read RunSkillAvailabilityView from current Library desired state
   -> resolve against PreparedSkillExposure
-  -> render Formatter v18 bytes
+  -> render Formatter v19 bytes
   -> persist Manifest v16 evidence atomically
 ```
 

@@ -1225,7 +1225,7 @@ fn load_current_captured_message(
             )?
             .collect::<rusqlite::Result<Vec<_>>>()?
     };
-    Ok(messages
+    messages
         .into_iter()
         .map(
             |(
@@ -1256,7 +1256,7 @@ fn load_current_captured_message(
                 }))
             },
         )
-        .collect::<Result<Vec<_>>>()?)
+        .collect::<Result<Vec<_>>>()
 }
 
 #[derive(Debug)]

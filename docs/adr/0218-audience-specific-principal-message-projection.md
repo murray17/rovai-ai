@@ -2,7 +2,7 @@
 document_type: adr
 id: ADR-0218
 title: Audience-Specific Principal Message Projection
-status: proposed
+status: accepted
 date: 2026-08-18
 decision_scope: cross-version
 source_version: v1.07
@@ -72,6 +72,6 @@ Agent-recipient separation.
 
 - [v1.07 proposal](../versions/v1.07/README.md)
 - [Model-context change proposal](../versions/v1.07/model-context-change-a2a-public-only.md)
-- [Camp History Retrieval v2 proposal](../contracts/camp-history-v2.md)
-- [Gather v3 proposal](../contracts/gather-v3.md)
+- [Camp History Retrieval v2](../contracts/camp-history-v2.md)
+- [Gather v3](../contracts/gather-v3.md)
 - [ADR-0165: Core-Owned Current-User Message Attention](0165-core-owned-current-user-message-attention.md)

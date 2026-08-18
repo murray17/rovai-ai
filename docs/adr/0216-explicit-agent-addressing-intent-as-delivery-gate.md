@@ -2,7 +2,7 @@
 document_type: adr
 id: ADR-0216
 title: Explicit Agent Addressing Intent as the Delivery Gate
-status: proposed
+status: accepted
 date: 2026-08-18
 decision_scope: cross-version
 source_version: v1.07
@@ -82,7 +82,7 @@ semantics.
 ## References
 
 - [v1.07 proposal](../versions/v1.07/README.md)
-- [Camp Message Send v10 proposal](../contracts/camp-message-send-v10.md)
+- [Camp Message Send v10](../contracts/camp-message-send-v10.md)
 - [ADR-0130: Public A2A Message and Unified Delivery](0130-public-a2a-message-and-unified-delivery.md)
 - [ADR-0134: Explicit Runtime Public Output Boundary](0134-runtime-public-output-boundary.md)
 - [ADR-0163: Explicit Caller Return](0163-explicit-caller-return-and-core-managed-reply-reference.md)

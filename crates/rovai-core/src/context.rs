@@ -7560,7 +7560,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn v89_clean_break_preserves_business_history_and_removes_old_context_state() {
+    fn v93_clean_break_preserves_business_history_and_removes_old_context_state() {
         let mut fixture = fixture();
         bind_fixture_native_session(&mut fixture, "pre-v93-native-session");
         let store = ManagedBlobStore::new(&fixture.directory);
@@ -7607,34 +7607,32 @@ mod slow_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let v88_schema = current_schema
+        let v92_schema = current_schema
             .replacen(
                 "CREATE TABLE context_manifest",
-                "CREATE TABLE context_manifest_v88_test",
+                "CREATE TABLE context_manifest_v92_test",
                 1,
             )
             .replacen(
                 "CREATE TABLE \"context_manifest\"",
-                "CREATE TABLE context_manifest_v88_test",
+                "CREATE TABLE context_manifest_v92_test",
                 1,
             )
-            .replace("run_fact_refs_json", "run_notice_refs_json")
-            .replace("run_fact_payload_json", "run_notice_payload_json")
-            .replace("run_fact_digest", "run_notice_digest")
             .replace(
-                "current_input_skill_resolution_json TEXT NOT NULL,\n                    current_input_skill_resolution_digest TEXT NOT NULL,\n                    ",
+                "message_projection_audience TEXT NOT NULL CHECK(message_projection_audience = 'agent_v1'),\n                    a2a_guidance_evidence_json TEXT NOT NULL,\n                    a2a_guidance_evidence_digest TEXT NOT NULL,\n                    ",
                 "",
             )
             .replace(
+                "CHECK(formatter_version = 19)",
                 "CHECK(formatter_version = 18)",
-                "CHECK(formatter_version IN (14, 15, 16))",
             );
-        assert!(v88_schema.contains("run_notice_payload_json"));
-        assert!(v88_schema.contains("formatter_version IN (14, 15, 16)"));
+        assert!(!v92_schema.contains("message_projection_audience"));
+        assert!(!v92_schema.contains("a2a_guidance_evidence_json"));
+        assert!(v92_schema.contains("formatter_version = 18"));
         fixture
             .database
             .connection()
-            .execute_batch(&v88_schema)
+            .execute_batch(&v92_schema)
             .unwrap();
         let columns = {
             let mut statement = fixture
@@ -7650,22 +7648,30 @@ mod slow_tests {
         };
         let destination_columns = columns
             .iter()
-            .filter(|column| !column.starts_with("current_input_skill_resolution_"))
-            .map(|column| {
-                column
-                    .replace("run_fact_refs_json", "run_notice_refs_json")
-                    .replace("run_fact_payload_json", "run_notice_payload_json")
-                    .replace("run_fact_digest", "run_notice_digest")
+            .filter(|column| {
+                !matches!(
+                    column.as_str(),
+                    "message_projection_audience"
+                        | "a2a_guidance_evidence_json"
+                        | "a2a_guidance_evidence_digest"
+                )
             })
             .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
             .collect::<Vec<_>>()
             .join(", ");
         let source_columns = columns
             .iter()
-            .filter(|column| !column.starts_with("current_input_skill_resolution_"))
+            .filter(|column| {
+                !matches!(
+                    column.as_str(),
+                    "message_projection_audience"
+                        | "a2a_guidance_evidence_json"
+                        | "a2a_guidance_evidence_digest"
+                )
+            })
             .map(|column| {
                 if column == "formatter_version" {
-                    "16".to_string()
+                    "18".to_string()
                 } else {
                     format!("\"{}\"", column.replace('"', "\"\""))
                 }
@@ -7676,7 +7682,7 @@ mod slow_tests {
             .database
             .connection()
             .execute_batch(&format!(
-                "INSERT INTO context_manifest_v88_test({destination_columns}) SELECT {source_columns} FROM context_manifest"
+                "INSERT INTO context_manifest_v92_test({destination_columns}) SELECT {source_columns} FROM context_manifest"
             ))
             .unwrap();
         fixture
@@ -7687,13 +7693,14 @@ mod slow_tests {
                 DROP INDEX context_manifest_blob_idx;
                 DROP INDEX context_manifest_bootstrap_idx;
                 DROP TABLE context_manifest;
-                ALTER TABLE context_manifest_v88_test RENAME TO context_manifest;
+                ALTER TABLE context_manifest_v92_test RENAME TO context_manifest;
                 CREATE INDEX context_manifest_blob_idx ON context_manifest(rendered_payload_blob_id);
                 CREATE INDEX context_manifest_bootstrap_idx ON context_manifest(bootstrap_evidence_id);
+                ALTER TABLE camp_message DROP COLUMN agent_addressing_mode;
                 UPDATE rovai_data_contract
-                SET contract_version = 'v0.90', projection_schema_version = 43
+                SET contract_version = 'v0.99', projection_schema_version = 47
                 WHERE singleton = 1;
-                DELETE FROM schema_migration WHERE version = 89;
+                DELETE FROM schema_migration WHERE version = 93;
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -7701,15 +7708,6 @@ mod slow_tests {
 
         let directory = fixture.directory.clone();
         let run_id = fixture.run_id.clone();
-        let conversation_id: String = fixture
-            .database
-            .connection()
-            .query_row(
-                "SELECT conversation_id FROM agent_run WHERE id = ?1",
-                [&run_id],
-                |row| row.get(0),
-            )
-            .unwrap();
         drop(fixture.database);
         let reopened = Database::open(&directory).unwrap();
 
@@ -7730,11 +7728,10 @@ mod slow_tests {
             run,
             (
                 "failed".to_string(),
-                Some("context_formatter_v17_required".to_string())
+                Some("context_formatter_v19_required".to_string())
             )
         );
         for table in [
-            "native_session_bootstrap_evidence",
             "context_manifest",
             "context_manifest_history_camp",
             "runtime_input_delivery",
@@ -7747,7 +7744,7 @@ mod slow_tests {
                 .unwrap();
             assert_eq!(
                 count, 0,
-                "{table} should be empty after the v89 clean break"
+                "{table} should be empty after the v93 clean break"
             );
         }
         let manifest_schema: String = reopened
@@ -7760,29 +7757,22 @@ mod slow_tests {
             .unwrap();
         assert!(manifest_schema.contains("run_fact_payload_json"));
         assert!(!manifest_schema.contains("run_notice_"));
-        assert!(manifest_schema.contains("formatter_version = 17"));
-        let binding_state: (Option<String>, Option<String>, i64) = reopened
-            .connection()
-            .query_row(
-                "SELECT native_session_id, native_binding_id, native_binding_generation FROM conversation WHERE id = ?1",
-                [&conversation_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .unwrap();
-        assert_eq!(binding_state, (None, None, 0));
+        assert!(manifest_schema.contains("formatter_version = 19"));
+        assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
+        assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         let contract: (String, i64, i64) = reopened
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, projection_schema_version,
-                       (SELECT COUNT(*) FROM schema_migration WHERE version = 89)
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 93)
                 FROM rovai_data_contract WHERE singleton = 1
                 "#,
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v0.94".to_string(), 44, 1));
+        assert_eq!(contract, ("v1.07".to_string(), 48, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

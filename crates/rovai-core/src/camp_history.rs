@@ -2693,11 +2693,11 @@ mod slow_tests {
             agent_run_id: "run-1".to_string(),
             execution_epoch: 1,
         };
-        let item = read_item(&transaction, &target, &run, "message-1", 4, 2).unwrap();
+        let item = read_item(&transaction, &target, &run, "message-1", 12, 2).unwrap();
         let item = &item["items"][0];
         assert_eq!(item["body"], "😀中");
-        assert_eq!(item["bodyLength"], 7);
-        assert_eq!(item["nextBodyOffset"], 6);
+        assert_eq!(item["bodyLength"], 15);
+        assert_eq!(item["nextBodyOffset"], 14);
         assert_eq!(item["attachmentCount"], 12);
         assert_eq!(item["attachments"].as_array().unwrap().len(), 10);
         assert_eq!(item["attachmentsTruncated"], true);

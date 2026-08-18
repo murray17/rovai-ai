@@ -1,16 +1,15 @@
 ---
 document_type: protocol-contract
 contract: gather-v3
-authority: proposed-gather-lifecycle-and-barrier
-status: proposed
+authority: gather-lifecycle-and-barrier
+status: accepted
 version: 3
 last_updated: 2026-08-18
 ---
 
-# Gather v3 Contract (Proposal)
+# Gather v3 Contract
 
-Model-context revision 1 is confirmed. This proposal would replace [Gather v2](gather-v2.md) only after its own
-acceptance and implementation; v2 remains the accepted current entry. v3 preserves the v2 operation, Default Lead gate, recipients,
+Model-context revision 1 is confirmed. This contract replaces [Gather v2](gather-v2.md) as the current entry. v3 preserves the v2 operation, Default Lead gate, recipients,
 request publication, Item/Delivery lifecycle, captured-return allowance, last-current-generation selection, fallback,
 Barrier CAS, Completion FIFO, cancellation, retry, limits and budget semantics. It changes only the frozen
 Agent-facing message projection in Completion Input.
@@ -102,5 +101,5 @@ inputs only.
 
 - [v1.07 model-context revision 1](../versions/v1.07/model-context-change-a2a-public-only.md)
 - [Gather v2 (accepted predecessor)](gather-v2.md)
-- [ContextManifest Evidence v17 proposal](context-manifest-evidence-v17.md)
+- [ContextManifest Evidence v17](context-manifest-evidence-v17.md)
 - [ADR-0218](../adr/0218-audience-specific-principal-message-projection.md)
