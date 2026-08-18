@@ -1,10 +1,12 @@
 use std::{
     fs::File,
+    io::Write,
     path::{Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::Serialize;
+use uuid::Uuid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,6 +62,16 @@ pub(crate) fn prepare_private_directory(path: &Path) -> Result<PathBuf> {
     prepare_private_directory_platform(path)
 }
 
+/// Creates exactly one new private directory.
+///
+/// Unlike [`prepare_private_directory`], this rejects an existing leaf. It is
+/// used for immutable/staging tree children where merging into an unexpected
+/// case-alias or concurrently-created directory would be unsafe.
+#[cfg(windows)]
+pub(crate) fn create_private_directory(path: &Path) -> Result<PathBuf> {
+    create_private_directory_platform(path)
+}
+
 /// Opens a retained private read/write file, creating it atomically when absent.
 ///
 /// This is intentionally narrower than `OpenOptions`: callers cannot request a
@@ -67,6 +79,35 @@ pub(crate) fn prepare_private_directory(path: &Path) -> Result<PathBuf> {
 /// mandatory before the handle is returned.
 pub(crate) fn open_private_read_write_file(path: &Path) -> Result<File> {
     open_private_read_write_file_platform(path)
+}
+
+/// Creates a new private, non-inheritable file and rejects an existing leaf.
+pub(crate) fn create_private_new_file(path: &Path) -> Result<File> {
+    create_private_new_file_platform(path)
+}
+
+/// Writes JSON through a fresh private sibling, flushes its bytes, and then
+/// publishes it atomically. Existing destinations must already satisfy the
+/// private-file admission policy before they may be replaced.
+pub(crate) fn atomic_write_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let parent = path.parent().context("private JSON path has no parent")?;
+    prepare_private_directory(parent)?;
+    if path.exists() {
+        drop(open_private_read_write_file(path)?);
+    }
+    let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
+    let result = (|| -> Result<()> {
+        let bytes = serde_json::to_vec_pretty(value)?;
+        let mut file = create_private_new_file(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        drop(file);
+        commit_private_temporary(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 #[cfg(windows)]
@@ -94,7 +135,7 @@ fn prepare_windows_data_root_platform(_layout: &WindowsDataRootLayout) -> Result
 
 #[cfg(unix)]
 fn prepare_private_directory_platform(path: &Path) -> Result<PathBuf> {
-    use anyhow::Context;
+    use std::os::unix::fs::PermissionsExt;
 
     std::fs::create_dir_all(path).with_context(|| {
         format!(
@@ -102,6 +143,8 @@ fn prepare_private_directory_platform(path: &Path) -> Result<PathBuf> {
             path.display()
         )
     })?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+        .with_context(|| format!("failed to restrict private directory {}", path.display()))?;
     path.canonicalize().with_context(|| {
         format!(
             "failed to resolve private Rovai data directory {}",
@@ -133,6 +176,35 @@ fn open_private_read_write_file_platform(path: &Path) -> Result<File> {
     Ok(file)
 }
 
+#[cfg(unix)]
+fn create_private_new_file_platform(path: &Path) -> Result<File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let parent = path.parent().context("private file has no parent")?;
+    if !parent.is_dir() {
+        anyhow::bail!("private file parent is unavailable: {}", parent.display());
+    }
+    std::fs::OpenOptions::new()
+        .create_new(true)
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .with_context(|| format!("failed to create private file {}", path.display()))
+}
+
+#[cfg(unix)]
+fn commit_private_temporary(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::rename(source, destination).with_context(|| {
+        format!(
+            "failed to publish private file {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
 #[cfg(windows)]
 mod windows {
     use std::{
@@ -160,7 +232,8 @@ mod windows {
             FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO,
             FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
             FileAttributeTagInfo, FileIdInfo, GetDriveTypeW, GetFileInformationByHandleEx,
-            GetVolumeInformationW, GetVolumePathNameW, OPEN_EXISTING, READ_CONTROL,
+            GetVolumeInformationW, GetVolumePathNameW, MOVEFILE_REPLACE_EXISTING,
+            MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, READ_CONTROL,
         },
         System::WindowsProgramming::DRIVE_FIXED,
     };
@@ -184,7 +257,14 @@ mod windows {
         validate_native_absolute_path(path)?;
         if !path.exists() {
             prepare_parent(path)?;
-            create_private_directory(path)?;
+            if let Err(error) = create_private_directory_native(path) {
+                // A concurrent creator may win between the existence probe and
+                // CreateDirectoryW. Admission below still requires exact type,
+                // volume identity, non-reparse state, and the protected DACL.
+                if !path.exists() {
+                    return Err(error);
+                }
+            }
         }
 
         let opened = open_path(path, ExpectedObjectKind::Directory)?;
@@ -210,6 +290,13 @@ mod windows {
             );
         }
         Ok(canonical)
+    }
+
+    pub(super) fn create_private_directory(path: &Path) -> Result<PathBuf> {
+        validate_native_absolute_path(path)?;
+        prepare_parent(path)?;
+        create_private_directory_native(path)?;
+        prepare_private_directory(path)
     }
 
     pub(super) fn open_private_read_write_file(path: &Path) -> Result<File> {
@@ -288,6 +375,87 @@ mod windows {
         Ok(File::from(handle))
     }
 
+    pub(super) fn create_private_new_file(path: &Path) -> Result<File> {
+        validate_native_absolute_path(path)?;
+        let parent = path.parent().ok_or_else(|| {
+            blocker(
+                HOST_UNSUPPORTED,
+                format!("private file path has no parent: {}", path.display()),
+            )
+        })?;
+        let admitted_parent = prepare_private_directory(parent)?;
+        let parent_handle = open_path(&admitted_parent, ExpectedObjectKind::Directory)?;
+        let parent_identity = file_identity(&parent_handle)?;
+
+        let descriptor = PrivateSecurityDescriptor::new(PrivateObjectKind::File)
+            .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))?;
+        let attributes = descriptor.attributes();
+        let wide_path = wide_path(path)?;
+        let raw = unsafe {
+            // SAFETY: wide_path is NUL-terminated and attributes borrows the
+            // live protected descriptor. CREATE_NEW rejects every existing leaf.
+            CreateFileW(
+                wide_path.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE | READ_CONTROL,
+                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                &attributes,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error())
+                .with_context(|| format!("failed to create private file {}", path.display()));
+        }
+        let handle = owned_handle(raw)?;
+        clear_handle_inheritance(&handle)?;
+        let identity = inspect_handle(&handle, ExpectedObjectKind::File)?;
+        if identity.volume_serial_number != parent_identity.volume_serial_number {
+            bail!(
+                "{IDENTITY_UNAVAILABLE}: private file and parent resolved to different volumes: {}",
+                path.display()
+            );
+        }
+        verify_private_acl(&handle, PrivateObjectKind::File, "private file").map_err(|error| {
+            blocker(
+                PRIVATE_ACL_INVALID,
+                format!(
+                    "new private file {} failed admission: {error:#}",
+                    path.display()
+                ),
+            )
+        })?;
+        Ok(File::from(handle))
+    }
+
+    pub(super) fn commit_private_temporary(source: &Path, destination: &Path) -> Result<()> {
+        validate_native_absolute_path(source)?;
+        validate_native_absolute_path(destination)?;
+        let source_wide = wide_path(source)?;
+        let destination_wide = wide_path(destination)?;
+        let moved = unsafe {
+            // SAFETY: both paths are NUL-terminated and remain live. The
+            // source was created with the private-file policy and is closed.
+            MoveFileExW(
+                source_wide.as_ptr(),
+                destination_wide.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved == 0 {
+            Err(io::Error::last_os_error()).with_context(|| {
+                format!(
+                    "failed to publish private file {} to {}",
+                    source.display(),
+                    destination.display()
+                )
+            })
+        } else {
+            Ok(())
+        }
+    }
+
     fn prepare_parent(path: &Path) -> Result<()> {
         let parent = path.parent().ok_or_else(|| {
             blocker(
@@ -305,7 +473,7 @@ mod windows {
         Ok(())
     }
 
-    fn create_private_directory(path: &Path) -> Result<()> {
+    fn create_private_directory_native(path: &Path) -> Result<()> {
         let descriptor = PrivateSecurityDescriptor::new(PrivateObjectKind::Directory)
             .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))?;
         let attributes = descriptor.attributes();
@@ -319,11 +487,6 @@ mod windows {
             return Ok(());
         }
         let error = io::Error::last_os_error();
-        if error.raw_os_error().map(|code| code as u32) == Some(ERROR_ALREADY_EXISTS) {
-            // Another creator won the race. It must pass the same exact policy;
-            // no permissions are changed here.
-            return Ok(());
-        }
         Err(error).with_context(|| format!("failed to create private directory {}", path.display()))
     }
 
@@ -592,8 +755,23 @@ fn prepare_private_directory_platform(path: &Path) -> Result<PathBuf> {
 }
 
 #[cfg(windows)]
+fn create_private_directory_platform(path: &Path) -> Result<PathBuf> {
+    windows::create_private_directory(path)
+}
+
+#[cfg(windows)]
 fn open_private_read_write_file_platform(path: &Path) -> Result<File> {
     windows::open_private_read_write_file(path)
+}
+
+#[cfg(windows)]
+fn create_private_new_file_platform(path: &Path) -> Result<File> {
+    windows::create_private_new_file(path)
+}
+
+#[cfg(windows)]
+fn commit_private_temporary(source: &Path, destination: &Path) -> Result<()> {
+    windows::commit_private_temporary(source, destination)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -603,6 +781,16 @@ fn prepare_private_directory_platform(_path: &Path) -> Result<PathBuf> {
 
 #[cfg(not(any(unix, windows)))]
 fn open_private_read_write_file_platform(_path: &Path) -> Result<File> {
+    anyhow::bail!("private Rovai storage is unsupported on this platform")
+}
+
+#[cfg(not(any(unix, windows)))]
+fn create_private_new_file_platform(_path: &Path) -> Result<File> {
+    anyhow::bail!("private Rovai storage is unsupported on this platform")
+}
+
+#[cfg(not(any(unix, windows)))]
+fn commit_private_temporary(_source: &Path, _destination: &Path) -> Result<()> {
     anyhow::bail!("private Rovai storage is unsupported on this platform")
 }
 
@@ -653,6 +841,26 @@ mod tests {
         }
         let admitted_again = prepare_windows_data_root(&root).unwrap();
         assert_eq!(admitted_again, layout);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn private_json_replacement_remains_admissible() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-windows-private-json-{}",
+            uuid::Uuid::new_v4()
+        ));
+        prepare_private_directory(&root).unwrap();
+        let path = root.join("state.json");
+
+        atomic_write_private_json(&path, &serde_json::json!({"state": "prepared"})).unwrap();
+        atomic_write_private_json(&path, &serde_json::json!({"state": "verified"})).unwrap();
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(value, serde_json::json!({"state": "verified"}));
+        drop(open_private_read_write_file(&path).unwrap());
         std::fs::remove_dir_all(root).unwrap();
     }
 }

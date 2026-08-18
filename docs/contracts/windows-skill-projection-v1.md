@@ -66,6 +66,10 @@ remove completed journal after DB audit is durable
 Sharing violations from antivirus/indexers receive a bounded, jittered retry. Exhaustion fails closed with the journal
 retained. No filesystem copy/rename/delete runs inside a long SQLite transaction.
 
+Source and copied-tree digest verification follows the Windows Revision v1 logical-mode rule in
+[Skill Projection Reconciliation](../architecture/skill-projection-reconciliation.md#windows-revision-v1-逻辑-mode):
+regular files contribute logical mode `0644`, while protected DACL admission remains a separate storage proof.
+
 ## 3. Crash-window recovery
 
 Core recovers this root before AgentRun admission. Recovery inspects journal plus opened identities/digests of final,

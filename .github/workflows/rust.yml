@@ -122,3 +122,15 @@ jobs:
           cargo test -p rovai-core --lib
           --target x86_64-pc-windows-msvc
           windows_attachment
+
+      - name: Exercise Windows Skill Library
+        run: >-
+          cargo test -p rovai-core --lib
+          --target x86_64-pc-windows-msvc
+          windows_skill_library
+
+      - name: Exercise Windows private JSON replacement
+        run: >-
+          cargo test -p rovai-core --lib
+          --target x86_64-pc-windows-msvc
+          private_json_replacement

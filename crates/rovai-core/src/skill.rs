@@ -6,10 +6,15 @@ use std::{
     time::Duration,
 };
 
+#[cfg(any(unix, windows))]
+use std::{
+    fs::File,
+    io::{Read, Write},
+};
+
 #[cfg(unix)]
 use std::{
-    fs::{File, OpenOptions},
-    io::{Read, Write},
+    fs::OpenOptions,
     os::unix::fs::{OpenOptionsExt, PermissionsExt},
 };
 
@@ -33,12 +38,18 @@ use crate::{
         DomainCommandGateway, EntityReference, sealed,
     },
     db::Database,
+    platform::private_storage::{atomic_write_private_json, prepare_private_directory},
 };
+
+#[cfg(windows)]
+use crate::platform::private_storage::{create_private_directory, create_private_new_file};
 
 pub const MAX_SKILL_FILES: usize = 1_000;
 pub const MAX_SKILL_DEPTH: usize = 32;
 pub const MAX_SKILL_FILE_BYTES: u64 = 10 * 1024 * 1024;
 pub const MAX_SKILL_TOTAL_BYTES: u64 = 50 * 1024 * 1024;
+#[cfg(windows)]
+const WINDOWS_SKILL_LOGICAL_FILE_MODE: u32 = 0o644;
 const MAX_SKILL_DISCOVERY_DEPTH: usize = 8;
 const STAGING_TTL: Duration = Duration::from_secs(30 * 60);
 
@@ -408,7 +419,7 @@ struct StagedCandidate {
     relative_content_path: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct CandidateSnapshot {
     name: String,
     description: String,
@@ -720,12 +731,10 @@ impl SkillLibraryService {
     }
 
     pub fn new(root: PathBuf) -> Result<Self> {
-        fs::create_dir_all(root.join(".staging"))
+        prepare_private_directory(&root)
             .with_context(|| format!("failed to create Skill Library at {}", root.display()))?;
-        fs::create_dir_all(root.join("revisions"))?;
-        restrict_private_directory(&root)?;
-        restrict_private_directory(&root.join(".staging"))?;
-        restrict_private_directory(&root.join("revisions"))?;
+        prepare_private_directory(&root.join(".staging"))?;
+        prepare_private_directory(&root.join("revisions"))?;
         Ok(Self {
             root,
             gateway: DomainCommandGateway,
@@ -883,8 +892,8 @@ impl SkillLibraryService {
         }
         let token = Uuid::new_v4().to_string();
         let staging_root = self.root.join(".staging").join(&token);
-        fs::create_dir_all(staging_root.join("candidates"))?;
-        restrict_private_directory(&staging_root)?;
+        prepare_private_directory(&staging_root)?;
+        prepare_private_directory(&staging_root.join("candidates"))?;
         let created_at = Utc::now();
         let expires_at = created_at
             + chrono::Duration::from_std(STAGING_TTL).context("invalid Skill staging duration")?;
@@ -934,7 +943,7 @@ impl SkillLibraryService {
             candidates,
             rejected_candidates,
         };
-        write_json_atomically(&staging_root.join("inspection.json"), &manifest)?;
+        atomic_write_private_json(&staging_root.join("inspection.json"), &manifest)?;
         self.inspection_view(database, manifest)
     }
 
@@ -953,8 +962,7 @@ impl SkillLibraryService {
             .root
             .join(".staging")
             .join(format!("github-checkout-{}", Uuid::new_v4()));
-        fs::create_dir_all(&checkout_root)?;
-        restrict_private_directory(&checkout_root)?;
+        prepare_private_directory(&checkout_root)?;
         let clone_result = (|| -> Result<(SkillImportInspection, String)> {
             run_git_import(repository_url, git_ref, &checkout_root)?;
             let resolved_commit = git_import_output(&checkout_root, &["rev-parse", "HEAD"])?;
@@ -1003,7 +1011,7 @@ impl SkillLibraryService {
                             .unwrap_or_default()
                     );
                 }
-                write_json_atomically(&manifest_path, &manifest)?;
+                atomic_write_private_json(&manifest_path, &manifest)?;
                 self.inspection_view(database, manifest)
             }
             Err(error) => Err(error),
@@ -2334,11 +2342,22 @@ fn stage_candidate(
     if destination.exists() {
         remove_directory_if_present(destination)?;
     }
-    fs::create_dir_all(destination)?;
-    restrict_private_directory(destination)?;
+    prepare_private_directory(destination)?;
     let mut collector = CandidateCollector::default();
     copy_candidate_tree(source, destination, Path::new(""), 0, &mut collector)?;
-    candidate_snapshot(destination, expected_name, collector)
+    let copied = candidate_snapshot(destination, expected_name, collector)?;
+    #[cfg(windows)]
+    {
+        let reopened = inspect_candidate_tree(destination, expected_name)?;
+        if reopened != copied {
+            anyhow::bail!("Windows Skill copy changed before it could be reopened and verified");
+        }
+        Ok(reopened)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(copied)
+    }
 }
 
 fn inspect_candidate_tree(source: &Path, expected_name: &str) -> Result<CandidateSnapshot> {
@@ -2520,7 +2539,74 @@ fn collect_revision_tree_metadata(
     Ok(files.len() <= MAX_SKILL_FILES)
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn collect_revision_tree_metadata(
+    content_root: &Path,
+    relative: &Path,
+    depth: usize,
+    files: &mut BTreeMap<String, (u32, u64)>,
+) -> Result<bool> {
+    if !relative.as_os_str().is_empty() {
+        anyhow::bail!("Windows Skill tree collection must begin at its retained root handle");
+    }
+    let root = crate::platform::windows_file_tree::open_path_without_following(content_root)
+        .context("failed to open Windows Skill Revision root")?;
+    collect_revision_tree_metadata_windows(root, relative, depth, files)
+}
+
+#[cfg(windows)]
+fn collect_revision_tree_metadata_windows(
+    node: File,
+    relative: &Path,
+    depth: usize,
+    files: &mut BTreeMap<String, (u32, u64)>,
+) -> Result<bool> {
+    use crate::platform::windows_file_tree::NodeKind;
+
+    if depth > MAX_SKILL_DEPTH {
+        return Ok(false);
+    }
+    let before = crate::platform::windows_file_tree::inspect_node(&node)
+        .context("failed to inspect Windows Skill Revision node")?;
+    match before.kind {
+        NodeKind::Directory => {
+            let names = crate::platform::windows_file_tree::read_directory_names(
+                &node,
+                MAX_SKILL_FILES + 1,
+            )
+            .context("failed to enumerate Windows Skill Revision directory")?;
+            for name in names {
+                let child_relative = relative.join(&name);
+                ensure_relative_path(&child_relative)?;
+                let child =
+                    crate::platform::windows_file_tree::open_child_without_following(&node, &name)
+                        .context("failed to open Windows Skill Revision child")?;
+                if !collect_revision_tree_metadata_windows(
+                    child,
+                    &child_relative,
+                    depth + 1,
+                    files,
+                )? {
+                    return Ok(false);
+                }
+            }
+        }
+        NodeKind::RegularFile => {
+            files.insert(
+                canonical_skill_relative_path(relative)?,
+                (WINDOWS_SKILL_LOGICAL_FILE_MODE, before.fingerprint.size),
+            );
+            if files.len() > MAX_SKILL_FILES {
+                return Ok(false);
+            }
+        }
+    }
+    let after = crate::platform::windows_file_tree::inspect_node(&node)
+        .context("failed to re-inspect Windows Skill Revision node")?;
+    Ok(before == after)
+}
+
+#[cfg(not(any(unix, windows)))]
 fn collect_revision_tree_metadata(
     _content_root: &Path,
     _relative: &Path,
@@ -2639,7 +2725,129 @@ fn copy_candidate_tree(
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn copy_candidate_tree(
+    source_root: &Path,
+    destination_root: &Path,
+    relative: &Path,
+    depth: usize,
+    collector: &mut CandidateCollector,
+) -> Result<()> {
+    if !relative.as_os_str().is_empty() {
+        anyhow::bail!("Windows Skill copy must begin at its retained root handle");
+    }
+    let root = crate::platform::windows_file_tree::open_path_without_following(source_root)
+        .context("failed to open Windows Skill source root")?;
+    copy_candidate_node_windows(root, destination_root, relative, depth, collector)
+}
+
+#[cfg(windows)]
+fn copy_candidate_node_windows(
+    mut source: File,
+    destination_root: &Path,
+    relative: &Path,
+    depth: usize,
+    collector: &mut CandidateCollector,
+) -> Result<()> {
+    use crate::platform::windows_file_tree::NodeKind;
+
+    if depth > MAX_SKILL_DEPTH {
+        anyhow::bail!("Skill directory exceeds maximum recursion depth");
+    }
+    let before = crate::platform::windows_file_tree::inspect_node(&source)
+        .context("failed to inspect Windows Skill source node")?;
+    match before.kind {
+        NodeKind::Directory => {
+            if depth > 0 {
+                create_private_directory(&destination_root.join(relative))?;
+            }
+            let names = crate::platform::windows_file_tree::read_directory_names(
+                &source,
+                MAX_SKILL_FILES + 1,
+            )
+            .context("failed to enumerate Windows Skill source directory")?;
+            for name in names {
+                let child_relative = relative.join(&name);
+                ensure_relative_path(&child_relative)?;
+                let child = crate::platform::windows_file_tree::open_child_without_following(
+                    &source, &name,
+                )
+                .context("failed to open Windows Skill source child")?;
+                copy_candidate_node_windows(
+                    child,
+                    destination_root,
+                    &child_relative,
+                    depth + 1,
+                    collector,
+                )?;
+            }
+        }
+        NodeKind::RegularFile => {
+            if collector.records.len() >= MAX_SKILL_FILES {
+                anyhow::bail!("Skill package exceeds maximum file count");
+            }
+            if before.fingerprint.size > MAX_SKILL_FILE_BYTES {
+                anyhow::bail!("Skill file exceeds maximum file size");
+            }
+            collector.total_bytes = collector
+                .total_bytes
+                .checked_add(before.fingerprint.size)
+                .context("Skill total size overflowed")?;
+            if collector.total_bytes > MAX_SKILL_TOTAL_BYTES {
+                anyhow::bail!("Skill package exceeds maximum total size");
+            }
+
+            let destination = destination_root.join(relative);
+            let mut output = create_private_new_file(&destination)?;
+            let mut digest = Sha256::new();
+            let mut buffer = [0_u8; 64 * 1024];
+            let mut first_bytes = Vec::new();
+            let mut copied = 0_u64;
+            loop {
+                let read = source.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                copied = copied
+                    .checked_add(read as u64)
+                    .context("Skill file size overflowed while copying")?;
+                if copied > before.fingerprint.size {
+                    anyhow::bail!("Skill file changed while it was being copied");
+                }
+                if first_bytes.len() < 8 * 1024 {
+                    let remaining = 8 * 1024 - first_bytes.len();
+                    first_bytes.extend_from_slice(&buffer[..read.min(remaining)]);
+                }
+                digest.update(&buffer[..read]);
+                output.write_all(&buffer[..read])?;
+            }
+            if copied != before.fingerprint.size {
+                anyhow::bail!("Skill file changed while it was being copied");
+            }
+            output.sync_all()?;
+            if looks_like_script(relative, &first_bytes) {
+                collector.script_file_count += 1;
+            }
+            if first_bytes.contains(&0) {
+                collector.binary_candidate_count += 1;
+            }
+            collector.records.push(FileDigestRecord {
+                path: canonical_skill_relative_path(relative)?,
+                mode: WINDOWS_SKILL_LOGICAL_FILE_MODE,
+                size: before.fingerprint.size,
+                digest: digest.finalize().into(),
+            });
+        }
+    }
+    let after = crate::platform::windows_file_tree::inspect_node(&source)
+        .context("failed to re-inspect Windows Skill source node")?;
+    if before != after {
+        anyhow::bail!("Skill source changed while it was being copied");
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
 fn copy_candidate_tree(
     _source_root: &Path,
     _destination_root: &Path,
@@ -2726,7 +2934,113 @@ fn inspect_candidate_node(
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn inspect_candidate_node(
+    source_root: &Path,
+    relative: &Path,
+    depth: usize,
+    collector: &mut CandidateCollector,
+) -> Result<()> {
+    if !relative.as_os_str().is_empty() {
+        anyhow::bail!("Windows Skill inspection must begin at its retained root handle");
+    }
+    let root = crate::platform::windows_file_tree::open_path_without_following(source_root)
+        .context("failed to open Windows Skill inspection root")?;
+    inspect_candidate_node_windows(root, relative, depth, collector)
+}
+
+#[cfg(windows)]
+fn inspect_candidate_node_windows(
+    mut source: File,
+    relative: &Path,
+    depth: usize,
+    collector: &mut CandidateCollector,
+) -> Result<()> {
+    use crate::platform::windows_file_tree::NodeKind;
+
+    if depth > MAX_SKILL_DEPTH {
+        anyhow::bail!("Skill directory exceeds maximum recursion depth");
+    }
+    let before = crate::platform::windows_file_tree::inspect_node(&source)
+        .context("failed to inspect Windows Skill node")?;
+    match before.kind {
+        NodeKind::Directory => {
+            let names = crate::platform::windows_file_tree::read_directory_names(
+                &source,
+                MAX_SKILL_FILES + 1,
+            )
+            .context("failed to enumerate Windows Skill directory")?;
+            for name in names {
+                let child_relative = relative.join(&name);
+                ensure_relative_path(&child_relative)?;
+                let child = crate::platform::windows_file_tree::open_child_without_following(
+                    &source, &name,
+                )
+                .context("failed to open Windows Skill child")?;
+                inspect_candidate_node_windows(child, &child_relative, depth + 1, collector)?;
+            }
+        }
+        NodeKind::RegularFile => {
+            if collector.records.len() >= MAX_SKILL_FILES {
+                anyhow::bail!("Skill package exceeds maximum file count");
+            }
+            if before.fingerprint.size > MAX_SKILL_FILE_BYTES {
+                anyhow::bail!("Skill file exceeds maximum file size");
+            }
+            collector.total_bytes = collector
+                .total_bytes
+                .checked_add(before.fingerprint.size)
+                .context("Skill total size overflowed")?;
+            if collector.total_bytes > MAX_SKILL_TOTAL_BYTES {
+                anyhow::bail!("Skill package exceeds maximum total size");
+            }
+            let mut digest = Sha256::new();
+            let mut buffer = [0_u8; 64 * 1024];
+            let mut first_bytes = Vec::new();
+            let mut inspected = 0_u64;
+            loop {
+                let read = source.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                inspected = inspected
+                    .checked_add(read as u64)
+                    .context("Skill file size overflowed while inspecting")?;
+                if inspected > before.fingerprint.size {
+                    anyhow::bail!("Skill file changed while it was being inspected");
+                }
+                if first_bytes.len() < 8 * 1024 {
+                    let remaining = 8 * 1024 - first_bytes.len();
+                    first_bytes.extend_from_slice(&buffer[..read.min(remaining)]);
+                }
+                digest.update(&buffer[..read]);
+            }
+            if inspected != before.fingerprint.size {
+                anyhow::bail!("Skill file changed while it was being inspected");
+            }
+            if looks_like_script(relative, &first_bytes) {
+                collector.script_file_count += 1;
+            }
+            if first_bytes.contains(&0) {
+                collector.binary_candidate_count += 1;
+            }
+            collector.records.push(FileDigestRecord {
+                path: canonical_skill_relative_path(relative)?,
+                mode: WINDOWS_SKILL_LOGICAL_FILE_MODE,
+                size: before.fingerprint.size,
+                digest: digest.finalize().into(),
+            });
+        }
+    }
+    let after = crate::platform::windows_file_tree::inspect_node(&source)
+        .context("failed to re-inspect Windows Skill node")?;
+    if before != after {
+        anyhow::bail!("Skill source changed while it was being inspected");
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
 fn inspect_candidate_node(
     _source_root: &Path,
     _relative: &Path,
@@ -3000,6 +3314,34 @@ fn ensure_relative_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn canonical_skill_relative_path(path: &Path) -> Result<String> {
+    path.to_str()
+        .context("Windows Skill paths must have a lossless Unicode representation")
+        .map(|value| value.replace('\\', "/"))
+}
+
+#[cfg(windows)]
+fn ensure_private_parent_directories(root: &Path, path: &Path) -> Result<()> {
+    let parent = path.parent().context("Skill file has no parent")?;
+    let relative = parent
+        .strip_prefix(root)
+        .context("Skill file escaped its materialization root")?;
+    let mut current = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            anyhow::bail!("Skill contains an invalid relative path");
+        };
+        current.push(name);
+        if current.exists() {
+            prepare_private_directory(&current)?;
+        } else {
+            create_private_directory(&current)?;
+        }
+    }
+    Ok(())
+}
+
 fn publish_directory(source: &Path, final_content: &Path) -> Result<()> {
     if final_content.exists() {
         anyhow::bail!("Skill Revision destination already exists");
@@ -3007,7 +3349,7 @@ fn publish_directory(source: &Path, final_content: &Path) -> Result<()> {
     let revision_dir = final_content
         .parent()
         .context("Skill Revision destination has no parent")?;
-    fs::create_dir_all(revision_dir)?;
+    prepare_private_directory(revision_dir)?;
     fs::rename(source, final_content).with_context(|| {
         format!(
             "failed to publish Skill Revision from {} to {}",
@@ -3173,12 +3515,28 @@ fn materialize_bundled_definition(
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
 fn materialize_bundled_definition(
-    _destination: &Path,
-    _definition: &BundledDefinition,
+    destination: &Path,
+    definition: &BundledDefinition,
 ) -> Result<()> {
-    anyhow::bail!("windows_private_storage_not_implemented")
+    prepare_private_directory(destination)?;
+    for (relative, content, mode) in definition.files {
+        let relative = Path::new(relative);
+        ensure_relative_path(relative)?;
+        if *mode & 0o777 != WINDOWS_SKILL_LOGICAL_FILE_MODE {
+            anyhow::bail!(
+                "bundled Skill {} uses a file mode that Windows Skill Revision v1 cannot preserve",
+                definition.name
+            );
+        }
+        let path = destination.join(relative);
+        ensure_private_parent_directories(destination, &path)?;
+        let mut file = create_private_new_file(&path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+    }
+    Ok(())
 }
 
 fn validate_staging_token(token: &str) -> Result<()> {
@@ -3189,39 +3547,6 @@ fn validate_staging_token(token: &str) -> Result<()> {
 fn validate_stable_id(value: &str, label: &str) -> Result<()> {
     Uuid::parse_str(value).with_context(|| format!("{label} is invalid"))?;
     Ok(())
-}
-
-#[cfg(unix)]
-fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<()> {
-    let parent = path.parent().context("JSON path has no parent")?;
-    fs::create_dir_all(parent)?;
-    let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
-    let bytes = serde_json::to_vec_pretty(value)?;
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .mode(0o600)
-        .open(&temporary)?;
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    fs::rename(&temporary, path)?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn write_json_atomically<T: Serialize>(_path: &Path, _value: &T) -> Result<()> {
-    anyhow::bail!("windows_private_storage_not_implemented")
-}
-
-#[cfg(unix)]
-fn restrict_private_directory(path: &Path) -> Result<()> {
-    fs::set_permissions(path, fs::Permissions::from_mode(0o700))
-        .with_context(|| format!("failed to restrict {}", path.display()))
-}
-
-#[cfg(not(unix))]
-fn restrict_private_directory(_path: &Path) -> Result<()> {
-    anyhow::bail!("windows_private_storage_not_implemented")
 }
 
 fn remove_directory_if_present(path: &Path) -> Result<()> {
@@ -3257,6 +3582,118 @@ fn anyhow_to_sql_error(error: anyhow::Error) -> rusqlite::Error {
         std::io::ErrorKind::InvalidData,
         error.to_string(),
     ))
+}
+
+#[cfg(all(test, windows))]
+mod windows_skill_library_tests {
+    use super::*;
+
+    const WINDOWS_FIXTURE_FILES: &[(&str, &str, u32)] = &[
+        (
+            "SKILL.md",
+            "---\nname: windows-tree\ndescription: Windows tree fixture\n---\n\nFixture.\n",
+            0o644,
+        ),
+        ("references/说明.md", "Unicode child.\n", 0o644),
+        ("references/nested/.hidden", "hidden\n", 0o644),
+    ];
+
+    fn temporary_directory(prefix: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("{prefix}-{}", Uuid::new_v4()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn write_fixture(root: &Path) -> PathBuf {
+        let source = root.join("windows-tree");
+        for (relative, content, _) in WINDOWS_FIXTURE_FILES {
+            let path = source.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content.as_bytes()).unwrap();
+        }
+        source
+    }
+
+    #[test]
+    fn windows_skill_library_copies_and_reverifies_a_unicode_tree() {
+        let sandbox = temporary_directory("rovai-windows-skill-tree");
+        let source = write_fixture(&sandbox);
+        let destination = sandbox.join("private-staging");
+        let staged = stage_candidate(&source, "windows-tree", &destination).unwrap();
+        let expected = bundled_candidate_snapshot(&BundledDefinition {
+            name: "windows-tree",
+            files: WINDOWS_FIXTURE_FILES,
+            upstream_repository: None,
+            upstream_revision: None,
+            management_policy: SkillManagementPolicy::UserManaged,
+        })
+        .unwrap();
+
+        assert_eq!(staged.content_digest, expected.content_digest);
+        assert_eq!(staged.file_count, WINDOWS_FIXTURE_FILES.len());
+        assert_eq!(
+            inspect_candidate_tree(&destination, "windows-tree")
+                .unwrap()
+                .content_digest,
+            expected.content_digest
+        );
+        for (relative, content, _) in WINDOWS_FIXTURE_FILES {
+            assert_eq!(
+                fs::read(destination.join(relative)).unwrap(),
+                content.as_bytes()
+            );
+        }
+
+        remove_directory_if_present(&sandbox).unwrap();
+    }
+
+    #[test]
+    fn windows_skill_library_rejects_a_junction_inside_the_source() {
+        let sandbox = temporary_directory("rovai-windows-skill-reparse");
+        let source = write_fixture(&sandbox);
+        let outside = sandbox.join("outside");
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"), b"outside").unwrap();
+        let junction = source.join("linked-outside");
+        let status = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&outside)
+            .status()
+            .unwrap();
+        assert!(status.success(), "failed to create the junction fixture");
+
+        let error = stage_candidate(&source, "windows-tree", &sandbox.join("staging"))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("reparse point"), "unexpected error: {error}");
+
+        fs::remove_dir(&junction).unwrap();
+        remove_directory_if_present(&sandbox).unwrap();
+    }
+
+    #[test]
+    fn windows_skill_library_bootstraps_and_fast_paths_all_bundled_revisions() {
+        let sandbox = temporary_directory("rovai-windows-skill-bootstrap");
+        let mut database = Database::open(&sandbox.join("database")).unwrap();
+        let service = SkillLibraryService::new(sandbox.join("library")).unwrap();
+
+        let first = service.install_bundled_skills(&mut database).unwrap();
+        assert_eq!(first.materialized_count, BUNDLED_SKILLS.len());
+        let second = service.install_bundled_skills(&mut database).unwrap();
+        assert_eq!(second.fast_path_count, BUNDLED_SKILLS.len());
+        assert_eq!(second.materialized_count, 0);
+        let skills = service.list(&database).unwrap();
+        assert_eq!(skills.len(), BUNDLED_SKILLS.len());
+        for skill in &skills {
+            service
+                .verify_revision_content(&skill.current_revision)
+                .unwrap();
+        }
+
+        drop(database);
+        remove_directory_if_present(&sandbox).unwrap();
+    }
 }
 
 #[cfg(all(test, feature = "slow-tests", unix))]

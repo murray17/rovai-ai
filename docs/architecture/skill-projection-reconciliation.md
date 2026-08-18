@@ -96,6 +96,19 @@ Bootstrap report 只服务启动性能诊断，不进入 SkillExposureSnapshot�
 保留 Skill ID、enablement 与 group assignments，把 origin 切为 official，追加不可变 bundled Revision 和
 审计事件。official inventory 建立后，同名 import 仍被拒绝；这条迁移不允许 imported 内容覆盖 bundle。
 
+### Windows Revision v1 逻辑 mode
+
+既有 `rovai-skill-revision-v1` digest 包含 POSIX mode，但 NTFS/DACL 不提供等价的 executable mode。Windows
+导入因此把每个 admitted regular file 的**逻辑 mode**确定为 `0644`；实际读写权限完全由 Windows Private
+Storage 的 protected DACL 拥有，不能从 logical mode 推导，也不能把 DACL 位混入 revision digest。脚本风险仍
+按扩展名、shebang 与内容探测，`executableFileCount` 在 Windows v1 为 `0`。
+
+当前 embedded bundled inventory 的所有文件 mode 均为 `0644`，所以 macOS 与 Windows 对同一 bundle 产生相同
+digest。若未来 bundle 需要其他 mode，Windows bootstrap 必须先随新的 Revision digest contract 明确迁移；在此
+之前直接 fail closed，不能静默改写 mode 或制造跨平台同名异 digest。Windows Library 与 projection 的遍历都从
+不跟随 reparse point 的 retained handle 开始，子项按父目录 handle 相对打开；复制文件 flush 后重开/重算完整树，
+不能用路径字符串或 DACL 等价猜测替代内容证明。
+
 ## 触发矩阵
 
 | 触发 | Library / DB | 项目 filesystem |
