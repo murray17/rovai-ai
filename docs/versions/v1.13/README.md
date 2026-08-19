@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.13
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-19
 > 真实打包 App UI 验收与本地交付检查。
 >
 > 前置版本：[v1.12 AgentRun 局部停止](../v1.12/README.md)。v1.12 已完成并冻结为 historical。
+>
+> 后续版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。
 
 ## 版本目标
 

@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # 长期接口合同
@@ -56,13 +56,15 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
 | [Accepted Input Recovery v1（当前）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛 |
 | [Collaboration State v2（当前）](collaboration-state-v2.md) | peer-only routing identity、稳定 CampMember 选择、Lead ID/Boolean、完整 projection digest、独立 inclusion、accepted ACK 与 v0.50 clean break |
-| [Camp History Retrieval v3（当前）](camp-history-v3.md) | v2 Agent projection/授权/读取语义不变；所有显式 target 与输出只接受唯一 canonical Camp ID |
+| [Camp History Retrieval v4（当前）](camp-history-v4.md) | v3 读取/授权/身份语义不变；CLI 在 Schema 前把省略 mode 安全补全为 timeline/before/20，消息锚点模式仍显式 |
+| [Camp History Retrieval v3（历史）](camp-history-v3.md) | v2 Agent projection/授权/读取语义不变；所有显式 target 与输出只接受唯一 canonical Camp ID |
 | [Camp History Retrieval v2（历史）](camp-history-v2.md) | v1 查询、授权、publication fence 与附件边界不变；Agent body/snippet/offset 使用 `agent_v1` Principal 投影，并为 `@Principal` 提供结构化候选路径 |
 | [Camp History Retrieval v1（历史）](camp-history-v1.md) | `camp.search/read/history.search` 的 single-Camp target、Manifest/live authorization、Public A2A publication fence 与旧 Human-body Agent 投影 |
 | [Memory Capture v3（当前）](memory-capture-v3.md) | v2 边界加 complete exact-Scope View、copyable Revision target、active body aggregate quota、64 KiB production projection limit 与 Memory-domain clean break |
 | [Memory Capture v2 (historical)](memory-capture-v2.md) | v1 捕获/Review/Forget 边界加 flat Agent-relative Scope identity、revise target assertion、durable domain rejection 与 Supersession 原子顺序 |
 | [Memory Capture v1 (historical)](memory-capture-v1.md) | 初版 best-effort 在线捕获、actor-bounded add/revise、隔离 Hearth Review Item、双 CAS、候选清除与 Forget safeguard；不含 Scope-identified revise |
-| [Built-in Tool Transport v16（当前）](builtin-tool-transport-v16.md) | v15 transport/operation 语义不变；catalog、result、capability 与 Binding 统一使用 canonical Camp ID、History v3 和 Formatter20/Manifest18 |
+| [Built-in Tool Transport v17（当前）](builtin-tool-transport-v17.md) | v16 transport/Core 语义不变；加入 `camp.read` CLI 默认补全、定向错误、History v4 与 v17 capability，Charter/Formatter/Manifest 不变 |
+| [Built-in Tool Transport v16（历史）](builtin-tool-transport-v16.md) | v15 transport/operation 语义不变；catalog、result、capability 与 Binding 统一使用 canonical Camp ID、History v3 和 Formatter20/Manifest18 |
 | [Built-in Tool Transport v15（历史）](builtin-tool-transport-v15.md) | 完整继承 v14 LocalIpcEndpoint/IPC v2，并加入 PublicOnly、canonical Principal attention、Send output v2 与 v15 catalog/capability clean break |
 | [Built-in Tool Transport v14（历史）](builtin-tool-transport-v14.md) | v13 十五项 operation 语义不变；LocalIpcEndpoint、IPC v2、Unix Socket/受保护 Windows Named Pipe 与 v14 capability clean break |
 | [Built-in Tool Agent Output Projection v1（当前）](builtin-tool-agent-output-projection-v1.md) | Core 完成后 Agent projection/schema drift 的安全 `output_contract_mismatch`、非重试 recovery 与 private local diagnostic |

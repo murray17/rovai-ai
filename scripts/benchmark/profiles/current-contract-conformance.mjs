@@ -58,7 +58,7 @@ export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
     evidence: test('crates/rovai-core/src/collaboration.rs', 'agent_task_updates_respect_lead_and_assignee_authority')
   },
   {
-    id: 'built-in-transport-v16',
+    id: 'built-in-transport-v17',
     evidence: test('crates/rovai-core/src/builtin_tool_transport.rs', 'list_and_describe_share_one_digest')
   },
   {

@@ -42,7 +42,8 @@ Memory 代替 Task、项目文档或历史证据。
 - 需要判断消息是否升级为持久责任，或协调 Task 与消息 linkage 时，读取
   [Task](references/task.md)。
 - 需要在当前 Camp、指定 Camp、跨 Camp 历史或稳定 ID exact read 之间选择时，读取
-  [Camp 与 History](references/camp-history.md)。
+  [Camp 与 History](references/camp-history.md)；该 reference 同时定义裸 `rovai camp read` 的默认
+  Timeline 行为、message-anchored 显式模式和 cursor 延续规则。
 - 需求可能属于长期记忆时，读取 [Memory 路由](references/memory.md)，随后使用
   `$memory-stewardship`；此处不替代 Memory 治理。
 - CLI 返回 `error.recovery`，尤其要求 refresh 或确认结果时，读取

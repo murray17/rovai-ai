@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.13
+current_version: v1.14
 last_updated: 2026-08-19
 ---
 
@@ -164,4 +164,5 @@ last_updated: 2026-08-19
 | v1.10 | `historical` | 唯一 Rovai Camp ID clean break 与 Claude Code/Antigravity 安全公开失败 | [v1.10/README.md](v1.10/README.md) |
 | v1.11 | `historical` | Runtime 模型目录 SWR、主动检查终态与真实执行模型校验 | [v1.11/README.md](v1.11/README.md) |
 | v1.12 | `historical` | User-only AgentRun 局部停止、立即写 fence 与权威状态投影 | [v1.12/README.md](v1.12/README.md) |
-| v1.13 | `current` | 十 Runtime 的 AgentRun 首个实际模型观测与执行台展示 | [v1.13/README.md](v1.13/README.md) |
+| v1.13 | `historical` | 十 Runtime 的 AgentRun 首个实际模型观测与执行台展示 | [v1.13/README.md](v1.13/README.md) |
+| v1.14 | `current` | `camp.read` 安全 Timeline 默认、显式消息锚点模式与 Built-in Transport v17 | [v1.14/README.md](v1.14/README.md) |
