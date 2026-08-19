@@ -687,6 +687,7 @@ try {
     `200% zoom hid or overlapped the resizable execution Drawer: ${JSON.stringify(zoomedDrawerLayout)}`)
   const zoomedDrawerCapture = join(outputDir, 'runtime-activity-zoom-200.png')
   await capture(app.cdp, zoomedDrawerCapture)
+  const directAgentRunStop = await verifyDirectAgentRunStop(app.cdp)
 
   const reportPath = join(outputDir, 'runtime-activity-acceptance.json')
   const report = {
@@ -722,7 +723,8 @@ try {
       recipientOnlyCompactLayout: compactLayout,
       compactRuntimeModel,
       zoomedDrawerLayout,
-      zoomedRuntimeModel
+      zoomedRuntimeModel,
+      directAgentRunStop
     },
     runtimes: observed,
     captures: {
@@ -2583,6 +2585,51 @@ async function verifyExecutionAutoFollowControl(cdp) {
     manualScrollPauses: true,
     returningToBottomResumes: true
   }
+}
+
+async function verifyDirectAgentRunStop(cdp) {
+  await waitForExpression(cdp,
+    `document.querySelectorAll('.execution-drawer [aria-label="停止当前运行"]').length === 1`)
+  const before = await evaluate(cdp, `(() => ({
+    stopButtonCount: document.querySelectorAll('.execution-drawer [aria-label="停止当前运行"]').length,
+    confirmationDialogCount: document.querySelectorAll('.agent-run-stop-dialog').length,
+    overlayCount: document.querySelectorAll('.dialog-overlay').length,
+    hasLegacyConfirmationCopy: document.body.innerText.includes('停止此运行？')
+      || document.body.innerText.includes('继续运行')
+  }))()`)
+  assert(before.stopButtonCount === 1
+    && before.confirmationDialogCount === 0
+    && before.overlayCount === 0
+    && !before.hasLegacyConfirmationCopy,
+  `AgentRun Stop still exposed confirmation UI before submission: ${JSON.stringify(before)}`)
+
+  const clicked = await evaluate(cdp, `(() => {
+    const button = document.querySelector('.execution-drawer [aria-label="停止当前运行"]')
+    button?.click()
+    return Boolean(button)
+  })()`)
+  assert(clicked, 'Could not submit AgentRun Stop from the Execution Drawer')
+  await waitForExpression(cdp, `(() => {
+    const state = document.querySelector('.execution-run-stop-state[role="status"]')?.textContent?.trim()
+    return ['正在停止…', '正在确认停止状态', '已停止'].includes(state ?? '')
+      && !document.querySelector('.execution-drawer [aria-label="停止当前运行"]')
+      && !document.querySelector('.agent-run-stop-dialog')
+      && !document.querySelector('.dialog-overlay')
+  })()`, 10_000)
+  const after = await evaluate(cdp, `(() => ({
+    state: document.querySelector('.execution-run-stop-state[role="status"]')?.textContent?.trim() ?? null,
+    stopButtonCount: document.querySelectorAll('.execution-drawer [aria-label="停止当前运行"]').length,
+    confirmationDialogCount: document.querySelectorAll('.agent-run-stop-dialog').length,
+    overlayCount: document.querySelectorAll('.dialog-overlay').length,
+    hasLegacyConfirmationCopy: document.body.innerText.includes('停止此运行？')
+      || document.body.innerText.includes('继续运行')
+  }))()`)
+  assert(after.stopButtonCount === 0
+    && after.confirmationDialogCount === 0
+    && after.overlayCount === 0
+    && !after.hasLegacyConfirmationCopy,
+  `AgentRun Stop did not remain a single direct action: ${JSON.stringify(after)}`)
+  return { before, after }
 }
 
 function assertRuntimeRows(observed) {

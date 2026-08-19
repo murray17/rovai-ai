@@ -37,6 +37,8 @@ last_updated: 2026-08-19
 
 ## Checkpoint 3：Transport、Renderer 与 Desktop 行为
 
+- [x] 将共享 ExecutionDrawer 的 AgentRun “停止”改为单击直接提交，移除确认 Dialog，并保留 Run-local
+  提交中、结果不确定、已停止与失败恢复投影；
 - [x] 将 `rovai` CLI 与 compaction hook 统一到同一异步 Local IPC client，Windows 与 Unix 共用 framing、超时、
   重试和 outcome-indeterminate 分类，并保留 v1.14 发布的 `camp.read` Timeline 默认；
 - [x] Named Pipe 每个实例使用 session logon SID + SYSTEM protected DACL，并在创建后回读 DACL；覆盖

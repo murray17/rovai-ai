@@ -71,7 +71,6 @@ import {
   agentRunShowsUnsettledWarning,
   attachmentDragKind,
   attachmentDropIsBlocked,
-  agentRunStopConfirmation,
   agentRunStopViewState,
   canStopAgentRun,
   campConversationViewFromStoredValue,
@@ -1039,10 +1038,6 @@ describe('task event projections', () => {
       turnCancelling: false
     })).toBe('hidden')
 
-    expect(agentRunStopConfirmation('required')).toContain('必要职责未完成')
-    expect(agentRunStopConfirmation('required')).toContain('其他已接受的运行继续')
-    expect(agentRunStopConfirmation('optional')).toContain('本轮仍可完成')
-    expect(agentRunStopConfirmation('optional')).toContain('其他已接受的运行继续')
   })
 
   it('projects one terminal Stop outcome at the authoritative cancellation boundary', () => {

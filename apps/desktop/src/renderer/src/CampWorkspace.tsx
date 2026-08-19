@@ -117,14 +117,6 @@ export function canStopAgentRun(
     && turn?.cancelRequestedAt === null
 }
 
-export function agentRunStopConfirmation(
-  completionRole: AgentRunView['completionRole']
-): string {
-  return completionRole === 'required'
-    ? '仅停止此运行，其他已接受的运行继续。此运行停止后将视为必要职责未完成；本轮会在其余职责收敛后以“必要职责未完成”失败。'
-    : '仅停止此运行，其他已接受的运行继续。如果其余必要职责正常完成，本轮仍可完成。'
-}
-
 export type AgentRunStopViewState =
   | 'available'
   | 'stopping'
@@ -4160,8 +4152,9 @@ function ExecutionDrawer({
   const [preferredHeight, setPreferredHeight] = useState<number | null>(storedExecutionDrawerHeight)
   const [measuredHeight, setMeasuredHeight] = useState<number | null>(null)
   const [resizing, setResizing] = useState(false)
-  const [stopConfirmationRunId, setStopConfirmationRunId] = useState<string | null>(null)
-  const [submittingStop, setSubmittingStop] = useState(false)
+  const [submittingStopRunIds, setSubmittingStopRunIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  )
   const processRef = useRef(process)
   processRef.current = process
   const resolvedFocusedRun = process.runs.find((run) => run.id === focusedRunId)
@@ -4177,6 +4170,7 @@ function ExecutionDrawer({
     resolvedFocusedRun
     && (
       cancellingRunIds.has(resolvedFocusedRun.id)
+      || submittingStopRunIds.has(resolvedFocusedRun.id)
       || resolvedFocusedRun.cancelRequestedAt !== null
     )
   )
@@ -4190,9 +4184,6 @@ function ExecutionDrawer({
         turnCancelling: turnStopping
       })
     : 'hidden'
-  const confirmationRun = stopConfirmationRunId
-    ? process.runs.find((run) => run.id === stopConfirmationRunId) ?? null
-    : null
   const focusedProgress = resolvedFocusedRunId
     ? progressByRunId.get(resolvedFocusedRunId)
     : undefined
@@ -4362,25 +4353,6 @@ function ExecutionDrawer({
     }
   }, [onClose])
 
-  useEffect(() => {
-    if (!confirmationRun) return
-    const confirmationTurn = turns.find((turn) => turn.id === confirmationRun.campTurnId) ?? null
-    if (
-      !canStopAgentRun(confirmationRun, confirmationTurn)
-      || cancellingTurnIds.has(confirmationRun.campTurnId)
-      || cancellingRunIds.has(confirmationRun.id)
-      || confirmingRunIds.has(confirmationRun.id)
-    ) {
-      setStopConfirmationRunId(null)
-    }
-  }, [
-    cancellingRunIds,
-    cancellingTurnIds,
-    confirmationRun,
-    confirmingRunIds,
-    turns
-  ])
-
   useLayoutEffect(() => {
     const requestedRunId = focusedRunId
       && processRef.current.runs.some((run) => run.id === focusedRunId)
@@ -4507,65 +4479,27 @@ function ExecutionDrawer({
             ) : stopViewState === 'confirming' ? (
               <span className="execution-run-stop-state tone-attention" role="status">正在确认停止状态</span>
             ) : null}
-            <Dialog.Root
-              open={stopConfirmationRunId !== null}
-              onOpenChange={(open) => {
-                if (!submittingStop) {
-                  setStopConfirmationRunId(open ? resolvedFocusedRunId : null)
-                }
-              }}
-            >
-              {stopViewState === 'available' && (
-                <Dialog.Trigger asChild>
-                  <button
-                    type="button"
-                    className="quiet-button compact danger-text execution-run-stop-button"
-                    aria-label="停止当前运行"
-                  >
-                    停止
-                  </button>
-                </Dialog.Trigger>
-              )}
-              {confirmationRun && (
-                <Dialog.Portal>
-                  <Dialog.Overlay className="dialog-overlay" />
-                  <Dialog.Content className="dialog-content agent-run-stop-dialog">
-                    <div className="dialog-heading">
-                      <Dialog.Title>停止此运行？</Dialog.Title>
-                      <Dialog.Close asChild>
-                        <button className="dialog-close" type="button" aria-label="关闭" disabled={submittingStop}>×</button>
-                      </Dialog.Close>
-                    </div>
-                    <Dialog.Description>
-                      {agentRunStopConfirmation(confirmationRun.completionRole)}
-                    </Dialog.Description>
-                    <div className="agent-run-stop-fact">
-                      <span>运行</span>
-                      <code>{shortIdentity(confirmationRun.id)}</code>
-                    </div>
-                    <div className="dialog-actions">
-                      <Dialog.Close asChild>
-                        <button className="quiet-button" type="button" disabled={submittingStop}>继续运行</button>
-                      </Dialog.Close>
-                      <button
-                        className="danger-button"
-                        type="button"
-                        disabled={submittingStop}
-                        onClick={() => {
-                          setSubmittingStop(true)
-                          void onCancelAgentRun(confirmationRun).finally(() => {
-                            setSubmittingStop(false)
-                            setStopConfirmationRunId(null)
-                          })
-                        }}
-                      >
-                        {submittingStop ? '正在提交…' : '停止此运行'}
-                      </button>
-                    </div>
-                  </Dialog.Content>
-                </Dialog.Portal>
-              )}
-            </Dialog.Root>
+            {stopViewState === 'available' && resolvedFocusedRun && (
+              <button
+                type="button"
+                className="quiet-button compact danger-text execution-run-stop-button"
+                aria-label="停止当前运行"
+                onClick={() => {
+                  const runId = resolvedFocusedRun.id
+                  setSubmittingStopRunIds((current) => new Set(current).add(runId))
+                  void onCancelAgentRun(resolvedFocusedRun).finally(() => {
+                    setSubmittingStopRunIds((current) => {
+                      if (!current.has(runId)) return current
+                      const next = new Set(current)
+                      next.delete(runId)
+                      return next
+                    })
+                  })
+                }}
+              >
+                停止
+              </button>
+            )}
             <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
           </div>
         </header>

@@ -184,7 +184,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v9](../contracts/run-process-detail-surface-v9.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v12](../contracts/run-process-detail-surface-v12.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -219,8 +219,10 @@ pnpm accept:runtime-activity-ui
   Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程，顶栏不存在执行入口；
 - Approval Dock 是唯一普通审批决定 surface；顶栏与通知摘要只展开、定位并聚焦 Dock，不改变 Inspector
   显隐或页签。收起/展开不改变队列，解决最后一项后焦点返回 Composer；
-- Drawer 不提供 Agent 或 Run 级 Stop/Cancel/Retry；唯一 CampTurn Stop、Approval Dock 与 Composer 在
-  `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、可键盘到达且不互相遮挡；
+- Drawer 顶栏只为当前聚焦且可停止的 AgentRun 提供一个“停止”按钮；单击必须直接提交、立即进入停止态，
+  不挂载确认 Dialog、“继续运行”动作或第二个提交按钮。Composer 继续拥有唯一 CampTurn Stop；两级停止、
+  Approval Dock 与 Composer 在 `2560×1440`、`1440×920`、`1040×700`、200% zoom 和 reduced motion 下均可见、
+  可键盘到达且不互相遮挡；
 - `2560×1440` 下 `.composer-box` 与可见 `.composer-route-rail` 都接近 1440px、居中且同轴；Inspector
   显隐后仍不超过 1440px。`.timeline-track`、Approval/Recovery Dock 与会话宽轨保持约 1040px，
   `Enter` keycap 位于发送按钮紧邻左侧；用户与所有 Agent 普通正文使用同一开放阅读表面，叙述保持约

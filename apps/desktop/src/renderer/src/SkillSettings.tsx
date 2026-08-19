@@ -201,6 +201,9 @@ export function SkillSettings(): React.JSX.Element {
         command: { skillId: current.id, expectedVersion: current.version }
       })
       assertCommandApplied(result)
+      setSkills((currentSkills) => currentSkills
+        ? currentSkills.filter((value) => value.id !== current.id)
+        : currentSkills)
       setConfirmation(null)
       await load()
     } catch (nextError) {
@@ -288,7 +291,7 @@ export function SkillSettings(): React.JSX.Element {
                   <span>GitHub Skill 链接</span>
                   <input className="skill-text-input" value={githubInput} onChange={(event) => setGithubInput(event.target.value)} placeholder="粘贴仓库或带 ref / 子目录的链接" />
                 </label>
-                <button className="primary-button" type="button" disabled={busy !== null || githubInput.trim().length === 0} onClick={() => void inspectGithubImport()}>
+                <button className="primary-button skill-import-github-submit" type="button" disabled={busy !== null || githubInput.trim().length === 0} onClick={() => void inspectGithubImport()}>
                   {busy === 'inspect-github' ? '正在检查…' : '检查并导入'}
                 </button>
               </div>
@@ -359,7 +362,9 @@ export function settingsVisibleSkills(
   search: string
 ): SkillView[] | null {
   if (!skills) return null
-  const configurable = skills.filter((skill) => skill.managementPolicy === 'user_managed')
+  const configurable = skills.filter((skill) => (
+    skill.managementPolicy === 'user_managed' && skill.lifecycleStatus === 'active'
+  ))
   const query = search.trim().toLocaleLowerCase('zh-CN')
   if (query.length === 0) return configurable
   return configurable.filter((skill) => skillSearchText(skill)
@@ -392,7 +397,7 @@ export function SkillCard({
   const detailsId = `skill-details-${skill.id.replace(/[^a-zA-Z0-9_-]/g, '-')}`
   return (
     <article
-      className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${deleting ? 'is-deleting' : ''} ${detailsOpen ? 'is-expanded' : ''}`}
+      className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${detailsOpen ? 'is-expanded' : ''}`}
       data-skill-name={skill.name}
       aria-busy={rowBusy}
       style={{ '--skill-identity': identityColorToken(skill.id) } as React.CSSProperties}
@@ -405,7 +410,6 @@ export function SkillCard({
             <span className={`skill-source source-${source.kind}`}>{source.badgeLabel}</span>
           </div>
           <p>{skill.currentRevision.description || '未提供说明。'}</p>
-          {deleting && <span className="skill-deleting-note">等待现有执行释放后删除</span>}
         </div>
         <div className="skill-card-controls">
           <SkillGroupMenu
@@ -452,7 +456,7 @@ export function SkillCard({
         <p className="skill-detail-note">{source.detailNote}</p>
         {skill.origin === 'imported' && (
           <div className="skill-detail-footer">
-            <button className="skill-delete-button" type="button" disabled={rowBusy || deleting} onClick={onDelete}>删除 Skill…</button>
+            <button className="skill-delete-button" type="button" disabled={rowBusy || deleting} onClick={onDelete}>删除</button>
           </div>
         )}
       </div>

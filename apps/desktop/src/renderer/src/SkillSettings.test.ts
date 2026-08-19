@@ -66,6 +66,16 @@ describe('Skill settings', () => {
     )).toEqual([])
   })
 
+  it('removes deleting Skills from the visible settings projection', () => {
+    const deleting = {
+      ...skillFixture(true),
+      lifecycleStatus: 'deleting'
+    } satisfies SkillView
+
+    expect(settingsVisibleSkills([deleting], '')).toEqual([])
+    expect(settingsVisibleSkills([deleting], 'skill-one')).toEqual([])
+  })
+
   it('explains import and projection states without relying on color', () => {
     expect(importActionLabel('create')).toBe('新 Skill')
     expect(importActionLabel('update')).toContain('新 Revision')
@@ -276,12 +286,14 @@ describe('Skill settings', () => {
     expect(thirdPartyDetails).toContain('target="_blank"')
     expect(thirdPartyMarkup).toContain('aria-expanded="false"')
     expect(thirdPartyMarkup).toContain('随 Rovai 安装的固定上游副本')
-    expect(thirdPartyMarkup).not.toContain('删除 Skill…')
+    expect(thirdPartyMarkup).not.toContain('class="skill-delete-button"')
     expect(importedPrimary).toContain('用户导入')
     expect(importedPrimary).not.toContain('本地文件夹导入')
     expect(importedPrimary).not.toContain('Revision r1')
     expect(importedDetails).toContain('本地文件夹导入')
-    expect(importedDetails).toContain('删除 Skill…')
+    expect(importedDetails).toContain('class="skill-delete-button"')
+    expect(importedDetails).toContain('>删除</button>')
+    expect(importedDetails).not.toContain('删除 Skill')
   })
 
   it('derives the identity color from the persistent Skill UUID across edits and revisions', () => {
