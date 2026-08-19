@@ -43,7 +43,9 @@ try {
     returnByValue: true
   })
   if (existingDialog.result?.result?.value) {
-    await pressKey(cdp, 'Escape')
+    await cdp.send('Runtime.evaluate', {
+      expression: `document.querySelector('.new-camp-dialog .dialog-close')?.click()`
+    })
     await waitForExpression(cdp, `document.querySelector('.new-camp-dialog') === null`, 5_000)
   }
   await waitForExpression(
@@ -100,6 +102,18 @@ try {
           && !text.includes('协作方式'),
         saysRecommended: text.includes('推荐'),
         optionalShell: Boolean(dialog?.querySelector('.new-camp-optional-shell')),
+        optionalCollapsed: !dialog?.querySelector('.new-camp-optional-panel'),
+        headerCreationIcon: Boolean(dialog?.querySelector('.new-camp-dialog-header-icon svg path')),
+        leadPicker: (() => {
+          const trigger = dialog?.querySelector('.new-camp-lead-trigger')
+          return {
+            custom: Boolean(trigger) && !dialog?.querySelector('.new-camp-lead-field select'),
+            hasAvatar: Boolean(trigger?.querySelector('.member-avatar')),
+            hasAvailability: trigger?.textContent?.includes('可用') === true,
+            hasAriaPopup: trigger?.getAttribute('aria-haspopup') === 'menu'
+          }
+        })(),
+        agentRuntimeCopyRemoved: !text.includes('Agent 运行时'),
         defaultsAttentionRemoved: !text.includes('默认配置已失效')
           && !text.includes('已保存配置曾失效')
           && !text.includes('以上调整只用于本次创建'),
@@ -109,6 +123,10 @@ try {
           return {
             count: icons.length,
             allSvg: icons.every((icon) => icon.tagName === 'svg'),
+            positions: icons.map((icon) => ({
+              right: icon.getBoundingClientRect().right,
+              parentClass: icon.parentElement?.className ?? null
+            })),
             rightEdgeSpread: rightEdges.length > 0
               ? Math.max(...rightEdges) - Math.min(...rightEdges)
               : null
@@ -143,10 +161,17 @@ try {
     || value?.collaborationRemoved !== true
     || value?.saysRecommended !== false
     || value?.optionalShell !== true
+    || value?.optionalCollapsed !== true
+    || value?.headerCreationIcon !== true
+    || value?.leadPicker?.custom !== true
+    || value?.leadPicker?.hasAvatar !== true
+    || value?.leadPicker?.hasAvailability !== true
+    || value?.leadPicker?.hasAriaPopup !== true
+    || value?.agentRuntimeCopyRemoved !== true
     || value?.defaultsAttentionRemoved !== true
     || value?.dropdownIcons?.count !== 4
     || value?.dropdownIcons?.allSvg !== true
-    || value?.dropdownIcons?.rightEdgeSpread > 1
+    || value?.dropdownIcons?.rightEdgeSpread > 2
     || value?.memberCount < 1
     || value?.selectedMembers !== value?.memberCount
     || value?.focusedProject !== true
@@ -165,13 +190,101 @@ try {
     `document.querySelector('.new-camp-picker-menu.member-menu') === null`,
     5_000
   )
-  await pressKey(cdp, 'Tab')
+  await cdp.send('Runtime.evaluate', {
+    expression: `document.querySelector('.new-camp-lead-trigger')?.focus()`
+  })
+  await wait(100)
+  await dispatchDomKey(cdp, 'ArrowDown')
   await waitForExpression(
     cdp,
-    `document.querySelector('.new-camp-dialog')?.contains(document.activeElement) === true`,
+    `Boolean(document.querySelector('.new-camp-lead-menu'))`,
     5_000
   )
+  const leadMenuInspection = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const menu = document.querySelector('.new-camp-lead-menu')
+      const options = [...(menu?.querySelectorAll('[role="menuitemradio"]') ?? [])]
+      return {
+        count: options.length,
+        allHaveAvatars: options.every((option) => Boolean(option.querySelector('.member-avatar'))),
+        checkedCount: options.filter((option) => option.getAttribute('aria-checked') === 'true').length,
+        activeInside: Boolean(menu?.contains(document.activeElement)),
+        activeLabel: document.activeElement?.getAttribute('aria-label') ?? null
+      }
+    })()`,
+    returnByValue: true
+  })
+  const leadMenuValue = leadMenuInspection.result?.result?.value
+  if (
+    leadMenuValue?.count !== memberSelectionValue.selected
+    || leadMenuValue?.allHaveAvatars !== true
+    || leadMenuValue?.checkedCount !== 1
+    || leadMenuValue?.activeInside !== true
+  ) {
+    throw new Error(`Lead picker acceptance failed: ${JSON.stringify(leadMenuValue)}`)
+  }
+  await dispatchDomKey(cdp, 'ArrowDown')
+  if (leadMenuValue.count > 1) {
+    await waitForExpression(
+      cdp,
+      `document.activeElement?.getAttribute('aria-label') !== ${JSON.stringify(leadMenuValue.activeLabel)}`,
+      5_000
+    )
+  }
+  const navigatedLead = await cdp.send('Runtime.evaluate', {
+    expression: `document.activeElement?.getAttribute('aria-label') ?? null`,
+    returnByValue: true
+  })
+  const navigatedLeadLabel = navigatedLead.result?.result?.value
+  if (leadMenuValue.count > 1 && navigatedLeadLabel === leadMenuValue.activeLabel) {
+    throw new Error(`Lead picker arrow navigation did not move focus: ${JSON.stringify(leadMenuValue)}`)
+  }
+  if (leadMenuValue.count > 1) {
+    await dispatchDomKey(cdp, 'Enter')
+  } else {
+    await dispatchDomKey(cdp, 'Escape')
+  }
+  await waitForExpression(cdp, `document.querySelector('.new-camp-lead-menu') === null`, 5_000)
+  await waitForExpression(
+    cdp,
+    `document.activeElement?.classList.contains('new-camp-lead-trigger') === true`,
+    5_000
+  )
+  await wait(100)
+  await cdp.send('Runtime.evaluate', {
+    expression: `document.querySelector('.new-camp-optional-trigger')?.click()`
+  })
+  await waitForExpression(cdp, `document.activeElement?.id === 'new-camp-name'`, 5_000)
+  const optionalInspection = await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const trigger = document.querySelector('.new-camp-optional-trigger')
+      const panel = document.querySelector('.new-camp-optional-panel')
+      const input = document.getElementById('new-camp-name')
+      const triggerRect = trigger?.getBoundingClientRect()
+      const panelRect = panel?.getBoundingClientRect()
+      return {
+        expanded: trigger?.getAttribute('aria-expanded') === 'true',
+        placeholder: input?.getAttribute('placeholder'),
+        focused: document.activeElement === input,
+        indent: triggerRect && panelRect ? panelRect.left - triggerRect.left : null,
+        unnamedHint: panel?.textContent?.includes('留空将创建为「未命名对话」。') === true
+      }
+    })()`,
+    returnByValue: true
+  })
+  const optionalValue = optionalInspection.result?.result?.value
+  if (
+    optionalValue?.expanded !== true
+    || optionalValue?.placeholder !== '输入名称...'
+    || optionalValue?.focused !== true
+    || optionalValue?.indent < 40
+    || optionalValue?.unnamedHint !== true
+  ) {
+    throw new Error(`Optional name acceptance failed: ${JSON.stringify(optionalValue)}`)
+  }
 
+  await cdp.send('Page.bringToFront')
+  await wait(100)
   const screenshot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: false,
@@ -285,20 +398,38 @@ function wait(milliseconds) {
 }
 
 async function pressKey(cdp, key) {
-  const virtualKey = key === 'Tab' ? 9 : key === 'Escape' ? 27 : key.charCodeAt(0)
-  const code = key === 'Tab' ? 'Tab' : key === 'Escape' ? 'Escape' : key
+  const keyDefinition = {
+    ArrowDown: { code: 'ArrowDown', virtualKey: 40 },
+    Enter: { code: 'Enter', virtualKey: 13 },
+    Escape: { code: 'Escape', virtualKey: 27 },
+    Tab: { code: 'Tab', virtualKey: 9 }
+  }[key] ?? { code: key, virtualKey: key.charCodeAt(0) }
   await cdp.send('Input.dispatchKeyEvent', {
-    type: 'keyDown',
+    type: 'rawKeyDown',
     key,
-    code,
-    windowsVirtualKeyCode: virtualKey,
-    nativeVirtualKeyCode: virtualKey
+    code: keyDefinition.code,
+    windowsVirtualKeyCode: keyDefinition.virtualKey,
+    nativeVirtualKeyCode: keyDefinition.virtualKey
   })
   await cdp.send('Input.dispatchKeyEvent', {
     type: 'keyUp',
     key,
-    code,
-    windowsVirtualKeyCode: virtualKey,
-    nativeVirtualKeyCode: virtualKey
+    code: keyDefinition.code,
+    windowsVirtualKeyCode: keyDefinition.virtualKey,
+    nativeVirtualKeyCode: keyDefinition.virtualKey
+  })
+}
+
+async function dispatchDomKey(cdp, key) {
+  await cdp.send('Runtime.evaluate', {
+    expression: `(() => {
+      const target = document.activeElement
+      if (!target) return false
+      const init = { key: ${JSON.stringify(key)}, code: ${JSON.stringify(key)}, bubbles: true, cancelable: true }
+      target.dispatchEvent(new KeyboardEvent('keydown', init))
+      target.dispatchEvent(new KeyboardEvent('keyup', init))
+      return true
+    })()`,
+    returnByValue: true
   })
 }

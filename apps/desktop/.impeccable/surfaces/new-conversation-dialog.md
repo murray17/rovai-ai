@@ -1,5 +1,5 @@
 ---
-version: 2
+version: 3
 slug: "new-conversation-dialog"
 primary_target: "apps/desktop/src/renderer/src/NewConversationDialog.tsx"
 related_targets:
@@ -20,11 +20,13 @@ Open the same Radix Dialog from every entry point. Width is
 `min(790px, viewport height - 72px)`. Header and footer remain fixed while the body scrolls. Use the
 raised theme surface, strong boundary and 3px Steel top edge; semantic errors keep their own color.
 
-Header: eyebrow `NEW CAMP`, title “创建新对话”, description “确定这段对话的工作环境与队员”, and an
-accessibly named close button.
+Header: a bounded `+` creation icon, eyebrow `NEW CAMP`, title “创建新对话”, description
+“确定这段对话的工作环境与队员”, and an accessibly named close button.
 
 Workspace, teammate, Lead and optional-configuration controls share one 16px stroke chevron and one
-right-edge inset. Native select styling must not introduce a second platform-specific arrow.
+right-edge inset. Lead uses the established accessible custom radio menu rather than a native select,
+so the trigger and every selected-member option can show a portrait while preserving keyboard focus,
+arrow-key navigation, `Esc` dismissal and focus return.
 
 ## Field order
 
@@ -34,9 +36,12 @@ right-edge inset. Native select styling must not introduce a second platform-spe
 2. **队员与 Lead** — default to the saved valid team configuration, otherwise all active teammates.
    The set is non-empty and Lead remains inside it. Runtime availability is guidance, not a structural
    selector. Unavailable saved members are filtered while initializing the draft without adding a
-   separate “默认配置已失效” warning block.
+   separate “默认配置已失效” warning block. The Lead trigger shows the current portrait, name and
+   availability; menu candidates come only from the currently selected teammates and each shows a
+   portrait. Do not add “Agent 运行时” copy to this selector.
 3. **可选配置 / 对话名称** — collapsed by default. Expansion focuses the input. Normalize and count
-   Unicode scalars up to 80; empty means “未命名对话” and is not delegated to a Runtime/LLM.
+   Unicode scalars up to 80; indent the expanded name editor on a visible child rail and keep the exact
+   placeholder `输入名称...`. Empty means “未命名对话” and is not delegated to a Runtime/LLM.
 
 Footer summary contains only Quick Chat/directory display name, teammate count and Lead, followed by
 “取消 / 创建”. Do not add a duplicate body summary or static warning block.
