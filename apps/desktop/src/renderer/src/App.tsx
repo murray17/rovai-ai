@@ -273,6 +273,19 @@ export function campActivationStateForCreation(
   return source === 'one_click' ? 'pending' : 'active'
 }
 
+export async function selectProjectDirectory(
+  selectWorkspaceDirectory: () => Promise<WorkspaceSelection | null>,
+  restoreProject: (projectPath: string) => Promise<void>,
+  selectProject: (project: CurrentProject, workspace: WorkspaceSelection) => void
+): Promise<'selected' | 'cancelled'> {
+  const workspace = await selectWorkspaceDirectory()
+  if (!workspace) return 'cancelled'
+
+  await restoreProject(workspace.projectPath)
+  selectProject({ kind: 'directory', projectPath: workspace.projectPath }, workspace)
+  return 'selected'
+}
+
 function initialCampInspectorVisibility(): boolean {
   try {
     return campInspectorVisibleFromStoredValue(window.localStorage.getItem(CAMP_INSPECTOR_VISIBILITY_KEY))
@@ -1676,14 +1689,11 @@ export function App(): React.JSX.Element {
   const openProject = async (): Promise<void> => {
     setError(null)
     try {
-      const workspace = await chooseWorkspaceDirectory()
-      if (workspace) {
-        await restoreNavigationProject(workspace.projectPath)
-        const outcome = await requestNewConversation(workspace)
-        if (outcome === 'created') {
-          chooseCurrentProject({ kind: 'directory', projectPath: workspace.projectPath }, workspace)
-        }
-      }
+      await selectProjectDirectory(
+        chooseWorkspaceDirectory,
+        restoreNavigationProject,
+        chooseCurrentProject
+      )
     } catch (nextError) {
       setError(errorMessage(nextError))
     }

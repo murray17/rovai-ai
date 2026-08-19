@@ -44,6 +44,7 @@ import {
   reconcileRunCancellationIds,
   rememberCampSnapshot,
   runtimeRecoveryFromCommandResult,
+  selectProjectDirectory,
   SettingsView,
   StartupRouteLoading,
   shouldLoadRuntimeHealth,
@@ -222,6 +223,38 @@ describe('cold startup route presentation', () => {
     expect(loading).not.toContain('startup-gate')
     expect(waiting).toContain('Core unavailable')
     expect(waiting).toContain('重试')
+  })
+})
+
+describe('Project directory selection', () => {
+  it('selects the Project without entering the new-conversation flow', async () => {
+    const workspace = { name: 'rovai-ai', projectPath: '/repo/rovai-ai' }
+    const effects: unknown[] = []
+
+    const outcome = await selectProjectDirectory(
+      async () => workspace,
+      async (projectPath) => { effects.push(['restore', projectPath]) },
+      (project, workspaceHint) => { effects.push(['select', project, workspaceHint]) }
+    )
+
+    expect(outcome).toBe('selected')
+    expect(effects).toEqual([
+      ['restore', '/repo/rovai-ai'],
+      ['select', { kind: 'directory', projectPath: '/repo/rovai-ai' }, workspace]
+    ])
+  })
+
+  it('leaves the current Project unchanged when the directory picker is cancelled', async () => {
+    const effects: string[] = []
+
+    const outcome = await selectProjectDirectory(
+      async () => null,
+      async () => { effects.push('restore') },
+      () => { effects.push('select') }
+    )
+
+    expect(outcome).toBe('cancelled')
+    expect(effects).toEqual([])
   })
 })
 
