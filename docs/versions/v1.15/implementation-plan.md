@@ -37,6 +37,8 @@ last_updated: 2026-08-19
 
 ## Checkpoint 3：Transport、Renderer 与 Desktop 行为
 
+- [x] 使 Core `camps.enter` 按权威 activation state 分流：meaningful Pending Camp 冷启动恢复跳过 Default Lead
+  reconciliation 并保持 Pending，Active Camp 继续 reconcile-before-read；
 - [x] 将共享 ExecutionDrawer 的 AgentRun “停止”改为单击直接提交，移除确认 Dialog，并保留 Run-local
   提交中、结果不确定、已停止与失败恢复投影；
 - [x] 将 `rovai` CLI 与 compaction hook 统一到同一异步 Local IPC client，Windows 与 Unix 共用 framing、超时、
@@ -70,6 +72,7 @@ last_updated: 2026-08-19
 - [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)
 - [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
 - [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
+- [Camp Open Projection v4](../../contracts/camp-open-projection-v4.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)

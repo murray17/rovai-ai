@@ -14,7 +14,7 @@ viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v3](../../contracts/camp-open-projection-v3.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v4](../../contracts/camp-open-projection-v4.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -38,7 +38,9 @@ Draft、滚动位置、Inspector 选择和地图模式。
 
 冷启动恢复与应用内切换的呈现边界不同。Main Window Session 一旦给出恢复目标，全局 StartupGate 必须
 关闭并显示对应一级页面框架；Camp shell 可暂时显示标题区、局部状态与结构占位，但不得伪装成 meaningful
-content，也不得在 `camps.enter` 成功前提交 active Camp。Members 与 Memory 同样在自己的内容区域读取，
+content，也不得在 `camps.enter` 成功前提交权威 Camp。成功 enter 的 Active Camp 保持 Active；meaningful
+Pending Camp Draft 保持 Pending，并以“草稿”呈现，不能把恢复打开误作激活。Members 与 Memory 同样在
+自己的内容区域读取，
 不能继续占用全屏“正在恢复上次位置”。失败留在局部 surface 重试；仅明确 `camps.exists === false` 的已删除
 Camp 可以回到 Quick Chat。Notification navigation、恢复位置写入和已读确认要等权威 route commit。
 

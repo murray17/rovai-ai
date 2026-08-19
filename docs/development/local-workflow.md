@@ -50,9 +50,12 @@ Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等�
 4. 在命令执行前解析精确、绝对的 `userData` 和隔离 Skill Library；没有两者的独立目录证据时不得
    启动开发、Smoke 或验收 App/Core；Core 的启动参数门和独占锁是最终防线，不替代通道选择；
 5. 真实日常数据默认只读。诊断不授权启动第二个 Core、写 SQLite、取消 Run、Retry 或发送消息；
-6. 不得为了方便直接调用 `electron-vite dev`、直接打开 `dist/.../Rovai-ai.app`，或让
+6. 当前会话宿主保护：默认保持承载当前 AI/Camp 会话的日常 App 运行。一般性的“安装”“升级”或
+   “打包到 Applications”不构成退出、终止或重启该宿主的授权；如果替换必须先退出，停在安装边界，
+   交由用户手动退出，或先取得针对本次退出的明确即时授权；
+7. 不得为了方便直接调用 `electron-vite dev`、直接打开 `dist/.../Rovai-ai.app`，或让
    `rovai-core --data-dir` 指向日常目录；
-7. 测试结束后只清理本次命令创建且路径已经确认的临时目录，不推测或递归删除日常目录。
+8. 测试结束后只清理本次命令创建且路径已经确认的临时目录，不推测或递归删除日常目录。
 
 ## 开发版：只使用 `pnpm dev`
 
@@ -118,7 +121,8 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai-ai.app"` 当作打包验�
 不是 `pnpm build`、`pnpm package:mac`、测试或 AI 收尾步骤。提升前必须：
 
 1. 完成隔离 App 验收；
-2. 彻底退出旧日常 App 和开发/验收实例；
+2. 确认旧日常 App 和开发/验收实例已退出；承载当前会话的日常 App 适用上文第 6 条，未经即时授权时
+   停在安装边界；
 3. 将已确认的 `.app` 安装到仓库外位置；
 4. 从安装位置重新启动，并确认进程命令行不再指向仓库 `dist/`；
 5. 保留原日常 `userData`，不把开发 fixture 覆盖过去。

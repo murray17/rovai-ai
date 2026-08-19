@@ -3,12 +3,12 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v3](../contracts/camp-open-projection-v3.md)与
+字段与窗口见 [Camp Open Projection v4](../contracts/camp-open-projection-v4.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -18,10 +18,10 @@ last_updated: 2026-08-18
 | Component | Responsibility |
 | --- | --- |
 | Main Window Session | 只冻结并返回本地恢复目标与设置位置；不等待 Core，也不保证目标领域数据已经加载 |
-| Renderer startup controller | 快照返回后立即显示候选目标的一级页面框架；候选 Camp 与 committed active Camp 分离，只有 enter 成功才提交权威 Camp 内容 |
+| Renderer startup controller | 快照返回后立即显示候选目标的一级页面框架；候选 Camp 与 committed Camp 分离，只有 enter 成功才提交权威 Camp 内容 |
 | Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
-| Core Camp enter module | 在一次串行 request 中顺序执行 Default Lead reconcile 与 post-reconcile read；rejected 时 fail closed |
+| Core Camp enter module | 在一次串行 request 中先读 activation state；Pending 直接读取投影，Active 顺序执行 Default Lead reconcile 与 post-reconcile read；缺失或 rejected 时 fail closed |
 | Core Camp open read model | 在单一 SQLite transaction 中组装有界首屏投影、coverage 与 high-water；不加载 Context Manifest/Action history |
 | Camp message history read | 以 stable sequence cursor 读取 earlier page；不回放 event 构造第二真源 |
 | Camp conversation find read | 扫描当前 Camp 公开 user/agent 正文投影，返回 exact total 与一个选中命中；不改变 Agent-facing discovery search，也不返回完整结果集 |
@@ -34,7 +34,9 @@ last_updated: 2026-08-18
 app click / notification target
   -> Renderer camps.enter(traceId, commandId, campId)
   -> cache miss keeps the current surface; no target route is committed yet
-  -> Core serialized reconcile
+  -> Core reads authoritative activation state
+       -> Pending: skip reconciliation
+       -> Active: serialized Default Lead reconciliation
   -> Core bounded read transaction + throughGlobalSequence
   -> Main parses typed response
   -> Renderer atomically commits target Camp ID + project + recent Camp surface
@@ -45,8 +47,8 @@ cold startup
   -> Main Window Session returns a frozen local target
   -> Renderer paints the target route shell and removes the global StartupGate
   -> Renderer queues camps.enter ahead of Overview/preferences/runtime health
-  -> Core reconcile + bounded projection
-  -> Renderer commits active Camp + meaningful content
+  -> Core activation-aware enter + bounded projection
+  -> Renderer commits Active Camp or meaningful Pending Camp Draft + meaningful content
   -> background navigation / campViewed / project restore
 
 Core event invalidates active Camp
@@ -83,13 +85,15 @@ user/agent 正文节点；exact total、顺序和目标由 Core 响应拥有。�
 旧 find/around 响应必须丢弃。关闭查找恢复打开前阅读位置与焦点，不修改 Draft、Inspector、Approval、
 执行台或领域已读状态。
 
-冷启动 route shell 只证明恢复目标已确定，不证明 Camp 存在或 Default Lead 已 reconcile。它不得设置
+冷启动 route shell 只证明恢复目标已确定，不证明 Camp 存在；Active Camp 也不保证 Default Lead 已 reconcile。
+它不得设置
 `activeCampId`、触发 `campViewed`、提交下次恢复位置或启用 Notification navigation。Camp、Members 与
 Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Main Window Session 本地快照读取失败。
 
 ## Failure boundaries
 
-- enter reconcile/read 失败：保留原 surface 并显示非阻塞错误，不展示未 reconcile 的新 Camp；
+- Active enter reconcile/read 或 Pending enter read 失败：保留原 surface 并显示非阻塞错误，不展示未取得
+  权威投影的新 Camp；
 - 冷启动 enter 失败：调用一次 `camps.exists`；只有明确为 false 才回到 Quick Chat，true 或存在性检查失败
   都保留候选 shell 并允许重试，不分页扫描 Navigation groups；
 - 首屏后项目导航恢复失败：已打开 Camp 保持可用，在导航 surface 报错，不回退快速对话；
@@ -101,5 +105,5 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v3](../contracts/camp-open-projection-v3.md)
+- [Camp Open Projection v4](../contracts/camp-open-projection-v4.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)

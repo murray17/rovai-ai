@@ -17,7 +17,7 @@ last_updated: 2026-08-19
 
 ## Camp 与 Workspace
 
-- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v3](../contracts/camp-open-projection-v3.md)、[First-run](../architecture/first-run-onboarding.md)及相应[当前合同](../contracts/README.md)。
+- 当前规范：[Camp/Composer 基础不变量](../architecture/foundational-invariants.md#camp-lifecycle)、[Camp Identity](../architecture/camp-identity.md)、[Camp Identity v1](../contracts/camp-identity-v1.md)、[Camp Activation](../architecture/camp-activation-lifecycle.md)、[Composer Draft](../architecture/camp-composer-draft.md)、[Camp Open](../architecture/camp-open-read-path.md)、[Camp Open Projection v4](../contracts/camp-open-projection-v4.md)、[First-run](../architecture/first-run-onboarding.md)及相应[当前合同](../contracts/README.md)。
 - 理由来源：[v0.22](../versions/v0.22/decisions.md)、[v0.23](../versions/v0.23/decisions.md)、[v0.25](../versions/v0.25/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.77](../versions/v0.77/decisions.md)、[v0.80](../versions/v0.80/decisions.md)、[v0.97](../versions/v0.97/decisions.md)、[v1.00](../versions/v1.00/decisions.md)、[v1.10](../versions/v1.10/decisions.md)。
 
 ## Member identity
