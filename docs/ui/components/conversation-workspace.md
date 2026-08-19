@@ -211,7 +211,9 @@ Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` �
 
 Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Shell 活动只有通用标题、同时公开 Evidence
 含命令文本时，Renderer 可以只提炼可审阅的可执行文件名与有界子命令，例如 `rovai camp read` 或
-`pnpm test`；参数、正文、路径和环境值不得进入标题，无法安全提炼时继续使用中性回退。该提炼只改变展示，
+`pnpm test`。紧随已展示命令或子命令的精确 `--help` 可以原样保留，使帮助查询区别于实际执行；
+不得扫描后续 token 猜测帮助语义。其他参数、正文、路径和环境值不得进入标题，无法安全提炼时继续使用
+中性回退。该提炼只改变展示，
 不得参与 Activity 分类、identity 或 lifecycle 合并。Tool 行尾只使用 7px 实心状态点：运行蓝色、等待审批
 橙色、成功绿色、失败或停止红色，仅记录为中性色。普通 Tool 行不再重复显示“已完成”文字；状态仍须通过
 `aria-label` 与 `title` 可读取，不能只靠颜色向辅助技术传达。

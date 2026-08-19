@@ -71,7 +71,8 @@ command output 与生命周期投影，不把一次 pass 扩大为所有模型�
 `item.id` 是 lifecycle identity。`item.title` 与上述结构化 presentation 字段只进入 Core
 `presentationHint`；原始 command string 不参与 Canonical 标题生成、分类或 identity。Renderer 仅在
 Canonical 标题仍是通用 Shell 文案时，可以从已经公开的 `item.command` 提炼可执行文件 basename 与最多
-两个安全子命令；Shell 参数、正文、路径、环境值和其他 token 不进入标题。这个 fallback 同时消费 live 与
+两个安全子命令；只有紧随已展示命令或子命令的精确 `--help` 可以原样追加，不得扫描后续 token
+猜测帮助语义。其他 Shell 参数、正文、路径、环境值和 token 不进入标题。这个 fallback 同时消费 live 与
 恢复后的同一 Evidence shape，不创造新事实。Codex `0.147.0` 的本地 app-server schema 与实际 AgentRun
 均证明 `commandExecution.title` 可以为空，而 `commandActions` 是协议必填字段；修复 fixture 使用该真实
 wire shape，Core post-fix live smoke 仍需单独运行。

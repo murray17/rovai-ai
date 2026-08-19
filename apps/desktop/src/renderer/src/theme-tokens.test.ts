@@ -305,6 +305,16 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.composer-send\s*\{[^}]*min-height:\s*28px/)
   })
 
+  it('keeps long Composer input internally scrollable without covering its actions', () => {
+    expect(css).toMatch(/\.composer-box\s*\{[^}]*grid-template-rows:\s*minmax\(0,\s*auto\) auto/)
+    expect(css).toMatch(/\.composer-input\s*\{[^}]*min-height:\s*0/)
+    expect(css).toMatch(/\.structured-mention-composer\s*\{[^}]*min-height:\s*0/)
+    expect(css).toMatch(
+      /\.structured-mention-editor\s*\{[^}]*max-height:\s*min\(180px,\s*26vh\)[^}]*overflow-y:\s*auto[^}]*overscroll-behavior:\s*contain/
+    )
+    expect(css).toMatch(/\.composer-action-row\s*\{[^}]*z-index:\s*1[^}]*justify-content:\s*space-between[^}]*background:\s*var\(--input\)/)
+  })
+
   it('uses a focused Task and Team Inspector without legacy Context or Approval cards', () => {
     expect(css).toMatch(/\.task-action-row\s*\{[^}]*position:\s*sticky[^}]*min-height:\s*42px/)
     expect(css).toMatch(/\.task-action-button\s*\{[^}]*width:\s*100%[^}]*background:\s*transparent/)

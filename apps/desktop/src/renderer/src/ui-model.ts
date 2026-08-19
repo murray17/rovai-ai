@@ -824,24 +824,34 @@ function shellSegmentLabel(tokens: string[], depth: number): string | null {
 
   const labelParts = [executable]
   const following = tokens.slice(cursor + 1)
+  let displayedArgumentCount = 0
   if (executable === 'rovai') {
     const command = following[0]
     const safeCommand = command && !command.startsWith('-') ? shellLabelPart(command) : null
     if (safeCommand) {
       labelParts.push(safeCommand)
+      displayedArgumentCount = 1
       if (safeCommand === 'camp') {
         const action = following[1]
         const safeAction = action && !action.startsWith('-') ? shellLabelPart(action) : null
-        if (safeAction && ROVAI_CAMP_ACTIONS.has(safeAction)) labelParts.push(safeAction)
+        if (safeAction && ROVAI_CAMP_ACTIONS.has(safeAction)) {
+          labelParts.push(safeAction)
+          displayedArgumentCount = 2
+        }
       }
     }
   } else if (COMMANDS_WITH_SUBCOMMAND.has(executable)) {
     const part = following[0]
     if (part && !part.startsWith('-')) {
       const safePart = shellLabelPart(part)
-      if (safePart) labelParts.push(safePart)
+      if (safePart) {
+        labelParts.push(safePart)
+        displayedArgumentCount = 1
+      }
     }
   }
+  const helpFlag = following[displayedArgumentCount]
+  if (helpFlag === '--help') labelParts.push(helpFlag)
   return truncateCommandLabel(labelParts.join(' '))
 }
 

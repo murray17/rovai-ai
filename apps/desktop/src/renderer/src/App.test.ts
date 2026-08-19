@@ -3671,7 +3671,7 @@ describe('task event projections', () => {
             command: "/bin/zsh -lc 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'"
           }
         },
-        expected: 'rovai camp read'
+        expected: 'rovai camp read --help'
       },
       { adapter: 'opencode-cli', canonical: { ...genericShell, presentationHint: 'Run fixed printf' }, payload: {}, expected: 'Run fixed printf' },
       { adapter: 'copilot-cli', canonical: { ...genericShell, presentationHint: 'Inspect attachment file' }, payload: {}, expected: 'Inspect attachment file' },
@@ -3705,6 +3705,18 @@ describe('task event projections', () => {
       item: {
         command: `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
       }
+    })).toBe('rovai send')
+    expect(executionActivityTitle(genericShell, {
+      item: { command: `/bin/zsh -lc 'rovai --help'` }
+    })).toBe('rovai --help')
+    expect(executionActivityTitle(genericShell, {
+      item: { command: `/bin/zsh -lc 'rovai send --help'` }
+    })).toBe('rovai send --help')
+    expect(executionActivityTitle(genericShell, {
+      item: { command: `rg --help /private/project/path` }
+    })).toBe('rg --help')
+    expect(executionActivityTitle(genericShell, {
+      item: { command: `rovai send --body '--help'` }
     })).toBe('rovai send')
     expect(executionActivityTitle(genericShell, {
       item: { command: `rovai send 'TOP_SECRET_POSITIONAL_BODY'` }
