@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   campTimelineContentChanged,
+  campTimelineFollowingLatestAfterScroll,
   campTimelineIsNearBottom,
   campTimelineReadingPositionFromStoredValue,
   followLatestCampTimeline,
@@ -113,5 +114,26 @@ describe('Camp timeline reading positions', () => {
       followingLatest: true
     })
     expect(scroll.scrollTop).toBe(820)
+  })
+
+  it('keeps follow-latest through a viewport resize before the observer restores the bottom', () => {
+    expect(campTimelineFollowingLatestAfterScroll(
+      { scrollTop: 700, followingLatest: true },
+      { scrollTop: 700, scrollHeight: 1_000, clientHeight: 300 },
+      { scrollTop: 700, scrollHeight: 1_000, clientHeight: 180 }
+    )).toBe(true)
+  })
+
+  it('stops following after user scrolls within unchanged timeline geometry', () => {
+    expect(campTimelineFollowingLatestAfterScroll(
+      { scrollTop: 700, followingLatest: true },
+      { scrollTop: 700, scrollHeight: 1_000, clientHeight: 300 },
+      { scrollTop: 500, scrollHeight: 1_000, clientHeight: 300 }
+    )).toBe(false)
+    expect(campTimelineFollowingLatestAfterScroll(
+      { scrollTop: 500, followingLatest: false },
+      { scrollTop: 500, scrollHeight: 1_000, clientHeight: 300 },
+      { scrollTop: 500, scrollHeight: 1_000, clientHeight: 180 }
+    )).toBe(false)
   })
 })
