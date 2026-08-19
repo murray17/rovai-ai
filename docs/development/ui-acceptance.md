@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -184,7 +184,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v12](../contracts/run-process-detail-surface-v12.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v13](../contracts/run-process-detail-surface-v13.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -211,9 +211,11 @@ pnpm accept:runtime-activity-ui
   切换 Agent/Camp 后保持；调整不得改变所选 Agent/stage，sticky-bottom 仍跟随，手动上滚仍暂停；
   最大高度在 1040×700 与 200% zoom 下不覆盖消息历史、Agent 执行台、Approval Dock 或 Composer；
 - 默认底部 placement 下 Inspector 仅有“任务 / 队员”；点击“移到右侧”后底部 Run Pulse/Drawer
-  消失，Inspector 自动显示并增加、激活唯一“执行”第三 Tab。右侧入口为全宽纵向列表、最多约四行且
-  超出内部滚动；详情不显示 resize separator。点击“移回底部”恢复横向 Run Pulse、底部 Drawer、
-  原基础 Tab、selected Agent/focused Run 和底部高度偏好；任一时刻不存在第二条过程时间线或重复入口；
+  消失，Inspector 自动显示并增加、激活唯一“执行”第三 Tab。两处入口都只显示头像、最多两行名称和
+  带形状的状态标记，不显示状态文字；右侧入口为全宽纵向列表、最多约四行且超出内部滚动，详情不显示
+  resize separator。点击“移回底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
+  focused Run 和底部高度偏好；移动前后必须是同一个 Drawer 与结果 DOM，并按比例保留 Drawer/结果
+  阅读位置、disclosure 和加载状态；任一时刻不存在第二条过程时间线或重复入口；
 - Context Delivery/Approval/Activity/Audit Tab、旧 route/state 不得返回；“队员”读取真实
   CampMember/AgentProfile，并用既有 Core 命令切换一个符合 presence/leave 约束的 Default Lead；
   Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程，顶栏不存在执行入口；
@@ -229,15 +231,20 @@ pnpm accept:runtime-activity-ui
   76ch，代码、表格、Task 和审批等现有结构化内容才可进入既有工件通道，身份色只进入头像、名称或身份点；
 - Canonical Activity 未报告工具时仍不补造 Tool 行；同一 Runtime 真实报告的 Tool 名称和 source 继续
   与 Runtime evidence 一致；Claude Bash fixture 必须覆盖 terminal output 为 `null` 的情况，并证明仅凭
-  公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。
+  公开的 `tool_use.input.command` 仍渲染为可展开 disclosure，而不是不可操作的静态 Tool 行。所有 Tool 行
+  必须保持 `16px 类型图标 / 可缩略名称 / 16px 状态轨 / 20px disclosure 轨` 四列；不可展开行保留末轨
+  占位，Shell、File、Git、Network、Permission、Runtime、Plan、Tool 和 Unknown 使用统一 16px 单色
+  线性 SVG，状态只由右侧带辅助名称的小点表达；
 - 同一 Run 至少 15 个 Canonical Tool operation 时，较早项、中间项和最后项全部按首次出现顺序保留；
   Built-in `camp.read/search` fixture 的顶层 `input/output` 为空、公共结果只在 `coreEnvelope.result` 时，
-  两条 Tool 行仍可展开，详情与复制文本不含 Envelope、request/receipt 或 canonical input。
-- 超过 Renderer 预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出只在原 Evidence `pre`
-  中保留开头 10 行和明确截断提示；DOM 不包含中段或末尾。右上角只有一个 25px、无边框、具名的
-  复制图标；真实点击必须按需读取完整 Evidence、只复制公开输出字段，并证明 8,000 行以上的中段与
-  末尾都进入剪贴板而 Evidence 外层 JSON 不进入。读取成功后图标与可访问名称反馈“已复制完整输出”；
-  DOM 不存在 standalone“查看完整工具调用”、`.complete-evidence-control` 或 raw Payload 展开面。
+  两条 Tool 行仍可展开，完整结果不含 Envelope、request/receipt 或 canonical input。
+- 超过 Renderer 原预览上限且由 Managed Blob 保存完整 Payload 的 Tool 输出在 disclosure 打开前不读取、
+  不把全文挂入 DOM；打开精确 Tool 行后按需读取并在固定最大高度的可聚焦结果 region 内完整渲染，
+  首、中、末 8,000 行以上标记都存在，不显示截断提示或复制按钮。溢出使用内部滚动条，Arrow、
+  Page Up/Down、Space、Home/End 可滚动，Escape 返回对应 summary 且不关闭 Drawer；读取失败保留精确
+  错误与重试，成功后焦点进入结果。`1040×700` 与 200% zoom 下结果、执行台、Approval Dock 和 Composer
+  无横向溢出或相互遮挡；DOM 不存在 standalone“查看完整工具调用”、`.complete-evidence-control` 或
+  raw Payload 展开面。
 
 ### Task Inspector 门禁
 

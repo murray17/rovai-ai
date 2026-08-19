@@ -43,6 +43,9 @@ last_updated: 2026-08-19
   提交中、结果不确定、已停止与失败恢复投影；
 - [x] Camp open 完整返回所有 non-terminal Execution Evidence，Renderer 取消 live event 600 项滚动裁剪，
   运行中正文与 Tool chronology 从首条 Evidence 起完整保留；
+- [x] ExecutionDrawer 在底部与 Inspector 间移动同一 DOM 并保留阅读位置；Tool 行收口为
+  四轨布局与九类 16px SVG，队员入口不显示状态文案，用户展开后按需读取完整 Tool
+  公开结果，并在有最大高度的键盘可滚动 region 中全量渲染；
 - [x] 将 `rovai` CLI 与 compaction hook 统一到同一异步 Local IPC client，Windows 与 Unix 共用 framing、超时、
   重试和 outcome-indeterminate 分类，并保留 v1.14 发布的 `camp.read` Timeline 默认；
 - [x] Named Pipe 每个实例使用 session logon SID + SYSTEM protected DACL，并在创建后回读 DACL；覆盖
@@ -76,6 +79,7 @@ last_updated: 2026-08-19
 - [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
+- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)

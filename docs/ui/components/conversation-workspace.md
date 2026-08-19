@@ -186,9 +186,12 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 切换前最后使用的“任务 / 队员”基础 Tab；新 Camp workspace 和应用重开仍从底部开始。
 
 两个位置共享当前 Agent 与精确 Run selection、Evidence load 和状态投影，不允许同时存在两套过程列表
-或详情。底部入口保持横向；右侧入口改为全宽纵向行，按 CampMember 顺序显示头像、名称和非颜色状态，
-最多约四行，更多队员在列表内部滚动。右侧详情占据剩余高度并独立滚动，不显示高度把手；底部详情继续
-保留鼠标、键盘调高与 Main Window Session 内高度偏好。
+或详情。位置切换通过稳定 host 移动同一个已挂载 Drawer DOM，保留 disclosure、加载状态、
+Drawer/结果阅读位置与 DOM identity，不得条件卸载后重建。底部入口保持横向；右侧入口改为
+全宽纵向行。两处每个入口都只显示头像、最多两行队员名称和带形状的状态标记，不显示
+“当前正在执行”等状态文案；完整状态仍通过状态标记、`aria-label`、`title` 和 Run 详情表达。
+右侧最多约显示四个队员行，更多队员在列表内部滚动。右侧详情占据剩余高度并独立滚动，不显示高度把手；
+底部详情继续保留鼠标、键盘调高与 Main Window Session 内高度偏好。
 
 打开过程入口时，先定位最新 running，其次最新 non-terminal，最后最新 terminal Run。用户显式
 发送成功且未在查看 non-terminal Run 时，按 Core 有序回执打开首个 Run 的精确 stage，但不夺走
@@ -215,15 +218,19 @@ Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。She
 `pnpm test`。紧随已展示命令或子命令的精确 `--help` 可以原样保留，使帮助查询区别于实际执行；
 不得扫描后续 token 猜测帮助语义。其他参数、正文、路径和环境值不得进入标题，无法安全提炼时继续使用
 中性回退。该提炼只改变展示，
-不得参与 Activity 分类、identity 或 lifecycle 合并。Tool 行尾只使用 7px 实心状态点：运行蓝色、等待审批
-橙色、成功绿色、失败或停止红色，仅记录为中性色。普通 Tool 行不再重复显示“已完成”文字；状态仍须通过
-`aria-label` 与 `title` 可读取，不能只靠颜色向辅助技术传达。
+不得参与 Activity 分类、identity 或 lifecycle 合并。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
+16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。类型图标是 Shell、File、Git、
+Network、Permission、Runtime、Plan、Tool 和 Unknown 九类统一 16px 单色线性 SVG，不代表状态。
+Tool 行尾状态仍只使用 7px 小点：运行蓝色、等待审批橙色、成功绿色、失败或停止红色，仅记录为中性色。
+普通 Tool 行不再重复显示“已完成”文字；状态仍须通过 `aria-label` 与 `title` 可读取。
 
-超长 Tool 输出只在原 disclosure 渲染有界开头预览；完整内容由该次展开结果内轻量、Icon-only 且有
-可访问名称的复制控件按需从 Core 读取，不能为了复制先把全文挂载进 Drawer。执行台不显示独立“查看完整
-工具调用”、standalone raw Evidence 或 Envelope JSON。复制失败保留预览并原位说明，证据使用 evidence
-token 与等宽结构。精确合同见
-[Run Process Detail Surface v12](../../contracts/run-process-detail-surface-v12.md)。
+Tool disclosure 展开后在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
+直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
+“重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
+`role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
+对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
+“查看完整工具调用”。精确合同见
+[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
@@ -233,7 +240,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v12](../../contracts/run-process-detail-surface-v12.md)。
+[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -261,7 +268,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v12](../../contracts/run-process-detail-surface-v12.md)。
+[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)。
 
 ## Camp Composer
 

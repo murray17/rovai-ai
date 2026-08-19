@@ -62,8 +62,8 @@ last_updated: 2026-08-19
 
 ## Product 与 Renderer
 
-- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-navigation)、[UI 规范](../ui/README.md)、[Run Process Detail Surface v12](../contracts/run-process-detail-surface-v12.md)。
-- 理由来源：[v0.11](../versions/v0.11/decisions.md)、[v0.24](../versions/v0.24/decisions.md)、[v0.55](../versions/v0.55/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.84](../versions/v0.84/decisions.md)、[v1.12](../versions/v1.12/decisions.md)、[v1.13](../versions/v1.13/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)。
+- 当前规范：[产品/Renderer 基础不变量](../architecture/foundational-invariants.md#product-navigation)、[UI 规范](../ui/README.md)、[Run Process Detail Surface v13](../contracts/run-process-detail-surface-v13.md)。
+- 理由来源：[v0.11](../versions/v0.11/decisions.md)、[v0.24](../versions/v0.24/decisions.md)、[v0.55](../versions/v0.55/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.84](../versions/v0.84/decisions.md)、[v1.12](../versions/v1.12/decisions.md)、[v1.13](../versions/v1.13/decisions.md)、[V1.15-D01](../versions/v1.15/decisions.md#v1-15-d01)、[V1.15-D02](../versions/v1.15/decisions.md#v1-15-d02)。
 
 ## 文档治理
 

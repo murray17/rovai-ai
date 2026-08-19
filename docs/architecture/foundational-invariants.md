@@ -395,4 +395,5 @@ last_updated: 2026-08-19
 - Conversation Header 的 Inspector 显隐是 Renderer 本地偏好，不产生领域命令。Stop 是时间线中的 CampTurn 终态投影；Copy 属于具体消息内容，Shared top bar 不取代页面自己的标题和动作。
 - 执行过程以 Agent 为稳定聚合单位：同一 Camp 中一个 Agent 的 Run chronology 形成一个过程入口，状态必须由证据和 Run authority 归约，不能按最后一条文本或动画猜测。
 - 普通 Camp Inspector 只有聚焦上下文和已定义的执行/详情入口；Approval 使用唯一 surface，不能在多个面板复制可操作控件或产生竞争决策。
-- Agent execution console 在一个已挂载 Camp workspace 内只有一个 Renderer-owned placement，默认底部，可由用户移入 Inspector；移动不复制 console、不改变 Run 状态，也不持久化为跨 workspace 领域偏好。
+- Agent execution console 在一个已挂载 Camp workspace 内只有一个 Renderer-owned placement，默认底部，可由用户移入 Inspector；移动必须复用同一已挂载 DOM，保留 selection、disclosure、局部加载和嵌套阅读位置，不复制 console、不改变 Run 状态，也不持久化为跨 workspace 领域偏好。
+- Tool 全文不属于 Camp open 默认 DOM；截断 Evidence/Managed Blob 只在用户展开精确 Canonical Tool 行后读取，并只提取公开结果字段。读取成功后允许完整结果在当前 Drawer 会话内挂载于有最大高度的内部滚动 region，但不得暴露 Envelope 或建立 standalone raw Evidence surface。

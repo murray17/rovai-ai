@@ -135,7 +135,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v12（当前）](run-process-detail-surface-v12.md) | v11 执行过程与模型合同不变；AgentRun “停止”单击直接提交，移除确认 Dialog 并保留权威请求状态与恢复 |
+| [Run Process Detail Surface v13（当前）](run-process-detail-surface-v13.md) | v12 执行过程与直接停止不变；稳定 DOM 移动、四轨 Tool 行、九类 SVG、精简队员入口与展开后完整结果内部滚动 |
+| [Run Process Detail Surface v12（历史）](run-process-detail-surface-v12.md) | v11 执行过程与模型合同不变；AgentRun “停止”单击直接提交，移除确认 Dialog 并保留权威请求状态与恢复 |
 | [Run Process Detail Surface v11（历史）](run-process-detail-surface-v11.md) | v10 执行过程合同不变；十 Runtime 的 default-only 首个实际模型观测、write-once 投影与 Run meta 原位展示 |
 | [Run Process Detail Surface v10（历史）](run-process-detail-surface-v10.md) | v9 执行过程合同不变；共享 Drawer 的 User-only AgentRun 局部停止、立即写 fence、权威请求状态与 required/optional 后果；不含实际模型观测 |
 | [Run Process Detail Surface v9（历史）](run-process-detail-surface-v9.md) | v8 执行过程合同不变；按 origin 显示 Claude Code/Antigravity 安全 failure，覆盖无 Evidence Run 与 Runtime 设置页；不含 Run-local Stop |

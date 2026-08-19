@@ -37,7 +37,7 @@ import {
   agentRunPresentation,
   agentRunWaitDetail,
   buildLiveExecutionProgress,
-  executionEvidenceCopyText,
+  executionEvidenceResultText,
   formatByteSize,
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
@@ -46,7 +46,6 @@ import {
   messageClockTime,
   relativeTimeLabel,
   selectCompleteExecutionEvidence,
-  toolDetailPreview,
   timelineDayLabel
 } from './ui-model'
 import { MemberAvatar } from './MemberAvatar'
@@ -106,6 +105,53 @@ type AttachmentDragKind = 'files' | 'directory'
 type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
 type ReplyFocusModality = 'pointer' | 'keyboard'
 type ConversationFindStatus = 'idle' | 'searching' | 'loading_target' | 'ready' | 'error'
+
+interface ExecutionConsoleReadingPosition {
+  outerRatio: number
+  results: Map<string, number>
+}
+
+function scrollPositionRatio(element: HTMLElement): number | null {
+  const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+  return maximum > 0 ? element.scrollTop / maximum : null
+}
+
+function captureExecutionConsoleReadingPosition(
+  drawer: HTMLElement | null,
+  fallback: ExecutionConsoleReadingPosition | null = null
+): ExecutionConsoleReadingPosition | null {
+  const body = drawer?.querySelector<HTMLElement>('.execution-drawer-body') ?? null
+  if (!drawer || !body) return null
+  const results = new Map<string, number>()
+  for (const result of drawer.querySelectorAll<HTMLElement>('[data-tool-result-key]')) {
+    const key = result.dataset.toolResultKey
+    if (!key) continue
+    results.set(key, scrollPositionRatio(result) ?? fallback?.results.get(key) ?? 0)
+  }
+  return {
+    outerRatio: scrollPositionRatio(body) ?? fallback?.outerRatio ?? 0,
+    results
+  }
+}
+
+function restoreExecutionConsoleReadingPosition(
+  drawer: HTMLElement | null,
+  position: ExecutionConsoleReadingPosition
+): void {
+  const body = drawer?.querySelector<HTMLElement>('.execution-drawer-body') ?? null
+  if (!drawer || !body) return
+  body.scrollTop = Math.round(
+    Math.max(0, body.scrollHeight - body.clientHeight) * position.outerRatio
+  )
+  for (const result of drawer.querySelectorAll<HTMLElement>('[data-tool-result-key]')) {
+    const key = result.dataset.toolResultKey
+    const ratio = key ? position.results.get(key) : undefined
+    if (ratio === undefined) continue
+    result.scrollTop = Math.round(
+      Math.max(0, result.scrollHeight - result.clientHeight) * ratio
+    )
+  }
+}
 
 export function canStopAgentRun(
   run: Pick<AgentRunView, 'status' | 'waitReason' | 'cancelRequestedAt'>,
@@ -1129,8 +1175,20 @@ export function CampWorkspace({
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
   const executionDrawerTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const executionDrawerReturnAgentIdRef = useRef<string | null>(null)
   const bottomPlacementButtonRef = useRef<HTMLButtonElement>(null)
   const inspectorPlacementButtonRef = useRef<HTMLButtonElement>(null)
+  const bottomExecutionDrawerHostRef = useRef<HTMLDivElement>(null)
+  const inspectorExecutionDrawerHostRef = useRef<HTMLDivElement>(null)
+  const executionReadingPosition = useRef<ExecutionConsoleReadingPosition | null>(null)
+  const pendingExecutionReadingPosition = useRef<ExecutionConsoleReadingPosition | null>(null)
+  const executionReadingRestoreFrames = useRef<[number, number] | null>(null)
+  const [executionDrawerPortal] = useState<HTMLDivElement | null>(() => {
+    if (typeof document === 'undefined') return null
+    const portal = document.createElement('div')
+    portal.className = 'execution-drawer-portal'
+    return portal
+  })
   const inspectorTab = controlledInspectorTab ?? localInspectorTab
   const inspectorSurfaceTab: CampInspectorSurfaceTab = executionPlacement === 'inspector'
     && executionInspectorActive
@@ -1149,6 +1207,44 @@ export function CampWorkspace({
       // A denied storage surface must not block the Camp reading plane.
     }
   }, [conversationView])
+  useLayoutEffect(() => {
+    if (!executionDrawerPortal) return
+    const host = executionPlacement === 'inspector'
+      ? inspectorExecutionDrawerHostRef.current
+      : bottomExecutionDrawerHostRef.current
+    if (!host) return
+    if (executionDrawerPortal.parentElement !== host) host.appendChild(executionDrawerPortal)
+
+    const readingPosition = pendingExecutionReadingPosition.current
+    if (!readingPosition) return
+    pendingExecutionReadingPosition.current = null
+    if (executionReadingRestoreFrames.current) {
+      window.cancelAnimationFrame(executionReadingRestoreFrames.current[0])
+      window.cancelAnimationFrame(executionReadingRestoreFrames.current[1])
+    }
+    const firstFrame = window.requestAnimationFrame(() => {
+      const secondFrame = window.requestAnimationFrame(() => {
+        executionReadingRestoreFrames.current = null
+        restoreExecutionConsoleReadingPosition(
+          executionDrawerPortal.querySelector<HTMLElement>('.execution-drawer'),
+          readingPosition
+        )
+      })
+      executionReadingRestoreFrames.current = [firstFrame, secondFrame]
+    })
+    executionReadingRestoreFrames.current = [firstFrame, firstFrame]
+  }, [executionDrawerPortal, executionPlacement, inspectorVisible])
+  useEffect(() => () => {
+    if (executionReadingRestoreFrames.current) {
+      window.cancelAnimationFrame(executionReadingRestoreFrames.current[0])
+      window.cancelAnimationFrame(executionReadingRestoreFrames.current[1])
+    }
+    executionDrawerPortal?.remove()
+  }, [executionDrawerPortal])
+  useEffect(() => {
+    executionReadingPosition.current = null
+    pendingExecutionReadingPosition.current = null
+  }, [executionDrawerAgentId, snapshot.camp.id])
   useEffect(() => {
     if (!showingFirstRunWelcome
       || firstRunConversationShownForCamp.current === snapshot.camp.id) return
@@ -1256,13 +1352,25 @@ export function CampWorkspace({
     setExecutionPlacement('bottom')
     setExecutionInspectorActive(false)
     executionDrawerTriggerRef.current = null
+    executionDrawerReturnAgentIdRef.current = null
   }, [snapshot.camp.id])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
+    const returnAgentId = executionDrawerReturnAgentIdRef.current
     executionDrawerTriggerRef.current = null
+    executionDrawerReturnAgentIdRef.current = null
     if (trigger?.isConnected) {
       trigger.focus({ preventScroll: true })
+      return
+    }
+    const currentAgentTrigger = returnAgentId
+      ? document.querySelector<HTMLButtonElement>(
+        `.run-pulse-${executionPlacement} .run-pulse-chip[data-agent-id="${CSS.escape(returnAgentId)}"]`
+      )
+      : null
+    if (currentAgentTrigger) {
+      currentAgentTrigger.focus({ preventScroll: true })
       return
     }
     const fallback = executionPlacement === 'inspector'
@@ -2876,6 +2984,12 @@ export function CampWorkspace({
   }
 
   const moveExecutionToInspector = (): void => {
+    const readingPosition = captureExecutionConsoleReadingPosition(
+      executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
+      executionReadingPosition.current
+    )
+    executionReadingPosition.current = readingPosition
+    pendingExecutionReadingPosition.current = readingPosition
     setExecutionPlacement('inspector')
     setExecutionInspectorActive(true)
     onOpenInspector?.(inspectorTab)
@@ -2883,6 +2997,12 @@ export function CampWorkspace({
   }
 
   const moveExecutionToBottom = (): void => {
+    const readingPosition = captureExecutionConsoleReadingPosition(
+      executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
+      executionReadingPosition.current
+    )
+    executionReadingPosition.current = readingPosition
+    pendingExecutionReadingPosition.current = readingPosition
     setExecutionPlacement('bottom')
     setExecutionInspectorActive(false)
     focusPlacementButton('bottom')
@@ -2923,8 +3043,13 @@ export function CampWorkspace({
       ? process.runs.find((run) => run.id === options.runId) ?? null
       : null
     const focusedRunId = requestedRun?.id ?? preferredAgentProcessRun(process.runs)?.id ?? null
-    if (trigger) executionDrawerTriggerRef.current = trigger
-    else if (options.moveDomFocus === false) executionDrawerTriggerRef.current = null
+    if (trigger) {
+      executionDrawerTriggerRef.current = trigger
+      executionDrawerReturnAgentIdRef.current = agentId
+    } else if (options.moveDomFocus === false) {
+      executionDrawerTriggerRef.current = null
+      executionDrawerReturnAgentIdRef.current = null
+    }
     setExecutionDrawerAgentId(agentId)
     setExecutionDrawerFocusedRunId(focusedRunId)
     setExecutionDrawerFocusRequest((request) => ({
@@ -3479,7 +3604,12 @@ export function CampWorkspace({
               onMovePlacement={moveExecutionToInspector}
             />
           )}
-          {executionPlacement === 'bottom' && executionDrawer}
+          <div
+            ref={bottomExecutionDrawerHostRef}
+            className="execution-drawer-host execution-drawer-host-bottom"
+          >
+            {!executionDrawerPortal && executionPlacement === 'bottom' && executionDrawer}
+          </div>
         </section>
 
         {inspectorVisible && <aside
@@ -3535,8 +3665,8 @@ export function CampWorkspace({
                 onChangeLead={onChangeLead}
               />
             </Tabs.Content>
-            {executionPlacement === 'inspector' && (
-              <Tabs.Content value="execution" className="execution-sidecar-panel">
+            <Tabs.Content value="execution" forceMount className="execution-sidecar-panel">
+              {executionPlacement === 'inspector' && (
                 <RunPulse
                   placement="inspector"
                   placementButtonRef={inspectorPlacementButtonRef}
@@ -3547,15 +3677,19 @@ export function CampWorkspace({
                   onOpen={openExecutionProcess}
                   onMovePlacement={moveExecutionToBottom}
                 />
-                <div className="execution-sidecar-detail">
-                  {executionDrawer ?? (
+              )}
+              <div
+                ref={inspectorExecutionDrawerHostRef}
+                className="execution-sidecar-detail execution-drawer-host execution-drawer-host-inspector"
+              >
+                {!executionDrawerPortal && executionPlacement === 'inspector' && executionDrawer}
+                {executionPlacement === 'inspector' && !executionDrawer && (
                     <div className="execution-sidecar-empty">
                       选择一位队员，查看连续执行历史。
                     </div>
-                  )}
-                </div>
-              </Tabs.Content>
-            )}
+                )}
+              </div>
+            </Tabs.Content>
           </Tabs.Root>
           <div className="inspector-meta">
             {snapshot.agentRuns.length > 0 && `run ${shortIdentity(snapshot.agentRuns[snapshot.agentRuns.length - 1].id)} · `}seq {snapshot.throughGlobalSequence}
@@ -3944,6 +4078,7 @@ export function CampWorkspace({
           onClose={closeMentionPopover}
         />
       )}
+      {executionDrawerPortal && createPortal(executionDrawer, executionDrawerPortal)}
     </section>
   )
 }
@@ -3972,6 +4107,18 @@ export function runPulseMemberNameLines(
     firstLine,
     graphemes.length > secondLineEnd ? `${secondLine}…` : secondLine
   ]
+}
+
+type RunPulseStateShape = 'running' | 'waiting' | 'completed' | 'failed' | 'stopped' | 'recorded'
+
+function runPulseStateShape(run: AgentRunView, stopping: boolean): RunPulseStateShape {
+  if (stopping && NON_TERMINAL_RUNS.has(run.status)) return 'stopped'
+  if (run.status === 'running') return 'running'
+  if (run.status === 'queued' || run.status === 'waiting') return 'waiting'
+  if (run.status === 'succeeded') return 'completed'
+  if (run.status === 'failed') return 'failed'
+  if (run.status === 'cancelled') return 'stopped'
+  return 'recorded'
 }
 
 function RunPulse({
@@ -4033,6 +4180,7 @@ function RunPulse({
             run,
             stopping && NON_TERMINAL_RUNS.has(run.status)
           )
+          const stateShape = runPulseStateShape(run, stopping)
           return (
             <li key={process.agentId}>
               <button
@@ -4042,6 +4190,7 @@ function RunPulse({
                 aria-pressed={selectedAgentId === process.agentId}
                 aria-expanded={selectedAgentId === process.agentId}
                 aria-controls="agent-execution-drawer"
+                title={`${memberName} · ${presentation.label}`}
                 data-agent-id={process.agentId}
                 onClick={(event) => onOpen(process.agentId, event.currentTarget)}
               >
@@ -4058,7 +4207,12 @@ function RunPulse({
                     {memberNameLines[1] && <span>{memberNameLines[1]}</span>}
                   </strong>
                 </span>
-                <span className={`run-pulse-chip-state tone-${presentation.tone}`}>{presentation.label}</span>
+                <span
+                  className={`run-pulse-chip-state tone-${presentation.tone} state-${stateShape}`}
+                  role="img"
+                  aria-label={presentation.label}
+                  title={presentation.label}
+                />
               </button>
             </li>
           )
@@ -4295,15 +4449,17 @@ function ExecutionDrawer({
 
   useLayoutEffect(() => {
     const drawer = drawerRef.current
-    const timelinePane = drawer?.parentElement
     if (placement !== 'bottom') {
       setHeightBounds(null)
       setMeasuredHeight(null)
       return undefined
     }
-    if (!drawer || !timelinePane) return undefined
-    const runPulse = timelinePane.querySelector<HTMLElement>('.run-pulse')
+    if (!drawer) return undefined
+    let timelinePane: HTMLElement | null = null
+    let runPulse: HTMLElement | null = null
+    let observer: ResizeObserver | null = null
     const measure = (): void => {
+      if (!timelinePane) return
       const nextBounds = executionDrawerHeightBounds(
         timelinePane.clientHeight,
         runPulse?.getBoundingClientRect().height ?? 0,
@@ -4317,13 +4473,19 @@ function ExecutionDrawer({
       const nextMeasuredHeight = Math.round(drawer.getBoundingClientRect().height)
       setMeasuredHeight((current) => current === nextMeasuredHeight ? current : nextMeasuredHeight)
     }
-    measure()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    observer?.observe(timelinePane)
-    observer?.observe(drawer)
-    if (runPulse) observer?.observe(runPulse)
-    window.addEventListener('resize', measure)
+    const frame = window.requestAnimationFrame(() => {
+      timelinePane = drawer.closest<HTMLElement>('.timeline-pane')
+      if (!timelinePane) return
+      runPulse = timelinePane.querySelector<HTMLElement>('.run-pulse')
+      measure()
+      observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
+      observer?.observe(timelinePane)
+      observer?.observe(drawer)
+      if (runPulse) observer?.observe(runPulse)
+      window.addEventListener('resize', measure)
+    })
     return () => {
+      window.cancelAnimationFrame(frame)
       observer?.disconnect()
       window.removeEventListener('resize', measure)
     }
@@ -4342,6 +4504,11 @@ function ExecutionDrawer({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (
+        event.key === 'Escape'
+        && event.target instanceof Element
+        && event.target.closest('.tool-call-result-scroll')
+      ) return
       if (event.key === 'Escape' && drawerRef.current?.contains(document.activeElement)) {
         event.preventDefault()
         onClose()
@@ -4510,6 +4677,7 @@ function ExecutionDrawer({
           data-following-latest={followingLatest ? 'true' : 'false'}
           onScroll={(event) => {
             const body = event.currentTarget
+            if (body.scrollHeight - body.clientHeight <= 1) return
             const eligible = Boolean(
               resolvedFocusedRun && NON_TERMINAL_RUNS.has(resolvedFocusedRun.status)
             )
@@ -6234,90 +6402,301 @@ function TaskTimelineCard({
   )
 }
 
-type ToolOutputCopyState = 'idle' | 'loading' | 'copied' | 'failed'
+type ToolResultLoadStatus = 'idle' | 'loading' | 'ready' | 'failed'
+
+interface ToolResultViewState {
+  evidenceId: string | null
+  status: ToolResultLoadStatus
+  text: string
+  error: string | null
+}
+
+function toolResultErrorMessage(error: unknown): string {
+  const detail = error instanceof Error ? error.message.trim() : ''
+  return detail ? `读取完整结果失败：${detail}` : '读取完整结果失败：未知错误'
+}
+
+function handleToolResultKeyDown(
+  event: ReactKeyboardEvent<HTMLPreElement>,
+  summary: HTMLElement | null
+): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    summary?.focus({ preventScroll: true })
+    return
+  }
+
+  const result = event.currentTarget
+  const lineHeight = Number.parseFloat(window.getComputedStyle(result).lineHeight) || 16
+  const page = Math.max(lineHeight * 4, result.clientHeight * 0.85)
+  let nextScrollTop: number | null = null
+  switch (event.key) {
+    case 'ArrowDown':
+      nextScrollTop = result.scrollTop + lineHeight
+      break
+    case 'ArrowUp':
+      nextScrollTop = result.scrollTop - lineHeight
+      break
+    case 'PageDown':
+      nextScrollTop = result.scrollTop + page
+      break
+    case 'PageUp':
+      nextScrollTop = result.scrollTop - page
+      break
+    case ' ':
+      nextScrollTop = result.scrollTop + (event.shiftKey ? -page : page)
+      break
+    case 'Home':
+      nextScrollTop = 0
+      break
+    case 'End':
+      nextScrollTop = result.scrollHeight
+      break
+    default:
+      return
+  }
+  event.preventDefault()
+  const maximum = Math.max(0, result.scrollHeight - result.clientHeight)
+  result.scrollTop = Math.min(maximum, Math.max(0, nextScrollTop))
+}
 
 function ToolCallDetail({
   campId,
   detail,
-  completeEvidence
+  completeEvidence,
+  expanded,
+  resultKey,
+  title,
+  summaryRef
 }: {
   campId: string
   detail: string
   completeEvidence?: PresentableExecutionEvidence
+  expanded: boolean
+  resultKey: string
+  title: string
+  summaryRef: RefObject<HTMLElement | null>
 }): JSX.Element {
-  const preview = toolDetailPreview(detail, Boolean(completeEvidence))
-  const [copyState, setCopyState] = useState<ToolOutputCopyState>('idle')
-  const resetTimer = useRef<number | null>(null)
+  const evidenceId = completeEvidence?.id ?? null
+  const [result, setResult] = useState<ToolResultViewState>(() => ({
+    evidenceId,
+    status: evidenceId ? 'idle' : 'ready',
+    text: evidenceId ? '' : detail,
+    error: null
+  }))
+  const requestSequence = useRef(0)
+  const previousEvidenceId = useRef(evidenceId)
+  const restoreFocusAfterLoad = useRef(false)
+  const resultRef = useRef<HTMLPreElement>(null)
+  const retryRef = useRef<HTMLButtonElement>(null)
+  const scrollHelpId = useId()
+
+  useEffect(() => {
+    if (previousEvidenceId.current === evidenceId) return
+    previousEvidenceId.current = evidenceId
+    requestSequence.current += 1
+    restoreFocusAfterLoad.current = false
+    setResult({
+      evidenceId,
+      status: evidenceId ? 'idle' : 'ready',
+      text: evidenceId ? '' : detail,
+      error: null
+    })
+  }, [detail, evidenceId])
+
+  useEffect(() => {
+    if (evidenceId !== null) return
+    setResult((current) => current.text === detail && current.status === 'ready'
+      ? current
+      : { evidenceId: null, status: 'ready', text: detail, error: null })
+  }, [detail, evidenceId])
+
   useEffect(() => () => {
-    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current)
+    requestSequence.current += 1
   }, [])
 
-  const resetCopyStateLater = (): void => {
-    if (resetTimer.current !== null) window.clearTimeout(resetTimer.current)
-    resetTimer.current = window.setTimeout(() => {
-      setCopyState('idle')
-      resetTimer.current = null
-    }, 1_800)
-  }
-
-  const copyFullOutput = async (): Promise<void> => {
-    if (copyState === 'loading') return
-    setCopyState('loading')
+  const loadCompleteResult = useCallback(async (restoreFocus: boolean): Promise<void> => {
+    if (!completeEvidence) return
+    const sequence = ++requestSequence.current
+    restoreFocusAfterLoad.current = restoreFocus
+    setResult({
+      evidenceId: completeEvidence.id,
+      status: 'loading',
+      text: '',
+      error: null
+    })
     try {
-      const fullText = completeEvidence
-        ? await window.rovai.request<{ payload: unknown }>('agentRunEvidence.getContent', {
-            campId,
-            evidenceId: completeEvidence.id
-          }).then((result) => executionEvidenceCopyText(completeEvidence.eventType, result.payload))
-        : detail
-      if (fullText === null || !(await writeClipboardText(fullText))) {
-        throw new Error('Complete Tool output is unavailable')
+      const response = await window.rovai.request<{ payload: unknown }>(
+        'agentRunEvidence.getContent',
+        { campId, evidenceId: completeEvidence.id }
+      )
+      const fullText = executionEvidenceResultText(
+        completeEvidence.eventType,
+        response.payload
+      )
+      if (fullText === null) {
+        throw new Error('证据中没有可展示的公开结果')
       }
-      setCopyState('copied')
-    } catch {
-      setCopyState('failed')
-    } finally {
-      resetCopyStateLater()
+      if (requestSequence.current !== sequence) return
+      setResult({
+        evidenceId: completeEvidence.id,
+        status: 'ready',
+        text: fullText,
+        error: null
+      })
+    } catch (error) {
+      if (requestSequence.current !== sequence) return
+      setResult({
+        evidenceId: completeEvidence.id,
+        status: 'failed',
+        text: '',
+        error: toolResultErrorMessage(error)
+      })
     }
-  }
+  }, [campId, completeEvidence])
 
-  const copyLabel = ({
-    idle: '复制完整输出',
-    loading: '正在读取完整输出',
-    copied: '已复制完整输出',
-    failed: '复制完整输出失败，重试'
-  } as const)[copyState]
+  useEffect(() => {
+    if (
+      expanded
+      && completeEvidence
+      && result.evidenceId === completeEvidence.id
+      && result.status === 'idle'
+    ) {
+      void loadCompleteResult(false)
+    }
+  }, [completeEvidence, expanded, loadCompleteResult, result.evidenceId, result.status])
+
+  useLayoutEffect(() => {
+    if (!restoreFocusAfterLoad.current) return undefined
+    const target = result.status === 'ready'
+      ? resultRef.current
+      : result.status === 'failed'
+        ? retryRef.current
+        : null
+    if (!target) return undefined
+    restoreFocusAfterLoad.current = false
+    const frame = window.requestAnimationFrame(() => target.focus({ preventScroll: true }))
+    return () => window.cancelAnimationFrame(frame)
+  }, [result.status])
 
   return (
-    <div className={`tool-call-detail${preview.truncated ? ' is-truncated' : ''}`}>
-      <pre>{preview.text}</pre>
-      {preview.truncated && (
-        <button
-          className={`tool-output-copy-button state-${copyState}`}
-          type="button"
-          aria-label={copyLabel}
-          title={copyLabel}
-          disabled={copyState === 'loading'}
-          onClick={() => void copyFullOutput()}
-        >
-          {copyState === 'loading'
-            ? <span aria-hidden="true">…</span>
-            : copyState === 'copied'
-              ? <span aria-hidden="true">✓</span>
-              : copyState === 'failed'
-                ? <span aria-hidden="true">!</span>
-                : (
-                    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.7" viewBox="0 0 24 24">
-                      <rect height="10" rx="2" width="10" x="8" y="8" />
-                      <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
-                    </svg>
-                  )}
-        </button>
+    <div className="tool-call-detail" aria-busy={result.status === 'loading'}>
+      {result.status === 'ready' && (
+        <>
+          <span className="sr-only" id={scrollHelpId}>
+            结果区域获得焦点后，可使用方向键、Page Up、Page Down、空格、Home 和 End 滚动；按 Escape 返回对应指令行。
+          </span>
+          <pre
+            ref={resultRef}
+            className="tool-call-result-scroll"
+            data-tool-result-key={resultKey}
+            tabIndex={0}
+            role="region"
+            aria-label={`${title}的完整结果，可滚动`}
+            aria-describedby={scrollHelpId}
+            onKeyDown={(event) => handleToolResultKeyDown(event, summaryRef.current)}
+          >
+            {result.text}
+          </pre>
+        </>
       )}
-      <span className="sr-only" role="status" aria-live="polite">
-        {copyState === 'idle' ? '' : copyLabel}
-      </span>
+      {result.status === 'idle' && (
+        <div className="tool-result-state" role="status">
+          <span>展开后读取完整结果。</span>
+        </div>
+      )}
+      {result.status === 'loading' && (
+        <div className="tool-result-state" role="status" aria-live="polite">
+          <span className="tool-result-spinner" aria-hidden="true" />
+          <span>正在读取完整结果…</span>
+        </div>
+      )}
+      {result.status === 'failed' && (
+        <div className="tool-result-state is-error" role="alert">
+          <span className="tool-result-state-copy">
+            <strong>未能读取完整结果</strong>
+            <span>{result.error}</span>
+          </span>
+          <button
+            ref={retryRef}
+            className="quiet-button compact tool-result-retry"
+            type="button"
+            onClick={() => void loadCompleteResult(true)}
+          >
+            重试
+          </button>
+        </div>
+      )}
     </div>
+  )
+}
+
+type ToolCallStep = Extract<LiveExecutionProgress['items'][number], { kind: 'tool' }>['step']
+
+function ToolCallRow({
+  campId,
+  step,
+  runId,
+  runStatus,
+  completeEvidence
+}: {
+  campId: string
+  step: ToolCallStep
+  runId: string
+  runStatus: AgentRunView['status']
+  completeEvidence?: PresentableExecutionEvidence
+}): JSX.Element {
+  const [expanded, setExpanded] = useState(false)
+  const summaryRef = useRef<HTMLElement>(null)
+  const status = activityStatusForAgentRun(step.status, runStatus)
+  const hasDetail = Boolean(step.detail)
+  const summary = (
+    <>
+      <ToolCallIcon activityDomain={step.activityDomain} />
+      <span className="tool-call-title">{step.title}</span>
+      <ToolCallState status={status} />
+      <span
+        className={`tool-call-disclosure-slot${hasDetail ? '' : ' is-placeholder'}`}
+        aria-hidden="true"
+      >
+        {hasDetail && (
+          <svg viewBox="0 0 16 16" focusable="false">
+            <path d="m4.75 6.25 3.25 3.5 3.25-3.5" />
+          </svg>
+        )}
+      </span>
+    </>
+  )
+
+  if (!hasDetail) {
+    return (
+      <div
+        className={`process-action tool-call-summary tool-call-static status-${status}`}
+        data-activity-domain={step.activityDomain}
+      >
+        {summary}
+      </div>
+    )
+  }
+
+  return (
+    <details
+      className={`process-action tool-call-disclosure status-${status}`}
+      data-activity-domain={step.activityDomain}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+    >
+      <summary ref={summaryRef} className="tool-call-summary">{summary}</summary>
+      <ToolCallDetail
+        campId={campId}
+        detail={step.detail}
+        completeEvidence={completeEvidence}
+        expanded={expanded}
+        resultKey={`${runId}:${step.id}`}
+        title={step.title}
+        summaryRef={summaryRef}
+      />
+    </details>
   )
 }
 
@@ -6436,38 +6815,16 @@ export function RunExecutionDisclosure({
         }
         if (item.kind !== 'tool') return null
         const step = item.step
-        const status = activityStatusForAgentRun(step.status, run.status)
         const fullEvidence = completeEvidence.byToolId.get(step.id)
-        const hasDetail = Boolean(step.detail)
-        const summary = (
-          <>
-            <ToolCallIcon activityDomain={step.activityDomain} />
-            <span className="tool-call-title">{step.title}</span>
-            <ToolCallState status={status} />
-            {hasDetail && <span className="tool-call-chevron" aria-hidden="true">⌄</span>}
-          </>
-        )
-        if (!hasDetail) {
-          return (
-            <div
-              className={`process-action tool-call-summary tool-call-static status-${status}`}
-              key={item.key}
-            >
-              {summary}
-            </div>
-          )
-        }
         return (
-          <details className={`process-action tool-call-disclosure status-${status}`} key={item.key}>
-            <summary className="tool-call-summary">{summary}</summary>
-            {step.detail && (
-              <ToolCallDetail
-                campId={campId}
-                detail={step.detail}
-                completeEvidence={fullEvidence}
-              />
-            )}
-          </details>
+          <ToolCallRow
+            key={item.key}
+            campId={campId}
+            step={step}
+            runId={run.id}
+            runStatus={run.status}
+            completeEvidence={fullEvidence}
+          />
         )
       })}
       {historyStatus === 'loading' && (
@@ -6546,21 +6903,81 @@ export function RunExecutionDisclosure({
   )
 }
 
+const TOOL_ICON_DOMAINS = new Set([
+  'shell',
+  'file',
+  'git',
+  'network',
+  'permission',
+  'runtime',
+  'plan',
+  'tool'
+])
+
 function ToolCallIcon({ activityDomain }: { activityDomain: string }): JSX.Element {
+  const domain = TOOL_ICON_DOMAINS.has(activityDomain) ? activityDomain : 'unknown'
   const icon = ({
-    shell: '>_',
-    file: '±',
-    git: '⑂',
-    network: '↗',
-    permission: '!',
-    runtime: '◌',
-    plan: '☷',
-    tool: '▱',
-    unknown: '·'
-  } as Record<string, string>)[activityDomain] ?? '·'
+    shell: (
+      <>
+        <rect x="1.75" y="2.25" width="12.5" height="11.5" rx="2" />
+        <path d="M4.25 6 6.1 7.8 4.25 9.6M8 10h3.2" />
+      </>
+    ),
+    file: (
+      <>
+        <path d="M4 1.75h5.1L12.5 5v9.25H4z" />
+        <path d="M9 1.9V5h3.2M6 8h4.4M6 10.5h3.3" />
+      </>
+    ),
+    git: (
+      <>
+        <circle cx="4" cy="3.25" r="1.35" />
+        <circle cx="4" cy="12.75" r="1.35" />
+        <circle cx="11.75" cy="7.2" r="1.35" />
+        <path d="M4 4.6v6.8M4 6.1h2.2a3.2 3.2 0 0 1 3.2 3.2v.1M9.4 7.2h1" />
+      </>
+    ),
+    network: (
+      <>
+        <circle cx="8" cy="8" r="5.75" />
+        <path d="M2.5 8h11M8 2.25c1.45 1.55 2.15 3.45 2.15 5.75S9.45 12.2 8 13.75M8 2.25C6.55 3.8 5.85 5.7 5.85 8s.7 4.2 2.15 5.75" />
+      </>
+    ),
+    permission: (
+      <>
+        <path d="M8 1.75 13 3.7v3.75c0 3.15-1.9 5.25-5 6.8-3.1-1.55-5-3.65-5-6.8V3.7z" />
+        <path d="M8 5v3.5M8 11h.01" />
+      </>
+    ),
+    runtime: (
+      <>
+        <rect x="3.15" y="3.15" width="9.7" height="9.7" rx="1.45" />
+        <rect x="5.5" y="5.5" width="5" height="5" rx=".75" />
+        <path d="M5.25 1.5v1.65M8 1.5v1.65M10.75 1.5v1.65M5.25 12.85v1.65M8 12.85v1.65M10.75 12.85v1.65M1.5 5.25h1.65M1.5 8h1.65M1.5 10.75h1.65M12.85 5.25h1.65M12.85 8h1.65M12.85 10.75h1.65" />
+      </>
+    ),
+    plan: (
+      <>
+        <rect x="3" y="1.75" width="10" height="12.5" rx="1.6" />
+        <path d="m5.2 5.2.75.75L7.35 4.5M8.6 5.25h2M5.2 9.1l.75.75 1.4-1.45M8.6 9.15h2" />
+      </>
+    ),
+    tool: (
+      <>
+        <path d="M9.65 2.35a3.15 3.15 0 0 0-3.2 3.85L2.8 9.85a1.85 1.85 0 0 0 2.62 2.62l3.65-3.65a3.15 3.15 0 0 0 3.85-3.2L10.8 7.74l-2.5-.45-.45-2.5z" />
+        <path d="M4.2 11.05h.01" />
+      </>
+    ),
+    unknown: (
+      <>
+        <circle cx="8" cy="8" r="5.75" />
+        <path d="M6.45 6.1a1.75 1.75 0 1 1 2.45 1.6c-.6.28-.9.72-.9 1.3M8 11.3h.01" />
+      </>
+    )
+  } as Record<string, JSX.Element>)[domain]
   return (
-    <span className="tool-call-icon" aria-hidden="true">
-      {icon}
+    <span className="tool-call-icon" data-icon-domain={domain} aria-hidden="true">
+      <svg viewBox="0 0 16 16" focusable="false">{icon}</svg>
     </span>
   )
 }

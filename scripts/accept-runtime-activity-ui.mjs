@@ -62,11 +62,15 @@ const runtimes = [
     }
   }),
   runtime('opencode', 'opencode-cli', 'OpenCode', 'read_file', acp('read', 'read_file', 'file', 'file.read')),
-  runtime('copilot', 'copilot-cli', 'GitHub Copilot', 'edit_file', acp('edit', 'edit_file', 'file', 'file.write', null)),
+  runtime('copilot', 'copilot-cli', 'GitHub Copilot', 'edit_file', {
+    ...acp('edit', 'edit_file', 'file', 'file.write', null),
+    expectedToolDisclosure: false
+  }),
   runtime('kiro', 'kiro-cli', 'Kiro', 'execute', acp('execute', 'execute', 'shell', 'shell.execute')),
   runtime('qoder', 'qoder-cli', 'Qoder', 'search_workspace', {
     ...acp('search', 'search_workspace', 'tool', 'tool.web.search'),
-    cancelledWithInProgressActivity: true
+    cancelledWithInProgressActivity: true,
+    expectedToolDisclosure: false
   }),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
@@ -314,6 +318,17 @@ try {
     && agentDock.uniqueAgentIds.length === runtimes.length
     && agentDock.agentIds.filter((agentId) => agentId === activeAgentId).length === 1,
     `Agent dock did not aggregate one entry per Agent: ${JSON.stringify(agentDock)}`)
+  assert(agentDock.entries.every((entry) => entry.childCount === 3
+    && entry.nameLineCount >= 1
+    && entry.nameLineCount <= 2
+    && entry.visibleStateText === ''
+    && entry.buttonAriaLabel
+    && entry.buttonTitle
+    && entry.stateAriaLabel
+    && entry.stateTitle
+    && ['state-running', 'state-waiting', 'state-completed', 'state-failed', 'state-stopped', 'state-recorded']
+      .includes(entry.stateShape)),
+  `Agent dock entries were not avatar + two-line name + shaped status markers: ${JSON.stringify(agentDock)}`)
   assert(agentDock.followsTimeline && agentDock.dockTop >= agentDock.timelineBottom - 1,
     `Agent dock is not attached below the conversation timeline: ${JSON.stringify(agentDock)}`)
   assert(agentDock.topRunBadgeCount === 0
@@ -343,6 +358,7 @@ try {
     && executionSidecar.sideDockCount === 1
     && executionSidecar.chipCount === runtimes.length
     && executionSidecar.uniqueAgentIds.length === runtimes.length
+    && executionSidecar.entryContract
     && executionSidecar.verticalRows
     && executionSidecar.fullWidthRows
     && executionSidecar.listScrollHeight > executionSidecar.listClientHeight
@@ -441,8 +457,8 @@ try {
       && Boolean(focused.querySelector('.execution-disclosure.run-live.is-running'))
   })()`)
   const executionDrawerResize = await verifyExecutionDrawerResizeControl(app.cdp)
+  const completeToolOutput = await verifyCompleteToolOutput(app.cdp)
   const executionAutoFollow = await verifyExecutionAutoFollowControl(app.cdp)
-  const boundedToolOutput = await verifyBoundedToolOutput(app.cdp)
   const toolOutputCapture = join(outputDir, 'runtime-activity-tool-output.png')
   await capture(app.cdp, toolOutputCapture)
 
@@ -464,6 +480,12 @@ try {
   const bottomCapture = join(outputDir, 'runtime-activity-bottom.png')
   await capture(app.cdp, bottomCapture)
 
+  const drawerFocusedForEscape = await evaluate(app.cdp, `(() => {
+    const closeButton = document.querySelector('.execution-drawer button[aria-label="收起执行详情"]')
+    closeButton?.focus({ preventScroll: true })
+    return document.activeElement === closeButton
+  })()`)
+  assert(drawerFocusedForEscape, 'Could not focus the execution Drawer before testing Drawer-level Escape')
   await app.cdp.send('Input.dispatchKeyEvent', {
     type: 'rawKeyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 53
   })
@@ -706,7 +728,7 @@ try {
       runningRunFocusedWithEvidence: observed.find((row) => row.agentId === activeAgentId)?.focusedEvidenceOpen === true,
       executionDrawerResize,
       executionAutoFollow,
-      boundedToolOutput,
+      completeToolOutput,
       claudeCommandDisclosure,
       antigravityCoreToolCatalogName: observed.find((row) => row.runtime === 'Antigravity')?.toolTitles[0] === 'camp.message.send',
       conversationPresentation,
@@ -784,6 +806,7 @@ function runtime(key, adapterKind, runtimeName, expectedToolName, details) {
     adapterKind,
     runtimeName,
     expectedToolName,
+    expectedToolDisclosure: true,
     ...modelFixture,
     ...details
   }
@@ -1364,9 +1387,25 @@ async function collectAgentDock(cdp) {
     const dock = document.querySelector('.run-pulse[aria-label="Agent 执行台"]')
     const timelineRect = timeline?.getBoundingClientRect()
     const dockRect = dock?.getBoundingClientRect()
-    const agentIds = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+    const chips = [...document.querySelectorAll('.run-pulse-chip[data-agent-id]')]
+    const agentIds = chips
       .map((chip) => chip.dataset.agentId ?? '')
       .filter(Boolean)
+    const entries = chips.map((chip) => {
+      const name = chip.querySelector('.run-pulse-chip-copy strong')
+      const state = chip.querySelector('.run-pulse-chip-state')
+      return {
+        agentId: chip.dataset.agentId ?? null,
+        childCount: chip.children.length,
+        nameLineCount: name?.children.length ?? 0,
+        visibleStateText: state?.textContent?.trim() ?? '',
+        buttonAriaLabel: chip.getAttribute('aria-label'),
+        buttonTitle: chip.getAttribute('title'),
+        stateAriaLabel: state?.getAttribute('aria-label'),
+        stateTitle: state?.getAttribute('title'),
+        stateShape: [...(state?.classList ?? [])].find((name) => name.startsWith('state-')) ?? null
+      }
+    })
     const auditTabCount = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
       .filter((tab) => tab.textContent?.includes('审计')).length
     const inspectorTabLabels = [...document.querySelectorAll('.activity-tabs > .tabs-list [role="tab"]')]
@@ -1375,6 +1414,7 @@ async function collectAgentDock(cdp) {
       chipCount: agentIds.length,
       agentIds,
       uniqueAgentIds: [...new Set(agentIds)],
+      entries,
       followsTimeline: timeline?.closest('.camp-conversation-stage')?.nextElementSibling === dock,
       timelineBottom: timelineRect?.bottom ?? 0,
       dockTop: dockRect?.top ?? 0,
@@ -1404,6 +1444,18 @@ async function collectExecutionSidecar(cdp) {
       sideDockCount: document.querySelectorAll('.run-pulse-inspector').length,
       chipCount: chips.length,
       uniqueAgentIds: [...new Set(agentIds)],
+      entryContract: chips.every((chip) => {
+        const name = chip.querySelector('.run-pulse-chip-copy strong')
+        const state = chip.querySelector('.run-pulse-chip-state')
+        return chip.children.length === 3
+          && (name?.children.length ?? 0) >= 1
+          && (name?.children.length ?? 0) <= 2
+          && (state?.textContent?.trim() ?? '') === ''
+          && Boolean(chip.getAttribute('aria-label'))
+          && Boolean(chip.getAttribute('title'))
+          && Boolean(state?.getAttribute('aria-label'))
+          && Boolean([...state.classList].find((name) => name.startsWith('state-')))
+      }),
       verticalRows: rects.every((rect, index) => index === 0
         || (Math.abs(rect.x - rects[0].x) <= 1 && rect.y > rects[index - 1].y)),
       fullWidthRows: rects.every((rect) => list && Math.abs(rect.width - list.clientWidth) <= 4),
@@ -1731,6 +1783,34 @@ async function collectRuntimeRows(cdp) {
       const spans = [...(meta?.querySelectorAll(':scope > span') ?? [])].map((span) => span.textContent?.trim() ?? '')
       const stages = [...document.querySelectorAll('.execution-drawer .execution-process-stage[data-agent-run-id]')]
       const focused = stages.find((stage) => stage.classList.contains('is-focused'))
+      const toolLayouts = [...document.querySelectorAll('.execution-drawer .tool-call-summary')]
+        .map((toolRow) => {
+          const icon = toolRow.querySelector('.tool-call-icon')
+          const iconSvg = icon?.querySelector('svg')
+          const state = toolRow.querySelector('.tool-call-state')
+          const disclosure = toolRow.querySelector('.tool-call-disclosure-slot')
+          const rowStyle = getComputedStyle(toolRow)
+          const iconRect = icon?.getBoundingClientRect()
+          const iconSvgRect = iconSvg?.getBoundingClientRect()
+          const stateRect = state?.getBoundingClientRect()
+          const disclosureRect = disclosure?.getBoundingClientRect()
+          return {
+            display: rowStyle.display,
+            gridTemplateColumns: rowStyle.gridTemplateColumns,
+            childCount: toolRow.children.length,
+            iconDomain: icon?.dataset.iconDomain ?? null,
+            iconWidth: iconRect?.width ?? 0,
+            iconSvgWidth: iconSvgRect?.width ?? 0,
+            iconSvgHeight: iconSvgRect?.height ?? 0,
+            stateWidth: stateRect?.width ?? 0,
+            disclosureWidth: disclosureRect?.width ?? 0,
+            statusLabel: state?.getAttribute('aria-label') ?? null,
+            disclosurePlaceholder: disclosure?.classList.contains('is-placeholder') ?? false,
+            summaryAriaLabel: toolRow.matches('summary')
+              ? toolRow.getAttribute('aria-label')
+              : null
+          }
+        })
       const modelPresentations = stages.map((stage) => {
         const model = stage.querySelector('.execution-run-model')
         const code = model?.querySelector('code')
@@ -1789,6 +1869,7 @@ async function collectRuntimeRows(cdp) {
         })),
         toolStateAnimations: [...document.querySelectorAll('.execution-drawer .tool-call-state')]
           .map((node) => getComputedStyle(node).animationName),
+        toolLayouts,
         toolSourceLabelCount: document.querySelectorAll('.execution-drawer .tool-call-source').length,
         hasVisibleSourceLabel: /Core 已验证|Runtime 报告/.test(
           document.querySelector('.execution-drawer')?.textContent ?? ''
@@ -1808,6 +1889,9 @@ async function collectFocusedRuntimeModelLayout(cdp) {
     const code = model?.querySelector('code')
     const drawer = document.querySelector('.execution-drawer')
     const style = code ? getComputedStyle(code) : null
+    const toolResult = drawer?.querySelector('.tool-call-result-scroll')
+    const toolResultRect = toolResult?.getBoundingClientRect()
+    const toolDetailRect = toolResult?.closest('.tool-call-detail')?.getBoundingClientRect()
     code?.focus({ preventScroll: true })
     return {
       runId: stage?.dataset.agentRunId ?? null,
@@ -1827,6 +1911,16 @@ async function collectFocusedRuntimeModelLayout(cdp) {
       textOverflow: style?.textOverflow ?? null,
       clientWidth: code?.clientWidth ?? null,
       scrollWidth: code?.scrollWidth ?? null,
+      toolResult: toolResult ? {
+        verticalOverflow: toolResult.scrollHeight > toolResult.clientHeight + 1,
+        horizontalOverflow: toolResult.scrollWidth > toolResult.clientWidth + 1,
+        width: toolResultRect?.width ?? 0,
+        detailWidth: toolDetailRect?.width ?? 0,
+        height: toolResultRect?.height ?? 0,
+        maxViewportHeight: innerHeight * .3,
+        middleMarkerVisible: toolResult.textContent?.includes(${JSON.stringify(longToolOutputMiddleMarker)}) ?? false,
+        lastMarkerVisible: toolResult.textContent?.includes(${JSON.stringify(longToolOutputLastMarker)}) ?? false
+      } : null,
       drawerHorizontalOverflow: (drawer?.scrollWidth ?? 0) > (drawer?.clientWidth ?? 0) + 1
     }
   })()`)
@@ -1903,8 +1997,27 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
     return true
   })()`)
   await wait(150)
+  const openedLongResultAtZoom = await evaluate(cdp, `(() => {
+    const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+    if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
+    return Boolean(disclosure)
+  })()`)
+  assert(openedLongResultAtZoom, '200% zoom could not open the long Tool result')
+  await waitForExpression(cdp, `(() => {
+    const result = document.querySelector('.execution-drawer .tool-call-result-scroll')
+    return result?.textContent?.includes(${JSON.stringify(longToolOutputLastMarker)})
+  })()`, 30_000)
   const zoom200 = await collectFocusedRuntimeModelLayout(cdp)
   assertFocusedRuntimeModelLayout(zoom200, '200% zoom bottom Drawer')
+  assert(zoom200.toolResult
+    && zoom200.toolResult.verticalOverflow
+    && !zoom200.toolResult.horizontalOverflow
+    && zoom200.toolResult.width <= zoom200.toolResult.detailWidth + 1
+    && zoom200.toolResult.height <= zoom200.toolResult.maxViewportHeight + 1
+    && zoom200.toolResult.middleMarkerVisible
+    && zoom200.toolResult.lastMarkerVisible,
+  `200% zoom did not keep the complete Tool result inside its local scroll region: ${JSON.stringify(zoom200)}`)
   const zoom200Capture = join(capturesDirectory, 'runtime-model-zoom-200.png')
   await capture(cdp, zoom200Capture)
 
@@ -2281,89 +2394,276 @@ async function verifyRecoveryBlockerResolution(cdp) {
   return resolution
 }
 
-async function verifyBoundedToolOutput(cdp) {
+async function verifyCompleteToolOutput(cdp) {
   const opened = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
       .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+    const beforeText = disclosure?.querySelector('.tool-call-detail')?.textContent ?? ''
     if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
-    return Boolean(disclosure)
+    return {
+      found: Boolean(disclosure),
+      fullResultAbsentBeforeExpansion: !beforeText.includes(${JSON.stringify(longToolOutputMiddleMarker)})
+        && !beforeText.includes(${JSON.stringify(longToolOutputLastMarker)})
+    }
   })()`)
-  assert(opened, 'Could not open the long Tool output disclosure')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer .tool-call-detail.is-truncated'))`)
+  assert(opened.found && opened.fullResultAbsentBeforeExpansion,
+    `Long Tool output was missing or loaded before expansion: ${JSON.stringify(opened)}`)
+  await waitForExpression(cdp, `(() => {
+    const result = document.querySelector('.execution-drawer .tool-call-result-scroll')
+    const text = result?.textContent ?? ''
+    return text.includes(${JSON.stringify(longToolOutputMiddleMarker)})
+      && text.includes(${JSON.stringify(longToolOutputLastMarker)})
+  })()`, 30_000)
 
   const presentation = await evaluate(cdp, `(() => {
-    const detail = document.querySelector('.execution-drawer .tool-call-detail.is-truncated')
-    const preview = detail?.querySelector('pre')
-    const button = detail?.querySelector('.tool-output-copy-button')
-    const buttonStyle = button ? getComputedStyle(button) : null
-    const buttonRect = button?.getBoundingClientRect()
-    const text = preview?.textContent ?? ''
+    const detail = document.querySelector('.execution-drawer .tool-call-detail')
+    const result = detail?.querySelector('.tool-call-result-scroll')
+    const disclosure = detail?.closest('details.tool-call-disclosure')
+    const summary = disclosure?.querySelector(':scope > summary')
+    const style = result ? getComputedStyle(result) : null
+    const rect = result?.getBoundingClientRect()
+    const text = result?.textContent ?? ''
     return {
-      previewText: text,
-      previewLineCount: text.split('\\n').length,
-      previewVerticalOverflow: preview ? preview.scrollHeight > preview.clientHeight + 1 : null,
+      lineCount: text.split('\\n').length,
+      verticalOverflow: result ? result.scrollHeight > result.clientHeight + 1 : null,
       hasFirstMarker: text.includes(${JSON.stringify(longToolOutputFirstMarker)}),
       hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
       hasLastMarker: text.includes(${JSON.stringify(longToolOutputLastMarker)}),
-      hasCutNotice: text.endsWith('…（后续内容未显示）'),
+      endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
+      hasCutNotice: text.includes('…（后续内容未显示）'),
+      leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
       copyButtonCount: detail?.querySelectorAll('.tool-output-copy-button').length ?? 0,
-      copyButtonText: button?.textContent?.trim() ?? '',
-      copyAriaLabel: button?.getAttribute('aria-label') ?? null,
-      copyBorderWidth: buttonStyle?.borderTopWidth ?? null,
-      copyWidth: buttonRect?.width ?? 0,
-      copyHeight: buttonRect?.height ?? 0,
       legacyCompleteControlCount: detail?.parentElement?.querySelectorAll('.complete-evidence-control').length ?? 0,
-      fullOutputLeakedIntoDom: document.body.innerText.includes(${JSON.stringify(longToolOutputMiddleMarker)})
-        || document.body.innerText.includes(${JSON.stringify(longToolOutputLastMarker)})
+      role: result?.getAttribute('role') ?? null,
+      tabIndex: result?.tabIndex ?? null,
+      ariaLabel: result?.getAttribute('aria-label') ?? null,
+      summaryAriaLabel: summary?.getAttribute('aria-label') ?? null,
+      resultHeight: rect?.height ?? 0,
+      overscrollBehavior: style?.overscrollBehavior ?? null,
+      scrollbarGutter: style?.scrollbarGutter ?? null,
+      whiteSpace: style?.whiteSpace ?? null,
+      overflowWrap: style?.overflowWrap ?? null
     }
   })()`)
   assert(presentation.hasFirstMarker
-    && !presentation.hasMiddleMarker
-    && !presentation.hasLastMarker
-    && presentation.hasCutNotice
-    && presentation.previewLineCount === 11
-    && presentation.previewVerticalOverflow === false,
-  `Long Tool output did not keep one bounded beginning preview: ${JSON.stringify(presentation)}`)
-  assert(presentation.copyButtonCount === 1
-    && presentation.copyButtonText === ''
-    && presentation.copyAriaLabel === '复制完整输出'
-    && presentation.copyBorderWidth === '0px'
-    && Math.abs(presentation.copyWidth - 25) <= 0.5
-    && Math.abs(presentation.copyHeight - 25) <= 0.5
+    && presentation.hasMiddleMarker
+    && presentation.hasLastMarker
+    && presentation.endsWithPublicOutput
+    && presentation.lineCount === 8_432
+    && presentation.verticalOverflow
+    && !presentation.hasCutNotice
+    && !presentation.leakedEnvelope,
+  `Long Tool output was not rendered as one complete public result: ${JSON.stringify(presentation)}`)
+  assert(presentation.copyButtonCount === 0
     && presentation.legacyCompleteControlCount === 0
-    && !presentation.fullOutputLeakedIntoDom,
-  `Long Tool output copy affordance was not the accepted light icon: ${JSON.stringify(presentation)}`)
+    && presentation.role === 'region'
+    && presentation.tabIndex === 0
+    && presentation.ariaLabel?.includes('完整结果')
+    && presentation.summaryAriaLabel === null
+    && presentation.resultHeight <= 221
+    && presentation.overscrollBehavior === 'contain'
+    && presentation.scrollbarGutter?.includes('stable')
+    && presentation.whiteSpace === 'pre-wrap'
+    && presentation.overflowWrap === 'anywhere',
+  `Complete Tool result accessibility or bounded-scroll contract failed: ${JSON.stringify(presentation)}`)
 
-  clipboardTouched = true
-  await evaluate(cdp, `document.querySelector('.execution-drawer .tool-output-copy-button')?.click()`)
+  await evaluate(cdp, `document.querySelector('.execution-drawer .tool-call-result-scroll')?.focus()`)
+  await pressKey(cdp, 'End', 'End', 35)
+  await waitForExpression(cdp, `(() => {
+    const result = document.querySelector('.execution-drawer .tool-call-result-scroll')
+    return result && Math.abs(result.scrollHeight - result.clientHeight - result.scrollTop) <= 1
+  })()`)
+  await pressKey(cdp, 'Home', 'Home', 36)
   await waitForExpression(cdp,
-    `document.querySelector('.execution-drawer .tool-output-copy-button')?.getAttribute('aria-label') === '已复制完整输出'`)
-  const text = await runProcess('/usr/bin/pbpaste', [])
-  const copied = await evaluate(cdp, `(() => {
-    const button = document.querySelector('.execution-drawer .tool-output-copy-button')
+    `document.querySelector('.execution-drawer .tool-call-result-scroll')?.scrollTop === 0`)
+  await pressKey(cdp, 'ArrowDown', 'ArrowDown', 40)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer .tool-call-result-scroll')?.scrollTop > 0`)
+  await pressKey(cdp, 'Home', 'Home', 36)
+  await pressKey(cdp, ' ', 'Space', 32)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer .tool-call-result-scroll')?.scrollTop > 0`)
+  await pressKey(cdp, 'Home', 'Home', 36)
+  await pressKey(cdp, 'PageDown', 'PageDown', 34)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer .tool-call-result-scroll')?.scrollTop > 0`)
+  await pressKey(cdp, 'Escape', 'Escape', 27)
+  const keyboard = await evaluate(cdp, `(() => {
+    const disclosure = document.activeElement?.closest('details.tool-call-disclosure')
     return {
-      buttonLabel: button?.getAttribute('aria-label') ?? null,
-      buttonIcon: button?.textContent?.trim() ?? ''
+      summaryFocused: document.activeElement === disclosure?.querySelector(':scope > summary'),
+      disclosureOpen: disclosure?.open ?? false,
+      drawerPresent: Boolean(document.querySelector('.execution-drawer'))
     }
   })()`)
-  Object.assign(copied, {
-    length: text.length,
-    lineCount: text.split('\n').length,
-    startsWithPublicOutput: text.startsWith(longToolOutputFirstMarker),
-    hasMiddleMarker: text.includes(longToolOutputMiddleMarker),
-    endsWithPublicOutput: text.endsWith(`${longToolOutputLastMarker} · line 8432`),
-    leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"')
-  })
-  assert(copied.length === longToolOutput.length
-    && copied.lineCount === 8_432
-    && copied.startsWithPublicOutput
-    && copied.hasMiddleMarker
-    && copied.endsWithPublicOutput
-    && !copied.leakedEnvelope
-    && copied.buttonLabel === '已复制完整输出'
-    && copied.buttonIcon === '✓',
-  `Copy full Tool output did not use the complete public output field: ${JSON.stringify(copied)}`)
-  return { ...presentation, copied }
+  assert(keyboard.summaryFocused && keyboard.disclosureOpen && keyboard.drawerPresent,
+    `Complete Tool result keyboard navigation failed: ${JSON.stringify(keyboard)}`)
+
+  const readingStart = await evaluate(cdp, `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    const body = drawer?.querySelector('.execution-drawer-body')
+    const result = drawer?.querySelector('.tool-call-result-scroll')
+    const ratio = (element) => {
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+      return maximum > 0 ? element.scrollTop / maximum : 0
+    }
+    body.scrollTop = Math.round(Math.max(0, body.scrollHeight - body.clientHeight) * .37)
+    body.dispatchEvent(new Event('scroll', { bubbles: true }))
+    result.scrollTop = Math.round(Math.max(0, result.scrollHeight - result.clientHeight) * .53)
+    window.__rovaiExecutionDrawerIdentity = drawer
+    window.__rovaiToolResultIdentity = result
+    return {
+      outerRatio: ratio(body),
+      resultRatio: ratio(result),
+      disclosureOpen: result.closest('details.tool-call-disclosure')?.open ?? false
+    }
+  })()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.execution-drawer-body')?.dataset.followingLatest === 'false'`)
+  await evaluate(cdp,
+    `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
+  const inspectorReadingRestored = `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    const body = drawer?.querySelector('.execution-drawer-body')
+    const result = drawer?.querySelector('.tool-call-result-scroll')
+    const ratio = (element) => {
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+      return maximum > 0 ? element.scrollTop / maximum : 0
+    }
+    return drawer?.dataset.placement === 'inspector'
+      && drawer === window.__rovaiExecutionDrawerIdentity
+      && result === window.__rovaiToolResultIdentity
+      && result?.closest('details.tool-call-disclosure')?.open
+      && (body.scrollHeight - body.clientHeight <= 1
+        || Math.abs(ratio(body) - ${JSON.stringify(readingStart.outerRatio)}) <= .03)
+      && Math.abs(ratio(result) - ${JSON.stringify(readingStart.resultRatio)}) <= .03
+  })()`
+  try {
+    await waitForExpression(cdp, inspectorReadingRestored)
+  } catch (error) {
+    const state = await evaluate(cdp, `(() => {
+      const drawer = document.querySelector('.execution-drawer')
+      const body = drawer?.querySelector('.execution-drawer-body')
+      const result = drawer?.querySelector('.tool-call-result-scroll')
+      const reading = (element) => {
+        const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+        return {
+          ratio: maximum > 0 ? element.scrollTop / maximum : 0,
+          scrollTop: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight
+        }
+      }
+      return {
+        placement: drawer?.dataset.placement ?? null,
+        sameDrawer: drawer === window.__rovaiExecutionDrawerIdentity,
+        sameResult: result === window.__rovaiToolResultIdentity,
+        open: result?.closest('details.tool-call-disclosure')?.open ?? false,
+        outer: body ? reading(body) : null,
+        result: result ? reading(result) : null
+      }
+    })()`)
+    throw new Error(`Inspector reading position was not restored: ${JSON.stringify({ readingStart, state })}`, {
+      cause: error
+    })
+  }
+  const inspectorReading = await evaluate(cdp, `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    const body = drawer?.querySelector('.execution-drawer-body')
+    const result = drawer?.querySelector('.tool-call-result-scroll')
+    const ratio = (element) => {
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+      return maximum > 0 ? element.scrollTop / maximum : 0
+    }
+    return {
+      sameDrawer: drawer === window.__rovaiExecutionDrawerIdentity,
+      sameResult: result === window.__rovaiToolResultIdentity,
+      outerRatio: ratio(body),
+      resultRatio: ratio(result),
+      open: result?.closest('details.tool-call-disclosure')?.open ?? false
+    }
+  })()`)
+  await evaluate(cdp,
+    `document.querySelector('.run-pulse-inspector .execution-placement-button')?.click()`)
+  const bottomReadingRestored = `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    const body = drawer?.querySelector('.execution-drawer-body')
+    const result = drawer?.querySelector('.tool-call-result-scroll')
+    const ratio = (element) => {
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+      return maximum > 0 ? element.scrollTop / maximum : 0
+    }
+    return drawer?.dataset.placement === 'bottom'
+      && drawer === window.__rovaiExecutionDrawerIdentity
+      && result === window.__rovaiToolResultIdentity
+      && result?.closest('details.tool-call-disclosure')?.open
+      && Math.abs(ratio(body) - ${JSON.stringify(readingStart.outerRatio)}) <= .03
+      && Math.abs(ratio(result) - ${JSON.stringify(readingStart.resultRatio)}) <= .03
+  })()`
+  try {
+    await waitForExpression(cdp, bottomReadingRestored)
+  } catch (error) {
+    const state = await evaluate(cdp, `(() => {
+      const drawer = document.querySelector('.execution-drawer')
+      const body = drawer?.querySelector('.execution-drawer-body')
+      const result = drawer?.querySelector('.tool-call-result-scroll')
+      const reading = (element) => {
+        const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+        return {
+          ratio: maximum > 0 ? element.scrollTop / maximum : 0,
+          scrollTop: element.scrollTop,
+          scrollHeight: element.scrollHeight,
+          clientHeight: element.clientHeight
+        }
+      }
+      return {
+        placement: drawer?.dataset.placement ?? null,
+        sameDrawer: drawer === window.__rovaiExecutionDrawerIdentity,
+        sameResult: result === window.__rovaiToolResultIdentity,
+        open: result?.closest('details.tool-call-disclosure')?.open ?? false,
+        outer: body ? reading(body) : null,
+        result: result ? reading(result) : null
+      }
+    })()`)
+    throw new Error(`Bottom reading position was not restored: ${JSON.stringify({
+      readingStart,
+      inspectorReading,
+      state
+    })}`, { cause: error })
+  }
+  const bottomReading = await evaluate(cdp, `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    const body = drawer?.querySelector('.execution-drawer-body')
+    const result = drawer?.querySelector('.tool-call-result-scroll')
+    const ratio = (element) => {
+      const maximum = Math.max(0, element.scrollHeight - element.clientHeight)
+      return maximum > 0 ? element.scrollTop / maximum : 0
+    }
+    const value = {
+      sameDrawer: drawer === window.__rovaiExecutionDrawerIdentity,
+      sameResult: result === window.__rovaiToolResultIdentity,
+      outerRatio: ratio(body),
+      resultRatio: ratio(result),
+      open: result?.closest('details.tool-call-disclosure')?.open ?? false
+    }
+    delete window.__rovaiExecutionDrawerIdentity
+    delete window.__rovaiToolResultIdentity
+    return value
+  })()`)
+  assert(readingStart.disclosureOpen
+    && inspectorReading.sameDrawer
+    && inspectorReading.sameResult
+    && inspectorReading.open
+    && bottomReading.sameDrawer
+    && bottomReading.sameResult
+    && bottomReading.open,
+  `Execution console placement did not preserve DOM identity and reading state: ${JSON.stringify({
+    readingStart,
+    inspectorReading,
+    bottomReading
+  })}`)
+
+  return { ...presentation, keyboard, readingStart, inspectorReading, bottomReading }
 }
 
 async function verifyClaudeCommandDisclosure(cdp) {
@@ -2483,7 +2783,16 @@ async function verifyExecutionDrawerResizeControl(cdp) {
     chip?.click()
     return Boolean(chip)
   })()`)
-  await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer-resize-handle'))`)
+  await waitForExpression(cdp, `(() => {
+    const drawer = document.querySelector('.execution-drawer')
+    const handle = drawer?.querySelector('.execution-drawer-resize-handle')
+    const stored = Number(sessionStorage.getItem('rovai.execution-drawer-height.v1'))
+    return Boolean(handle)
+      && drawer?.dataset.userSized === 'true'
+      && Number.isFinite(stored)
+      && Math.abs((drawer?.getBoundingClientRect().height ?? 0) - stored) <= 1
+      && Number(handle?.getAttribute('aria-valuenow')) === stored
+  })()`)
   const reopened = await geometry()
   assert(reopened
     && Math.abs(reopened.height - keyboardSized.height) <= 1
@@ -2710,6 +3019,17 @@ function assertRuntimeRows(observed) {
     }
     assert(row.toolTitles.length === 1 && row.toolTitles[0] === expected.expectedToolName,
       `${expected.runtimeName} tool title mismatch: ${JSON.stringify(row)}`)
+    assert(row.toolLayouts.length === 1
+      && row.toolLayouts.every((layout) => layout.display === 'grid'
+        && layout.childCount === 4
+        && Math.abs(layout.iconWidth - 16) <= .5
+        && Math.abs(layout.iconSvgWidth - 16) <= .5
+        && Math.abs(layout.iconSvgHeight - 16) <= .5
+        && Math.abs(layout.stateWidth - 16) <= .5
+        && Math.abs(layout.disclosureWidth - 20) <= .5
+        && layout.statusLabel
+        && layout.summaryAriaLabel === null),
+    `${expected.runtimeName} Tool row did not keep four fixed tracks and a 16px SVG: ${JSON.stringify(row)}`)
     if (expected.cancelledWithInProgressActivity) {
       assert(row.focusedStatus === 'cancelled'
         && row.toolStates.length === 1
@@ -2724,11 +3044,16 @@ function assertRuntimeRows(observed) {
         && row.toolStates[0].status === 'completed',
       `${expected.runtimeName} terminal Tool state was not a concise accessible success marker: ${JSON.stringify(row)}`)
     }
-    if (expected.adapterKind === 'copilot-cli') {
+    if (!expected.expectedToolDisclosure) {
       assert(row.staticToolTitles.length === 1
         && row.staticToolTitles[0] === expected.expectedToolName
         && row.expandableToolTitles.length === 0,
-      `${expected.runtimeName} exposed an empty Tool disclosure: ${JSON.stringify(row)}`)
+      `${expected.runtimeName} exposed a Tool disclosure without a public result: ${JSON.stringify(row)}`)
+      assert(row.toolLayouts[0]?.disclosurePlaceholder,
+        `${expected.runtimeName} static Tool row did not retain the disclosure track: ${JSON.stringify(row)}`)
+    } else {
+      assert(!row.toolLayouts[0]?.disclosurePlaceholder,
+        `${expected.runtimeName} expandable Tool row lost its disclosure control: ${JSON.stringify(row)}`)
     }
     assert(row.toolSourceLabelCount === 0 && row.hasVisibleSourceLabel === false,
       `${expected.runtimeName} exposed a redundant source label: ${JSON.stringify(row)}`)

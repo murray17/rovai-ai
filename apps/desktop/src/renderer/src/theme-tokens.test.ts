@@ -284,11 +284,17 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     )
   })
 
-  it('keeps long Tool output copy as a light icon inside the existing evidence preview', () => {
-    expect(css).toMatch(/\.tool-call-detail\s*\{[^}]*position:\s*relative[^}]*margin:\s*7px 0 0 24px/)
-    expect(css).toMatch(/\.tool-output-copy-button\s*\{[^}]*position:\s*absolute[^}]*width:\s*25px[^}]*height:\s*25px[^}]*border:\s*0/)
-    expect(css).toMatch(/\.tool-call-detail\.is-truncated > pre\s*\{[^}]*padding-right:\s*36px/)
-    expect(css).not.toContain('.tool-output-copy-button {\n  border: 1px')
+  it('keeps complete Tool results in the shared four-track, keyboard-scrollable surface', () => {
+    expect(css).toMatch(/\.tool-call-summary\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*16px minmax\(0, 1fr\) 16px 20px/)
+    expect(css).toMatch(/\.tool-call-icon svg\s*\{[^}]*width:\s*16px[^}]*height:\s*16px[^}]*fill:\s*none/)
+    expect(css).toMatch(/\.tool-call-disclosure-slot\s*\{[^}]*width:\s*20px[^}]*height:\s*20px/)
+    expect(css).toMatch(/\.tool-call-disclosure-slot\.is-placeholder\s*\{[^}]*visibility:\s*hidden/)
+    expect(css).toMatch(/\.tool-call-detail\s*\{[^}]*position:\s*relative[^}]*margin:\s*5px 0 8px 24px[^}]*padding-right:\s*52px/)
+    expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*max-height:\s*min\(220px, 30vh\)[^}]*overflow:\s*auto[^}]*scrollbar-gutter:\s*stable/)
+    expect(css).toMatch(/\.tool-call-result-scroll\s*\{[^}]*white-space:\s*pre-wrap[^}]*overflow-wrap:\s*anywhere/)
+    expect(css).toContain('.tool-call-result-scroll:focus-visible')
+    expect(css).not.toContain('.tool-output-copy-button')
+    expect(css).not.toContain('.tool-call-detail.is-truncated')
   })
 
   it('keeps the Composer on its responsive centered track with split tool and send actions', () => {

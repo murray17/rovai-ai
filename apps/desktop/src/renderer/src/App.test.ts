@@ -131,13 +131,12 @@ import {
   buildLiveExecutionProgress,
   diffLineKind,
   executionActivityTitle,
-  executionEvidenceCopyText,
+  executionEvidenceResultText,
   formatByteSize,
   liveRuntimeEventFromCore,
   liveRuntimeEventFromExecutionEvidence,
   parseGitStatus,
-  selectCompleteExecutionEvidence,
-  toolDetailPreview
+  selectCompleteExecutionEvidence
 } from './ui-model'
 
 const TEST_EXECUTION_BUDGET = {
@@ -2439,6 +2438,9 @@ describe('task event projections', () => {
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
     expect(markup).not.toContain('<small>执行过程</small>')
     expect(markup).toContain('class="run-pulse-chip-copy"><strong><span>沐瓦</span></strong>')
+    expect(markup).toContain('class="run-pulse-chip-state tone-info state-running" role="img"')
+    expect(markup).toMatch(/title="沐瓦 · [^"]+"/)
+    expect(markup).not.toMatch(/run-pulse-chip-state[^>]*>[^<]+<\/span>/)
     expect(markup).toContain('data-agent-id="agent_2"')
     expect(markup).toContain('执行中')
     expect(markup.indexOf('class="local-message-avatar"'))
@@ -3471,7 +3473,7 @@ describe('task event projections', () => {
         status: 'running'
       }
     })
-    expect(executionEvidenceCopyText('runtime.action', { kind: 'execute' })).toBeNull()
+    expect(executionEvidenceResultText('runtime.action', { kind: 'execute' })).toBeNull()
 
     const run: AgentRunView = {
       id: 'run-copilot', campTurnId: 'turn-1', conversationId: 'conversation-copilot',
@@ -3492,12 +3494,12 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup).toContain('tool-call-static')
-    expect(markup).not.toContain('tool-call-disclosure')
-    expect(markup).not.toContain('tool-call-chevron')
+    expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
+    expect(markup).toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).not.toContain('>execute<')
   })
 
-  it('opens Built-in Camp results in their Tool rows and copies only the public result', () => {
+  it('opens complete Built-in Camp public results in their Tool rows', () => {
     const readResult = {
       mode: 'item',
       message: { messageId: 'message-1', body: '完整消息正文' }
@@ -3564,11 +3566,11 @@ describe('task event projections', () => {
     expect(readItem.step.detail).not.toContain('coreEnvelope')
     expect(readItem.step.detail).not.toContain('private-request-1')
 
-    const copied = executionEvidenceCopyText('runtime.action', events[1].payload)
-    expect(copied).not.toBeNull()
-    expect(JSON.parse(copied ?? 'null')).toEqual(searchResult)
-    expect(copied).not.toContain('private-input-projection')
-    expect(copied).not.toContain('private-request-2')
+    const resultText = executionEvidenceResultText('runtime.action', events[1].payload)
+    expect(resultText).not.toBeNull()
+    expect(JSON.parse(resultText ?? 'null')).toEqual(searchResult)
+    expect(resultText).not.toContain('private-input-projection')
+    expect(resultText).not.toContain('private-request-2')
 
     const run: AgentRunView = {
       id: 'run-builtins', campTurnId: 'turn-1', conversationId: 'conversation-builtins',
@@ -3588,15 +3590,75 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run, progress, campId: 'camp-1', focused: true
     }))
-    expect(markup.match(/tool-call-disclosure/g)).toHaveLength(2)
-    expect(markup).toContain('tool-output-copy-button')
+    expect(markup.match(/<details class="process-action tool-call-disclosure/g)).toHaveLength(2)
+    expect(markup).not.toContain('tool-output-copy-button')
     expect(markup).toContain('search-result-1')
-    expect(markup).not.toContain('search-result-14')
+    expect(markup).toContain('search-result-14')
+    expect(markup).toContain('role="region"')
+    expect(markup).toContain('的完整结果，可滚动')
     expect(markup).not.toContain('complete-evidence-control')
     expect(markup).not.toContain('complete-evidence-standalone')
     expect(markup).not.toContain('查看完整工具调用')
     expect(markup).not.toContain('private-input-projection')
     expect(markup).not.toContain('private-request-2')
+  })
+
+  it('uses one 16px SVG family and stable four-track markup for all Tool domains', () => {
+    const domains = [
+      'shell',
+      'file',
+      'git',
+      'network',
+      'permission',
+      'runtime',
+      'plan',
+      'tool',
+      'unknown'
+    ]
+    const run: AgentRunView = {
+      id: 'run-domains', campTurnId: 'turn-domains', conversationId: 'conversation-domains',
+      agentId: 'agent-domains', taskId: null, responsibilityKey: 'direct:agent-domains',
+      responsibilityGeneration: 0, purpose: '验证指令图标', completionRole: 'required',
+      status: 'succeeded', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: domains.length, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-19T00:00:00Z', startedAt: '2026-08-19T00:00:00Z',
+      endedAt: '2026-08-19T00:00:09Z', updatedAt: '2026-08-19T00:00:09Z'
+    }
+    const progress = {
+      items: domains.map((domain, index) => ({
+        key: `tool:${domain}`,
+        kind: 'tool' as const,
+        step: {
+          id: `tool-${domain}`,
+          title: `${domain} command`,
+          detail: `${domain} complete result`,
+          status: 'completed' as const,
+          activityDomain: domain,
+          toolName: null,
+          credibility: 'runtime_structured' as const
+        }
+      }))
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-domains', focused: true
+    }))
+
+    for (const domain of domains) {
+      expect(markup).toContain(`data-icon-domain="${domain}"`)
+      expect(markup).toContain(`${domain} complete result`)
+    }
+    expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(domains.length)
+    expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(domains.length)
+    expect(markup.match(/<summary class="tool-call-summary">/g)).toHaveLength(domains.length)
+    expect(markup.match(/class="tool-call-state status-completed"/g)).toHaveLength(domains.length)
+    expect(markup.match(/class="tool-call-disclosure-slot"/g)).toHaveLength(domains.length)
+    expect(markup).toMatch(/tool-call-icon[\s\S]*tool-call-title[\s\S]*tool-call-state[\s\S]*tool-call-disclosure-slot/)
+    expect(markup).not.toMatch(/<summary[^>]*aria-label=/)
   })
 
   it('keeps a Claude Bash command expandable when the tool result has no output', () => {
@@ -3652,10 +3714,12 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup).toContain('tool-call-disclosure')
-    expect(markup).toContain('tool-call-chevron')
+    expect(markup).toContain('tool-call-disclosure-slot')
+    expect(markup).not.toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).toContain('class="tool-call-state status-completed"')
     expect(markup).toContain('aria-label="成功"')
-    expect(markup).not.toContain('tool-call-result')
+    expect(markup).toContain('tool-call-result-scroll')
+    expect(markup).not.toContain('tool-output-copy-button')
     expect(markup).not.toContain('>已完成<')
     expect(markup).not.toContain('tool-call-static')
 
@@ -3849,33 +3913,8 @@ describe('task event projections', () => {
     expect(selected.unassigned.map((item) => item.id)).toEqual(['narration'])
   })
 
-  it('keeps only the beginning of long Tool output and extracts copyable public content', () => {
-    expect(toolDetailPreview('short output', false)).toEqual({
-      text: 'short output',
-      truncated: false
-    })
-    expect(toolDetailPreview('short output', true)).toEqual({
-      text: 'short output',
-      truncated: false
-    })
-    const lines = Array.from({ length: 14 }, (_, index) => `line ${index + 1}`)
-    const preview = toolDetailPreview(lines.join('\n'), false)
-    expect(preview.truncated).toBe(true)
-    expect(preview.text).toContain('line 1')
-    expect(preview.text).toContain('line 10')
-    expect(preview.text).not.toContain('line 11')
-    expect(preview.text).not.toContain('line 14')
-    expect(preview.text).toMatch(/line 10\n…（后续内容未显示）$/)
-
-    expect(toolDetailPreview(
-      `first line\n…（内容已截断，可按需读取完整证据）`,
-      true
-    )).toEqual({
-      text: 'first line\n…（后续内容未显示）',
-      truncated: true
-    })
-
-    expect(executionEvidenceCopyText('activity.completed', {
+  it('extracts only complete public Tool result fields from Evidence', () => {
+    expect(executionEvidenceResultText('activity.completed', {
       item: {
         command: 'git diff',
         aggregatedOutput: '\u001b[31mfull diff\u001b[0m\nsecond line',
@@ -3883,15 +3922,15 @@ describe('task event projections', () => {
       },
       _rovaiTruncated: true
     })).toBe('full diff\nsecond line')
-    expect(executionEvidenceCopyText('runtime.action', {
+    expect(executionEvidenceResultText('runtime.action', {
       output: { status: 'accepted', receiptId: 'receipt-1' },
-      rawOutputDigest: 'must-not-be-copied'
+      rawOutputDigest: 'must-not-be-rendered'
     })).toBe('{\n  "status": "accepted",\n  "receiptId": "receipt-1"\n}')
-    expect(executionEvidenceCopyText('file.change.updated', {
+    expect(executionEvidenceResultText('file.change.updated', {
       patch: '*** Begin Patch\n*** End Patch',
       itemId: 'hidden-identity'
     })).toBe('*** Begin Patch\n*** End Patch')
-    expect(executionEvidenceCopyText('agent.text.delta', {
+    expect(executionEvidenceResultText('agent.text.delta', {
       delta: 'not a Tool output'
     })).toBeNull()
   })

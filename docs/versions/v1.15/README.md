@@ -41,6 +41,8 @@ Platform。历史 v1.05 只保留当时设计过程和未实施快照，不作�
   NTFS entry identity、持久 Run registration、bounded sharing retry 和 crash-window recovery；
 - 完成 secured Named Pipe Built-in Transport v17、Windows Renderer Interaction Delta、NSIS、PE/manifest verifier、
   Authenticode 与真实 Windows 10/11 acceptance；
+- 执行台在底部与 Inspector 间移动同一 DOM，统一四轨 Tool 行、九类 SVG、精简队员入口和
+  展开后完整 Tool 结果的内部滚动/键盘语义；
 - 十个 Adapter 逐一取得 digest-bound Windows evidence；未完成者保持 `not_qualified`。
 
 ## 数据迁移
@@ -86,10 +88,10 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.14 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.15。 |
-| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology、取消固定 80/600 事件窗口的取舍；Windows 平台决定继续继承 v1.05。 |
-| Contracts | 已更新 | [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)把 Migration 97 目标推进到 Data Contract v1.15/schema 52；[Run Process Detail Surface v12](../../contracts/run-process-detail-surface-v12.md)把 AgentRun Stop 收敛为单击直接提交；[Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)继承 activation-aware enter，并完整投影 non-terminal Evidence。 |
+| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果、稳定执行台 DOM 与旧预览/复制取舍的局部替代；Windows 平台决定继续继承 v1.05。 |
+| Contracts | 已更新 | [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)把 Migration 97 目标推进到 Data Contract v1.15/schema 52；[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)继承 AgentRun 直接停止，并定义四轨指令行、九类 SVG、精简队员入口与完整 Tool 结果；[Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)继承 activation-aware enter，并完整投影 non-terminal Evidence。 |
 | Architecture | 已更新 | [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录 Migration 97 的 v1.15 目标；[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)继续组合其他平台边界；[Camp Open Read Path](../../architecture/camp-open-read-path.md)记录 activation-aware enter、meaningful Pending 冷启动恢复与完整 non-terminal Evidence。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)移除 AgentRun Stop 确认层，且运行中正文与步骤不再按最后 80/600 项裁剪；底部与 Inspector 保留同一直接停止入口和权威状态投影。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止与完整运行 chronology；底部/Inspector 移动同一 Drawer DOM，Tool 行固定对齐，队员入口去除可见状态文案，完整结果在有最大高度的 region 中内部滚动。 |
 | Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
 | Runtime compatibility | 确认无需更新 | 当前尚无新的真实 Windows Adapter 资格证据；所有 Windows 行继续保持 `not_qualified`。 |
 | Documentation routing | 已更新 | 版本指针、索引和本版 References 路由到 v1.15；Windows 长期任务入口保持指向当前 Contract、Architecture 与历史决定理由。 |
@@ -106,7 +108,7 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 - [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
 - [Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
-- [Run Process Detail Surface v12](../../contracts/run-process-detail-surface-v12.md)
+- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)
