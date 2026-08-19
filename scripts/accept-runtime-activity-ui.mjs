@@ -1250,11 +1250,29 @@ async function verifyTimelineFollowsLatestAcrossViewportResize(cdp) {
     }
   })()`, true)
   assert(resized, 'Timeline follow-latest acceptance lost the timeline and Agent dock')
-  await waitForExpression(cdp, `(() => {
-    const timeline = document.querySelector('.camp-timeline')
-    return Boolean(timeline)
-      && Math.abs(timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop) <= 1
-  })()`, 2_000)
+  try {
+    await waitForExpression(cdp, `(() => {
+      const timeline = document.querySelector('.camp-timeline')
+      return Boolean(timeline)
+        && Math.abs(timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop) <= 1
+    })()`, 2_000)
+  } catch (error) {
+    const stalled = await evaluate(cdp, `(() => {
+      const timeline = document.querySelector('.camp-timeline')
+      if (!timeline) return null
+      const maxScroll = Math.max(0, timeline.scrollHeight - timeline.clientHeight)
+      return {
+        clientHeight: timeline.clientHeight,
+        scrollHeight: timeline.scrollHeight,
+        scrollTop: timeline.scrollTop,
+        maxScroll,
+        distanceFromBottom: Math.abs(maxScroll - timeline.scrollTop)
+      }
+    })()`)
+    throw new Error(`Timeline follow-latest did not settle: ${JSON.stringify({ prepared, resized, stalled })}`, {
+      cause: error
+    })
+  }
   const settled = await evaluate(cdp, `(() => {
     const timeline = document.querySelector('.camp-timeline')
     if (!timeline) return null

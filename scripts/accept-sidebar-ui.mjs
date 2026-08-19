@@ -555,20 +555,20 @@ async function assertQuestionMarkHelpHoverOnly(cdp) {
     }
   })()`)
   const expectedSettingsGroups = [
-    { label: '应用', items: ['通用', '外观', '通知'] },
-    { label: '能力', items: ['Skill', 'MCP', 'Agent 运行时'] },
-    { label: '支持', items: ['诊断与修复'] }
+    { label: '应用', items: ['通用', '外观', '提醒'] },
+    { label: '能力', items: ['Skills', 'MCP', 'Agent 运行时'] },
+    { label: '支持', items: ['运行监控', '诊断与修复'] }
   ]
   assert(JSON.stringify(settingsNavigation.groups) === JSON.stringify(expectedSettingsGroups)
       && settingsNavigation.labelled
       && !settingsNavigation.horizontalOverflow,
-  `Settings navigation groups do not match the seven-item contract: ${JSON.stringify(settingsNavigation)}`)
+  `Settings navigation groups do not match the eight-item contract: ${JSON.stringify(settingsNavigation)}`)
   await waitForSelector(cdp, '.general-help-mark')
   await assertHoverOnlyTooltip(cdp, '.general-help-mark', '.general-help-popover', 'General one-click help')
 
   const openedSkills = await evaluate(cdp, `(() => {
     const button = [...document.querySelectorAll('.settings-sidebar-menu button')]
-      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === 'Skill')
+      .find((candidate) => candidate.querySelector('strong')?.textContent?.trim() === 'Skills')
     button?.click()
     return Boolean(button)
   })()`)
@@ -578,8 +578,10 @@ async function assertQuestionMarkHelpHoverOnly(cdp) {
     inlineCopy: document.querySelector('.skill-import-copy')?.textContent?.trim() ?? '',
     legacyQuestionMark: Boolean(document.querySelector('.skill-import-help'))
   })`)
-  assert(skillImportHelp.inlineCopy.includes('导入前会先生成安全预览') && !skillImportHelp.legacyQuestionMark,
-    `Skill import help did not use the P2 inline explanation: ${JSON.stringify(skillImportHelp)}`)
+  assert(skillImportHelp.inlineCopy.includes('先生成安全预览')
+      && skillImportHelp.inlineCopy.includes('确认后复制完整内容')
+      && !skillImportHelp.legacyQuestionMark,
+  `Skill import help did not use the current inline explanation: ${JSON.stringify(skillImportHelp)}`)
 
   const returnedToApp = await evaluate(cdp, `(() => {
     const button = document.querySelector('.settings-sidebar-back')
@@ -1088,7 +1090,7 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
   })()`)
   assert(dialogState.title.includes('从侧栏移除')
       && dialogState.description.includes('不会删除本地目录')
-      && dialogState.description.includes('Camp')
+      && dialogState.description.includes('会话')
       && dialogState.description.includes('运行记录')
       && dialogState.description.includes('重新选择同一工作目录即可恢复')
       && dialogState.primary
@@ -1326,7 +1328,7 @@ async function launchApp(port, width, height, reducedMotion) {
       const style = document.createElement('style')
       style.dataset.sidebarAcceptance = 'deterministic-hover'
       style.textContent = [
-        '.group-menu-trigger, .group-create-button, .general-help-popover {',
+        '.group-menu-trigger, .group-create-button, .camp-menu-trigger, .general-help-popover {',
         '  transition: none !important;',
         '}'
       ].join('\\n')

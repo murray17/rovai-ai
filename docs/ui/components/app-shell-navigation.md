@@ -43,8 +43,8 @@ Core-owned Pending Camp 并进入同一 Composer，第一条消息成功后再�
 设置侧栏分三组：
 
 - 应用：通用、外观、提醒；
-- 能力：Skill、MCP、Agent 运行时；
-- 支持：诊断与修复。
+- 能力：Skills、MCP、Agent 运行时；
+- 支持：运行监控、诊断与修复。
 
 不增加“关于与更新”。返回 App 后恢复原一级页面；当前 Main Window Session 内记住最后设置分类，
 全新安装默认“通用”。设置页面的局部构图见
