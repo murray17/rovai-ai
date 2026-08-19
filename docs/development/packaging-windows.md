@@ -41,7 +41,7 @@ manifest 与 verifier 版本，不能与正式签名发布混用，也不能用 
 
 ## 安装、升级与卸载
 
-- clean install：新用户安装、启动、Core ready、v14 Built-in roundtrip 与现有 Onboarding gate 通过；
+- clean install：新用户安装、启动、Core ready、v17 Built-in roundtrip 与现有 Onboarding gate 通过；
 - upgrade：先要求正在运行的 App 正常关闭，等待 Planned Shutdown 完成，再替换被锁定的 sidecar；新旧 Core 不并行；
 - downgrade：检测 schema incompatibility 后在启动前阻断，显示当前/目标版本和安全下一步；
 - uninstall：默认保留 `%LOCALAPPDATA%\Rovai AI` 数据；删除数据是未默认选中的显式选项，并二次确认精确范围；

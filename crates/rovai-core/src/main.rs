@@ -9452,14 +9452,6 @@ fn relevant_failed_runtime_probe_attempt(
         .last_probe_attempt
         .as_ref()
         .filter(|attempt| attempt.status == "failed")?;
-    if installation.adapter_kind == AdapterKind::TraeCnCli
-        && attempt
-            .diagnostic_code
-            .as_deref()
-            .is_some_and(|code| code.starts_with("runtime_version_"))
-    {
-        return None;
-    }
     if let Some(snapshot) = installation.snapshot.as_ref() {
         if attempt.executable_fingerprint.as_deref() != snapshot.executable_fingerprint.as_deref() {
             return None;
@@ -15264,10 +15256,33 @@ mod tests {
     }
 
     #[test]
-    fn availability_distinguishes_static_installation_from_runtime_readiness() {
+    fn trae_version_failures_follow_uniform_runtime_status_rules() {
         let now = chrono::Utc::now();
         let mut installation = managed_runtime_fixture(&now.to_rfc3339(), None);
         installation.adapter_kind = AdapterKind::TraeCnCli;
+        installation.last_probe_attempt = Some(rovai_core::agent_profile::AdapterProbeAttempt {
+            id: "current-trae-version-timeout".to_string(),
+            installation_id: installation.id.clone(),
+            status: "failed".to_string(),
+            failure_class: "transient".to_string(),
+            diagnostic_code: Some("runtime_version_timed_out".to_string()),
+            candidate_path: installation.executable_path.clone(),
+            executable_fingerprint: Some("sha256:test".to_string()),
+            attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
+            retry_after: None,
+            failure: None,
+        });
+        assert!(relevant_failed_runtime_probe_attempt(&installation).is_some());
+        assert_eq!(
+            product_runtime_availability_status(
+                RuntimeDiscoveryStatus::Found,
+                Some(&installation),
+                None,
+                false,
+            ),
+            "refresh_failed_using_last_success"
+        );
+
         let snapshot = installation.snapshot.as_mut().unwrap();
         snapshot.probe_status = "installed_unverified".to_string();
         snapshot.authentication_status = "unknown".to_string();
@@ -15284,30 +15299,7 @@ mod tests {
                 None,
                 false,
             ),
-            "installed_unverified"
-        );
-
-        installation.last_probe_attempt = Some(rovai_core::agent_profile::AdapterProbeAttempt {
-            id: "legacy-trae-version-timeout".to_string(),
-            installation_id: installation.id.clone(),
-            status: "failed".to_string(),
-            failure_class: "transient".to_string(),
-            diagnostic_code: Some("runtime_version_timed_out".to_string()),
-            candidate_path: installation.executable_path.clone(),
-            executable_fingerprint: Some("sha256:test".to_string()),
-            attempted_at: (now + chrono::Duration::seconds(1)).to_rfc3339(),
-            retry_after: None,
-            failure: None,
-        });
-        assert!(relevant_failed_runtime_probe_attempt(&installation).is_none());
-        assert_eq!(
-            product_runtime_availability_status(
-                RuntimeDiscoveryStatus::Found,
-                Some(&installation),
-                None,
-                false,
-            ),
-            "installed_unverified"
+            "needs_attention"
         );
     }
 

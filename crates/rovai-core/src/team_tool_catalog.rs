@@ -789,7 +789,7 @@ pub fn builtin_tool_definitions() -> Vec<Value> {
         json!({
             "name": CAMP_READ_TOOL_NAME,
             "title": "Read original Camp messages",
-            "description": "Read exact messages or timeline pages from one Camp. Omit campId for the current Camp; pass it explicitly for another Camp available to the current AgentRun. item slices one body; around does not paginate; thread and timeline use exclusive integer sequence cursors. IDs and cursors locate content but never grant access.",
+            "description": "Read messages from exactly one Camp. With no mode, return the newest 20 visible messages from the current or explicitly selected Camp (mode=timeline, direction=before, limit=20). Use direction=after to begin with the oldest visible page. Use explicit item, around, or thread modes for message-anchored reads. Around is bounded and does not paginate; thread and timeline use exclusive integer sequence cursors. Reuse nextCursor with the same mode and direction. IDs and cursors locate content but never grant access.",
             "inputSchema": CampHistoryService::camp_read_input_schema(),
             "outputSchema": camp_read_success_schema()
         }),

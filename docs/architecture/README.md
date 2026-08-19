@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # 长期系统架构
@@ -15,7 +15,7 @@ last_updated: 2026-08-18
 | [Benchmark Protocol](benchmark-protocol.md) | Core 外的 Adapter/Profile/Execution/Evaluation/Reporting、Process/Outcome/Tool-Use Judge、Tool Interaction、typed Resource 与 paired counterfactual 模块 |
 | [Diagnostics Center](diagnostics-center.md) | Core 严格只读诊断组装、Skill/MCP 审计、Runtime 缓存事实、Renderer 单项修复复检、Electron v5 导出与 Startup Recovery 边界 |
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
-| [Built-in Tool Runtime](builtin-tool-runtime.md) | 十五项固定 Agent CLI operation、single-Camp History target、safe Agent output projection、Core Router、Runtime Fleet、精确 help、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
+| [Built-in Tool Runtime](builtin-tool-runtime.md) | 十五项固定 Agent CLI operation、`camp.read` 安全 Timeline 默认、single-Camp History target、safe Agent output projection、Core Router、Runtime Fleet、精确 help、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Camp Identity](camp-identity.md) | 唯一 `rvcamp_` CampId 的生成、持久化、Context/Tool/path 流转、clean break 与 Native Session identity seam |
 | [持久 Gather Barrier](durable-gather-barrier.md) | 一条公共请求、N 个 Item/forward Delivery、持久 return capture、原子 Barrier、Completion FIFO 与 mandatory typed Current Input 的组件权威 |
 | [Runtime Catalog Boundaries](runtime-catalog-boundaries.md) | 可执行 Product Runtime Catalog、机器 Availability 与 Renderer-only Settings Preview 的权威分层、准入和晋升边界 |

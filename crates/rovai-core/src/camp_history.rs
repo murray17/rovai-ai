@@ -28,7 +28,7 @@ pub const CAMP_LIST_TOOL_NAME: &str = "camp.list";
 pub const CAMP_SEARCH_TOOL_NAME: &str = "camp.search";
 pub const HISTORY_SEARCH_TOOL_NAME: &str = "history.search";
 pub const CAMP_READ_TOOL_NAME: &str = "camp.read";
-pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 3;
+pub const CAMP_HISTORY_CONTRACT_VERSION: u32 = 4;
 
 const CAMP_LIST_DEFAULT_LIMIT: usize = 20;
 const CAMP_LIST_MAX_LIMIT: usize = 50;

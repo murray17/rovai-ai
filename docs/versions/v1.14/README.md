@@ -1,106 +1,77 @@
 ---
 document_type: version-overview
 version: v1.14
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-08-19
 ---
 
-# Rovai-ai v1.14：Windows x64 产品实现与资格闭环
+# Rovai-ai v1.14：`camp.read` 安全 Timeline 默认
 
-> 当前状态：v1.05 形成的 Windows 长期决定、Contract、Architecture 与 Interaction Delta 继续有效；本版在
-> 已发布的 v1.13 基线上实施这些约束。平台 seam、native frame、Runtime 平台准入、native executable
-> resolver、原子 Job 启动、私有 Core/Desktop data root、handle-relative Attachment、managed Skill Library、
-> crash-recoverable Skill Projection 与共享异步 Named Pipe client 已进入代码。固定 Windows CI 实跑、Windows
-> client OS 验收、逐 Runtime 资格、NSIS 与签名尚未完成，因此不得宣称 Windows 已发布。
+> 当前状态：CLI、catalog、Skill、合同与文档路由已完成，并通过 Rust、Skill、文档和 smoke 模板门禁。
 >
 > 前置版本：[v1.13 AgentRun 实际 Runtime 模型展示](../v1.13/README.md)。v1.13 已完成并冻结为 historical。
+>
+> 后续版本：[v1.15 Windows x64 产品实现与资格闭环](../v1.15/README.md)。
 
 ## 版本目标
 
-在不回退 v1.10 Camp identity、v1.11 Runtime 模型目录、v1.12 AgentRun 局部停止、v1.13 实际 Runtime 模型
-观测、macOS 能力和安全边界的前提下，交付 Windows 10 22H2+ 与 Windows 11 native x64 Desktop：Core、CLI、
-Desktop 可构建和安装，进程、IPC、私有存储、Attachment、MCP、Skill Projection 与 Renderer 具有真实 Windows
-backend；每个 Runtime 只有在独立证据完成后才可被选择和执行。
-
-本版实现依据 [v1.05 Windows 决策记录](../v1.05/decisions.md)、当前 Windows Contracts 与 Windows Desktop
-Platform。历史 v1.05 只保留当时设计过程和未实施快照，不作为当前实现状态来源。
+让 `rovai camp read` 成为安全、可直接使用的最近消息读取命令：省略 mode 时固定解释为
+`timeline + before + limit 20`，显式 `--camp-id` 只改变目标 Camp。以消息为锚点的读取继续要求显式选择
+`item`、`around` 或 `thread`，不根据 `messageId` 或其他模式专属字段猜测意图。
 
 ## 交付范围
 
-- 完成 `x86_64-pc-windows-msvc` 全 targets、Desktop sidecar staging、native frame 与平台目录布局；
-- 所有 Runtime、Probe 与 one-shot 通过原子 `CreateProcessW + STARTUPINFOEXW + JOB_LIST + HANDLE_LIST` launcher；
-- Windows Runtime search、native EXE/validated Node shim、file identity 与平台资格矩阵保持单一 Rust 权威；
-- `%LOCALAPPDATA%` Core/User Data/Session Data/Logs/CrashDumps 使用 local NTFS admission 和创建时 protected DACL；
-- Attachment 使用 retained handle 与 handle-relative traversal，拒绝 reparse、identity drift 与非准入存储；
-- Skill Library 使用 Windows logical mode；Skill Projection 使用同父目录 copy、schema 2 journal、operationId、
-  NTFS entry identity、持久 Run registration、bounded sharing retry 和 crash-window recovery；
-- 完成 secured Named Pipe Built-in Transport、Windows Renderer Interaction Delta、NSIS、PE/manifest verifier、
-  Authenticode 与真实 Windows 10/11 acceptance；
-- 十个 Adapter 逐一取得 digest-bound Windows evidence；未完成者保持 `not_qualified`。
+### CLI 默认补全与错误
 
-## 数据迁移
+- direct flags、JSON stdin/heredoc 与 `--input-file` 先各自解析为单一 JSON 对象，再进入同一默认补全；
+- 省略 mode 时补入 `timeline`，Timeline 中省略的 direction/limit 分别补为 `before`/`20`；显式值覆盖默认，
+  cursor 不设默认；
+- 补全发生在 canonical Schema 校验之前；Core 始终收到完整、已验证的 canonical input；
+- 省略 mode 却传入 message-anchored 字段时返回定向 `fix_input`，要求显式选择模式，不自动推断。
 
-已发布的 Migration 96 保持归属于 v1.13：它从 `v1.10 / projection schema 50` 增加 nullable
-`agent_run.runtime_observed_model_id`，并推进到 `v1.13 / schema 51`。Windows 不复用或重写该迁移。
+### 教学与兼容
 
-Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schema 51`，安装：
-
-- `skill_projection_observation.operation_id` 与唯一非空索引；
-- `skill_projection_observation.entry_identity`，绑定投影目录的 canonical volume/file ID；
-- `skill_projection_run_registration`，以 AgentRun execution epoch 和 canonical root identity 持久化 Windows
-  Execution Root Projection Gate；
-- Data Contract `v1.14 / projection schema 52`。
-
-该迁移不重写 ContextManifest 18、Formatter 20、Camp identity、AgentRun 实际模型或已有 Skill exposure。
-schema 52 无 downgrade reader；不满足精确 v1.13/schema 51 来源条件的 store 继续按既有 admission/quarantine
-策略 fail closed。
-
-## 验收边界
-
-- macOS workspace、Core tests、Desktop 与既有文档门禁保持通过；
-- Windows Rust 全 targets 和 Windows-only tests 在固定 CI image 编译并执行；
-- Skill journal 在每个 copy/rename/journal/DB/cleanup transition 的 crash injection 后可恢复或稳定关闭准入；
-- 相同内容但不同 NTFS file identity、project-owned、reparse、DACL drift 与 ambiguous journal 均保留且不覆盖；
-- Windows 10 22H2 与 Windows 11 的 native frame、DPI、Forced Colors、NVDA、IME、Explorer、安装/升级/卸载
-  由真实 client OS 验收；Windows Server CI 不替代这些证据；
-- 每个 `qualified` Runtime 独立覆盖 discovery、identity、authentication、first run、continuation、Built-in Tool、
-  approval、cancel、terminal、process cleanup 与 planned shutdown；
-- Electron EXE、`rovai-core.exe`、`rovai.exe` 和 installer 分别验证架构、manifest、hash、签名与时间戳后才可发布。
+- `camp.read --help` 反映 CLI 的真实 optional/default 行为，同时保留各模式 requiredness、方向和分页说明；
+- operation catalog 与 `cli-operations` Camp/History reference 说明默认、显式模式和 cursor 延续；
+- Built-in Tool Transport 提升为 v17，Runtime capability 为 `builtin_cli.transport.v17`，Camp History 提升为 v4；
+- Session Charter、`skills/cli-operations/agents/openai.yaml`、Bootstrap、Formatter 20 与 ContextManifest 18 不变。
 
 ## 明确不做
 
-- 不支持 Windows x86/ARM64、WSL Core、Linux、MSIX/Store、企业 MSI、系统服务或自动更新；
-- 不支持 UNC/network/removable/non-NTFS workspace，也不在安装器中修改 HKLM long-path policy；
-- 不使用 localhost TCP、PowerShell、通用 cmd/bat launcher、spawn 后 attach Job、PID 猜测或先创建后补 ACL；
-- 不用 Windows Server CI、三类 execution-shape 测试或 green build 代替逐 Runtime/client OS 资格；
-- 不建立第二套 Renderer 组件树、主题、信息架构或 Windows 专属产品世界。
+- 不修改 canonical Core `camp.read` Schema 的 required 字段；
+- 不把 CLI 默认下沉为 Router、授权、分页、receipt 或 replay 的隐式状态；
+- 不从 `messageId`、`bodyOffset`、`before` 或 `after` 猜测 message-anchored mode；
+- 不修改 Session Charter 或 Skill 默认模型提示，不触发模型上下文 revision；
+- 不改变 Camp ID、历史可见性、授权、输出 shape、cursor 数值或最大页大小。
+
+## 数据与兼容性
+
+本版没有数据库 Migration 或持久数据 shape 变化。v17 通过 capability、CLI command version、Camp History v4
+和 catalog digest 对旧 Runtime Binding fail closed；已存 receipt 仍重放原 canonical result。CLI shorthand
+不会写入持久状态，也不会改变 Core service 的 20 条页大小兜底。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v1.13 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.14。 |
-| Decisions | 确认无需更新 | 本版实现继续遵守 [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)；集成 v1.13 与迁移顺延没有改变平台准入、原子启动、Transport、私有存储或 Skill copy 的长期取舍。 |
-| Contracts | 已更新 | [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)补足持久 Run registration、entry identity 与 Migration 97；其余 Windows 合同语义不变。 |
-| Architecture | 已更新 | [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录 DB-backed root gate 与 schema 52；[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)继续组合其他平台边界。 |
-| UI | 确认无需更新 | 本版实现既有 [Windows Interaction Delta](../../ui/windows-interaction-delta.md)，保留同一组件树与 macOS 视觉真源。 |
-| Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
-| Runtime compatibility | 确认无需更新 | 当前尚无新的真实 Windows Adapter 资格证据；所有 Windows 行继续保持 `not_qualified`。 |
-| Documentation routing | 已更新 | 版本指针、索引和本版 References 路由到 v1.14；Windows 长期任务入口保持指向当前 Contract、Architecture 与历史决定理由。 |
-| Root README | 确认无需更新 | Windows 尚未完成真实验收或发布，根 README 不提前声明常青 Windows 支持。 |
+| Version lifecycle | 已更新 | v1.13 冻结为 historical；本概览、实施计划与版本索引建立唯一 current v1.14。 |
+| Decisions | 已更新 | [V1.14-D01](decisions.md#v1-14-d01)记录安全 Timeline 默认与 message-anchored 显式模式的取舍。 |
+| Contracts | 已更新 | [Camp History Retrieval v4](../../contracts/camp-history-v4.md)与[Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)冻结 CLI 补全与兼容边界。 |
+| Architecture | 已更新 | Built-in Tool Runtime、基础不变量与 Camp Identity 路由明确解析后/Schema 前补全及 canonical Core 边界。 |
+| UI | 确认无需更新 | 本版只改变 Agent CLI 输入与教学，不改变 Renderer、交互或可见消息投影。 |
+| Runtime Activity | 确认无需更新 | canonical operation、Activity 与 Evidence shape 不变；CLI shorthand 不产生新活动类型。 |
+| Runtime compatibility | 确认无需更新 | 不改变 Runtime 准入或实测结论；安装快照仅按现有机制广告 v17 capability。 |
+| Documentation routing | 已更新 | 文档导航、Contract 索引、Decisions CURRENT 与当前架构引用切换到 v17/v4/v1.14。 |
+| Root README | 确认无需更新 | 项目定位、常青能力与支持范围不变，命令局部默认不进入根 README。 |
 
 ## References
 
-- [实施与验收计划](implementation-plan.md)
-- [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)
-- [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
-- [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
-- [Windows Private Storage v1](../../contracts/windows-private-storage-v1.md)
-- [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
-- [Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)
-- [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
-- [Windows packaging guide](../../development/packaging-windows.md)
+- [v1.14 实施计划](implementation-plan.md)
+- [v1.14 决策记录](decisions.md)
+- [Camp History Retrieval v4](../../contracts/camp-history-v4.md)
+- [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
+- [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)

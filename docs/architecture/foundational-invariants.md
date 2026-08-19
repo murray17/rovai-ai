@@ -54,18 +54,18 @@ last_updated: 2026-08-19
 ### Camp 创建、命名与激活
 
 - Camp 创建是 User-only、幂等且原子的独立领域动作。它冻结 workspace、成员、Default Lead 和协作模式，但不创建 Conversation、消息、Turn、Run、Native Session 或执行 Workspace，也不把 Runtime ready 当成 Camp 创建前提。
-- Camp 可以持久存在于零消息、零 Conversation 状态。Conversation 只在精确目标全部通过最终执行准入后，为那些目标惰性创建；多目标提交保持 all-or-none。
+- Camp 可以持久存在于零消息、零 Conversation 状态。Conversation 只在原子 Execution Admission 中为每个精确目标惰性创建；该业务准入不执行 Workspace 文件系统、Git、Runtime discovery、可执行文件或 fingerprint 检查，多目标提交保持 all-or-none。
 - Camp 名称经过空白规范化并受 Unicode scalar 上限约束，持久记录 `default | generated | user` 来源。只有第一条已接受用户执行提交可把默认名确定性改为生成名；用户命名永不被自动覆盖。生成名从权威 Structured Content 中去掉连续的行首寻址 mention 后计算，不从原始 Markdown 猜测。
-- Camp activation 是 Core-owned `pending | active` 状态。一步创建只建立 Pending Camp；第一条已接受用户提交在同一事务中激活。Pending Camp 不进入普通恢复和执行入口，只能显式丢弃或由受控启动清理删除。
+- Camp activation 是 Core-owned `pending | active` 状态。显式创建 Dialog 直接建立 Active Camp；经确认的一键入口建立 Pending Camp；Pending Camp 的第一条已接受用户提交在消息事务中将其激活。Pending Camp 不进入普通执行入口；空 Pending Camp 只能经受控丢弃或启动清理删除，有正文或附件的 Pending Draft 才能进入导航与恢复。
 
 <a id="camp-workspace"></a>
 
 ### Workspace 与动态 Git 能力
 
-- 每个 Camp 持久绑定 Lobby 或一个绝对、规范化、可遍历且安全的目录路径。Core 拒绝文件系统根、产品私有数据树、直接 Git 元数据目录和 bare repository；Runtime 权限仍独立决定 Agent 实际可做什么。
+- 每个 Camp 的持久 Workspace Binding 由 `projectBindingKind: quick_chat | directory` 和绝对、规范化、可遍历且安全的 `projectPath` 组成。`quick_chat` 指向应用受管的 Quick Chat 目录，`directory` 指向用户明确选择的安全目录。Core 拒绝文件系统根、产品私有数据树、直接 Git 元数据目录和 bare repository；Runtime 权限仍独立决定 Agent 实际可做什么。
 - Git 是对当前目录的动态能力，而不是 Camp 身份。Core 在创建、Run 启动、Git 专用操作和 Run 终止等边界重新观测 `not_git | git_valid | git_invalid`；Git 失效只关闭 Git 专用行为，不废止安全目录、协作历史或普通文件工作。
 - AgentRun 冻结 workspace 路径及起止 Git observation 作为审计事实。导航按规范目录路径分组，不引入 Project 表、Repository Scope 或 Git-common-directory 身份。
-- **Quick Chat / 快速对话** 是应用受管 Lobby workspace 的产品分组术语，不是 Camp 或 Project；持久 binding 和投影 key 使用当前 `quick-chat` 词汇，不继续生成旧 Lobby Chat 身份。
+- **Quick Chat / 快速对话** 是应用受管 workspace 的规范领域与产品分组术语，不是 Camp 或 Project。Rust variant 使用 `QuickChat`，存储与 IPC 值使用 `quick_chat`，JavaScript/TypeScript property 使用 `quickChat`，CSS/test identifier 与受管目录名使用 `quick-chat`。旧称只允许存在于历史快照和迁移证据；当前代码、合同与投影不保留 alias、deprecated field、dual read 或旧 wire value 翻译。
 
 <a id="camp-composer"></a>
 
@@ -124,10 +124,10 @@ last_updated: 2026-08-19
 
 - Camp、CampMember、Default Lead、Conversation、CampMessage、CampTurn、AgentRun 和 Task 由 Core 作为同一协作边界协调。Presence、Camp membership、Runtime readiness、Capability、权限、预算和 fencing 是相互独立的准入轴，不能由其中一项推导其余项。
 - CampMember 只表达 Camp 内关系，不复制全局 Presence。成员顺序使用稳定、不复用的关系序列；Default Lead 必须是当前有效关系且符合领导资格，关系/Presence 变化时由 Core 在同一命令中确定性修复或拒绝，不由 Renderer 自选替代。
-- Camp 只冻结 workspace binding 和成员关系，Git/Project 是可重观测投影而不是新聚合。新 Camp 不预创建 Conversation 或 Run；精确目标通过最终准入时才惰性创建 Conversation，多目标保持 all-or-none。永久删除默认要求 quiescent，force 只能在用户明确确认和持久停止/隔离边界后执行。
+- Camp 只冻结 workspace binding 和成员关系，Git/Project 是可重观测投影而不是新聚合。新 Camp 不预创建 Conversation 或 Run；原子 Execution Admission 为精确目标惰性创建 Conversation、公共消息、Turn 与 queued Run，多目标保持 all-or-none。Workspace、Git、Runtime 与可执行文件检查属于后续 Scheduler dispatch 边界。永久删除默认要求 quiescent，force 只能在用户明确确认和持久停止/隔离边界后执行。
 - Renderer 可以先本地显示待确认的用户消息，但不得把它当成 CampMessage。Core 接受发送时原子持久公共消息、Turn、目标 Run 和冻结配置；Scheduler 在执行边界完成 workspace、Runtime、Git、当前 membership/permission/fence 检查。失败产生诚实 Run 终态，不撤销已接受消息；ending Git observation 属于终态审计而不是发送准入。
 - 一次 CampTurn 的 root Run 与 A2A 后代共享冻结 execution budget。Core 以一个事务检查与消费总 AgentRun、accepted A2A、depth、fanout 和相关 allowance，并对重放返回同一结果；客户端、Runtime 或多条 Delivery 不能拆分请求绕过预算。
-- Composer Stop 作用于整个 CampTurn 执行树；共享 ExecutionDrawer 的 Run Stop 只作用于当前 AgentRun，不写 Turn cancel request、不取消兄弟 Run/Delivery，也不创建公共时间线消息。两者都由 Core 先幂等持久取消意图并立即关闭相应 Run 的新领域写入，再由既有 coordinator 有界中断 Runtime；只有可靠 Runtime 终态才能声称已取消，外部效果保持 `settled | unsettled | unknown` 的诚实状态。
+- Composer Stop 作用于整个 CampTurn 执行树；共享 ExecutionDrawer 的 Run Stop 只作用于当前 AgentRun，不写 Turn cancel request、不取消兄弟 Run/Delivery，也不创建公共时间线消息。两者都由 Core 先幂等持久取消意图并立即关闭相应 Run 的新领域写入，再由既有 coordinator 有界中断 Runtime；只有可靠 Runtime 终态才能声称已取消。外部效果是否待确认必须作为独立事实保留；缺少权威终态时设置 `hasUnsettledExternalEffects`，不得从 Run 的取消状态推断效果已经结算。
 
 <a id="collaboration-task"></a>
 
@@ -145,8 +145,9 @@ last_updated: 2026-08-19
 
 - CampMessage 是唯一公共消息事实；ConversationMessage 只服务目标成员的私有连续性。公共 A2A、用户消息和允许的 Runtime 自动输出都必须先越过同一 publication fence，之后才可进入 History、Context、通知或 Delivery。
 - History 的稳定职责分为 Camp discovery、单一显式 Camp 内 search/read、跨 Camp public search 和按 exact ID/sequence 分页读取；工具只返回结构化、有界、可继续的结果，不恢复旧 Summary 或让 relevance search 取代权威顺序读取。中文/短查询、转义、派生索引与 tombstone 使用确定性合同，索引可重建且不成为第二真源。
+- `rovai camp read` 的 CLI 省略 mode 时只解释为 `timeline + before + limit 20`；显式 Camp ID 只改变单一 target，显式 direction/limit 覆盖对应默认，cursor 不设默认。item/around/thread 仍必须显式选择，message ID 和模式专属字段从不推断 mode。
 - Agent 只能访问自己当前具备 Camp 关系和运行授权的公共历史；每次读取都重做 live authorization，ID、搜索命中、旧 Manifest、引用闭包或过去的关系不扩大 scope。跨 Camp search 只发现当前可见公开消息，后续 exact read 仍使用相同授权。
-- `camp.message.send` 只有 `Automatic | PublicOnly` 两种持久寻址意图。只有显式 built-in routing operation 且意图允许 Agent addressing 时才创建 Delivery；Runtime 自动 final、普通用户消息和纯 public publication 不能靠正文意外唤醒 Agent。
+- `camp.message.send` 只有 `automatic | public_only` 两种持久寻址意图。只有显式 built-in routing operation 且意图允许 Agent addressing 时才创建 Delivery；Runtime 自动 final、普通用户消息和纯 public publication 不能靠正文意外唤醒 Agent。
 - Canonical Agent ID 是稳定目标形式。精确当前成员显示名可作为 Core 解析的便利 alias，但只在逻辑行首第一个非空白 token 处生效；mid-line prose 不寻址，歧义或不合格成员 fail closed。
 - 当前 Run 作者可以按 exact message ID 读取自己刚提交且越过 publication fence 的消息；该窄例外不扩大历史高水位、其他作者或跨 Camp读取。
 
@@ -299,11 +300,11 @@ last_updated: 2026-08-19
 - Core IPC 先返回并校验完整 Envelope，然后按 operation 投影一份 closed Agent result JSON。普通 Agent 输出不包含 envelope wrapper、request identity 或 receipt，也不通过递归删字段得到；每个 operation 有明确 `agentOutputSchema` 与 golden fixture。完整 Envelope 只用于 Core、Evidence、Qualification 和 host-controlled debug 边界。
 - `rovai` CLI 是 Runtime 调用 Rovai-owned built-ins 的唯一运输。内置 MCP/`rovai_team` Bridge、注入、alias map、Runtime 临时配置和 native permission bundle 已 clean break 删除；不存在 fallback 或同 Run 双运输。用户外部 MCP 继续走独立 Library/Runtime-native projection，不经 Built-in Router。
 - CLI 使用领域分组命令，但 receipt、审计、Activity 与 Envelope 保留 canonical dotted operation identity。Native Session Bootstrap 只教稳定 CLI 入口和通用失败纪律；Agent 侧没有 `tool list`、`tool describe`、generic invoke 或全量 schema discovery。精确输入源和本命令约束由简短 `--help` 给出，复杂选择/恢复由 `cli-operations` Skill 说明。
-- 每个业务命令一次只选 direct arguments、stdin/heredoc 或 `--input-file` 一个输入源，不合并也不建立覆盖优先级。CLI 只把 canonical JSON 传给 Core；输入文件路径、Shell quoting 与临时文件不是 Core 信任边界或保密保证。
+- 每个业务命令一次只选 direct arguments、stdin/heredoc 或 `--input-file` 一个输入源，不合并也不建立覆盖优先级。`camp.read` 只在所选来源成为 JSON 对象之后、canonical Schema 校验之前补全安全 Timeline 默认；默认 Timeline 发送给 Core 的 canonical JSON 始终包含 mode/direction/limit，其他显式 mode 继续发送各自完整 branch。其他命令不引入业务默认；输入文件路径、Shell quoting 与临时文件不是 Core 信任边界或保密保证。
 - 目标 Runtime 必须在接收 Run 输入前证明 CLI、当前 IPC、Run binding 和当前 contract 可用；否则以结构化理由 fail closed，不启动降级 Agent。发布资格按 Runtime 及宿主平台独立验收，不因一个平台未准入而否定其他已验收组合。
 - Business rejection 投影稳定 code、safe message、closed recovery 和合同允许的 details；不泄露 stack、SQL、内部路径、IPC 地址、secret 或未筛底层错误。乐观冲突要求重读后重新判断；只有 Core 明确允许时才以同一 request identity 有界重试。幂等重试返回原 receipt/结果而不重复效果；无法证明时返回 outcome indeterminate 并要求核对当前状态。
 - CLI 子进程通过当前 Run 的受保护本地 IPC endpoint 与新 lease 继承调用身份，不从可复用 Runtime 进程身份继承权力。Runtime 及它启动的子进程共享当前 Run/Member 归属和同一 scope/version/quota/fence，不根据父进程名、命令文本或层级猜测模型意图。Run release 先 fence lease，迟到子进程调用不得归属于后续 Run。
-- Unix Socket 和受保护 Windows Named Pipe 共享 Local IPC v2 语义：每 App 一个 endpoint，基于 OS identity 加 process/lease token 的双重校验，当前用户专用权限，有界 frame/超时/重试，断连结果不明时不盲重发。v15 完整继承 v14 transport/security，只扩展当前 operation 合同。
+- Unix Socket 和受保护 Windows Named Pipe 共享 Local IPC v2 语义：每 App 一个 endpoint，基于 OS identity 加 process/lease token 的双重校验，当前用户专用权限，有界 frame/超时/重试，断连结果不明时不盲重发。v17 完整继承 v16 transport/security，只扩展当前 `camp.read` CLI 与 catalog 合同。
 - 一次已由 Core 验证的 CLI invocation 在主 Activity 中以 canonical operation 呈现。Runtime Shell Evidence 只在具有显式 Core request/receipt 与结构化 command identity 关联时折叠为 supporting transport；无法证明时保留两项独立 Evidence，不用文本、时间或目录猜测。
 
 <a id="skills-external-mcp"></a>
@@ -341,7 +342,7 @@ last_updated: 2026-08-19
 - `phase` 只表示 started/progress/terminal 位置，`outcome` 独立表示证据支持的结果。乱序、冲突、waiting、Run 终态和 recovery 使用同一 reducer，不能从进程退出或 UI 消失猜 success/cancelled。
 - 每个 operation 的默认 classifier/version 首次建立后固定。新分类器通过显式平行 reprojection 和可追溯迁移产生，不静默改写历史，也不中途改变 live operation 语义。
 - 分类升级生成显式平行 projection/version，携带来源 Evidence set、classifier/mapping digest、输出 digest 和可回滚迁移记录；默认历史读取保持首次建立版本，live operation 不中途换 classifier。当前产品只维护一张 current Canonical Activity Projection 和当前 Mapping Registry；任意历史身份 replay 基础设施未准入前，不伪造已支持的重放能力。
-- 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `run_level | operation_level | semantic_level`等层级，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
+- 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
 
 <a id="evidence-usage"></a>
 

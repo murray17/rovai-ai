@@ -2,7 +2,7 @@ import { defineBenchmarkProfile } from '../execution/suite.mjs'
 import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
-  version: 'v1.14',
+  version: 'v1.15',
   projectionSchemaVersion: 52
 })
 
@@ -67,7 +67,7 @@ export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
     evidence: test('crates/rovai-core/src/collaboration.rs', 'agent_task_updates_respect_lead_and_assignee_authority')
   },
   {
-    id: 'built-in-transport-v16',
+    id: 'built-in-transport-v17',
     evidence: test('crates/rovai-core/src/builtin_tool_transport.rs', 'list_and_describe_share_one_digest')
   },
   {
@@ -80,7 +80,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.14.0',
+  version: '1.15.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -98,8 +98,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.14-current-contract',
-    version: '1.14.0',
+    id: 'rovai-v1.15-current-contract',
+    version: '1.15.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

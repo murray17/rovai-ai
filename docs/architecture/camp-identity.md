@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: camp-identity-boundaries
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Camp Identity Architecture
@@ -37,6 +37,8 @@ Camp API、Camp path 和 Agent-facing Camp locator 只接受 `rvcamp_...`。
 - Desktop Core 参数与领域命令反序列化在查询、授权或路径计算之前拒绝非 canonical 值。
 - Renderer 只用共享 `isCampId` 恢复本机导航、onboarding、pin 与 timeline state；无效旧状态被丢弃。
 - Context Formatter、Camp History 与 Built-in catalog 共享同一 Camp ID 语义，但各自通过版本化合同冻结 wire。
+- `camp.read` CLI 的 Timeline 默认只补全 read shape；显式或从当前 Binding 解析出的 CampId 仍经过同一
+  canonical parse 与 live authorization，不因默认读取方式改变 identity scope。
 - Attachment 与 Runtime-managed home 先解析 Camp ID，再把 canonical value 当作单一路径组件。
 - Conversation/Runtime 层保留 provider-native ID，不从 Camp ID 推导、补全或猜测 Session ID。
 
@@ -62,7 +64,7 @@ Run、Turn、Delivery 与 Gather。
 
 - [Camp Identity v1](../contracts/camp-identity-v1.md)
 - [ContextManifest Evidence v18](../contracts/context-manifest-evidence-v18.md)
-- [Camp History Retrieval v3](../contracts/camp-history-v3.md)
-- [Built-in Tool Transport v16](../contracts/builtin-tool-transport-v16.md)
+- [Camp History Retrieval v4](../contracts/camp-history-v4.md)
+- [Built-in Tool Transport v17](../contracts/builtin-tool-transport-v17.md)
 - [AgentRun Recovery](agent-run-recovery.md)
 - [Built-in Tool Runtime](builtin-tool-runtime.md)

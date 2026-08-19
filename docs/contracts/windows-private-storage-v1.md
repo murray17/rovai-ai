@@ -56,7 +56,8 @@ windows_storage.path_outside_tested_envelope
 
 ## 3. Private object creation
 
-Named Pipe security is owned by Built-in Tool Transport v14. Filesystem objects use the same general rule through native
+Named Pipe security is owned by current [Built-in Tool Transport v17](builtin-tool-transport-v17.md), which inherits the
+v14 creation-time security boundary. Filesystem objects use the same general rule through native
 creation APIs:
 
 - new sensitive file: `CreateFileW(..., CREATE_NEW, SECURITY_ATTRIBUTES, ...)`;

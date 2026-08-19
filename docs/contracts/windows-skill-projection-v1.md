@@ -105,7 +105,7 @@ The gate is keyed by opened canonical root identity:
 - ambiguous recovery leaves the root blocked with a stable `skill_projection_recovery_required` reason.
 
 Migration 97 installs the registration table plus nullable `operation_id` and `entry_identity` observation columns and
-advances the exact `v1.13 / schema 51 / migration 96` source to Data Contract `v1.14 / projection schema 52`. Existing
+advances the exact `v1.13 / schema 51 / migration 96` source to Data Contract `v1.15 / projection schema 52`. Existing
 macOS observations remain valid with null Windows-only identity fields; Migration 96 remains the released v1.13
 `agent_run.runtime_observed_model_id` transition and is never reused.
 

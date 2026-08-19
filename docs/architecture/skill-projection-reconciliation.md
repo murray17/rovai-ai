@@ -181,6 +181,6 @@ Resolver 只接受 `ready`、同 ID/同名且与冻结 Runtime Group 相容的�
   长 SQLite transaction，project-owned 或 externally modified entry 永不静默覆盖/删除。
 
 Migration 97 从已完整应用 Migration 96 的 Data Contract `v1.13 / projection schema 51` 安装 observation
-`operation_id`、`entry_identity` 与 Windows Run registration，目标为 `v1.14 / projection schema 52`。Migration 96
+`operation_id`、`entry_identity` 与 Windows Run registration，目标为 `v1.15 / projection schema 52`。Migration 96
 继续只拥有 `agent_run.runtime_observed_model_id`；Migration 97 不改变 macOS link backend、ContextManifest 18 或
 SkillExposureSnapshot schema 2。

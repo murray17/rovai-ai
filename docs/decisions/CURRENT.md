@@ -27,8 +27,8 @@ last_updated: 2026-08-19
 
 ## Collaboration、Task 与 Message Delivery
 
-- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[Public A2A Message Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Gather](../architecture/durable-gather-barrier.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v10](../contracts/camp-message-send-v10.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Gather v3](../contracts/gather-v3.md)和[Camp History Retrieval v3](../contracts/camp-history-v3.md)。
-- 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)。
+- 当前规范：[协作与消息基础不变量](../architecture/foundational-invariants.md#collaboration-admission)、[Public A2A Message Delivery](../architecture/public-a2a-message-delivery.md)、[Durable Gather](../architecture/durable-gather-barrier.md)、[Durable Task v3](../contracts/durable-task-v3.md)、[Camp Message Send v10](../contracts/camp-message-send-v10.md)、[Message Delivery v4](../contracts/message-delivery-v4.md)、[Gather v3](../contracts/gather-v3.md)和[Camp History Retrieval v4](../contracts/camp-history-v4.md)。
+- 理由来源：[v0.15](../versions/v0.15/decisions.md)、[v0.45](../versions/v0.45/decisions.md)、[v0.47](../versions/v0.47/decisions.md)、[v0.54](../versions/v0.54/decisions.md)、[v0.59](../versions/v0.59/decisions.md)、[v0.62](../versions/v0.62/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.89](../versions/v0.89/decisions.md)、[v0.90](../versions/v0.90/decisions.md)、[v1.06](../versions/v1.06/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)。
 
 ## Runtime execution 与 Security
 
@@ -47,8 +47,8 @@ last_updated: 2026-08-19
 
 ## Skills、MCP 与 Built-ins
 
-- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v16](../contracts/builtin-tool-transport-v16.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
-- 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)。
+- 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v17](../contracts/builtin-tool-transport-v17.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
+- 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)。
 
 ## Evidence、Runtime Activity 与 Usage
 

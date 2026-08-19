@@ -290,10 +290,17 @@ export function buildLiveExecutionProgress(
       steps.push(step)
       return
     }
+    const previous = steps[index]
+    const title = step.activityDomain === 'shell'
+      && !genericShellTitle(previous.title)
+      && genericShellTitle(step.title)
+      ? previous.title
+      : step.title
     steps[index] = {
-      ...steps[index],
+      ...previous,
       ...step,
-      detail: step.detail || steps[index].detail
+      title,
+      detail: step.detail || previous.detail
     }
   }
 
@@ -354,7 +361,7 @@ export function buildLiveExecutionProgress(
       const itemId = canonical?.operationId ?? event.id
       rememberItem(`tool:${itemId}`)
       const nativeStatus = stringField(item, 'status')
-      const title = canonicalActivityTitle(canonical)
+      const title = executionActivityTitle(canonical, payload)
       const command = stringField(item, 'command')
       const rawOutput = stringField(item, 'aggregatedOutput')
         ?? stringField(item, 'output')
@@ -386,7 +393,7 @@ export function buildLiveExecutionProgress(
       const canonical = event.canonical
       const itemId = canonical?.operationId ?? event.id
       rememberItem(`tool:${itemId}`)
-      const title = canonicalActivityTitle(canonical)
+      const title = executionActivityTitle(canonical, payload)
       const nativeStatus = stringField(payload, 'status')
       upsertStep({
         id: itemId,
@@ -407,7 +414,7 @@ export function buildLiveExecutionProgress(
       rememberItem(`tool:${itemId}`)
       upsertStep({
         id: itemId,
-        title: canonicalActivityTitle(canonical),
+        title: executionActivityTitle(canonical, payload),
         detail: 'Patch 内容已更新',
         status: canonicalActivityStatus(canonical, 'running'),
         activityDomain: canonical?.activityDomain ?? 'unknown',
@@ -684,12 +691,27 @@ function canonicalRuntimeActivity(value: unknown): CanonicalRuntimeActivityView 
     : null
 }
 
-function canonicalActivityTitle(canonical: CanonicalRuntimeActivityView | null | undefined): string {
-  if (canonical?.toolName) return canonical.toolName
-  if (canonical?.presentationHint) {
-    return canonical.presentationHint
-      .replaceAll('Runtime 工具调用', '工具调用')
-      .replaceAll('Runtime 活动', '系统活动')
+export function executionActivityTitle(
+  canonical: CanonicalRuntimeActivityView | null | undefined,
+  payload: unknown
+): string {
+  const presentationHint = canonical?.presentationHint
+    ?.replaceAll('Runtime 工具调用', '工具调用')
+    .replaceAll('Runtime 活动', '系统活动')
+  const shellActivity = canonical?.activityDomain === 'shell'
+  const command = shellActivity ? publicShellCommand(payload) : null
+
+  if (shellActivity) {
+    if (presentationHint && !genericShellTitle(presentationHint)) {
+      return presentationHint
+    }
+    const commandLabel = command ? shellCommandLabel(command) : null
+    if (commandLabel) return commandLabel
+    if (canonical?.toolName) return canonical.toolName
+    if (presentationHint) return presentationHint
+  } else {
+    if (canonical?.toolName) return canonical.toolName
+    if (presentationHint) return presentationHint
   }
   return ({
     shell: '终端操作',
@@ -702,6 +724,215 @@ function canonicalActivityTitle(canonical: CanonicalRuntimeActivityView | null |
     plan: '计划更新',
     unknown: '系统活动'
   } as Record<string, string>)[canonical?.activityDomain ?? 'unknown'] ?? '系统活动'
+}
+
+const GENERIC_SHELL_TITLES = new Set([
+  'bash',
+  'execute',
+  'run command',
+  'shell',
+  'terminal',
+  '执行 shell 命令',
+  '终端操作'
+])
+
+function genericShellTitle(title: string): boolean {
+  return GENERIC_SHELL_TITLES.has(title.toLocaleLowerCase())
+}
+
+const COMMANDS_WITH_SUBCOMMAND = new Set([
+  'bun',
+  'cargo',
+  'deno',
+  'dotnet',
+  'git',
+  'go',
+  'gradle',
+  'gradlew',
+  'mvn',
+  'npm',
+  'npx',
+  'pnpm',
+  'swift',
+  'uv',
+  'yarn'
+])
+
+const ROVAI_CAMP_ACTIONS = new Set(['list', 'read', 'search'])
+
+type ShellToken = { value: string; operator: boolean }
+
+function publicShellCommand(payload: unknown): string | null {
+  const root = asRecord(payload)
+  const item = asRecord(root.item)
+  const itemCommand = stringField(item, 'command')
+  if (itemCommand?.trim()) return itemCommand
+
+  const input = root.input
+  if (typeof input === 'string' && input.trim()) return input
+  const inputRecord = asRecord(input)
+  for (const key of ['command', 'commandLine', 'CommandLine', 'cmd']) {
+    const command = stringField(inputRecord, key)
+    if (command?.trim()) return command
+  }
+  return null
+}
+
+function shellCommandLabel(command: string, depth = 0): string | null {
+  if (depth > 2) return null
+  const segments = splitShellSegments(tokenizeShellCommand(command))
+  for (const segment of segments) {
+    const label = shellSegmentLabel(segment, depth)
+    if (label) return label
+  }
+  return null
+}
+
+function shellSegmentLabel(tokens: string[], depth: number): string | null {
+  let cursor = 0
+  while (cursor < tokens.length && shellAssignment(tokens[cursor])) cursor += 1
+  if (cursor >= tokens.length) return null
+
+  const executable = shellExecutable(tokens[cursor])
+  if (!executable) return null
+  if (executable === 'cd') return null
+
+  if (executable === 'env') {
+    cursor += 1
+    while (cursor < tokens.length && (tokens[cursor].startsWith('-') || shellAssignment(tokens[cursor]))) {
+      cursor += 1
+    }
+    return shellSegmentLabel(tokens.slice(cursor), depth + 1)
+  }
+
+  if (['command', 'exec', 'nohup', 'time'].includes(executable)) {
+    return shellSegmentLabel(tokens.slice(cursor + 1), depth + 1)
+  }
+
+  if (['bash', 'dash', 'fish', 'ksh', 'sh', 'zsh'].includes(executable)) {
+    const commandIndex = tokens.findIndex((token, index) => index > cursor && ['-c', '-lc'].includes(token))
+    return commandIndex >= 0 && tokens[commandIndex + 1]
+      ? shellCommandLabel(tokens[commandIndex + 1], depth + 1)
+      : executable
+  }
+  if (['cmd', 'cmd.exe', 'powershell', 'powershell.exe', 'pwsh', 'pwsh.exe'].includes(executable)) {
+    const commandIndex = tokens.findIndex((token, index) => index > cursor && ['/c', '-command'].includes(token.toLocaleLowerCase()))
+    return commandIndex >= 0 && tokens[commandIndex + 1]
+      ? shellCommandLabel(tokens.slice(commandIndex + 1).join(' '), depth + 1)
+      : executable
+  }
+
+  const labelParts = [executable]
+  const following = tokens.slice(cursor + 1)
+  if (executable === 'rovai') {
+    const command = following[0]
+    const safeCommand = command && !command.startsWith('-') ? shellLabelPart(command) : null
+    if (safeCommand) {
+      labelParts.push(safeCommand)
+      if (safeCommand === 'camp') {
+        const action = following[1]
+        const safeAction = action && !action.startsWith('-') ? shellLabelPart(action) : null
+        if (safeAction && ROVAI_CAMP_ACTIONS.has(safeAction)) labelParts.push(safeAction)
+      }
+    }
+  } else if (COMMANDS_WITH_SUBCOMMAND.has(executable)) {
+    const part = following[0]
+    if (part && !part.startsWith('-')) {
+      const safePart = shellLabelPart(part)
+      if (safePart) labelParts.push(safePart)
+    }
+  }
+  return truncateCommandLabel(labelParts.join(' '))
+}
+
+function tokenizeShellCommand(command: string): ShellToken[] {
+  const tokens: ShellToken[] = []
+  let current = ''
+  let quote: 'single' | 'double' | null = null
+  let escaped = false
+  const flush = (): void => {
+    if (!current) return
+    tokens.push({ value: current, operator: false })
+    current = ''
+  }
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index]
+    if (escaped) {
+      current += character
+      escaped = false
+      continue
+    }
+    if (character === '\\' && quote !== 'single') {
+      escaped = true
+      continue
+    }
+    if (quote === 'single') {
+      if (character === "'") quote = null
+      else current += character
+      continue
+    }
+    if (quote === 'double') {
+      if (character === '"') quote = null
+      else current += character
+      continue
+    }
+    if (character === "'") {
+      quote = 'single'
+      continue
+    }
+    if (character === '"') {
+      quote = 'double'
+      continue
+    }
+    if (/\s/u.test(character)) {
+      flush()
+      if (character === '\n') tokens.push({ value: '\n', operator: true })
+      continue
+    }
+    if (['&', '|', ';'].includes(character)) {
+      flush()
+      const doubled = command[index + 1] === character
+      tokens.push({ value: doubled ? character.repeat(2) : character, operator: true })
+      if (doubled) index += 1
+      continue
+    }
+    current += character
+  }
+  if (escaped) current += '\\'
+  flush()
+  return tokens
+}
+
+function splitShellSegments(tokens: ShellToken[]): string[][] {
+  const segments: string[][] = [[]]
+  for (const token of tokens) {
+    if (token.operator) {
+      if (segments.at(-1)?.length) segments.push([])
+      continue
+    }
+    segments.at(-1)?.push(token.value)
+  }
+  return segments.filter((segment) => segment.length > 0)
+}
+
+function shellExecutable(token: string): string | null {
+  const basename = token.replaceAll('\\', '/').split('/').at(-1)?.toLocaleLowerCase() ?? ''
+  return shellLabelPart(basename)
+}
+
+function shellLabelPart(token: string): string | null {
+  const value = token.trim()
+  return value && /^[\p{L}\p{N}._:+-]+$/u.test(value) ? value : null
+}
+
+function shellAssignment(token: string): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*=/u.test(token)
+}
+
+function truncateCommandLabel(label: string): string {
+  const characters = Array.from(label)
+  return characters.length <= 56 ? label : `${characters.slice(0, 55).join('')}…`
 }
 
 function canonicalActivityStatus(

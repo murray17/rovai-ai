@@ -406,7 +406,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 15,
+    contractVersion: 17,
     ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -450,9 +450,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v16')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v17')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v15: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v17: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -991,7 +991,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v15 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v17 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -1060,7 +1060,7 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v15 ipc-v2'
+"$CLI" --version | grep -q 'contract-v17 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
@@ -1091,6 +1091,9 @@ camp_search_help="$("$CLI" camp search --help)"
 printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai camp search --query 'amount'"
 printf '%s\n' "$camp_search_help" | grep -Fq -- "rovai camp search --camp-id '<camp-id>' --query 'amount'"
 camp_read_help="$("$CLI" camp read --help)"
+printf '%s\n' "$camp_read_help" | grep -Fq -- 'Default behavior:'
+printf '%s\n' "$camp_read_help" | grep -Fq -- '--mode timeline --direction before --limit 20'
+printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --camp-id '<camp-id>'"
 printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --mode item --message-id '<message-id>'"
 printf '%s\n' "$camp_read_help" | grep -Fq -- "rovai camp read --camp-id '<camp-id>' --mode item --message-id '<message-id>'"
 history_search_help="$("$CLI" history search --help)"
@@ -1203,6 +1206,34 @@ STEP=camp_search_explicit_current
 camp_search_explicit_current="$("$CLI" camp search --camp-id ${shellQuote(input.campId)} --query ${shellQuote(input.currentMarker)} --limit 5)"
 assert_success "$camp_search_explicit_current" 'camp.search'
 test "$(printf '%s\n' "$camp_search_explicit_current" | "$JQ" -er '.results[0].messageId')" = "$message_id"
+STEP=camp_read_default_current
+camp_read_default_current="$("$CLI" camp read </dev/null)"
+assert_success "$camp_read_default_current" 'camp.read'
+printf '%s\n' "$camp_read_default_current" | "$JQ" -e --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" '
+  .campId == $campId
+  and .mode == "timeline"
+  and .direction == "before"
+  and (.items | any(.messageId == $messageId))
+' >/dev/null
+STEP=camp_read_default_explicit
+camp_read_default_explicit="$("$CLI" camp read --camp-id ${shellQuote(input.campId)})"
+assert_success "$camp_read_default_explicit" 'camp.read'
+printf '%s\n' "$camp_read_default_explicit" | "$JQ" -e --arg messageId "$message_id" '
+  .mode == "timeline"
+  and .direction == "before"
+  and (.items | any(.messageId == $messageId))
+' >/dev/null
+STEP=camp_read_default_stdin
+camp_read_default_stdin="$(printf '%s\n' ${shellQuote(JSON.stringify({ campId: input.campId, limit: 5 }))} | "$CLI" camp read)"
+assert_success "$camp_read_default_stdin" 'camp.read'
+printf '%s\n' "$camp_read_default_stdin" | "$JQ" -e '.mode == "timeline" and .direction == "before"' >/dev/null
+cat > "$RUN_TMP/camp-read-default.json" <<'ROVAI_JSON'
+${JSON.stringify({ campId: input.campId, direction: 'after', limit: 5 })}
+ROVAI_JSON
+STEP=camp_read_default_input_file
+camp_read_default_input_file="$("$CLI" camp read --input-file "$RUN_TMP/camp-read-default.json")"
+assert_success "$camp_read_default_input_file" 'camp.read'
+printf '%s\n' "$camp_read_default_input_file" | "$JQ" -e '.mode == "timeline" and .direction == "after"' >/dev/null
 STEP=camp_read
 ${campRead('$message_id')} > "$RUN_TMP/camp-read.json"
 camp_read="$("$CLI" camp read --input-file "$RUN_TMP/camp-read.json")"

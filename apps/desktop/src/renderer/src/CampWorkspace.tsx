@@ -65,12 +65,14 @@ import { projectCampWorldMap } from './camp-world-map-model'
 import {
   CAMP_TIMELINE_READING_POSITIONS_STORAGE_KEY,
   campTimelineContentChanged,
+  campTimelineFollowingLatestAfterScroll,
   campTimelineIsNearBottom,
   campTimelineReadingPositionFromStoredValue,
   followLatestCampTimeline,
   restoredCampTimelineScrollTop,
   storedCampTimelineReadingPositionsWithUpdate,
-  type CampTimelineReadingPosition
+  type CampTimelineReadingPosition,
+  type CampTimelineViewportGeometry
 } from './camp-timeline-position'
 import {
   applyConversationFindHighlights,
@@ -1096,6 +1098,10 @@ export function CampWorkspace({
   const timelineReadingPosition = useRef<{
     campId: string
     position: CampTimelineReadingPosition
+  } | null>(null)
+  const timelineViewportGeometry = useRef<{
+    campId: string
+    geometry: CampTimelineViewportGeometry
   } | null>(null)
   const timelinePositionSaveTimer = useRef<number | null>(null)
   const lastVisibleNotificationSources = useRef<string | null>(null)
@@ -2280,17 +2286,29 @@ export function CampWorkspace({
     scroll: HTMLElement
   ): void => {
     timelineVisibleAnchorRef.current = visibleTimelineMessageAnchor(scroll)
+    const previousPosition = timelineReadingPosition.current?.campId === campId
+      ? timelineReadingPosition.current.position
+      : null
+    const previousGeometry = timelineViewportGeometry.current?.campId === campId
+      ? timelineViewportGeometry.current.geometry
+      : null
+    const geometry = {
+      scrollTop: Math.max(0, scroll.scrollTop),
+      scrollHeight: scroll.scrollHeight,
+      clientHeight: scroll.clientHeight
+    }
     timelineReadingPosition.current = {
       campId,
       position: {
-        scrollTop: Math.max(0, scroll.scrollTop),
-        followingLatest: !conversationFind.open && campTimelineIsNearBottom(
-          scroll.scrollTop,
-          scroll.scrollHeight,
-          scroll.clientHeight
+        scrollTop: geometry.scrollTop,
+        followingLatest: !conversationFind.open && campTimelineFollowingLatestAfterScroll(
+          previousPosition,
+          previousGeometry,
+          geometry
         )
       }
     }
+    timelineViewportGeometry.current = { campId, geometry }
     if (timelinePositionSaveTimer.current !== null) {
       window.clearTimeout(timelinePositionSaveTimer.current)
     }
@@ -2307,6 +2325,16 @@ export function CampWorkspace({
       ? followLatestCampTimeline(scroll)
       : { scrollTop: 0, followingLatest: true }
     timelineReadingPosition.current = { campId, position }
+    if (scroll) {
+      timelineViewportGeometry.current = {
+        campId,
+        geometry: {
+          scrollTop: position.scrollTop,
+          scrollHeight: scroll.scrollHeight,
+          clientHeight: scroll.clientHeight
+        }
+      }
+    }
     if (timelinePositionSaveTimer.current !== null) {
       window.clearTimeout(timelinePositionSaveTimer.current)
       timelinePositionSaveTimer.current = null
@@ -2334,6 +2362,14 @@ export function CampWorkspace({
             scrollTop,
             followingLatest: current?.followingLatest !== false
               || campTimelineIsNearBottom(scrollTop, scroll.scrollHeight, scroll.clientHeight)
+          }
+        }
+        timelineViewportGeometry.current = {
+          campId,
+          geometry: {
+            scrollTop,
+            scrollHeight: scroll.scrollHeight,
+            clientHeight: scroll.clientHeight
           }
         }
         lastTimelineItem.current = {
@@ -2375,6 +2411,14 @@ export function CampWorkspace({
           && campTimelineIsNearBottom(scroll.scrollTop, scroll.scrollHeight, scroll.clientHeight)
       }
     }
+    timelineViewportGeometry.current = {
+      campId,
+      geometry: {
+        scrollTop: Math.max(0, scroll.scrollTop),
+        scrollHeight: scroll.scrollHeight,
+        clientHeight: scroll.clientHeight
+      }
+    }
     lastTimelineItem.current = { campId, ...nextMarker }
   }, [conversationTimeline, conversationView, snapshot.camp.id])
 
@@ -2391,15 +2435,48 @@ export function CampWorkspace({
       const position = followLatestCampTimeline(scroll)
       timelineReadingPosition.current = { campId, position }
     }
+    timelineViewportGeometry.current = {
+      campId,
+      geometry: {
+        scrollTop: Math.max(0, scroll.scrollTop),
+        scrollHeight: scroll.scrollHeight,
+        clientHeight: scroll.clientHeight
+      }
+    }
+    let resizeFrame: number | null = null
+    let settleFrame: number | null = null
     const observer = new ResizeObserver(() => {
       const latest = timelineReadingPosition.current
-      if (latest?.campId === campId && latest.position.followingLatest === false) return
-      const position = followLatestCampTimeline(scroll)
-      timelineReadingPosition.current = { campId, position }
+      const shouldFollowLatest = latest?.campId !== campId
+        || latest.position.followingLatest !== false
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
+      if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null
+        settleFrame = window.requestAnimationFrame(() => {
+          settleFrame = null
+          if (shouldFollowLatest) {
+            const position = followLatestCampTimeline(scroll)
+            timelineReadingPosition.current = { campId, position }
+          }
+          timelineViewportGeometry.current = {
+            campId,
+            geometry: {
+              scrollTop: Math.max(0, scroll.scrollTop),
+              scrollHeight: scroll.scrollHeight,
+              clientHeight: scroll.clientHeight
+            }
+          }
+        })
+      })
     })
     observer.observe(scroll)
     observer.observe(track)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
+      if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+    }
   }, [conversationView, snapshot.camp.id])
 
   useEffect(() => {
@@ -6430,11 +6507,9 @@ export function RunExecutionDisclosure({
         const hasDetail = Boolean(step.detail)
         const summary = (
           <>
-            <ToolCallIcon activityDomain={step.activityDomain} status={status} />
+            <ToolCallIcon activityDomain={step.activityDomain} />
             <span className="tool-call-title">{step.title}</span>
-            <span className={`tool-call-result status-${status}`}>
-              {toolCallStatusLabel(status)}
-            </span>
+            <ToolCallState status={status} />
             {hasDetail && <span className="tool-call-chevron" aria-hidden="true">⌄</span>}
           </>
         )
@@ -6537,13 +6612,7 @@ export function RunExecutionDisclosure({
   )
 }
 
-function ToolCallIcon({
-  activityDomain,
-  status
-}: {
-  activityDomain: string
-  status: string
-}): JSX.Element {
+function ToolCallIcon({ activityDomain }: { activityDomain: string }): JSX.Element {
   const icon = ({
     shell: '>_',
     file: '±',
@@ -6556,16 +6625,28 @@ function ToolCallIcon({
     unknown: '·'
   } as Record<string, string>)[activityDomain] ?? '·'
   return (
-    <span className={`tool-call-icon status-${status}`} aria-hidden="true">
+    <span className="tool-call-icon" aria-hidden="true">
       {icon}
     </span>
+  )
+}
+
+function ToolCallState({ status }: { status: string }): JSX.Element {
+  const label = toolCallStatusLabel(status)
+  return (
+    <span
+      className={`tool-call-state status-${status}`}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
   )
 }
 
 function toolCallStatusLabel(status: string): string {
   return ({
     running: '执行中',
-    completed: '已完成',
+    completed: '成功',
     failed: '失败',
     waiting: '等待审批',
     stopped: '已停止',

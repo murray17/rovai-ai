@@ -3,6 +3,12 @@ export type CampTimelineReadingPosition = {
   followingLatest: boolean
 }
 
+export type CampTimelineViewportGeometry = {
+  scrollTop: number
+  scrollHeight: number
+  clientHeight: number
+}
+
 export type CampTimelineContentMarker = {
   itemId: string | null
   itemCount: number
@@ -85,6 +91,21 @@ export function campTimelineIsNearBottom(
   threshold = CAMP_TIMELINE_BOTTOM_THRESHOLD
 ): boolean {
   return scrollHeight - scrollTop - clientHeight <= threshold
+}
+
+export function campTimelineFollowingLatestAfterScroll(
+  previousPosition: CampTimelineReadingPosition | null,
+  previousGeometry: CampTimelineViewportGeometry | null,
+  currentGeometry: CampTimelineViewportGeometry
+): boolean {
+  if (campTimelineIsNearBottom(
+    currentGeometry.scrollTop,
+    currentGeometry.scrollHeight,
+    currentGeometry.clientHeight
+  )) return true
+  if (previousPosition?.followingLatest !== true || !previousGeometry) return false
+  return previousGeometry.scrollHeight !== currentGeometry.scrollHeight
+    || previousGeometry.clientHeight !== currentGeometry.clientHeight
 }
 
 export function followLatestCampTimeline(

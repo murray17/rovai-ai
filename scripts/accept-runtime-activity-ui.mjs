@@ -50,13 +50,13 @@ const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
 const directoryAttachmentSource = join(fixtureRoot, '项目资料')
 
 const runtimes = [
-  runtime('codex', 'codex-cli', 'Codex CLI', '读取 README.md', {
+  runtime('codex', 'codex-cli', 'Codex CLI', 'rovai camp read', {
     protocol: 'codex-app-server', domain: 'shell', semantic: 'shell.execute',
-    evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '读取 README.md', payload: {
+    evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '执行 Shell 命令', payload: {
       item: {
         id: 'op-codex', type: 'commandExecution', status: 'completed', title: null,
-        command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
-        commandActions: [{ type: 'read', name: 'sed', path: '/repo/docs/README.md' }],
+        command: '/bin/zsh -lc "rovai camp read --mode timeline --direction before --limit 20"',
+        commandActions: [{ type: 'unknown', name: null, path: null }],
         output: longToolOutput
       }
     }
@@ -71,7 +71,7 @@ const runtimes = [
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
   runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
-  runtime('claude', 'claude-code-cli', 'Claude Code', 'Bash', {
+  runtime('claude', 'claude-code-cli', 'Claude Code', 'printf', {
     protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {
       toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
@@ -1251,11 +1251,29 @@ async function verifyTimelineFollowsLatestAcrossViewportResize(cdp) {
     }
   })()`, true)
   assert(resized, 'Timeline follow-latest acceptance lost the timeline and Agent dock')
-  await waitForExpression(cdp, `(() => {
-    const timeline = document.querySelector('.camp-timeline')
-    return Boolean(timeline)
-      && Math.abs(timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop) <= 1
-  })()`, 2_000)
+  try {
+    await waitForExpression(cdp, `(() => {
+      const timeline = document.querySelector('.camp-timeline')
+      return Boolean(timeline)
+        && Math.abs(timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop) <= 1
+    })()`, 2_000)
+  } catch (error) {
+    const stalled = await evaluate(cdp, `(() => {
+      const timeline = document.querySelector('.camp-timeline')
+      if (!timeline) return null
+      const maxScroll = Math.max(0, timeline.scrollHeight - timeline.clientHeight)
+      return {
+        clientHeight: timeline.clientHeight,
+        scrollHeight: timeline.scrollHeight,
+        scrollTop: timeline.scrollTop,
+        maxScroll,
+        distanceFromBottom: Math.abs(maxScroll - timeline.scrollTop)
+      }
+    })()`)
+    throw new Error(`Timeline follow-latest did not settle: ${JSON.stringify({ prepared, resized, stalled })}`, {
+      cause: error
+    })
+  }
   const settled = await evaluate(cdp, `(() => {
     const timeline = document.querySelector('.camp-timeline')
     if (!timeline) return null
@@ -1763,11 +1781,11 @@ async function collectRuntimeRows(cdp) {
           .map((node) => node.textContent?.trim() ?? ''),
         expandableToolTitles: [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure .tool-call-title')]
           .map((node) => node.textContent?.trim() ?? ''),
-        toolResults: [...document.querySelectorAll('.execution-drawer .tool-call-result')].map((node) => ({
-          text: node.textContent?.trim() ?? '',
+        toolStates: [...document.querySelectorAll('.execution-drawer .tool-call-state')].map((node) => ({
+          label: node.getAttribute('aria-label') ?? '',
           status: [...node.classList].find((name) => name.startsWith('status-'))?.slice(7) ?? null
         })),
-        toolIconAnimations: [...document.querySelectorAll('.execution-drawer .tool-call-icon')]
+        toolStateAnimations: [...document.querySelectorAll('.execution-drawer .tool-call-state')]
           .map((node) => getComputedStyle(node).animationName),
         toolSourceLabelCount: document.querySelectorAll('.execution-drawer .tool-call-source').length,
         hasVisibleSourceLabel: /Core 已验证|Runtime 报告/.test(
@@ -2264,7 +2282,7 @@ async function verifyRecoveryBlockerResolution(cdp) {
 async function verifyBoundedToolOutput(cdp) {
   const opened = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === '读取 README.md')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
     if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
     return Boolean(disclosure)
   })()`)
@@ -2366,10 +2384,10 @@ async function verifyClaudeCommandDisclosure(cdp) {
   })()`)
   await waitForExpression(cdp, `(() => [...document.querySelectorAll(
     '.execution-drawer details.tool-call-disclosure .tool-call-title'
-  )].some((candidate) => candidate.textContent?.trim() === 'Bash'))()`)
+  )].some((candidate) => candidate.textContent?.trim() === 'printf'))()`)
   const presentation = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'Bash')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'printf')
     disclosure?.querySelector('summary')?.click()
     return {
       found: Boolean(disclosure),
@@ -2647,12 +2665,17 @@ function assertRuntimeRows(observed) {
       `${expected.runtimeName} tool title mismatch: ${JSON.stringify(row)}`)
     if (expected.cancelledWithInProgressActivity) {
       assert(row.focusedStatus === 'cancelled'
-        && row.toolResults.length === 1
-        && row.toolResults[0].text === '已停止'
-        && row.toolResults[0].status === 'stopped'
-        && row.toolIconAnimations.length === 1
-        && row.toolIconAnimations[0] === 'none',
+        && row.toolStates.length === 1
+        && row.toolStates[0].label === '已停止'
+        && row.toolStates[0].status === 'stopped'
+        && row.toolStateAnimations.length === 1
+        && row.toolStateAnimations[0] === 'none',
       `${expected.runtimeName} cancelled Run did not stop its in-progress activity presentation: ${JSON.stringify(row)}`)
+    } else {
+      assert(row.toolStates.length === 1
+        && row.toolStates[0].label === '成功'
+        && row.toolStates[0].status === 'completed',
+      `${expected.runtimeName} terminal Tool state was not a concise accessible success marker: ${JSON.stringify(row)}`)
     }
     if (expected.adapterKind === 'copilot-cli') {
       assert(row.staticToolTitles.length === 1
@@ -2782,7 +2805,7 @@ async function verifyCampWorldMap(cdp, capturesDirectory) {
     && staticPresentation.documentOverflow <= 1,
   `World map or floating controls escaped the conversation surface: ${JSON.stringify(staticPresentation)}`)
   assert(staticPresentation.realSpeechText.includes('执行 · 正在运行')
-    && staticPresentation.realSpeechText.includes('读取 README.md'),
+    && staticPresentation.realSpeechText.includes('rovai camp read'),
   `World map did not use the real AgentRun activity summary: ${JSON.stringify(staticPresentation)}`)
 
   const routeToggleClicked = await evaluate(cdp, `(() => {

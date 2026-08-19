@@ -50,11 +50,11 @@ Planned Shutdown and accepted-input recovery keep that authority.
 
 ## 4. Local IPC
 
-[Built-in Tool Transport v15](../contracts/builtin-tool-transport-v15.md) inherits v14's one discriminated endpoint. Windows Pipe
+[Built-in Tool Transport v17](../contracts/builtin-tool-transport-v17.md) inherits v14's one discriminated endpoint. Windows Pipe
 instances are private at creation, byte-mode, local-only and authenticated again by process/lease tokens. The listener
 creates the next secured instance before dispatching the connected one; inability to replenish closes admission.
 
-The macOS Unix Socket implementation uses the same IPC v2 wire under v15. Router, receipt and replay remain
+The macOS Unix Socket implementation uses the same IPC v2 wire under v17. Router, receipt and replay remain
 transport-independent.
 
 ## 5. Storage and filesystem

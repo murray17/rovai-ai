@@ -1065,7 +1065,7 @@ async function configureFrozenRuntimes(request, trialTeam = FROZEN_TEAM) {
         && candidate.authScope === 'default')
     ]))
     return Object.values(selected).every((value) => value?.snapshot?.probeStatus === 'ready')
-      && selected['antigravity-app'].snapshot.capabilities.includes('builtin_cli.transport.v16')
+      && selected['antigravity-app'].snapshot.capabilities.includes('builtin_cli.transport.v17')
       ? selected
       : null
   }, 'frozen Runtime installations', 180_000)
