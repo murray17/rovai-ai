@@ -6430,11 +6430,9 @@ export function RunExecutionDisclosure({
         const hasDetail = Boolean(step.detail)
         const summary = (
           <>
-            <ToolCallIcon activityDomain={step.activityDomain} status={status} />
+            <ToolCallIcon activityDomain={step.activityDomain} />
             <span className="tool-call-title">{step.title}</span>
-            <span className={`tool-call-result status-${status}`}>
-              {toolCallStatusLabel(status)}
-            </span>
+            <ToolCallState status={status} />
             {hasDetail && <span className="tool-call-chevron" aria-hidden="true">⌄</span>}
           </>
         )
@@ -6537,13 +6535,7 @@ export function RunExecutionDisclosure({
   )
 }
 
-function ToolCallIcon({
-  activityDomain,
-  status
-}: {
-  activityDomain: string
-  status: string
-}): JSX.Element {
+function ToolCallIcon({ activityDomain }: { activityDomain: string }): JSX.Element {
   const icon = ({
     shell: '>_',
     file: '±',
@@ -6556,16 +6548,28 @@ function ToolCallIcon({
     unknown: '·'
   } as Record<string, string>)[activityDomain] ?? '·'
   return (
-    <span className={`tool-call-icon status-${status}`} aria-hidden="true">
+    <span className="tool-call-icon" aria-hidden="true">
       {icon}
     </span>
+  )
+}
+
+function ToolCallState({ status }: { status: string }): JSX.Element {
+  const label = toolCallStatusLabel(status)
+  return (
+    <span
+      className={`tool-call-state status-${status}`}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
   )
 }
 
 function toolCallStatusLabel(status: string): string {
   return ({
     running: '执行中',
-    completed: '已完成',
+    completed: '成功',
     failed: '失败',
     waiting: '等待审批',
     stopped: '已停止',

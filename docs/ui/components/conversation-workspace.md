@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # Camp 会话工作区
@@ -206,6 +206,13 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 完整保留，不用最后 N 项切片静默删除较早操作，也不增加第二条“较早 N 项”时间线。Built-in Tool 从
 Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
 静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
+
+Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Shell 活动只有通用标题、同时公开 Evidence
+含命令文本时，Renderer 可以只提炼可审阅的可执行文件名与有界子命令，例如 `rovai camp read` 或
+`pnpm test`；参数、正文、路径和环境值不得进入标题，无法安全提炼时继续使用中性回退。该提炼只改变展示，
+不得参与 Activity 分类、identity 或 lifecycle 合并。Tool 行尾只使用 7px 实心状态点：运行蓝色、等待审批
+橙色、成功绿色、失败或停止红色，仅记录为中性色。普通 Tool 行不再重复显示“已完成”文字；状态仍须通过
+`aria-label` 与 `title` 可读取，不能只靠颜色向辅助技术传达。
 
 超长 Tool 输出只在原 disclosure 渲染有界开头预览；完整内容由该次展开结果内轻量、Icon-only 且有
 可访问名称的复制控件按需从 Core 读取，不能为了复制先把全文挂载进 Drawer。执行台不显示独立“查看完整

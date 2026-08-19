@@ -1,0 +1,1004 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rovai AI · 执行台命令状态交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --workspace-subtle: #f4f5f4;
+      --workspace-raised: #ffffff;
+      --workspace-line: #d5dadd;
+      --workspace-line-strong: #bdc6ca;
+      --workspace-steel: #476b85;
+      --conversation: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --success-contrast: #ffffff;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --danger-contrast: #ffffff;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --attention-contrast: #ffffff;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --neutral: #5f6678;
+      --evidence-canvas: #f4f6f3;
+      --evidence-surface: #ffffff;
+      --evidence-ink: #252a36;
+      --evidence-muted: #5f6678;
+      --evidence-line: #d5dad3;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --dock-height: 398px;
+      --dock-width: 310px;
+      --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --workspace-subtle: #11171b;
+      --workspace-raised: #1c2328;
+      --workspace-line: #2b353b;
+      --workspace-line-strong: #3d4950;
+      --workspace-steel: #8fadc0;
+      --conversation: #181d21;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --success-contrast: #0a140e;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --danger-contrast: #160d0c;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --attention-contrast: #160f08;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --neutral: #abb5bc;
+      --evidence-canvas: #12191d;
+      --evidence-surface: #171f24;
+      --evidence-ink: #dce4e9;
+      --evidence-muted: #9eabb3;
+      --evidence-line: #35424a;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, 0.18);
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 320px; min-height: 100%; margin: 0; }
+    body {
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: var(--sans);
+      font-size: 13px;
+      line-height: 1.55;
+      text-rendering: optimizeLegibility;
+    }
+    button { color: inherit; font: inherit; }
+    button:focus-visible, summary:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    ::selection { color: var(--ink); background: var(--focus-soft); }
+    * { scrollbar-color: var(--line-strong) transparent; scrollbar-width: thin; }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .review-bar {
+      position: relative;
+      z-index: 10;
+      display: grid;
+      min-height: 68px;
+      grid-template-columns: minmax(250px, 1fr) auto auto;
+      align-items: center;
+      gap: 20px;
+      padding: 10px 18px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+    }
+    .review-title { display: grid; min-width: 0; gap: 1px; }
+    .review-title strong { overflow: hidden; font-size: 13px; letter-spacing: -0.015em; text-overflow: ellipsis; white-space: nowrap; }
+    .review-title span { overflow: hidden; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .review-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; }
+    .control-set { display: flex; align-items: center; gap: 6px; }
+    .control-label { color: var(--faint); font-size: 10px; }
+    .segmented {
+      display: inline-flex;
+      min-height: 32px;
+      align-items: center;
+      gap: 2px;
+      padding: 2px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--surface-subtle);
+    }
+    .segment-button {
+      display: inline-flex;
+      min-height: 26px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 0 9px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--muted);
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    .segment-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .segment-button[aria-pressed="true"] { color: var(--brand-ink); background: var(--surface-raised); box-shadow: 0 1px 2px rgba(22, 30, 38, 0.08); }
+    .segment-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .review-note { max-width: 250px; color: var(--faint); font-size: 10px; line-height: 1.45; text-align: right; }
+
+    .preview-wrap { height: calc(100vh - 68px); min-height: 630px; padding: 18px; background: var(--canvas); }
+    .viewport {
+      display: grid;
+      width: min(1480px, 100%);
+      height: 100%;
+      min-height: 590px;
+      margin: 0 auto;
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(150px, 1fr) minmax(280px, var(--dock-height));
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: var(--conversation);
+      box-shadow: var(--shadow-float);
+    }
+    .viewport[data-layout="right"] {
+      grid-template-columns: minmax(480px, 1fr) var(--dock-width);
+      grid-template-rows: minmax(0, 1fr);
+    }
+
+    .quiet-workspace {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      place-items: center;
+      overflow: hidden;
+      color: var(--faint);
+      background: var(--conversation);
+    }
+    .viewport[data-layout="right"] .quiet-workspace { grid-column: 1; grid-row: 1; }
+    .quiet-workspace::before {
+      position: absolute;
+      inset: 0 0 auto;
+      height: 48px;
+      border-bottom: 1px solid var(--line);
+      content: "";
+      background: var(--surface);
+    }
+    .workspace-label { display: grid; place-items: center; gap: 9px; opacity: 0.66; }
+    .workspace-label svg { width: 28px; height: 28px; fill: none; stroke: var(--workspace-steel); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.25; }
+    .workspace-label span { font-size: 10.5px; }
+
+    .execution-console {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 0;
+      grid-column: 1;
+      grid-row: 2;
+      grid-template-rows: auto minmax(0, 1fr);
+      border-top: 1px solid var(--workspace-line-strong);
+      background: var(--workspace-raised);
+    }
+    .viewport[data-layout="right"] .execution-console {
+      grid-column: 2;
+      grid-row: 1;
+      border-top: 0;
+      border-left: 1px solid var(--workspace-line-strong);
+    }
+    .resize-handle {
+      position: absolute;
+      z-index: 4;
+      top: -4px;
+      left: 0;
+      width: 100%;
+      height: 8px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      cursor: ns-resize;
+    }
+    .resize-handle::after {
+      position: absolute;
+      top: 3px;
+      left: 50%;
+      width: 82px;
+      height: 2px;
+      border-radius: 2px;
+      content: "";
+      background: var(--workspace-steel);
+      transform: translateX(-50%);
+    }
+    .viewport[data-layout="right"] .resize-handle { display: none; }
+
+    .console-top {
+      display: grid;
+      min-width: 0;
+      min-height: 56px;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--workspace-line);
+      background: var(--surface);
+    }
+    .console-heading { display: flex; min-width: max-content; align-items: center; gap: 8px; }
+    .console-heading svg { width: 17px; height: 17px; fill: none; stroke: var(--workspace-steel); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .console-heading-copy { display: grid; gap: 1px; }
+    .console-heading-copy strong { font-size: 11px; letter-spacing: 0.01em; }
+    .console-heading-copy span { color: var(--faint); font-size: 9.5px; }
+    .console-heading-copy b { color: var(--info); font: 650 9.5px/1 var(--mono); }
+    .console-actions { display: flex; align-items: center; gap: 4px; }
+    .icon-text-button, .quiet-button, .danger-button {
+      display: inline-flex;
+      min-height: 29px;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 0 8px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      background: transparent;
+      cursor: pointer;
+      font-size: 10.5px;
+      font-weight: 650;
+    }
+    .icon-text-button { color: var(--muted); }
+    .icon-text-button:hover { color: var(--brand-ink); background: var(--brand-soft); }
+    .icon-text-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .quiet-button { border-color: var(--line-strong); color: var(--muted); background: var(--surface-raised); }
+    .quiet-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .danger-button { border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); color: var(--danger); background: var(--surface-raised); }
+    .danger-button:hover { border-color: var(--danger); background: var(--danger-soft); }
+
+    .runtime-list {
+      display: flex;
+      min-width: 0;
+      gap: 5px;
+      overflow-x: auto;
+      overscroll-behavior-x: contain;
+      padding: 1px;
+    }
+    .runtime-button {
+      --identity: #39777a;
+      display: grid;
+      min-width: 128px;
+      height: 40px;
+      flex: 0 0 128px;
+      grid-template-columns: 26px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 4px 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      text-align: left;
+      cursor: pointer;
+    }
+    .runtime-button:hover { border-color: var(--line-strong); background: var(--surface-hover); }
+    .runtime-button[aria-selected="true"] { border-color: var(--workspace-steel); background: var(--brand-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--workspace-steel) 22%, transparent); }
+    .avatar {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--identity) 64%, var(--line));
+      border-radius: 50%;
+      color: var(--identity);
+      background: color-mix(in srgb, var(--identity) 10%, var(--surface-raised));
+      font-size: 10.5px;
+      font-weight: 720;
+    }
+    .runtime-copy { display: grid; min-width: 0; gap: 1px; }
+    .runtime-copy strong { overflow: hidden; font-size: 10.5px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-copy span { overflow: hidden; color: var(--faint); font-size: 8.5px; line-height: 1.15; text-overflow: ellipsis; white-space: nowrap; }
+    .runtime-status { display: inline-flex; align-items: center; gap: 4px; font-size: 8.5px; font-weight: 720; white-space: nowrap; }
+    .runtime-status::before { width: 6px; height: 6px; flex: 0 0 6px; border: 1px solid currentColor; border-radius: 50%; content: ""; background: var(--surface-muted); }
+    .runtime-status.status-running { color: var(--info); }
+    .runtime-status.status-running::before { background: currentColor; box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 12%, transparent); }
+    .runtime-status.status-success { color: var(--success); }
+    .runtime-status.status-success::before { background: currentColor; }
+    .runtime-status.status-failed { color: var(--danger); }
+    .runtime-status.status-failed::before { background: currentColor; }
+    .runtime-status.status-waiting { color: var(--attention); }
+    .runtime-status.status-waiting::before { background: var(--attention-soft); }
+    .runtime-status.status-stopped,
+    .runtime-status.status-recorded { color: var(--muted); }
+
+    .tool-state-mark {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      flex: 0 0 7px;
+      border: 0;
+      border-radius: 50%;
+      background: var(--neutral);
+    }
+    .tool-state-mark.state-success,
+    .tool-state-mark.state-recorded { background: var(--success); }
+    .tool-state-mark.state-failed,
+    .tool-state-mark.state-stopped { background: var(--danger); }
+    .tool-state-mark.state-running { background: var(--info); }
+    .tool-state-mark.state-waiting { background: var(--attention); }
+
+    .console-body { min-width: 0; min-height: 0; overflow: hidden; }
+    .run-panel { display: grid; height: 100%; min-width: 0; min-height: 0; grid-template-rows: auto minmax(0, 1fr); }
+    .run-header {
+      display: flex;
+      min-width: 0;
+      min-height: 54px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--workspace-line);
+      background: var(--workspace-raised);
+    }
+    .run-identity { display: flex; min-width: 0; align-items: center; gap: 9px; }
+    .run-identity .avatar { width: 32px; height: 32px; flex: 0 0 32px; font-size: 12px; }
+    .run-copy { display: grid; min-width: 0; gap: 1px; }
+    .run-title-row { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px; }
+    .run-title-row strong { overflow: hidden; font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-role { color: var(--brand-ink); font-size: 9px; font-weight: 700; }
+    .run-copy small { overflow: hidden; color: var(--faint); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .run-copy code { font: 9.5px/1.3 var(--mono); }
+    .run-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+
+    .run-scroll { min-height: 0; overflow: auto; padding: 12px 14px 18px; scroll-behavior: smooth; }
+    .run-timeline { position: relative; display: grid; max-width: 820px; gap: 12px; padding-left: 25px; }
+    .run-timeline::before { position: absolute; top: 8px; bottom: 12px; left: 6px; width: 1px; content: ""; background: var(--line-strong); }
+    .stage {
+      position: relative;
+      min-width: 0;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .stage::before {
+      position: absolute;
+      top: 13px;
+      left: -24px;
+      width: 9px;
+      height: 9px;
+      border: 2px solid var(--surface-raised);
+      border-radius: 50%;
+      content: "";
+      background: var(--neutral);
+      box-shadow: 0 0 0 1px var(--neutral);
+    }
+    .stage.stage-success::before { background: var(--success); box-shadow: 0 0 0 1px var(--success); }
+    .stage.stage-current { border-color: color-mix(in srgb, var(--info) 62%, var(--line)); background: var(--workspace-subtle); }
+    .stage.stage-current::before { background: var(--info); box-shadow: 0 0 0 1px var(--info); }
+    .stage-head { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 9px; }
+    .stage-time { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .stage-time time { font: 650 10px/1.3 var(--mono); font-variant-numeric: tabular-nums; }
+    .run-state-label { font-size: 9px; font-weight: 750; }
+    .run-state-label.tone-info { color: var(--info); }
+    .run-state-label.tone-attention { color: var(--attention); }
+    .run-state-label.tone-success { color: var(--success); }
+    .run-state-label.tone-danger { color: var(--danger); }
+    .run-state-label.tone-neutral { color: var(--muted); }
+    .current-tag { padding: 2px 5px; border-radius: 4px; color: var(--info); background: var(--info-soft); font-size: 8.5px; font-weight: 700; }
+    .stage-summary { margin: 5px 0 0; color: var(--faint); font-size: 9.5px; }
+    .tool-list { display: grid; gap: 5px; margin-top: 9px; }
+    .tool-call { min-width: 0; }
+    .tool-call > summary { list-style: none; cursor: pointer; }
+    .tool-call > summary::-webkit-details-marker { display: none; }
+    .tool-row { display: flex; min-width: 0; min-height: 30px; align-items: center; gap: 8px; padding: 3px 5px; border-radius: 5px; }
+    .tool-row:hover { background: var(--surface-hover); }
+    .tool-domain { display: grid; width: 19px; height: 19px; flex: 0 0 19px; place-items: center; color: var(--muted); font: 650 9px/1 var(--mono); }
+    .tool-title { min-width: 0; overflow: hidden; color: var(--evidence-ink); font: 10.5px/1.3 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+    .tool-row .tool-state-mark { margin-left: auto; }
+    .chevron { width: 13px; height: 13px; flex: 0 0 13px; color: var(--faint); transition: transform 140ms ease; }
+    .chevron path { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+    .tool-call[open] .chevron { transform: rotate(180deg); }
+    .tool-detail { position: relative; margin: 4px 5px 7px 32px; }
+    .tool-detail pre {
+      max-height: 122px;
+      margin: 0;
+      overflow: auto;
+      padding: 8px 34px 8px 9px;
+      border: 1px solid var(--evidence-line);
+      border-radius: 5px;
+      color: var(--evidence-muted);
+      background: var(--evidence-canvas);
+      font: 9.5px/1.5 var(--mono);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .copy-button {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      display: grid;
+      width: 25px;
+      height: 25px;
+      place-items: center;
+      border: 0;
+      border-radius: 4px;
+      color: var(--faint);
+      background: transparent;
+      cursor: pointer;
+    }
+    .copy-button:hover { color: var(--brand-ink); background: var(--brand-soft); }
+    .copy-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+    .copy-button.is-copied { color: var(--success); background: var(--success-soft); }
+    .processing-row { display: flex; min-height: 28px; align-items: center; gap: 8px; margin-top: 5px; padding: 0 5px; color: var(--muted); font-size: 10.5px; }
+    .process-spinner { width: 11px; height: 11px; flex: 0 0 11px; border: 1.5px solid var(--line-strong); border-top-color: var(--muted); border-radius: 50%; animation: process-spin 900ms linear infinite; }
+    @keyframes process-spin { to { transform: rotate(360deg); } }
+
+    .viewport[data-layout="right"] .console-top {
+      min-height: 0;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-content: start;
+      gap: 8px;
+      padding: 10px 8px 8px;
+    }
+    .viewport[data-layout="right"] .console-heading { padding: 0 4px; }
+    .viewport[data-layout="right"] .console-heading-copy span { display: none; }
+    .viewport[data-layout="right"] .console-actions { grid-column: 2; grid-row: 1; }
+    .viewport[data-layout="right"] .runtime-list {
+      grid-column: 1 / -1;
+      grid-row: 2;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 169px;
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    .viewport[data-layout="right"] .runtime-button {
+      width: 100%;
+      min-width: 0;
+      height: 40px;
+      flex-basis: 40px;
+      grid-template-columns: 26px minmax(0, 1fr) auto;
+      border-color: transparent;
+      background: transparent;
+    }
+    .viewport[data-layout="right"] .runtime-button[aria-selected="true"] { border-color: var(--workspace-steel); background: var(--brand-soft); }
+    .viewport[data-layout="right"] .run-header { min-height: 58px; padding: 7px 8px; }
+    .viewport[data-layout="right"] .run-title-row { display: grid; gap: 0; }
+    .viewport[data-layout="right"] .run-title-row strong { max-width: 130px; }
+    .viewport[data-layout="right"] .run-role { display: none; }
+    .viewport[data-layout="right"] .run-copy small { max-width: 138px; }
+    .viewport[data-layout="right"] .run-actions { gap: 3px; }
+    .viewport[data-layout="right"] .run-actions button { min-height: 27px; padding-inline: 6px; font-size: 9.5px; }
+    .viewport[data-layout="right"] .run-scroll { padding: 10px 8px 16px; }
+    .viewport[data-layout="right"] .run-timeline { gap: 10px; padding-left: 21px; }
+    .viewport[data-layout="right"] .run-timeline::before { left: 5px; }
+    .viewport[data-layout="right"] .stage { padding: 9px 8px; }
+    .viewport[data-layout="right"] .stage::before { left: -20px; }
+    .viewport[data-layout="right"] .tool-detail { margin-left: 27px; }
+    .viewport[data-layout="right"] .tool-title { font-size: 9.5px; }
+    .viewport[data-layout="right"] .stage-summary { display: none; }
+
+    .viewport[data-collapsed="true"] .console-body { display: none; }
+    .viewport[data-layout="bottom"][data-collapsed="true"] { grid-template-rows: minmax(0, 1fr) 57px; }
+    .viewport[data-layout="bottom"][data-collapsed="true"] .resize-handle { display: none; }
+
+    @media (max-width: 980px) {
+      .review-bar { grid-template-columns: 1fr auto; gap: 10px; }
+      .review-title { grid-column: 1; }
+      .review-controls { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+      .review-note { grid-column: 2; grid-row: 1; }
+      .preview-wrap { height: calc(100vh - 118px); padding: 10px; }
+      .viewport[data-layout="right"] { --dock-width: 300px; grid-template-columns: minmax(420px, 1fr) var(--dock-width); }
+    }
+    @media (max-width: 760px) {
+      .review-bar { display: flex; flex-wrap: wrap; }
+      .review-title { flex: 1 1 100%; }
+      .review-controls { flex: 1 1 auto; }
+      .review-note { display: none; }
+      .preview-wrap { height: auto; min-height: 680px; }
+      .viewport { height: 720px; }
+      .viewport[data-layout="right"] { grid-template-columns: minmax(360px, 1fr) 260px; overflow-x: auto; }
+      .control-label { display: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <header class="review-bar">
+    <div class="review-title">
+      <strong>执行台 · AgentRun 命令步骤微调</strong>
+      <span>独立交互稿，不连接 Core；仅调整 Tool 步骤的命令标题与行尾状态。</span>
+    </div>
+
+    <div class="review-controls" aria-label="交互稿控制">
+      <div class="control-set">
+        <span class="control-label">位置</span>
+        <div class="segmented" role="group" aria-label="执行台位置">
+          <button class="segment-button" type="button" data-layout-button="bottom" aria-pressed="true">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M2 10.5h12"/></svg>
+            底部
+          </button>
+          <button class="segment-button" type="button" data-layout-button="right" aria-pressed="false">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="2"/><path d="M10.5 2v12"/></svg>
+            右侧
+          </button>
+        </div>
+      </div>
+
+      <div class="control-set">
+        <span class="control-label">当前命令</span>
+        <div class="segmented" role="group" aria-label="当前命令状态">
+          <button class="segment-button" type="button" data-state-button="running" aria-pressed="true"><span class="tool-state-mark state-running" aria-hidden="true"></span>运行</button>
+          <button class="segment-button" type="button" data-state-button="success" aria-pressed="false"><span class="tool-state-mark state-success" aria-hidden="true"></span>成功</button>
+          <button class="segment-button" type="button" data-state-button="failed" aria-pressed="false"><span class="tool-state-mark state-failed" aria-hidden="true"></span>失败</button>
+          <button class="segment-button" type="button" data-state-button="waiting" aria-pressed="false"><span class="tool-state-mark state-waiting" aria-hidden="true"></span>待审核</button>
+        </div>
+      </div>
+
+      <div class="control-set">
+        <span class="control-label">主题</span>
+        <div class="segmented" role="group" aria-label="主题">
+          <button class="segment-button" type="button" data-theme-button="day" aria-pressed="true">日间</button>
+          <button class="segment-button" type="button" data-theme-button="night" aria-pressed="false">夜间</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="review-note">仅 Tool 行变化：具体命令名＋小圆点。Runtime 与 Run stage 保持现状。</div>
+  </header>
+
+  <main class="preview-wrap">
+    <section class="viewport" id="viewport" data-layout="bottom" data-collapsed="false" aria-label="执行台交互预览">
+      <div class="quiet-workspace" aria-hidden="true">
+        <div class="workspace-label">
+          <svg viewBox="0 0 32 32"><path d="M5 16h5l2.5-5 4 11 3.2-7 2.1 3H27"/><path d="M5 25h22" opacity=".45"/></svg>
+          <span>会话内容区域 · 本稿仅评审执行台</span>
+        </div>
+      </div>
+
+      <section class="execution-console" aria-label="执行台">
+        <button class="resize-handle" id="resize-handle" type="button" aria-label="调整底部执行台高度" title="拖动或使用上下方向键调整高度"></button>
+
+        <header class="console-top">
+          <div class="console-heading">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M1.5 10h3l1.5-4 3 8 2.5-6 2 4 1.5-2h3.5"/></svg>
+            <div class="console-heading-copy">
+              <strong>执行台</strong>
+              <span><b id="running-count">1</b> 运行 · 10 队员</span>
+            </div>
+          </div>
+
+          <nav class="runtime-list" id="runtime-list" role="tablist" aria-label="Runtime 过程"></nav>
+
+          <div class="console-actions">
+            <button class="icon-text-button" id="move-console" type="button">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9M9 5l3 3-3 3"/></svg>
+              <span id="move-label">移到右侧</span>
+            </button>
+          </div>
+        </header>
+
+        <div class="console-body">
+          <article class="run-panel" aria-labelledby="run-name">
+            <header class="run-header">
+              <div class="run-identity">
+                <span class="avatar" id="run-avatar" style="--identity:#39777a">C</span>
+                <div class="run-copy">
+                  <div class="run-title-row">
+                    <strong id="run-name">Codex CLI 验收</strong>
+                    <span class="run-role">Agent</span>
+                  </div>
+                  <small><span id="runtime-name">Codex CLI</span> · 模型 <code id="model-name">gpt-5.6-codex</code></small>
+                </div>
+              </div>
+              <div class="run-actions">
+                <button class="danger-button" type="button" id="stop-run">停止</button>
+                <button class="quiet-button" type="button" id="collapse-run">收起</button>
+              </div>
+            </header>
+
+            <div class="run-scroll" id="run-scroll">
+              <div class="run-timeline">
+                <section class="stage stage-success">
+                  <div class="stage-head">
+                    <div class="stage-time">
+                      <time>19:58–19:58</time>
+                      <span class="run-state-label tone-success">已完成</span>
+                    </div>
+                  </div>
+                  <p class="stage-summary">本轮上下文已接收，保留为可回看的 Run stage。</p>
+                </section>
+
+                <section class="stage stage-current" id="current-stage">
+                  <div class="stage-head">
+                    <div class="stage-time">
+                      <time>20:00–现在</time>
+                      <span class="run-state-label tone-info" id="stage-state">执行中</span>
+                      <span class="current-tag">当前</span>
+                    </div>
+                  </div>
+                  <p class="stage-summary" id="stage-summary">正在整理 Runtime Activity，并保持命令证据可审阅。</p>
+                  <div class="tool-list" id="tool-list"></div>
+                  <div class="processing-row" id="processing-row" role="status">
+                    <span class="process-spinner" id="processing-state" aria-hidden="true"></span>
+                    <span id="processing-label">正在处理</span>
+                  </div>
+                </section>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <div class="sr-only" id="live-region" aria-live="polite"></div>
+
+  <script>
+    const runtimes = [
+      {
+        id: 'codex', short: 'C', name: 'Codex CLI 验收', runtime: 'Codex CLI', model: 'gpt-5.6-codex', color: '#39777a', state: 'running',
+        tools: [
+          ['rovai camp read', 'success', '$ rovai camp read --camp rvcamp_01m0…\\n读取 Camp 成功 · 返回 10 个 Runtime 活动'],
+          ['rovai send', 'success', '$ rovai send --to runtime-observer\\n消息已接受 · delivery accepted'],
+          ['git diff --check', 'running', '$ git diff --check\\n正在检查工作区差异…']
+        ]
+      },
+      {
+        id: 'opencode', short: 'O', name: 'OpenCode 验收', runtime: 'OpenCode', model: 'agent-runtime-default', color: '#a65f4a', state: 'success',
+        tools: [
+          ['rg --files', 'success', '$ rg --files apps/desktop\\n已列出项目文件'],
+          ['pnpm test', 'success', '$ pnpm test --filter renderer\\n428 tests passed'],
+          ['git status', 'success', '$ git status --short\\n工作区有 8 个已修改文件']
+        ]
+      },
+      {
+        id: 'copilot', short: 'G', name: 'GitHub Copilot 验收', runtime: 'GitHub Copilot', model: 'agent-runtime-default', color: '#9a6a32', state: 'failed',
+        tools: [
+          ['git diff --check', 'success', '$ git diff --check\\n未发现空白错误'],
+          ['pnpm typecheck', 'success', '$ pnpm typecheck\\n类型检查通过'],
+          ['pnpm test', 'failed', '$ pnpm test\\n1 项断言失败 · 可展开检查输出']
+        ]
+      },
+      {
+        id: 'kiro', short: 'K', name: 'Kiro 验收', runtime: 'Kiro', model: 'agent-runtime-default', color: '#74628f', state: 'success',
+        tools: [
+          ['cargo fmt', 'success', '$ cargo fmt --check\\n格式检查通过'],
+          ['cargo test', 'success', '$ cargo test -p rovai-core\\n测试通过'],
+          ['git status', 'success', '$ git status --short\\n已读取工作区状态']
+        ]
+      },
+      {
+        id: 'qoder', short: 'Q', name: 'Qoder 验收', runtime: 'Qoder', model: 'agent-runtime-default', color: '#8a5c75', state: 'stopped',
+        tools: [
+          ['pnpm typecheck', 'success', '$ pnpm typecheck\\n类型检查通过'],
+          ['rg', 'success', '$ rg RuntimeActivity apps/desktop\\n找到 24 个匹配'],
+          ['pnpm test', 'stopped', '$ pnpm test\\n父 Run 已停止，不再显示运行动画']
+        ]
+      },
+      {
+        id: 'codebuddy', short: 'C', name: 'CodeBuddy 验收', runtime: 'CodeBuddy', model: 'agent-runtime-default', color: '#4f729b', state: 'success',
+        tools: [
+          ['pnpm lint', 'success', '$ pnpm lint\\n检查通过'],
+          ['git status', 'success', '$ git status --short\\n已读取工作区状态'],
+          ['git diff --check', 'success', '$ git diff --check\\n未发现空白错误']
+        ]
+      },
+      {
+        id: 'qwen', short: 'Q', name: 'Qwen Code 验收', runtime: 'Qwen Code', model: 'agent-runtime-default', color: '#8c6146', state: 'waiting',
+        tools: [
+          ['sed', 'success', '$ sed -n 1,220p ui-model.ts\\n已读取文件片段'],
+          ['rg', 'success', '$ rg tool-call-state\\n找到状态组件'],
+          ['pnpm test', 'waiting', '$ pnpm test\\n等待审批后继续']
+        ]
+      },
+      {
+        id: 'trae', short: 'T', name: 'TRAE CLI 验收', runtime: 'TRAE CLI（中国企业版）', model: 'agent-runtime-default', color: '#547245', state: 'success',
+        tools: [
+          ['pnpm typecheck', 'success', '$ pnpm typecheck\\n类型检查通过'],
+          ['pnpm build:desktop', 'success', '$ pnpm build:desktop\\n桌面构建通过'],
+          ['git status', 'success', '$ git status --short\\n已读取工作区状态']
+        ]
+      },
+      {
+        id: 'claude', short: 'C', name: 'Claude Code 验收', runtime: 'Claude Code', model: 'agent-runtime-default', color: '#547245', state: 'failed',
+        tools: [
+          ['printf', 'success', '$ printf fixture-output\\nfixture-output'],
+          ['rg', 'success', '$ rg commandExecution\\n找到 Runtime 事件映射'],
+          ['git diff --check', 'failed', '$ git diff --check\\n发现尾随空格']
+        ]
+      },
+      {
+        id: 'antigravity', short: 'A', name: 'Antigravity 验收', runtime: 'Antigravity', model: 'agent-runtime-default', color: '#39777a', state: 'recorded',
+        tools: [
+          ['rovai send', 'success', '$ rovai send --to codex\\n投递已接受'],
+          ['rovai camp read', 'success', '$ rovai camp read --camp rvcamp_01m0…\\n已读取 Camp'],
+          ['git status', 'recorded', '$ git status --short\\n该事件只记录，不表示运行中']
+        ]
+      }
+    ];
+
+    const stateLabels = {
+      running: '执行中',
+      success: '成功',
+      failed: '失败',
+      waiting: '等待审批',
+      stopped: '已停止',
+      recorded: '已记录'
+    };
+
+    const runStateLabels = {
+      running: '执行中',
+      success: '已完成',
+      failed: '失败',
+      waiting: '结果待确认',
+      stopped: '已停止',
+      recorded: '已记录'
+    };
+
+    const runStateTones = {
+      running: 'info',
+      success: 'success',
+      failed: 'danger',
+      waiting: 'attention',
+      stopped: 'neutral',
+      recorded: 'neutral'
+    };
+
+    const viewport = document.getElementById('viewport');
+    const runtimeList = document.getElementById('runtime-list');
+    const toolList = document.getElementById('tool-list');
+    const liveRegion = document.getElementById('live-region');
+    const runScroll = document.getElementById('run-scroll');
+    let selectedRuntime = 'codex';
+    let stateOverride = 'running';
+
+    function toolStateMark(state, hidden = false) {
+      const label = stateLabels[state] || state;
+      return `<span class="tool-state-mark state-${state}" ${hidden ? 'aria-hidden="true"' : `role="img" aria-label="${label}" title="${label}"`}></span>`;
+    }
+
+    function runtimeStatus(state) {
+      const label = runStateLabels[state] || state;
+      return `<span class="runtime-status status-${state}">${label}</span>`;
+    }
+
+    function renderRuntimeList() {
+      runtimeList.innerHTML = runtimes.map((runtime) => {
+        const selected = runtime.id === selectedRuntime;
+        return `
+          <button class="runtime-button" type="button" role="tab" aria-selected="${selected}" aria-controls="run-scroll" data-runtime="${runtime.id}" style="--identity:${runtime.color}">
+            <span class="avatar" aria-hidden="true">${runtime.short}</span>
+            <span class="runtime-copy"><strong>${runtime.name}</strong><span>${runtime.runtime}</span></span>
+            ${runtimeStatus(runtime.state)}
+          </button>`;
+      }).join('');
+
+      runtimeList.querySelectorAll('[data-runtime]').forEach((button) => {
+        button.addEventListener('click', () => {
+          selectedRuntime = button.dataset.runtime;
+          stateOverride = null;
+          document.querySelectorAll('[data-state-button]').forEach((stateButton) => stateButton.setAttribute('aria-pressed', 'false'));
+          render();
+          runScroll.scrollTop = 0;
+          liveRegion.textContent = `已切换到 ${currentRuntime().name}`;
+        });
+      });
+    }
+
+    function currentRuntime() {
+      return runtimes.find((runtime) => runtime.id === selectedRuntime) || runtimes[0];
+    }
+
+    function renderTools() {
+      const runtime = currentRuntime();
+      const tools = runtime.tools.map((tool) => [...tool]);
+      if (stateOverride) tools[tools.length - 1][1] = stateOverride;
+      toolList.innerHTML = tools.map(([title, state, detail], index) => `
+        <details class="tool-call" ${index === 0 ? 'open' : ''}>
+          <summary class="tool-row">
+            <span class="tool-domain" aria-hidden="true">&gt;_</span>
+            <code class="tool-title">${title}</code>
+            ${toolStateMark(state)}
+            <svg class="chevron" viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>
+          </summary>
+          <div class="tool-detail">
+            <pre>${detail}</pre>
+            <button class="copy-button" type="button" aria-label="复制完整工具输出" title="复制完整工具输出" data-copy="${index}">
+              <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="7" height="7" rx="1.4"/><path d="M3.5 10.5h-1V3.8c0-.8.6-1.4 1.4-1.4h6.6v1"/></svg>
+            </button>
+          </div>
+        </details>`).join('');
+
+      toolList.querySelectorAll('[data-copy]').forEach((button) => {
+        button.addEventListener('click', async () => {
+          const index = Number(button.dataset.copy);
+          const content = tools[index][2];
+          try {
+            await navigator.clipboard.writeText(content);
+            button.classList.add('is-copied');
+            button.title = '已复制';
+            liveRegion.textContent = '工具输出已复制';
+            window.setTimeout(() => {
+              button.classList.remove('is-copied');
+              button.title = '复制完整工具输出';
+            }, 1200);
+          } catch {
+            liveRegion.textContent = '浏览器未允许复制，请使用本地服务器打开交互稿';
+          }
+        });
+      });
+    }
+
+    function renderRun() {
+      const runtime = currentRuntime();
+      const effectiveState = runtime.state;
+      const stateLabel = runStateLabels[effectiveState] || effectiveState;
+      document.getElementById('run-avatar').textContent = runtime.short;
+      document.getElementById('run-avatar').style.setProperty('--identity', runtime.color);
+      document.getElementById('run-name').textContent = runtime.name;
+      document.getElementById('runtime-name').textContent = runtime.runtime;
+      document.getElementById('model-name').textContent = runtime.model;
+
+      const stageState = document.getElementById('stage-state');
+      stageState.className = `run-state-label tone-${runStateTones[effectiveState] || 'neutral'}`;
+      stageState.textContent = stateLabel;
+
+      const processingState = document.getElementById('processing-state');
+      processingState.hidden = effectiveState !== 'running';
+      const processingLabel = document.getElementById('processing-label');
+      const processingRow = document.getElementById('processing-row');
+      const stageSummary = document.getElementById('stage-summary');
+      const copy = {
+        running: ['正在处理', '正在整理 Runtime Activity，并保持命令证据可审阅。'],
+        success: ['运行已结束', '该 Run 已结束，执行证据仍可回看。'],
+        failed: ['运行未能完成', '失败证据保留在当前 Run stage。'],
+        waiting: ['结果待确认', 'Runtime 已接受任务，最终结果仍待确认。'],
+        stopped: ['运行已停止', '当前 Run 已停止。'],
+        recorded: ['事件已记录', '该事件只表示已观察，不推断执行结果。']
+      }[effectiveState];
+      processingLabel.textContent = copy[0];
+      stageSummary.textContent = copy[1];
+      processingRow.hidden = !['running', 'waiting'].includes(effectiveState);
+    }
+
+    function render() {
+      renderRuntimeList();
+      renderTools();
+      renderRun();
+      const runningCount = runtimes.filter((runtime) => runtime.state === 'running').length;
+      document.getElementById('running-count').textContent = String(runningCount);
+    }
+
+    function setLayout(layout) {
+      viewport.dataset.layout = layout;
+      viewport.dataset.collapsed = 'false';
+      document.querySelectorAll('[data-layout-button]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.layoutButton === layout)));
+      document.getElementById('move-label').textContent = layout === 'bottom' ? '移到右侧' : '移回底部';
+      document.getElementById('move-console').querySelector('svg').style.transform = layout === 'bottom' ? '' : 'rotate(180deg)';
+      document.getElementById('collapse-run').textContent = '收起';
+      liveRegion.textContent = `执行台已移到${layout === 'bottom' ? '底部' : '右侧'}`;
+    }
+
+    document.querySelectorAll('[data-layout-button]').forEach((button) => button.addEventListener('click', () => setLayout(button.dataset.layoutButton)));
+    document.getElementById('move-console').addEventListener('click', () => setLayout(viewport.dataset.layout === 'bottom' ? 'right' : 'bottom'));
+
+    document.querySelectorAll('[data-theme-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.documentElement.dataset.theme = button.dataset.themeButton;
+        document.querySelectorAll('[data-theme-button]').forEach((themeButton) => themeButton.setAttribute('aria-pressed', String(themeButton === button)));
+        liveRegion.textContent = button.dataset.themeButton === 'day' ? '已切换为日间主题' : '已切换为夜间主题';
+      });
+    });
+
+    document.querySelectorAll('[data-state-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        stateOverride = button.dataset.stateButton;
+        document.querySelectorAll('[data-state-button]').forEach((stateButton) => stateButton.setAttribute('aria-pressed', String(stateButton === button)));
+        render();
+        liveRegion.textContent = `当前命令状态：${stateLabels[stateOverride]}`;
+      });
+    });
+
+    document.getElementById('collapse-run').addEventListener('click', (event) => {
+      const collapsed = viewport.dataset.collapsed === 'true';
+      viewport.dataset.collapsed = String(!collapsed);
+      event.currentTarget.textContent = collapsed ? '收起' : '展开';
+      liveRegion.textContent = collapsed ? '已展开当前 Run' : '已收起当前 Run';
+    });
+
+    document.getElementById('stop-run').addEventListener('click', () => {
+      currentRuntime().state = 'stopped';
+      stateOverride = 'stopped';
+      document.querySelectorAll('[data-state-button]').forEach((button) => button.setAttribute('aria-pressed', 'false'));
+      render();
+      liveRegion.textContent = '演示状态：当前 Run 已停止';
+    });
+
+    const resizeHandle = document.getElementById('resize-handle');
+    let resizing = false;
+    resizeHandle.addEventListener('pointerdown', (event) => {
+      if (viewport.dataset.layout !== 'bottom') return;
+      resizing = true;
+      resizeHandle.setPointerCapture(event.pointerId);
+      document.body.style.cursor = 'ns-resize';
+    });
+    resizeHandle.addEventListener('pointermove', (event) => {
+      if (!resizing) return;
+      const bounds = viewport.getBoundingClientRect();
+      const nextHeight = Math.max(280, Math.min(bounds.height - 150, bounds.bottom - event.clientY));
+      document.documentElement.style.setProperty('--dock-height', `${nextHeight}px`);
+    });
+    resizeHandle.addEventListener('pointerup', (event) => {
+      resizing = false;
+      resizeHandle.releasePointerCapture(event.pointerId);
+      document.body.style.cursor = '';
+    });
+    resizeHandle.addEventListener('keydown', (event) => {
+      if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      const current = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dock-height')) || 398;
+      const direction = event.key === 'ArrowUp' ? 16 : -16;
+      const nextHeight = Math.max(280, Math.min(viewport.clientHeight - 150, current + direction));
+      document.documentElement.style.setProperty('--dock-height', `${nextHeight}px`);
+      liveRegion.textContent = `底部执行台高度 ${Math.round(nextHeight)} 像素`;
+    });
+
+    render();
+  </script>
+</body>
+</html>

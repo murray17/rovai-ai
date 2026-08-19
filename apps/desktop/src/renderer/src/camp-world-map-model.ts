@@ -356,7 +356,12 @@ export function truncateCampWorldMapSpeech(value: string, maximum = 92): string 
 function executionProgressItemText(item: ExecutionProgressItem): string {
   if (item.kind === 'narration') return item.body
   if (item.kind === 'tool') {
-    return item.step.detail ? `${item.step.title}：${item.step.detail}` : item.step.title
+    if (!item.step.detail) return item.step.title
+    const title = campWorldMapPlainText(item.step.title).toLocaleLowerCase()
+    const detail = campWorldMapPlainText(item.step.detail).toLocaleLowerCase()
+    return title && detail.includes(title)
+      ? item.step.title
+      : `${item.step.title}：${item.step.detail}`
   }
   const currentStep = item.plan.find((step) => step.status === 'inProgress')
     ?? item.plan.find((step) => step.status === 'pending')

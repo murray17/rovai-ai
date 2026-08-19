@@ -129,6 +129,7 @@ import {
   buildGitStatusEntries,
   buildLiveExecutionProgress,
   diffLineKind,
+  executionActivityTitle,
   executionEvidenceCopyText,
   formatByteSize,
   liveRuntimeEventFromCore,
@@ -2403,7 +2404,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Steps')
     expect(markup).toContain('aria-label="会话世界地图"')
     expect(markup).toContain('执行 · 正在运行')
-    expect(markup).toContain('执行 Shell 命令：pnpm test')
+    expect(markup).toContain('pnpm test')
+    expect(markup).not.toContain('pnpm test：pnpm test')
     expect(markup).not.toContain('conversation-bubble agent agent-run-message')
     expect(markup).not.toContain('execution-disclosure')
     expect(markup).not.toContain('stream-reasoning')
@@ -3192,7 +3194,7 @@ describe('task event projections', () => {
     })
     expect(progress.items[2]).toMatchObject({
       step: {
-        title: '执行 Shell 命令',
+        title: 'pnpm test',
         detail: 'pnpm test',
         status: 'running'
       }
@@ -3575,7 +3577,7 @@ describe('task event projections', () => {
 
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
-      step: { title: 'Bash', status: 'completed' }
+      step: { title: 'printf', status: 'completed' }
     })
     const item = progress.items[0]
     if (item.kind !== 'tool') throw new Error('Expected Claude Bash tool progress')
@@ -3601,7 +3603,93 @@ describe('task event projections', () => {
     }))
     expect(markup).toContain('tool-call-disclosure')
     expect(markup).toContain('tool-call-chevron')
+    expect(markup).toContain('class="tool-call-state status-completed"')
+    expect(markup).toContain('aria-label="成功"')
+    expect(markup).not.toContain('tool-call-result')
+    expect(markup).not.toContain('>已完成<')
     expect(markup).not.toContain('tool-call-static')
+
+    const failedMarkup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run: { ...run, status: 'failed' as const },
+      progress: {
+        items: [{
+          key: 'tool:failed-command',
+          kind: 'tool' as const,
+          step: {
+            id: 'failed-command', title: 'pnpm test', detail: 'exit 1',
+            status: 'failed' as const, activityDomain: 'shell', toolName: null,
+            credibility: 'runtime_structured'
+          }
+        }]
+      },
+      campId: 'camp-1',
+      focused: true
+    }))
+    expect(failedMarkup).toContain('class="tool-call-state status-failed"')
+    expect(failedMarkup).toContain('aria-label="失败"')
+  })
+
+  it('uses bounded concrete command labels across the current ten Runtime adapters', () => {
+    const genericShell = canonicalActivity('shell-command', {
+      activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null,
+      presentationHint: '执行 Shell 命令', phase: 'started', outcome: 'unknown'
+    })
+    const cases = [
+      {
+        adapter: 'codex-cli',
+        canonical: genericShell,
+        payload: {
+          item: {
+            command: "/bin/zsh -lc 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'"
+          }
+        },
+        expected: 'rovai camp read'
+      },
+      { adapter: 'opencode-cli', canonical: { ...genericShell, presentationHint: 'Run fixed printf' }, payload: {}, expected: 'Run fixed printf' },
+      { adapter: 'copilot-cli', canonical: { ...genericShell, presentationHint: 'Inspect attachment file' }, payload: {}, expected: 'Inspect attachment file' },
+      { adapter: 'kiro-cli', canonical: { ...genericShell, presentationHint: 'Read project file' }, payload: {}, expected: 'Read project file' },
+      { adapter: 'qoder-cli', canonical: { ...genericShell, presentationHint: 'Search project' }, payload: {}, expected: 'Search project' },
+      { adapter: 'codebuddy-cli', canonical: { ...genericShell, presentationHint: 'Apply patch' }, payload: {}, expected: 'Apply patch' },
+      { adapter: 'qwen-code', canonical: { ...genericShell, presentationHint: 'Run tests' }, payload: {}, expected: 'Run tests' },
+      { adapter: 'trae-cn-cli', canonical: { ...genericShell, presentationHint: 'bash' }, payload: {}, expected: 'bash' },
+      {
+        adapter: 'claude-code-cli',
+        canonical: { ...genericShell, toolName: 'Bash', presentationHint: 'Bash' },
+        payload: { input: "cargo test --package private-package -- token_must_not_leak" },
+        expected: 'cargo test'
+      },
+      {
+        adapter: 'antigravity-app',
+        canonical: { ...genericShell, toolName: 'run_command', presentationHint: 'run_command' },
+        payload: {},
+        expected: 'run_command'
+      }
+    ]
+
+    expect(cases).toHaveLength(10)
+    for (const testCase of cases) {
+      expect(
+        executionActivityTitle(testCase.canonical, testCase.payload),
+        testCase.adapter
+      ).toBe(testCase.expected)
+    }
+    expect(executionActivityTitle(genericShell, {
+      item: {
+        command: `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
+      }
+    })).toBe('rovai send')
+    expect(executionActivityTitle(genericShell, {
+      item: { command: `rovai send 'TOP_SECRET_POSITIONAL_BODY'` }
+    })).toBe('rovai send')
+    expect(executionActivityTitle(genericShell, {
+      item: { command: `rovai camp TOP_SECRET_UNKNOWN_ACTION` }
+    })).toBe('rovai camp')
+    expect(executionActivityTitle(canonicalActivity('file-write', {
+      activityDomain: 'file', semanticKind: 'file.write', toolName: null,
+      presentationHint: 'write_file', phase: 'started', outcome: 'unknown'
+    }), {
+      input: 'TOP_SECRET_NON_SHELL_INPUT'
+    })).toBe('write_file')
   })
 
   it('uses the Core Codex presentation hint without parsing the command in Renderer', () => {
