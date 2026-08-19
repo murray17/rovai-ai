@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # Camp 会话工作区
@@ -310,7 +310,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 
 文件和目录都进入当前 Draft。preparing/error 附件阻止发送；目录保存为一个只读快照附件，原文件
 不移动。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v1](../../contracts/camp-attachment-v1.md)。
+快照限制见 [Camp Attachment v2](../../contracts/camp-attachment-v2.md)。
 
 ## 空 Camp 欢迎状态
 

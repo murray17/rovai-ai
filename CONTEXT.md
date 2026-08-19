@@ -1119,11 +1119,11 @@ The deterministic bounded model-facing representation of public history from the
 _Avoid_: Context Briefing, Task state, private Conversation, Execution Evidence, current trigger
 
 **Run Fact**:
-A typed, compact model-facing fact already determined by authoritative Core state and directly relevant to the current AgentRun. Run Facts schema v1 can describe a frozen Task reference, lost Session continuity, an unsettled external effect, Gather member return semantics or exhausted delegation budget; absent facts and an empty section are omitted. A fact guides current decisions but is not an authorization token, mutable source snapshot or prose warning.
+A typed, compact model-facing fact already determined by authoritative Core state and directly relevant to the current AgentRun. Run Facts schema v2 always identifies the current Camp's enumerable, read-only Published Attachment root through `campResources`, and can additionally describe a frozen Task reference, lost Session continuity, an unsettled external effect, Gather member return semantics or exhausted delegation budget. Optional facts are omitted when absent, but the section itself is mandatory. A fact guides current decisions but is not an authorization token, mutable source snapshot or prose warning.
 _Avoid_: Run Notice, Control Signal, Work Brief, inferred warning, operation authorization, Task snapshot
 
 **Current Input**:
-The complete, never-truncated user message or Public A2A Message content that triggered one AgentRun, with trusted source type and stable Camp Attachment Paths when applicable. A2A source metadata contains only the Core-derived `senderAgentId` and `senderName`; internal Run, Task, Delivery, lineage, and correlation IDs remain outside model input. For a Message Delivery, Core must first prove that complete Current Input, the direct Public Reference Context parent, and mandatory structure fit the frozen target Runtime limit before materializing an AgentRun; otherwise the already accepted Delivery fails terminally with `context_payload_too_large`, while its Public Message and sibling Deliveries remain unchanged.
+The complete, never-truncated user message or Public A2A Message content that triggered one AgentRun, with trusted source type and stable Published Attachment Paths when applicable. A2A source metadata contains only the Core-derived `senderAgentId` and `senderName`; internal Run, Task, Delivery, lineage, and correlation IDs remain outside model input. For a Message Delivery, Core must first prove that complete Current Input, the direct Public Reference Context parent, and mandatory structure fit the frozen target Runtime limit before materializing an AgentRun; otherwise the already accepted Delivery fails terminally with `context_payload_too_large`, while its Public Message and sibling Deliveries remain unchanged.
 _Avoid_: Shared Conversation duplicate, Work Brief, model-generated source metadata, source reply alias
 
 **Accepted Public Context Boundary**:
@@ -1598,9 +1598,13 @@ _Avoid_: AgentRun-only aggregation, early completion, Outcome-as-recovery, busin
 The path, symlink, ownership, permission, size, and atomic-write protections applied when Rovai-ai manages its own blobs, projections, private configurations, sockets, logs, or temporary files. It is independent of Runtime-Managed Permission and remains Core-enforced.
 _Avoid_: Agent filesystem permission, Run Workspace boundary, Runtime sandbox
 
+**Authority Attachment**:
+The immutable Core-owned payload and private metadata stored under `<data_dir>/camp-attachments/`. It is the only content authority for both Draft and Published Attachments; database state, rather than a second authority tree, determines publication. Runtime never receives the Authority root or `.rovai-attachment.json`, and deletion or rebuild of a Runtime View does not change the Authority Attachment, its `contentDigest`, or historical evidence.
+_Avoid_: Runtime attachment root, Published Attachment Path, original user file, second authoritative copy
+
 **Prepared Attachment**:
-A Core-owned file resource inside one Camp Composer Draft that is ready to be consumed by one accepted message send. It has no original local path in product-facing state, remains distinct from a Message Attachment, and may survive Camp navigation or application restart until it is sent, explicitly discarded, or automatically expired.
-_Avoid_: Message Attachment, Renderer file path, uploaded message, permanent draft
+A Draft-private reference to one Authority Attachment inside a Camp Composer Draft that is ready to be consumed by one accepted message send. It has no original local path in product-facing state, never enters the Camp Published Attachment View, remains distinct from a Published Attachment, and may survive Camp navigation or application restart until it is sent, explicitly discarded, or automatically expired.
+_Avoid_: Published Attachment, Runtime-readable file, Renderer file path, uploaded message, permanent draft
 
 **Camp Composer Draft**:
 The private, durable user preparation for one future CampMessage, containing Structured Camp Message Content and ordered Prepared Attachments. It may survive Camp navigation or application restart, is invisible to Agents and public history, and is consumed only by an accepted send.
@@ -1614,17 +1618,17 @@ _Avoid_: updated timestamp, Renderer counter, CampMessage version, best-effort a
 The authoritative ordered content of one CampMessage and, for user-authored input, its Camp Composer Draft, using the closed `Text`, `MemberMention(agentId)`, `AllMembersMention`, and Core-generated `CurrentUserMention(local_user)` segments. Plain-text display, search, Context, Clipboard, accessibility and mention projections derive from it; submitted or stored plain body must not become a parallel content truth.
 _Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parsed user lookalike, parallel body and routing truth
 
-**Message Attachment**:
-An immutable managed-content resource belonging to one accepted public CampMessage and created by consuming a ready Prepared Attachment with that message. Its single authoritative file has a stable Camp Attachment Path, and its content and metadata share the CampMessage's public visibility for every currently eligible CampMember regardless of message addressing; it supplements a required non-blank message body and can never constitute a body-free message by itself.
-_Avoid_: Prepared Attachment, addressed-recipient attachment, pure attachment message, local file path, mutable upload
+**Published Attachment**:
+An immutable Authority Attachment whose exact Prepared Attachment was consumed by one accepted public CampMessage. The message commit makes it shared with the whole Camp regardless of addressing or whether it appears in a particular AgentRun's Context; every eligible Camp Agent may enumerate and read its Published Attachment Path. It supplements a required non-blank message body and can never constitute a body-free message by itself.
+_Avoid_: Prepared Attachment, addressed-recipient attachment, Context-scoped grant, pure attachment message, mutable upload
 
-**Camp Attachment Path**:
-The stable, read-only application-managed filesystem path of one Message Attachment inside its Camp Attachment Directory. Every currently eligible CampMember may discover and read the same path when the owning public message is inside that AgentRun's frozen message boundary; the file is neither copied into a Run nor placed in a user-selected Project workspace.
-_Avoid_: Run Attachment Projection, original local path, Managed Blob path, Project file
+**Camp Published Attachment View**:
+The instance-isolated, derived and rebuildable Runtime filesystem catalog containing exactly one Camp's Published Attachments and no Draft Attachment or Core-private metadata. Runtime receives only that Camp's exact `attachments` root; the View follows the Camp lifecycle, is not a second content authority, and never becomes a Camp Workspace Binding, Git worktree, Run projection, Session projection, or cross-Camp library.
+_Avoid_: Authority Attachment root, Run Attachment Projection, Agent Session projection, Project attachment folder, global Runtime files root
 
-**Camp Attachment Directory**:
-The Rovai-ai-managed directory that owns the authoritative Message Attachment files for one Camp. It follows the Camp lifecycle and never becomes part of the Camp Workspace Binding or a Git worktree; its existence does not create a live directory feed or let an AgentRun discover attachments beyond its frozen public-message boundary.
-_Avoid_: Run projection root, live attachment feed, Project attachment folder, user-selected workspace, cross-Camp library
+**Published Attachment Path**:
+The stable, read-only path of one Published Attachment payload inside its Camp Published Attachment View. New model input and ContextManifest attachment references obtain it from the Core resolver; every eligible Agent in that Camp may discover and read it even when the owning message is outside the current frozen Context. It is neither an Authority Attachment path nor permission to enumerate Drafts, another Camp, the View parent, or a user-selected Project workspace.
+_Avoid_: Authority storage path, Context-scoped grant, original local path, Managed Blob path, Project file
 
 **Run Workspace**:
 The immutable absolute, existing startup and recovery working directory of one AgentRun. It carries no filesystem authority and is not a model-controlled built-in operation field. An A2A target Run receives the source Run Workspace path by deterministic Core rule, while the recipient continues to use its own Adapter Permission Configuration. A sender may instead describe another filesystem path in ordinary message or Task content; the recipient interprets that instruction and accesses or switches to the path through its own Runtime without changing the frozen Run Workspace.

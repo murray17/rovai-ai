@@ -5,6 +5,10 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import {
+  coreDataDirectoryArguments,
+  removeEphemeralRuntimeCampFilesRoot
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-'))
@@ -24,7 +28,7 @@ try {
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
   core = spawn(join(root, 'target', 'debug', 'rovai-core'), [
-    '--data-dir', dataDir,
+    ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root', join(dataDir, 'managed-skill-library')
   ], {
     cwd: root,
@@ -454,6 +458,7 @@ try {
     ])
     if (core.exitCode === null) core.kill('SIGTERM')
   }
+  await removeEphemeralRuntimeCampFilesRoot(dataDir)
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 

@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { dispatchQualificationPrompt } from '../../lib/qualification-common.mjs'
 import { findCompetingRovaiProcesses } from '../../lib/qualification-core.mjs'
+import { coreDataDirectoryArguments } from '../../lib/runtime-camp-files-root.mjs'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 
@@ -106,7 +107,7 @@ export async function createEvidenceCamp({ core, commandPrefix, name, body, proj
 
 function startCore(executable, dataDirectory) {
   const child = spawn(executable, [
-    '--data-dir', dataDirectory,
+    ...coreDataDirectoryArguments(dataDirectory),
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: repositoryRoot,

@@ -4,7 +4,7 @@ authority: camp-conversation-drop-zone
 status: accepted
 design_direction: porcelain-day-steel-night
 implementation_status: complete
-last_updated: 2026-08-18
+last_updated: 2026-08-20
 ---
 
 # Camp 会话区文件与文件夹拖放
@@ -52,5 +52,5 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
 
 - [方向原型](../../prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
 - [设计说明](../../prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
-- [Camp Attachment v1](../../contracts/camp-attachment-v1.md)
+- [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
 - [Camp 资源不变量](../../architecture/foundational-invariants.md#camp-resources)

@@ -966,6 +966,72 @@ impl AgentRuntimeFleetManager {
             .await;
     }
 
+    pub(crate) async fn fence_camp_for_attachment_mutation(&self, camp_id: &str) -> Result<()> {
+        let _operation = self.operations.lock().await;
+        let process_ids = {
+            let state = self.state.lock().await;
+            let mut process_ids = Vec::new();
+            for (process_id, entry) in &state.processes {
+                if entry.compatibility.camp_id != camp_id {
+                    continue;
+                }
+                if !matches!(
+                    entry.state,
+                    FleetProcessState::IdleWarm | FleetProcessState::Stopping
+                ) {
+                    bail!("camp_attachment_view_busy: Camp Runtime Host is not reliably quiescent");
+                }
+                process_ids.push(process_id.clone());
+            }
+            process_ids
+        };
+        for process_id in process_ids {
+            if !self.stop_process_locked(&process_id).await {
+                bail!("camp_attachment_view_busy: Camp Runtime Host could not be fenced");
+            }
+        }
+        let retained = self
+            .state
+            .lock()
+            .await
+            .processes
+            .values()
+            .any(|entry| entry.compatibility.camp_id == camp_id);
+        if retained {
+            bail!("camp_attachment_view_busy: Camp Runtime Host remains resident");
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn force_fence_camp_for_deletion(&self, camp_id: &str) -> Result<()> {
+        let _operation = self.operations.lock().await;
+        let process_ids = {
+            let state = self.state.lock().await;
+            state
+                .processes
+                .iter()
+                .filter(|(_, entry)| entry.compatibility.camp_id == camp_id)
+                .map(|(process_id, _)| process_id.clone())
+                .collect::<Vec<_>>()
+        };
+        for process_id in process_ids {
+            if !self.stop_process_locked(&process_id).await {
+                bail!("camp_attachment_view_busy: Camp Runtime Host could not be fenced");
+            }
+        }
+        if self
+            .state
+            .lock()
+            .await
+            .processes
+            .values()
+            .any(|entry| entry.compatibility.camp_id == camp_id)
+        {
+            bail!("camp_attachment_view_busy: Camp Runtime Host remains resident");
+        }
+        Ok(())
+    }
+
     pub(crate) async fn invalidate_member(&self, agent_id: &str) {
         self.invalidate_matching(|entry| entry.compatibility.agent_id == agent_id)
             .await;

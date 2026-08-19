@@ -67,6 +67,10 @@ use rovai_core::{
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
+    camp_attachment_view::{
+        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, CampAttachmentVisibilityMode,
+        PreparedCampAttachmentCleanup,
+    },
     camp_content::StructuredCampMessageContent,
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, CampHistoryService,
@@ -219,6 +223,8 @@ const PLANNED_SHUTDOWN_FENCE_SETTLEMENT_RESERVE: Duration = Duration::from_secs(
 const RUNTIME_USAGE_FLUSH_INTERVAL: Duration = Duration::from_secs(4);
 const RUNTIME_EVIDENCE_DELTA_BATCH_WINDOW: Duration = Duration::from_millis(25);
 const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
+const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
+const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1009,6 +1015,8 @@ struct Core {
     antigravity_app: AntigravityAppRuntimeAdapter,
     planned_shutdown: Arc<PlannedShutdownCoordinator>,
     agent_run_tasks: Mutex<tokio::task::JoinSet<()>>,
+    attachment_views: CampAttachmentViewStore,
+    attachment_view_gates: Mutex<HashMap<String, Arc<RwLock<()>>>>,
     data_dir: PathBuf,
 }
 
@@ -1017,7 +1025,7 @@ struct PreparedRuntimeLaunch<'a> {
     resume_disposition: NativeSessionResumeDisposition,
     skill_exposure: &'a PreparedSkillExposure,
     mcp_projection: &'a PreparedMcpProjection,
-    attachment_access_root: &'a Path,
+    attachment_authorization: &'a CampAttachmentRuntimeAuthorization,
     output: &'a mpsc::UnboundedSender<String>,
     launch_permit: &'a mut ExecutionLaunchPermit,
 }
@@ -1347,6 +1355,67 @@ impl AgentRunRuntime {
 }
 
 impl Core {
+    async fn attachment_view_gate(&self, camp_id: &str) -> Arc<RwLock<()>> {
+        let mut gates = self.attachment_view_gates.lock().await;
+        gates
+            .entry(camp_id.to_string())
+            .or_insert_with(|| Arc::new(RwLock::new(())))
+            .clone()
+    }
+
+    async fn acquire_camp_attachment_mutation(
+        &self,
+        camp_id: &str,
+    ) -> Result<(tokio::sync::OwnedRwLockWriteGuard<()>, tokio::time::Instant)> {
+        let deadline = tokio::time::Instant::now() + CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE;
+        let gate = self.attachment_view_gate(camp_id).await;
+        let guard = tokio::time::timeout_at(deadline, gate.write_owned())
+            .await
+            .map_err(|_| anyhow::anyhow!("camp_attachment_view_busy"))?;
+        Ok((guard, deadline))
+    }
+
+    async fn wait_for_camp_attachment_quiescence(
+        &self,
+        camp_id: &str,
+        deadline: tokio::time::Instant,
+    ) -> Result<()> {
+        loop {
+            let has_active_runtime = {
+                let database = self.database.lock().await;
+                self.attachment_views
+                    .camp_has_active_runtime(&database, camp_id)?
+            };
+            if !has_active_runtime
+                && self
+                    .runtime_fleet
+                    .fence_camp_for_attachment_mutation(camp_id)
+                    .await
+                    .is_ok()
+            {
+                return Ok(());
+            }
+            if tokio::time::Instant::now() >= deadline {
+                anyhow::bail!("camp_attachment_view_busy");
+            }
+            tokio::time::sleep(CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL).await;
+        }
+    }
+
+    async fn finish_camp_attachment_cleanup(
+        &self,
+        cleanup: Option<&PreparedCampAttachmentCleanup>,
+    ) -> Result<()> {
+        let Some(cleanup) = cleanup else {
+            return Ok(());
+        };
+        let mut database = self.database.lock().await;
+        self.attachment_views
+            .commit_camp_delete_cleanup(&mut database, cleanup)?;
+        self.attachment_views
+            .complete_camp_delete_cleanup(&mut database, cleanup)
+    }
+
     fn known_agent_ids(database: &Database) -> Result<BTreeSet<String>> {
         AgentProfileService::default().all_profile_ids(database)
     }
@@ -4396,6 +4465,12 @@ impl Core {
                     &mut database,
                     &user_command_envelope(params.command_id, command),
                 )?;
+                if execution.result.status == CommandResultStatus::Applied
+                    && let Some(camp_id) = execution.result.payload["campId"].as_str()
+                {
+                    self.attachment_views
+                        .ensure_empty_camp_ready(&mut database, camp_id)?;
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.rename" => {
@@ -4504,20 +4579,53 @@ impl Core {
                 let params: UserCommandParams<DeleteCampCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
+                let command_id = params.command_id.clone();
                 let force = params.command.force;
-                let mut database = self.database.lock().await;
                 let runtime_cleanup_targets = if force {
+                    let database = self.database.lock().await;
                     ExecutionRuntimeService::default()
                         .list_camp_runtime_cleanup_targets(&database, &camp_id)?
                 } else {
                     Vec::new()
                 };
+                if force {
+                    self.stop_deleted_camp_runtimes(&runtime_cleanup_targets)
+                        .await;
+                    self.runtime_fleet
+                        .force_fence_camp_for_deletion(&camp_id)
+                        .await?;
+                }
+                let (_view_mutation, _) = self.acquire_camp_attachment_mutation(&camp_id).await?;
+                let mut database = self.database.lock().await;
+                let cleanup = self.attachment_views.prepare_camp_delete_cleanup(
+                    &mut database,
+                    &camp_id,
+                    &command_id,
+                )?;
+                drop(database);
+                if !force
+                    && let Err(error) = self
+                        .runtime_fleet
+                        .fence_camp_for_attachment_mutation(&camp_id)
+                        .await
+                {
+                    if let Some(cleanup) = cleanup.as_ref() {
+                        let mut database = self.database.lock().await;
+                        self.attachment_views
+                            .cancel_camp_delete_cleanup(&mut database, cleanup)?;
+                    }
+                    return Err(error);
+                }
+                let mut database = self.database.lock().await;
                 let execution = CollaborationService::default().delete_camp(
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
                 if execution.result.status == CommandResultStatus::Applied {
                     self.mark_skill_projections_dirty_best_effort(&mut database, true);
+                } else if let Some(cleanup) = cleanup.as_ref() {
+                    self.attachment_views
+                        .cancel_camp_delete_cleanup(&mut database, cleanup)?;
                 }
                 let should_remove_attachments =
                     execution.result.status == CommandResultStatus::Applied;
@@ -4529,11 +4637,13 @@ impl Core {
                     .map(str::to_string);
                 drop(database);
                 if should_remove_attachments && let Some(camp_id) = deleted_camp_id {
-                    if force {
-                        self.stop_deleted_camp_runtimes(&runtime_cleanup_targets)
-                            .await;
-                    }
                     self.forget_deleted_camp_runtimes(&camp_id).await;
+                    if let Err(error) = self.finish_camp_attachment_cleanup(cleanup.as_ref()).await
+                    {
+                        eprintln!(
+                            "Camp {camp_id} was deleted but Runtime Attachment View cleanup failed: {error:#}"
+                        );
+                    }
                     if let Err(error) =
                         CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)
                     {
@@ -4548,6 +4658,27 @@ impl Core {
                 let params: UserCommandParams<DiscardPendingCampCommand> =
                     serde_json::from_value(request.params.clone())?;
                 let camp_id = params.command.camp_id.clone();
+                let command_id = params.command_id.clone();
+                let (_view_mutation, _) = self.acquire_camp_attachment_mutation(&camp_id).await?;
+                let mut database = self.database.lock().await;
+                let cleanup = self.attachment_views.prepare_camp_delete_cleanup(
+                    &mut database,
+                    &camp_id,
+                    &command_id,
+                )?;
+                drop(database);
+                if let Err(error) = self
+                    .runtime_fleet
+                    .fence_camp_for_attachment_mutation(&camp_id)
+                    .await
+                {
+                    if let Some(cleanup) = cleanup.as_ref() {
+                        let mut database = self.database.lock().await;
+                        self.attachment_views
+                            .cancel_camp_delete_cleanup(&mut database, cleanup)?;
+                    }
+                    return Err(error);
+                }
                 let mut database = self.database.lock().await;
                 let execution = CollaborationService::default().discard_pending_camp(
                     &mut database,
@@ -4566,8 +4697,14 @@ impl Core {
                     .get("campId")
                     .and_then(Value::as_str)
                     .map(str::to_string);
+                if !discarded && let Some(cleanup) = cleanup.as_ref() {
+                    self.attachment_views
+                        .cancel_camp_delete_cleanup(&mut database, cleanup)?;
+                }
                 drop(database);
                 if discarded && let Some(camp_id) = discarded_camp_id {
+                    self.finish_camp_attachment_cleanup(cleanup.as_ref())
+                        .await?;
                     CampAttachmentStore::new(&self.data_dir).remove_camp(&camp_id)?;
                 }
                 Ok(serde_json::to_value(execution.result)?)
@@ -5199,7 +5336,7 @@ impl Core {
             }));
         }
 
-        let execution = {
+        let publication = {
             let mut database = self.database.lock().await;
             let draft = CampAttachmentStore::new(&self.data_dir)
                 .load_draft(&database, params.camp_id.as_str())?;
@@ -5215,6 +5352,88 @@ impl Core {
                     &attachment_ids,
                 )?;
             }
+            self.attachment_views.stage_publication(
+                &mut database,
+                &CampAttachmentStore::new(&self.data_dir),
+                params.camp_id.as_str(),
+                &params.command_id,
+                params.draft_revision,
+            )?
+        };
+        let execution = if let Some(publication) = publication.as_ref() {
+            let (_view_mutation, mutation_deadline) = match self
+                .acquire_camp_attachment_mutation(params.camp_id.as_str())
+                .await
+            {
+                Ok(admission) => admission,
+                Err(error) => {
+                    // Staging is outside the Runtime-authorized Camp tree, so it can be
+                    // rolled back without the write admission. Do not retain a quota
+                    // reservation merely because an active Run held the read guard.
+                    let mut database = self.database.lock().await;
+                    self.attachment_views.rollback_publication(
+                        &mut database,
+                        &publication.operation_id,
+                        "camp_attachment_view_busy",
+                    )?;
+                    return Err(error);
+                }
+            };
+            if let Err(error) = self
+                .wait_for_camp_attachment_quiescence(params.camp_id.as_str(), mutation_deadline)
+                .await
+            {
+                let mut database = self.database.lock().await;
+                self.attachment_views.rollback_publication(
+                    &mut database,
+                    &publication.operation_id,
+                    "camp_attachment_view_busy",
+                )?;
+                return Err(error);
+            }
+            {
+                let mut database = self.database.lock().await;
+                self.attachment_views
+                    .gate_publication(&mut database, publication)?;
+                self.attachment_views
+                    .promote_publication(&mut database, publication)?;
+            }
+            let committed = {
+                let mut database = self.database.lock().await;
+                CollaborationService::default().send_user_camp_draft_with_publication(
+                    &mut database,
+                    &envelope,
+                    Some(&publication.operation_id),
+                )
+            };
+            match committed {
+                Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .complete_publication(&mut database, &publication.operation_id)?;
+                    execution
+                }
+                Ok(execution) => {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views.rollback_publication(
+                        &mut database,
+                        &publication.operation_id,
+                        "camp_attachment_view_publish_failed",
+                    )?;
+                    execution
+                }
+                Err(error) => {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views.rollback_publication(
+                        &mut database,
+                        &publication.operation_id,
+                        "camp_attachment_view_publish_failed",
+                    )?;
+                    return Err(error);
+                }
+            }
+        } else {
+            let mut database = self.database.lock().await;
             CollaborationService::default().send_user_camp_draft(&mut database, &envelope)?
         };
         Ok(json!({
@@ -6588,8 +6807,12 @@ impl Core {
         charter_delivery_mode: CharterDeliveryMode,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<PreparedContext>> {
+        let view_gate = self.attachment_view_gate(&execution.camp_id).await;
+        let _view_read = view_gate.read().await;
         let materialization = {
             let mut database = self.database.lock().await;
+            self.attachment_views
+                .verify_camp_ready(&database, &execution.camp_id)?;
             ContextService.materialize_with_exposures(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
@@ -6630,11 +6853,15 @@ impl Core {
         charter_delivery_mode: CharterDeliveryMode,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
+        let view_gate = self.attachment_view_gate(&execution.camp_id).await;
+        let _view_read = view_gate.read().await;
         let preparation = {
             // The Core database mutex is the logical Runtime Input preparation
             // boundary. A Compaction Observer cannot commit between selecting
             // the pending revision and persisting RuntimeInputDelivery.prepared.
             let mut database = self.database.lock().await;
+            self.attachment_views
+                .verify_camp_ready(&database, &execution.camp_id)?;
             let materialization = ContextService.materialize_with_exposures(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
@@ -7510,9 +7737,21 @@ impl Core {
             .prepare_agent_run_mcp_projection(execution)
             .await
             .context("failed to prepare AgentRun MCP projection")?;
-        let attachment_access_root = CampAttachmentStore::new(&self.data_dir)
-            .camp_root(&execution.camp_id)
-            .context("failed to prepare the Camp Attachment access root")?;
+        let attachment_view_gate = self.attachment_view_gate(&execution.camp_id).await;
+        let _attachment_view_admission = attachment_view_gate.read_owned().await;
+        // No Adapter is promoted to live-append compatibility until a persisted,
+        // artifact-bound positive probe proves the required warm-host behavior.
+        let visibility_mode = CampAttachmentVisibilityMode::GenerationFencedV1;
+        let attachment_authorization = {
+            let database = self.database.lock().await;
+            self.attachment_views.camp_runtime_authorization(
+                &database,
+                &execution.camp_id,
+                Some(Path::new(&execution.workspace.execution_root)),
+                visibility_mode,
+            )?
+        };
+        let attachment_access_root = attachment_authorization.attachment_root.clone();
         let resume_disposition = {
             let mut database = self.database.lock().await;
             ExecutionRuntimeService::default()
@@ -7539,7 +7778,7 @@ impl Core {
                     resume_disposition,
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
-                    attachment_access_root: &attachment_access_root,
+                    attachment_authorization: &attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -7552,7 +7791,7 @@ impl Core {
                     resume_disposition,
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
-                    attachment_access_root: &attachment_access_root,
+                    attachment_authorization: &attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -7565,7 +7804,7 @@ impl Core {
                     resume_disposition,
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
-                    attachment_access_root: &attachment_access_root,
+                    attachment_authorization: &attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -7588,7 +7827,7 @@ impl Core {
         let runtime_compatibility_digest = codex::runtime_compatibility_digest(
             &execution.runtime,
             &execution_root,
-            &attachment_access_root,
+            &attachment_authorization,
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
             .await?;
@@ -7756,11 +7995,11 @@ impl Core {
         let reasoning_effort = execution.runtime.model.options["reasoning_effort"].as_str();
         let delivery = {
             let mut database = self.database.lock().await;
-            ContextService.prepare_input_delivery(
+            ContextService.prepare_input_delivery_for_context(
                 &mut database,
                 &execution.agent_run_id,
                 execution.execution_epoch,
-                &prepared_context.manifest_id,
+                &prepared_context,
             )
         }?;
         if delivery.status == "accepted" {
@@ -7840,10 +8079,11 @@ impl Core {
             resume_disposition,
             skill_exposure,
             mcp_projection,
-            attachment_access_root,
+            attachment_authorization,
             output,
             launch_permit,
         } = launch;
+        let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -7891,11 +8131,11 @@ impl Core {
         }
         let delivery = {
             let mut database = self.database.lock().await;
-            ContextService.prepare_input_delivery(
+            ContextService.prepare_input_delivery_for_context(
                 &mut database,
                 &execution.agent_run_id,
                 execution.execution_epoch,
-                &prepared_context.manifest_id,
+                &prepared_context,
             )
         }?;
         if delivery.status == "accepted" {
@@ -8386,10 +8626,11 @@ impl Core {
             resume_disposition,
             skill_exposure,
             mcp_projection,
-            attachment_access_root,
+            attachment_authorization,
             output,
             launch_permit,
         } = launch;
+        let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -8421,20 +8662,20 @@ impl Core {
             .then(|| binding_credential.native_binding_id.clone());
         let input_delivery = if let Some(proposed_binding_id) = proposed_binding_id.as_deref() {
             let mut database = self.database.lock().await;
-            ContextService.prepare_input_delivery_for_binding(
+            ContextService.prepare_input_delivery_for_binding_context(
                 &mut database,
                 &execution.agent_run_id,
                 execution.execution_epoch,
-                &prepared_context.manifest_id,
+                &prepared_context,
                 proposed_binding_id,
             )?
         } else {
             let mut database = self.database.lock().await;
-            ContextService.prepare_input_delivery(
+            ContextService.prepare_input_delivery_for_context(
                 &mut database,
                 &execution.agent_run_id,
                 execution.execution_epoch,
-                &prepared_context.manifest_id,
+                &prepared_context,
             )?
         };
         if input_delivery.status == "accepted" {
@@ -8762,10 +9003,11 @@ impl Core {
             resume_disposition,
             skill_exposure,
             mcp_projection,
-            attachment_access_root,
+            attachment_authorization,
             output,
             launch_permit,
         } = launch;
+        let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -8786,7 +9028,7 @@ impl Core {
             execution.permission_semantics,
             &mcp_projection.servers,
             &mcp_projection.projection_digest,
-            attachment_access_root,
+            attachment_authorization,
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
             .await?;
@@ -8900,7 +9142,7 @@ impl Core {
                     execution.permission_semantics,
                     &mcp_projection.servers,
                     &mcp_projection.projection_digest,
-                    attachment_access_root,
+                    attachment_authorization,
                 )?;
                 self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
                     .await?;
@@ -9549,9 +9791,19 @@ async fn run_core(
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
+    let runtime_camp_files_root = parse_runtime_camp_files_root()?;
+    let attachment_views = CampAttachmentViewStore::admit(
+        &runtime_camp_files_root,
+        &data_dir,
+        std::slice::from_ref(&skill_library_root),
+    )?;
     let mcp_config_path = parse_mcp_config_path()?;
     let database_started_at = Instant::now();
-    let mut database = Database::open(&data_dir)?;
+    let mut database = Database::open_with_runtime_camp_files_root(
+        &data_dir,
+        attachment_views.root(),
+        attachment_views.root_identity_digest(),
+    )?;
     eprintln!(
         "[startup] stage=database_ready duration_ms={} elapsed_ms={}",
         database_started_at.elapsed().as_millis(),
@@ -9625,6 +9877,9 @@ async fn run_core(
             discarded_pending_camps.len()
         );
     }
+    attachment_views
+        .reconcile(&mut database, &attachment_store)
+        .context("failed to reconcile Camp Published Attachment Views")?;
     let search_summary = runtime_search_environment.summary();
     database.record_runtime_search_environment_generation(
         search_summary.generation,
@@ -9809,6 +10064,8 @@ async fn run_core(
         antigravity_app,
         planned_shutdown,
         agent_run_tasks: Mutex::new(tokio::task::JoinSet::new()),
+        attachment_views,
+        attachment_view_gates: Mutex::new(HashMap::new()),
         runtime_fleet,
         builtin_tool_leases,
         data_dir,
@@ -14311,6 +14568,10 @@ fn parse_data_dir() -> Result<PathBuf> {
     parse_data_dir_from(std::env::args().skip(1))
 }
 
+fn parse_runtime_camp_files_root() -> Result<PathBuf> {
+    parse_runtime_camp_files_root_from(std::env::args().skip(1))
+}
+
 fn parse_windows_data_root_preparation() -> Result<Option<PathBuf>> {
     parse_windows_data_root_preparation_from(std::env::args().skip(1))
 }
@@ -14414,6 +14675,35 @@ fn parse_data_dir_from(args: impl IntoIterator<Item = String>) -> Result<PathBuf
     }
     data_dir.context(
         "rovai-core requires an explicit absolute --data-dir; refusing to infer daily userData",
+    )
+}
+
+fn parse_runtime_camp_files_root_from(args: impl IntoIterator<Item = String>) -> Result<PathBuf> {
+    let mut args = args.into_iter();
+    let mut root = None;
+    while let Some(arg) = args.next() {
+        if arg == "--runtime-camp-files-root" {
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .context("--runtime-camp-files-root requires a path")?;
+            if !path.is_absolute()
+                || path.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::CurDir | std::path::Component::ParentDir
+                    )
+                })
+            {
+                anyhow::bail!("--runtime-camp-files-root requires a normalized absolute path");
+            }
+            if root.replace(path).is_some() {
+                anyhow::bail!("--runtime-camp-files-root may be provided only once");
+            }
+        }
+    }
+    root.context(
+        "rovai-core requires an explicit absolute --runtime-camp-files-root; refusing to infer a shared Home root",
     )
 }
 
@@ -14946,6 +15236,54 @@ mod tests {
                 ])
                 .unwrap_err()
             )
+            .contains("only once")
+        );
+    }
+
+    #[test]
+    fn runtime_camp_files_root_must_be_explicit_normalized_absolute_and_unique() {
+        let root = std::env::temp_dir().join("rovai-runtime-camp-files-root");
+        assert_eq!(
+            parse_runtime_camp_files_root_from(vec![
+                "--runtime-camp-files-root".to_string(),
+                root.to_string_lossy().into_owned(),
+            ])
+            .unwrap(),
+            root
+        );
+        assert!(
+            parse_runtime_camp_files_root_from(Vec::new())
+                .unwrap_err()
+                .to_string()
+                .contains("refusing to infer a shared Home root")
+        );
+        assert!(
+            parse_runtime_camp_files_root_from(vec![
+                "--runtime-camp-files-root".to_string(),
+                "relative-root".to_string(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("normalized absolute")
+        );
+        assert!(
+            parse_runtime_camp_files_root_from(vec![
+                "--runtime-camp-files-root".to_string(),
+                root.join("..").to_string_lossy().into_owned(),
+            ])
+            .unwrap_err()
+            .to_string()
+            .contains("normalized absolute")
+        );
+        assert!(
+            parse_runtime_camp_files_root_from(vec![
+                "--runtime-camp-files-root".to_string(),
+                root.to_string_lossy().into_owned(),
+                "--runtime-camp-files-root".to_string(),
+                root.to_string_lossy().into_owned(),
+            ])
+            .unwrap_err()
+            .to_string()
             .contains("only once")
         );
     }

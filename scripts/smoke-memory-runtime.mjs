@@ -6,6 +6,10 @@ import { createInterface } from 'node:readline'
 import { configureCodexRuntime } from './configure-codex-runtime.mjs'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import {
+  coreDataDirectoryArguments,
+  removeEphemeralRuntimeCampFilesRoot
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const selectedAdapters = (process.env.ROVAI_MEMORY_RUNTIME_ADAPTERS
@@ -107,6 +111,7 @@ async function runAdapterSmoke(adapterKind) {
     }
   } finally {
     if (core) await core.stop()
+    await removeEphemeralRuntimeCampFilesRoot(dataDir)
     await rm(fixtureRoot, { recursive: true, force: true })
   }
 }
@@ -127,7 +132,7 @@ async function configureClaude(request, _health) {
 
 function startCore(dataDirectory, environment = {}) {
   const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
-    '--data-dir', dataDirectory,
+    ...coreDataDirectoryArguments(dataDirectory),
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: root,

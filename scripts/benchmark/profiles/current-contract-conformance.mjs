@@ -3,7 +3,7 @@ import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
   version: 'v1.15',
-  projectionSchemaVersion: 53
+  projectionSchemaVersion: 54
 })
 
 const criteria = [
@@ -35,7 +35,7 @@ const criteria = [
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 19 and Context Formatter version is 20', [
+  criterion('CCC-010', 'ContextManifest version is 20 and Context Formatter version is 21', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
   criterion(
@@ -53,8 +53,8 @@ const criteria = [
     test('crates/rovai-core/src/db.rs', 'current_migration_state_admission_matrix'),
     test('crates/rovai-core/src/db.rs', 'v107_quarantine_moves_owned_directories_without_following_links')
   ]),
-  criterion('CCC-014', 'The v98 schema transition invalidates Profile v3 Native Session context before Profile v4', [
-    test('crates/rovai-core/src/db.rs', 'v98_invalidates_profile_v3_context_and_preserves_public_messages')
+  criterion('CCC-014', 'The v99 schema transition preserves completed evidence, closes unfinished execution, and backfills only published attachments', [
+    test('crates/rovai-core/src/db.rs', 'v99_preserves_legacy_evidence_classifies_unfinished_work_and_backfills_only_published_attachments')
   ]),
   criterion('CCC-015', 'Self-authored recent messages are excluded before the top-15 and omission aggregate', [
     test('crates/rovai-core/src/context.rs', 'recent_public_messages_filter_self_before_limit_and_omission_aggregation')

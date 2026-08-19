@@ -12,6 +12,10 @@ import { createServer } from 'node:http'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import {
+  coreDataDirectoryArguments,
+  removeEphemeralRuntimeCampFilesRoot
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-'))
@@ -121,6 +125,7 @@ try {
   if (core) await core.stop()
   if (projectedHttp) await projectedHttp.stop()
   if (nativeHttp) await nativeHttp.stop()
+  await removeEphemeralRuntimeCampFilesRoot(dataDir)
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
@@ -425,7 +430,7 @@ function startCore() {
     ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
     : join(root, 'target', 'debug', 'rovai-core')
   const child = spawn(coreExecutable, [
-    '--data-dir', dataDir,
+    ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root', join(dataDir, 'managed-skill-library'),
     '--mcp-config-path', mcpConfigPath
   ], {

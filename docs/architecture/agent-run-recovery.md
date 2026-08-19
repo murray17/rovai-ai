@@ -2,7 +2,7 @@
 document_type: architecture
 architecture: agent-run-recovery
 authority: agent-run-session-and-native-turn-recovery-boundaries
-last_updated: 2026-08-13
+last_updated: 2026-08-20
 ---
 
 # AgentRun Recovery
@@ -10,7 +10,7 @@ last_updated: 2026-08-13
 本文描述 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复边界。规范依据是
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
 fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
-[Accepted Input Recovery v1](../contracts/accepted-input-recovery-v1.md)与
+[Accepted Input Recovery v2](../contracts/accepted-input-recovery-v2.md)与
 [Planned Shutdown v2](../contracts/planned-shutdown-v2.md)。
 
 ## 1. 三个独立恢复对象
@@ -19,6 +19,7 @@ fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-
 AgentRun durable state
   ├─ Native Session binding：可 load/resume 或安全替换
   ├─ Runtime Input Delivery：prepared / accepted / delivery_unknown 证据
+  ├─ Attachment authorization：Manifest View Receipt / Runtime Auth Receipt
   └─ Native Turn：Provider 侧一次 prompt 的运行与 terminal result
 ```
 
@@ -45,11 +46,19 @@ Approval、Runtime Delivery 和 prepared input，再分类 AgentRun：
 `recovery_blocked` 的 `runtime_recovery_required` 必须为 false。第二次启动不得重新标记为自动恢复，
 不得增加 execution epoch，也不得改变 accepted Delivery。
 
+Migration 99 是一次性 clean break：所有旧 Formatter 20 非终态输入在 Runtime View backfill 前按
+delivery/action evidence 终结，accepted outcome unknown 绝不能降为 cancelled。旧 Manifest、payload Blob、ACK、
+Binding identity 和执行证据保留为 non-dispatchable history；新的 Scheduler 只接受 Formatter 21/Manifest 20。
+
 ## 3. 调度与 Adapter 边界
 
 Scheduler 只领取 queued，或确有自动动作的 `waiting/runtime_recovery` Run。accepted input filter 保留为
 纵深防御；`recovery_blocked` 永不进入候选集合。Codex/ACP Adapter 遇到既有 accepted Delivery 时必须
 fail closed，不得发 `agent_run.input_resumed` 或等待一个不存在的旧 Host response route。
+
+当前输入 retry/resume 还必须匹配同一 Camp Published Attachment View root identity、冻结 Entry receipt 与
+Runtime Attachment Auth Receipt。generation/root 不兼容时 fence Native Binding；不得重新选择 Context、生成新
+View path、修改已冻结 bytes，或把 Authority Attachment path 当降级入口。
 
 未来若某 Adapter 通过 P1 实验，Core 才能为它增加独立的 `native_turn_reconciliation` 状态与 Coordinator。
 该 Coordinator 只能 lookup/reattach 同一 Provider Turn，不能调用新的 prompt API。

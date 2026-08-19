@@ -76,6 +76,17 @@ pub(crate) struct ManagedAttachmentSummary {
     pub file_count: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeAttachmentCopyReceipt {
+    pub authority_safe_leaf: String,
+    pub kind: String,
+    pub file_count: u64,
+    pub directory_count: u64,
+    pub node_count: u64,
+    pub byte_size: u64,
+    pub content_digest: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ManagedAttachmentMetadata {
@@ -987,6 +998,74 @@ impl CampAttachmentStore {
         }))
     }
 
+    pub(crate) fn copy_verified_authority_attachment_for_runtime(
+        &self,
+        storage_path: &Path,
+        media_type: &str,
+        expected_size: u64,
+        expected_digest: &str,
+        destination_payload: &Path,
+    ) -> Result<RuntimeAttachmentCopyReceipt> {
+        validate_owned_attachment(
+            &self.root,
+            storage_path,
+            media_type,
+            expected_size,
+            expected_digest,
+        )?;
+        validate_runtime_source_tree(storage_path, 0)?;
+        let authority_safe_leaf = storage_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("Authority Attachment has no UTF-8 safe leaf")?
+            .to_string();
+        validate_runtime_safe_leaf(&authority_safe_leaf)?;
+        ensure_directory(destination_payload)?;
+        let destination = destination_payload.join(&authority_safe_leaf);
+        let copied = copy_and_inspect(storage_path, &destination)?;
+        validate_runtime_source_tree(storage_path, 0)?;
+        if copied.byte_size != expected_size
+            || copied.content_digest != expected_digest
+            || (media_type == DIRECTORY_MEDIA_TYPE) != (copied.kind == "directory")
+        {
+            anyhow::bail!("Camp Attachment Runtime View copy did not match Authority receipt");
+        }
+        Ok(RuntimeAttachmentCopyReceipt {
+            authority_safe_leaf,
+            kind: copied.kind,
+            file_count: copied.file_count,
+            directory_count: copied.directory_count,
+            node_count: copied.node_count,
+            byte_size: copied.byte_size,
+            content_digest: copied.content_digest,
+        })
+    }
+
+    pub(crate) fn verify_authority_attachment_for_runtime(
+        &self,
+        storage_path: &Path,
+        media_type: &str,
+        expected_size: u64,
+        expected_digest: &str,
+    ) -> Result<RuntimeAttachmentCopyReceipt> {
+        validate_owned_attachment(
+            &self.root,
+            storage_path,
+            media_type,
+            expected_size,
+            expected_digest,
+        )?;
+        validate_runtime_source_tree(storage_path, 0)?;
+        let inspected = inspect_runtime_attachment_copy(storage_path)?;
+        if inspected.byte_size != expected_size
+            || inspected.content_digest != expected_digest
+            || (media_type == DIRECTORY_MEDIA_TYPE) != (inspected.kind == "directory")
+        {
+            anyhow::bail!("Authority Attachment does not match its persisted Runtime receipt");
+        }
+        Ok(inspected)
+    }
+
     pub fn remove_camp(&self, camp_id: &str) -> Result<()> {
         let camp_id = CampId::parse(camp_id)?;
         let root = self.root.join(camp_id.as_str());
@@ -1017,6 +1096,68 @@ impl CampAttachmentStore {
         }
         Ok(camps.len())
     }
+}
+
+pub(crate) fn inspect_runtime_attachment_copy(path: &Path) -> Result<RuntimeAttachmentCopyReceipt> {
+    let authority_safe_leaf = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("Runtime Attachment copy has no UTF-8 safe leaf")?
+        .to_string();
+    validate_runtime_safe_leaf(&authority_safe_leaf)?;
+    let mut source = open_source_without_following(path)?;
+    let metadata = inspect_open_node(&source)?;
+    if metadata.kind == OpenedNodeKind::RegularFile {
+        if metadata.link_count != 1 {
+            anyhow::bail!("Runtime Attachment copy contains a hard-linked file");
+        }
+        let (byte_size, digest) = inspect_open_regular_file(&mut source)?;
+        return Ok(RuntimeAttachmentCopyReceipt {
+            authority_safe_leaf,
+            kind: "file".to_string(),
+            file_count: 1,
+            directory_count: 0,
+            node_count: 1,
+            byte_size,
+            content_digest: format!(
+                "sha256:{}",
+                digest
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ),
+        });
+    }
+    if metadata.kind != OpenedNodeKind::Directory {
+        anyhow::bail!("Runtime Attachment copy contains an unsupported root node");
+    }
+    let mut state = DirectorySnapshotState {
+        hasher: Sha256::new(),
+        file_count: 0,
+        directory_count: 1,
+        entry_count: 0,
+        byte_size: 0,
+    };
+    state.hasher.update(b"rovai-directory-snapshot-v1\0");
+    inspect_open_directory_snapshot(
+        &source,
+        Path::new(""),
+        0,
+        fingerprint_volume(&metadata.fingerprint),
+        &mut state,
+    )?;
+    Ok(RuntimeAttachmentCopyReceipt {
+        authority_safe_leaf,
+        kind: "directory".to_string(),
+        file_count: state.file_count,
+        directory_count: state.directory_count,
+        node_count: state
+            .file_count
+            .checked_add(state.directory_count)
+            .context("Runtime Attachment node count overflow")?,
+        byte_size: state.byte_size,
+        content_digest: format!("sha256:{:x}", state.hasher.finalize()),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1657,6 +1798,8 @@ struct PreparedAttachment {
     path: PathBuf,
     kind: String,
     file_count: u64,
+    directory_count: u64,
+    node_count: u64,
     media_type: String,
     byte_size: u64,
     content_digest: String,
@@ -1744,6 +1887,8 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAt
         path: destination.to_path_buf(),
         kind: "file".to_string(),
         file_count: 1,
+        directory_count: 0,
+        node_count: 1,
         media_type: inspection.media_type,
         byte_size,
         content_digest: format!("sha256:{:x}", hasher.finalize()),
@@ -1756,6 +1901,7 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAt
 struct DirectorySnapshotState {
     hasher: Sha256,
     file_count: u64,
+    directory_count: u64,
     entry_count: u64,
     byte_size: u64,
 }
@@ -1765,6 +1911,7 @@ struct DirectorySnapshotState {
 struct MetadataFingerprint {
     device: u64,
     inode: u64,
+    link_count: u64,
     size: u64,
     modified_seconds: i64,
     modified_nanoseconds: i64,
@@ -1789,11 +1936,13 @@ enum OpenedNodeKind {
 struct OpenedNodeMetadata {
     kind: OpenedNodeKind,
     fingerprint: MetadataFingerprint,
+    link_count: u64,
 }
 
 #[cfg(any(unix, windows))]
 fn copy_directory_snapshot(source: &File, destination: &Path) -> Result<PreparedAttachment> {
-    if inspect_open_node(source)?.kind != OpenedNodeKind::Directory {
+    let root_metadata = inspect_open_node(source)?;
+    if root_metadata.kind != OpenedNodeKind::Directory {
         anyhow::bail!("Attachment directory changed before snapshotting");
     }
 
@@ -1801,17 +1950,30 @@ fn copy_directory_snapshot(source: &File, destination: &Path) -> Result<Prepared
     let mut state = DirectorySnapshotState {
         hasher: Sha256::new(),
         file_count: 0,
+        directory_count: 1,
         entry_count: 0,
         byte_size: 0,
     };
     state.hasher.update(b"rovai-directory-snapshot-v1\0");
-    copy_open_directory(source, destination, Path::new(""), 0, &mut state)?;
+    copy_open_directory(
+        source,
+        destination,
+        Path::new(""),
+        0,
+        fingerprint_volume(&root_metadata.fingerprint),
+        &mut state,
+    )?;
     set_directory_read_only(destination)?;
     sync_parent(destination)?;
     Ok(PreparedAttachment {
         path: destination.to_path_buf(),
         kind: "directory".to_string(),
         file_count: state.file_count,
+        directory_count: state.directory_count,
+        node_count: state
+            .file_count
+            .checked_add(state.directory_count)
+            .context("Attachment directory node count overflow")?,
         media_type: DIRECTORY_MEDIA_TYPE.to_string(),
         byte_size: state.byte_size,
         content_digest: format!("sha256:{:x}", state.hasher.finalize()),
@@ -1825,6 +1987,7 @@ fn copy_open_directory(
     destination: &Path,
     relative_path: &Path,
     depth: usize,
+    root_volume: u64,
     state: &mut DirectorySnapshotState,
 ) -> Result<()> {
     if depth > MAX_DIRECTORY_DEPTH {
@@ -1833,6 +1996,9 @@ fn copy_open_directory(
     let before = inspect_open_node(source)?;
     if before.kind != OpenedNodeKind::Directory {
         anyhow::bail!("Attachment directory changed while it was being copied");
+    }
+    if fingerprint_volume(&before.fingerprint) != root_volume {
+        anyhow::bail!("Attachment directory contains a mount or volume escape");
     }
     hash_tree_entry(&mut state.hasher, b'D', relative_path, 0, None)?;
     let names = read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?;
@@ -1846,15 +2012,23 @@ fn copy_open_directory(
         }
         let mut child = open_child_without_following(source, name)?;
         let metadata = inspect_open_node(&child)?;
+        if fingerprint_volume(&metadata.fingerprint) != root_volume {
+            anyhow::bail!("Attachment directory contains a mount or volume escape");
+        }
         let child_relative = relative_path.join(name);
         let child_destination = destination.join(name);
         if metadata.kind == OpenedNodeKind::Directory {
+            state.directory_count = state
+                .directory_count
+                .checked_add(1)
+                .context("Attachment directory count overflow")?;
             ensure_directory(&child_destination)?;
             copy_open_directory(
                 &child,
                 &child_destination,
                 &child_relative,
                 depth + 1,
+                root_volume,
                 state,
             )?;
             set_directory_read_only(&child_destination)?;
@@ -1973,6 +2147,125 @@ fn copy_open_regular_file(source: &mut File, destination: &Path) -> Result<Copie
         byte_size,
         digest: hasher.finalize().into(),
     })
+}
+
+fn inspect_open_regular_file(source: &mut File) -> Result<(u64, [u8; 32])> {
+    let before = inspect_open_node(source)?;
+    if before.kind != OpenedNodeKind::RegularFile || before.link_count != 1 {
+        anyhow::bail!("Runtime Attachment file identity is unsafe");
+    }
+    if fingerprint_size(&before.fingerprint) > MAX_ATTACHMENT_BYTES {
+        anyhow::bail!("Runtime Attachment file exceeds the per-file limit");
+    }
+    let mut hasher = Sha256::new();
+    let mut byte_size = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = source.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        byte_size = byte_size
+            .checked_add(read as u64)
+            .context("Runtime Attachment file size overflow")?;
+        if byte_size > MAX_ATTACHMENT_BYTES {
+            anyhow::bail!("Runtime Attachment file exceeds the per-file limit");
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let after = inspect_open_node(source)?;
+    if after.kind != OpenedNodeKind::RegularFile
+        || after.link_count != 1
+        || byte_size != fingerprint_size(&before.fingerprint)
+        || before.fingerprint != after.fingerprint
+    {
+        anyhow::bail!("Runtime Attachment file changed while it was inspected");
+    }
+    Ok((byte_size, hasher.finalize().into()))
+}
+
+fn inspect_open_directory_snapshot(
+    source: &File,
+    relative_path: &Path,
+    depth: usize,
+    root_volume: u64,
+    state: &mut DirectorySnapshotState,
+) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!("Runtime Attachment directory exceeds the depth limit");
+    }
+    let before = inspect_open_node(source)?;
+    if before.kind != OpenedNodeKind::Directory
+        || fingerprint_volume(&before.fingerprint) != root_volume
+    {
+        anyhow::bail!("Runtime Attachment directory identity is unsafe");
+    }
+    hash_tree_entry(&mut state.hasher, b'D', relative_path, 0, None)?;
+    let names = read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?;
+    for name in &names {
+        state.entry_count = state
+            .entry_count
+            .checked_add(1)
+            .context("Runtime Attachment directory entry count overflow")?;
+        if state.entry_count > MAX_DIRECTORY_ENTRIES {
+            anyhow::bail!("Runtime Attachment directory exceeds the entry limit");
+        }
+        let mut child = open_child_without_following(source, name)?;
+        let metadata = inspect_open_node(&child)?;
+        if fingerprint_volume(&metadata.fingerprint) != root_volume {
+            anyhow::bail!("Runtime Attachment directory contains a mount or volume escape");
+        }
+        let child_relative = relative_path.join(name);
+        if metadata.kind == OpenedNodeKind::Directory {
+            state.directory_count = state
+                .directory_count
+                .checked_add(1)
+                .context("Runtime Attachment directory count overflow")?;
+            inspect_open_directory_snapshot(
+                &child,
+                &child_relative,
+                depth + 1,
+                root_volume,
+                state,
+            )?;
+        } else if metadata.kind == OpenedNodeKind::RegularFile {
+            if metadata.link_count != 1 {
+                anyhow::bail!("Runtime Attachment directory contains a hard-linked file");
+            }
+            state.file_count = state
+                .file_count
+                .checked_add(1)
+                .context("Runtime Attachment directory file count overflow")?;
+            if state.file_count > MAX_DIRECTORY_FILES {
+                anyhow::bail!("Runtime Attachment directory exceeds the file-count limit");
+            }
+            let (byte_size, digest) = inspect_open_regular_file(&mut child)?;
+            state.byte_size = state
+                .byte_size
+                .checked_add(byte_size)
+                .context("Runtime Attachment directory size overflow")?;
+            if state.byte_size > MAX_DRAFT_ATTACHMENT_BYTES {
+                anyhow::bail!("Runtime Attachment directory exceeds the byte limit");
+            }
+            hash_tree_entry(
+                &mut state.hasher,
+                b'F',
+                &child_relative,
+                byte_size,
+                Some(&digest),
+            )?;
+        } else {
+            anyhow::bail!("Runtime Attachment directory contains an unsupported node");
+        }
+    }
+    let after = inspect_open_node(source)?;
+    if names != read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?
+        || after.kind != OpenedNodeKind::Directory
+        || before.fingerprint != after.fingerprint
+    {
+        anyhow::bail!("Runtime Attachment directory changed while it was inspected");
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -2096,12 +2389,14 @@ fn inspect_open_node(file: &File) -> Result<OpenedNodeMetadata> {
         fingerprint: MetadataFingerprint {
             device: metadata.dev(),
             inode: metadata.ino(),
+            link_count: metadata.nlink(),
             size: metadata.size(),
             modified_seconds: metadata.mtime(),
             modified_nanoseconds: metadata.mtime_nsec(),
             changed_seconds: metadata.ctime(),
             changed_nanoseconds: metadata.ctime_nsec(),
         },
+        link_count: metadata.nlink(),
     })
 }
 
@@ -2135,7 +2430,18 @@ fn inspect_open_node(file: &File) -> Result<OpenedNodeMetadata> {
             NodeKind::Directory => OpenedNodeKind::Directory,
         },
         fingerprint: metadata.fingerprint,
+        link_count: metadata.number_of_links as u64,
     })
+}
+
+#[cfg(unix)]
+fn fingerprint_volume(fingerprint: &MetadataFingerprint) -> u64 {
+    fingerprint.device
+}
+
+#[cfg(windows)]
+fn fingerprint_volume(fingerprint: &MetadataFingerprint) -> u64 {
+    fingerprint.volume_serial_number
 }
 
 #[cfg(windows)]
@@ -2740,6 +3046,58 @@ fn validate_component(value: &str, label: &str) -> Result<()> {
             .all(|character| character.is_ascii_alphanumeric() || character == '-')
     {
         anyhow::bail!("{label} identity is invalid");
+    }
+    Ok(())
+}
+
+fn validate_runtime_safe_leaf(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.ends_with([' ', '.'])
+        || value
+            .chars()
+            .any(|character| matches!(character, '/' | '\\' | ':' | '\0'))
+    {
+        anyhow::bail!("Authority Attachment safe leaf is invalid for Runtime View");
+    }
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem.strip_prefix("COM").is_some_and(|suffix| {
+            matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        })
+        || stem.strip_prefix("LPT").is_some_and(|suffix| {
+            matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        });
+    if reserved {
+        anyhow::bail!("Authority Attachment safe leaf is a reserved Runtime View name");
+    }
+    Ok(())
+}
+
+fn validate_runtime_source_tree(path: &Path, depth: usize) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!("Camp Attachment Runtime View source exceeds the depth limit");
+    }
+    let source = open_source_without_following(path)?;
+    let metadata = inspect_open_node(&source)?;
+    if metadata.kind == OpenedNodeKind::RegularFile {
+        if metadata.link_count != 1 {
+            anyhow::bail!("Camp Attachment Runtime View source contains a hard-linked file");
+        }
+        return Ok(());
+    }
+    if metadata.kind != OpenedNodeKind::Directory {
+        anyhow::bail!("Camp Attachment Runtime View source contains an unsupported node");
+    }
+    let mut children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+    children.sort_by_key(|entry| entry.file_name());
+    for child in children {
+        validate_runtime_source_tree(&child.path(), depth + 1)?;
     }
     Ok(())
 }

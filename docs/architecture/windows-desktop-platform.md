@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-20
 ---
 
 # Windows Desktop Platform
@@ -59,9 +59,15 @@ transport-independent.
 
 ## 5. Storage and filesystem
 
-[Windows Private Storage v1](../contracts/windows-private-storage-v1.md) places Core and Electron state under separate
+[Windows Private Storage v2](../contracts/windows-private-storage-v2.md) places Core and Electron state under separate
 `%LOCALAPPDATA%\Rovai AI` children. Private objects are created with a protected DACL before becoming visible. Opened
 handle identity, verified ancestry and reparse policy—not lowercase strings—own security and deduplication.
+
+The derived Camp Published Attachment View is the explicit `<data_dir>\runtime-files` private child; Windows never uses
+the macOS Home-based instance directory. Root/managed containers use native private-directory admission, and Runtime may
+receive only one current-Camp `attachments` descendant. Authority remains under Core `camp-attachments`. This storage
+backend does not qualify any Adapter: every `windows-x64` row remains `not_qualified` until independent exact-root,
+read-only, sandbox and lifecycle evidence exists.
 
 All three shipped EXEs embed `longPathAware`; host policy and the tested envelope are diagnostic facts. The installer
 does not change HKLM. Unsupported storage or paths fail with stable blockers before Runtime input.

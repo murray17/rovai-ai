@@ -20,6 +20,9 @@ use rovai_core::{
         AgentRuntimeAdapterRegistry, McpProjectionCapability, SkillDiscoveryCapability,
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
+    camp_attachment_view::{
+        CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION, CampAttachmentRuntimeAuthorization,
+    },
     command::canonical_json_digest,
     managed_process::{
         ManagedChildStderr, ManagedChildStdin, ManagedChildStdout, ManagedProcess,
@@ -1279,20 +1282,25 @@ impl CodexCliRuntimeAdapter {
 pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
-    attachment_access_root: &Path,
+    attachment_authorization: &CampAttachmentRuntimeAuthorization,
 ) -> Result<String> {
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
     canonical_json_digest(&json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "adapterKind": frozen_runtime.adapter_kind,
         "runtimeConfigDigest": frozen_runtime.config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "executionRoot": cwd,
         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
-        "attachmentAccessRoot": attachment_access_root,
+        "campAttachmentViewContractVersion": CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION,
+        "campAttachmentRoot": attachment_authorization.attachment_root,
+        "campAttachmentVisibilityMode": attachment_authorization.visibility_mode.as_str(),
+        "campAttachmentGeneration": attachment_authorization
+            .visibility_mode
+            .compatibility_generation(attachment_authorization.generation),
     }))
 }
 

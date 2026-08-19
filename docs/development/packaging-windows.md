@@ -3,7 +3,7 @@ document_type: development-guide
 authority: windows-desktop-build-packaging-routing
 status: accepted-design
 source_version: v1.05
-last_updated: 2026-08-18
+last_updated: 2026-08-20
 ---
 
 # Windows x64 构建、打包与发布设计
@@ -48,7 +48,7 @@ manifest 与 verifier 版本，不能与正式签名发布混用，也不能用 
 - failure：安装/升级失败保留可审阅日志和回滚结果，不把半替换状态报告为成功。
 
 所有 Smoke/acceptance 使用独立 data root，不能指向日常 App；私有目录布局和创建时 DACL 由
-[Windows Private Storage v1](../contracts/windows-private-storage-v1.md)决定。
+[Windows Private Storage v2](../contracts/windows-private-storage-v2.md)决定。
 
 ## 正式签名与发布验证
 

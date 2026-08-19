@@ -24,6 +24,9 @@ use rovai_core::{
         write_kiro_additive_agent_config,
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
+    camp_attachment_view::{
+        CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION, CampAttachmentRuntimeAuthorization,
+    },
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
     managed_process::{
@@ -1528,10 +1531,8 @@ impl AcpRuntime {
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
-        let additional_directories = session_additional_directories(
-            self.host.adapter_kind,
-            self.attachment_access_root.as_deref(),
-        );
+        let additional_directories =
+            session_additional_directories(self.attachment_access_root.as_deref())?;
         let mcp_servers = if !matches!(
             self.host.adapter_kind,
             AdapterKind::CopilotCli
@@ -2329,7 +2330,7 @@ pub(crate) fn runtime_compatibility_digest(
     permission_semantics: PermissionSemantics,
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     mcp_projection_digest: &str,
-    attachment_access_root: &Path,
+    attachment_authorization: &CampAttachmentRuntimeAuthorization,
 ) -> Result<String> {
     let execution_root = PathBuf::from(&workspace.execution_root)
         .canonicalize()
@@ -2351,7 +2352,7 @@ pub(crate) fn runtime_compatibility_digest(
     let mcp_projection_compatibility_digest =
         (!excludes_run_local_digests).then_some(mcp_projection_digest);
     canonical_json_digest(&json!({
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "adapterKind": frozen_runtime.adapter_kind,
         "runtimeConfigDigest": runtime_config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
@@ -2362,7 +2363,12 @@ pub(crate) fn runtime_compatibility_digest(
         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         "externalMcpServers": external_mcp_servers,
         "mcpProjectionDigest": mcp_projection_compatibility_digest,
-        "attachmentAccessRoot": attachment_access_root,
+        "campAttachmentViewContractVersion": CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION,
+        "campAttachmentRoot": attachment_authorization.attachment_root,
+        "campAttachmentVisibilityMode": attachment_authorization.visibility_mode.as_str(),
+        "campAttachmentGeneration": attachment_authorization
+            .visibility_mode
+            .compatibility_generation(attachment_authorization.generation),
     }))
 }
 
@@ -2945,23 +2951,11 @@ fn launchable_acp_adapter(kind: AdapterKind) -> bool {
     kind.uses_acp()
 }
 
-fn session_additional_directories(
-    adapter_kind: AdapterKind,
-    attachment_access_root: Option<&Path>,
-) -> Vec<String> {
-    // Camp attachment roots intentionally have execute-only permissions so a
-    // Runtime can open frozen opaque child paths without enumerating other Camp
-    // attachments. Qoder 1.1.14 recursively lstat's every ACP additional root
-    // during session/new and rejects that secure directory shape. The prompt
-    // still carries each exact attachment path, and Rovai's ACP filesystem host
-    // enforces that the path remains beneath this root.
-    if adapter_kind == AdapterKind::QoderCli {
-        return Vec::new();
-    }
-    attachment_access_root
-        .iter()
-        .map(|root| root.to_string_lossy().into_owned())
-        .collect()
+fn session_additional_directories(attachment_access_root: Option<&Path>) -> Result<Vec<String>> {
+    let root = attachment_access_root.context(
+        "camp_attachment_view_runtime_unsupported: ACP Session has no exact Camp attachment root",
+    )?;
+    Ok(vec![root.to_string_lossy().into_owned()])
 }
 
 #[cfg(unix)]
@@ -3532,6 +3526,12 @@ mod tests {
         std::fs::set_permissions(path, permissions).unwrap();
     }
 
+    fn exact_attachment_root(root: &Path) -> PathBuf {
+        let attachment_root = root.join("attachments");
+        std::fs::create_dir_all(&attachment_root).unwrap();
+        attachment_root
+    }
+
     fn frozen_trae_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
             adapter_kind: AdapterKind::TraeCnCli,
@@ -3698,7 +3698,7 @@ while IFS= read -r ignored; do :; done
             "sha256:compatibility".to_string(),
             "sha256:mcp".to_string(),
             root.clone(),
-            None,
+            Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
         );
         let session_id = runtime
@@ -3770,7 +3770,7 @@ while IFS= read -r ignored; do :; done
             "sha256:compatibility".to_string(),
             "sha256:mcp".to_string(),
             root.clone(),
-            None,
+            Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
         );
 
@@ -3857,7 +3857,7 @@ while IFS= read -r ignored; do :; done
             "sha256:compatibility".to_string(),
             "sha256:mcp".to_string(),
             root.clone(),
-            None,
+            Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
         );
         let session_id = runtime
@@ -3982,7 +3982,7 @@ while IFS= read -r ignored; do :; done
                 "sha256:compatibility".to_string(),
                 "sha256:mcp".to_string(),
                 root.clone(),
-                None,
+                Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
             );
             let error = runtime
@@ -4338,12 +4338,17 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn qoder_does_not_receive_the_execute_only_camp_attachment_root() {
+    fn every_acp_session_receives_the_exact_enumerable_camp_attachment_root() {
         let root = Path::new("/tmp/rovai-camp-attachments/camp-id");
-        assert!(session_additional_directories(AdapterKind::QoderCli, Some(root)).is_empty());
         assert_eq!(
-            session_additional_directories(AdapterKind::CodebuddyCli, Some(root)),
+            session_additional_directories(Some(root)).unwrap(),
             vec![root.to_string_lossy().into_owned()]
+        );
+        assert!(
+            session_additional_directories(None)
+                .unwrap_err()
+                .to_string()
+                .contains("camp_attachment_view_runtime_unsupported")
         );
     }
 
@@ -4444,6 +4449,15 @@ while IFS= read -r ignored; do :; done
             std::env::temp_dir().join(format!("rovai-trae-compatibility-{}", uuid::Uuid::new_v4()));
         let attachments = root.join("attachments");
         std::fs::create_dir_all(&attachments).unwrap();
+        let attachment_authorization = CampAttachmentRuntimeAuthorization {
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
+            attachment_root: attachments,
+            root_identity_digest: "sha256:root".to_string(),
+            generation: 1,
+            catalog_digest: "sha256:catalog".to_string(),
+            visibility_mode:
+                rovai_core::camp_attachment_view::CampAttachmentVisibilityMode::GenerationFencedV1,
+        };
         let executable = root.join("traecli");
         make_executable(&executable, "#!/bin/sh\nexit 0\n");
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
@@ -4454,7 +4468,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:mcp",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
 
@@ -4469,7 +4483,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:mcp",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_eq!(ready, first);
@@ -4480,7 +4494,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:another-run-local-mcp-projection",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_eq!(run_local_mcp_projection, first);
@@ -4499,7 +4513,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &changed_servers,
             "sha256:another-run-local-mcp-projection",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_ne!(changed_mcp, first);
@@ -4511,7 +4525,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:mcp",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_ne!(changed_host, first);

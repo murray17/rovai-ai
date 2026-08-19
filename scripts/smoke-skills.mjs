@@ -14,6 +14,10 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import {
+  coreDataDirectoryArguments,
+  removeEphemeralRuntimeCampFilesRoot
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-'))
@@ -325,6 +329,7 @@ try {
   }, null, 2))
 } finally {
   if (core) await core.stop()
+  await removeEphemeralRuntimeCampFilesRoot(dataDir)
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
@@ -525,8 +530,7 @@ function startCore() {
     ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
     : join(root, 'target', 'debug', 'rovai-core')
   const child = spawn(coreExecutable, [
-    '--data-dir',
-    dataDir,
+    ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root',
     libraryRoot
   ], {

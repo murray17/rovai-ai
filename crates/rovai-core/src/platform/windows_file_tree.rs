@@ -55,12 +55,14 @@ pub(crate) struct FileFingerprint {
     pub(crate) last_write_time: i64,
     pub(crate) change_time: i64,
     pub(crate) attributes: u32,
+    pub(crate) number_of_links: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct NodeMetadata {
     pub(crate) kind: NodeKind,
     pub(crate) fingerprint: FileFingerprint,
+    pub(crate) number_of_links: u32,
 }
 
 /// Opens the selected source itself, rather than whatever a final reparse
@@ -224,7 +226,9 @@ pub(crate) fn inspect_node(file: &File) -> Result<NodeMetadata> {
             last_write_time: basic.LastWriteTime,
             change_time: basic.ChangeTime,
             attributes: basic.FileAttributes,
+            number_of_links: standard.NumberOfLinks,
         },
+        number_of_links: standard.NumberOfLinks,
     })
 }
 

@@ -3531,12 +3531,17 @@ mod slow_tests {
                     id, agent_run_id, execution_epoch, context_manifest_id,
                     native_binding_id, native_binding_generation,
                     boundary_camp_message_sequence, dynamic_payload_digest,
-                    status, native_input_id, prepared_at, accepted_at, updated_at
+                    status, native_input_id, prepared_at, accepted_at, updated_at,
+                    runtime_attachment_auth_receipt_version,
+                    runtime_attachment_auth_receipt_json,
+                    runtime_attachment_auth_receipt_digest,
+                    runtime_request_digest
                 ) VALUES (
                     'null-unsettled-effect-input', ?1, 1,
                     'null-unsettled-effect-manifest', 'null-unsettled-effect-binding',
                     1, 1, 'sha256:null-unsettled-effect', 'accepted',
-                    'null-unsettled-effect-native-input', ?2, ?2, ?2
+                    'null-unsettled-effect-native-input', ?2, ?2, ?2,
+                    1, '{"schemaVersion":1}', 'sha256:test-auth', 'sha256:test-request'
                 )
                 "#,
                 params![agent_run_id, now],

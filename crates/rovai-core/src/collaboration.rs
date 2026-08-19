@@ -14,6 +14,7 @@ pub const DURABLE_TASK_CONTRACT_VERSION: u32 = 3;
 use crate::{
     agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
     camp_attachment::consume_prepared_attachments,
+    camp_attachment_view::commit_publication_in_message_transaction,
     camp_content::{
         StructuredCampMessageContent, StructuredCampMessageSegment, canonical_content_digest,
         has_all_members_mention, member_mention_ids, normalize_content, render_plain_text,
@@ -1972,6 +1973,15 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<SendUserCampDraftCommand>,
     ) -> Result<CommandExecution> {
+        self.send_user_camp_draft_with_publication(database, envelope, None)
+    }
+
+    pub fn send_user_camp_draft_with_publication(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SendUserCampDraftCommand>,
+        attachment_publication_operation_id: Option<&str>,
+    ) -> Result<CommandExecution> {
         Self::validate_send_message_input(&envelope.payload)?;
         let camp_message_id = Uuid::new_v4().to_string();
         let camp_turn_id = envelope
@@ -2118,6 +2128,7 @@ impl CollaborationService {
                     body: &submission.body,
                     structured_content: &submission.structured_content,
                     prepared_attachment_ids: &submission.prepared_attachment_ids,
+                    attachment_publication_operation_id,
                     address_mode: submission.address.mode(),
                     reply_to_camp_message_id: submission.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
@@ -2423,6 +2434,7 @@ struct QueueCampMessageInput<'a> {
     body: &'a str,
     structured_content: &'a [StructuredCampMessageSegment],
     prepared_attachment_ids: &'a [String],
+    attachment_publication_operation_id: Option<&'a str>,
     address_mode: &'a str,
     reply_to_camp_message_id: Option<&'a str>,
     resolution: &'a AddressResolution,
@@ -2576,6 +2588,12 @@ fn queue_camp_message_and_runs(
             input.camp_turn_id,
             input.now,
         ],
+    )?;
+    commit_publication_in_message_transaction(
+        transaction,
+        input.attachment_publication_operation_id,
+        input.camp_id,
+        input.prepared_attachment_ids,
     )?;
     consume_prepared_attachments(
         transaction,
@@ -4526,6 +4544,7 @@ mod slow_tests {
             AdapterKind, AgentProfileService, RemoveMemberCommand, configure_test_runtime,
         },
         camp_attachment::CampAttachmentStore,
+        camp_attachment_view::CampAttachmentViewStore,
         camp_content::StructuredCampMessageSegment as Segment,
         command::CommandResultStatus,
         current_input_skill::parse_skill_selection_snapshot,
@@ -6361,23 +6380,36 @@ mod slow_tests {
             .verify_send(&database, &camp_id, &attachment_ids)
             .unwrap();
 
+        let view_store = CampAttachmentViewStore::for_test(&database).unwrap();
+        let command_id = Uuid::new_v4().to_string();
+        let publication = view_store
+            .stage_publication(&mut database, &store, &camp_id, &command_id, draft.revision)
+            .unwrap()
+            .expect("attachment publication should stage a View entry");
+        view_store
+            .gate_publication(&mut database, &publication)
+            .unwrap();
+        view_store
+            .promote_publication(&mut database, &publication)
+            .unwrap();
+
         let result = service
-            .send_test_camp_message(
+            .send_user_camp_draft_with_publication(
                 &mut database,
                 &user_envelope(
-                    "send-message-with-attachment",
+                    &command_id,
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    SendUserCampDraftCommand {
                         camp_id: camp_id.clone(),
-                        draft_revision: None,
-                        body: "请阅读附件。".to_string(),
-                        prepared_attachment_ids: attachment_ids.clone(),
-                        address: TestCampMessageAddress::Default,
-                        reply_to_camp_message_id: None,
+                        draft_revision: draft.revision,
                         execution: None,
                     },
                 ),
+                Some(&publication.operation_id),
             )
+            .unwrap();
+        view_store
+            .complete_publication(&mut database, &publication.operation_id)
             .unwrap();
         assert_eq!(result.result.status, CommandResultStatus::Applied);
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
@@ -6398,7 +6430,17 @@ mod slow_tests {
         );
         assert!(stored_digest.starts_with("sha256:"));
 
+        view_store
+            .remove_camp_view(&mut database, &camp_id)
+            .unwrap();
         store.remove_camp(&camp_id).unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(
+            view_store.root().join("camps"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        drop(view_store);
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

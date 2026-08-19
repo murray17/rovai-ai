@@ -20,6 +20,23 @@ last_updated: 2026-08-20
   v1.05 状态当作实施事实；
 - [x] 完成本版所有代码后的 macOS 基线、Windows x64 交叉编译、文档全门禁和 base-aware CI 检查。
 
+## Checkpoint 0A：Camp Published Attachment Runtime View
+
+- [x] 完成并二次确认 revision 2；以 Camp 作为 Published Attachment 共享授权域，撤回 Run/Agent Session
+  projection，不暴露或迁移 Authority Attachment root；
+- [x] Desktop 显式派生实例隔离 `--runtime-camp-files-root`；Core 完成绝对路径、marker/lock、symlink/reparse、
+  overlap、ownership 与 Windows private-storage admission；
+- [x] 实现 Camp View catalog、staging/publication/cleanup journal、全组 copy/digest/identity 校验、quota、原子
+  promote、startup recovery、controlled rebuild 与 Camp cleanup；
+- [x] 使 message publication mutation gate 与整次 Runtime Run read guard 互斥；所有 Adapter 当前采用
+  `generation_fenced_v1`，并将精确 Camp root/generation 纳入 Host compatibility；
+- [x] 使用统一 Published Attachment path resolver 生成 Current/Shared/Gather refs，升级到 Formatter 21、
+  Manifest 20、Run Facts v2、View/Auth receipts，并禁止 dispatch-time Authority path 替换；
+- [x] 实现 Migration 99/schema 54：preflight 空 View root，按 delivery/action evidence 收敛旧非终态执行，
+  保留历史 Manifest/Blob/Evidence/Authority，并只从 `message_attachment` 回填；
+- [x] 覆盖 root admission、publication crash/retry、mutation concurrency、integrity rebuild、Runtime guard、
+  force delete、Migration classification/backfill、Desktop 参数及 temporary Smoke root cleanup。
+
 ## Checkpoint 1：平台、进程与私有文件系统
 
 - [x] 建立 Windows x64 compile baseline、平台 local IPC seam、target-aware sidecar staging 与 native frame；
@@ -83,7 +100,12 @@ last_updated: 2026-08-20
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
 - [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
 - [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
-- [ContextManifest Evidence v19](../../contracts/context-manifest-evidence-v19.md)
+- [Camp Published Attachment View architecture](../../architecture/camp-published-attachment-view.md)
+- [Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)
+- [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
+- [ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)
+- [Run Facts v2](../../contracts/run-facts-v2.md)
+- [Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)

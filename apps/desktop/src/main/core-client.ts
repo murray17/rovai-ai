@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { createInterface } from 'node:readline'
-import { accessSync, constants } from 'node:fs'
+import { accessSync, constants, realpathSync } from 'node:fs'
 import { join, resolve, win32 } from 'node:path'
 import { app } from 'electron'
 import type { CoreEvent, CoreMethod } from '@contracts'
@@ -42,16 +43,42 @@ export type CoreShutdownResult = {
 
 export function coreLaunchArguments(
   dataDirectory: string,
+  runtimeCampFilesRoot: string,
   skillLibraryRoot: string | null,
   removedSkillProjectRoots: readonly string[]
 ): string[] {
-  const args = ['--data-dir', dataDirectory]
+  const args = [
+    '--data-dir', dataDirectory,
+    '--runtime-camp-files-root', runtimeCampFilesRoot
+  ]
   if (skillLibraryRoot) args.push('--skill-library-root', skillLibraryRoot)
   else args.push('--use-default-skill-library')
   for (const executionRoot of removedSkillProjectRoots) {
     args.push('--removed-skill-project-root', executionRoot)
   }
   return args
+}
+
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync.native(resolve(path))
+  } catch {
+    return resolve(path)
+  }
+}
+
+export function runtimeCampFilesRoot(
+  dataDirectory: string,
+  homeDirectory: string,
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') return win32.join(dataDirectory, 'runtime-files')
+  const canonicalUserData = canonicalPath(dataDirectory)
+  const instanceKey = `v1-${createHash('sha256')
+    .update('rovai-runtime-camp-files-instance-v1\0', 'utf8')
+    .update(canonicalUserData, 'utf8')
+    .digest('hex')}`
+  return join(canonicalPath(homeDirectory), '.rovai', 'instances', instanceKey, 'runtime-files')
 }
 
 export function desktopSkillLibraryRoot(
@@ -87,9 +114,14 @@ export class CoreClient {
   #removedSkillProjectRoots: string[] = []
   #skillLibraryRoot: string | null = null
   readonly #dataDirectory: string
+  readonly #runtimeCampFilesRoot: string
 
-  constructor(dataDirectory: string = app.getPath('userData')) {
+  constructor(
+    dataDirectory: string = app.getPath('userData'),
+    runtimeFilesRoot: string = runtimeCampFilesRoot(dataDirectory, app.getPath('home'))
+  ) {
     this.#dataDirectory = dataDirectory
+    this.#runtimeCampFilesRoot = runtimeFilesRoot
   }
 
   setRemovedSkillProjectRoots(executionRoots: string[]): void {
@@ -113,6 +145,7 @@ export class CoreClient {
     const binary = resolveCoreBinary()
     const args = coreLaunchArguments(
       this.#dataDirectory,
+      this.#runtimeCampFilesRoot,
       this.#skillLibraryRoot,
       this.#removedSkillProjectRoots
     )

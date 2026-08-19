@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-composer-draft
 authority: camp-composer-draft-and-user-send-boundaries
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-20
 ---
 
 # Camp Composer Draft 架构
@@ -100,6 +100,6 @@ message回看更早记录。动态空白候选可以因失效被抑制；已经�
 ## References
 
 - [Camp Composer Draft v2](../contracts/camp-composer-draft-v2.md)
-- [Camp Attachment v1](../contracts/camp-attachment-v1.md)
+- [Camp Attachment v2](../contracts/camp-attachment-v2.md)
 - [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)

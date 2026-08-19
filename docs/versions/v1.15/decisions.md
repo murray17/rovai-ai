@@ -135,6 +135,63 @@ projection：消息继续持久化并对用户、其他 Agent、Timeline、Histo
 ### 当前权威影响
 
 - [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
-- [ContextManifest Evidence v19](../../contracts/context-manifest-evidence-v19.md)
+- [ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)
 - [有界公共上下文与引用闭包](../../architecture/foundational-invariants.md#context-public-history)
 - [Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
+
+<a id="v1-15-d04"></a>
+
+## V1.15-D04：Published Attachment 采用 Camp 共享 Runtime View
+
+### 背景
+
+权威附件位于 Core 私有 data directory；把其路径写入模型输入并不能保证 TRAE 等沙箱化 Runtime 可以读取。
+最初考虑为每个 AgentRun 或 Agent Session 建立最小投影，但这会把文件授权错误地绑定到“附件进入当前
+Context”：Agent B 无法主动查看 Agent A 已经发布到同一 Camp 的文件，稳定 Session 还要承担不断变化的
+授权根和副本生命周期。直接放开 Authority 根则会把 Draft、Core metadata 和同根其他 Camp 一并推入
+Runtime 信任边界。
+
+### 决定
+
+保留 `<data_dir>/camp-attachments/` 为唯一 Authority；Prepared Attachment 始终 Core-private。附件随
+CampMessage 事务成功成为 `message_attachment` 时，转为整个 Camp 共享的 Published Attachment，并通过
+实例隔离、按 Camp 稳定的派生 Runtime View 供该 Camp 全体 Agent 枚举和只读访问。Runtime 只接收当前 Camp
+精确 `attachments` 根；Context 是否显式引用某个附件只决定模型输入，不决定 Camp 内读取权。
+
+发布使用 Runtime 不可达 staging、全组校验、journal、per-Camp mutation gate 与原子 promote；新 Context
+统一解析 View path，并推进 Formatter 21、Manifest 20 和 Run Facts v2。所有 Adapter 在没有真实增量可见性
+正向 Probe 前使用 generation-fenced Host compatibility。Migration 99 保留 Authority 与历史 Evidence，按
+accepted-input 事实终结旧非终态 Formatter 20 执行，再从 `message_attachment` 回填 View。
+
+### 后果
+
+- 同一 Camp 的 Agent 可以主动发现此前任何成员发布的附件，不要求附件再次进入当前 Prompt；Draft、其他
+  Camp、Core metadata 和 View 的实例父目录仍不在授权范围；
+- 每个 Published Attachment 只有一个 Camp 级 Runtime 副本，路径在 Camp 生命周期内稳定；View 可删除、
+  重建并随 Camp 删除，但不能反向成为业务权威；
+- 发布与整次 Runtime Run 通过读写 gate 串行化；当前 generation-fenced 模式会在新增附件时 fence 旧 Host，
+  而不是为每个 Run 创建新目录；
+- `0500/0400` 和 protected DACL 只提供防误写与最小暴露加固；同 UID/SID 的跨 Camp 强隔离仍取决于 Adapter
+  sandbox 或 exact-directory allowlist 的真实证据；
+- 历史 Authority path、ContextManifest、模型输入 Blob、摘要、Managed Blob 和 `contentDigest` 不改写。
+
+### 被拒绝方案
+
+- 为每个 AgentRun 复制获准附件：把 Camp 协作文件降为 Prompt-scoped capability，并产生重复副本和恢复路径；
+- 为每个 Agent Session 累积授权目录：仍按单 Agent 历史划分共享事实，且 Session/compaction/rebuild 使授权难以收敛；
+- 把 Authority Camp 根直接交给 Runtime：会暴露 Draft 和 Core-private metadata，并让派生访问问题污染权威布局；
+- 授权实例 root、`camps` parent 或全局 Home root：扩大到其他 Camp/实例，破坏精确业务授权；
+- 使用 symlink/hardlink：把 Authority 节点和 Runtime 可见节点的身份、权限与删除边界耦合；
+- 假设 TRAE Warm Host 自动看到新增目录：没有 Adapter×platform×binary 正向 Probe，不能据此取消 generation fence。
+
+### 当前权威影响
+
+- [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
+- [Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)
+- [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
+- [ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)
+- [Run Facts v2](../../contracts/run-facts-v2.md)
+- [Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)
+- [Accepted Input Recovery v2](../../contracts/accepted-input-recovery-v2.md)
+- [Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)
+- [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)
