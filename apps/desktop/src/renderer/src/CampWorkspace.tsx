@@ -2443,24 +2443,40 @@ export function CampWorkspace({
         clientHeight: scroll.clientHeight
       }
     }
+    let resizeFrame: number | null = null
+    let settleFrame: number | null = null
     const observer = new ResizeObserver(() => {
       const latest = timelineReadingPosition.current
-      if (latest?.campId !== campId || latest.position.followingLatest !== false) {
-        const position = followLatestCampTimeline(scroll)
-        timelineReadingPosition.current = { campId, position }
-      }
-      timelineViewportGeometry.current = {
-        campId,
-        geometry: {
-          scrollTop: Math.max(0, scroll.scrollTop),
-          scrollHeight: scroll.scrollHeight,
-          clientHeight: scroll.clientHeight
-        }
-      }
+      const shouldFollowLatest = latest?.campId !== campId
+        || latest.position.followingLatest !== false
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
+      if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null
+        settleFrame = window.requestAnimationFrame(() => {
+          settleFrame = null
+          if (shouldFollowLatest) {
+            const position = followLatestCampTimeline(scroll)
+            timelineReadingPosition.current = { campId, position }
+          }
+          timelineViewportGeometry.current = {
+            campId,
+            geometry: {
+              scrollTop: Math.max(0, scroll.scrollTop),
+              scrollHeight: scroll.scrollHeight,
+              clientHeight: scroll.clientHeight
+            }
+          }
+        })
+      })
     })
     observer.observe(scroll)
     observer.observe(track)
-    return () => observer.disconnect()
+    return () => {
+      observer.disconnect()
+      if (resizeFrame !== null) window.cancelAnimationFrame(resizeFrame)
+      if (settleFrame !== null) window.cancelAnimationFrame(settleFrame)
+    }
   }, [conversationView, snapshot.camp.id])
 
   useEffect(() => {
