@@ -113,6 +113,13 @@ import {
 
 export { allNavigationCamps }
 
+export function appendLiveRuntimeEvent(
+  current: LiveRuntimeEvent[],
+  event: LiveRuntimeEvent
+): LiveRuntimeEvent[] {
+  return [...current, event]
+}
+
 type LoadState = 'loading' | 'ready' | 'error'
 type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
@@ -1454,7 +1461,7 @@ export function App(): React.JSX.Element {
         `live-${++liveRuntimeEventSequence.current}`
       )
       if (liveEvent) {
-        setLiveRuntimeEvents((current) => [...current, liveEvent].slice(-600))
+        setLiveRuntimeEvents((current) => appendLiveRuntimeEvent(current, liveEvent))
       }
       if (event.method === 'runtime.state') {
         const runtimeStatus = stringField(params, 'status')

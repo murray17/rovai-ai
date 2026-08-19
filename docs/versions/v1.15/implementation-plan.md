@@ -41,6 +41,8 @@ last_updated: 2026-08-19
   reconciliation 并保持 Pending，Active Camp 继续 reconcile-before-read；
 - [x] 将共享 ExecutionDrawer 的 AgentRun “停止”改为单击直接提交，移除确认 Dialog，并保留 Run-local
   提交中、结果不确定、已停止与失败恢复投影；
+- [x] Camp open 完整返回所有 non-terminal Execution Evidence，Renderer 取消 live event 600 项滚动裁剪，
+  运行中正文与 Tool chronology 从首条 Evidence 起完整保留；
 - [x] 将 `rovai` CLI 与 compaction hook 统一到同一异步 Local IPC client，Windows 与 Unix 共用 framing、超时、
   重试和 outcome-indeterminate 分类，并保留 v1.14 发布的 `camp.read` Timeline 默认；
 - [x] Named Pipe 每个实例使用 session logon SID + SYSTEM protected DACL，并在创建后回读 DACL；覆盖
@@ -72,7 +74,7 @@ last_updated: 2026-08-19
 - [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)
 - [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
 - [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
-- [Camp Open Projection v4](../../contracts/camp-open-projection-v4.md)
+- [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)

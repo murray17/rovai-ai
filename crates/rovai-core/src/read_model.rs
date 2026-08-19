@@ -37,7 +37,6 @@ const CAMP_OPEN_MESSAGE_LIMIT: i64 = 20;
 const CAMP_OPEN_DELIVERY_LIMIT: i64 = 200;
 const CAMP_OPEN_TURN_LIMIT: i64 = 64;
 const CAMP_OPEN_AGENT_RUN_LIMIT: i64 = 96;
-const CAMP_OPEN_EXECUTION_EVIDENCE_LIMIT: i64 = 80;
 const CAMP_OPEN_APPROVAL_LIMIT: i64 = 32;
 const CAMP_OPEN_TIMELINE_LIMIT: i64 = 160;
 
@@ -860,7 +859,7 @@ impl ReadModelService {
         let execution_evidence = load_execution_evidence(
             &transaction,
             camp_id,
-            EXECUTION_EVIDENCE_SNAPSHOT_LIMIT,
+            Some(EXECUTION_EVIDENCE_SNAPSHOT_LIMIT),
             false,
         )?;
         let context_manifests = load_context_manifests(&transaction, camp_id)?;
@@ -910,12 +909,7 @@ impl ReadModelService {
             load_message_deliveries(&transaction, camp_id, Some(CAMP_OPEN_DELIVERY_LIMIT))?;
         let turns = load_turns(&transaction, camp_id, Some(CAMP_OPEN_TURN_LIMIT))?;
         let agent_runs = load_agent_runs(&transaction, camp_id, Some(CAMP_OPEN_AGENT_RUN_LIMIT))?;
-        let execution_evidence = load_execution_evidence(
-            &transaction,
-            camp_id,
-            CAMP_OPEN_EXECUTION_EVIDENCE_LIMIT,
-            true,
-        )?;
+        let execution_evidence = load_execution_evidence(&transaction, camp_id, None, true)?;
         let approvals =
             load_approvals(&transaction, camp_id, true, Some(CAMP_OPEN_APPROVAL_LIMIT))?;
         let timeline = load_events(
@@ -2545,7 +2539,7 @@ fn load_agent_runs(
 fn load_execution_evidence(
     transaction: &Transaction<'_>,
     camp_id: &str,
-    limit: i64,
+    limit: Option<i64>,
     active_only: bool,
 ) -> Result<Vec<AgentRunExecutionEvidenceView>> {
     let mut statement = transaction.prepare(
@@ -2570,7 +2564,10 @@ fn load_execution_evidence(
         "#,
     )?;
     let mut evidence = statement
-        .query_map(params![camp_id, limit, active_only], execution_evidence_row)?
+        .query_map(
+            params![camp_id, limit.unwrap_or(-1), active_only],
+            execution_evidence_row,
+        )?
         .map(|row| execution_evidence_view(row?))
         .collect::<Result<Vec<_>>>()?;
     attach_canonical_activity(transaction, &mut evidence)?;
@@ -4659,6 +4656,47 @@ mod slow_tests {
                 )
                 .is_err()
         );
+
+        let transaction = database.connection_mut().transaction().unwrap();
+        {
+            let mut statement = transaction
+                .prepare(
+                    r#"
+                    INSERT INTO agent_run_execution_evidence(
+                        id, agent_run_id, execution_epoch, sequence,
+                        event_type, kind, phase, source_event_key,
+                        payload_preview_json, content_blob_id,
+                        content_byte_count, is_truncated, occurred_at
+                    ) VALUES (
+                        ?1, ?2, 0, ?3, 'agent.text.delta', 'narration',
+                        'updated', NULL, ?4, NULL, 32, 0, ?5
+                    )
+                    "#,
+                )
+                .unwrap();
+            for sequence in 5..=85 {
+                statement
+                    .execute(params![
+                        format!("evidence-{sequence}"),
+                        agent_run_id,
+                        sequence,
+                        json!({ "itemId": null, "delta": format!("片段{sequence}") }).to_string(),
+                        now,
+                    ])
+                    .unwrap();
+            }
+        }
+        transaction.commit().unwrap();
+
+        let open = read_model
+            .camp_open_projection(&mut database, camp_id)
+            .unwrap();
+        assert_eq!(open.execution_evidence.len(), 85);
+        assert_eq!(open.execution_evidence.first().unwrap().sequence, 1);
+        assert_eq!(open.execution_evidence.last().unwrap().sequence, 85);
+        assert_eq!(open.coverage.execution_evidence.loaded_count, 85);
+        assert_eq!(open.coverage.execution_evidence.total_count, 85);
+        assert!(open.coverage.execution_evidence.complete);
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

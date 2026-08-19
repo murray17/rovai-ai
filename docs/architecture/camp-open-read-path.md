@@ -8,7 +8,7 @@ last_updated: 2026-08-19
 
 # Camp Open Read Path 架构
 
-字段与窗口见 [Camp Open Projection v4](../contracts/camp-open-projection-v4.md)与
+字段与窗口见 [Camp Open Projection v5](../contracts/camp-open-projection-v5.md)与
 [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)。本架构把“进入会话”、
 “继续阅读”、“查找完整当前会话”和“检查运行详情”分成用途明确的接口，同时保持 SQLite Read Side
 为唯一权威。
@@ -22,10 +22,10 @@ last_updated: 2026-08-19
 | Renderer enter controller | 生成 trace/command ID、selection generation 与 high-water fence；应用内缓存未命中时保留当前 surface，投影到达后原子 commit 目标 Camp/项目并完成 meaningful paint，再恢复项目导航、确认可见来源和刷新侧栏 |
 | Electron Main bridge | allowlist typed method、记录不含内容的 IPC roundtrip/response bytes；不组装或缓存领域投影 |
 | Core Camp enter module | 在一次串行 request 中先读 activation state；Pending 直接读取投影，Active 顺序执行 Default Lead reconcile 与 post-reconcile read；缺失或 rejected 时 fail closed |
-| Core Camp open read model | 在单一 SQLite transaction 中组装有界首屏投影、coverage 与 high-water；不加载 Context Manifest/Action history |
+| Core Camp open read model | 在单一 SQLite transaction 中组装完整 non-terminal Execution Evidence、其他有界首屏投影、coverage 与 high-water；不加载 Context Manifest/Action history |
 | Camp message history read | 以 stable sequence cursor 读取 earlier page；不回放 event 构造第二真源 |
 | Camp conversation find read | 扫描当前 Camp 公开 user/agent 正文投影，返回 exact total 与一个选中命中；不改变 Agent-facing discovery search，也不返回完整结果集 |
-| Run detail read | 在用户展开指定 Run 后复用 Evidence page/content 接口；不扩大普通 Camp open payload |
+| Run detail read | terminal Run 在用户展开后复用 Evidence page/content 接口；大 Evidence 正文继续按需读取，不随普通 Camp open 挂载 |
 | Full Camp snapshot | 兼容、诊断与定向测试面；保持纯读，但不服务普通 open/refresh |
 
 ## Enter and refresh flow
@@ -37,7 +37,7 @@ app click / notification target
   -> Core reads authoritative activation state
        -> Pending: skip reconciliation
        -> Active: serialized Default Lead reconciliation
-  -> Core bounded read transaction + throughGlobalSequence
+  -> Core read transaction + complete non-terminal Evidence + bounded other collections + throughGlobalSequence
   -> Main parses typed response
   -> Renderer atomically commits target Camp ID + project + recent Camp surface
   -> next meaningful paint
@@ -47,7 +47,7 @@ cold startup
   -> Main Window Session returns a frozen local target
   -> Renderer paints the target route shell and removes the global StartupGate
   -> Renderer queues camps.enter ahead of Overview/preferences/runtime health
-  -> Core activation-aware enter + bounded projection
+  -> Core activation-aware enter + complete non-terminal Evidence + bounded other collections
   -> Renderer commits Active Camp or meaningful Pending Camp Draft + meaningful content
   -> background navigation / campViewed / project restore
 
@@ -61,7 +61,8 @@ Core event invalidates active Camp
 `AgentRunView.runtimeModel` 从默认未观察态收敛到首个可信模型，不进入 timeline、CampMessage 或 Run detail
 Evidence，也不自动打开执行台或改变当前 selection。
 
-缓存只保存最近的有界投影。cache hit 可立即恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
+缓存只保存最近的 Camp 投影；除完整 non-terminal Evidence 外，其他 collection 保持有界。cache hit 可立即
+恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把
 当前 Snapshot 清空，也不提前切换 route。普通请求在 400 ms 内不呈现 loading，超过预算只在目标导航行
 显示非阻塞进度。schema mismatch、Core restart、Camp mismatch 或 sequence regression 使缓存失效。
 Renderer 不通过 event replay 补齐权威对象。
@@ -105,5 +106,5 @@ Memory 分别拥有局部 loading/error；全屏 StartupGate 只允许覆盖 Mai
 
 - [Core 受管内容不变量](foundational-invariants.md#core-managed-content)
 - [协作与执行准入不变量](foundational-invariants.md#collaboration-admission)
-- [Camp Open Projection v4](../contracts/camp-open-projection-v4.md)
+- [Camp Open Projection v5](../contracts/camp-open-projection-v5.md)
 - [Camp Conversation Find v1](../contracts/camp-conversation-find-v1.md)

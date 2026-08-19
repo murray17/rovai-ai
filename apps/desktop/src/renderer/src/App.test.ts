@@ -22,6 +22,7 @@ import {
   ControlledShutdownOverlay,
   WindowDragStrip,
   allNavigationCamps,
+  appendLiveRuntimeEvent,
   campActivationPreview,
   campActivationStateForCreation,
   campDeleteCommand,
@@ -152,6 +153,27 @@ const TEST_EXECUTION_BUDGET = {
   exhaustionReason: null,
   exhaustionCommandId: null
 }
+
+it('retains every live Runtime event without a rolling count cap', () => {
+  const current = Array.from({ length: 600 }, (_, index) => ({
+    id: `live-${index + 1}`,
+    agentRunId: 'run-long',
+    eventType: 'agent.text.delta',
+    payload: { itemId: 'message-long', delta: `${index + 1}` },
+    createdAt: `2026-08-19T00:00:${String(index % 60).padStart(2, '0')}Z`
+  }))
+  const next = appendLiveRuntimeEvent(current, {
+    id: 'live-601',
+    agentRunId: 'run-long',
+    eventType: 'runtime.action',
+    payload: { toolCallId: 'tool-601', status: 'completed' },
+    createdAt: '2026-08-19T00:01:00Z'
+  })
+
+  expect(next).toHaveLength(601)
+  expect(next[0].id).toBe('live-1')
+  expect(next.at(-1)?.id).toBe('live-601')
+})
 
 function canonicalActivity(
   operationId: string,
