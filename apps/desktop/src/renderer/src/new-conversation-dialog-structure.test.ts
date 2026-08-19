@@ -21,4 +21,9 @@ describe('New Conversation dialog presentation contract', () => {
     expect(component).toContain('className="new-camp-lead-option"')
     expect(component).not.toContain('Agent 运行时')
   })
+
+  it('distinguishes valid Git metadata from the neutral inspection state', () => {
+    expect(styles).toMatch(/\.new-camp-git-metadata\s*\{[^}]*color:\s*var\(--success\);[^}]*background:\s*var\(--success-soft\);/s)
+    expect(styles).toMatch(/\.new-camp-git-loading\s*\{[^}]*color:\s*var\(--muted\);[^}]*background:\s*var\(--surface-muted\);/s)
+  })
 })

@@ -4343,12 +4343,12 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   padding: 3px 7px;
   overflow: hidden;
   border-radius: 6px;
-  color: var(--muted);
-  background: var(--surface-muted);
   font: 650 10.5px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.new-camp-git-metadata { color: var(--success); background: var(--success-soft); }
+.new-camp-git-loading { color: var(--muted); background: var(--surface-muted); }
 .new-camp-git-loading i {
   width: 12px;
   height: 12px;

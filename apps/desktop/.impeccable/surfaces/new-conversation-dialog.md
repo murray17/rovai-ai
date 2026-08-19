@@ -1,5 +1,5 @@
 ---
-version: 3
+version: 4
 slug: "new-conversation-dialog"
 primary_target: "apps/desktop/src/renderer/src/NewConversationDialog.tsx"
 related_targets:
@@ -32,7 +32,8 @@ arrow-key navigation, `Esc` dismissal and focus return.
 
 1. **工作目录 · 可选** — default Quick Chat, a known canonical Project or “选择工作目录…”. Preserve
    native folder-picker cancellation, directory safety validation and asynchronous Git capability. A valid
-   ordinary directory is usable before Git detection completes; do not run `git init`.
+   ordinary directory is usable before Git detection completes; do not run `git init`. Valid Git metadata
+   uses the semantic success foreground and surface, while the in-progress inspection state remains neutral.
 2. **队员与 Lead** — default to the saved valid team configuration, otherwise all active teammates.
    The set is non-empty and Lead remains inside it. Runtime availability is guidance, not a structural
    selector. Unavailable saved members are filtered while initializing the draft without adding a
