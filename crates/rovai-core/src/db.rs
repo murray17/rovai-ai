@@ -592,17 +592,17 @@ const V107_QUARANTINE_DIRECTORIES: &[&str] = &[
     "runtime/qwen",
 ];
 
-fn has_current_data_contract(path: &Path) -> bool {
+fn has_admissible_data_contract(path: &Path) -> bool {
     if !path.exists() {
         return true;
     }
     let Ok(connection) = Connection::open(path) else {
         return false;
     };
-    connection_has_current_data_contract(&connection).unwrap_or(false)
+    connection_has_admissible_data_contract(&connection).unwrap_or(false)
 }
 
-fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
+fn connection_has_admissible_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
     let marker = connection
         .query_row(
             r#"
@@ -629,11 +629,28 @@ fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Re
     Ok(matches!(
         (marker, projection_exists, migration_state),
         (Ok(Some((contract, schema, classifier))), Ok(true), Ok(migrations))
-            if contract == CURRENT_DATA_CONTRACT_VERSION
-                && schema == CURRENT_PROJECTION_SCHEMA_VERSION
-                && classifier == V043_CLASSIFIER_VERSION
+            if classifier == V043_CLASSIFIER_VERSION
                 && migrations.admits(&contract, schema)
     ))
+}
+
+#[cfg(test)]
+fn connection_has_current_data_contract(connection: &Connection) -> rusqlite::Result<bool> {
+    if !connection_has_admissible_data_contract(connection)? {
+        return Ok(false);
+    }
+    connection.query_row(
+        r#"
+        SELECT contract_version = ?1 AND projection_schema_version = ?2
+        FROM rovai_data_contract
+        WHERE singleton = 1
+        "#,
+        params![
+            CURRENT_DATA_CONTRACT_VERSION,
+            CURRENT_PROJECTION_SCHEMA_VERSION
+        ],
+        |row| row.get(0),
+    )
 }
 
 fn load_current_migration_state(
@@ -1050,6 +1067,13 @@ fn rename_conflicting_profiles_for_v42(
 
 impl Database {
     pub fn open(data_dir: &Path) -> Result<Self> {
+        Self::open_with_data_contract_enforcement(data_dir, !cfg!(test))
+    }
+
+    fn open_with_data_contract_enforcement(
+        data_dir: &Path,
+        enforce_data_contract: bool,
+    ) -> Result<Self> {
         std::fs::create_dir_all(data_dir)
             .with_context(|| format!("failed to create data dir {}", data_dir.display()))?;
         let preferred_path = data_dir.join("rovai.sqlite");
@@ -1059,9 +1083,9 @@ impl Database {
         } else {
             legacy_path.clone()
         };
-        let reset_reason = if !cfg!(test)
+        let reset_reason = if enforce_data_contract
             && candidate_path.exists()
-            && !has_current_data_contract(&candidate_path)
+            && !has_admissible_data_contract(&candidate_path)
         {
             let reason = if candidate_path == legacy_path {
                 "legacy_or_missing_current_data_contract"
@@ -16286,7 +16310,7 @@ mod tests {
     }
 
     #[test]
-    fn database_loads_current_migration_state_for_admission() {
+    fn database_contract_preflight_admits_current_and_rejects_future_store() {
         let directory =
             std::env::temp_dir().join(format!("rovai-current-contract-smoke-{}", Uuid::new_v4()));
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
@@ -16303,7 +16327,20 @@ mod tests {
 
         assert_eq!(state, migration_state_through(96));
         assert!(state.admits(&contract, schema));
-        assert!(has_current_data_contract(&directory.join("rovai.sqlite")));
+        assert!(has_admissible_data_contract(
+            &directory.join("rovai.sqlite")
+        ));
+        assert!(connection_has_current_data_contract(database.connection()).unwrap());
+
+        database
+            .connection()
+            .execute(
+                "UPDATE rovai_data_contract SET contract_version = 'v99.0' WHERE singleton = 1",
+                [],
+            )
+            .unwrap();
+        assert!(!connection_has_admissible_data_contract(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
 
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
@@ -16318,6 +16355,13 @@ mod tests {
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
         database
             .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name = '历史队员应保留' WHERE id = ?1",
+                [LUOKE_AGENT_ID],
+            )
+            .unwrap();
+        database
+            .connection()
             .execute_batch(
                 r#"
                 ALTER TABLE agent_run DROP COLUMN runtime_observed_model_id;
@@ -16328,9 +16372,18 @@ mod tests {
                 "#,
             )
             .unwrap();
+        assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
         drop(database);
 
-        let reopened = Database::open(&directory).expect("v1.10/schema-50 should migrate to v96");
+        // Database::open disables quarantine under cfg(test), so force the production admission
+        // policy here to cover the startup boundary that previously discarded this valid source.
+        let reopened = Database::open_with_data_contract_enforcement(&directory, true)
+            .expect("v1.10/schema-50 should migrate to v96 before production quarantine");
+        assert!(
+            !directory.join("inactive-data-quarantine").exists(),
+            "an admissible migration source must not be quarantined"
+        );
         assert!(
             table_columns(reopened.connection(), "agent_run")
                 .unwrap()
@@ -16356,6 +16409,16 @@ mod tests {
                 1,
             )
         );
+        let historical_teammate_name: String = reopened
+            .connection()
+            .query_row(
+                "SELECT display_name FROM agent_profile WHERE id = ?1",
+                [LUOKE_AGENT_ID],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(historical_teammate_name, "历史队员应保留");
+        assert!(connection_has_current_data_contract(reopened.connection()).unwrap());
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }
