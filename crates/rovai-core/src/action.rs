@@ -568,12 +568,22 @@ impl ActionSafetyService {
                 Some(camp_id) => camp_id,
                 None => return Ok(rejected("action.camp_required", "Action requires a Camp")),
             };
-            let context = match agent_action_context(
-                transaction,
-                &envelope.actor,
-                envelope.execution_epoch,
-                camp_id,
-            )? {
+            let context = match match envelope.payload.control_mode {
+                ActionControlMode::Observed => agent_action_observation_context(
+                    transaction,
+                    &envelope.actor,
+                    envelope.execution_epoch,
+                    camp_id,
+                ),
+                ActionControlMode::Mediated | ActionControlMode::Intercepted => {
+                    agent_action_admission_context(
+                        transaction,
+                        &envelope.actor,
+                        envelope.execution_epoch,
+                        camp_id,
+                    )
+                }
+            }? {
                 Some(context) => context,
                 None => {
                     return Ok(rejected(
@@ -1004,7 +1014,7 @@ impl ActionSafetyService {
                     ));
                 }
             };
-            let context = match agent_action_context(
+            let context = match agent_action_observation_context(
                 transaction,
                 &envelope.actor,
                 envelope.execution_epoch,
@@ -1187,7 +1197,8 @@ impl ActionSafetyService {
                            action_execution.status, action_execution.control_mode,
                            action_execution.version, camp_turn.camp_id,
                            action_execution.source_agent_run_execution_epoch,
-                           agent_run.execution_epoch, agent_run.permission_semantics
+                           agent_run.execution_epoch, agent_run.permission_semantics,
+                           agent_run.status, agent_run.cancel_requested_at
                     FROM approval
                     JOIN action_execution ON action_execution.id = approval.action_id
                     JOIN agent_run ON agent_run.id = action_execution.agent_run_id
@@ -1213,6 +1224,8 @@ impl ActionSafetyService {
                             row.get::<_, i64>(13)?,
                             row.get::<_, i64>(14)?,
                             row.get::<_, String>(15)?,
+                            row.get::<_, String>(16)?,
+                            row.get::<_, Option<String>>(17)?,
                         ))
                     },
                 )
@@ -1234,6 +1247,8 @@ impl ActionSafetyService {
                 action_source_epoch,
                 run_epoch,
                 permission_semantics,
+                run_status,
+                run_cancel_requested_at,
             )) = row
             else {
                 return Ok(rejected("approval.not_found", "Action Approval does not exist"));
@@ -1284,6 +1299,14 @@ impl ActionSafetyService {
                     "Selected option is not part of the frozen Runtime request",
                 ));
             };
+            let run_accepts_new_effects = matches!(run_status.as_str(), "running" | "waiting")
+                && run_cancel_requested_at.is_none();
+            if selected_option.allows_action && !run_accepts_new_effects {
+                return Ok(rejected(
+                    "approval.agent_run_effects_fenced",
+                    "Approval cannot authorize new effects for a stopping AgentRun",
+                ));
+            }
             if permission_semantics == PermissionSemantics::RuntimeManagedV2
                 && let Err(error) = selected_option.validate()
             {
@@ -1332,26 +1355,28 @@ impl ActionSafetyService {
                     "approval_expired",
                     &now_text,
                 )?;
-                create_runtime_delivery(
-                    transaction,
-                    &agent_run_id,
-                    &action_id,
-                    "authorization_resolution",
-                    run_epoch,
-                    &json!({
-                        "actionId": action_id,
-                        "actionKind": action_kind,
-                        "actionDigest": action_digest,
-                        "decision": "expired",
-                        "optionId": expiry_option.option_id,
-                        "optionKind": expiry_option.kind,
-                        "allowsAction": false,
-                        "nativeResponseDigest": expiry_option.native_response_digest,
-                        "nativeResponse": (
-                            permission_semantics == PermissionSemantics::RuntimeManagedV2
-                        ).then_some(&expiry_option.native_response),
-                    }),
-                )?;
+                if run_accepts_new_effects {
+                    create_runtime_delivery(
+                        transaction,
+                        &agent_run_id,
+                        &action_id,
+                        "authorization_resolution",
+                        run_epoch,
+                        &json!({
+                            "actionId": action_id,
+                            "actionKind": action_kind,
+                            "actionDigest": action_digest,
+                            "decision": "expired",
+                            "optionId": expiry_option.option_id,
+                            "optionKind": expiry_option.kind,
+                            "allowsAction": false,
+                            "nativeResponseDigest": expiry_option.native_response_digest,
+                            "nativeResponse": (
+                                permission_semantics == PermissionSemantics::RuntimeManagedV2
+                            ).then_some(&expiry_option.native_response),
+                        }),
+                    )?;
+                }
                 return Ok(CommandHandlerResult::applied(
                     "approval.expired",
                     json!({ "approvalId": envelope.payload.approval_id, "actionId": action_id }),
@@ -1365,7 +1390,7 @@ impl ActionSafetyService {
                 _ if selected_option.allows_action => ("approved", "user_selected_allow"),
                 _ => ("denied", "user_selected_deny"),
             };
-            transaction.execute(
+            let approval_updated = transaction.execute(
                 r#"
                 UPDATE approval
                 SET status = ?2, decision_json = ?3,
@@ -1373,6 +1398,19 @@ impl ActionSafetyService {
                     resolution_code = ?5, resolution_reason = ?6,
                     version = version + 1, resolved_at = ?7, updated_at = ?7
                 WHERE id = ?1 AND status = 'pending' AND version = ?8
+                  AND (
+                    ?9 = 0
+                    OR EXISTS (
+                      SELECT 1
+                      FROM action_execution
+                      JOIN agent_run ON agent_run.id = action_execution.agent_run_id
+                      WHERE action_execution.id = approval.action_id
+                        AND agent_run.status IN ('running', 'waiting')
+                        AND agent_run.execution_epoch =
+                            action_execution.source_agent_run_execution_epoch
+                        AND agent_run.cancel_requested_at IS NULL
+                    )
+                  )
                 "#,
                 params![
                     envelope.payload.approval_id,
@@ -1390,8 +1428,15 @@ impl ActionSafetyService {
                     envelope.payload.reason,
                     now_text,
                     envelope.payload.expected_version,
+                    i64::from(selected_option.allows_action),
                 ],
             )?;
+            if approval_updated != 1 {
+                return Ok(rejected(
+                    "approval.resolution_fenced",
+                    "Approval changed or its AgentRun stopped before resolution",
+                ));
+            }
             if !selected_option.allows_action {
                 set_action_not_executed(
                     transaction,
@@ -1401,7 +1446,9 @@ impl ActionSafetyService {
                     &now_text,
                 )?;
             }
-            if control_mode == "intercepted" || !selected_option.allows_action {
+            if run_accepts_new_effects
+                && (control_mode == "intercepted" || !selected_option.allows_action)
+            {
                 create_runtime_delivery(
                     transaction,
                     &agent_run_id,
@@ -1423,7 +1470,7 @@ impl ActionSafetyService {
                     }),
                 )?;
                 mark_agent_run_waiting(transaction, &agent_run_id, "runtime_delivery", &now_text)?;
-            } else {
+            } else if selected_option.allows_action {
                 mark_agent_run_waiting(transaction, &agent_run_id, "action_execution", &now_text)?;
             }
             append_system_camp_message(
@@ -1488,7 +1535,8 @@ impl ActionSafetyService {
                            action_execution.control_mode, action_execution.execute_before,
                            action_execution.version, action_execution.attempt_count,
                            action_execution.agent_run_id, camp_turn.camp_id,
-                           agent_run.status, agent_run.execution_epoch
+                           agent_run.status, agent_run.execution_epoch,
+                           agent_run.cancel_requested_at
                     FROM action_execution
                     JOIN agent_run ON agent_run.id = action_execution.agent_run_id
                     JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -1507,6 +1555,7 @@ impl ActionSafetyService {
                             row.get::<_, String>(7)?,
                             row.get::<_, String>(8)?,
                             row.get::<_, i64>(9)?,
+                            row.get::<_, Option<String>>(10)?,
                         ))
                     },
                 )
@@ -1522,6 +1571,7 @@ impl ActionSafetyService {
                 camp_id,
                 run_status,
                 run_epoch,
+                run_cancel_requested_at,
             )) = row
             else {
                 return Ok(rejected("action.not_found", "Action does not exist"));
@@ -1539,6 +1589,12 @@ impl ActionSafetyService {
                 return Ok(rejected(
                     "action.agent_run_terminal",
                     "Action source AgentRun is no longer active",
+                ));
+            }
+            if run_cancel_requested_at.is_some() {
+                return Ok(rejected(
+                    "action.agent_run_effects_fenced",
+                    "Action source AgentRun is stopping",
                 ));
             }
             if let Some(execute_before) = execute_before
@@ -1668,6 +1724,13 @@ impl ActionSafetyService {
                     started_at = COALESCE(started_at, ?8),
                     version = version + 1, updated_at = ?8
                 WHERE id = ?1 AND status = 'prepared' AND version = ?9
+                  AND EXISTS (
+                    SELECT 1 FROM agent_run
+                    WHERE agent_run.id = action_execution.agent_run_id
+                      AND agent_run.status IN ('running', 'waiting')
+                      AND agent_run.execution_epoch = ?5
+                      AND agent_run.cancel_requested_at IS NULL
+                  )
                 "#,
                 params![
                     envelope.payload.action_id,
@@ -1734,6 +1797,14 @@ impl ActionSafetyService {
                 WHERE id = ?1 AND active_attempt_id = ?2
                   AND action_execution_epoch = ?3 AND execution_lease_owner = ?4
                   AND status = 'executing'
+                  AND EXISTS (
+                    SELECT 1 FROM agent_run
+                    WHERE agent_run.id = action_execution.agent_run_id
+                      AND agent_run.status IN ('running', 'waiting')
+                      AND agent_run.execution_epoch =
+                          action_execution.agent_run_execution_epoch_at_dispatch
+                      AND agent_run.cancel_requested_at IS NULL
+                  )
                 "#,
                 params![
                     envelope.payload.action_id,
@@ -2008,7 +2079,7 @@ impl ActionSafetyService {
                            runtime_delivery_checkpoint.payload_digest,
                            runtime_delivery_checkpoint.payload_json,
                            camp_turn.camp_id, agent_run.status,
-                           agent_run.execution_epoch
+                           agent_run.execution_epoch, agent_run.cancel_requested_at
                     FROM runtime_delivery_checkpoint
                     JOIN agent_run ON agent_run.id = runtime_delivery_checkpoint.agent_run_id
                     JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
@@ -2028,6 +2099,7 @@ impl ActionSafetyService {
                             row.get::<_, String>(8)?,
                             row.get::<_, String>(9)?,
                             row.get::<_, i64>(10)?,
+                            row.get::<_, Option<String>>(11)?,
                         ))
                     },
                 )
@@ -2044,6 +2116,7 @@ impl ActionSafetyService {
                 camp_id,
                 run_status,
                 run_epoch,
+                run_cancel_requested_at,
             )) = row
             else {
                 return Ok(rejected(
@@ -2073,7 +2146,10 @@ impl ActionSafetyService {
                     "Runtime Delivery is not available for delivery",
                 ));
             }
-            if !matches!(run_status.as_str(), "running" | "waiting") || run_epoch != target_epoch {
+            if !matches!(run_status.as_str(), "running" | "waiting")
+                || run_epoch != target_epoch
+                || run_cancel_requested_at.is_some()
+            {
                 return Ok(rejected(
                     "runtime_delivery.target_fenced",
                     "Runtime Delivery targets an inactive AgentRun epoch",
@@ -2089,6 +2165,14 @@ impl ActionSafetyService {
                     lease_owner = ?2, lease_expires_at = ?3,
                     version = version + 1, updated_at = ?4
                 WHERE id = ?1 AND version = ?5
+                  AND EXISTS (
+                    SELECT 1 FROM agent_run
+                    WHERE agent_run.id = runtime_delivery_checkpoint.agent_run_id
+                      AND agent_run.status IN ('running', 'waiting')
+                      AND agent_run.execution_epoch =
+                          runtime_delivery_checkpoint.target_execution_epoch
+                      AND agent_run.cancel_requested_at IS NULL
+                  )
                 "#,
                 params![
                     envelope.payload.delivery_id,
@@ -2817,6 +2901,7 @@ impl ActionSafetyService {
                   runtime_delivery_checkpoint.target_execution_epoch
               AND agent_run.execution_epoch = runtime_delivery_checkpoint.target_execution_epoch
               AND agent_run.status IN ('running', 'waiting')
+              AND agent_run.cancel_requested_at IS NULL
               AND action_execution.native_request_method IS NOT NULL
               AND runtime_delivery_checkpoint.native_request_id IS NOT NULL
               AND action_execution.native_response_context_json IS NOT NULL
@@ -2994,11 +3079,30 @@ fn validate_action_result_fields(
     Ok(())
 }
 
-fn agent_action_context(
+fn agent_action_admission_context(
     transaction: &Transaction<'_>,
     actor: &ActorRef,
     execution_epoch: Option<i64>,
     camp_id: &str,
+) -> Result<Option<AgentActionContext>> {
+    load_agent_action_context(transaction, actor, execution_epoch, camp_id, true)
+}
+
+fn agent_action_observation_context(
+    transaction: &Transaction<'_>,
+    actor: &ActorRef,
+    execution_epoch: Option<i64>,
+    camp_id: &str,
+) -> Result<Option<AgentActionContext>> {
+    load_agent_action_context(transaction, actor, execution_epoch, camp_id, false)
+}
+
+fn load_agent_action_context(
+    transaction: &Transaction<'_>,
+    actor: &ActorRef,
+    execution_epoch: Option<i64>,
+    camp_id: &str,
+    require_effect_admission: bool,
 ) -> Result<Option<AgentActionContext>> {
     let ActorRef::Agent {
         agent_id,
@@ -3026,10 +3130,17 @@ fn agent_action_context(
               AND conversation.agent_id = ?3
               AND agent_run.execution_epoch = ?4
               AND agent_run.status IN ('running', 'waiting')
+              AND (?5 = 0 OR agent_run.cancel_requested_at IS NULL)
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
             "#,
-            params![source_agent_run_id, camp_id, agent_id, execution_epoch],
+            params![
+                source_agent_run_id,
+                camp_id,
+                agent_id,
+                execution_epoch,
+                i64::from(require_effect_admission),
+            ],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -4550,6 +4661,404 @@ mod tests {
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
+    #[cfg(feature = "slow-tests")]
+    fn cancel_requested_run_fences_new_action_effects_without_dropping_observations() {
+        let mut fixture = fixture("allow");
+        let service = ActionSafetyService::default();
+
+        let approval_prepare =
+            intercepted_prepare_envelope(&fixture, "action-stop-approval", "stop-approval");
+        service
+            .prepare_action(&mut fixture.database, &approval_prepare)
+            .unwrap();
+        let (approval_id, approval_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id, version FROM approval WHERE action_id = 'action-stop-approval'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        let delivery_prepare =
+            intercepted_prepare_envelope(&fixture, "action-stop-delivery", "stop-delivery");
+        service
+            .prepare_action(&mut fixture.database, &delivery_prepare)
+            .unwrap();
+        let (delivery_approval_id, delivery_approval_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT id, version FROM approval WHERE action_id = 'action-stop-delivery'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        service
+            .resolve_approval(
+                &mut fixture.database,
+                &user_envelope(
+                    "approve-stop-delivery",
+                    Some(&fixture.camp_id),
+                    ResolveActionApprovalCommand {
+                        approval_id: delivery_approval_id,
+                        option_id: "accept".to_string(),
+                        expected_version: delivery_approval_version,
+                        reason: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let (delivery_id, delivery_version): (String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT id, version FROM runtime_delivery_checkpoint
+                WHERE action_id = 'action-stop-delivery'
+                  AND delivery_kind = 'authorization_resolution'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+
+        let claim_prepare = prepare_envelope(&fixture, "action-stop-claim");
+        service
+            .prepare_action(&mut fixture.database, &claim_prepare)
+            .unwrap();
+        let claim_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM action_execution WHERE id = 'action-stop-claim'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        let dispatch_prepare = prepare_envelope(&fixture, "action-stop-dispatch");
+        service
+            .prepare_action(&mut fixture.database, &dispatch_prepare)
+            .unwrap();
+        let dispatch_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM action_execution WHERE id = 'action-stop-dispatch'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let dispatch_claim = service
+            .claim_action(
+                &mut fixture.database,
+                &system_envelope(
+                    "claim-stop-dispatch",
+                    &fixture.camp_id,
+                    "action-executor",
+                    ClaimActionCommand {
+                        action_id: "action-stop-dispatch".to_string(),
+                        expected_version: dispatch_version,
+                        lease_owner: "stop-dispatch-owner".to_string(),
+                        lease_seconds: 30,
+                        authorization_delivery_id: None,
+                        authorization_delivery_lease_owner: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(dispatch_claim.result.status, CommandResultStatus::Accepted);
+        let dispatch_attempt_id = dispatch_claim.result.payload["attemptId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let dispatch_epoch = dispatch_claim.result.payload["actionExecutionEpoch"]
+            .as_i64()
+            .unwrap();
+
+        let result_prepare = prepare_envelope(&fixture, "action-stop-result");
+        service
+            .prepare_action(&mut fixture.database, &result_prepare)
+            .unwrap();
+        let result_version: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT version FROM action_execution WHERE id = 'action-stop-result'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let result_claim = service
+            .claim_action(
+                &mut fixture.database,
+                &system_envelope(
+                    "claim-stop-result",
+                    &fixture.camp_id,
+                    "action-executor",
+                    ClaimActionCommand {
+                        action_id: "action-stop-result".to_string(),
+                        expected_version: result_version,
+                        lease_owner: "stop-result-owner".to_string(),
+                        lease_seconds: 30,
+                        authorization_delivery_id: None,
+                        authorization_delivery_lease_owner: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let result_attempt_id = result_claim.result.payload["attemptId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let result_epoch = result_claim.result.payload["actionExecutionEpoch"]
+            .as_i64()
+            .unwrap();
+        let dispatch_started = service
+            .mark_dispatch_started(
+                &mut fixture.database,
+                &system_envelope(
+                    "mark-stop-result-dispatch",
+                    &fixture.camp_id,
+                    "action-executor",
+                    MarkActionDispatchStartedCommand {
+                        action_id: "action-stop-result".to_string(),
+                        attempt_id: result_attempt_id.clone(),
+                        action_execution_epoch: result_epoch,
+                        lease_owner: "stop-result-owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(dispatch_started.result.status, CommandResultStatus::Applied);
+
+        let now = chrono::Utc::now().to_rfc3339();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET cancel_requested_at = ?2,
+                    cancel_reason_code = 'user_requested_agent_run_stop',
+                    version = version + 1, updated_at = ?2
+                WHERE id = ?1
+                "#,
+                params![fixture.agent_run_id, now],
+            )
+            .unwrap();
+
+        let prepare_after_stop_envelope = prepare_envelope(&fixture, "action-after-stop");
+        let prepare_after_stop = service
+            .prepare_action(&mut fixture.database, &prepare_after_stop_envelope)
+            .unwrap();
+        assert_eq!(
+            prepare_after_stop.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(prepare_after_stop.result.code, "action.stale_agent_run");
+
+        let allow_after_stop = service
+            .resolve_approval(
+                &mut fixture.database,
+                &user_envelope(
+                    "allow-after-stop",
+                    Some(&fixture.camp_id),
+                    ResolveActionApprovalCommand {
+                        approval_id: approval_id.clone(),
+                        option_id: "accept".to_string(),
+                        expected_version: approval_version,
+                        reason: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            allow_after_stop.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(
+            allow_after_stop.result.code,
+            "approval.agent_run_effects_fenced"
+        );
+        let deny_after_stop = service
+            .resolve_approval(
+                &mut fixture.database,
+                &user_envelope(
+                    "deny-after-stop",
+                    Some(&fixture.camp_id),
+                    ResolveActionApprovalCommand {
+                        approval_id: approval_id.clone(),
+                        option_id: "decline".to_string(),
+                        expected_version: approval_version,
+                        reason: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(deny_after_stop.result.status, CommandResultStatus::Applied);
+        let denied_state: (String, String, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT approval.status, action_execution.status,
+                       (SELECT COUNT(*) FROM runtime_delivery_checkpoint
+                        WHERE action_id = action_execution.id)
+                FROM approval
+                JOIN action_execution ON action_execution.id = approval.action_id
+                WHERE approval.id = ?1
+                "#,
+                [approval_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            denied_state,
+            ("denied".to_string(), "not_executed".to_string(), 0)
+        );
+
+        let claim_after_stop = service
+            .claim_action(
+                &mut fixture.database,
+                &system_envelope(
+                    "claim-after-stop",
+                    &fixture.camp_id,
+                    "action-executor",
+                    ClaimActionCommand {
+                        action_id: "action-stop-claim".to_string(),
+                        expected_version: claim_version,
+                        lease_owner: "stop-claim-owner".to_string(),
+                        lease_seconds: 30,
+                        authorization_delivery_id: None,
+                        authorization_delivery_lease_owner: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            claim_after_stop.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(
+            claim_after_stop.result.code,
+            "action.agent_run_effects_fenced"
+        );
+
+        let dispatch_after_stop = service
+            .mark_dispatch_started(
+                &mut fixture.database,
+                &system_envelope(
+                    "dispatch-after-stop",
+                    &fixture.camp_id,
+                    "action-executor",
+                    MarkActionDispatchStartedCommand {
+                        action_id: "action-stop-dispatch".to_string(),
+                        attempt_id: dispatch_attempt_id,
+                        action_execution_epoch: dispatch_epoch,
+                        lease_owner: "stop-dispatch-owner".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            dispatch_after_stop.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(dispatch_after_stop.result.code, "action.attempt_fenced");
+
+        let candidates = service
+            .list_runtime_delivery_candidates(&fixture.database, 100)
+            .unwrap();
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.delivery_id != delivery_id)
+        );
+        let acquire_after_stop = service
+            .acquire_runtime_delivery(
+                &mut fixture.database,
+                &system_envelope(
+                    "acquire-after-stop",
+                    &fixture.camp_id,
+                    "runtime-adapter:codex",
+                    AcquireRuntimeDeliveryCommand {
+                        delivery_id,
+                        expected_version: delivery_version,
+                        lease_owner: "stop-delivery-owner".to_string(),
+                        lease_seconds: 30,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            acquire_after_stop.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(
+            acquire_after_stop.result.code,
+            "runtime_delivery.target_fenced"
+        );
+
+        let recorded_result = service
+            .record_result(
+                &mut fixture.database,
+                &system_envelope(
+                    "record-result-after-stop",
+                    &fixture.camp_id,
+                    "action-executor",
+                    RecordActionResultCommand {
+                        action_id: "action-stop-result".to_string(),
+                        attempt_id: result_attempt_id,
+                        action_execution_epoch: result_epoch,
+                        outcome: ActionResultOutcome::Succeeded,
+                        result_code: "exit_0".to_string(),
+                        result_summary: "Effect completed before cancellation".to_string(),
+                        result_data: json!({ "exitCode": 0 }),
+                        effect_disposition: "complete".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(recorded_result.result.status, CommandResultStatus::Applied);
+
+        let observed_after_stop = service
+            .record_observed_action(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "observe-after-stop".to_string(),
+                    actor: ActorRef::Agent {
+                        agent_id: "agent_2".to_string(),
+                        source_agent_run_id: fixture.agent_run_id.clone(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: Some(1),
+                    payload: RecordObservedActionCommand {
+                        action_id: "action-observed-after-stop".to_string(),
+                        native_action_id: "native-observed-after-stop".to_string(),
+                        native_kind: "edit".to_string(),
+                        observation_digest: "sha256:observed-after-stop".to_string(),
+                        outcome: ActionResultOutcome::Succeeded,
+                        result_code: "observed_complete".to_string(),
+                        result_summary: "Observed effect completed before stop".to_string(),
+                        result_data: json!({}),
+                        effect_disposition: "complete".to_string(),
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            observed_after_stop.result.status,
+            CommandResultStatus::Applied
+        );
+
+        drop(fixture.database);
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
     #[test]
     fn restart_fails_closed_intercepted_approvals_and_authorization_deliveries() {
         let mut fixture = fixture("ask");
@@ -5326,6 +5835,11 @@ mod tests {
         #[test]
         fn restart_distinguishes_not_dispatched_from_unknown_effects() {
             super::restart_distinguishes_not_dispatched_from_unknown_effects();
+        }
+
+        #[test]
+        fn cancel_requested_run_fences_new_action_effects_without_dropping_observations() {
+            super::cancel_requested_run_fences_new_action_effects_without_dropping_observations();
         }
     }
 }
