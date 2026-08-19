@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.15
 lifecycle: current
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # v1.15 决策记录
@@ -93,3 +93,48 @@ Drawer，使已展开状态和阅读位置丢失。
 - [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
 - [Product/Renderer 基础不变量](../../architecture/foundational-invariants.md#product-execution-surface)
+
+<a id="v1-15-d03"></a>
+
+## V1.15-D03：自身公屏输出不作为同一 Agent 的 recent 未读候选
+
+### 背景
+
+CampMessage 是所有成员共享、持久且可检索的公共事实；此前 recent selector 只按 Camp、sequence boundary、
+trigger 与 tombstone 选择，所以 Agent 通过 `rovai send` 发布的上一轮输出会在下一 AgentRun 重新进入自己的
+`SHARED_CONVERSATION.recentMessages`。更新的自身消息还能占用 15 条名额并把用户或其他 Agent 消息挤出。
+Renderer 隐藏无法修复模型输入，发布后删除消息又会破坏公共事实和其他成员可见性。
+
+### 决定
+
+Profile v4 在 recent `LIMIT` 和 whole-history omission aggregate 前排除
+`author_type = agent AND author_id = currentAgentId`。过滤只属于当前 recipient Agent 的模型 recent
+projection：消息继续持久化并对用户、其他 Agent、Timeline、History/Search 与 Renderer 可见；当前 trigger
+继续通过完整 `CURRENT_INPUT` 交付；自身消息仍可作为理解 eligible message 所需的 reference ancestor。
+
+该选择推进 ContextManifest 至 v19，并以 Migration 98 对 Profile v3 的 Binding、冻结 context 与恢复 Evidence
+执行 clean break，避免旧选择语义在重试或恢复中与新 reader 混用。
+
+### 后果
+
+- 自身输出不再占 recent top-15 或制造 whole-history omission，较早 eligible 消息可以回填；
+- accepted public boundary 仍跨过自身消息 sequence，避免后续重新注入；
+- direct materialization 与 A2A preflight 必须使用同一 recipient Agent ID、selector 和 omission predicate；
+- schema 52 store 升到 schema 53 时，非终态执行稳定关闭并清除旧 Session/Binding/Evidence；CampMessage 和其他
+  业务事实保留；
+- Profile v3/Manifest v18 没有 compatibility reader、dual write 或 downgrade reader。
+
+### 被拒绝方案
+
+- 在 Renderer 隐藏自身消息：只改变人类展示，模型输入和候选名额仍错误；
+- 发布后删除或标记自身 CampMessage：会破坏公共时间线、其他成员理解、History/Search 与引用链；
+- 在 `LIMIT 15` 后过滤：自身消息仍会占名额，无法保证返回 15 条 eligible 消息；
+- 把自身消息从 reference closure 一并隐藏：会切断其他 eligible 消息的必要因果祖先；
+- 只按 `source_agent_run_id` 过滤：旧消息或非 Run 来源的自身发布仍会漏入，作者 identity 才是稳定边界。
+
+### 当前权威影响
+
+- [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
+- [ContextManifest Evidence v19](../../contracts/context-manifest-evidence-v19.md)
+- [有界公共上下文与引用闭包](../../architecture/foundational-invariants.md#context-public-history)
+- [Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)

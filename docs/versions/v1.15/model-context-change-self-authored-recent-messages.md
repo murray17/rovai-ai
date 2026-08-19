@@ -9,7 +9,7 @@ confirmed_by: murray17
 confirmed_at: 2026-08-19T23:52:57+08:00
 authority: confirmed-model-input-change-statement
 implementation_baseline: 5a3ea00dcbe67062d78d767a6156862350b160e3
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # v1.15 核心模型上下文变更说明：排除自身发布的 recent public message
@@ -350,11 +350,30 @@ confirmed_at: 2026-08-19T23:52:57+08:00
     CampMessage 完整保留；非法来源、重复 Migration 与 downgrade reader 均失败关闭；
 12. 运行相关 Rust 单测、Context/DB migration tests、shared Contract fixture、文档门禁和 workspace 既有回归。
 
+## 实施结论
+
+Revision 1 已按确认语义实现，没有修改上述 candidate、omission、reference、boundary 或 Renderer 不变项。
+实际版本轴为 Formatter 20（不变）、Context Delivery Profile 4、ContextManifest 19、Data Contract v1.15、
+projection schema 53、Migration 98。Profile v4 canonical digest 为
+`022688d6f133ea3bb6e6d5773cd30aec1db7a184e4419bbc0fe9c554518bc8d9`。
+
+实现验证结果：
+
+- Context 41 项定向 slow tests 全部通过，包括 current/replacement Binding 自身输出过滤、pre-limit 15 条
+  eligible 回填、用户/其他 Agent/system 保留与 omission 排除；
+- DB/Migration 23 项定向 tests 全部通过，包括 schema 52→53、Profile CHECK 3→4、非终态
+  Run/Turn/Delivery/Gather 收敛、Binding/Evidence 清除、CampMessage 保留与重复打开幂等；
+- `pnpm test:rust:pr` 通过（Rust lib 264、CLI 15、slow 264）；
+- `cargo clippy --workspace --all-targets -- -D warnings`、`cargo fmt --all --check`、`pnpm typecheck`、
+  `pnpm test`、`pnpm build:desktop` 全部通过；
+- `pnpm docs:test`、`pnpm docs:check` 与
+  `DOCS_BASE_REF=0194dc56580a3269d4b18f85d3eff38b7ef3aa4e pnpm docs:check:ci` 全部通过。
+
 ## References
 
 - [核心模型上下文变更治理](../../development/model-context-change-governance.md)
 - [v1.15 版本概览](README.md)
 - [v1.15 实施与验收计划](implementation-plan.md)
-- [Context Delivery Profile v3](../../contracts/context-delivery-profile-v3.md)
-- [ContextManifest Evidence v18](../../contracts/context-manifest-evidence-v18.md)
+- [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
+- [ContextManifest Evidence v19](../../contracts/context-manifest-evidence-v19.md)
 - [公共上下文与 ContextManifest 不变量](../../architecture/foundational-invariants.md#context-public-history)

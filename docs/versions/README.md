@@ -2,7 +2,7 @@
 document_type: versions-index
 authority: version-lifecycle
 current_version: v1.15
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # Rovai-ai 版本记录
@@ -166,4 +166,4 @@ last_updated: 2026-08-19
 | v1.12 | `historical` | User-only AgentRun 局部停止、立即写 fence 与权威状态投影 | [v1.12/README.md](v1.12/README.md) |
 | v1.13 | `historical` | 十 Runtime 的 AgentRun 首个实际模型观测与执行台展示 | [v1.13/README.md](v1.13/README.md) |
 | v1.14 | `historical` | `camp.read` 安全 Timeline 默认、显式消息锚点模式与 Built-in Transport v17 | [v1.14/README.md](v1.14/README.md) |
-| v1.15 | `current` | Windows x64 产品实现、平台验收与逐 Runtime 资格闭环 | [v1.15/README.md](v1.15/README.md) |
+| v1.15 | `current` | Windows x64 产品实现与资格闭环；Profile v4 排除同一 Agent 自身 recent 公屏输出 | [v1.15/README.md](v1.15/README.md) |

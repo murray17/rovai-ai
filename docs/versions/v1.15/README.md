@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
 model_context_change: true
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # Rovai-ai v1.15：Windows x64 产品实现与资格闭环
@@ -18,7 +18,8 @@ last_updated: 2026-08-19
 > client OS 验收、逐 Runtime 资格、NSIS 与签名尚未完成，因此不得宣称 Windows 已发布。
 >
 > 模型上下文补充：[排除自身发布 recent public message 的 revision 1](model-context-change-self-authored-recent-messages.md)
-> 已由开发者二次确认，当前进入隔离 worktree 实施；本文档提交仍不宣称实现已经完成。
+> 已由开发者二次确认并实现为 Context Delivery Profile v4、ContextManifest Evidence v19、schema 53 与
+> Migration 98；定向 Rust/Contract/文档与 workspace 回归结果记录在变更说明末尾。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 
@@ -66,6 +67,12 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 或已有 Skill exposure。schema 52 无 downgrade reader；不满足精确 v1.13/schema 51 来源条件的 store 继续按
 既有 admission/quarantine 策略 fail closed。
 
+Migration 98 只接受已完整应用 Migration 97 的 `v1.15 / projection schema 52`。它将
+`context_manifest.context_delivery_profile_version` 从 3 clean break 到 4，关闭非终态 Run/Turn/Delivery/
+Gather，移除旧 frozen context、Manifest/Input/Bootstrap/compaction/resume evidence，清除 Native
+Session/Binding 与 accepted boundary，并推进到 `v1.15 / projection schema 53`。CampMessage、Camp、Task、
+Memory、Agent 与 Runtime/Library 业务事实保留；没有 Profile v3/Manifest v18 reader、dual write 或 downgrade。
+
 ## 验收边界
 
 - macOS workspace、Core tests、Desktop 与既有文档门禁保持通过；
@@ -91,13 +98,13 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.14 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.15。 |
-| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果、稳定执行台 DOM 与旧预览/复制取舍的局部替代；Windows 平台决定继续继承 v1.05。 |
-| Contracts | 已更新 | [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)把 Migration 97 目标推进到 Data Contract v1.15/schema 52；[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)继承 AgentRun 直接停止，并定义四轨指令行、九类 SVG、精简队员入口与完整 Tool 结果；[Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)继承 activation-aware enter，并完整投影 non-terminal Evidence。 |
-| Architecture | 已更新 | [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录 Migration 97 的 v1.15 目标；[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)继续组合其他平台边界；[Camp Open Read Path](../../architecture/camp-open-read-path.md)记录 activation-aware enter、meaningful Pending 冷启动恢复与完整 non-terminal Evidence。 |
+| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果与稳定执行台 DOM；[V1.15-D03](decisions.md#v1-15-d03)记录自身公屏输出不再作为同一 Agent 的 recent 未读候选；Windows 平台决定继续继承 v1.05。 |
+| Contracts | 已更新 | [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)定义 pre-limit 自身作者过滤与 eligible omission；[ContextManifest Evidence v19](../../contracts/context-manifest-evidence-v19.md)定义 Profile v4 Evidence、schema 53 与 Migration 98；既有 Windows Skill Projection、Run Process Detail 与 Camp Open 合同保持当前。 |
+| Architecture | 已更新 | [公共上下文不变量](../../architecture/foundational-invariants.md#context-public-history)、[Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)与[Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)统一 direct/preflight selector、reference 与 boundary 边界；既有 Windows 架构保持当前。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止与完整运行 chronology；底部/Inspector 移动同一 Drawer DOM，Tool 行固定对齐，队员入口去除可见状态文案，完整结果在有最大高度的 region 中内部滚动。 |
 | Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
 | Runtime compatibility | 确认无需更新 | 当前尚无新的真实 Windows Adapter 资格证据；所有 Windows 行继续保持 `not_qualified`。 |
-| Documentation routing | 已更新 | 版本指针、索引和本版 References 路由到 v1.15；Windows 长期任务入口保持指向当前 Contract、Architecture 与历史决定理由。 |
+| Documentation routing | 已更新 | 文档导航、合同索引、决定导航、版本索引和本版 References 路由到 Profile v4/Manifest v19；Windows 长期任务入口保持指向当前 Contract、Architecture 与历史决定理由。 |
 | Root README | 确认无需更新 | Windows 尚未完成真实验收或发布，根 README 不提前声明常青 Windows 支持。 |
 
 ## References
@@ -105,6 +112,8 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 - [模型上下文变更 revision 1：排除自身发布的 recent public message](model-context-change-self-authored-recent-messages.md)
 - [实施与验收计划](implementation-plan.md)
 - [v1.15 决策记录](decisions.md)
+- [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
+- [ContextManifest Evidence v19](../../contracts/context-manifest-evidence-v19.md)
 - [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)
 - [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
 - [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)

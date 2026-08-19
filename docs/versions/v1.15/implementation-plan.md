@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.15
 authority: implementation-plan-and-acceptance
 status: in_progress
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # v1.15 Windows x64 实施与验收计划
@@ -14,6 +14,8 @@ last_updated: 2026-08-19
 - [x] 冻结产品版本 v1.14，建立唯一 current v1.15 与 Data Contract v1.15/schema 52/Migration 97；
 - [x] 保留 v1.12 AgentRun 局部停止、v1.13 实际 Runtime 模型观测、v1.14 `camp.read` Timeline 默认、
   Built-in Transport v17、Migration 96 与 Read Model schema；
+- [x] 实施已确认的自身 recent public message 过滤：Profile v4 在 top-15/omission 前按 recipient Agent ID
+  排除自身作者，Manifest v19/Migration 98 clean break 旧 Binding/Evidence，并以 schema 53 保留 CampMessage；
 - [x] 继续采用 [v1.05 Windows 决策记录](../v1.05/decisions.md)和当前 Windows Contracts，不把历史
   v1.05 状态当作实施事实；
 - [x] 完成本版所有代码后的 macOS 基线、Windows x64 交叉编译、文档全门禁和 base-aware CI 检查。
@@ -80,6 +82,8 @@ last_updated: 2026-08-19
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
 - [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
+- [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
+- [ContextManifest Evidence v19](../../contracts/context-manifest-evidence-v19.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)

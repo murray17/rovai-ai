@@ -3,7 +3,7 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-20
 ---
 
 # Public A2A Message 与 Message Delivery 架构
@@ -138,14 +138,15 @@ recipient/Camp 的直接相关事件调用 `dispatchPending(agentId)`；没有�
 ## 4. Context gate 与 AgentRun 物化顺序
 
 Delivery 被选中尝试后，Core 先按
-[Context Delivery Profile v3](../contracts/context-delivery-profile-v3.md)完成选择与预算 gate，再由
-当前 Context Formatter v19 形成 Model Context Projection，并由 ContextManifest v17 冻结 Evidence，最后决定
+[Context Delivery Profile v4](../contracts/context-delivery-profile-v4.md)完成选择与预算 gate，再由
+当前 Context Formatter v20 形成 Model Context Projection，并由 ContextManifest v19 冻结 Evidence，最后决定
 是否创建 AgentRun：
 
 ```text
 Delivery attempt
   → read authoritative public boundary
-  → resolve Profile v3 + reference closure
+  → resolve Profile v4 + filter recipient self-authored recent candidates
+  → resolve bounded reference closure
   → format Model Context Projection
   → freeze ContextManifest Evidence + exact payload/digest
   → if fit: materialize AgentRun and bind Delivery

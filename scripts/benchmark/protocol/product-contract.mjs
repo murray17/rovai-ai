@@ -62,8 +62,8 @@ export async function collectProductContractFingerprint({
       constantAuthority(source.contextContract, 'AGENT_RUN_CONTEXT_FORMATTER_VERSION')
     ),
     contextDeliveryProfileVersion: available(
-      Number.parseInt(capture(source.contextDelivery.contents, /CONTEXT_DELIVERY_PROFILE_V3:[\s\S]*?profile_version:\s*(\d+)/u, 'Context Delivery Profile version'), 10),
-      constantAuthority(source.contextDelivery, 'CONTEXT_DELIVERY_PROFILE_V3')
+      Number.parseInt(capture(source.contextDelivery.contents, /CONTEXT_DELIVERY_PROFILE_V4:[\s\S]*?profile_version:\s*(\d+)/u, 'Context Delivery Profile version'), 10),
+      constantAuthority(source.contextDelivery, 'CONTEXT_DELIVERY_PROFILE_V4')
     ),
     durableTaskContract: available({
       version: Number.parseInt(capture(source.taskContract.contents, /DURABLE_TASK_CONTRACT_VERSION:\s*u32\s*=\s*(\d+)/u, 'Durable Task contract version'), 10),

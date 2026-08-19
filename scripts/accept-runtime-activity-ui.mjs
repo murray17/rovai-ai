@@ -1141,7 +1141,7 @@ async function seedFixture() {
       'sha256:legacy-empty-mcp-exposure', 'fixture-mcp-projection',
       '[]', 'fixture-active-tasks',
       0, ${runtimes.length}, 0,
-      3, '{"profileVersion":3,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
+      4, '{"profileVersion":4,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
       '[]', 20,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},

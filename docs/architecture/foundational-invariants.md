@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # 当前基础架构不变量
@@ -241,6 +241,7 @@ last_updated: 2026-08-19
 
 - 模型上下文只投影确定性、有界、已发布且当前授权的 raw public CampMessage，不使用会随运行重写的摘要、Coverage Baseline 或私有 Conversation 替代公开事实。`CURRENT_INPUT` 始终完整；嵌套 Member Call 另外投影不可由模型修改的 originating public user message lineage。
 - 公共历史按稳定 sequence 选择最近候选，每条 body 与总预算都用 Unicode scalar 计算并在受控边界截断。选择、顺序、per-message/total limit、body digest、截断和 omission count/reason 由版本化 Context Delivery Profile/Formatter/Manifest 分别拥有，必须从冻结输入可复现。
+- Recent public candidate 在数量限制前排除当前 Agent 自己发布的消息；用户、其他 Agent 和 system 消息继续按 sequence 竞争名额。自身消息不占 recent limit、也不计入 whole-history omission，但仍可作为理解 eligible message 所需的授权 reference ancestor。该规则只约束模型 recent projection，不删除 CampMessage、不改变 Timeline/History/Search/Renderer，也不影响独立的完整 `CURRENT_INPUT`。
 - 定稿的 `COLLABORATION_STATE`、current input、public history 和 optional reference closure 有稳定段顺序。公共 history watermark 只由 Runtime accepted input 推进；省略提示只是证据，不是 Agent 自动读取授权。新 Manifest 不保存 Summary ID/覆盖区间或高级摘要设置，这些已从当前投递模型 clean break 移除。
 - 引用链闭包使用独立的有界 Profile：只补齐理解当前公开消息所需的 exact public ancestors，有固定深度/数量/字符优先级，并保留来源、裁剪和遗漏证据。每个祖先在投影时重做 live authorization；闭包不绕过 History scope、不把私有 Conversation 公开，也不把引用的附件自动展开为模型输入。
 - Whole-history omission 必须区分“候选真实为空”“候选存在但预算全部排除”“只投影部分”。当 exact ID 列表本身超过 evidence budget 时，Manifest 保留 total omitted count、可证明的 bounded digest/range 而不声称列出全部 ID。空 section 和整段省略有不同、显式、可测试证据。

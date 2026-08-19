@@ -3431,8 +3431,12 @@ fn load_recent_public_messages<R: ContextReadConnection>(
           AND camp_message.sequence <= ?3
           AND camp_message.tombstoned_at IS NULL
           AND (?4 IS NULL OR camp_message.id <> ?4)
+          AND NOT (
+              camp_message.author_type = 'agent'
+              AND camp_message.author_id = ?5
+          )
         ORDER BY camp_message.sequence DESC
-        LIMIT ?5
+        LIMIT ?6
         "#,
     )?;
     let mut rows = statement
@@ -3442,6 +3446,7 @@ fn load_recent_public_messages<R: ContextReadConnection>(
                 after_sequence,
                 through_sequence,
                 snapshot.trigger_camp_message_id,
+                snapshot.agent_id,
                 profile.max_public_messages as i64,
             ],
             |row| {
@@ -3764,9 +3769,10 @@ fn omitted_public_messages<R: ContextReadConnection>(
         WHERE camp_id = ?1 AND sequence > ?2 AND sequence <= ?3
           AND tombstoned_at IS NULL
           AND (?4 IS NULL OR id <> ?4)
+          AND NOT (author_type = 'agent' AND author_id = ?5)
           AND NOT EXISTS (
               SELECT 1
-              FROM json_each(?5) AS excluded
+              FROM json_each(?6) AS excluded
               WHERE excluded.value = camp_message.id
           )
         "#,
@@ -3775,6 +3781,7 @@ fn omitted_public_messages<R: ContextReadConnection>(
                 after_sequence,
                 snapshot.camp_message_boundary_sequence,
                 snapshot.trigger_camp_message_id,
+                snapshot.agent_id,
                 excluded_message_ids_json,
             ],
             |row| {
@@ -5817,7 +5824,7 @@ mod slow_tests {
             pending_redelivery_revision, reconcile_detector_policies,
             submit_compaction_observation,
         },
-        context_delivery::CONTEXT_DELIVERY_PROFILE_V3,
+        context_delivery::CONTEXT_DELIVERY_PROFILE_V4,
         current_input_skill::{
             CurrentInputSkillResolution, SkillSelectionEntry, SkillSelectionSnapshot,
         },
@@ -11706,7 +11713,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(manifest.0, 0);
-        assert_eq!(manifest.1, 3);
+        assert_eq!(manifest.1, 4);
         assert_eq!(manifest.2.len(), 64);
         assert_eq!((manifest.3, manifest.4, manifest.5), (5, 2, 6));
         std::fs::remove_dir_all(fixture.directory).unwrap();
@@ -12136,7 +12143,7 @@ mod slow_tests {
                 .iter()
                 .map(|message| message["body"].as_str().unwrap().chars().count())
                 .sum::<usize>(),
-            CONTEXT_DELIVERY_PROFILE_V3.max_public_history_chars
+            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars
         );
         assert_eq!(shared["omittedMessages"]["count"], 3);
         assert_eq!(shared["omittedMessages"]["sequenceStart"], 2);
@@ -12145,9 +12152,9 @@ mod slow_tests {
     }
 
     #[test]
-    fn public_history_budget_is_shared_and_profile_v3_bounded() {
+    fn public_history_budget_is_shared_and_profile_v4_bounded() {
         fn message(id: &str) -> SharedMessage {
-            let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V3.max_message_body_chars);
+            let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V4.max_message_body_chars);
             SharedMessage {
                 camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 message_id: id.to_string(),
@@ -12183,7 +12190,7 @@ mod slow_tests {
             &mut originating_public_user_message,
             &mut reference_closure,
             &mut omission_entries,
-            CONTEXT_DELIVERY_PROFILE_V3.max_public_history_chars,
+            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars,
         );
 
         assert_eq!(recent_messages.len(), 8);
@@ -12201,7 +12208,7 @@ mod slow_tests {
                     .iter()
                     .map(|entry| unicode_scalar_count(&entry.message.body))
                     .sum::<usize>(),
-            CONTEXT_DELIVERY_PROFILE_V3.max_public_history_chars
+            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars
         );
         assert_eq!(omission_entries.len(), 7);
         assert!(omission_entries.iter().all(|entry| {
@@ -12338,7 +12345,7 @@ mod slow_tests {
         let origin = load_originating_public_user_message(
             &fixture.database,
             &snapshot,
-            CONTEXT_DELIVERY_PROFILE_V3,
+            CONTEXT_DELIVERY_PROFILE_V4,
             None,
         )
         .unwrap()
@@ -12360,7 +12367,7 @@ mod slow_tests {
             load_originating_public_user_message(
                 &fixture.database,
                 &snapshot,
-                CONTEXT_DELIVERY_PROFILE_V3,
+                CONTEXT_DELIVERY_PROFILE_V4,
                 None,
             )
             .unwrap()
@@ -12378,7 +12385,7 @@ mod slow_tests {
         let error = load_originating_public_user_message(
             &fixture.database,
             &snapshot,
-            CONTEXT_DELIVERY_PROFILE_V3,
+            CONTEXT_DELIVERY_PROFILE_V4,
             None,
         )
         .unwrap_err();
@@ -12450,7 +12457,7 @@ mod slow_tests {
                 .as_str()
                 .is_some_and(|digest| digest.starts_with("sha256:"))
         );
-        assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V3.max_message_body_chars);
+        assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V4.max_message_body_chars);
         assert!(!context.rendered_payload.contains("[SHARED_CONVERSATION]"));
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
@@ -12650,7 +12657,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn current_binding_generation_self_output_is_available_in_the_raw_window() {
+    fn current_binding_generation_self_output_is_filtered_from_the_raw_window() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let ContextMaterialization::Ready(first_context) = ContextService
@@ -12737,14 +12744,158 @@ mod slow_tests {
         assert!(
             shared
                 .iter()
-                .any(|message| message.body == current_generation_output),
-            "same-binding explicitly sent output remains an ordinary public CampMessage"
+                .all(|message| message.body != current_generation_output),
+            "same-Agent public output must not be re-injected as recent history"
         );
+        let persisted_output_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1 AND body = ?2",
+                params![&fixture.camp_id, current_generation_output],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted_output_count, 1);
         std::fs::remove_dir_all(fixture.directory).unwrap();
     }
 
     #[test]
-    fn replacement_binding_bootstrap_includes_self_output_from_the_old_generation() {
+    fn recent_public_messages_filter_self_before_limit_and_omission_aggregation() {
+        let fixture = fixture();
+        let snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        let first_sequence: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence + 1 FROM camp WHERE id = ?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for offset in 0..15_i64 {
+            let sequence = first_sequence + offset;
+            let (author_type, author_id) = match offset % 3 {
+                0 => ("user", "eligible-user"),
+                1 => ("agent", "agent_2"),
+                _ => ("system", "eligible-system"),
+            };
+            fixture
+                .database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id, body,
+                        address_mode, addressed_agent_ids_json,
+                        structured_content_json, content_digest,
+                        version, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'default', '[]',
+                              '[{"kind":"text","text":"eligible"}]',
+                              ?7, 1, ?8, ?8)
+                    "#,
+                    params![
+                        format!("eligible-recent-{offset}"),
+                        &fixture.camp_id,
+                        sequence,
+                        author_type,
+                        author_id,
+                        format!("eligible-body-{offset}"),
+                        format!("sha256:eligible-{offset}"),
+                        &now,
+                    ],
+                )
+                .unwrap();
+        }
+        for offset in 0..20_i64 {
+            let sequence = first_sequence + 15 + offset;
+            fixture
+                .database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id,
+                        source_agent_run_id, body, address_mode,
+                        addressed_agent_ids_json, structured_content_json,
+                        content_digest, version, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, 'default',
+                              '[]', '[{"kind":"text","text":"self"}]',
+                              ?7, 1, ?8, ?8)
+                    "#,
+                    params![
+                        format!("self-recent-{offset}"),
+                        &fixture.camp_id,
+                        sequence,
+                        &snapshot.agent_id,
+                        &snapshot.agent_run_id,
+                        format!("self-body-{offset}"),
+                        format!("sha256:self-{offset}"),
+                        &now,
+                    ],
+                )
+                .unwrap();
+        }
+        let boundary = first_sequence + 34;
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET last_message_sequence = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
+                params![&fixture.camp_id, boundary, &now],
+            )
+            .unwrap();
+
+        let recent = load_recent_public_messages(
+            &fixture.database,
+            &snapshot,
+            0,
+            boundary,
+            current_context_delivery_profile().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(recent.len(), 15);
+        assert!(
+            recent
+                .iter()
+                .all(|message| message.sender_id != snapshot.agent_id)
+        );
+        assert_eq!(recent.first().unwrap().sequence, first_sequence);
+        assert_eq!(recent.last().unwrap().sequence, first_sequence + 14);
+        assert!(recent.iter().any(|message| message.sender_type == "user"));
+        assert!(
+            recent
+                .iter()
+                .any(|message| message.sender_type == "agent" && message.sender_id == "agent_2")
+        );
+        assert!(recent.iter().any(|message| {
+            message.sender_type == "system" && message.sender_id == "eligible-system"
+        }));
+
+        let included_message_ids = recent
+            .iter()
+            .map(|message| message.message_id.clone())
+            .collect::<HashSet<_>>();
+        let mut omission_entries = Vec::new();
+        let omitted = omitted_public_messages(
+            &fixture.database,
+            &snapshot,
+            0,
+            &included_message_ids,
+            &mut omission_entries,
+        )
+        .unwrap();
+        assert_eq!(omitted, None);
+        assert!(omission_entries.is_empty());
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn replacement_binding_bootstrap_excludes_self_output_from_the_old_generation() {
         let mut fixture = fixture();
         let context = ContextService;
         let runtime = ExecutionRuntimeService::default();
@@ -12986,7 +13137,7 @@ mod slow_tests {
         };
         assert_eq!(replacement_context.expected_binding_generation, 2);
         assert!(
-            replacement_context
+            !replacement_context
                 .rendered_payload
                 .contains(old_generation_output)
         );

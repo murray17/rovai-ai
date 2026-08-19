@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # Built-in Tool Runtime Architecture
@@ -36,7 +36,7 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 omission 的 bounded aggregate 边界见
 [公共上下文不变量](foundational-invariants.md#context-public-history)和
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、
-[ContextManifest Evidence v18](../contracts/context-manifest-evidence-v18.md)及
+[ContextManifest Evidence v19](../contracts/context-manifest-evidence-v19.md)及
 [Run Facts v1](../contracts/run-facts-v1.md)。Task authority 与
 self-active awareness 见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；真实空集合
@@ -370,7 +370,7 @@ Session Charter 只说明：
 - Core 在每次 invocation 重做授权，任何模型可见 ID/fact 都不是 authorization token；
 - Dynamic Context 可能截断或省略：`SHARED_CONVERSATION.campId` 适用于全部投影消息，截断消息只以
   Unicode-scalar `nextBodyOffset` 对齐 `camp.read item.bodyOffset`；遗漏 sequence envelope 可有空洞且
-  不可执行；公共 A2A 继续遵循 Profile v3 的 bounded reference closure 与 self-active Task selection；
+  不可执行；公共 A2A 继续遵循 Profile v4 的 bounded reference closure、self-authored recent filter 与 self-active Task selection；
 - `RUN_FACTS` 字段化表达冻结 Task reference、Session continuity、external effect、Gather member 与
   delegation budget；命令特定教学不回填 Charter。
 
@@ -461,7 +461,7 @@ CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保�
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v18 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v19 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
@@ -469,7 +469,7 @@ digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 s
 
 ### Self Active Task Projection
 
-Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
+Profile v4 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
 八项。Formatter v20 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
 `SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
 `{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
@@ -477,7 +477,7 @@ Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updat
 公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
 selection/budget omission。
 
-ContextManifest v18 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+ContextManifest v19 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
 与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
 全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
 materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只
@@ -496,7 +496,8 @@ Run Camp，origin/reference/recent 三类消息不得跨 Camp。单消息保留 
 
 同一 Structured `CurrentUserMention(local_user)` 在 Human/FTS 投影为 `@你`，在 Agent Current Input、Shared
 Conversation、reference closure、Camp History 和 Gather v3 投影为 `@Principal`；content digest 不变，Agent
-offset/digest 只在 `agent_v1` 空间计算。ContextManifest v18 冻结该 audience、真实 Camp/source refs、完整
+offset/digest 只在 `agent_v1` 空间计算。Recent selector 在 top-15 前排除目标 Agent 自己发布的消息，且
+whole-history omission 使用同一 eligible set；自身消息仍可作为必要 reference ancestor。ContextManifest v19 冻结该 audience、真实 Camp/source refs、完整
 body length、truncation/offset、source/projected digests、A2A guidance closed evidence、attachment identity/digest
 和 omission evidence。Run Facts v1 无事实时整段省略，单项缺失时省略
 字段；Manifest 独立保存 typed refs、exact compact JSON text 与 digest。Gather fallback 只承认当前 target
@@ -505,7 +506,7 @@ Run/active retry generation 在无 captured return 时的 successful Runtime fin
 
 Direct user Current Input 可按 [Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)增加
 optional sibling `skills[{name,path}]`。Picker identity、per-Run send snapshot、start-time desired state 与
-verified Exposure 由 Core resolver 组合；正文和附件不变，零 entry 省略字段。ContextManifest v18 保存
+verified Exposure 由 Core resolver 组合；正文和附件不变，零 entry 省略字段。ContextManifest v19 保存
 完整 included/omitted resolution 与 exact bytes；Runtime Adapter 仍只发送既有完整 payload，不解释 Skill
 或创建 Provider-specific input item。
 

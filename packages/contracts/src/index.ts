@@ -1265,9 +1265,9 @@ export interface ContextManifestView {
   historyCamps: ContextManifestHistoryCampView[]
   rawMessageCount: number
   previousAcceptedPublicBoundarySequence: number
-  contextDeliveryProfileVersion: 3
+  contextDeliveryProfileVersion: 4
   contextDeliveryProfile: {
-    profileVersion: 3
+    profileVersion: 4
     maxPublicMessages: number
     maxPublicHistoryChars: number
     maxMessageBodyChars: number

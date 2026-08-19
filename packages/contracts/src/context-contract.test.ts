@@ -8,8 +8,8 @@ describe('AgentRun context contract', () => {
 
     expect(fixture.agentRunContextFormatterVersion).toBe(formatterVersion)
     expect(fixture.contextManifestFormatterVersion).toBe(formatterVersion)
-    expect(fixture.contextDeliveryProfileVersion).toBe(3)
-    expect(fixture.contextManifestVersion).toBe(18)
+    expect(fixture.contextDeliveryProfileVersion).toBe(4)
+    expect(fixture.contextManifestVersion).toBe(19)
     expect(fixture.messageProjectionAudience).toBe('agent_v1')
     expect(fixture.dynamicContextSectionOrder.slice(-2)).toEqual(['A2A_GUIDANCE?', 'CURRENT_INPUT'])
     expect(fixture.dynamicContextSectionOrder.at(-1)).toBe('CURRENT_INPUT')
@@ -26,6 +26,16 @@ describe('AgentRun context contract', () => {
       maxTasks: 8,
       emptyCandidateProjection: { tasks: [] },
       allCandidatesBudgetOmitted: 'section_omitted',
+    })
+    expect(fixture.recentPublicCandidateSelection).toEqual({
+      boundary: 'previousAcceptedSequence < sequence <= currentBoundarySequence',
+      preLimitExclusions: ['tombstone', 'currentTrigger', 'authorType:agent+currentAgentId'],
+      limit: 15,
+      selectionOrdering: 'sequence DESC',
+      projectionOrdering: 'sequence ASC',
+      selfAuthoredRecentMessages: 'ineligible',
+      selfAuthoredWholeHistoryOmission: 'excluded',
+      referenceClosure: 'unchanged',
     })
     expect(fixture.currentInputSourceShapes).toEqual({
       user: { type: 'user' },
