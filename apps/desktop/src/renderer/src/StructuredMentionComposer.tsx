@@ -32,6 +32,7 @@ import {
   type StructuredMentionSelection
 } from './structured-mention-model'
 import { MemberAvatar } from './MemberAvatar'
+import { SkillIdentityMark } from './SkillIdentityMark'
 import type { ComposerSkillOption } from './composer-skill-picker'
 import { readStructuredMessageClipboardContent } from './structured-message-clipboard'
 
@@ -877,7 +878,7 @@ export function StructuredMentionComposer({
                   onMouseEnter={() => setActiveOption(index)}
                   onClick={() => chooseSkillOption(option)}
                 >
-                  <span className="skill-picker-glyph" aria-hidden="true">/</span>
+                  <SkillIdentityMark skillId={option.id} name={option.name} size="compact" />
                   <span className="skill-picker-copy">
                     <strong>/{option.name}</strong>
                     <small>{option.description || (option.origin === 'official' ? 'Rovai 内置 Skill' : '用户导入 Skill')}</small>

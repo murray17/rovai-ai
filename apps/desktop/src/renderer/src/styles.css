@@ -2536,7 +2536,8 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .mention-avatar { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 45%, transparent); border-radius: 7px; color: var(--brand); background: var(--surface); font-size: 11px; font-weight: 750; }
 .skill-picker-menu { max-height: 310px; }
 .skill-picker-menu button { min-height: 46px; grid-template-columns: 28px minmax(0, 1fr) auto; }
-.skill-picker-glyph { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 42%, var(--line)); border-radius: 7px; color: var(--brand-hover); background: var(--surface); font: 750 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.skill-identity-mark { --skill-identity: var(--identity-1); display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 9px; color: var(--skill-identity); background: color-mix(in srgb, var(--skill-identity) 12%, var(--surface)); box-shadow: none; font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -0.02em; }
+.skill-identity-mark.is-compact { width: 28px; height: 28px; border-radius: 7px; }
 .skill-picker-copy small { font-family: inherit; }
 .skill-picker-enter { min-width: 12px; color: var(--faint); font-size: 10px; text-align: right; }
 .mention-target-summary { overflow: hidden; color: var(--faint); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
@@ -3612,13 +3613,12 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .skill-card-grid { --skill-actions-width: 212px; display: grid; width: 100%; max-width: none; gap: 5px; padding: 7px; border: 0; border-radius: 12px; background: var(--surface-subtle); }
 .skill-card-primary { display: grid; min-width: 0; grid-template-columns: 34px minmax(0, 1fr) var(--skill-actions-width); gap: 10px; align-items: center; }
 .skill-card-controls { display: grid; min-width: 0; grid-template-columns: 118px 48px 30px; gap: 8px; align-items: center; }
-.skill-card { --skill-identity: var(--identity-1); position: relative; min-width: 0; border: 0; border-radius: 9px; background: var(--surface-raised); transition: background-color 140ms ease; }
+.skill-card { position: relative; min-width: 0; border: 0; border-radius: 9px; background: var(--surface-raised); transition: background-color 140ms ease; }
 .skill-card:hover, .skill-card:focus-within { background: color-mix(in srgb, var(--surface-selected) 54%, var(--surface-raised)); }
 .skill-card.is-disabled { background: color-mix(in srgb, var(--surface-subtle) 55%, var(--surface-raised)); }
 .skill-card.is-disabled .skill-card-title, .skill-card.is-disabled .skill-card-heading > p { opacity: 0.62; }
 .skill-card.is-expanded { background: color-mix(in srgb, var(--surface-selected) 76%, var(--surface-raised)); }
 .skill-card-primary { min-height: 66px; padding: 10px 11px; }
-.skill-card-mark { display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 9px; color: var(--skill-identity); background: color-mix(in srgb, var(--skill-identity) 12%, var(--surface)); box-shadow: none; font: 700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: -0.02em; }
 .skill-card-heading { display: grid; min-width: 0; gap: 3px; }
 .skill-card-title { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 7px; transition: opacity 140ms ease; }
 .skill-card-title > strong { min-width: 0; max-width: 100%; overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 620; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }

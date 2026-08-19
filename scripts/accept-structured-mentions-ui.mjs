@@ -212,8 +212,8 @@ try {
     return button?.getAttribute('aria-pressed') === 'true' && !timeline?.hidden
   })()`)
   const initialSnapshot = await request(running.cdp, 'camps.snapshot', { campId })
-  assert(initialSnapshot.schemaVersion === 30,
-    `Camp snapshot schema is not v30: ${initialSnapshot.schemaVersion}`)
+  assert(initialSnapshot.schemaVersion === 32,
+    `Camp snapshot schema is not v32: ${initialSnapshot.schemaVersion}`)
   assert(
     deepEqual(initialSnapshot.members.map((member) => member.agentId), targetMemberIds),
     `Camp does not contain exactly the three target members: ${JSON.stringify(initialSnapshot.members)}`
@@ -236,16 +236,16 @@ try {
     const editor = document.querySelector('#camp-message')
     const menu = document.querySelector('.skill-picker-menu')
     const option = menu?.querySelector('[data-skill-name=${JSON.stringify(selectableSkill.name)}]')
-    const glyph = option?.querySelector('.skill-picker-glyph')
+    const mark = option?.querySelector('.skill-identity-mark.is-compact')
     if (!(editor instanceof HTMLElement)
         || !(menu instanceof HTMLElement)
         || !(option instanceof HTMLElement)
-        || !(glyph instanceof HTMLElement)) return null
+        || !(mark instanceof HTMLElement)) return null
     const menuRect = menu.getBoundingClientRect()
     const editorRect = editor.getBoundingClientRect()
     const menuStyle = getComputedStyle(menu)
     const optionStyle = getComputedStyle(option)
-    const glyphStyle = getComputedStyle(glyph)
+    const markStyle = getComputedStyle(mark)
     return {
       menuLabel: menu.getAttribute('aria-label'),
       menuRole: menu.getAttribute('role'),
@@ -256,8 +256,11 @@ try {
       menuAboveEditor: menuRect.bottom <= editorRect.top - 5,
       maxHeight: menuStyle.maxHeight,
       optionMinHeight: optionStyle.minHeight,
-      glyphSize: [glyphStyle.width, glyphStyle.height],
-      glyphColor: glyphStyle.color,
+      markSize: [markStyle.width, markStyle.height],
+      markText: mark.textContent,
+      markAriaHidden: mark.getAttribute('aria-hidden'),
+      markIdentity: mark.style.getPropertyValue('--skill-identity').trim(),
+      markColor: markStyle.color,
       viewportFits: menuRect.left >= 0 && menuRect.right <= innerWidth
     }
   })()`)
@@ -272,7 +275,12 @@ try {
       && skillPickerInspection.menuAboveEditor
       && Number.parseFloat(skillPickerInspection.maxHeight) === 310
       && Number.parseFloat(skillPickerInspection.optionMinHeight) >= 46
-      && skillPickerInspection.glyphSize.every((value) => Number.parseFloat(value) === 28)
+      && skillPickerInspection.markSize.every((value) => Number.parseFloat(value) === 28)
+      && skillPickerInspection.markText
+      && skillPickerInspection.markText !== '/'
+      && skillPickerInspection.markAriaHidden === 'true'
+      && skillPickerInspection.markIdentity.startsWith('var(--identity-')
+      && skillPickerInspection.markColor.length > 0
       && skillPickerInspection.viewportFits,
     `Skill picker does not match the accepted native dropdown: ${JSON.stringify(skillPickerInspection)}`
   )

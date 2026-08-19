@@ -13,8 +13,8 @@ import type {
 } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { SkillIdentityMark } from './SkillIdentityMark'
 import { localizeExecutionEngineTerms } from './product-copy'
-import { identityColorToken } from './theme'
 
 type ImportTab = 'local' | 'github'
 type SkillRowOperation = 'toggle' | 'groups'
@@ -400,10 +400,9 @@ export function SkillCard({
       className={`skill-card ${!skill.enabled ? 'is-disabled' : ''} ${detailsOpen ? 'is-expanded' : ''}`}
       data-skill-name={skill.name}
       aria-busy={rowBusy}
-      style={{ '--skill-identity': identityColorToken(skill.id) } as React.CSSProperties}
     >
       <div className="skill-card-primary">
-        <span className="skill-card-mark" aria-hidden="true">{skillMark(skill.name)}</span>
+        <SkillIdentityMark skillId={skill.id} name={skill.name} />
         <div className="skill-card-heading">
           <div className="skill-card-title">
             <strong title={skill.name}>{skill.name}</strong>
@@ -491,12 +490,6 @@ function withoutSkillRowOperation(
   const next = { ...operations }
   delete next[skillId]
   return next
-}
-
-function skillMark(name: string): string {
-  const parts = name.split(/[-_\s]+/u).filter(Boolean)
-  const mark = parts.slice(0, 2).map((part) => Array.from(part)[0] ?? '').join('')
-  return mark.toLocaleUpperCase('en-US').slice(0, 2) || 'SK'
 }
 
 export type SkillSourcePresentation = {

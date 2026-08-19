@@ -201,7 +201,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   it('preserves stable identity colors for Skill, MCP, and member marks in both themes', () => {
     expect(new Set(Array.from({ length: 8 }, (_, index) => day[`--identity-${index + 1}`])).size).toBe(8)
     expect(new Set(Array.from({ length: 8 }, (_, index) => night[`--identity-${index + 1}`])).size).toBe(8)
-    expect(css).toMatch(/\.skill-card-mark\s*\{[^}]*color:\s*var\(--skill-identity\)/)
+    expect(css).toMatch(/\.skill-identity-mark\s*\{[^}]*color:\s*var\(--skill-identity\)/)
     expect(css).toMatch(/\.mcp-assignment-option-mark, \.mcp-server-mark\s*\{[^}]*color:\s*var\(--mcp-identity\)/)
   })
 
@@ -332,7 +332,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   it('keeps the Composer Skill picker in the accepted native Steel dropdown', () => {
     expect(css).toMatch(/\.skill-picker-menu\s*\{[^}]*max-height:\s*310px/)
     expect(css).toMatch(/\.skill-picker-menu button\s*\{[^}]*min-height:\s*46px[^}]*grid-template-columns:\s*28px minmax\(0, 1fr\) auto/)
-    expect(css).toMatch(/\.skill-picker-glyph\s*\{[^}]*width:\s*28px[^}]*height:\s*28px[^}]*color:\s*var\(--brand-hover\)/)
+    expect(css).toMatch(/\.skill-identity-mark\.is-compact\s*\{[^}]*width:\s*28px[^}]*height:\s*28px[^}]*border-radius:\s*7px/)
     expect(css).toMatch(/\.skill-picker-enter\s*\{[^}]*color:\s*var\(--faint\)/)
   })
 
@@ -349,10 +349,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
 
   it('uses readable identity-colored Skill rows and a bounded MCP workbench', () => {
     expect(css).toMatch(/\.skill-card-grid\s*\{[^}]*max-width:\s*none[^}]*gap:\s*5px[^}]*border-radius:\s*12px[^}]*background:\s*var\(--surface-subtle\)/)
-    expect(css).toMatch(/\.skill-card\s*\{[^}]*--skill-identity:\s*var\(--identity-1\)/)
+    expect(css).toMatch(/\.skill-identity-mark\s*\{[^}]*--skill-identity:\s*var\(--identity-1\)/)
     expect(css).toMatch(/\.skill-card-primary\s*\{[^}]*grid-template-columns:\s*34px minmax\(0, 1fr\) var\(--skill-actions-width\)/)
     expect(css).toMatch(/\.skill-card-controls\s*\{[^}]*grid-template-columns:\s*118px 48px 30px/)
-    expect(css).toMatch(/\.skill-card-mark\s*\{[^}]*width:\s*34px[^}]*height:\s*34px[^}]*color:\s*var\(--skill-identity\)/)
+    expect(css).toMatch(/\.skill-identity-mark\s*\{[^}]*width:\s*34px[^}]*height:\s*34px[^}]*color:\s*var\(--skill-identity\)/)
     expect(css).toMatch(/\.skill-card-title > strong\s*\{[^}]*font-size:\s*13px/)
     expect(css).toMatch(/\.skill-card-heading > p\s*\{[^}]*font-size:\s*11px/)
     expect(css).toMatch(/\.skill-source\s*\{[^}]*font-size:\s*9px/)
