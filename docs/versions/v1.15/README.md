@@ -5,7 +5,7 @@ lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
-model_context_change: false
+model_context_change: true
 last_updated: 2026-08-19
 ---
 
@@ -16,6 +16,9 @@ last_updated: 2026-08-19
 > resolver、原子 Job 启动、私有 Core/Desktop data root、handle-relative Attachment、managed Skill Library、
 > crash-recoverable Skill Projection 与共享异步 Named Pipe client 已进入代码。固定 Windows CI 实跑、Windows
 > client OS 验收、逐 Runtime 资格、NSIS 与签名尚未完成，因此不得宣称 Windows 已发布。
+>
+> 模型上下文补充：[排除自身发布 recent public message 的 revision 1](model-context-change-self-authored-recent-messages.md)
+> 已由开发者二次确认，当前进入隔离 worktree 实施；本文档提交仍不宣称实现已经完成。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 
@@ -99,6 +102,7 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 
 ## References
 
+- [模型上下文变更 revision 1：排除自身发布的 recent public message](model-context-change-self-authored-recent-messages.md)
 - [实施与验收计划](implementation-plan.md)
 - [v1.15 决策记录](decisions.md)
 - [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)
