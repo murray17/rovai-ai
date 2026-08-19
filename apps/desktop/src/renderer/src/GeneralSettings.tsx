@@ -7,6 +7,15 @@ import type {
   StartupLocationMode,
   WindowResetCapability
 } from '@contracts'
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFact,
+  AppDialogFactGrid,
+  AppDialogFooter,
+  AppDialogGlyph,
+  AppDialogHeader
+} from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { resolveNewConversationDefaults } from './new-conversation-preferences'
@@ -495,29 +504,39 @@ export function GeneralSettings({
     </div>
     <Dialog.Root open={oneClickConfirmOpen} onOpenChange={(open) => !oneClickBusy && setOneClickConfirmOpen(open)}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content compact-dialog one-click-confirm-dialog" aria-describedby="one-click-confirm-description">
-          <Dialog.Title>开启一键创建新对话？</Dialog.Title>
-          <Dialog.Description id="one-click-confirm-description">
-            开启后，以下入口将不再打开创建弹窗，而是直接创建并进入新对话：
-          </Dialog.Description>
-          <ul>
-            {ONE_CLICK_ENTRY_DESCRIPTIONS.map((description) => <li key={description}>{description}</li>)}
-          </ul>
-          <div className="one-click-confirm-summary">
-            <strong>新对话将使用：</strong>
-            <span>项目：由使用的新建入口决定</span>
-            <span>队员：{savedMemberNames.join('、') || '—'}</span>
-            <span>队长：{savedLeadName ?? '—'}</span>
-          </div>
-          <p>如需重新选择项目、队员、队长或对话名称，请先在设置中关闭“一键创建新对话”。</p>
-          <div className="dialog-actions">
-            <Dialog.Close asChild><button className="quiet-button" type="button" disabled={oneClickBusy}>取消</button></Dialog.Close>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent className="one-click-confirm-dialog" tone="info" aria-describedby="one-click-confirm-description">
+          <AppDialogHeader
+            title="开启一键创建新对话？"
+            description="开启后，以下入口会直接创建并进入新对话，不再显示创建弹窗。"
+            descriptionId="one-click-confirm-description"
+            icon="bolt"
+            kicker="创建方式变化"
+            closeDisabled={oneClickBusy}
+          />
+          <AppDialogBody>
+            <div className="app-dialog-choice-list">
+              {ONE_CLICK_ENTRY_DESCRIPTIONS.map((description, index) => (
+                <div className="app-dialog-choice" key={description}>
+                  <span aria-hidden="true"><AppDialogGlyph name={index === ONE_CLICK_ENTRY_DESCRIPTIONS.length - 1 ? 'folder' : 'bolt'} /></span>
+                  <strong>{description}</strong>
+                </div>
+              ))}
+            </div>
+            <AppDialogFactGrid>
+              <AppDialogFact label="项目">由新建入口决定</AppDialogFact>
+              <AppDialogFact label="默认队员">{savedMemberNames.length} 位</AppDialogFact>
+              <AppDialogFact label="默认队长">{savedLeadName ?? '—'}</AppDialogFact>
+            </AppDialogFactGrid>
+            <p className="app-dialog-supporting-copy">如需重新选择项目、队员、队长或对话名称，请先在设置中关闭“一键创建新对话”。</p>
+          </AppDialogBody>
+          <AppDialogFooter>
+            <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={oneClickBusy}>取消</button></Dialog.Close>
             <button className="primary-button" type="button" disabled={oneClickBusy} onClick={() => void confirmOneClickEnabled()}>
               {oneClickBusy ? '正在开启…' : '开启一键创建'}
             </button>
-          </div>
-        </Dialog.Content>
+          </AppDialogFooter>
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
     </>

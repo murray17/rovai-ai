@@ -37,7 +37,7 @@ try {
   await clickMemoryAction(first.cdp, initialBody, '修订')
   await waitForSelector(first.cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(first.cdp, revisedBody)
-  await clickButton(first.cdp, '.memory-editor-dialog button', '保存')
+  await clickButton(first.cdp, '.memory-editor-dialog button', '保存修订')
   await waitForText(first.cdp, '.memory-catalog-item > strong', revisedBody)
 
   const revisedRecord = await request(first.cdp, 'memory.list')
@@ -132,7 +132,7 @@ async function createHearthMemory(cdp, body) {
   await waitForSelector(cdp, '.memory-editor-dialog textarea')
   await replaceTextarea(cdp, body)
   await replaceRetrievalKeys(cdp, '验收记忆')
-  await clickButton(cdp, '.memory-editor-dialog button', '保存')
+  await clickButton(cdp, '.memory-editor-dialog button', '保存记忆')
   await waitForEditorOutcome(cdp, 'create')
 }
 

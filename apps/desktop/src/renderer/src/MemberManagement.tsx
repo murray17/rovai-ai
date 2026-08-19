@@ -28,6 +28,14 @@ import { parseControlledMemberAvatarRef } from '@contracts'
 import { MemberAvatar } from './MemberAvatar'
 import { MemberAvatarCropper } from './MemberAvatarCropper'
 import { MemberPortrait } from './MemberPortrait'
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFact,
+  AppDialogFactGrid,
+  AppDialogFooter,
+  AppDialogHeader
+} from './AppDialog'
 import { localizeExecutionEngineTerms } from './product-copy'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import {
@@ -496,68 +504,76 @@ export const MembersView = forwardRef<MembersViewHandle, MembersViewProps>(funct
       />
       <Dialog.Root open={removal !== null} onOpenChange={(open) => !open && busy !== 'remove' && closeRemovalDialog()}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content
-            className="dialog-content"
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent
+            tone="danger"
             aria-describedby="remove-member-description"
             onCloseAutoFocus={(event) => {
               event.preventDefault()
               removalReturnFocusRef.current?.focus()
             }}
           >
-            <div className="dialog-heading"><div><Dialog.Title>移除队员</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy === 'remove'}>×</Dialog.Close></div>
-            <Dialog.Description id="remove-member-description">
-              移除后队员不会再出现在管理列表，也不能产生后续消息；历史身份与记录仍会保留。
-            </Dialog.Description>
+            <AppDialogHeader
+              title={`永久移除“${removal?.displayName ?? '队员'}”？`}
+              description="移除后，这位队员不能再加入后续协作或产生新消息；历史身份与记录继续保留。"
+              descriptionId="remove-member-description"
+              icon="user"
+              kicker="需要名称确认"
+              closeDisabled={busy === 'remove'}
+            />
             {removal && (
               <>
-                {removal.preview.nonTerminalAgentRunCount > 0 && (
-                  <div className="inline-error" role="alert">仍有 {removal.preview.nonTerminalAgentRunCount} 个未结束的执行，当前不能移除。</div>
-                )}
-                {removal.preview.nonTerminalAgentRunCount === 0 && (
-                  <div className="inline-notice">
-                    将从 {removal.preview.currentCampMembershipCount} 个会话移除，并释放 {removal.preview.openAssignedTaskCount} 个未完成任务。
-                    {removal.preview.defaultLeadCampCount > 0 && ` 其中 ${removal.preview.defaultLeadCampCount} 个会话将重新选择默认负责人。`}
-                  </div>
-                )}
-                <label className="field-label">输入 {removal.displayName} 确认
-                  <input
-                    value={removal.confirmationName}
-                    onChange={(event) => setRemoval({ ...removal, confirmationName: event.target.value })}
-                    autoFocus
-                    autoComplete="off"
-                  />
-                </label>
-                <div className="dialog-actions">
+                <AppDialogBody>
+                  <AppDialogFactGrid>
+                    <AppDialogFact label="当前会话">{removal.preview.currentCampMembershipCount} 个</AppDialogFact>
+                    <AppDialogFact label="未完成任务">{removal.preview.openAssignedTaskCount} 个将释放</AppDialogFact>
+                    <AppDialogFact label="默认负责人">{removal.preview.defaultLeadCampCount} 个将重选</AppDialogFact>
+                  </AppDialogFactGrid>
+                  {removal.preview.nonTerminalAgentRunCount > 0 && (
+                    <div className="inline-error app-dialog-blocker" role="alert">仍有 {removal.preview.nonTerminalAgentRunCount} 个未结束的执行，当前不能移除。</div>
+                  )}
+                  <label className="field-label app-dialog-confirm-field">输入 <code>{removal.displayName}</code> 以确认
+                    <input
+                      value={removal.confirmationName}
+                      onChange={(event) => setRemoval({ ...removal, confirmationName: event.target.value })}
+                      autoFocus
+                      data-dialog-autofocus
+                      autoComplete="off"
+                    />
+                    <small>区分大小写</small>
+                  </label>
+                </AppDialogBody>
+                <AppDialogFooter note="历史身份、消息与审计记录仍会保留。">
                   <Dialog.Close className="quiet-button" type="button" disabled={busy === 'remove'}>取消</Dialog.Close>
                   <button
                     className="danger-button"
                     type="button"
                     disabled={!removal.preview.removable || removal.confirmationName !== removal.displayName || busy === 'remove'}
                     onClick={() => void confirmRemoval().catch(() => undefined)}
-                  >{busy === 'remove' ? '正在移除…' : '永久移除'}</button>
-                </div>
+                  >{busy === 'remove' ? '正在移除…' : '永久移除队员'}</button>
+                </AppDialogFooter>
               </>
             )}
-          </Dialog.Content>
+          </AppDialogContent>
         </Dialog.Portal>
       </Dialog.Root>
       <Dialog.Root open={pendingTransition !== null} onOpenChange={(open) => !open && continueEditing()}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="dialog-content member-leave-dialog" aria-describedby="member-leave-description">
-            <div className="dialog-heading">
-              <div><Dialog.Title>运行配置尚未保存</Dialog.Title></div>
-              <Dialog.Close className="dialog-close" aria-label="继续编辑">×</Dialog.Close>
-            </div>
-            <Dialog.Description id="member-leave-description">
-              当前队员的运行配置包含未保存更改。你可以继续编辑，或放弃更改后执行刚才的操作。
-            </Dialog.Description>
-            <div className="dialog-actions">
-              <button className="quiet-button" type="button" onClick={continueEditing}>继续编辑</button>
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent className="member-leave-dialog" tone="attention" aria-describedby="member-leave-description">
+            <AppDialogHeader
+              title="放弃未保存的运行配置？"
+              description="刚才的操作需要离开当前编辑。放弃后，这些更改不会应用到后续执行。"
+              descriptionId="member-leave-description"
+              icon="warning"
+              kicker="未保存更改"
+              closeLabel="继续编辑"
+            />
+            <AppDialogFooter>
+              <button className="quiet-button" type="button" autoFocus data-dialog-autofocus onClick={continueEditing}>继续编辑</button>
               <button className="danger-button" type="button" onClick={() => void discardAndContinue()}>放弃更改</button>
-            </div>
-          </Dialog.Content>
+            </AppDialogFooter>
+          </AppDialogContent>
         </Dialog.Portal>
       </Dialog.Root>
     </>
@@ -1302,22 +1318,31 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
   return (
     <Dialog.Root open={open} onOpenChange={(value) => !busy && onOpenChange(value)}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content
-          className="dialog-content member-dialog"
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent
+          className="member-dialog"
+          width="wide"
           aria-describedby="member-dialog-description"
           onCloseAutoFocus={(event) => {
             event.preventDefault()
             returnFocusRef.current?.focus()
           }}
         >
-          <div className="dialog-heading"><div><Dialog.Title>{agent ? '编辑队员身份' : '新增队员'}</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭身份编辑" disabled={busy}>×</Dialog.Close></div>
-          <Dialog.Description className="sr-only" id="member-dialog-description">设置队员的长期身份信息。</Dialog.Description>
-          <form className="member-identity-form" onSubmit={(event) => void submit(event)}>
-            <div className="member-dialog-scroll">
+          <AppDialogHeader
+            title={agent ? '编辑队员身份' : '新增队员'}
+            description={agent
+              ? '更新这位队员的长期身份信息；不会直接改动 Agent 运行时、权限或记忆。'
+              : '设置新队员的长期身份信息；Agent 运行时与权限将在创建后单独配置。'}
+            descriptionId="member-dialog-description"
+            icon="user"
+            closeLabel="关闭身份编辑"
+            closeDisabled={busy}
+          />
+          <form className="member-identity-form app-dialog-form" onSubmit={(event) => void submit(event)}>
+            <AppDialogBody className="member-dialog-scroll">
               <section className="member-identity-editor" aria-label="队员身份字段">
                 <div className="member-form-grid">
-                  <label className="field-label">名称<input ref={nameRef} required value={draft.displayName} onChange={(event) => { setDraft({ ...draft, displayName: event.target.value }); setSubmitError(null) }} autoFocus /><small>{unicodeScalarLength(draft.displayName)}/80</small></label>
+                  <label className="field-label">名称<input ref={nameRef} required value={draft.displayName} onChange={(event) => { setDraft({ ...draft, displayName: event.target.value }); setSubmitError(null) }} autoFocus data-dialog-autofocus /><small>{unicodeScalarLength(draft.displayName)}/80</small></label>
                   <label className="field-label">团队角色<input ref={teamRoleRef} value={draft.teamRole} onChange={(event) => { setDraft({ ...draft, teamRole: event.target.value }); setSubmitError(null) }} placeholder="队员在团队中的主要贡献类型" /><small>{unicodeScalarLength(draft.teamRole)}/120</small></label>
                 </div>
                 <label className="field-label">专业职责<textarea ref={responsibilitiesRef} rows={2} value={draft.professionalResponsibilities} onChange={(event) => { setDraft({ ...draft, professionalResponsibilities: event.target.value }); setSubmitError(null) }} placeholder="说明队员长期负责什么，以及通常交付什么结果。" /><small>{unicodeScalarLength(draft.professionalResponsibilities)}/300</small></label>
@@ -1352,10 +1377,13 @@ function MemberIdentityDialog({ open, agent, agents, busy, returnFocusRef, onOpe
                 </details>
               </section>
               {submitError && <div className="inline-error">{submitError}</div>}
-            </div>
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close><button className="primary-button" disabled={busy || !draft.displayName.trim()}>{busy ? '正在保存身份…' : agent ? '保存身份' : '创建'}</button></div>
+            </AppDialogBody>
+            <AppDialogFooter note="身份变更会用于之后符合条件的新执行。">
+              <Dialog.Close className="quiet-button" type="button" disabled={busy}>取消</Dialog.Close>
+              <button className="primary-button" disabled={busy || !draft.displayName.trim()}>{busy ? '正在保存身份…' : agent ? '保存身份' : '创建队员'}</button>
+            </AppDialogFooter>
           </form>
-        </Dialog.Content>
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
   )
@@ -1466,25 +1494,36 @@ function MemberAvatarDialog({ open, agent, busy, returnFocusRef, onOpenChange, o
   return (
     <Dialog.Root open={open} onOpenChange={(value) => !isBusy && onOpenChange(value)}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content member-avatar-dialog" aria-describedby="member-avatar-dialog-description" onCloseAutoFocus={(event) => { event.preventDefault(); returnFocusRef.current?.focus() }}>
-          <div className="dialog-heading"><div><Dialog.Title>更换角色图片</Dialog.Title></div><Dialog.Close className="dialog-close" aria-label="关闭角色图片编辑" disabled={isBusy}>×</Dialog.Close></div>
-          <Dialog.Description id="member-avatar-dialog-description">角色图片独立保存，不会修改身份、运行时、权限或队员记忆。</Dialog.Description>
-          <form onSubmit={(event) => void submit(event)}>
-            <section className="member-avatar-editor" aria-label="角色图片">
-              <div className="member-avatar-editor-heading"><div><strong>当前图片</strong><span>可裁剪自定义图片，或选择内置队员外观</span></div>{(avatarRef || avatarSource) && <button className="quiet-button" type="button" disabled={isBusy} onClick={() => { setAvatarRef(null); setAvatarSource(null); setAvatarError(null) }}>移除</button>}</div>
-              {sourceUrl && avatarSource
-                ? <MemberAvatarCropper sourceUrl={sourceUrl} sourceWidth={avatarSource.width} sourceHeight={avatarSource.height} value={avatarSource.crop} disabled={isBusy} onChange={(crop) => setAvatarSource({ ...avatarSource, crop, needsSave: true })} />
-                : <div className="member-avatar-current"><MemberAvatar agentId={agent?.agentId ?? 'avatar-draft'} avatarRef={avatarRef} displayName={agent?.displayName ?? '队员'} size={parsedAvatar?.kind === 'builtin' ? 'bust' : 'picker'} /><div><strong>{avatarBusy === 'loading' ? '正在读取原图…' : parsedAvatar?.kind === 'builtin' ? '内置队员外观' : parsedAvatar?.kind === 'managed' ? '受管角色图片' : avatarRef ? '已有图片' : '字符头像'}</strong><span>没有图片时使用名称的首个字符。</span></div></div>}
-              <button className="quiet-button member-avatar-browse" type="button" disabled={isBusy} onClick={() => void chooseImage()}>{avatarBusy === 'choosing' ? '正在处理图片…' : avatarSource ? '替换图片…' : '选择一张图片…'}</button>
-              <p className="field-help">支持静态 PNG/JPEG，文件不超过 10 MiB；保存时移除原始元数据。</p>
-              <div className="member-preset-heading"><strong>内置队员外观</strong><span>只替换角色图片</span></div>
-              <div className="member-preset-list member-avatar-preset-list">{BUILTIN_MEMBER_PRESETS.map((preset) => <button key={preset.role} className={`member-preset-card ${avatarRef === preset.avatarRef ? 'selected' : ''}`} type="button" disabled={isBusy} aria-pressed={avatarRef === preset.avatarRef} onClick={() => selectBuiltin(preset)}><MemberAvatar agentId={`preset-${preset.role}`} avatarRef={preset.avatarRef} displayName={preset.displayName} size="bust" decorative /><span className="member-preset-copy"><strong>{preset.displayName}</strong><small>{preset.teamRole}</small></span></button>)}</div>
-            </section>
-            {avatarError && <div className="inline-error" role="alert">{avatarError}</div>}
-            <div className="dialog-actions"><Dialog.Close className="quiet-button" type="button" disabled={isBusy}>取消</Dialog.Close><button className="primary-button" disabled={isBusy}>{avatarBusy === 'saving' || busy ? '正在保存图片…' : '保存角色图片'}</button></div>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent className="member-avatar-dialog" width="wide" aria-describedby="member-avatar-dialog-description" onCloseAutoFocus={(event) => { event.preventDefault(); returnFocusRef.current?.focus() }}>
+          <AppDialogHeader
+            title="更换角色图片"
+            description="图片单独保存，不会改动队员身份、Agent 运行时、权限或记忆。"
+            descriptionId="member-avatar-dialog-description"
+            icon="image"
+            closeLabel="关闭角色图片编辑"
+            closeDisabled={isBusy}
+          />
+          <form className="app-dialog-form" onSubmit={(event) => void submit(event)}>
+            <AppDialogBody>
+              <section className="member-avatar-editor" aria-label="角色图片">
+                <div className="member-avatar-editor-heading"><div><strong>当前图片</strong><span>可裁剪自定义图片，或选择内置队员外观</span></div></div>
+                {sourceUrl && avatarSource
+                  ? <MemberAvatarCropper sourceUrl={sourceUrl} sourceWidth={avatarSource.width} sourceHeight={avatarSource.height} value={avatarSource.crop} disabled={isBusy} onChange={(crop) => setAvatarSource({ ...avatarSource, crop, needsSave: true })} />
+                  : <div className="member-avatar-current"><MemberAvatar agentId={agent?.agentId ?? 'avatar-draft'} avatarRef={avatarRef} displayName={agent?.displayName ?? '队员'} size={parsedAvatar?.kind === 'builtin' ? 'bust' : 'picker'} /><div><strong>{avatarBusy === 'loading' ? '正在读取原图…' : parsedAvatar?.kind === 'builtin' ? '内置队员外观' : parsedAvatar?.kind === 'managed' ? '受管角色图片' : avatarRef ? '已有图片' : '字符头像'}</strong><span>没有图片时使用名称的首个字符。</span></div></div>}
+                <button className="quiet-button member-avatar-browse" type="button" disabled={isBusy} onClick={() => void chooseImage()}>{avatarBusy === 'choosing' ? '正在处理图片…' : avatarSource ? '替换图片…' : '选择一张图片…'}</button>
+                <p className="field-help">支持静态 PNG/JPEG，文件不超过 10 MiB；保存时移除原始元数据。</p>
+                <div className="member-preset-heading"><strong>内置队员外观</strong><span>只替换角色图片</span></div>
+                <div className="member-preset-list member-avatar-preset-list">{BUILTIN_MEMBER_PRESETS.map((preset) => <button key={preset.role} className={`member-preset-card ${avatarRef === preset.avatarRef ? 'selected' : ''}`} type="button" disabled={isBusy} aria-pressed={avatarRef === preset.avatarRef} onClick={() => selectBuiltin(preset)}><MemberAvatar agentId={`preset-${preset.role}`} avatarRef={preset.avatarRef} displayName={preset.displayName} size="bust" decorative /><span className="member-preset-copy"><strong>{preset.displayName}</strong><small>{preset.teamRole}</small></span></button>)}</div>
+              </section>
+              {avatarError && <div className="inline-error" role="alert">{avatarError}</div>}
+            </AppDialogBody>
+            <AppDialogFooter leading={(avatarRef || avatarSource) && <button className="quiet-button" type="button" disabled={isBusy} onClick={() => { setAvatarRef(null); setAvatarSource(null); setAvatarError(null) }}>移除图片</button>}>
+              <Dialog.Close className="quiet-button" type="button" disabled={isBusy}>取消</Dialog.Close>
+              <button className="primary-button" disabled={isBusy}>{avatarBusy === 'saving' || busy ? '正在保存图片…' : '保存图片'}</button>
+            </AppDialogFooter>
           </form>
-        </Dialog.Content>
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
   )

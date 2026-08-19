@@ -251,9 +251,9 @@ try {
   )
   const coloredIdentityMarks = new Set(result.cardMetrics.map((card) => card.markColor)).size > 1
   const readableSkillType = result.cardMetrics.every((card) =>
-    card.titleFontSize === '14px'
-      && card.descriptionFontSize === '12.5px'
-      && card.sourceFontSize === '10.5px'
+    card.titleFontSize === '13px'
+      && card.descriptionFontSize === '11px'
+      && card.sourceFontSize === '9px'
   )
   const switchesValid = result.cardMetrics.every((card) =>
     card.switchText === ''
@@ -275,8 +275,8 @@ try {
       || result.devicePixelRatio !== zoomFactor
       || result.horizontalOverflow
       || result.panelOverflow
-      || JSON.stringify(result.subnav) !== JSON.stringify(['通用', '外观', '通知', 'Skill', 'MCP', 'Agent 运行时', '诊断与修复'])
-      || result.activeSection !== 'Skill'
+      || JSON.stringify(result.subnav) !== JSON.stringify(['通用', '外观', '提醒', 'Skills', 'MCP', 'Agent 运行时', '运行监控', '诊断与修复'])
+      || result.activeSection !== 'Skills'
       || JSON.stringify(result.officialSkillNames) !== JSON.stringify([
         'analyze-agent-codebase',
         'campfire',
@@ -313,7 +313,7 @@ try {
         'worktree',
         'writing-for-agents'
       ])
-      || JSON.stringify(result.operationColumns) !== JSON.stringify(['投递范围', '状态', '查看'])
+      || result.operationColumns.length !== 0
       || result.legacyMoreButtonCount !== 0
       || result.primaryProvenanceCount !== 0
       || !identityTokensValid

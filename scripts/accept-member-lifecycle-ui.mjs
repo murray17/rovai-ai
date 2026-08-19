@@ -927,8 +927,8 @@ try {
   await running.cdp.send('Input.insertText', { text: '小兔' })
   await waitForExpression(running.cdp,
     `Boolean([...document.querySelectorAll('.dialog-content button')]
-      .find((button) => button.textContent?.trim() === '永久移除' && !button.disabled))`)
-  await mouseClick(running.cdp, '.dialog-content button', '永久移除')
+      .find((button) => button.textContent?.trim() === '永久移除队员' && !button.disabled))`)
+  await mouseClick(running.cdp, '.dialog-content button', '永久移除队员')
   await waitForExpression(running.cdp, `!document.querySelector('.dialog-content')`, 30_000)
   await waitForExpression(running.cdp, `![...document.querySelectorAll('.member-sidebar-copy strong')]
     .some((node) => node.textContent === '小兔')`)

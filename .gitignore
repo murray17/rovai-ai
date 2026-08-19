@@ -36,3 +36,4 @@ Desktop.ini
 # Local workspace caches and design-tool state
 /.pnpm-store/
 /.impeccable/
+/.agent/

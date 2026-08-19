@@ -11,6 +11,14 @@ import type {
   SkillView,
   StoredCommandResult
 } from '@contracts'
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogImpact,
+  AppDialogImpactList
+} from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { SkillIdentityMark } from './SkillIdentityMark'
@@ -18,16 +26,37 @@ import { localizeExecutionEngineTerms } from './product-copy'
 
 type ImportTab = 'local' | 'github'
 type SkillRowOperation = 'toggle' | 'groups'
-type Confirmation =
-  | { kind: 'delete'; skill: SkillView }
-  | { kind: 'update'; candidate: SkillImportCandidate }
-  | null
+
+export function deleteSkillConfirmationCopy(name: string): {
+  title: string
+  description: string
+  confirmLabel: string
+} {
+  return {
+    title: `删除导入的 Skill “${name}”？`,
+    description: '将停止新投递，并在现有执行释放后删除 Rovai 管理的内容。',
+    confirmLabel: '确认删除 Skill'
+  }
+}
+
+export function updateSkillConfirmationCopy(name: string): {
+  title: string
+  description: string
+  confirmLabel: string
+} {
+  return {
+    title: `更新现有 Skill “${name}”？`,
+    description: '将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。',
+    confirmLabel: '更新 Skill'
+  }
+}
 
 export function SkillSettings(): React.JSX.Element {
   const [skills, setSkills] = useState<SkillView[] | null>(null)
   const [groups, setGroups] = useState<SkillDeliveryGroupView[]>([])
   const [inspection, setInspection] = useState<SkillImportInspection | null>(null)
-  const [confirmation, setConfirmation] = useState<Confirmation>(null)
+  const [deletingSkill, setDeletingSkill] = useState<SkillView | null>(null)
+  const [updatingCandidate, setUpdatingCandidate] = useState<SkillImportCandidate | null>(null)
   const [importTab, setImportTab] = useState<ImportTab>('local')
   const [importOpen, setImportOpen] = useState(false)
   const [githubInput, setGithubInput] = useState('')
@@ -130,7 +159,7 @@ export function SkillSettings(): React.JSX.Element {
       setInspection((current) => current
         ? { ...current, candidates: current.candidates.filter((value) => value.name !== candidate.name) }
         : null)
-      setConfirmation(null)
+      setUpdatingCandidate(null)
       await load()
     } catch (nextError) {
       setError(errorMessage(nextError))
@@ -204,7 +233,7 @@ export function SkillSettings(): React.JSX.Element {
       setSkills((currentSkills) => currentSkills
         ? currentSkills.filter((value) => value.id !== current.id)
         : currentSkills)
-      setConfirmation(null)
+      setDeletingSkill(null)
       await load()
     } catch (nextError) {
       setError(errorMessage(nextError))
@@ -327,7 +356,7 @@ export function SkillSettings(): React.JSX.Element {
                   busy={busy === `delete-${skill.id}` ? busy : null}
                   onToggleEnabled={() => void setEnabled(skill)}
                   onToggleGroup={(groupKey) => void toggleGroup(skill, groupKey)}
-                  onDelete={() => setConfirmation({ kind: 'delete', skill })}
+                  onDelete={() => setDeletingSkill(skill)}
                 />
               ))}
             </div>
@@ -340,18 +369,21 @@ export function SkillSettings(): React.JSX.Element {
         busy={busy}
         onClose={() => !busy && setInspection(null)}
         onCommit={(candidate) => {
-          if (candidate.importAction === 'update') setConfirmation({ kind: 'update', candidate })
+          if (candidate.importAction === 'update') setUpdatingCandidate(candidate)
           else void commitCandidate(candidate, false)
         }}
       />
-      <ConfirmationDialog
-        confirmation={confirmation}
+      <DeleteSkillDialog
+        skill={deletingSkill}
         busy={busy}
-        onClose={() => !busy && setConfirmation(null)}
-        onConfirm={() => {
-          if (confirmation?.kind === 'delete') void deleteSkill(confirmation.skill)
-          if (confirmation?.kind === 'update') void commitCandidate(confirmation.candidate, true)
-        }}
+        onClose={() => !busy && setDeletingSkill(null)}
+        onConfirm={() => deletingSkill && void deleteSkill(deletingSkill)}
+      />
+      <UpdateSkillDialog
+        candidate={updatingCandidate}
+        busy={busy}
+        onClose={() => !busy && setUpdatingCandidate(null)}
+        onConfirm={() => updatingCandidate && void commitCandidate(updatingCandidate, true)}
       />
     </div>
   )
@@ -708,62 +740,114 @@ function ImportInspectionDialog({ inspection, busy, onClose, onCommit }: {
   return (
     <Dialog.Root open={inspection !== null} onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content skill-import-dialog">
-          <div className="dialog-heading">
-            <Dialog.Title>检查 Skill 导入</Dialog.Title>
-            <Dialog.Close className="dialog-close" aria-label="关闭" disabled={busy !== null}>×</Dialog.Close>
-          </div>
-          <Dialog.Description>确认后写入 Rovai Skill Library。新 Skill 默认启用并选择全部 Agent 运行时生效组；之后仍可逐项调整。</Dialog.Description>
-          {inspection && <>
-            <code className="inspection-path">{inspection.sourcePath}</code>
-            <div className="import-candidate-list">
-              {inspection.candidates.map((candidate) => {
-                const blocked = candidate.importAction === 'official_conflict'
-                return (
-                  <article className="import-candidate" key={candidate.name}>
-                    <div>
-                      <strong>{candidate.name}</strong><span>{importActionLabel(candidate.importAction)}</span>
-                      <p>{candidate.description || '未提供说明。'}</p>
-                      <small>{candidate.fileCount} 个文件 · {formatBytes(candidate.totalBytes)} · {shortDigest(candidate.contentDigest)}</small>
-                      <SkillRisk summary={candidate.riskSummary} />
-                    </div>
-                    <button className={candidate.importAction === 'update' ? 'approve-button' : 'primary-button'} type="button" disabled={busy !== null || blocked} onClick={() => onCommit(candidate)}>
-                      {busy === `import-${candidate.name}` ? '正在保存…' : blocked ? '与内置 Skill 冲突' : candidate.importAction === 'update' ? '检查并更新' : candidate.importAction === 'unchanged' ? '确认现有版本' : '导入'}
-                    </button>
-                  </article>
-                )
-              })}
-            </div>
-            {inspection.candidates.length === 0 && <div className="skill-empty">没有可导入的候选 Skill。</div>}
-            {inspection.rejectedCandidates.length > 0 && <div className="rejected-candidates"><strong>未通过检查（{inspection.rejectedCandidates.length}）</strong>{inspection.rejectedCandidates.map((candidate) => <div key={`${candidate.sourcePath}:${candidate.code}`}><code>{candidate.sourcePath}</code><span>{candidate.code}：{candidate.message}</span></div>)}</div>}
-            <p className="inspection-expiry">本次预览有效至 {formatTimestamp(inspection.expiresAt)}。</p>
-          </>}
-        </Dialog.Content>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent className="skill-import-dialog" width="wide" tone="info">
+          <AppDialogHeader
+            title="检查 Skill 导入"
+            description="确认后写入 Rovai Skill Library。新 Skill 默认启用并选择全部 Agent 运行时生效组；之后仍可逐项调整。"
+            icon="sparkles"
+            kicker="安全预览"
+            closeDisabled={busy !== null}
+          />
+          {inspection && (
+            <AppDialogBody>
+              <code className="inspection-path">{inspection.sourcePath}</code>
+              <div className="import-candidate-list">
+                {inspection.candidates.map((candidate) => {
+                  const blocked = candidate.importAction === 'official_conflict'
+                  return (
+                    <article className="import-candidate" key={candidate.name}>
+                      <div>
+                        <strong>{candidate.name}</strong><span>{importActionLabel(candidate.importAction)}</span>
+                        <p>{candidate.description || '未提供说明。'}</p>
+                        <small>{candidate.fileCount} 个文件 · {formatBytes(candidate.totalBytes)} · {shortDigest(candidate.contentDigest)}</small>
+                        <SkillRisk summary={candidate.riskSummary} />
+                      </div>
+                      <button className={candidate.importAction === 'update' ? 'approve-button' : 'primary-button'} type="button" disabled={busy !== null || blocked} onClick={() => onCommit(candidate)}>
+                        {busy === `import-${candidate.name}` ? '正在保存…' : blocked ? '与内置 Skill 冲突' : candidate.importAction === 'update' ? '检查并更新' : candidate.importAction === 'unchanged' ? '确认现有版本' : '导入'}
+                      </button>
+                    </article>
+                  )
+                })}
+              </div>
+              {inspection.candidates.length === 0 && <div className="skill-empty">没有可导入的候选 Skill。</div>}
+              {inspection.rejectedCandidates.length > 0 && <div className="rejected-candidates"><strong>未通过检查（{inspection.rejectedCandidates.length}）</strong>{inspection.rejectedCandidates.map((candidate) => <div key={`${candidate.sourcePath}:${candidate.code}`}><code>{candidate.sourcePath}</code><span>{candidate.code}：{candidate.message}</span></div>)}</div>}
+              <p className="inspection-expiry">本次预览有效至 {formatTimestamp(inspection.expiresAt)}。</p>
+            </AppDialogBody>
+          )}
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
   )
 }
 
-function ConfirmationDialog({ confirmation, busy, onClose, onConfirm }: {
-  confirmation: Confirmation
+export function DeleteSkillDialog({ skill, busy, onClose, onConfirm }: {
+  skill: SkillView | null
   busy: string | null
   onClose(): void
   onConfirm(): void
 }): React.JSX.Element {
-  const deleting = confirmation?.kind === 'delete'
+  const copy = deleteSkillConfirmationCopy(skill?.name ?? '')
   return (
-    <Dialog.Root open={confirmation !== null} onOpenChange={(open) => !open && onClose()}>
+    <Dialog.Root open={skill !== null} onOpenChange={(open) => !open && onClose()}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content camp-action-dialog">
-          <Dialog.Title>{deleting ? '删除导入的 Skill？' : '更新现有 Skill？'}</Dialog.Title>
-          <Dialog.Description>{deleting ? `“${confirmation?.kind === 'delete' ? confirmation.skill.name : ''}”会停止新投递，并在现有执行释放后删除受管内容；不会删除 Agent 运行时原生的同名 Skill。` : `“${confirmation?.kind === 'update' ? confirmation.candidate.name : ''}”将创建新的不可变 Revision；已有生效组会保留，正在进行的执行不会切换版本。`}</Dialog.Description>
-          <div className="dialog-actions">
-            <Dialog.Close className="quiet-button" disabled={busy !== null}>取消</Dialog.Close>
-            <button className={deleting ? 'danger-button' : 'primary-button'} type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith(deleting ? 'delete-' : 'import-') ? deleting ? '正在删除…' : '正在更新…' : deleting ? '确认删除' : '确认更新'}</button>
-          </div>
-        </Dialog.Content>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent tone="danger">
+          <AppDialogHeader
+            title={copy.title}
+            description={copy.description}
+            icon="sparkles"
+            kicker="受管内容"
+            closeDisabled={busy !== null}
+          />
+          <AppDialogBody>
+            <AppDialogImpactList>
+              <AppDialogImpact tone="delete" icon="trash" label="Rovai 管理内容">当前 Revision 与受管文件将在安全释放后删除。</AppDialogImpact>
+              <AppDialogImpact tone="keep" icon="keep" label="原生 Skill">Agent 运行时原生的同名 Skill 不会被删除。</AppDialogImpact>
+              <AppDialogImpact tone="keep" icon="shield" label="当前执行">已经开始的执行继续使用启动时冻结的版本。</AppDialogImpact>
+            </AppDialogImpactList>
+          </AppDialogBody>
+          <AppDialogFooter>
+            <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
+            <button className="danger-button" type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith('delete-') ? '正在删除…' : copy.confirmLabel}</button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+export function UpdateSkillDialog({ candidate, busy, onClose, onConfirm }: {
+  candidate: SkillImportCandidate | null
+  busy: string | null
+  onClose(): void
+  onConfirm(): void
+}): React.JSX.Element {
+  const copy = updateSkillConfirmationCopy(candidate?.name ?? '')
+  return (
+    <Dialog.Root open={candidate !== null} onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent tone="info">
+          <AppDialogHeader
+            title={copy.title}
+            description={copy.description}
+            icon="sparkles"
+            kicker="版本更新"
+            closeDisabled={busy !== null}
+          />
+          <AppDialogBody>
+            <AppDialogImpactList>
+              <AppDialogImpact icon="sparkles" label="将创建">一个新的不可变 Revision，并将其设为之后投递使用的版本。</AppDialogImpact>
+              <AppDialogImpact tone="keep" icon="keep" label="生效组">当前分配到的 Agent 运行时生效组保持不变。</AppDialogImpact>
+              <AppDialogImpact tone="keep" icon="shield" label="当前执行">已经开始的执行继续使用启动时选择的原版本。</AppDialogImpact>
+            </AppDialogImpactList>
+          </AppDialogBody>
+          <AppDialogFooter>
+            <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
+            <button className="primary-button" type="button" onClick={onConfirm} disabled={busy !== null}>{busy?.startsWith('import-') ? '正在更新…' : copy.confirmLabel}</button>
+          </AppDialogFooter>
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
   )

@@ -61,6 +61,8 @@ try {
   await cdp.send('Page.bringToFront')
   await resize(cdp, 1440, 920)
   await waitForExpression(cdp, `Boolean(document.querySelector('.unified-sidebar-footer button[aria-label="设置"]'))`, 45_000)
+  await evaluate(cdp, `window.rovai.appearance.setPreference('day')`)
+  await waitForExpression(cdp, `document.documentElement.dataset.theme === 'day'`, 5_000)
   const existingMembers = await request(cdp, 'members.list')
   for (let index = existingMembers.length; index < 12; index += 1) {
     const result = await request(cdp, 'members.create', {
@@ -115,7 +117,7 @@ try {
     officialPresetCopyVisible: document.querySelector('.mcp-settings')?.innerText.includes('官方预设') ?? false
   }))()`)
   assert(
-    JSON.stringify(initial.subnav) === JSON.stringify(['通用', '外观', '提醒', 'Skills', 'MCP', 'Agent 运行时', '诊断与修复']),
+    JSON.stringify(initial.subnav) === JSON.stringify(['通用', '外观', '提醒', 'Skills', 'MCP', 'Agent 运行时', '运行监控', '诊断与修复']),
     `Settings navigation is incorrect: ${JSON.stringify(initial)}`
   )
   assert(initial.serverNames.length === 0, `Fresh MCP Library is not empty: ${JSON.stringify(initial)}`)
@@ -223,7 +225,7 @@ try {
   await setValue(cdp, '.mcp-json-editor textarea', JSON.stringify({
     mcpServers: { 'smoke-http': { url: 'https://example.test/mcp' } }
   }, null, 2))
-  await clickButtonByText(cdp, '.mcp-editor-dialog button', '保存')
+  await clickButtonByText(cdp, '.mcp-editor-dialog button', '保存 MCP')
   await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 2`, 10_000)
   await waitForExpression(cdp, `document.activeElement?.textContent?.includes('添加 MCP')`, 5_000)
 
@@ -303,8 +305,8 @@ try {
   await resize(cdp, 1040, 700)
 
   await clickRowButton(cdp, 'smoke-http', '删除')
-  await waitForExpression(cdp, `Boolean(document.querySelector('.compact-dialog'))`, 5_000)
-  await clickButtonByText(cdp, '.compact-dialog button', '删除')
+  await waitForExpression(cdp, `Boolean(document.querySelector('.app-dialog'))`, 5_000)
+  await clickButtonByText(cdp, '.app-dialog button', '删除 MCP')
   await waitForExpression(cdp, `document.querySelectorAll('.mcp-server-row').length === 1`, 10_000)
   const finalNames = await evaluate(cdp, `[...document.querySelectorAll('.mcp-server-title > strong')].map((node) => node.textContent)`)
   assert(JSON.stringify(finalNames) === JSON.stringify(['imported_docs']), `Delete did not converge: ${JSON.stringify(finalNames)}`)
@@ -317,6 +319,7 @@ try {
     ['Skills', 'Skills'],
     ['MCP', 'MCP'],
     ['Agent 运行时', 'Agent 运行时'],
+    ['运行监控', '运行监控'],
     ['诊断与修复', '诊断与修复']
   ]) {
     await clickButtonByText(cdp, '.settings-sidebar-menu button', navigationLabel)

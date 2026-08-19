@@ -17,6 +17,12 @@ import type {
   McpMutationResult,
   McpServerView
 } from '@contracts'
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader
+} from './AppDialog'
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { MemberAvatar } from './MemberAvatar'
 import { localizeExecutionEngineTerms } from './product-copy'
@@ -768,24 +774,26 @@ function JsonEditorDialog({
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content mcp-editor-dialog">
-          <Dialog.Title>{editor.serverId ? '编辑 MCP' : '添加 MCP'}</Dialog.Title>
-          <Dialog.Description>使用标准 <code>mcpServers</code> JSON，且只能包含一个 Server。对象键就是可编辑的 Server Name。</Dialog.Description>
-          {issues.length > 0 && <div className="mcp-dialog-issues" role="alert">{issues.map((issue) => <span key={`${issue.code}:${issue.field ?? ''}`}>{issueText(issue)}</span>)}</div>}
-          <label className="mcp-json-editor">
-            <span>Server Definition</span>
-            <textarea autoFocus spellCheck={false} value={editor.definitionJson} onChange={(event) => onChange({ ...editor, definitionJson: event.target.value })} />
-          </label>
-          <div className="mcp-json-help">
-            <span>Stdio：<code>command</code>、<code>args</code>、<code>env</code>、<code>cwd</code></span>
-            <span>HTTP：<code>url</code>、<code>headers</code></span>
-          </div>
-          <div className="dialog-actions">
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent className="mcp-editor-dialog" width="wide">
+          <AppDialogHeader
+            title={editor.serverId ? '编辑 MCP' : '添加 MCP'}
+            description={<>粘贴一个标准 <code>mcpServers</code> 对象；本次只能保存一个 Server，外层对象键将作为 Server Name。</>}
+            icon="server"
+            closeDisabled={busy}
+          />
+          <AppDialogBody>
+            {issues.length > 0 && <div className="mcp-dialog-issues" role="alert">{issues.map((issue) => <span key={`${issue.code}:${issue.field ?? ''}`}>{issueText(issue)}</span>)}</div>}
+            <label className="mcp-json-editor">
+              <span>Server Definition</span>
+              <textarea autoFocus data-dialog-autofocus spellCheck={false} value={editor.definitionJson} onChange={(event) => onChange({ ...editor, definitionJson: event.target.value })} />
+            </label>
+          </AppDialogBody>
+          <AppDialogFooter>
             <button className="quiet-button" type="button" onClick={onClose} disabled={busy}>取消</button>
-            <button className="primary-button" type="button" onClick={onSave} disabled={busy || !editor.definitionJson.trim()}>{busy ? '正在保存…' : '保存'}</button>
-          </div>
-        </Dialog.Content>
+            <button className="primary-button" type="button" onClick={onSave} disabled={busy || !editor.definitionJson.trim()}>{busy ? '正在保存…' : '保存 MCP'}</button>
+          </AppDialogFooter>
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
   )
@@ -814,50 +822,57 @@ function ImportDialog({
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content mcp-import-dialog">
-          <Dialog.Title>从本机配置导入</Dialog.Title>
-          <Dialog.Description>只读取本机用户级配置并生成预览。导入结果统一停用且不分配队员；来源明文凭据不会复制或显示。</Dialog.Description>
-          <div className="mcp-import-sources" aria-label="读取来源">
-            {inspection.sources.map((source) => (
-              <span className={`mcp-source-status source-${source.status}`} key={`${source.sourceKind}:${source.sourcePath}`} title={source.sourcePath}>
-                <b>{sourceLabel(source.sourceKind)}</b>{source.status === 'loaded' ? `${source.candidateCount} 个` : source.status === 'missing' ? '未配置' : '读取失败'}
-              </span>
-            ))}
-          </div>
-          {inspection.candidates.length === 0 && <div className="skill-empty">没有发现可导入的 MCP Server。</div>}
-          <div className="mcp-import-candidates">
-            {inspection.candidates.map((candidate) => {
-              const draft = drafts[candidate.candidateId]
-              const unavailable = candidate.compatibility === 'unsupported' || !candidate.normalizedDefinitionJson || candidate.conflict === 'same'
-              return (
-                <article className={`mcp-import-candidate ${unavailable ? 'unavailable' : ''}`} key={candidate.candidateId}>
-                  <label className="mcp-import-select">
-                    <input type="checkbox" checked={draft?.selected ?? false} disabled={unavailable} onChange={(event) => update(candidate.candidateId, { selected: event.target.checked })} />
-                    <span><strong>{candidate.sourceName}</strong><small>{sourceLabel(candidate.sourceKind)} · {importCompatibilityLabel(candidate.compatibility, candidate.conflict)}</small></span>
-                  </label>
-                  <pre className="mcp-import-source-preview">{candidate.sourceDefinitionJson}</pre>
-                  {draft?.selected && (
-                    <div className="mcp-import-options">
-                      {candidate.conflict === 'name_conflict' && (
-                        <label><span>冲突处理</span><select value={draft.action} onChange={(event) => update(candidate.candidateId, { action: event.target.value as ImportDraft['action'] })}><option value="replace">替换同名 Server，保留 ID 与分配</option><option value="create">修改 JSON 后另存</option></select></label>
-                      )}
-                      <label className="mcp-import-json"><span>规范化后的 JSON</span><textarea spellCheck={false} value={draft.definitionJson} onChange={(event) => update(candidate.candidateId, { definitionJson: event.target.value })} /></label>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent className="mcp-import-dialog" width="large" tone="info">
+          <AppDialogHeader
+            title="从本机配置导入 MCP"
+            description="只读取用户级配置并生成预览。导入项默认停用且不分配队员；明文凭据不会复制或显示。"
+            icon="download"
+            kicker="本机只读扫描"
+            closeDisabled={busy}
+          />
+          <AppDialogBody>
+            <div className="mcp-import-sources" aria-label="读取来源">
+              {inspection.sources.map((source) => (
+                <span className={`mcp-source-status source-${source.status}`} key={`${source.sourceKind}:${source.sourcePath}`} title={source.sourcePath}>
+                  <b>{sourceLabel(source.sourceKind)}</b>{source.status === 'loaded' ? `${source.candidateCount} 个` : source.status === 'missing' ? '未配置' : '读取失败'}
+                </span>
+              ))}
+            </div>
+            {inspection.candidates.length === 0 && <div className="skill-empty">没有发现可导入的 MCP Server。</div>}
+            <div className="mcp-import-candidates">
+              {inspection.candidates.map((candidate) => {
+                const draft = drafts[candidate.candidateId]
+                const unavailable = candidate.compatibility === 'unsupported' || !candidate.normalizedDefinitionJson || candidate.conflict === 'same'
+                return (
+                  <article className={`mcp-import-candidate ${unavailable ? 'unavailable' : ''}`} key={candidate.candidateId}>
+                    <label className="mcp-import-select">
+                      <input type="checkbox" checked={draft?.selected ?? false} disabled={unavailable} onChange={(event) => update(candidate.candidateId, { selected: event.target.checked })} />
+                      <span><strong>{candidate.sourceName}</strong><small>{sourceLabel(candidate.sourceKind)} · {importCompatibilityLabel(candidate.compatibility, candidate.conflict)}</small></span>
+                    </label>
+                    <pre className="mcp-import-source-preview">{candidate.sourceDefinitionJson}</pre>
+                    {draft?.selected && (
+                      <div className="mcp-import-options">
+                        {candidate.conflict === 'name_conflict' && (
+                          <label><span>冲突处理</span><select value={draft.action} onChange={(event) => update(candidate.candidateId, { action: event.target.value as ImportDraft['action'] })}><option value="replace">替换同名 Server，保留 ID 与分配</option><option value="create">修改 JSON 后另存</option></select></label>
+                        )}
+                        <label className="mcp-import-json"><span>规范化后的 JSON</span><textarea spellCheck={false} value={draft.definitionJson} onChange={(event) => update(candidate.candidateId, { definitionJson: event.target.value })} /></label>
+                      </div>
+                    )}
+                    <div className="mcp-import-issues">
+                      {candidate.issues.map((issue) => <span className={`issue-${issue.kind}`} key={`${candidate.candidateId}:${issue.code}:${issue.field ?? ''}`}>{importIssueText(issue.code, issue.message)}</span>)}
                     </div>
-                  )}
-                  <div className="mcp-import-issues">
-                    {candidate.issues.map((issue) => <span className={`issue-${issue.kind}`} key={`${candidate.candidateId}:${issue.code}:${issue.field ?? ''}`}>{importIssueText(issue.code, issue.message)}</span>)}
-                  </div>
-                  {unavailable && <p className="mcp-import-manual">该来源包含 Rovai 当前无法等价表达的权限或未知字段，因此不会自动导入。你仍可根据预览手动创建标准 JSON。</p>}
-                </article>
-              )
-            })}
-          </div>
-          <div className="dialog-actions">
+                    {unavailable && <p className="mcp-import-manual">该来源包含 Rovai 当前无法等价表达的权限或未知字段，因此不会自动导入。你仍可根据预览手动创建标准 JSON。</p>}
+                  </article>
+                )
+              })}
+            </div>
+          </AppDialogBody>
+          <AppDialogFooter note="导入后需显式启用并分配给队员。">
             <button className="quiet-button" type="button" onClick={onClose} disabled={busy}>取消</button>
             <button className="primary-button" type="button" onClick={onCommit} disabled={busy || selectedCount === 0}>{busy ? '正在导入…' : `导入所选（${selectedCount}）`}</button>
-          </div>
-        </Dialog.Content>
+          </AppDialogFooter>
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
   )
@@ -875,15 +890,24 @@ function DeleteServerDialog({
   onDelete(): void
 }): React.JSX.Element {
   return (
-    <>
-      <Dialog.Root open={deleting !== null} onOpenChange={(open) => { if (!open) onDeleteClose() }}>
-        <Dialog.Portal><Dialog.Overlay className="dialog-overlay" /><Dialog.Content className="dialog-content compact-dialog">
-          <Dialog.Title>删除 MCP Server？</Dialog.Title>
-          <Dialog.Description>将删除 <strong>{deleting?.name}</strong> 的定义和全部队员分配。已经开始的执行不受影响。</Dialog.Description>
-          <div className="dialog-actions"><button className="quiet-button" type="button" onClick={onDeleteClose} disabled={busy}>取消</button><button className="danger-button" type="button" onClick={onDelete} disabled={busy}>删除</button></div>
-        </Dialog.Content></Dialog.Portal>
-      </Dialog.Root>
-    </>
+    <Dialog.Root open={deleting !== null} onOpenChange={(open) => { if (!open) onDeleteClose() }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent tone="danger">
+          <AppDialogHeader
+            title={`删除 MCP Server “${deleting?.name ?? ''}”？`}
+            description="将删除 Server 定义和全部队员分配。"
+            icon="server"
+            kicker="配置删除"
+            closeDisabled={busy}
+          />
+          <AppDialogFooter>
+            <button className="quiet-button" type="button" autoFocus data-dialog-autofocus onClick={onDeleteClose} disabled={busy}>取消</button>
+            <button className="danger-button" type="button" onClick={onDelete} disabled={busy}>{busy ? '正在删除…' : '删除 MCP'}</button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 

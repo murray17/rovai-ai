@@ -12,6 +12,12 @@ import type {
   MemoryScopeKind,
   StoredCommandResult
 } from '@contracts'
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader
+} from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
 import { localizeExecutionEngineTerms } from './product-copy'
 
@@ -507,15 +513,20 @@ export function MemoryLibrary({
 
       <Dialog.Root open={forgetTarget !== null} onOpenChange={(open) => { if (!open) setForgetTarget(null) }}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content className="dialog-content compact-dialog memory-confirm-dialog">
-            <Dialog.Title>永久遗忘这条记忆？</Dialog.Title>
-            <Dialog.Description>正文、Retrieval Keys 与受控候选内容会被清除，操作不可撤销。Agent 之后调用 memory.read 只会收到已删除提示，不会获得旧正文。</Dialog.Description>
-            <div className="dialog-actions">
-              <Dialog.Close asChild><button className="quiet-button" type="button">取消</button></Dialog.Close>
-              <button className="danger-button" type="button" onClick={() => forgetTarget && void forget(forgetTarget)} disabled={busy !== null}>永久遗忘</button>
-            </div>
-          </Dialog.Content>
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent className="memory-confirm-dialog" tone="danger">
+            <AppDialogHeader
+              title="永久遗忘这条记忆？"
+              description="当前正文、Retrieval Keys 与受控候选内容会被清除，操作不可撤销。"
+              icon="brain"
+              kicker="不可撤销"
+              closeDisabled={busy !== null}
+            />
+            <AppDialogFooter note="清除后无法恢复。">
+              <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={busy !== null}>取消</button></Dialog.Close>
+              <button className="danger-button" type="button" onClick={() => forgetTarget && void forget(forgetTarget)} disabled={busy !== null}>{busy?.startsWith('forget-') ? '正在遗忘…' : '永久遗忘'}</button>
+            </AppDialogFooter>
+          </AppDialogContent>
         </Dialog.Portal>
       </Dialog.Root>
     </section>
@@ -721,28 +732,37 @@ function MemoryEditorDialog({
   return (
     <Dialog.Root open={editor !== null} onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="dialog-overlay" />
-        <Dialog.Content className="dialog-content memory-editor-dialog">
-          <form onSubmit={onSubmit}>
-            <Dialog.Title>{editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'reviewItem' ? '编辑后接受共同记忆审核项' : '修订记忆'}</Dialog.Title>
-            <Dialog.Description>正文写成面向未来、可独立理解且不含秘密的信息。Retrieval Keys 用于搜索，不代替正文。</Dialog.Description>
-            <div className="memory-editor-grid">
-              <label className="field-label">范围<select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind })}><option value="hearth">共同记忆</option><option value="companion">队员记忆</option><option value="relationship">队员间记忆</option></select></label>
-              <label className="field-label">类型<select value={draft.kind} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}>偏好</option><option value="agreement">约定</option><option value="lesson">经验</option></select></label>
-              {draft.scope === 'companion' && <AgentSelect label="队员" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
-              {draft.scope === 'relationship' && <>
-                <AgentSelect label="队员 A" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />
-                <AgentSelect label="队员 B" value={draft.secondAgentId} agents={agents.filter((agent) => agent.agentId !== draft.firstAgentId)} disabled={identityLocked || busy} onChange={(secondAgentId) => onDraft({ ...draft, secondAgentId })} />
-                <label className="field-label">方向<select value={draft.direction} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, direction: event.target.value as MemoryDirection })}><option value="mutual">双方共同</option><option value="directed">单向</option></select></label>
-                {draft.direction === 'directed' && <AgentSelect label="责任方" value={draft.directedActorAgentId} agents={agents.filter((agent) => [draft.firstAgentId, draft.secondAgentId].includes(agent.agentId))} disabled={identityLocked || busy} onChange={(directedActorAgentId) => onDraft({ ...draft, directedActorAgentId })} />}
-              </>}
-            </div>
-            <label className="field-label memory-body-field">Retrieval Keys<input value={draft.retrievalKeys} disabled={busy} placeholder="1–3 个关键词，使用逗号分隔" onChange={(event) => onDraft({ ...draft, retrievalKeys: event.target.value })} /><small>{keys.length}/3 项 · {keyBytes}/48 bytes</small></label>
-            <label className="field-label memory-body-field">正文<textarea autoFocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} /><small>{bodyBytes}/2048 bytes</small></label>
-            {!reviewItemEditable && <div className="memory-review-warning" role="status">权威审核状态已变化。草稿仍保留，但这条审核不能再接受；请关闭后查看最新记录。</div>}
-            <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close><button className="primary-button" type="submit" disabled={!draft.body.trim() || bodyBytes > 2048 || !identityValid || !keysValid || !reviewItemEditable || busy}>{busy ? '正在保存…' : editor?.kind === 'reviewItem' ? '接受最终内容' : '保存'}</button></div>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent className="memory-editor-dialog" width="wide">
+          <AppDialogHeader
+            title={editor?.kind === 'create' ? '新增记忆' : editor?.kind === 'reviewItem' ? '编辑后接受共同记忆审核项' : '修订记忆'}
+            description="正文应面向未来、可独立理解且不包含秘密。Retrieval Keys 只用于检索，不代替正文。"
+            icon="brain"
+            closeDisabled={busy}
+          />
+          <form className="app-dialog-form" onSubmit={onSubmit}>
+            <AppDialogBody>
+              <div className="memory-editor-grid">
+                <label className="field-label">范围<select value={draft.scope} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, scope: event.target.value as MemoryScopeKind })}><option value="hearth">共同记忆</option><option value="companion">队员记忆</option><option value="relationship">队员间记忆</option></select></label>
+                <label className="field-label">类型<select value={draft.kind} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, kind: event.target.value as MemoryKind })}><option value="preference" disabled={draft.scope === 'relationship'}>偏好</option><option value="agreement">约定</option><option value="lesson">经验</option></select></label>
+                {draft.scope === 'companion' && <AgentSelect label="队员" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />}
+                {draft.scope === 'relationship' && <>
+                  <AgentSelect label="队员 A" value={draft.firstAgentId} agents={agents} disabled={identityLocked || busy} onChange={(firstAgentId) => onDraft({ ...draft, firstAgentId })} />
+                  <AgentSelect label="队员 B" value={draft.secondAgentId} agents={agents.filter((agent) => agent.agentId !== draft.firstAgentId)} disabled={identityLocked || busy} onChange={(secondAgentId) => onDraft({ ...draft, secondAgentId })} />
+                  <label className="field-label">方向<select value={draft.direction} disabled={identityLocked || busy} onChange={(event) => onDraft({ ...draft, direction: event.target.value as MemoryDirection })}><option value="mutual">双方共同</option><option value="directed">单向</option></select></label>
+                  {draft.direction === 'directed' && <AgentSelect label="责任方" value={draft.directedActorAgentId} agents={agents.filter((agent) => [draft.firstAgentId, draft.secondAgentId].includes(agent.agentId))} disabled={identityLocked || busy} onChange={(directedActorAgentId) => onDraft({ ...draft, directedActorAgentId })} />}
+                </>}
+              </div>
+              <label className="field-label memory-body-field">Retrieval Keys<input value={draft.retrievalKeys} disabled={busy} placeholder="1–3 个关键词，使用逗号分隔" onChange={(event) => onDraft({ ...draft, retrievalKeys: event.target.value })} /><small>{keys.length}/3 项 · {keyBytes}/48 bytes</small></label>
+              <label className="field-label memory-body-field">正文<textarea autoFocus data-dialog-autofocus value={draft.body} rows={7} disabled={busy} onChange={(event) => onDraft({ ...draft, body: event.target.value })} /><small>{bodyBytes}/2048 bytes</small></label>
+              {!reviewItemEditable && <div className="memory-review-warning" role="status">权威审核状态已变化。草稿仍保留，但这条审核不能再接受；请关闭后查看最新记录。</div>}
+            </AppDialogBody>
+            <AppDialogFooter>
+              <Dialog.Close asChild><button className="quiet-button" type="button" disabled={busy}>取消</button></Dialog.Close>
+              <button className="primary-button" type="submit" disabled={!draft.body.trim() || bodyBytes > 2048 || !identityValid || !keysValid || !reviewItemEditable || busy}>{busy ? '正在保存…' : editor?.kind === 'reviewItem' ? '接受最终内容' : editor?.kind === 'revise' ? '保存修订' : '保存记忆'}</button>
+            </AppDialogFooter>
           </form>
-        </Dialog.Content>
+        </AppDialogContent>
       </Dialog.Portal>
     </Dialog.Root>
   )

@@ -5,13 +5,15 @@ import type { SkillView, StoredCommandResult } from '@contracts'
 import {
   SkillCard,
   SkillSettings,
+  deleteSkillConfirmationCopy,
   formatBytes,
   groupAssignmentSummary,
   importActionLabel,
   patchSkillEnabledResult,
   projectionStateLabel,
   settingsVisibleSkills,
-  skillSourcePresentation
+  skillSourcePresentation,
+  updateSkillConfirmationCopy
 } from './SkillSettings'
 import { identityColorToken } from './theme'
 
@@ -83,6 +85,19 @@ describe('Skill settings', () => {
     expect(projectionStateLabel('shadowed')).toContain('项目同名')
     expect(projectionStateLabel('stale')).toContain('下次运行')
     expect(projectionStateLabel('pending_removal')).toContain('释放')
+  })
+
+  it('keeps Skill deletion and update as separate confirmation contracts', () => {
+    expect(deleteSkillConfirmationCopy('ui-audit')).toEqual({
+      title: '删除导入的 Skill “ui-audit”？',
+      description: '将停止新投递，并在现有执行释放后删除 Rovai 管理的内容。',
+      confirmLabel: '确认删除 Skill'
+    })
+    expect(updateSkillConfirmationCopy('ui-audit')).toEqual({
+      title: '更新现有 Skill “ui-audit”？',
+      description: '将把已检查的内容保存为新的 Revision。现有生效组保持不变，已经开始的执行继续使用原版本。',
+      confirmLabel: '更新 Skill'
+    })
   })
 
   it('formats import sizes compactly and deterministically', () => {

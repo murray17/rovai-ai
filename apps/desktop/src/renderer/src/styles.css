@@ -3962,6 +3962,249 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .dialog-overlay { position: fixed; z-index: 100; inset: 0; background: var(--overlay); animation: fade-in 150ms ease-out; }
 .dialog-content { position: fixed; z-index: 101; top: 50%; left: 50%; width: min(640px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; padding: 22px; transform: translate(-50%, -50%); border: 1px solid var(--line-strong); border-top: 3px solid var(--brand); border-radius: 12px; background: var(--surface-raised); box-shadow: var(--shadow-dialog); }
 @keyframes fade-in { from { opacity: 0; } }
+.dialog-overlay.app-dialog-overlay { z-index: 300; backdrop-filter: blur(2px); }
+.dialog-content.app-dialog {
+  --dialog-accent: var(--brand);
+  z-index: 301;
+  display: flex;
+  width: min(540px, calc(100vw - 48px));
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+  border-top: 0;
+  border-radius: 13px;
+  color: var(--ink);
+  animation: app-dialog-in 170ms cubic-bezier(.16, 1, .3, 1) both;
+}
+.dialog-content.app-dialog::before {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  content: "";
+  background: var(--dialog-accent);
+}
+.dialog-content.app-dialog.tone-danger { --dialog-accent: var(--danger); }
+.dialog-content.app-dialog.tone-attention { --dialog-accent: var(--attention); }
+.dialog-content.app-dialog.tone-info { --dialog-accent: var(--info); }
+.dialog-content.app-dialog.tone-neutral { --dialog-accent: var(--line-strong); }
+.dialog-content.app-dialog.app-dialog-wide { width: min(760px, calc(100vw - 48px)); }
+.dialog-content.app-dialog.app-dialog-large { width: min(940px, calc(100vw - 48px)); }
+@keyframes app-dialog-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 7px)) scale(.992); }
+}
+.app-dialog-header {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) 32px;
+  gap: 12px;
+  align-items: start;
+  padding: 21px 22px 16px;
+}
+.app-dialog-icon {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--dialog-accent) 32%, var(--line));
+  border-radius: 9px;
+  color: var(--dialog-accent);
+  background: color-mix(in srgb, var(--dialog-accent) 9%, var(--surface-raised));
+}
+.app-dialog-icon svg,
+.app-dialog-impact > svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+.app-dialog-heading { min-width: 0; }
+.app-dialog-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 4px;
+  color: var(--dialog-accent);
+  font: 730 9px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.app-dialog-kicker::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  content: "";
+  background: currentColor;
+}
+.app-dialog h2.app-dialog-title {
+  margin: 0;
+  font: 700 19px/1.3 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  letter-spacing: -.02em;
+}
+.app-dialog .app-dialog-description {
+  max-width: 68ch;
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.62;
+}
+.app-dialog-close {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--muted);
+  background: var(--surface-muted);
+  cursor: pointer;
+}
+.app-dialog-close:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+.app-dialog-close svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+.app-dialog-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 22px 20px;
+  overscroll-behavior: contain;
+}
+.app-dialog-body.with-divider { padding-top: 17px; border-top: 1px solid var(--line); }
+.app-dialog-form { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; }
+.app-dialog-footer {
+  display: flex;
+  min-height: 64px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 22px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+}
+.app-dialog-footer-copy { min-width: 0; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
+.app-dialog .app-dialog-footer .dialog-actions {
+  position: static;
+  flex: 0 0 auto;
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.app-dialog .danger-button {
+  border-color: var(--danger);
+  color: var(--danger-contrast);
+  background: var(--danger);
+}
+.app-dialog .danger-button:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 92%, var(--ink));
+}
+.app-dialog-impact-list {
+  display: grid;
+  overflow: hidden;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.app-dialog-impact {
+  display: grid;
+  min-height: 48px;
+  grid-template-columns: 22px 92px minmax(0, 1fr);
+  align-items: start;
+  gap: 9px;
+  padding: 10px 2px;
+  border-bottom: 1px solid var(--line);
+}
+.app-dialog-impact:last-child { border-bottom: 0; }
+.app-dialog-impact > svg { width: 17px; height: 17px; margin-top: 1px; color: var(--muted); }
+.app-dialog-impact.is-delete > svg { color: var(--danger); }
+.app-dialog-impact.is-keep > svg { color: var(--success); }
+.app-dialog-impact.is-warning > svg { color: var(--attention); }
+.app-dialog-impact > strong { color: var(--muted); font-size: 10.5px; }
+.app-dialog-impact > span { color: var(--ink); font-size: 10.5px; line-height: 1.55; }
+.app-dialog-fact-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.app-dialog-fact {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 11px;
+  border-right: 1px solid var(--line);
+}
+.app-dialog-fact:last-child { border-right: 0; }
+.app-dialog-fact > span {
+  color: var(--faint);
+  font-size: 8.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.app-dialog-fact > strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-dialog .app-dialog-blocker { margin: 12px 0 0; }
+.app-dialog-confirm-field { margin-top: 13px; }
+.app-dialog-confirm-field code {
+  color: var(--ink);
+  font: 650 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.app-dialog-choice-list {
+  display: grid;
+  overflow: hidden;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.app-dialog-choice {
+  display: grid;
+  min-height: 46px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-raised);
+}
+.app-dialog-choice:last-child { border-bottom: 0; }
+.app-dialog-choice > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--brand-ink);
+  background: var(--brand-soft);
+}
+.app-dialog-choice svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+.app-dialog-choice strong { font-size: 10.5px; }
+.app-dialog-supporting-copy { margin: 10px 0 0; color: var(--faint); font-size: 9.5px; line-height: 1.55; }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .dialog-heading h2 { margin: 5px 0 0; font: 700 21px/1.25 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
 .dialog-close { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: var(--surface-muted); cursor: pointer; font-size: 18px; }
@@ -4635,9 +4878,9 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .member-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .member-dialog { display: flex; width: min(720px, calc(100vw - 48px)); flex-direction: column; overflow: hidden; }
 .member-identity-form { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; }
-.member-dialog-scroll { min-height: 0; overflow-y: auto; padding-right: 8px; overscroll-behavior: contain; }
+.member-dialog-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .member-dialog .dialog-actions { position: static; flex: 0 0 auto; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); background: var(--surface-raised); }
-.member-avatar-dialog { width: min(620px, calc(100vw - 48px)); }
+.member-avatar-dialog { width: min(760px, calc(100vw - 48px)); }
 .member-identity-editor { display: grid; gap: 2px; }
 .member-dialog .field-label textarea { height: auto; min-height: calc(3em + 20px); }
 .field-label > small { color: var(--faint); font-size: 9px; font-weight: 500; line-height: 1.45; }
@@ -5719,6 +5962,16 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 }
 
 @media (max-width: 760px) {
+  .dialog-content.app-dialog { width: calc(100vw - 24px); max-height: calc(100vh - 24px); }
+  .app-dialog-header { padding: 18px 16px 14px; }
+  .app-dialog-body { padding-right: 16px; padding-left: 16px; }
+  .app-dialog-footer { align-items: stretch; padding: 12px 16px; }
+  .app-dialog-footer-copy:empty { display: none; }
+  .app-dialog-impact { grid-template-columns: 20px minmax(0, 1fr); }
+  .app-dialog-impact > span { grid-column: 2; }
+  .app-dialog-fact-grid { grid-template-columns: minmax(0, 1fr); }
+  .app-dialog-fact { border-right: 0; border-bottom: 1px solid var(--line); }
+  .app-dialog-fact:last-child { border-bottom: 0; }
   .member-dialog { width: calc(100vw - 24px); }
   .member-identity-overview { grid-template-columns: minmax(0, 1fr); }
   .member-identity-copy { grid-template-columns: minmax(0, 1fr); }

@@ -108,7 +108,7 @@ try {
   const dayAvatarDialogCapture = join(outputDir, 'member-avatar-picker-day.png')
   await capture(first.cdp, dayAvatarDialogCapture)
   await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '叮叮')
-  await clickButton(first.cdp, '.member-avatar-dialog button', '保存角色图片')
+  await clickButton(first.cdp, '.member-avatar-dialog button', '保存图片')
   await waitForExpression(first.cdp, `!document.querySelector('.member-avatar-dialog')`, 30_000)
 
   await openCreateDialog(first.cdp)
@@ -118,7 +118,7 @@ try {
   const dayDialogCapture = join(outputDir, 'member-avatar-create-day.png')
   await capture(first.cdp, dayDialogCapture)
   await replaceLabeledInput(first.cdp, '名称', '叮叮副本')
-  await clickButton(first.cdp, '.member-dialog button', '创建')
+  await clickButton(first.cdp, '.member-dialog button', '创建队员')
   await waitForExpression(first.cdp, `!document.querySelector('.member-dialog')`, 30_000)
   let presetCopy = (await request(first.cdp, 'members.list'))
     .find((profile) => profile.displayName === '叮叮副本')
@@ -133,7 +133,7 @@ try {
   await clickButton(first.cdp, '.member-identity-appearance button', '更换角色图片')
   await waitForSelector(first.cdp, '.member-avatar-dialog')
   await clickElementContaining(first.cdp, '.member-avatar-dialog .member-preset-card', '叮叮')
-  await clickButton(first.cdp, '.member-avatar-dialog button', '保存角色图片')
+  await clickButton(first.cdp, '.member-avatar-dialog button', '保存图片')
   await waitForExpression(first.cdp, `!document.querySelector('.member-avatar-dialog')`, 30_000)
   presetCopy = (await request(first.cdp, 'members.list'))
     .find((profile) => profile.displayName === '叮叮副本')
@@ -557,7 +557,7 @@ async function selectMember(cdp, displayName) {
   })()`)
   assert(selected, `Could not select member ${displayName}`)
   await waitForExpression(cdp,
-    `document.querySelector('.member-detail-heading h2')?.textContent === ${JSON.stringify(displayName)}`)
+    `document.querySelector('.member-detail-heading h1')?.textContent === ${JSON.stringify(displayName)}`)
 }
 
 async function openCreateDialog(cdp) {

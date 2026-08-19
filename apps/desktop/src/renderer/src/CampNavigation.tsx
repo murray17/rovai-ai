@@ -18,6 +18,14 @@ import type {
   SettingsSection
 } from '@contracts'
 import { writeClipboardText } from './clipboard'
+import {
+  AppDialogBody,
+  AppDialogContent,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogImpact,
+  AppDialogImpactList
+} from './AppDialog'
 import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
 import { allNavigationCamps } from './ui-model'
 
@@ -691,9 +699,10 @@ export function CampNavigation({
 
       <Dialog.Root open={action !== null} onOpenChange={(open) => { if (!open) closeAction() }}>
         <Dialog.Portal>
-          <Dialog.Overlay className="dialog-overlay" />
-          <Dialog.Content
-            className="dialog-content camp-action-dialog"
+          <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+          <AppDialogContent
+            className="camp-action-dialog"
+            tone={action?.kind === 'delete' ? 'danger' : action?.kind === 'remove_project' ? 'info' : 'brand'}
             onCloseAutoFocus={(event) => {
               const target = dialogReturnFocusTargetRef.current
               dialogReturnFocusTargetRef.current = null
@@ -703,32 +712,67 @@ export function CampNavigation({
             }}
           >
             {action?.kind === 'rename' ? (
-              <form onSubmit={(event) => void submitRename(event)}>
-                <Dialog.Title>重命名对话</Dialog.Title>
-                <Dialog.Description>只修改侧栏标题，不改变会话的项目归属、队员或活动顺序。</Dialog.Description>
-                <label className="field-label" htmlFor="rename-camp-title">标题<input id="rename-camp-title" autoFocus value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} disabled={actionBusy} /></label>
-                <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close><button className="primary-button" type="submit" disabled={!renameTitle.trim() || actionBusy}>{actionBusy ? '保存中…' : '保存'}</button></div>
-              </form>
+              <>
+                <AppDialogHeader
+                  title="重命名对话"
+                  description="仅更新侧栏中的对话名称。项目归属、队员、消息与活动顺序保持不变。"
+                  icon="pencil"
+                  closeDisabled={actionBusy}
+                />
+                <form className="app-dialog-form" onSubmit={(event) => void submitRename(event)}>
+                  <AppDialogBody>
+                    <label className="field-label" htmlFor="rename-camp-title">对话名称<input id="rename-camp-title" autoFocus data-dialog-autofocus value={renameTitle} onChange={(event) => setRenameTitle(event.target.value)} disabled={actionBusy} /></label>
+                  </AppDialogBody>
+                  <AppDialogFooter>
+                    <Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>
+                    <button className="primary-button" type="submit" disabled={!renameTitle.trim() || actionBusy}>{actionBusy ? '保存中…' : '保存名称'}</button>
+                  </AppDialogFooter>
+                </form>
+              </>
             ) : action?.kind === 'delete' ? (
-              <div>
-                <Dialog.Title>永久删除“{action.camp.title}”？</Dialog.Title>
-                <Dialog.Description>这会立即停止仍在运行的执行，并物理删除该会话的消息、队员连续性、运行记录、未决审批和关联数据。此操作不能撤销，也不会删除本地项目目录。</Dialog.Description>
-                <div className="dialog-actions"><Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close><button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '正在永久删除…' : '永久删除'}</button></div>
-              </div>
+              <>
+                <AppDialogHeader
+                  title={`永久删除“${action.camp.title}”？`}
+                  description="Rovai 会永久删除会话数据，并请求停止这段对话中仍未结束的执行。"
+                  icon="trash"
+                  kicker="不可撤销"
+                  closeDisabled={actionBusy}
+                />
+                <AppDialogBody>
+                  <AppDialogImpactList>
+                    <AppDialogImpact tone="delete" icon="trash" label="将被删除">消息、队员连续性、运行记录、未决审批及关联数据。</AppDialogImpact>
+                    <AppDialogImpact tone="warning" icon="warning" label="仍在运行">会收到停止请求；删除提交后不再恢复任何会话数据。</AppDialogImpact>
+                    <AppDialogImpact tone="keep" icon="folder" label="保持不变">本地项目目录及其中的文件不会被删除。</AppDialogImpact>
+                  </AppDialogImpactList>
+                </AppDialogBody>
+                <AppDialogFooter note="删除成功后无法恢复。">
+                  <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}>取消</button></Dialog.Close>
+                  <button className="danger-button" type="button" onClick={() => void confirmDelete()} disabled={actionBusy}>{actionBusy ? '正在永久删除…' : '永久删除对话'}</button>
+                </AppDialogFooter>
+              </>
             ) : action?.kind === 'remove_project' ? (
-              <div>
-                <Dialog.Title>从侧栏移除“{action.project.name}”？</Dialog.Title>
-                <Dialog.Description>
-                  项目会从这台 Mac 的侧栏隐藏，并取消项目及其中对话的置顶。不会删除本地目录、会话、消息、运行记录或审计；正在运行的执行也不会停止。之后重新选择同一工作目录即可恢复。
-                </Dialog.Description>
-                <div className="dialog-actions">
-                  <Dialog.Close asChild><button className="quiet-button" type="button" disabled={actionBusy}>取消</button></Dialog.Close>
-                  <button className="primary-button" type="button" onClick={() => void confirmProjectRemoval()} disabled={actionBusy}>{actionBusy ? '正在移除…' : '移除项目'}</button>
-                </div>
-              </div>
+              <>
+                <AppDialogHeader
+                  title={`从侧栏移除“${action.project.name}”？`}
+                  description="只移除此设备上的导航入口，并取消项目及其中对话的置顶。"
+                  icon="folder"
+                  kicker="可恢复"
+                  closeDisabled={actionBusy}
+                />
+                <AppDialogBody>
+                  <AppDialogImpactList>
+                    <AppDialogImpact icon="folder" label="会改变">项目与其中对话不再显示在此设备的侧栏，相关置顶会被取消。</AppDialogImpact>
+                    <AppDialogImpact tone="keep" icon="keep" label="继续保留">本地目录、会话、消息、运行记录、审计以及已经开始的执行。</AppDialogImpact>
+                    <AppDialogImpact icon="info" label="如何恢复">之后重新选择同一工作目录，即可恢复导航入口。</AppDialogImpact>
+                  </AppDialogImpactList>
+                </AppDialogBody>
+                <AppDialogFooter>
+                  <Dialog.Close asChild><button className="quiet-button" type="button" autoFocus data-dialog-autofocus disabled={actionBusy}>取消</button></Dialog.Close>
+                  <button className="primary-button" type="button" onClick={() => void confirmProjectRemoval()} disabled={actionBusy}>{actionBusy ? '正在移除…' : '移除侧栏入口'}</button>
+                </AppDialogFooter>
+              </>
             ) : null}
-            <Dialog.Close asChild><button className="dialog-close" aria-label="关闭" disabled={actionBusy}>×</button></Dialog.Close>
-          </Dialog.Content>
+          </AppDialogContent>
         </Dialog.Portal>
       </Dialog.Root>
     </>

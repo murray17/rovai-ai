@@ -95,12 +95,13 @@ try {
   const deleteTarget = `camp:${fixture.deleteCampId}`
   await openDeleteDialog(desktopApp.cdp, deleteTarget)
   const deleteDialogCapture = join(outputDir, 'delete-dialog-day-1440x920.png')
+  await wait(200)
   await capture(desktopApp.cdp, deleteDialogCapture)
   await pressKey(desktopApp.cdp, 'Escape')
   await waitForExpression(desktopApp.cdp, `!document.querySelector('.camp-action-dialog')`)
   await waitForTargetFocus(desktopApp.cdp, deleteTarget)
   await openDeleteDialog(desktopApp.cdp, deleteTarget)
-  await clickButton(desktopApp.cdp, '.camp-action-dialog .danger-button', '永久删除')
+  await clickButton(desktopApp.cdp, '.camp-action-dialog .danger-button', '永久删除对话')
   await waitForExpression(desktopApp.cdp, `(() => {
     const target = ${JSON.stringify(deleteTarget)}
     return ![...document.querySelectorAll('[data-sidebar-menu-target]')]
@@ -1005,7 +1006,7 @@ async function renameCampFromMenu(cdp, target) {
     input?.dispatchEvent(new Event('input', { bubbles: true }))
     return input?.value
   })()`)
-  await clickButton(cdp, '.camp-action-dialog button', '保存')
+  await clickButton(cdp, '.camp-action-dialog button', '保存名称')
   await waitForExpression(cdp, `!document.querySelector('.camp-action-dialog')`, 15_000)
   await waitForExpression(cdp, `(() => {
     const target = ${JSON.stringify(target)}
@@ -1052,10 +1053,11 @@ async function openDeleteDialog(cdp, target) {
     title: document.querySelector('.camp-action-dialog h2')?.textContent ?? '',
     description: document.querySelector('.camp-action-dialog')?.textContent ?? '',
     dangerButton: [...document.querySelectorAll('.camp-action-dialog .danger-button')]
-      .some((button) => button.textContent?.trim() === '永久删除')
+      .some((button) => button.textContent?.trim() === '永久删除对话')
   })`)
   assert(state.title.includes('永久删除')
-      && state.description.includes('此操作不能撤销')
+      && state.description.includes('不可撤销')
+      && state.description.includes('本地项目目录')
       && state.dangerButton,
   `Delete confirmation semantics were incomplete: ${JSON.stringify(state)}`)
 }
@@ -1079,7 +1081,7 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
   const dialogState = await evaluate(cdp, `(() => {
     const dialog = document.querySelector('.camp-action-dialog')
     const primary = [...(dialog?.querySelectorAll('button') ?? [])]
-      .find((button) => button.textContent?.trim() === '移除项目')
+      .find((button) => button.textContent?.trim() === '移除侧栏入口')
     return {
       title: dialog?.querySelector('h2')?.textContent?.trim() ?? '',
       description: dialog?.textContent?.trim() ?? '',
@@ -1089,14 +1091,16 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
     }
   })()`)
   assert(dialogState.title.includes('从侧栏移除')
-      && dialogState.description.includes('不会删除本地目录')
+      && dialogState.description.includes('继续保留')
+      && dialogState.description.includes('本地目录')
       && dialogState.description.includes('会话')
       && dialogState.description.includes('运行记录')
-      && dialogState.description.includes('重新选择同一工作目录即可恢复')
+      && dialogState.description.includes('重新选择同一工作目录')
       && dialogState.primary
       && dialogState.dangerButtons === 0,
   `Project removal confirmation semantics were incomplete: ${JSON.stringify(dialogState)}`)
   const dialogCapture = join(outputDir, 'project-removal-dialog-day-1440x920.png')
+  await wait(200)
   await capture(cdp, dialogCapture)
 
   // Cancel once to prove the destructive-looking menu item is still reversible
@@ -1110,7 +1114,7 @@ async function removeAndRestoreProject(cdp, projectTarget, campTarget) {
   await assertHighlightedItem(cdp, '移除项目')
   await pressKey(cdp, 'Enter')
   await waitForSelector(cdp, '.camp-action-dialog')
-  await clickButton(cdp, '.camp-action-dialog .primary-button', '移除项目')
+  await clickButton(cdp, '.camp-action-dialog .primary-button', '移除侧栏入口')
   await waitForExpression(cdp, `(() => {
     const target = ${JSON.stringify(projectTarget)}
     return ![...document.querySelectorAll('[data-sidebar-menu-target]')]
