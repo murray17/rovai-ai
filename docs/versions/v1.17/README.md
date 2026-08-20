@@ -45,10 +45,12 @@ Runtime View 在事务后异步物化；Delivery 与 AgentRun admission 在物�
 
 ## 数据与 Context 兼容性
 
-本版升级到 Data Contract `v1.17 / projection schema 57 / Migration 102`。既有 `message_attachment` 回填为
-`available`；既有 View catalog 作为 append-only Runtime-available catalog 的合法前缀。Migration 安装统一
-publication operation、semantic/resolved revision、resolution digest/tombstone、quota reservation 和
-Delivery projection gate 所需状态。
+本版升级到 Data Contract `v1.17 / projection schema 58 / Migration 103`。Migration 102 把既有
+`message_attachment` 回填为 `available`，并把既有 View catalog 作为 append-only Runtime-available
+catalog 的合法前缀，同时安装统一 publication operation、semantic/resolved revision、resolution
+digest/tombstone、quota reservation 和 Delivery projection gate 所需状态。Migration 103 在完整
+schema 57 上扩展 TRAE Skill delivery group，并使旧 TRAE 弱 `ready` snapshot 降级后重新取得统一
+Machine Ready 证据。
 
 `CampAttachmentViewReceiptV2` wire、Formatter 21、ContextManifest 21、Run Facts v2、Profile v4 与 Session
 Charter bytes 不变。View contract 升级到 3，Host 兼容性据此 fence；Runtime Launch and Verification 升级到

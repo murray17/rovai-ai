@@ -3,7 +3,7 @@ import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
   version: 'v1.17',
-  projectionSchemaVersion: 57
+  projectionSchemaVersion: 58
 })
 
 const criteria = [

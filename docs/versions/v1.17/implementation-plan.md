@@ -13,6 +13,8 @@ last_updated: 2026-08-20
 - [x] 冻结 v1.16，建立唯一 current v1.17 与 [V1.17-D01](decisions.md#v1-17-d01)；
 - [x] 建立 v1.17 当前 Contracts，并同步 Architecture、UI 与文档路由；
 - [x] Migration 102 从完整 schema 56 升到 schema 57，保留历史公共附件并回填 `available`。
+- [x] Migration 103 从完整 schema 57 升到 schema 58，扩展 TRAE Skill delivery group 并失效旧弱
+  `ready` snapshot。
 
 ## 2. 深模块与 ingress
 
@@ -51,7 +53,7 @@ last_updated: 2026-08-20
   `NotObserved` / `Unverified`；
 - [x] Availability Check 与 Dispatch Preflight 共用不发模型/Tool Prompt 的 TRAE Machine Ready 合同，并使
   旧弱 `ready` snapshot 失效；
-- [ ] 在并行 Attachment Migration 102 落地后，以后续唯一 Migration 扩展十组 Skill assignment CHECK，
+- [x] 在 Attachment Migration 102 落地后，以 Migration 103 扩展十组 Skill assignment CHECK，
   再运行完整 Rust/Docs/Desktop 门禁并随本版发布。
 
 ## References
