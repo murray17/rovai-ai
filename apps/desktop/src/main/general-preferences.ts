@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type {
+  ExecutionConsolePlacement,
   GeneralPreferencesSnapshot,
   NewConversationDefaults,
   SettingsSection,
@@ -9,6 +10,7 @@ import type {
 } from '@contracts'
 
 const STARTUP_LOCATION_MODES = new Set<StartupLocationMode>(['last_location', 'quick_chat'])
+const EXECUTION_CONSOLE_PLACEMENTS = new Set<ExecutionConsolePlacement>(['bottom', 'inspector'])
 const SETTINGS_SECTIONS = new Set<SettingsSection>([
   'general',
   'skills',
@@ -21,9 +23,10 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
 ])
 
 export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferencesSnapshot = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   startupLocationMode: 'last_location',
   lastSettingsSection: 'general',
+  executionConsolePlacement: 'bottom',
   newConversationDefaults: null,
   newConversationDefaultsRequireConfirmation: false,
   oneClickNewConversationEnabled: false
@@ -35,6 +38,11 @@ export function isStartupLocationMode(value: unknown): value is StartupLocationM
 
 export function isSettingsSection(value: unknown): value is SettingsSection {
   return typeof value === 'string' && SETTINGS_SECTIONS.has(value as SettingsSection)
+}
+
+export function isExecutionConsolePlacement(value: unknown): value is ExecutionConsolePlacement {
+  return typeof value === 'string'
+    && EXECUTION_CONSOLE_PLACEMENTS.has(value as ExecutionConsolePlacement)
 }
 
 export function isNewConversationDefaults(value: unknown): value is NewConversationDefaults {
@@ -58,15 +66,21 @@ export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnaps
       lastSettingsSection: value.lastSettingsSection
     }
   }
-  if (!hasExactKeys(value, [
+  const v2Keys = [
     'schemaVersion',
     'startupLocationMode',
     'lastSettingsSection',
     'newConversationDefaults',
     'newConversationDefaultsRequireConfirmation',
     'oneClickNewConversationEnabled'
-  ])) return null
-  if (value.schemaVersion !== 2) return null
+  ]
+  const v3Keys = [...v2Keys, 'executionConsolePlacement']
+  if (!hasExactKeys(value, v2Keys) && !hasExactKeys(value, v3Keys)) return null
+  if (value.schemaVersion !== 2 && value.schemaVersion !== 3) return null
+  if (value.schemaVersion === 2 && !hasExactKeys(value, v2Keys)) return null
+  if (value.schemaVersion === 3
+    && !hasExactKeys(value, v2Keys)
+    && !hasExactKeys(value, v3Keys)) return null
   if (!isStartupLocationMode(value.startupLocationMode)) return null
   if (!isSettingsSection(value.lastSettingsSection)) return null
   if (value.newConversationDefaults !== null && !isNewConversationDefaults(value.newConversationDefaults)) return null
@@ -77,9 +91,12 @@ export function parseGeneralPreferences(value: unknown): GeneralPreferencesSnaps
     || value.oneClickNewConversationEnabled
   )) return null
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     startupLocationMode: value.startupLocationMode,
     lastSettingsSection: value.lastSettingsSection,
+    executionConsolePlacement: isExecutionConsolePlacement(value.executionConsolePlacement)
+      ? value.executionConsolePlacement
+      : 'bottom',
     newConversationDefaults: value.newConversationDefaults
       ? structuredClone(value.newConversationDefaults)
       : null,
@@ -142,6 +159,20 @@ export class GeneralPreferencesStore {
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot> {
     return this.#enqueue(async () => {
       const next = { ...this.#snapshot, lastSettingsSection: section }
+      await writePrivateJson(this.#filePath, next)
+      this.#snapshot = next
+      return this.get()
+    })
+  }
+
+  setExecutionConsolePlacement(
+    placement: ExecutionConsolePlacement
+  ): Promise<GeneralPreferencesSnapshot> {
+    if (!isExecutionConsolePlacement(placement)) {
+      return Promise.reject(new Error('Unsupported execution console placement'))
+    }
+    return this.#enqueue(async () => {
+      const next = { ...this.#snapshot, executionConsolePlacement: placement }
       await writePrivateJson(this.#filePath, next)
       this.#snapshot = next
       return this.get()

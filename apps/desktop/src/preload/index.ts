@@ -3,6 +3,7 @@ import type {
   AppearanceSnapshot,
   CoreEvent,
   CoreMethod,
+  ExecutionConsolePlacement,
   RestorableLocation,
   SettingsSection,
   StartupLocationMode,
@@ -54,6 +55,9 @@ const api: RovaiApi = {
     },
     setLastSettingsSection(section: SettingsSection) {
       return ipcRenderer.invoke('rovai:general-preferences-set-section', section)
+    },
+    setExecutionConsolePlacement(placement: ExecutionConsolePlacement) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-execution-placement', placement)
     },
     setNewConversationDefaults(defaults) {
       return ipcRenderer.invoke('rovai:general-preferences-set-new-conversation-defaults', defaults)

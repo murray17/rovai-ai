@@ -79,13 +79,13 @@ last_updated: 2026-08-20
 
 - [x] 确认全局粒度、唯一按钮写入口、独立 Inspector visibility、Main-owned 持久化与旧偏好默认底部，
   记录 [V1.15-D05](decisions.md#v1-15-d05)并建立 [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)；
-- [ ] 将 General Preferences 推进到 schema 3，加入 `executionConsolePlacement` 与串行原子 setter；v1/v2
+- [x] 将 General Preferences 推进到 schema 3，加入 `executionConsolePlacement` 与串行原子 setter；v1/v2
   读取保留其他可识别字段并补 `bottom`，不增加 Core/SQLite Migration 或 downgrade reader；
-- [ ] 在首个 Camp workspace 挂载前取得权威偏好，把 placement 从 CampWorkspace 瞬时 state 提升到 App/Main
+- [x] 在首个 Camp workspace 挂载前取得权威偏好，把 placement 从 CampWorkspace 瞬时 state 提升到 App/Main
   控制；写成功后才移动同一 Drawer DOM，pending 防重复，失败保持旧 snapshot 并原位重试；
-- [ ] 保持 placement 与 Inspector visibility 独立：普通切 Camp/恢复不强制显示或临时回退，显式移动与
+- [x] 保持 placement 与 Inspector visibility 独立：普通切 Camp/恢复不强制显示或临时回退，显式移动与
   Task/停止结果/世界地图精确导航仍显示 Inspector、激活“执行”并定位目标；
-- [ ] 增加 General Preferences migration/store/API 单测、Renderer 状态与失败单测，并扩展 packaged App
+- [x] 增加 General Preferences migration/store/API 单测、Renderer 状态与失败单测，并扩展 packaged App
   `accept:runtime-activity-ui` 覆盖跨 Camp、一级页面、重启、hidden 组合及首屏无闪跳。
 
 ## Checkpoint 4：打包、升级与发布安全

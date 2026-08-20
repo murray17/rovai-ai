@@ -6,6 +6,7 @@ import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, screen, sh
 import type {
   AppearanceSnapshot,
   CoreMethod,
+  ExecutionConsolePlacement,
   MonitoringFilter,
   RuntimeUsageSnapshot,
   NavigationPin,
@@ -40,6 +41,7 @@ import { NavigationPreferencesStore } from './navigation-preferences'
 import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 import {
   GeneralPreferencesStore,
+  isExecutionConsolePlacement,
   isNewConversationDefaults,
   isSettingsSection,
   isStartupLocationMode
@@ -482,6 +484,13 @@ ipcMain.handle('rovai:general-preferences-set-startup', (_event, mode: unknown) 
 ipcMain.handle('rovai:general-preferences-set-section', (_event, section: unknown) => {
   if (!isSettingsSection(section)) throw new Error('Unsupported settings section')
   return requireGeneralPreferences().setLastSettingsSection(section as SettingsSection)
+})
+
+ipcMain.handle('rovai:general-preferences-set-execution-placement', (_event, placement: unknown) => {
+  if (!isExecutionConsolePlacement(placement)) throw new Error('Unsupported execution console placement')
+  return requireGeneralPreferences().setExecutionConsolePlacement(
+    placement as ExecutionConsolePlacement
+  )
 })
 
 ipcMain.handle('rovai:general-preferences-set-new-conversation-defaults', (_event, defaults: unknown) => {

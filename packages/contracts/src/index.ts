@@ -1715,6 +1715,8 @@ export interface AppearanceApi {
 
 export type StartupLocationMode = 'last_location' | 'quick_chat'
 
+export type ExecutionConsolePlacement = 'bottom' | 'inspector'
+
 export type SettingsSection =
   | 'general'
   | 'skills'
@@ -1739,9 +1741,10 @@ export interface NewConversationDefaults {
 }
 
 export interface GeneralPreferencesSnapshot {
-  schemaVersion: 2
+  schemaVersion: 3
   startupLocationMode: StartupLocationMode
   lastSettingsSection: SettingsSection
+  executionConsolePlacement: ExecutionConsolePlacement
   newConversationDefaults: NewConversationDefaults | null
   newConversationDefaultsRequireConfirmation: boolean
   oneClickNewConversationEnabled: boolean
@@ -1775,6 +1778,7 @@ export interface GeneralPreferencesApi {
   get(): Promise<GeneralPreferencesSnapshot>
   setStartupLocationMode(mode: StartupLocationMode): Promise<GeneralPreferencesSnapshot>
   setLastSettingsSection(section: SettingsSection): Promise<GeneralPreferencesSnapshot>
+  setExecutionConsolePlacement(placement: ExecutionConsolePlacement): Promise<GeneralPreferencesSnapshot>
   setNewConversationDefaults(defaults: NewConversationDefaults): Promise<GeneralPreferencesSnapshot>
   setOneClickNewConversationEnabled(enabled: boolean): Promise<GeneralPreferencesSnapshot>
   invalidateNewConversationDefaults(): Promise<GeneralPreferencesSnapshot>

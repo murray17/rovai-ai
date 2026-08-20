@@ -26,9 +26,10 @@ last_updated: 2026-08-20
 > Published Attachment 通过实例隔离、Camp-shared View 供当前 Camp Runtime 枚举和只读访问。新输入使用
 > Formatter 21、Manifest 20、Run Facts v2、schema 54 与 Migration 99；Run/Agent Session projection 方案均撤回。
 >
-> 执行台位置的本机安装级全局偏好已完成设计确认并进入 [V1.15-D05](decisions.md#v1-15-d05)与
-> [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)；生产代码、自动测试与
-> packaged App 验收尚未实施，不能把文档状态当作交付完成。
+> 执行台位置的本机安装级全局偏好已按 [V1.15-D05](decisions.md#v1-15-d05)与
+> [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)实施：General Preferences
+> schema 3、Main/IPC/Renderer 控制链路、旧偏好默认、pending/失败重试与独立 Inspector visibility 均已进入
+> 生产代码；自动测试和 packaged macOS App 已覆盖跨 Camp、一级页面、原子写失败与完整重启恢复。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 

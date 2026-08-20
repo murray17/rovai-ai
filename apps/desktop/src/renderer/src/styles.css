@@ -1141,10 +1141,16 @@ html[data-rovai-platform="win32"] *::after {
 .run-pulse-chip-state.tone-success { color: var(--success); }
 .run-pulse-chip-state.tone-danger { color: var(--danger); }
 .run-pulse-chip-state.tone-neutral { color: var(--muted); }
+.execution-placement-control { display: grid; min-width: 0; justify-items: end; gap: 2px; }
 .execution-placement-button { display: inline-flex; min-width: 30px; min-height: 30px; align-items: center; justify-content: center; gap: 6px; padding: 0 7px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 9.5px; font-weight: 680; white-space: nowrap; cursor: pointer; }
 .execution-placement-button:hover { color: var(--ink); background: var(--surface-hover); }
 .execution-placement-button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.execution-placement-button:disabled { color: var(--faint); cursor: wait; }
 .execution-placement-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.55; }
+.execution-placement-feedback { display: inline-flex; max-width: 220px; align-items: center; justify-content: flex-end; gap: 5px; color: var(--danger); font-size: 9px; line-height: 1.3; text-align: right; }
+.execution-placement-feedback > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-placement-feedback button { min-height: 22px; padding: 0 3px; border: 0; color: var(--danger); background: transparent; font: inherit; font-weight: 750; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.execution-placement-feedback button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .activity-pane { display: flex; grid-column: 2; grid-row: 1 / span 2; flex-direction: column; border-left: 1px solid var(--conversation-inspector-line); color: var(--ink); background: var(--inspector-surface); }
 .conversation-controls { min-width: 0; grid-column: 1; grid-row: 2; background: var(--conversation-surface); }
 .execution-drawer-host-bottom, .execution-drawer-portal { display: contents; }

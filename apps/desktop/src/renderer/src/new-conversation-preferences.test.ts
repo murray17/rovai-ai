@@ -113,9 +113,10 @@ describe('new conversation preferences', () => {
 
 function configuredPreferences(): GeneralPreferencesSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     startupLocationMode: 'last_location',
     lastSettingsSection: 'general',
+    executionConsolePlacement: 'bottom',
     newConversationDefaults: {
       memberAgentIds: ['agent-a', 'agent-b'],
       defaultLeadAgentId: 'agent-a'

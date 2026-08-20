@@ -21,6 +21,7 @@ import type {
   CampOpenMessageCoverage,
   CampOpenProjection,
   CampSnapshot,
+  ExecutionConsolePlacement,
   MessageDeliveryView,
   TaskStatus,
   TaskView,
@@ -98,7 +99,6 @@ export interface FirstRunCampContext {
   memberAgentId: string
   memberRole: BuiltinMemberAvatarRole
 }
-type ExecutionConsolePlacement = 'bottom' | 'inspector'
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
 type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
@@ -413,6 +413,22 @@ export function executionConsoleIsVisible(
 ): boolean {
   return placement === 'bottom'
     || (inspectorVisible && inspectorSurfaceTab === 'execution')
+}
+
+export function executionPlacementChangeShouldStart(
+  current: ExecutionConsolePlacement,
+  target: ExecutionConsolePlacement,
+  pending: boolean
+): boolean {
+  return !pending && current !== target
+}
+
+export function executionPlacementSaveFailureMessage(
+  current: ExecutionConsolePlacement
+): string {
+  return current === 'bottom'
+    ? '未能保存，仍在底部。'
+    : '未能保存，仍在右侧。'
 }
 
 export function attachmentDropIsBlocked(
@@ -1029,6 +1045,8 @@ export function CampWorkspace({
   onCancelAgentRun = async () => undefined,
   stopping,
   onStop,
+  executionPlacement = 'bottom',
+  onExecutionPlacementChange = async () => undefined,
   inspectorVisible = true,
   inspectorTab: controlledInspectorTab,
   onInspectorTabChange,
@@ -1064,6 +1082,8 @@ export function CampWorkspace({
   onCancelAgentRun?(run: AgentRunView): Promise<void>
   stopping: boolean
   onStop(): void
+  executionPlacement?: ExecutionConsolePlacement
+  onExecutionPlacementChange?(placement: ExecutionConsolePlacement): Promise<ExecutionConsolePlacement | void>
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
   onInspectorTabChange?(tab: CampInspectorTab): void
@@ -1164,7 +1184,11 @@ export function CampWorkspace({
   )
   const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
-  const [executionPlacement, setExecutionPlacement] = useState<ExecutionConsolePlacement>('bottom')
+  const [executionPlacementPending, setExecutionPlacementPending] = useState(false)
+  const [executionPlacementError, setExecutionPlacementError] = useState<{
+    message: string
+    detail: string | null
+  } | null>(null)
   const [executionInspectorActive, setExecutionInspectorActive] = useState(false)
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(null)
   const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(null)
@@ -1183,6 +1207,8 @@ export function CampWorkspace({
   const executionReadingPosition = useRef<ExecutionConsoleReadingPosition | null>(null)
   const pendingExecutionReadingPosition = useRef<ExecutionConsoleReadingPosition | null>(null)
   const executionReadingRestoreFrames = useRef<[number, number] | null>(null)
+  const executionPlacementRequest = useRef(false)
+  const executionPlacementMounted = useRef(true)
   const [executionDrawerPortal] = useState<HTMLDivElement | null>(() => {
     if (typeof document === 'undefined') return null
     const portal = document.createElement('div')
@@ -1234,12 +1260,16 @@ export function CampWorkspace({
     })
     executionReadingRestoreFrames.current = [firstFrame, firstFrame]
   }, [executionDrawerPortal, executionPlacement, inspectorVisible])
-  useEffect(() => () => {
-    if (executionReadingRestoreFrames.current) {
-      window.cancelAnimationFrame(executionReadingRestoreFrames.current[0])
-      window.cancelAnimationFrame(executionReadingRestoreFrames.current[1])
+  useEffect(() => {
+    executionPlacementMounted.current = true
+    return () => {
+      executionPlacementMounted.current = false
+      if (executionReadingRestoreFrames.current) {
+        window.cancelAnimationFrame(executionReadingRestoreFrames.current[0])
+        window.cancelAnimationFrame(executionReadingRestoreFrames.current[1])
+      }
+      executionDrawerPortal?.remove()
     }
-    executionDrawerPortal?.remove()
   }, [executionDrawerPortal])
   useEffect(() => {
     executionReadingPosition.current = null
@@ -1349,7 +1379,6 @@ export function CampWorkspace({
     setExecutionDrawerAgentId(null)
     setExecutionDrawerFocusedRunId(null)
     setSubmittedExecutionRequest(null)
-    setExecutionPlacement('bottom')
     setExecutionInspectorActive(false)
     executionDrawerTriggerRef.current = null
     executionDrawerReturnAgentIdRef.current = null
@@ -2983,29 +3012,52 @@ export function CampWorkspace({
     })
   }
 
+  const moveExecution = async (target: ExecutionConsolePlacement): Promise<void> => {
+    if (!executionPlacementChangeShouldStart(
+      executionPlacement,
+      target,
+      executionPlacementRequest.current
+    )) return
+    executionPlacementRequest.current = true
+    setExecutionPlacementPending(true)
+    setExecutionPlacementError(null)
+    try {
+      const confirmedPlacement = await onExecutionPlacementChange(target)
+      if (!executionPlacementMounted.current) return
+      if (confirmedPlacement && confirmedPlacement !== target) {
+        throw new Error('保存后的执行台位置与请求不一致')
+      }
+      const readingPosition = captureExecutionConsoleReadingPosition(
+        executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
+        executionReadingPosition.current
+      )
+      executionReadingPosition.current = readingPosition
+      pendingExecutionReadingPosition.current = readingPosition
+      if (target === 'inspector') {
+        setExecutionInspectorActive(true)
+        onOpenInspector?.(inspectorTab)
+      } else {
+        setExecutionInspectorActive(false)
+      }
+      focusPlacementButton(target)
+    } catch (nextError) {
+      if (!executionPlacementMounted.current) return
+      setExecutionPlacementError({
+        message: executionPlacementSaveFailureMessage(executionPlacement),
+        detail: nextError instanceof Error ? nextError.message : null
+      })
+    } finally {
+      executionPlacementRequest.current = false
+      if (executionPlacementMounted.current) setExecutionPlacementPending(false)
+    }
+  }
+
   const moveExecutionToInspector = (): void => {
-    const readingPosition = captureExecutionConsoleReadingPosition(
-      executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
-      executionReadingPosition.current
-    )
-    executionReadingPosition.current = readingPosition
-    pendingExecutionReadingPosition.current = readingPosition
-    setExecutionPlacement('inspector')
-    setExecutionInspectorActive(true)
-    onOpenInspector?.(inspectorTab)
-    focusPlacementButton('inspector')
+    void moveExecution('inspector')
   }
 
   const moveExecutionToBottom = (): void => {
-    const readingPosition = captureExecutionConsoleReadingPosition(
-      executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
-      executionReadingPosition.current
-    )
-    executionReadingPosition.current = readingPosition
-    pendingExecutionReadingPosition.current = readingPosition
-    setExecutionPlacement('bottom')
-    setExecutionInspectorActive(false)
-    focusPlacementButton('bottom')
+    void moveExecution('bottom')
   }
 
   const loadEarlierMessages = async (): Promise<void> => {
@@ -3602,6 +3654,8 @@ export function CampWorkspace({
               selectedAgentId={executionDrawerAgentId}
               onOpen={openExecutionProcess}
               onMovePlacement={moveExecutionToInspector}
+              placementPending={executionPlacementPending}
+              placementError={executionPlacementError}
             />
           )}
           <div
@@ -3676,6 +3730,8 @@ export function CampWorkspace({
                   selectedAgentId={executionDrawerAgentId}
                   onOpen={openExecutionProcess}
                   onMovePlacement={moveExecutionToBottom}
+                  placementPending={executionPlacementPending}
+                  placementError={executionPlacementError}
                 />
               )}
               <div
@@ -4129,7 +4185,9 @@ function RunPulse({
   stopping,
   selectedAgentId,
   onOpen,
-  onMovePlacement
+  onMovePlacement,
+  placementPending,
+  placementError
 }: {
   placement: ExecutionConsolePlacement
   placementButtonRef: RefObject<HTMLButtonElement | null>
@@ -4139,6 +4197,8 @@ function RunPulse({
   selectedAgentId: string | null
   onOpen(agentId: string, trigger: HTMLButtonElement): void
   onMovePlacement(): void
+  placementPending: boolean
+  placementError: { message: string; detail: string | null } | null
 }): JSX.Element {
   const visibleProcesses = processes.slice().sort((left, right) => {
     const leftPosition = memberById.get(left.agentId)?.memberOrder ?? Number.MAX_SAFE_INTEGER
@@ -4149,10 +4209,15 @@ function RunPulse({
     process.runs.some(agentRunCountsAsExecuting)
   ).length
   if (visibleProcesses.length === 0) return <></>
-  const placementLabel = placement === 'bottom' ? '移到右侧' : '移回底部'
+  const placementLabel = placementPending
+    ? '正在保存'
+    : placement === 'bottom' ? '移到右侧' : '移回底部'
   const placementAriaLabel = placement === 'bottom'
-    ? '将执行台移到右侧检查器'
-    : '将执行台移回会话底部'
+    ? '将执行台移到右侧检查器并记住此位置'
+    : '将执行台移回会话底部并记住此位置'
+  const placementTitle = placement === 'bottom'
+    ? '移到右侧并记住此位置'
+    : '移回底部并记住此位置'
   return (
     <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
       <div className="run-pulse-heading">
@@ -4218,17 +4283,27 @@ function RunPulse({
           )
         })}
       </ul>
-      <button
-        ref={placementButtonRef}
-        className="execution-placement-button"
-        type="button"
-        aria-label={placementAriaLabel}
-        title={placementLabel}
-        onClick={onMovePlacement}
-      >
-        <ExecutionPlacementIcon target={placement === 'bottom' ? 'inspector' : 'bottom'} />
-        <span>{placementLabel}</span>
-      </button>
+      <div className="execution-placement-control">
+        <button
+          ref={placementButtonRef}
+          className="execution-placement-button"
+          type="button"
+          aria-label={placementAriaLabel}
+          aria-busy={placementPending}
+          title={placementPending ? '正在保存执行台位置' : placementTitle}
+          disabled={placementPending}
+          onClick={onMovePlacement}
+        >
+          <ExecutionPlacementIcon target={placement === 'bottom' ? 'inspector' : 'bottom'} />
+          <span>{placementLabel}</span>
+        </button>
+        {placementError && (
+          <span className="execution-placement-feedback" role="alert" title={placementError.detail ?? undefined}>
+            <span>{placementError.message}</span>
+            <button type="button" onClick={onMovePlacement}>重试</button>
+          </span>
+        )}
+      </div>
     </div>
   )
 }

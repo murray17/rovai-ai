@@ -18,6 +18,7 @@ import type {
   CoreEvent,
   DesktopStartupSnapshot,
   EventBatch,
+  ExecutionConsolePlacement,
   GeneralPreferencesSnapshot,
   HealthStatus,
   NotificationActionView,
@@ -783,10 +784,6 @@ export function App(): React.JSX.Element {
     setInstallations(nextInstallations)
   }, [loadAgents])
 
-  const loadGeneralPreferences = useCallback(async (): Promise<void> => {
-    setGeneralPreferences(await window.rovai.generalPreferences.get())
-  }, [])
-
   const applyNavigationPreferences = useCallback((
     snapshot: NavigationPreferencesSnapshot
   ): void => {
@@ -823,7 +820,10 @@ export function App(): React.JSX.Element {
           `[startup] trace=${startupTraceId.current} stage=main_session_request `
           + `elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
         )
-        const snapshot = await window.rovai.desktopSession.getStartupSnapshot()
+        const [snapshot, preferences] = await Promise.all([
+          window.rovai.desktopSession.getStartupSnapshot(),
+          window.rovai.generalPreferences.get()
+        ])
         const target = startupTargetFromSnapshot(snapshot)
         cancelPendingCampActivation()
         setActiveCampId(null)
@@ -846,6 +846,7 @@ export function App(): React.JSX.Element {
           lastMainView.current = 'compose'
           setView('compose')
         }
+        setGeneralPreferences(preferences)
         setStartupSnapshot(snapshot)
         setSettingsSection(snapshot.lastSettingsSection)
         setStartupError(null)
@@ -1098,11 +1099,6 @@ export function App(): React.JSX.Element {
     ) return
     void refreshOnboardingRuntime()
   }, [onboardingRuntimePhase, onboardingSnapshot, refreshOnboardingRuntime])
-
-  useEffect(() => {
-    if (startupStatus !== 'resolved') return
-    void loadGeneralPreferences().catch((nextError) => setError(errorMessage(nextError)))
-  }, [loadGeneralPreferences, startupStatus])
 
   useEffect(() => {
     if (
@@ -2483,6 +2479,14 @@ export function App(): React.JSX.Element {
     setCampInspectorVisible(true)
   }
 
+  const changeExecutionConsolePlacement = useCallback(async (
+    placement: ExecutionConsolePlacement
+  ): Promise<ExecutionConsolePlacement> => {
+    const next = await window.rovai.generalPreferences.setExecutionConsolePlacement(placement)
+    setGeneralPreferences(next)
+    return next.executionConsolePlacement
+  }, [])
+
   const focusCampApprovals = (): void => {
     setNotificationFocus({
       requestId: ++notificationFocusSequence.current,
@@ -2712,7 +2716,7 @@ export function App(): React.JSX.Element {
           />
         )}
 
-        {!startupGateVisible && view === 'camp' && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
+        {!startupGateVisible && generalPreferences && view === 'camp' && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
           <CampWorkspace
             key={activeCampId}
             snapshot={visibleCampSnapshot}
@@ -2746,6 +2750,8 @@ export function App(): React.JSX.Element {
             onCancelAgentRun={cancelAgentRun}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
+            executionPlacement={generalPreferences.executionConsolePlacement}
+            onExecutionPlacementChange={changeExecutionConsolePlacement}
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}

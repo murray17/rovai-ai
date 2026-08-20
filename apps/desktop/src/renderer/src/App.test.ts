@@ -91,6 +91,8 @@ import {
   executionDrawerIsNearBottom,
   executionDrawerTitle,
   executionConsoleIsVisible,
+  executionPlacementChangeShouldStart,
+  executionPlacementSaveFailureMessage,
   executionDisclosureOpenAfterActivity,
   executionDisclosureIsLiveOpen,
   firstSubmittedAgentRun,
@@ -2379,6 +2381,11 @@ describe('task event projections', () => {
     expect(executionConsoleIsVisible('inspector', true, 'execution')).toBe(true)
     expect(executionConsoleIsVisible('inspector', true, 'tasks')).toBe(false)
     expect(executionConsoleIsVisible('inspector', false, 'execution')).toBe(false)
+    expect(executionPlacementChangeShouldStart('bottom', 'inspector', false)).toBe(true)
+    expect(executionPlacementChangeShouldStart('bottom', 'inspector', true)).toBe(false)
+    expect(executionPlacementChangeShouldStart('bottom', 'bottom', false)).toBe(false)
+    expect(executionPlacementSaveFailureMessage('bottom')).toBe('未能保存，仍在底部。')
+    expect(executionPlacementSaveFailureMessage('inspector')).toBe('未能保存，仍在右侧。')
     expect(attachmentDropIsBlocked(true, false, 'bottom', false, 'tasks')).toBe(true)
     expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'execution')).toBe(true)
     expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'tasks')).toBe(false)
@@ -2432,7 +2439,7 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="message-bubble"'))
       .toBeLessThan(markup.indexOf('class="message-copy-button"'))
     expect(markup).toContain('aria-label="Agent 执行台"')
-    expect(markup).toContain('aria-label="将执行台移到右侧检查器"')
+    expect(markup).toContain('aria-label="将执行台移到右侧检查器并记住此位置"')
     expect(markup).toContain('class="run-pulse-title"')
     expect(markup).toContain('class="run-pulse-chip"')
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
