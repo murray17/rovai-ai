@@ -995,6 +995,17 @@ html[data-rovai-platform="win32"] *::after {
 .memory-search input { width: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 0; outline: 0; color: var(--ink); background: transparent; box-shadow: none; font-size: 10px; }
 .memory-search input::placeholder { color: var(--workspace-faint); opacity: 1; }
 .memory-search input:focus-visible { border-color: transparent; outline: 0; box-shadow: none; }
+.memory-capacity-strip { display: flex; min-width: 0; flex: 0 0 auto; gap: 7px; margin: 0; padding: 0 0 5px; overflow-x: auto; overscroll-behavior-x: contain; list-style: none; scrollbar-color: var(--workspace-line) transparent; scrollbar-width: thin; }
+.memory-capacity-strip:focus-visible { border-radius: 8px; outline: 2px solid var(--focus); outline-offset: 2px; }
+.memory-capacity-strip::-webkit-scrollbar { height: 6px; }
+.memory-capacity-strip::-webkit-scrollbar-track { background: transparent; }
+.memory-capacity-strip::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--workspace-line); }
+.memory-capacity-item { display: grid; min-width: 200px; flex: 0 0 200px; gap: 7px; padding: 9px 11px; border-radius: 9px; background: var(--workspace-surface-subtle); }
+.memory-capacity-name { overflow: hidden; color: var(--ink); font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.memory-capacity-metrics { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+.memory-capacity-metrics > span { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
+.memory-capacity-metrics strong { color: var(--ink); font: 650 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.memory-capacity-metrics small { font-size: 8.5px; }
 .memory-workbench { display: grid; min-height: 280px; flex: 1 1 auto; grid-template-columns: minmax(310px, .88fr) minmax(390px, 1.12fr); gap: 9px; overflow: hidden; border: 0; border-radius: 0; background: transparent; }
 .memory-catalog { display: flex; min-width: 0; min-height: 0; flex-direction: column; padding: 8px; border: 0; border-radius: 12px; background: var(--workspace-surface-subtle); }
 .memory-catalog-heading { display: flex; flex: 0 0 auto; min-height: 35px; align-items: center; justify-content: space-between; padding: 5px 6px 8px; border: 0; }

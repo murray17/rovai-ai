@@ -5,6 +5,7 @@ import type {
   AgentProfile,
   CreateMemoryCommand,
   HearthReviewItem,
+  MemoryCapacity,
   MemoryDirection,
   MemoryKind,
   MemoryLibraryView,
@@ -655,7 +656,7 @@ export function MemoryLibrary({
         </label>
       </div>
 
-      <CapacityStrip library={library} scope={scope} />
+      <CapacityStrip library={library} scope={scope} agents={agents} />
 
       <div className="memory-workbench">
         <div className="memory-catalog">
@@ -739,19 +740,60 @@ export function MemoryLibrary({
   )
 }
 
-function CapacityStrip({ library, scope }: { library: MemoryLibraryView | null; scope: MemoryScopeKind }): React.JSX.Element | null {
+export function CapacityStrip({
+  library,
+  scope,
+  agents
+}: {
+  library: MemoryLibraryView | null
+  scope: MemoryScopeKind
+  agents: AgentProfile[]
+}): React.JSX.Element | null {
   const capacities = library?.capacities.filter((capacity) => capacity.scope === scope) ?? []
   if (capacities.length === 0) return null
   return (
-    <div className="memory-capacity-strip" aria-label="当前范围容量">
-      {capacities.slice(0, 6).map((capacity) => (
-        <span key={capacity.scopeKey}>
-          <strong>{capacity.activeCount}/{capacity.maxCount}</strong> 总量
-          <small>{capacity.agentOriginCount}/{capacity.agentOriginMaxCount} 队员形成</small>
-        </span>
+    <ul className="memory-capacity-strip" aria-label="当前范围容量，可横向滚动查看全部" tabIndex={0}>
+      {capacities.map((capacity) => (
+        <li key={capacity.scopeKey} className="memory-capacity-item">
+          <span className="memory-capacity-name">{memoryCapacityLabel(capacity, agents)}</span>
+          <span className="memory-capacity-metrics">
+            <span><strong>{capacity.activeCount}/{capacity.maxCount}</strong><small>总量</small></span>
+            <span><strong>{capacity.agentOriginCount}/{capacity.agentOriginMaxCount}</strong><small>队员形成</small></span>
+          </span>
+        </li>
       ))}
-    </div>
+    </ul>
   )
+}
+
+export function memoryCapacityLabel(capacity: MemoryCapacity, agents: AgentProfile[]): string {
+  const companionPrefix = 'companion:'
+  const relationshipPrefix = 'relationship:'
+  const applicablePrefix = 'relationship-applicable:'
+
+  if (capacity.scopeKey === 'hearth') return '共同记忆'
+  if (capacity.scopeKey.startsWith(companionPrefix)) {
+    return agentName(capacity.scopeKey.slice(companionPrefix.length), agents)
+  }
+  if (capacity.scopeKey.startsWith(applicablePrefix)) {
+    return `适用于 ${agentName(capacity.scopeKey.slice(applicablePrefix.length), agents)}`
+  }
+  if (capacity.scopeKey.startsWith(relationshipPrefix)) {
+    for (let first = 0; first < agents.length; first += 1) {
+      for (let second = first + 1; second < agents.length; second += 1) {
+        const left = agents[first]
+        const right = agents[second]
+        if (capacity.scopeKey === `${relationshipPrefix}${left.agentId}:${right.agentId}`
+          || capacity.scopeKey === `${relationshipPrefix}${right.agentId}:${left.agentId}`) {
+          return `${left.displayName} × ${right.displayName}`
+        }
+      }
+    }
+    const agentIds = capacity.scopeKey.slice(relationshipPrefix.length).split(':')
+    if (agentIds.length === 2) return agentIds.map((id) => agentName(id, agents)).join(' × ')
+    return '队员组合'
+  }
+  return scopeLabel(capacity.scope)
 }
 
 function MemoryDetail({
