@@ -175,9 +175,10 @@ digest 不是 Host 输入。不写 Runtime 用户级或 Workspace 配置，也�
 不同解析后 Server 集合不会命中同一 Host，以及 cwd、权限和 Session 绑定仍由各自 AgentRun 冻结。
 
 TRAE 的 `append_system_prompt` 已实测为独立 system message，但正式集成仍使用首包 Charter；能力存在
-不等于模型在冲突场景中可靠服从。Rovai Skill 原生投递路径和 compaction detector 仍无合格证据，
-保持空/Disabled。Missing-Send Recovery 则只在 zero-send、accepted-send suppression 与真实
-tool→final 三条专项 Smoke 通过后启用，不从“Runtime 已支持”反向推断。
+不等于模型在冲突场景中可靠服从。Rovai managed Skill 投递只拥有已验证的项目 `.trae/skills`；Runtime
+兼容扫描到的其他项目/用户路径不进入 Rovai ownership。Compaction detector 仍因可靠结构化完成信号
+`NotObserved` 而保持 `Disabled`，不是 `Unsupported`。Missing-Send Recovery 则只在 zero-send、
+accepted-send suppression 与真实 tool→final 三条专项 Smoke 通过后启用，不从“Runtime 已支持”反向推断。
 
 ## 队员最高权限默认
 
