@@ -4,14 +4,14 @@ version: v1.19
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: planned
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-08-20
 ---
 
 # Rovai-ai v1.19：Agent 文件入口隔离与纯附件发送
 
-> 当前状态：设计与合同已接受，实施和发布待完成。
+> 当前状态：设计、实施、验证、推送与 macOS arm64 安装发布均已完成。
 >
 > 前置版本：[v1.18 Codex 执行台真实命令预览](../v1.18/README.md)。v1.18 已按完成事实冻结为
 > historical；v1.17 建立的统一附件 publication、Delivery gate 和 Runtime View v3 继续作为本版基线。
