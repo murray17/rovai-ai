@@ -296,26 +296,183 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] 结构合法、可归属当前 Host/Session 且在预算内的未知 ACP `_...` extension notification，仅因 parser
       没有 handler 就使 Session 协议违规。
 
-## 12. 准入结论
+## 12. 最终汇报要求
+
+完成 Runtime 调研或接入后，必须按以下格式汇报。不得只写“支持 ACP”或“支持 Resume”。
+
+### 基本结论
 
 ```text
 Runtime:
 AdapterKind:
-Platform:
+Version / build:
+Platform / architecture:
 Admission: qualified | not_qualified | unsupported
-Evidence revision:
-Verified version/model/account:
+一句话结论:
+最接近的现有 Adapter:
+```
+
+### 1. 接入形态
+
+Integration shape:
+
+- `codex_native_server`
+- `standard_acp_stdio`
+- `vendor_extended_acp`
+- `stream_json_cli`
+- `one_shot_cli`
+- `other`
+
+```text
+Exact launch command:
+Transport / protocol version:
+是否为常驻 Host:
+一个 Host 是否支持多个 Session:
+依赖的私有 method / notification:
+```
+
+必须明确说明：
+
+- 是类似 Codex 的专用原生 Server，还是通用 ACP；
+- 若为 ACP，是纯标准 ACP，还是依赖 Runtime 私有扩展。
+
+### 2. Session 生命周期
+
+| 能力 | 状态与精确语义 |
+| --- | --- |
+| `session/new` | |
+| 同 Host 复用原 Session | |
+| `session/resume` | 是否保持相同 Session ID；是否 replay |
+| `session/load` | 是否保持相同 Session ID；是否 replay |
+| Host/Core 重启后的恢复 | exact resume / history restore / new session |
+| 恢复失败策略 | fail closed / fresh session fallback |
+
+最终 Session 策略：
+
+- `warm_host`
+- `exact_resume`
+- `history_restore`
+- `new_only`
+
+不得把 `session/resume` 与 `session/load` 合并汇报。
+
+### 3. Host 与 Session 兼容性
+
+```text
 Host compatibility inputs:
 Native Session compatibility inputs:
-Per-Prompt compatibility inputs:
-Session refresh strategy:
-Runtime evidence (`Verified | DocumentationOnly | Unverified | NotObserved | Unsupported` per item):
-Rovai implementation (`Implemented | Disabled | NotImplemented | Blocked` per item):
-Async catalog ownership/state:
-Unknown extension policy:
-Machine Ready contract:
-Adapter behavior evidence:
-Known limitations and parser gaps:
-Reviewer:
-Date:
+```
+
+分别说明以下变化后的处理方式：
+
+| 变化 | 复用原 Session | 新 Session | 重启 Host |
+| --- | --- | --- | --- |
+| Runtime version / executable | | | |
+| Model | | | |
+| Permission / mode | | | |
+| MCP | | | |
+| Skill exposure | | | |
+| cwd / workspace access | | | |
+| Attachment root | | | |
+
+同时说明每项资源在何时加载：
+
+`process_start | session_new | session_load | session_resume | per_prompt | live_watch`
+
+### 4. Ready 语义
+
+```text
+Machine Ready requirements:
+AvailabilityCheck 与 Dispatch 是否使用同一 validator:
+AvailabilityCheck 是否发送模型 Prompt:
+DispatchPreflight 是否发送模型 Prompt:
+Ready 的失效条件:
+主要启动耗时来源:
+```
+
+### 5. 核心能力
+
+每项同时填写：
+
+- Runtime evidence：`Verified | DocumentationOnly | Unverified | NotObserved | Unsupported`
+- Rovai implementation：`Implemented | Disabled | NotImplemented | Blocked`
+
+| 能力 | Runtime evidence | Rovai implementation | 边界说明 |
+| --- | --- | --- | --- |
+| Dynamic model catalog | | | |
+| Permission / mode catalog | | | |
+| Structured Tool lifecycle | | | |
+| Approval allow / deny | | | |
+| Cancellation | | | |
+| Reliable final boundary | | | |
+| External MCP | | | |
+| Rovai managed Skill | | | |
+| Runtime advertised commands | | | |
+| Compaction signal | | | |
+| Usage / Token / Cache / Cost | | | |
+
+### 6. Skill 与异步 Catalog
+
+```text
+Managed Skill 项目路径:
+其他 Runtime 扫描路径:
+Skill 扫描或刷新时机:
+既有 Idle Session 是否刷新:
+新 Session 是否刷新:
+session/load 是否刷新:
+available_commands_update 是否存在:
+首条 update 到达时间:
+update 是 full replacement 还是 delta:
+```
+
+### 7. Compaction
+
+```text
+是否确实触发过压缩:
+Manual trigger:
+Automatic trigger:
+结构化 signal:
+Signal phase: imminent_edge | started | completed | none
+Occurrence / 去重依据:
+实际启动方式下 Hook 是否可达:
+Rovai detector: BestEffort | Disabled
+```
+
+必须区分：
+
+- Runtime 是否真的发生压缩；
+- Runtime 是否公开结构化生命周期信号；
+- Rovai 是否已经实现 detector。
+
+### 8. Windows 平台边界
+
+Install form:
+
+- native `.exe`
+- npm launcher
+- `.cmd` / `.bat`
+- PowerShell script
+- WSL only
+- bundled executable
+
+```text
+实际启动的文件:
+支持的 Windows 版本:
+支持的架构:
+Native Windows 或 WSL:
+认证存储位置:
+进程树清理方式:
+已知 Windows 限制:
+```
+
+### 最终决定
+
+```text
+Qualified capabilities:
+Disabled capabilities:
+Unverified capabilities:
+Required code changes:
+Required document changes:
+Blocking issues:
+Recommended admission decision:
 ```
