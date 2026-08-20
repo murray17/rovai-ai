@@ -188,7 +188,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 
 移到现有 Inspector 时，底部入口与详情完全移除，Inspector 临时增加首个“执行”Tab，并自动显示、
 激活该 Tab。右侧使用既有 310px / compact 260px 宽度，不新增可拖宽 Sidecar。移回底部后恢复用户
-切换前最后使用的“任务 / 队员”基础 Tab。位置偏好只拥有承载位置，不跨 Camp 保存 Agent/Run selection、
+切换前最后使用的“队员 / 任务”基础 Tab。位置偏好只拥有承载位置，不跨 Camp 保存 Agent/Run selection、
 Drawer 开合、Tool 全文或滚动位置，也不根据窗口宽度自动改变。重新进入 Camp 时可以从当前权威 snapshot
 推导最新 running Run；这是新的瞬时 selection，不是恢复旧 Drawer 状态，也不改写位置偏好。
 
@@ -241,7 +241,7 @@ Tool disclosure 展开后在原位渲染完整公开结果，不再截断，不�
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)。
+[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
@@ -251,7 +251,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)。
+[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -279,7 +279,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)。
+[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
 
 ## Camp Composer
 
@@ -288,6 +288,13 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 附件、Skill 候选、Mention、reply intent 和 continuation intent 都使用同一 Core-owned Draft；任何浮层
 都不能建立第二份草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，
 不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入仍保留局部焦点提示。
+
+Composer 为空时根据当前用户可见的 Camp 会话/任务时间线选择输入提示：没有有效历史时显示
+“集结队伍，写下这次冒险的目标…”；已有历史时显示
+“和队伍继续前行：补充线索、调整方向或布置新任务…”。有效历史包括 user/agent 公共消息、Task 卡和
+用户可见的停止结果；初始化 system 消息、已隐藏的 `a2a_event` / `task_event`、原始 Domain Event 与其他
+内部记录不参与判断。该提示只由既有投影派生，不新增持久或 Renderer 状态，也不改变发送、任务、附件、
+回复、延续或路由行为。
 
 ### Skill 快速选择
 
@@ -333,13 +340,13 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 
 ## Camp 右侧详情栏（Inspector）
 
-默认底部执行台时，ordinary Inspector 只有“任务 / 队员”。Task 提供列表与详情责任层；队员读取当前 CampMember 与
-AgentProfile，并通过既有 versioned Core 命令提供唯一 Default Lead 选择器。ContextManifest 与
+默认底部执行台时，ordinary Inspector 只有“队员 / 任务”。队员读取当前 CampMember 与 AgentProfile，
+并通过既有 versioned Core 命令提供唯一 Default Lead 选择器；Task 提供列表与详情责任层。ContextManifest 与
 Runtime Input Delivery Evidence 继续存在于 Core/Snapshot，但不进入普通 Inspector；审批只在
 Approval Dock 决定。
 
 仅当用户把执行台移到右侧时，Inspector 增加条件式首个“执行”Tab；右侧 Tab 的 DOM、视觉与键盘顺序为
-“执行 / 任务 / 队员”。它承载同一 Agent 过程详情，
+“执行 / 队员 / 任务”。它承载同一 Agent 过程详情，
 不是新的 Activity/Audit timeline，也不改变 Task、队员、Default Lead 或 Approval 边界。移回底部后
 该 Tab 从 DOM 和键盘顺序中消失。
 

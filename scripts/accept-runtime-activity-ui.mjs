@@ -351,7 +351,7 @@ try {
     `Agent dock is not attached below the conversation timeline: ${JSON.stringify(agentDock)}`)
   assert(agentDock.topRunBadgeCount === 0
     && agentDock.auditTabCount === 0
-    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
   `Removed top Run/Audit entries or legacy Inspector tabs returned: ${JSON.stringify(agentDock)}`)
 
   await evaluate(app.cdp, `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
@@ -370,7 +370,7 @@ try {
   await waitForExpression(app.cdp,
     `document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'`)
   const executionSidecar = await collectExecutionSidecar(app.cdp)
-  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '任务', '队员'])
+  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '队员', '任务'])
     && executionSidecar.activeTab === '执行'
     && executionSidecar.bottomDockCount === 0
     && executionSidecar.sideDockCount === 1
@@ -415,7 +415,7 @@ try {
     && returnedExecutionSelection.selectedAgentId === activeAgentId
     && returnedExecutionSelection.drawerPlacement === 'bottom'
     && returnedExecutionSelection.resizeHandle
-    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
   `Execution console did not return to the production bottom surface: ${JSON.stringify({ returnedExecutionDock, returnedExecutionSelection })}`)
 
   await setTheme(app.cdp, 'night')
@@ -2427,7 +2427,7 @@ function assertConversationDropPresentation(presentation, context, expectedCallo
     && presentation.layerInsideGrid
     && presentation.inspectorExcluded
     && Math.abs(presentation.calloutWidth - expectedCalloutWidth) <= 1
-    && JSON.stringify(presentation.tabs) === JSON.stringify(['任务', '队员'])
+    && JSON.stringify(presentation.tabs) === JSON.stringify(['队员', '任务'])
     && !presentation.documentOverflow
     && !presentation.sourcePathVisible,
   `${context} conversation drop presentation failed: ${JSON.stringify(presentation)}`)

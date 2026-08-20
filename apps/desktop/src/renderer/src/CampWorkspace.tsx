@@ -896,6 +896,14 @@ export function campConversationTimeline(
   })
 }
 
+export function campConversationHasVisibleHistory(
+  timeline: readonly CampConversationTimelineItem[]
+): boolean {
+  return timeline.some((item) =>
+    item.kind !== 'camp_message' || item.message.authorType !== 'system'
+  )
+}
+
 export function formatStopElapsed(createdAt: string, cancelRequestedAt: string): string {
   const started = new Date(createdAt).getTime()
   const stopped = new Date(cancelRequestedAt).getTime()
@@ -1573,6 +1581,7 @@ export function CampWorkspace({
       visibleCampMessages
     ]
   )
+  const isCampEmpty = !campConversationHasVisibleHistory(conversationTimeline)
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const replyRepairRequired = composerDraftNeedsReplyRepair(composerDraft)
   const hasExplicitRecipient = messageContent.some((segment) =>
@@ -3797,8 +3806,8 @@ export function CampWorkspace({
               {executionPlacement === 'inspector' && (
                 <Tabs.Trigger value="execution">执行 <small>{executionProcesses.length}</small></Tabs.Trigger>
               )}
-              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
               <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="execution" forceMount className="execution-sidecar-panel">
               {executionPlacement === 'inspector' && (
@@ -4100,7 +4109,9 @@ export function CampWorkspace({
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
               ariaLabel={`给 ${defaultLead?.displayName ?? '默认负责人'} 发消息`}
-              placeholder="继续提问、补充约束或交付下一项职责…"
+              placeholder={isCampEmpty
+                ? '集结队伍，写下这次冒险的目标…'
+                : '和队伍继续前行：补充线索、调整方向或布置新任务…'}
               disabled={busy || composerSubmitting || routingMutating}
               editorRef={composerEditorRef}
               onActivateMemberMention={(member, trigger, focusPanel) =>

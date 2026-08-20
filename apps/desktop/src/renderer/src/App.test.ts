@@ -75,6 +75,7 @@ import {
   attachmentDropIsBlocked,
   agentRunStopViewState,
   canStopAgentRun,
+  campConversationHasVisibleHistory,
   campConversationViewFromStoredValue,
   campConversationTimeline,
   composerDraftNeedsContinuationRepair,
@@ -634,6 +635,17 @@ describe('task event projections', () => {
       [task]
     )
 
+    const initializationMessage = {
+      ...message('camp-initialized', 1, '2026-08-05T01:58:00Z'),
+      authorType: 'system' as const,
+      authorId: 'camp-initializer'
+    }
+    expect(campConversationHasVisibleHistory([])).toBe(false)
+    expect(campConversationHasVisibleHistory(
+      campConversationTimeline([initializationMessage])
+    )).toBe(false)
+    expect(campConversationHasVisibleHistory(projected)).toBe(true)
+
     expect(projected.map((item) => item.id)).toEqual([
       'before-task',
       `task:${task.taskId}`,
@@ -660,6 +672,7 @@ describe('task event projections', () => {
       assigneeAgentId: null,
       version: 5
     }])
+    expect(campConversationHasVisibleHistory(updated)).toBe(true)
     expect(updated).toHaveLength(1)
     expect(updated[0]).toMatchObject({
       id: `task:${task.taskId}`,
@@ -2125,6 +2138,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('给 洛可 发消息')
+    expect(markup).toContain('集结队伍，写下这次冒险的目标…')
+    expect(markup).not.toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
     expect(markup).not.toContain('默认由 Lead · 洛可接收')
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('快速对话')
@@ -2529,6 +2544,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
+    expect(markup).toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
+    expect(markup).not.toContain('集结队伍，写下这次冒险的目标…')
     expect(markup).toContain('>复制</button>')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
@@ -2613,9 +2630,9 @@ describe('task event projections', () => {
     const inspectorTabListEnd = inspectorMarkup.indexOf('</div>', inspectorTabListStart)
     const inspectorTabList = inspectorMarkup.slice(inspectorTabListStart, inspectorTabListEnd)
     expect(inspectorTabList.indexOf('>执行 <small>'))
-      .toBeLessThan(inspectorTabList.indexOf('>任务 <small>'))
-    expect(inspectorTabList.indexOf('>任务 <small>'))
       .toBeLessThan(inspectorTabList.indexOf('>队员 <small>'))
+    expect(inspectorTabList.indexOf('>队员 <small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>任务 <small>'))
     expect(inspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-execution/)
     expect(inspectorMarkup).toContain('data-placement="inspector"')
 
