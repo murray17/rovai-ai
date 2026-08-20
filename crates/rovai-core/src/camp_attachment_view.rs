@@ -4134,10 +4134,14 @@ fn verify_resolution_ledger(
     let mut digest = empty_digest;
     for (revision, operation_id, outcome, entry_digest, tombstone_digest, failure_code) in rows {
         if operation_id.is_none() {
+            // A migration checkpoint seals the catalog prefix that existed at
+            // its revision; later semantic publications append to that prefix.
+            let (_, _, checkpoint_catalog_digest) =
+                semantic_catalog_state_through_revision(connection, camp_id, Some(revision))?;
             if previous_revision != 0
                 || outcome != "available"
                 || revision < 1
-                || entry_digest.as_deref() != Some(receipt.semantic_catalog_digest.as_str())
+                || entry_digest.as_deref() != Some(checkpoint_catalog_digest.as_str())
                 || tombstone_digest.is_some()
                 || failure_code.is_some()
             {
@@ -5404,6 +5408,46 @@ mod tests {
         (operation_id, attachment_id)
     }
 
+    fn finish_semantic_composer_attachment(
+        database: &mut Database,
+        data_dir: &Path,
+        camp_id: &str,
+        view: &CampAttachmentViewStore,
+        operation_id: &str,
+    ) {
+        view.reconcile(database, &CampAttachmentStore::new(data_dir))
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status FROM camp_attachment_view_operation WHERE id = ?1",
+                    [operation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "recovery_required"
+        );
+        let plan = view
+            .plan_queued_publication(database, camp_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.operation_id(), operation_id);
+        let copied =
+            CampAttachmentViewStore::copy_publication(&CampAttachmentStore::new(data_dir), plan)
+                .unwrap();
+        let publication = view.finish_publication_staging(database, copied).unwrap();
+        view.gate_publication(database, &publication).unwrap();
+        view.promote_publication(database, &publication).unwrap();
+        assert!(
+            view.resolve_semantic_publication_success(database, operation_id)
+                .unwrap()
+                .is_empty()
+        );
+        view.finish_semantic_publication(database, operation_id)
+            .unwrap();
+    }
+
     #[test]
     fn semantic_publication_success_commits_a_verified_resolution_ledger() {
         let (mut database, data_dir, camp_id, view) = fixture();
@@ -5413,40 +5457,13 @@ mod tests {
             &camp_id,
             "semantic success",
         );
-        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
-            .unwrap();
-        assert_eq!(
-            database
-                .connection()
-                .query_row(
-                    "SELECT status FROM camp_attachment_view_operation WHERE id = ?1",
-                    [&operation_id],
-                    |row| row.get::<_, String>(0),
-                )
-                .unwrap(),
-            "recovery_required"
+        finish_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            &operation_id,
         );
-        let plan = view
-            .plan_queued_publication(&mut database, &camp_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(plan.operation_id(), operation_id);
-        let copied =
-            CampAttachmentViewStore::copy_publication(&CampAttachmentStore::new(&data_dir), plan)
-                .unwrap();
-        let publication = view
-            .finish_publication_staging(&mut database, copied)
-            .unwrap();
-        view.gate_publication(&mut database, &publication).unwrap();
-        view.promote_publication(&mut database, &publication)
-            .unwrap();
-        assert!(
-            view.resolve_semantic_publication_success(&mut database, &operation_id)
-                .unwrap()
-                .is_empty()
-        );
-        view.finish_semantic_publication(&mut database, &operation_id)
-            .unwrap();
 
         assert_eq!(
             database
@@ -5459,6 +5476,91 @@ mod tests {
                 .unwrap(),
             "available"
         );
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn migration_resolution_checkpoint_remains_valid_after_semantic_append() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let (legacy_operation_id, legacy_attachment_id) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "legacy semantic publication",
+        );
+        finish_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            &legacy_operation_id,
+        );
+
+        let semantic_catalog_digest = database
+            .connection()
+            .query_row(
+                "SELECT semantic_catalog_digest FROM camp_attachment_view WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        transaction
+            .execute(
+                r#"
+                UPDATE message_attachment
+                SET publication_operation_id = NULL,
+                    publication_semantic_revision = NULL
+                WHERE id = ?1
+                "#,
+                [&legacy_attachment_id],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                r#"
+                UPDATE camp_attachment_view_operation
+                SET source_kind = 'legacy', semantic_revision = NULL,
+                    resolution_ledger_digest = NULL
+                WHERE id = ?1
+                "#,
+                [&legacy_operation_id],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                r#"
+                UPDATE camp_attachment_publication_resolution
+                SET operation_id = NULL, entry_digest = ?2
+                WHERE camp_id = ?1 AND semantic_revision = 1
+                "#,
+                params![camp_id, semantic_catalog_digest],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "UPDATE camp_attachment_view SET resolution_digest = ?2 WHERE camp_id = ?1",
+                params![camp_id, semantic_catalog_digest],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+
+        let (operation_id, _) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "post-migration semantic publication",
+        );
+        finish_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            &operation_id,
+        );
+
         view.verify_camp_ready(&database, &camp_id).unwrap();
         cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
     }
