@@ -2578,6 +2578,7 @@ async function verifyCompleteToolOutput(cdp) {
       hasFirstMarker: text.includes(${JSON.stringify(longToolOutputFirstMarker)}),
       hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
       hasLastMarker: text.includes(${JSON.stringify(longToolOutputLastMarker)}),
+      startsWithCommandAndOutputSections: text.startsWith(${JSON.stringify(`命令\n${codexExpectedCommand}\n\n输出\n${longToolOutputFirstMarker}`)}),
       endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
       hasCutNotice: text.includes('…（后续内容未显示）'),
       leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
@@ -2597,8 +2598,9 @@ async function verifyCompleteToolOutput(cdp) {
   assert(presentation.hasFirstMarker
     && presentation.hasMiddleMarker
     && presentation.hasLastMarker
+    && presentation.startsWithCommandAndOutputSections
     && presentation.endsWithPublicOutput
-    && presentation.lineCount === 8_432
+    && presentation.lineCount === 8_436
     && presentation.verticalOverflow
     && !presentation.hasCutNotice
     && !presentation.leakedEnvelope,
