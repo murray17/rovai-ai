@@ -463,7 +463,7 @@ impl CampAttachmentViewStore {
 
         let rows = load_prepared_authority_rows(database.connection(), camp_id)?;
         if rows.is_empty() {
-            self.ensure_empty_camp_ready(database, camp_id)?;
+            self.verify_camp_ready(database, camp_id)?;
             return Ok(CampAttachmentPublicationStaging::None);
         }
         let requested_bytes = rows.iter().try_fold(0_u64, |total, row| {
@@ -4378,6 +4378,60 @@ mod tests {
         assert!(reject_nested_runtime_root_markers(&outer_root).is_err());
 
         fs::remove_dir_all(&fixture).unwrap();
+    }
+
+    #[test]
+    fn follow_up_without_new_attachments_preserves_published_view() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let source = data_dir.join("published.txt");
+        fs::write(&source, b"published once").unwrap();
+        let initial = attachment_store
+            .save_body(&mut database, &camp_id, "Initial message with attachment")
+            .unwrap();
+        let initial = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                initial.revision,
+                &source,
+                "published.txt",
+            )
+            .unwrap();
+        publish_current_draft(&mut database, &data_dir, &camp_id, &view, initial.revision);
+
+        let follow_up = attachment_store
+            .save_body(
+                &mut database,
+                &camp_id,
+                "Follow-up without a new attachment",
+            )
+            .unwrap();
+        let publication = view
+            .stage_publication(
+                &mut database,
+                &attachment_store,
+                &camp_id,
+                &Uuid::new_v4().to_string(),
+                follow_up.revision,
+            )
+            .expect("a no-attachment follow-up should preserve the ready published View");
+
+        assert!(publication.is_none());
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_attachment_view_entry WHERE camp_id = ?1",
+                    [&camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
     }
 
     #[test]
