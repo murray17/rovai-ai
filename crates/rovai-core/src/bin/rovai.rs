@@ -24,7 +24,8 @@ use rovai_core::builtin_tool_transport::{
     builtin_tool_identity_by_command,
 };
 use rovai_core::camp_message_send_teaching::{
-    CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
+    CAMP_MESSAGE_SEND_FILE_HELP, CAMP_MESSAGE_SEND_HELP_EXAMPLES,
+    CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
     CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP,
 };
 use rovai_core::command::canonical_json_digest;
@@ -1572,6 +1573,9 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
         }
         if description.name == "camp.message.send" && argument.field == "mentionUser" {
             write_indented_help(output, CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP);
+        }
+        if description.name == "camp.message.send" && argument.field == "files" {
+            write_indented_help(output, CAMP_MESSAGE_SEND_FILE_HELP);
         }
         if description.name == "memory.view" && argument.field == "scope" {
             writeln!(output, "      One of: hearth, companion, relationship.")

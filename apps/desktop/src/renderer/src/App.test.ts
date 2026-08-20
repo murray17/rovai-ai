@@ -3082,7 +3082,17 @@ describe('task event projections', () => {
         fileCount: 1,
         mediaType: 'text/plain',
         byteSize: 12,
-        previewKind: 'none'
+        previewKind: 'none',
+        runtimeProjectionState: 'pending'
+      }, {
+        id: 'attachment-timeline-failed',
+        displayName: '不可用.txt',
+        kind: 'file',
+        fileCount: 1,
+        mediaType: 'text/plain',
+        byteSize: 8,
+        previewKind: 'none',
+        runtimeProjectionState: 'failed'
       }],
       addressMode: 'default',
       addressedAgentIds: ['agent_1'],
@@ -3133,6 +3143,10 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="回复这条消息"')
     expect(markup).toContain('class="timeline-attachments" aria-label="消息附件"')
     expect(markup).toContain('说明.txt')
+    expect(markup).toContain('正在准备供队员读取')
+    expect(markup).toContain('队员读取不可用')
+    expect(markup).toContain('attachment-projection-pending')
+    expect(markup).toContain('attachment-projection-failed')
     expect(markup).not.toContain('class="message-bubble"')
   })
 

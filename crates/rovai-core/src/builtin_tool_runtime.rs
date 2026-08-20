@@ -117,6 +117,10 @@ impl BuiltinToolProcessConfig {
         &self.inner.context_path
     }
 
+    pub(crate) fn run_tmp(&self) -> &Path {
+        &self.inner.run_tmp
+    }
+
     pub(crate) fn configure_command(&self, command: &mut Command) -> Result<()> {
         let cli_directory = self
             .inner
@@ -162,6 +166,7 @@ pub(crate) struct AuthorizedBuiltinToolInvocation {
     pub agent_run_id: String,
     pub execution_epoch: i64,
     pub native_binding: BuiltinToolBindingCredential,
+    pub run_tmp: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -336,6 +341,7 @@ impl BuiltinToolLeaseRegistry {
             agent_run_id: active.agent_run_id.clone(),
             execution_epoch: active.execution_epoch,
             native_binding: active.native_binding.clone(),
+            run_tmp: process.config.run_tmp().to_path_buf(),
         })
     }
 

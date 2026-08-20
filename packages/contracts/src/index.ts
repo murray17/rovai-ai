@@ -972,9 +972,11 @@ export interface CampMessageAttachmentView {
   mediaType: string
   byteSize: number
   previewKind: 'image' | 'none'
+  runtimeProjectionState: 'pending' | 'available' | 'recovery_required' | 'failed'
 }
 
-export interface PreparedAttachmentView extends CampMessageAttachmentView {
+export interface PreparedAttachmentView
+  extends Omit<CampMessageAttachmentView, 'runtimeProjectionState'> {
   state: 'ready' | 'error'
   errorMessage: string | null
   createdAt: string

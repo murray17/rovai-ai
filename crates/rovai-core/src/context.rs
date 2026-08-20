@@ -6758,7 +6758,9 @@ mod slow_tests {
                         public_only: false,
                         mention_user: false,
                         task_id: None,
+                        files: Vec::new(),
                     },
+                    frozen_files: Vec::new(),
                 },
                 &run_id,
                 execution_epoch,
@@ -8169,7 +8171,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.15".to_string(), 56, 1));
+        assert_eq!(contract, ("v1.17".to_string(), 57, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

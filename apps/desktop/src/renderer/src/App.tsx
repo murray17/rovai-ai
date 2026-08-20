@@ -3267,7 +3267,10 @@ export function optimisticCampMessage(
     sourceAgentRunId: null,
     body: draft.body,
     content: draft.content,
-    attachments: draft.attachments,
+    attachments: draft.attachments.map((attachment) => ({
+      ...attachment,
+      runtimeProjectionState: 'pending' as const
+    })),
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
     addressedAgentIds,
     replyToCampMessageId: draft.replyIntent?.replyToCampMessageId ?? null,

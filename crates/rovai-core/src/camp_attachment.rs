@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    camp_attachment_publication::AuthorityAttachment,
     camp_content::{
         StructuredCampMessageContent, StructuredCampMessageSegment, has_all_members_mention,
         member_mention_ids, normalize_content, render_current_plain_text,
@@ -181,6 +182,120 @@ impl CampAttachmentStore {
         ensure_directory(&root)?;
         restrict_discovery(&root)?;
         Ok(root)
+    }
+
+    pub fn freeze_agent_sources(
+        &self,
+        camp_id: &str,
+        requested_paths: &[String],
+        execution_workspace: &Path,
+        run_tmp: &Path,
+    ) -> Result<Vec<AuthorityAttachment>> {
+        CampId::parse(camp_id)?;
+        if requested_paths.len() > MAX_PREPARED_ATTACHMENTS {
+            anyhow::bail!("At most 10 files may be attached to one message");
+        }
+        let workspace_root = fs::canonicalize(execution_workspace)
+            .context("AgentRun execution workspace is unavailable")?;
+        let run_tmp_root = fs::canonicalize(run_tmp).context("ROVAI_RUN_TMP is unavailable")?;
+        let camp_root = self.camp_root(camp_id)?;
+        allow_directory_update(&camp_root)?;
+        let mut frozen = Vec::with_capacity(requested_paths.len());
+        let freeze_result = (|| -> Result<()> {
+            let mut total_bytes = 0_u64;
+            for requested in requested_paths {
+                let requested = Path::new(requested);
+                let source = if requested.is_absolute() {
+                    requested.to_path_buf()
+                } else {
+                    workspace_root.join(requested)
+                };
+                if source.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::ParentDir | std::path::Component::CurDir
+                    )
+                }) {
+                    anyhow::bail!("Attachment source contains an unsafe path component");
+                }
+                let canonical_source = fs::canonicalize(&source)
+                    .with_context(|| format!("Attachment source is unavailable: {requested:?}"))?;
+                let (admitted_root, checked_source) =
+                    if canonical_source.starts_with(&workspace_root) {
+                        let relative = if requested.is_absolute() {
+                            source
+                                .strip_prefix(execution_workspace)
+                                .or_else(|_| source.strip_prefix(&workspace_root))
+                                .context("Attachment source uses an unsafe workspace root alias")?
+                        } else {
+                            requested
+                        };
+                        (&workspace_root, workspace_root.join(relative))
+                    } else if canonical_source.starts_with(&run_tmp_root) {
+                        let relative = source
+                            .strip_prefix(run_tmp)
+                            .or_else(|_| source.strip_prefix(&run_tmp_root))
+                            .context("Attachment source uses an unsafe ROVAI_RUN_TMP root alias")?;
+                        (&run_tmp_root, run_tmp_root.join(relative))
+                    } else {
+                        anyhow::bail!(
+                            "Attachment source is outside the AgentRun workspace and ROVAI_RUN_TMP"
+                        );
+                    };
+                reject_symlink_path(admitted_root, &checked_source)?;
+                let source_name = canonical_source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .context("Attachment source has no UTF-8 display name")?;
+                let display_name = normalize_display_name(source_name)?;
+                let attachment_id = Uuid::new_v4().to_string();
+                let attachment_directory = camp_root.join(&attachment_id);
+                ensure_directory(&attachment_directory)?;
+                let destination = attachment_directory.join(&display_name);
+                let prepared = copy_and_inspect(&canonical_source, &destination)?;
+                total_bytes = total_bytes
+                    .checked_add(prepared.byte_size)
+                    .context("Agent attachment byte total overflow")?;
+                if total_bytes > MAX_DRAFT_ATTACHMENT_BYTES {
+                    anyhow::bail!("Attachments exceed the 64 MiB aggregate limit");
+                }
+                write_attachment_metadata(&attachment_directory, &prepared)?;
+                restrict_discovery(&attachment_directory)?;
+                frozen.push(AuthorityAttachment {
+                    attachment_id,
+                    display_name,
+                    media_type: prepared.media_type,
+                    byte_size: prepared.byte_size,
+                    content_digest: prepared.content_digest,
+                    storage_path: prepared.path,
+                    preview_kind: prepared.preview_kind,
+                });
+            }
+            Ok(())
+        })();
+        let _ = restrict_discovery(&camp_root);
+        if let Err(error) = freeze_result {
+            for attachment in &frozen {
+                if let Some(directory) = attachment.storage_path.parent() {
+                    cleanup_unowned_attachment(&camp_root, directory);
+                }
+            }
+            return Err(error);
+        }
+        Ok(frozen)
+    }
+
+    pub fn cleanup_unowned_agent_sources(&self, camp_id: &str, frozen: &[AuthorityAttachment]) {
+        let Ok(camp_root) = self.camp_root(camp_id) else {
+            return;
+        };
+        let _ = allow_directory_update(&camp_root);
+        for attachment in frozen {
+            if let Some(directory) = attachment.storage_path.parent() {
+                cleanup_unowned_attachment(&camp_root, directory);
+            }
+        }
+        let _ = restrict_discovery(&camp_root);
     }
 
     pub fn load_draft(&self, database: &Database, camp_id: &str) -> Result<CampComposerDraftView> {
@@ -962,7 +1077,7 @@ impl CampAttachmentStore {
                 UNION ALL
                 SELECT storage_path, media_type, byte_size, preview_kind
                 FROM message_attachment
-                WHERE id = ?1
+                WHERE id = ?1 AND runtime_projection_state = 'available'
                 LIMIT 1
                 "#,
                 [attachment_id],
@@ -1096,6 +1211,20 @@ impl CampAttachmentStore {
         }
         Ok(camps.len())
     }
+}
+
+fn reject_symlink_path(admitted_root: &Path, requested_source: &Path) -> Result<()> {
+    let relative = requested_source
+        .strip_prefix(admitted_root)
+        .context("Attachment source escaped its admitted root")?;
+    let mut current = admitted_root.to_path_buf();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        if fs::symlink_metadata(&current)?.file_type().is_symlink() {
+            anyhow::bail!("Attachment source path contains a symbolic link");
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn inspect_runtime_attachment_copy(path: &Path) -> Result<RuntimeAttachmentCopyReceipt> {
@@ -3259,6 +3388,98 @@ fn sync_parent(_path: &Path) -> Result<()> {
     // directory-fsync primitive. Files are flushed before MOVEFILE_WRITE_THROUGH
     // commits their same-directory rename in commit_temporary.
     Ok(())
+}
+
+#[cfg(test)]
+mod agent_source_tests {
+    use super::*;
+
+    #[test]
+    fn agent_sources_are_frozen_only_from_the_exact_run_workspace_or_tmp() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-agent-attachment-source-test-{}",
+            Uuid::new_v4()
+        ));
+        let workspace = directory.join("workspace");
+        let run_tmp = directory.join("run-tmp");
+        let outside = directory.join("outside");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&run_tmp).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(workspace.join("workspace.txt"), b"workspace source").unwrap();
+        fs::write(run_tmp.join("generated.txt"), b"run tmp source").unwrap();
+        fs::write(outside.join("secret.txt"), b"outside source").unwrap();
+
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let store = CampAttachmentStore::new(&directory);
+        let frozen = store
+            .freeze_agent_sources(
+                camp_id,
+                &[
+                    "workspace.txt".to_string(),
+                    run_tmp.join("generated.txt").to_string_lossy().into_owned(),
+                ],
+                &workspace,
+                &run_tmp,
+            )
+            .unwrap();
+        assert_eq!(frozen.len(), 2);
+        assert_eq!(
+            fs::read(&frozen[0].storage_path).unwrap(),
+            b"workspace source"
+        );
+        assert_eq!(
+            fs::read(&frozen[1].storage_path).unwrap(),
+            b"run tmp source"
+        );
+        fs::write(workspace.join("workspace.txt"), b"changed later").unwrap();
+        assert_eq!(
+            fs::read(&frozen[0].storage_path).unwrap(),
+            b"workspace source"
+        );
+
+        assert!(
+            store
+                .freeze_agent_sources(
+                    camp_id,
+                    &["../outside/secret.txt".to_string()],
+                    &workspace,
+                    &run_tmp,
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .freeze_agent_sources(
+                    camp_id,
+                    &[outside.join("secret.txt").to_string_lossy().into_owned()],
+                    &workspace,
+                    &run_tmp,
+                )
+                .is_err()
+        );
+
+        #[cfg(unix)]
+        {
+            let linked_secret = workspace.join("linked-secret.txt");
+            std::os::unix::fs::symlink(outside.join("secret.txt"), &linked_secret).unwrap();
+            assert!(
+                store
+                    .freeze_agent_sources(
+                        camp_id,
+                        &["linked-secret.txt".to_string()],
+                        &workspace,
+                        &run_tmp,
+                    )
+                    .is_err()
+            );
+            fs::remove_file(linked_secret).unwrap();
+        }
+
+        store.cleanup_unowned_agent_sources(camp_id, &frozen);
+        make_owned_tree_removable(&directory).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 #[cfg(all(test, windows))]

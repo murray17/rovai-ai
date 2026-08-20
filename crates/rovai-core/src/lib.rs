@@ -7,6 +7,7 @@ pub mod builtin_tool_cli_output;
 pub mod builtin_tool_evidence_projection;
 pub mod builtin_tool_transport;
 pub mod camp_attachment;
+pub mod camp_attachment_publication;
 pub mod camp_attachment_view;
 pub mod camp_content;
 pub mod camp_history;

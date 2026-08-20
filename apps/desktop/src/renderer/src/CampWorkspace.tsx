@@ -26,6 +26,7 @@ import type {
   TaskStatus,
   TaskView,
   NavigationCampItem,
+  PreparedAttachmentView,
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
@@ -6246,14 +6247,18 @@ function AttachmentCard({
   onRemove,
   timeline = false
 }: {
-  attachment: CampMessageAttachmentView
+  attachment: CampMessageAttachmentView | PreparedAttachmentView
   onRemove?: () => void
   timeline?: boolean
 }): JSX.Element {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
+  const runtimeProjectionState = 'runtimeProjectionState' in attachment
+    ? attachment.runtimeProjectionState
+    : 'available'
+  const runtimeAvailable = runtimeProjectionState === 'available'
   useEffect(() => {
-    if (attachment.previewKind !== 'image') return
+    if (attachment.previewKind !== 'image' || !runtimeAvailable) return
     let active = true
     let objectUrl: string | null = null
     void window.rovai.composerAttachments.preview(attachment.id)
@@ -6275,7 +6280,14 @@ function AttachmentCard({
       active = false
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
-  }, [attachment.id, attachment.previewKind])
+  }, [attachment.id, attachment.previewKind, runtimeAvailable])
+
+  const projectionLabel = runtimeProjectionState === 'failed'
+    ? '队员读取不可用'
+    : runtimeProjectionState === 'pending'
+      || runtimeProjectionState === 'recovery_required'
+      ? '正在准备供队员读取'
+      : null
 
   const content = (
     <>
@@ -6289,17 +6301,20 @@ function AttachmentCard({
       <span className="attachment-copy">
         <strong title={attachment.displayName}>{attachment.displayName}</strong>
         <small>
-          {attachment.kind === 'directory'
+          {projectionLabel ?? (attachment.kind === 'directory'
             ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
-            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`}
+            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`)}
         </small>
       </span>
     </>
   )
 
   return (
-    <div className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''}`}>
-      {previewUrl
+    <div
+      className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
+      aria-label={projectionLabel ? `${attachment.displayName}：${projectionLabel}` : undefined}
+    >
+      {previewUrl && runtimeAvailable
         ? (
             <Dialog.Root>
               <Dialog.Trigger asChild>

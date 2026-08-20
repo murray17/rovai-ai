@@ -2,8 +2,8 @@ import { defineBenchmarkProfile } from '../execution/suite.mjs'
 import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
-  version: 'v1.15',
-  projectionSchemaVersion: 56
+  version: 'v1.17',
+  projectionSchemaVersion: 57
 })
 
 const criteria = [
@@ -59,12 +59,13 @@ const criteria = [
   criterion('CCC-015', 'Self-authored recent messages are excluded before the top-15 and omission aggregate', [
     test('crates/rovai-core/src/context.rs', 'recent_public_messages_filter_self_before_limit_and_omission_aggregation')
   ]),
-  criterion('CCC-016', 'Attachment Context freezes stable semantics while rebuild identity, publication copy, Run admission, and per-Camp publication remain independently fenced', [
+  criterion('CCC-016', 'Attachment publication commits semantics before asynchronous projection, gates Delivery on resolution, and terminally settles failed source projection', [
     test('crates/rovai-core/src/camp_attachment_view.rs', 'rollback_append_only_validation_and_controlled_rebuild_preserve_committed_entries'),
     test('crates/rovai-core/src/camp_attachment_view.rs', 'publication_copy_phase_releases_the_shared_database_mutex'),
-    test('crates/rovai-core/src/camp_attachment_view.rs', 'same_camp_allows_only_one_nonterminal_publish_operation'),
+    test('crates/rovai-core/src/camp_attachment_view.rs', 'semantic_publication_success_commits_a_verified_resolution_ledger'),
+    test('crates/rovai-core/src/camp_attachment_view.rs', 'terminal_projection_failure_tombstones_public_attachment_and_releases_intent'),
+    test('crates/rovai-core/src/team_tool.rs', 'attachment_send_returns_real_ids_and_terminal_projection_failure_settles_without_attempt'),
     test('crates/rovai-core/src/db.rs', 'v100_backfills_stable_catalog_and_terminalizes_old_nonterminal_runs'),
-    test('crates/rovai-core/src/db.rs', 'v101_serializes_nonterminal_publish_operations_per_camp'),
     test('crates/rovai-core/src/main.rs', 'agent_run_claim_waits_for_attachment_read_admission_and_retains_it')
   ])
 ]
@@ -75,7 +76,7 @@ export const CURRENT_CONTRACT_PREREQUISITES = Object.freeze([
     evidence: test('crates/rovai-core/src/collaboration.rs', 'agent_task_updates_respect_lead_and_assignee_authority')
   },
   {
-    id: 'built-in-transport-v17',
+    id: 'built-in-transport-v18',
     evidence: test('crates/rovai-core/src/builtin_tool_transport.rs', 'list_and_describe_share_one_digest')
   },
   {
@@ -88,7 +89,7 @@ export const CURRENT_CONTRACT_CRITERIA = Object.freeze(criteria)
 
 export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
   id: 'current-contract-conformance',
-  version: '1.15.0',
+  version: '1.17.0',
   lane: 'contract-conformance',
   hardOutcomeDefinition: {
     validity: 'deterministic_source_and_harness_valid',
@@ -106,8 +107,8 @@ export const CURRENT_CONTRACT_PROFILE = defineBenchmarkProfile({
     compositeScore: false
   },
   suite: {
-    id: 'rovai-v1.15-current-contract',
-    version: '1.15.0',
+    id: 'rovai-v1.17-current-contract',
+    version: '1.17.0',
     shuffle: false,
     rounds: [{ id: 'deterministic', ordinal: 1 }],
     cases: criteria.map((entry) => ({

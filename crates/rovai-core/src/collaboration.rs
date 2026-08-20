@@ -14,6 +14,7 @@ pub const DURABLE_TASK_CONTRACT_VERSION: u32 = 3;
 use crate::{
     agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
     camp_attachment::consume_prepared_attachments,
+    camp_attachment_publication::CampAttachmentPublicationCoordinator,
     camp_attachment_view::commit_publication_in_message_transaction,
     camp_content::{
         StructuredCampMessageContent, StructuredCampMessageSegment, canonical_content_digest,
@@ -2128,7 +2129,8 @@ impl CollaborationService {
                     body: &submission.body,
                     structured_content: &submission.structured_content,
                     prepared_attachment_ids: &submission.prepared_attachment_ids,
-                    attachment_publication_operation_id,
+                    legacy_attachment_publication_operation_id: attachment_publication_operation_id,
+                    draft_revision: envelope.payload.draft_revision,
                     address_mode: submission.address.mode(),
                     reply_to_camp_message_id: submission.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
@@ -2434,7 +2436,8 @@ struct QueueCampMessageInput<'a> {
     body: &'a str,
     structured_content: &'a [StructuredCampMessageSegment],
     prepared_attachment_ids: &'a [String],
-    attachment_publication_operation_id: Option<&'a str>,
+    legacy_attachment_publication_operation_id: Option<&'a str>,
+    draft_revision: i64,
     address_mode: &'a str,
     reply_to_camp_message_id: Option<&'a str>,
     resolution: &'a AddressResolution,
@@ -2589,12 +2592,18 @@ fn queue_camp_message_and_runs(
             input.now,
         ],
     )?;
-    commit_publication_in_message_transaction(
-        transaction,
-        input.attachment_publication_operation_id,
-        input.camp_id,
-        input.prepared_attachment_ids,
-    )?;
+    let attachment_publication = if input.legacy_attachment_publication_operation_id.is_none() {
+        CampAttachmentPublicationCoordinator.commit_composer_intent(
+            transaction,
+            input.camp_id,
+            input.camp_message_id,
+            input.command_id,
+            input.draft_revision,
+            input.prepared_attachment_ids,
+        )?
+    } else {
+        None
+    };
     consume_prepared_attachments(
         transaction,
         input.camp_id,
@@ -2602,6 +2611,20 @@ fn queue_camp_message_and_runs(
         input.prepared_attachment_ids,
         input.now,
     )?;
+    if let Some(operation_id) = input.legacy_attachment_publication_operation_id {
+        commit_publication_in_message_transaction(
+            transaction,
+            Some(operation_id),
+            input.camp_id,
+            input.prepared_attachment_ids,
+        )?;
+    } else if let Some(publication) = attachment_publication.as_ref() {
+        CampAttachmentPublicationCoordinator.bind_message_attachments(
+            transaction,
+            input.camp_message_id,
+            publication,
+        )?;
+    }
     index_camp_message(
         transaction,
         input.camp_message_id,

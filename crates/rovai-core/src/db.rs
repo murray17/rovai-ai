@@ -48,8 +48,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.15";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 56;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.17";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 57;
+const V102_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
+const V102_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 56;
 const V101_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
 const V101_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 55;
 const V100_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
@@ -146,6 +148,7 @@ struct CurrentMigrationState {
     v99: bool,
     v100: bool,
     v101: bool,
+    v102: bool,
 }
 
 impl CurrentMigrationState {
@@ -155,6 +158,42 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102;
+        }
+        if self.v102 {
+            return false;
+        }
+        if contract == V102_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V102_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -871,7 +910,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 98),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 99),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 100),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 101)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 101),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 102)
         "#,
         [],
         |row| {
@@ -908,6 +948,7 @@ fn load_current_migration_state(
                 v99: row.get(29)?,
                 v100: row.get(30)?,
                 v101: row.get(31)?,
+                v102: row.get(32)?,
             })
         },
     )
@@ -2338,6 +2379,9 @@ impl Database {
             if !self.schema_migration_applied(101)? {
                 self.migrate_single_camp_publication_v101()?;
             }
+            if !self.schema_migration_applied(102)? {
+                self.migrate_unified_attachment_publication_v102()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2690,6 +2734,9 @@ impl Database {
         }
         if !self.schema_migration_applied(101)? {
             self.migrate_single_camp_publication_v101()?;
+        }
+        if !self.schema_migration_applied(102)? {
+            self.migrate_unified_attachment_publication_v102()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -13474,6 +13521,238 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_unified_attachment_publication_v102(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            let current_delivery_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_delivery_schema =
+                if current_delivery_schema.contains("CREATE TABLE \"message_delivery\"") {
+                    current_delivery_schema.replacen(
+                        "CREATE TABLE \"message_delivery\"",
+                        "CREATE TABLE message_delivery_v102",
+                        1,
+                    )
+                } else {
+                    current_delivery_schema.replacen(
+                        "CREATE TABLE message_delivery",
+                        "CREATE TABLE message_delivery_v102",
+                        1,
+                    )
+                };
+            let mut delivery_v102 = renamed_delivery_schema
+                .replace(
+                    "REFERENCES message_delivery(id)",
+                    "REFERENCES message_delivery_v102(id)",
+                )
+                .replacen(
+                    "'materialized', 'terminal'",
+                    "'materialized', 'projection_blocked', 'terminal'",
+                    1,
+                )
+                .replacen(
+                    "(dispatch_attempt_count = 0 AND dispatch_phase = 'never_attempted')",
+                    "(dispatch_attempt_count = 0 AND dispatch_phase IN ('never_attempted', 'projection_blocked'))\n                    OR (status = 'failed' AND dispatch_attempt_count = 0\n                        AND dispatch_phase = 'terminal'\n                        AND failure_code = 'attachment_projection_failed')",
+                    1,
+                );
+            let delivery_projection_anchor =
+                "                    target_conversation_id TEXT REFERENCES conversation(id),";
+            let projection_columns = r#"                    pre_dispatch_gate TEXT
+                        CHECK(pre_dispatch_gate IS NULL OR pre_dispatch_gate = 'attachment_projection'),
+                    projection_operation_id TEXT
+                        REFERENCES camp_attachment_view_operation(id),
+"#;
+            let projection_position = delivery_v102
+                .find(delivery_projection_anchor)
+                .context("v102 could not locate the Message Delivery projection seam")?;
+            delivery_v102.insert_str(projection_position, projection_columns);
+            if !delivery_v102.contains("CREATE TABLE message_delivery_v102")
+                || !delivery_v102.contains("'projection_blocked'")
+                || !delivery_v102.contains("pre_dispatch_gate")
+            {
+                anyhow::bail!("v102 could not rebuild the Message Delivery v5 schema");
+            }
+            let delivery_columns = table_columns(&transaction, "message_delivery")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE message_attachment ADD COLUMN
+                    runtime_projection_state TEXT NOT NULL DEFAULT 'available'
+                    CHECK(runtime_projection_state IN (
+                        'pending','available','recovery_required','failed'
+                    ));
+                ALTER TABLE message_attachment ADD COLUMN
+                    publication_operation_id TEXT
+                        REFERENCES camp_attachment_view_operation(id);
+                ALTER TABLE message_attachment ADD COLUMN
+                    publication_semantic_revision INTEGER
+                        CHECK(publication_semantic_revision IS NULL
+                              OR publication_semantic_revision >= 1);
+
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    semantic_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK(semantic_revision >= 0);
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    resolved_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK(resolved_revision >= 0 AND resolved_revision <= semantic_revision);
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    resolution_digest TEXT NOT NULL DEFAULT
+                        '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945';
+
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    source_kind TEXT NOT NULL DEFAULT 'legacy'
+                        CHECK(source_kind IN ('legacy','composer','agent'));
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    camp_message_id TEXT REFERENCES camp_message(id);
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    semantic_revision INTEGER
+                        CHECK(semantic_revision IS NULL OR semantic_revision >= 1);
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    resolution_state TEXT NOT NULL DEFAULT 'unresolved'
+                        CHECK(resolution_state IN ('unresolved','available','failed'));
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    resolution_ledger_digest TEXT;
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    terminal_failure_code TEXT;
+
+                CREATE TABLE camp_attachment_publication_resolution (
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    semantic_revision INTEGER NOT NULL CHECK(semantic_revision >= 1),
+                    operation_id TEXT REFERENCES camp_attachment_view_operation(id),
+                    outcome TEXT NOT NULL CHECK(outcome IN ('available','failed')),
+                    entry_digest TEXT,
+                    tombstone_digest TEXT,
+                    failure_code TEXT,
+                    resolved_at TEXT NOT NULL,
+                    PRIMARY KEY(camp_id, semantic_revision),
+                    CHECK(
+                        (outcome = 'available' AND entry_digest IS NOT NULL
+                         AND tombstone_digest IS NULL AND failure_code IS NULL)
+                        OR
+                        (outcome = 'failed' AND entry_digest IS NULL
+                         AND tombstone_digest IS NOT NULL AND failure_code IS NOT NULL)
+                    )
+                );
+                "#,
+            )?;
+
+            transaction.execute(
+                r#"
+                UPDATE camp_attachment_view
+                SET semantic_revision = catalog_revision,
+                    resolved_revision = catalog_revision,
+                    resolution_digest = semantic_catalog_digest
+                "#,
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_attachment_view_operation
+                SET resolution_state = CASE
+                        WHEN status IN ('completed','committed') THEN 'available'
+                        WHEN status = 'rolled_back' THEN 'failed'
+                        ELSE 'unresolved'
+                    END
+                "#,
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO camp_attachment_publication_resolution(
+                    camp_id, semantic_revision, operation_id, outcome,
+                    entry_digest, tombstone_digest, failure_code, resolved_at
+                )
+                SELECT camp_id, catalog_revision, NULL, 'available',
+                       semantic_catalog_digest, NULL, NULL, updated_at
+                FROM camp_attachment_view
+                WHERE catalog_revision > 0
+                "#,
+                [],
+            )?;
+
+            transaction.execute_batch(&delivery_v102)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO message_delivery_v102({delivery_columns}, pre_dispatch_gate, projection_operation_id) \
+                 SELECT {delivery_columns}, NULL, NULL FROM message_delivery;"
+            ))?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE message_delivery;
+                ALTER TABLE message_delivery_v102 RENAME TO message_delivery;
+
+                CREATE INDEX message_delivery_recipient_pending_idx
+                    ON message_delivery(camp_id, recipient_agent_id, queue_sequence)
+                    WHERE status = 'pending';
+                CREATE INDEX message_delivery_wait_condition_idx
+                    ON message_delivery(recipient_agent_id, wait_condition, queue_sequence)
+                    WHERE status = 'pending' AND wait_condition IS NOT NULL;
+                CREATE INDEX message_delivery_camp_turn_idx
+                    ON message_delivery(camp_turn_id, status, created_at);
+                CREATE INDEX message_delivery_message_idx
+                    ON message_delivery(message_id, recipient_canonical_position);
+                CREATE INDEX message_delivery_gather_idx
+                    ON message_delivery(gather_id, delivery_kind, status, created_at)
+                    WHERE gather_id IS NOT NULL;
+                CREATE INDEX message_delivery_gather_capture_source_idx
+                    ON message_delivery(
+                        gather_dispatch_delivery_id, source_agent_run_id,
+                        status, created_at
+                    )
+                    WHERE dispatch_disposition = 'gather_captured';
+                CREATE INDEX message_delivery_projection_gate_idx
+                    ON message_delivery(projection_operation_id, recipient_agent_id, queue_sequence)
+                    WHERE dispatch_phase = 'projection_blocked';
+
+                DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;
+                DROP INDEX IF EXISTS camp_attachment_view_open_publish_camp_idx;
+                CREATE UNIQUE INDEX camp_attachment_publication_revision_unique
+                    ON camp_attachment_view_operation(camp_id, semantic_revision)
+                    WHERE semantic_revision IS NOT NULL;
+                CREATE INDEX camp_attachment_publication_writer_intent_idx
+                    ON camp_attachment_view_operation(camp_id, semantic_revision, created_at, id)
+                    WHERE resolution_state = 'unresolved';
+                CREATE INDEX message_attachment_runtime_projection_idx
+                    ON message_attachment(camp_id, runtime_projection_state, created_at, id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.17', projection_schema_version = 57,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (102, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v102 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -17876,7 +18155,140 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
+    let has_v102: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 102)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v102 {
+        return;
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+
+    let current_delivery_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut source_delivery_schema = current_delivery_schema
+        .replacen(
+            "CREATE TABLE message_delivery",
+            "CREATE TABLE message_delivery_v101_source",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"message_delivery\"",
+            "CREATE TABLE message_delivery_v101_source",
+            1,
+        )
+        .replace(
+            "REFERENCES message_delivery(id)",
+            "REFERENCES message_delivery_v101_source(id)",
+        )
+        .replacen(
+            "'materialized', 'projection_blocked', 'terminal'",
+            "'materialized', 'terminal'",
+            1,
+        )
+        .replacen(
+            "(dispatch_attempt_count = 0 AND dispatch_phase IN ('never_attempted', 'projection_blocked'))\n                    OR (status = 'failed' AND dispatch_attempt_count = 0\n                        AND dispatch_phase = 'terminal'\n                        AND failure_code = 'attachment_projection_failed')",
+            "(dispatch_attempt_count = 0 AND dispatch_phase = 'never_attempted')",
+            1,
+        );
+    let projection_start = source_delivery_schema
+        .find("pre_dispatch_gate TEXT")
+        .and_then(|offset| source_delivery_schema[..offset].rfind('\n'))
+        .expect("v102 test downgrade should locate projection gate columns");
+    let projection_end = source_delivery_schema[projection_start..]
+        .find("target_conversation_id TEXT")
+        .map(|offset| projection_start + offset)
+        .expect("v102 test downgrade should locate the post-gate column");
+    let projection_end_line = source_delivery_schema[..projection_end]
+        .rfind('\n')
+        .map(|offset| offset + 1)
+        .expect("v102 test downgrade should retain post-gate indentation");
+    source_delivery_schema.replace_range(projection_start + 1..projection_end_line, "");
+    assert!(source_delivery_schema.contains("CREATE TABLE message_delivery_v101_source"));
+    assert!(!source_delivery_schema.contains("projection_blocked"));
+    assert!(!source_delivery_schema.contains("pre_dispatch_gate"));
+
+    connection.execute_batch(&source_delivery_schema).unwrap();
+    let delivery_columns = table_columns(connection, "message_delivery")
+        .unwrap()
+        .into_iter()
+        .filter(|column| {
+            !matches!(
+                column.as_str(),
+                "pre_dispatch_gate" | "projection_operation_id"
+            )
+        })
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    connection
+        .execute_batch(&format!(
+            r#"
+            INSERT INTO message_delivery_v101_source({delivery_columns})
+            SELECT {delivery_columns} FROM message_delivery;
+            DROP TABLE message_delivery;
+            ALTER TABLE message_delivery_v101_source RENAME TO message_delivery;
+
+            DROP TABLE camp_attachment_publication_resolution;
+            DROP INDEX IF EXISTS camp_attachment_publication_revision_unique;
+            DROP INDEX IF EXISTS camp_attachment_publication_writer_intent_idx;
+            DROP INDEX IF EXISTS message_attachment_runtime_projection_idx;
+
+            ALTER TABLE message_attachment DROP COLUMN publication_semantic_revision;
+            ALTER TABLE message_attachment DROP COLUMN publication_operation_id;
+            ALTER TABLE message_attachment DROP COLUMN runtime_projection_state;
+            ALTER TABLE camp_attachment_view DROP COLUMN resolution_digest;
+            ALTER TABLE camp_attachment_view DROP COLUMN resolved_revision;
+            ALTER TABLE camp_attachment_view DROP COLUMN semantic_revision;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN terminal_failure_code;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN resolution_ledger_digest;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN resolution_state;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN semantic_revision;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN camp_message_id;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN source_kind;
+
+            CREATE INDEX camp_attachment_view_open_publish_camp_idx
+                ON camp_attachment_view_operation(camp_id, status, created_at, id)
+                WHERE kind = 'publish'
+                  AND status NOT IN ('completed','rolled_back');
+            CREATE TRIGGER camp_attachment_view_single_open_publish_insert
+            BEFORE INSERT ON camp_attachment_view_operation
+            WHEN NEW.kind = 'publish'
+              AND NEW.status NOT IN ('completed','rolled_back')
+              AND EXISTS(
+                  SELECT 1 FROM camp_attachment_view_operation AS existing
+                  WHERE existing.camp_id = NEW.camp_id
+                    AND existing.kind = 'publish'
+                    AND existing.status NOT IN ('completed','rolled_back')
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'camp_attachment_view_busy');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.15', projection_schema_version = 56
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 102;
+            PRAGMA foreign_keys = ON;
+            "#,
+        ))
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v99_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v102_source_for_test(connection);
     let has_v100: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 100)",
@@ -18399,6 +18811,7 @@ mod tests {
             v99: version >= 99,
             v100: version >= 100,
             v101: version >= 101,
+            v102: version >= 102,
         }
     }
 
@@ -18409,6 +18822,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                102,
+            ),
+            (
+                "v1.15/schema-56",
+                V102_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V102_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 101,
             ),
             (
@@ -18651,7 +19070,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(101));
+        assert_eq!(state, migration_state_through(102));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -19607,6 +20026,10 @@ mod tests {
             .unwrap();
         assert!(manifest_schema.contains("context_manifest_version IN (19, 20, 21)"));
         assert!(manifest_schema.contains("camp_attachment_view_receipt_version = 2"));
+        database.migrate_single_camp_publication_v101().unwrap();
+        database
+            .migrate_unified_attachment_publication_v102()
+            .unwrap();
         view.verify_camp_ready(&database, &camp_id).unwrap();
 
         view.remove_camp_view(&mut database, &camp_id).unwrap();
@@ -20256,6 +20679,10 @@ mod tests {
         );
 
         database.migrate_semantic_attachment_receipt_v100().unwrap();
+        database.migrate_single_camp_publication_v101().unwrap();
+        database
+            .migrate_unified_attachment_publication_v102()
+            .unwrap();
         let view = CampAttachmentViewStore::for_test(&database).unwrap();
         view.reconcile(&mut database, &attachment_store).unwrap();
         assert_eq!(
@@ -25094,7 +25521,8 @@ mod tests {
         assert_migrations_applied(
             connection,
             &[
-                58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100,
+                58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
+                102,
             ],
         );
         assert_schema_objects(
@@ -25116,6 +25544,7 @@ mod tests {
                 "camp_attachment_view_entry",
                 "camp_attachment_view_operation",
                 "camp_attachment_view_operation_entry",
+                "camp_attachment_publication_resolution",
             ],
             true,
         );
@@ -25136,7 +25565,13 @@ mod tests {
         assert_schema_objects(
             connection,
             "index",
-            &["message_delivery_gather_capture_source_idx"],
+            &[
+                "message_delivery_gather_capture_source_idx",
+                "message_delivery_projection_gate_idx",
+                "camp_attachment_publication_revision_unique",
+                "camp_attachment_publication_writer_intent_idx",
+                "message_attachment_runtime_projection_idx",
+            ],
             true,
         );
 
@@ -25207,7 +25642,42 @@ mod tests {
         assert_table_columns(
             connection,
             "camp_attachment_view",
-            &["catalog_revision", "semantic_catalog_digest"],
+            &[
+                "catalog_revision",
+                "semantic_catalog_digest",
+                "semantic_revision",
+                "resolved_revision",
+                "resolution_digest",
+            ],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "camp_attachment_view_operation",
+            &[
+                "source_kind",
+                "camp_message_id",
+                "semantic_revision",
+                "resolution_state",
+                "resolution_ledger_digest",
+                "terminal_failure_code",
+            ],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "message_attachment",
+            &[
+                "runtime_projection_state",
+                "publication_operation_id",
+                "publication_semantic_revision",
+            ],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "message_delivery",
+            &["pre_dispatch_gate", "projection_operation_id"],
             &[],
         );
         assert_table_columns(

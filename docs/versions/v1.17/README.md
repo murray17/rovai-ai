@@ -4,14 +4,14 @@ version: v1.17
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: planned
+implementation_status: implemented
 model_context_change: false
 last_updated: 2026-08-20
 ---
 
 # Rovai-ai v1.17：统一附件发布与 Agent 文件发送
 
-> 当前状态：设计已接受，实施与验收待完成。
+> 当前状态：设计、实施与仓库验收已完成；发布交付按实施计划执行。
 >
 > 前置版本：[v1.16 Camp 纯附件消息](../v1.16/README.md)。v1.16 已按完成事实冻结为
 > historical；其空正文、ready 附件发送和 Timeline 规则继续作为本版基线。
@@ -81,4 +81,3 @@ v12。Receipt 中的 catalog 明确定义为 Runtime-available catalog，failed 
 - [Camp Published Attachment View v3](../../contracts/camp-published-attachment-view-v3.md)
 - [Camp Message Send v11](../../contracts/camp-message-send-v11.md)
 - [Message Delivery v5](../../contracts/message-delivery-v5.md)
-

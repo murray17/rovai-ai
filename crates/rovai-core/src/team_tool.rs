@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::AdapterKind,
+    camp_attachment::MAX_PREPARED_ATTACHMENTS,
+    camp_attachment_publication::AuthorityAttachment,
     camp_history::{
         CAMP_LIST_TOOL_NAME, CAMP_READ_TOOL_NAME, CAMP_SEARCH_TOOL_NAME, HISTORY_SEARCH_TOOL_NAME,
     },
@@ -34,6 +36,7 @@ use crate::{
         PublicA2aOperation, SendPublicA2aMessage, dispatch_accepted_deliveries,
         persist_public_a2a_message,
     },
+    runtime::AgentRunWorkspace,
 };
 
 pub const TEAM_CREATE_TASK_TOOL_NAME: &str = "team.create_task";
@@ -75,6 +78,8 @@ pub struct CampMessageSendInput {
     #[serde(default)]
     pub public_only: bool,
     pub task_id: Option<String>,
+    #[serde(default)]
+    pub files: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -156,6 +161,7 @@ pub struct CampMessageSendCommand {
     mention_user: bool,
     agent_addressing_mode: AgentAddressingMode,
     task_id: Option<String>,
+    files: Vec<String>,
 }
 
 impl sealed::Sealed for CampMessageSendCommand {}
@@ -170,6 +176,7 @@ pub struct CampMessageSendInvocation {
     pub binding_credential: String,
     pub runtime_tool_call_id: String,
     pub input: CampMessageSendInput,
+    pub frozen_files: Vec<AuthorityAttachment>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -483,6 +490,56 @@ impl TeamToolService {
         )
     }
 
+    pub fn recorded_binding_command_exists(
+        &self,
+        database: &Database,
+        command_id: &str,
+    ) -> Result<bool> {
+        database
+            .connection()
+            .query_row(
+                r#"
+                SELECT EXISTS(
+                    SELECT 1 FROM event_log
+                    WHERE event_type = 'command.result' AND command_id = ?1
+                )
+                "#,
+                [command_id],
+                |row| row.get(0),
+            )
+            .map_err(Into::into)
+    }
+
+    pub fn agent_file_ingress_scope(
+        &self,
+        database: &Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+    ) -> Result<Option<(String, AgentRunWorkspace)>> {
+        let row = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT turn.camp_id, run.workspace_json
+                FROM agent_run AS run
+                JOIN camp_turn AS turn ON turn.id = run.camp_turn_id
+                WHERE run.id = ?1 AND run.execution_epoch = ?2
+                  AND run.status IN ('running','waiting')
+                "#,
+                params![agent_run_id, execution_epoch],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .optional()?;
+        row.map(|(camp_id, workspace_json)| {
+            let workspace_json = workspace_json.context("AgentRun workspace is unavailable")?;
+            let workspace = serde_json::from_str::<AgentRunWorkspace>(&workspace_json)
+                .context("AgentRun workspace is invalid")?;
+            workspace.validate()?;
+            Ok((camp_id, workspace))
+        })
+        .transpose()
+    }
+
     pub fn camp_message_send_input_schema() -> Value {
         json!({
             "type": "object",
@@ -516,6 +573,13 @@ impl TeamToolService {
                     "type": "string",
                     "minLength": 1,
                     "description": "Optional current Task link; exactly one effective recipient is required."
+                },
+                "files": {
+                    "type": "array",
+                    "maxItems": MAX_PREPARED_ATTACHMENTS,
+                    "uniqueItems": true,
+                    "items": {"type": "string", "minLength": 1},
+                    "description": "Optional AgentRun-local file or directory path; repeat --file to preserve attachment order."
                 }
             }
         })
@@ -1044,6 +1108,7 @@ impl TeamToolService {
                     invocation.input.public_only,
                 ),
                 task_id: invocation.input.task_id.clone(),
+                files: invocation.input.files.clone(),
             };
             let replay_envelope = CommandEnvelope {
                 command_id: command_id.clone(),
@@ -1060,6 +1125,12 @@ impl TeamToolService {
                 .gateway
                 .replay_if_recorded(database, &replay_envelope)?
                 .context("recorded public send disappeared before replay");
+        }
+        if invocation.input.files.len() != invocation.frozen_files.len() {
+            return Err(invocation_error(
+                "message.invalid_input",
+                "Every requested file must have one frozen Authority attachment",
+            ));
         }
 
         let sender = resolve_sender_identity(
@@ -1080,6 +1151,7 @@ impl TeamToolService {
                 invocation.input.public_only,
             ),
             task_id: invocation.input.task_id.clone(),
+            files: invocation.input.files.clone(),
         };
         let envelope = CommandEnvelope {
             command_id,
@@ -1143,12 +1215,14 @@ impl TeamToolService {
                     agent_addressing_mode: envelope.payload.agent_addressing_mode,
                     mention_user: envelope.payload.mention_user,
                     task_id: envelope.payload.task_id.as_deref(),
+                    attachments: &invocation.frozen_files,
                     operation: PublicA2aOperation::Send,
                 },
             )
         })?;
         if !execution.replayed
             && execution.result.status != crate::command::CommandResultStatus::Rejected
+            && invocation.frozen_files.is_empty()
         {
             let delivery_ids = execution.result.payload["deliveryIds"]
                 .as_array()
@@ -1314,6 +1388,7 @@ impl TeamToolService {
                     agent_addressing_mode: AgentAddressingMode::Automatic,
                     mention_user: false,
                     task_id: None,
+                    attachments: &[],
                     operation: PublicA2aOperation::Gather {
                         gather_id: &gather_id,
                         initiator_conversation_id: &initiator_conversation_id,
@@ -1644,6 +1719,25 @@ fn validate_public_send_invocation(invocation: &CampMessageSendInvocation) -> Re
             "taskId must not be empty when supplied",
         ));
     }
+    if invocation.input.files.len() > MAX_PREPARED_ATTACHMENTS
+        || invocation
+            .input
+            .files
+            .iter()
+            .any(|path| path.trim().is_empty())
+        || invocation
+            .input
+            .files
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            != invocation.input.files.len()
+    {
+        return Err(invocation_error(
+            "message.invalid_input",
+            "files must contain at most 10 unique non-empty paths",
+        ));
+    }
     Ok(())
 }
 
@@ -1908,12 +2002,11 @@ mod tests {
         context::ContextMaterialization,
         memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
         memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
-        message_delivery::{
-            DeliveryDispatchTrigger, RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
-        },
+        message_delivery::{DeliveryDispatchTrigger, dispatch_pending_for_recipient},
         runtime::{CancelCampTurnCommand, FailAgentRunCommand},
     };
     use crate::{
+        camp_attachment_view::CampAttachmentViewStore,
         collaboration::{
             AddCampMemberCommand, CollaborationService, CreateCampCommand, CreateTaskCommand,
             ExecutionRequest, TestCampMessageAddress, TestCampMessageCommand,
@@ -1933,7 +2026,9 @@ mod tests {
             MemoryRetrievalInvocation, MemoryRetrievalService, MemoryViewInput, MemoryViewOutput,
         },
         memory_tool::{MemoryToolService, MemoryWriteToolInput, MemoryWriteToolInvocation},
-        message_delivery::{CancelMessageDeliveryCommand, MessageDeliveryService},
+        message_delivery::{
+            CancelMessageDeliveryCommand, MessageDeliveryService, RetryMessageDeliveryCommand,
+        },
         runtime::{
             BindNativeSessionCommand, ClaimAgentRunCommand, ExecutionRuntimeService,
             MissingSendRecoveryBoundary, MissingSendRecoveryCandidate, SucceedAgentRunCommand,
@@ -2190,7 +2285,9 @@ mod tests {
                     mention_user: false,
                     public_only: false,
                     task_id: None,
+                    files: Vec::new(),
                 },
+                frozen_files: Vec::new(),
             }
         }
 
@@ -2730,6 +2827,129 @@ mod tests {
             .unwrap();
         assert!(durable_replay.replayed);
         assert_eq!(durable_replay.result.payload["messageId"], message_id);
+    }
+
+    #[test]
+    fn attachment_send_returns_real_ids_and_terminal_projection_failure_settles_without_attempt() {
+        let mut fixture = Fixture::new();
+        let service = TeamToolService::default();
+        let authority_path = fixture.directory.join("frozen-agent-file.txt");
+        std::fs::write(&authority_path, b"file").unwrap();
+        let attachment_id = Uuid::new_v4().to_string();
+        let mut invocation = fixture.public_send_invocation(
+            "attachment-send-real-identities",
+            "Review the attached file",
+            &["agent_2"],
+        );
+        invocation.input.files = vec!["frozen-agent-file.txt".to_string()];
+        invocation.frozen_files = vec![AuthorityAttachment {
+            attachment_id: attachment_id.clone(),
+            display_name: "frozen-agent-file.txt".to_string(),
+            media_type: "text/plain".to_string(),
+            byte_size: 4,
+            content_digest: "sha256:test-frozen-agent-file".to_string(),
+            storage_path: authority_path,
+            preview_kind: "none".to_string(),
+        }];
+
+        let sent = service
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        let message_id = sent.result.payload["messageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(Uuid::parse_str(&message_id).is_ok());
+        assert!(Uuid::parse_str(&delivery_id).is_ok());
+        let operation_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT publication_operation_id FROM message_attachment
+                WHERE id = ?1 AND camp_message_id = ?2
+                  AND runtime_projection_state = 'pending'
+                "#,
+                params![attachment_id, message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let gate: (String, i64, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT dispatch_phase, dispatch_attempt_count, pre_dispatch_gate
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            gate,
+            (
+                "projection_blocked".to_string(),
+                0,
+                Some("attachment_projection".to_string()),
+            )
+        );
+
+        let view = CampAttachmentViewStore::for_test(&fixture.database).unwrap();
+        assert_eq!(
+            view.resolve_semantic_publication_terminal_failure(
+                &mut fixture.database,
+                &operation_id,
+                "camp_attachment_view_source_invalid",
+            )
+            .unwrap(),
+            vec![(fixture.camp_id.clone(), "agent_2".to_string())]
+        );
+        let terminal: (String, String, i64, Option<String>, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, dispatch_phase, dispatch_attempt_count,
+                       pre_dispatch_gate, version
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(terminal.0, "failed");
+        assert_eq!(terminal.1, "terminal");
+        assert_eq!(terminal.2, 0);
+        assert_eq!(terminal.3, None);
+        let retry = MessageDeliveryService::default()
+            .retry(
+                &mut fixture.database,
+                &user_envelope(
+                    "retry-terminal-attachment-projection",
+                    Some(&fixture.camp_id),
+                    RetryMessageDeliveryCommand {
+                        delivery_id,
+                        expected_version: terminal.4,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(retry.result.status, CommandResultStatus::Rejected);
+        assert_eq!(retry.result.code, "message_delivery.retry_not_allowed");
     }
 
     #[test]
