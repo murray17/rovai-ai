@@ -50,7 +50,7 @@ Planned Shutdown and accepted-input recovery keep that authority.
 
 ## 4. Local IPC
 
-[Built-in Tool Transport v17](../contracts/builtin-tool-transport-v17.md) inherits v14's one discriminated endpoint. Windows Pipe
+[Built-in Tool Transport v18](../contracts/builtin-tool-transport-v18.md) inherits v14's one discriminated endpoint. Windows Pipe
 instances are private at creation, byte-mode, local-only and authenticated again by process/lease tokens. The listener
 creates the next secured instance before dispatching the connected one; inability to replenish closes admission.
 

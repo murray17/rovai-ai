@@ -82,9 +82,9 @@ last_updated: 2026-08-20
 ### 附件、首次运行与删除
 
 - Camp Attachment 是 `file | directory` 封闭联合。Core 负责分类、无 symlink 遍历、限制、复制、摘要和只读快照；一个目录作为一个层级附件全成全败，包含隐藏项和空目录。
-- Authority Attachment 始终位于 `<data_dir>/camp-attachments/`；Prepared Attachment 与 private metadata 只供 Core 使用。发送事务 commit 后的 Published Attachment 才是 Camp 公共资源，消息寻址、Prompt 选择、Run、Conversation 或 Session 都不缩小其 Camp-wide 枚举/读取授权。
-- Runtime 不读取 Authority Camp tree，而只获得实例隔离、可重建的 Camp Published Attachment View 精确 `attachments` 根。每个 Published Attachment 复制为稳定、只读的 View Entry；模型通过 mandatory `RUN_FACTS.campResources` 主动发现 catalog，显式 Context occurrence 只决定是否展示路径，不授予或撤销文件权。
-- 发布以短数据库锁冻结 CopyPlan/journal，释放全局 Database mutex 后在 Runtime 不可达 staging 中完成整组 copy/verify/fsync，再以短 CAS 进入 staged；同一 Camp 只允许一个非终态 publish operation，取得 mutation gate 后仍须复核 Draft 与 Prepared Attachment 集合，旧 staging 回滚不得删除其他 operation 已提交的 Entry。最终由 per-Camp mutation gate 与消息事务线性化。该 gate 与 Context freeze 和整次 Runtime launch/run read admission 互斥；Scheduler 必须先取得 read admission、再 Claim AgentRun，并把 guard 持有到 Run 生命周期结束。缺失/漂移先 fence Host 并受控整 Camp rebuild，不能回退到 Authority root、暴露 Draft 或在活跃 Host 背后静默补文件。
+- Authority Attachment 始终位于 `<data_dir>/camp-attachments/`；Prepared Attachment、Agent Run-local ingress 与 private metadata 只供 Core 使用。发送事务 commit 后的 `message_attachment` 才是 Camp 公共事实，消息寻址、Prompt、Run、Conversation 或 Session 都不缩小其 Camp-wide 可见性。
+- Runtime 不读取 Authority Camp tree，只获得实例隔离、可重建的 Published Attachment View 精确 `attachments` 根。只有 `runtime_projection_state = available` 的公共附件属于 Runtime Desired Catalog；`pending | recovery_required` 阻断新 Runtime admission，`failed` 保留公共/UI 事实但只有 resolution tombstone、没有 Runtime path。
+- Composer 与 Agent ingress 共享统一 publication coordinator：短事务先提交公共语义、revision、reservation、writer intent 与 gate，Worker 再按 Camp FIFO 在数据库锁外 copy/verify/fsync。Scheduler 必须先取得一次 read admission，再在同一数据库临界区确认无 writer intent并 Claim；完整 Run 复用该 admission。成功和 terminal failure 都推进 contiguous resolved revision，failed 不得被 rebuild 静默复活。
 - 首次安装 admission 与训练进度由 Electron Main 在 Core 启动前以私有版本化 Desktop 状态拥有；产品数据库存在性参与 clean/fail-closed 判定。Provisioning 通过可重试 checkpoint 幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成。
 - Camp 永久删除保持 User-only、exact-version 和单事务聚合删除。普通模式要求 quiescent；用户明确确认的 force 模式先持久化停止/隔离边界，再删除 Camp 聚合并异步清理受管资源，不能把未知 Runtime 外部效果宣称为已撤销。
 
@@ -199,7 +199,7 @@ last_updated: 2026-08-20
 - 每个正式 AgentRun 独占一个 Runtime 进程，内部作业使用临时独占进程；Adapter 明确声明哪些 Runtime 可进入 IdleWarm，one-shot/Burst 终态后关闭。Native Session 连续性不授予并行共享进程的资格。
 - `AgentRuntimeFleetManager` 是唯一正式进程所有者，内聚 spawn/reuse/stop/reap、唯一 lease、Resident accounting、TTL/LRU/Sweeper、Core generation 与崩溃清理。Adapter 生成 opaque compatibility digest 并证明 health/quiescence；Manager 不解析模型、权限、MCP 或 Runtime 私有字段。所有事件、释放、取消与迟到回调必须匹配不可复制的 `process_id + agent_run_id + execution_epoch + lease_generation`。
 - IdleWarm 复用必须精确匹配 `camp_id + agent_profile_id + runtime_compatibility_digest`；process digest 与 Native Session binding digest 是不同身份。Resident 的 per-member/global 配额只约束跨 Run 保留的 IdleWarm/BusyResident/Stopping，不阻止无兼容 Resident 时创建本 Run 独占且终态即关闭的 Burst。acquire 在一个锁下原子选择兼容空闲进程、Resident 容量或 Burst，必要时按 LRU 淘汰空闲 Resident。
-- Runtime compatibility 必须绑定当前 Camp Published Attachment View contract、精确 `attachments` root、visibility mode 和必要 generation。没有真实 live-append Probe 时一律 generation-fenced；Camp 附件追加在 mutation gate 内停止旧 Host。Runtime 不能收到 instance/Camps parent、其他 Camp 或 Authority attachment root。
+- Runtime compatibility 必须绑定 Camp Published Attachment View contract 3、精确 `attachments` root、visibility mode 和必要 generation。没有真实 live-append Probe 时一律 generation-fenced；View mutation 在 write admission 内停止旧 Host。Runtime 不能收到 pending/failed path、instance/Camps parent、其他 Camp 或 Authority attachment root。
 - Run 结束只有在输入结果已知、输出和 tool work 收敛、Team/Run lease 已解绑且 Adapter 能证明进程 quiescent/healthy 时才可进入 IdleWarm；否则必须关闭。Fleet 启动时必须同时启动单调时间 TTL 与 LRU Sweeper，配置变更、Camp 删除、成员永久移除、不健康和容量回收也会立即使精确 scope 失效/停止；已冻结活跃 Run 只标记 run 后退役，不被容量策略中断。
 - IdleWarm 可保留精确冻结的外部 MCP 投影、Runtime 内存、私有配置与其进程/连接直到 TTL、失效或容量回收；这不等于 AgentRun 终态即撤销外部凭据。空闲期没有活跃 Run lease，built-in/Team 调用 fail closed；不能证明安全保留精确字节时必须关闭整个 Runtime。
 - Fleet 是单一 Core generation 的内存状态，不写 SQLite、不跨重启接管。正常关闭停止并 reap 全部进程；崩溃清理只能在 owner record、旧 generation、进程组组长与命令身份均可证明时终止，不能仅凭 PID、路径或 UID 猜测性杀进程。
@@ -257,7 +257,7 @@ last_updated: 2026-08-20
 ### ContextManifest 与结构化 Run Facts
 
 - ContextManifest、模型输入 bytes、Runtime Input Delivery Evidence 和 Native Session/Run 状态是四个独立权威。Manifest 冻结模型实际可见选择、formatter/profile/section 版本、来源 digest、遗漏、水位和 exact compact payload digest；交付 evidence 记录 Runtime 实际接受。日志摘要、Run 状态或 Manifest 本身不能互相代替。
-- Manifest 的附件 receipt 只冻结 Camp ID、稳定相对 View path、attachment semantic identity 和 append-only catalog revision/digest；inode/device/file ID、root/Entry identity、publication operation、physical generation 与 physical catalog 只属于当前本机完整性和 Runtime Auth Receipt，不能决定语义相同的历史 Context 是否有效。
+- Manifest 的附件 receipt 只冻结 Camp ID、稳定相对 View path、available attachment semantic identity 和 append-only Runtime catalog revision/digest；failed tombstone 属于 Core resolution ledger而不产生模型路径。inode/device/file ID、root/Entry identity、publication operation、physical generation 与 physical catalog 只属于当前本机完整性和 Runtime Auth Receipt。
 - 模型投影可以 compact，但不得丢失、重命名或自由文本化 authoritative fact。稳定产品规则留在 Session Charter，per-Run 事实只出现一次；每个 schema/formatter/profile/manifest/section 版本跟随实际 owner 独立推进，不用一个全局数字伪造同步升级。
 - Shared Conversation 始终属于一个 Camp，动态 continuation 使用有界公共消息而不复制私有历史。每个新 Run 的 closed、typed `RUN_FACTS` 必须包含当前 Camp exact Published Attachment root、enumerate/read、scope 与 read-only 事实；Task reference、Session continuity、accepted-input/outcome uncertainty、Gather generation 和 delegation budget 继续作为可选事实。字段缺失与值 unknown 必须可区分。
 - Self-active Task snapshot 只选当前成员在当前 Camp 显式负责的非终态 Task，按 Profile 的稳定 order/limit/budget priority 冻结。真实空集合产生显式 empty snapshot；候选存在但被上限/预算全部排除时整段省略并记 aggregate omitted count，不泄露被排除 ID。Renderer/Skill 不得临时改排序。

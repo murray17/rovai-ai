@@ -14,7 +14,7 @@ last_updated: 2026-08-20
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v11](../contracts/runtime-launch-and-verification-v11.md)。实测版本和能力只由
+[Runtime Launch and Verification v12](../contracts/runtime-launch-and-verification-v12.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -105,7 +105,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v11](../contracts/runtime-launch-and-verification-v11.md)。
+[Runtime Launch and Verification v12](../contracts/runtime-launch-and-verification-v12.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -154,6 +154,11 @@ TRAE 的 `append_system_prompt` 已实测为独立 system message，但正式集
 tool→final 三条专项 Smoke 通过后启用，不从“Runtime 已支持”反向推断。
 
 ## 队员最高权限默认
+
+Runtime Host compatibility 还绑定 Camp Attachment View contract 3。Scheduler 在 Camp read admission 内、Claim
+之前检查持久 publication writer intent；存在 pending/recovery operation 时 Run 保持 queued。一次 dispatch 的
+Context freeze、Runtime authorization、Host acquire/resume 和 input delivery 复用同一 admission 与 verified
+authorization，不能在公平 writer 排队后再次申请 read gate，也不能对同一 View 重复全量扫描。
 
 用户显式选择 Product Runtime 时，Core 的 `memberRuntimeDefaults` 使用该 Adapter 已验证的最高权限值；
 descriptor 的保守 `recommendedValue` 不替代队员 draft。静态 descriptor 只拥有配置/admission 语义，不升级为

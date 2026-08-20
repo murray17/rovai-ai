@@ -9,9 +9,9 @@ last_updated: 2026-08-20
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v10](../contracts/camp-message-send-v10.md)、
+分别见 [Camp Message Send v11](../contracts/camp-message-send-v11.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
-[Message Delivery v4](../contracts/message-delivery-v4.md)、
+[Message Delivery v5](../contracts/message-delivery-v5.md)、
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)、
 [Camp History Retrieval v2](../contracts/camp-history-v2.md)；决策理由见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)、
@@ -101,7 +101,7 @@ Message Delivery Dispatch Pump 是投递、排队和物化的唯一权威。它�
 recipient、message、Task、`forward | return` edge、target lineage 和 presentation snapshot，不重新
 解析正文或扩大目标。
 
-Message Delivery v4 以 `deliveryKind`、`dispatchDisposition` 和 `completionRole` 形成 closed union。普通
+Message Delivery v5 以 `deliveryKind`、`dispatchDisposition`、`completionRole` 和可选 pre-dispatch gate 形成 closed union。普通
 public A2A 继续拥有 message/edge/lineage；Gather 的精确 return 可以作为 `gather_captured` 直接 settled，
 但其 CampMessage 始终公开；Barrier 创建的 `gather_completion` 没有公开 recipient/edge lineage，却继续进入
 同一 recipient FIFO 与 Dispatch Pump。Delivery-level completionRole 让 pre-run terminal 也能被 CampTurn
@@ -136,6 +136,21 @@ recipient/Camp 的直接相关事件调用 `dispatchPending(agentId)`；没有�
 兜底事件。
 
 ## 4. Context gate 与 AgentRun 物化顺序
+
+带附件的 public A2A 在普通 dispatch attempt 前有一层持久 projection gate：
+
+```text
+accepted CampMessage + real Delivery IDs
+  → Delivery projection_blocked（占据 recipient FIFO；attempt count = 0）
+  → attachment projection available
+     → CAS never_attempted + explicit Dispatch Pump trigger
+  → terminal projection failure
+     → failed / attachment_projection_failed（无 AgentRun）
+```
+
+`projection_blocked` 不是 waitCondition 或 `interrupted_before_dispatch`；普通 Camp/Run/容量事件不得越过或隐式
+释放它。只有 operation completion/recovery 拥有 gate transition。同一消息的 terminal failed attachment 保留
+公共事实，但 Delivery 不向收件人制造缺失 Runtime path。
 
 Delivery 被选中尝试后，Core 先按
 [Context Delivery Profile v4](../contracts/context-delivery-profile-v4.md)完成选择与预算 gate，再由

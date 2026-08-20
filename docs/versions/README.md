@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.16
+current_version: v1.17
 last_updated: 2026-08-20
 ---
 
@@ -167,4 +167,5 @@ last_updated: 2026-08-20
 | v1.13 | `historical` | 十 Runtime 的 AgentRun 首个实际模型观测与执行台展示 | [v1.13/README.md](v1.13/README.md) |
 | v1.14 | `historical` | `camp.read` 安全 Timeline 默认、显式消息锚点模式与 Built-in Transport v17 | [v1.14/README.md](v1.14/README.md) |
 | v1.15 | `historical` | Windows x64 产品实现与资格闭环；Profile v4 自身消息过滤、本机安装级执行台位置偏好与可重建 Runtime Attachment semantic receipt | [v1.15/README.md](v1.15/README.md) |
-| v1.16 | `current` | Camp 纯附件消息、统一发送门禁与无空白正文气泡的 Timeline 投影 | [v1.16/README.md](v1.16/README.md) |
+| v1.16 | `historical` | Camp 纯附件消息、统一发送门禁与无空白正文气泡的 Timeline 投影 | [v1.16/README.md](v1.16/README.md) |
+| v1.17 | `current` | Agent 文件发送、语义先提交的统一附件发布与 Runtime 可用性投影 | [v1.17/README.md](v1.17/README.md) |

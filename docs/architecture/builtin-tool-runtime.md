@@ -9,11 +9,11 @@ last_updated: 2026-08-20
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v17](../contracts/builtin-tool-transport-v17.md)、
+[Built-in Tool Transport v18](../contracts/builtin-tool-transport-v18.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v10](../contracts/camp-message-send-v10.md)、
+[Camp Message Send v11](../contracts/camp-message-send-v11.md)、
 [Gather v3](../contracts/gather-v3.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v16 及更早 Transport 只保留
@@ -236,6 +236,12 @@ Lease → AgentRun + executionEpoch + NativeBinding
       → resolve_sender_identity()
       → authenticated current Camp
 ```
+
+带 `files` 的 Send 将一次 invocation 分成短授权、锁外 Authority freeze、短重授权/commit 三段。第一段只做
+request replay 与 exact lease/run/epoch/run-tmp 认证；随后释放全局 invocation guard 和 Database mutex，在
+blocking work 中执行 no-follow copy/hash/fsync；最后重取 guard/Database 并验证同一身份后提交统一 publication
+aggregate。重放不重新读源，身份漂移只清理本 operation 尚未拥有的 Authority 节点。该分段是 Send adapter 的
+内部实现，不扩大 generic Router interface，也不把路径或 projection 状态加入 Agent output。
 
 推导。首次调用将它写入内部 `CampMessageSendCommand.camp_id`；持久 Replay 读取已记录的
 `camp_id + source AgentRun + executionEpoch`，不重新使用当前活跃身份。Camp History service 为
@@ -586,5 +592,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v17 command、projection、replay、
+- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v18 command、projection、replay、
   fence 和 negative-path 验收：对应平台版本不得完成。未准入 Windows Runtime 不进入 AgentRun。

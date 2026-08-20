@@ -14,7 +14,7 @@ viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v6](../../contracts/camp-open-projection-v6.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -330,8 +330,13 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
 视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
 占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v2](../../contracts/camp-attachment-v2.md)，发送边界见
-[Camp Composer Draft v3](../../contracts/camp-composer-draft-v3.md)。
+快照限制见 [Camp Attachment v3](../../contracts/camp-attachment-v3.md)，发送边界见
+[Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
+
+Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
+“正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”，并移除会暗示 Runtime
+可读的 preview/open affordance。`available` 沿用现有附件卡行为。状态使用既有 Porcelain Day / Steel Night
+语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
 
 ## 空 Camp 欢迎状态
 
