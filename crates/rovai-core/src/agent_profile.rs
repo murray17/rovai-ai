@@ -19,6 +19,7 @@ use crate::{
         ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
         AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
         TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
+        trae_static_permission_options,
     },
     collaboration::end_camp_membership,
     command::{
@@ -1605,7 +1606,9 @@ impl AgentProfileService {
                 r#"
                 SELECT installation.id, installation.executable_path,
                        snapshot.executable_fingerprint, snapshot.probe_status,
-                       snapshot.permission_schema_digest
+                       snapshot.permission_schema_version,
+                       snapshot.permission_schema_digest,
+                       snapshot.permission_options_json
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
@@ -1620,7 +1623,9 @@ impl AgentProfileService {
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
                     ))
                 },
             )
@@ -1633,7 +1638,16 @@ impl AgentProfileService {
             previous_fingerprint,
             identity_changed,
             preserve_existing,
-        ) = if let Some((id, path, fingerprint, probe_status, permission_schema_digest)) = existing
+            normalize_legacy_trae_schema,
+        ) = if let Some((
+            id,
+            path,
+            fingerprint,
+            probe_status,
+            permission_schema_version,
+            permission_schema_digest,
+            permission_options_json,
+        )) = existing
         {
             let identity_changed =
                 path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
@@ -1663,14 +1677,40 @@ impl AgentProfileService {
                     now,
                 ],
             )?;
+            let schema_matches = permission_schema_digest.as_deref()
+                == Some(discovered.snapshot.permission_schema_digest.as_str());
+            let normalize_legacy_trae_schema = !schema_matches
+                && discovered.adapter_kind == AdapterKind::TraeCnCli
+                && probe_status.as_deref() == Some("ready")
+                && match (
+                    permission_schema_version,
+                    permission_schema_digest.as_deref(),
+                    permission_options_json.as_deref(),
+                ) {
+                    (Some(version), Some(digest), Some(options_json)) => {
+                        legacy_trae_permission_schema_can_normalize(
+                            version,
+                            digest,
+                            options_json,
+                            &discovered.snapshot,
+                        )?
+                    }
+                    _ => false,
+                };
             let preserve_existing = !identity_changed
-                && permission_schema_digest.as_deref()
-                    == Some(discovered.snapshot.permission_schema_digest.as_str())
+                && (schema_matches || normalize_legacy_trae_schema)
                 && (probe_status.as_deref() == Some("ready")
                     || (probe_status.as_deref() == Some("light_ready")
                         && discovered.snapshot.probe_status == "light_failed"
                         && executable_is_usable));
-            (id, path, fingerprint, identity_changed, preserve_existing)
+            (
+                id,
+                path,
+                fingerprint,
+                identity_changed,
+                preserve_existing,
+                normalize_legacy_trae_schema,
+            )
         } else {
             let id = format!("adapter-installation-{}", Uuid::new_v4());
             transaction.execute(
@@ -1694,7 +1734,7 @@ impl AgentProfileService {
                     now,
                 ],
             )?;
-            (id, String::new(), None, false, false)
+            (id, String::new(), None, false, false, false)
         };
 
         if !preserve_existing {
@@ -1702,6 +1742,18 @@ impl AgentProfileService {
                 &transaction,
                 &installation_id,
                 &discovered.snapshot,
+            )?;
+        } else if normalize_legacy_trae_schema {
+            transaction.execute(
+                r#"
+                UPDATE adapter_capability_snapshot
+                SET permission_schema_digest = ?2
+                WHERE installation_id = ?1
+                "#,
+                params![
+                    installation_id,
+                    discovered.snapshot.permission_schema_digest,
+                ],
             )?;
         }
         if let (Some(identity), Some(fingerprint)) =
@@ -4656,6 +4708,51 @@ fn validate_permission_descriptors(descriptors: &[PermissionOptionDescriptor]) -
     Ok(())
 }
 
+fn legacy_trae_permission_schema_can_normalize(
+    previous_schema_version: i64,
+    previous_schema_digest: &str,
+    previous_options_json: &str,
+    current_static_snapshot: &AdapterCapabilitySnapshot,
+) -> Result<bool> {
+    if previous_schema_version != current_static_snapshot.permission_schema_version {
+        return Ok(false);
+    }
+    let static_options = trae_static_permission_options();
+    let static_digest = canonical_json_digest(&serde_json::to_value(&static_options)?)?;
+    if current_static_snapshot.permission_schema_digest != static_digest {
+        return Ok(false);
+    }
+    let Ok(legacy_options) =
+        serde_json::from_str::<Vec<PermissionOptionDescriptor>>(previous_options_json)
+    else {
+        return Ok(false);
+    };
+    if validate_permission_descriptors(&legacy_options).is_err()
+        || canonical_json_digest(&serde_json::to_value(&legacy_options)?)? != previous_schema_digest
+        || legacy_options.len() != static_options.len()
+    {
+        return Ok(false);
+    }
+    Ok(static_options.iter().all(|expected| {
+        legacy_options.iter().any(|candidate| {
+            candidate.key == expected.key
+                && candidate.value_type == expected.value_type
+                && candidate.recommended_value == expected.recommended_value
+                && candidate.scope == expected.scope
+                && candidate.risk == expected.risk
+                && candidate.supported == expected.supported
+                && candidate.required == expected.required
+                && candidate.unsupported_reason == expected.unsupported_reason
+                && expected.choices.iter().all(|expected_choice| {
+                    candidate
+                        .choices
+                        .iter()
+                        .any(|choice| choice.value == expected_choice.value)
+                })
+        })
+    }))
+}
+
 fn profile_display_name_exists(
     transaction: &Transaction<'_>,
     display_name: &str,
@@ -6118,7 +6215,7 @@ mod slow_tests {
         assert_eq!(blocker.code, "runtime_probe_required");
 
         let deep_probe_at = chrono::Utc::now() - chrono::Duration::hours(2);
-        let live_snapshot = AgentRuntimeAdapterRegistry::default()
+        let mut live_snapshot = AgentRuntimeAdapterRegistry::default()
             .trae_live_session_capability_snapshot(
                 None,
                 fingerprint.clone(),
@@ -6151,6 +6248,12 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(live_snapshot.reported_version, None);
+        // v1.03 deep probes digested the Session-advertised descriptors themselves. An upgrade
+        // must recognize that exact legacy format without treating it as current schema drift.
+        live_snapshot.permission_schema_digest = canonical_json_digest(
+            &serde_json::to_value(&live_snapshot.permission_options).unwrap(),
+        )
+        .unwrap();
         service
             .record_snapshot(
                 &mut database,
@@ -6227,6 +6330,7 @@ mod slow_tests {
                 chrono::Utc::now().to_rfc3339(),
             )
             .unwrap();
+        let stable_permission_schema_digest = startup_snapshot.permission_schema_digest.clone();
         let rediscovered_installation_id = service
             .commit_discovered_managed_installation(
                 &mut database,
@@ -6248,6 +6352,10 @@ mod slow_tests {
             .unwrap();
         let retained_snapshot = rediscovered.snapshot.as_ref().unwrap();
         assert_eq!(retained_snapshot.probe_status, "ready");
+        assert_eq!(
+            retained_snapshot.permission_schema_digest, stable_permission_schema_digest,
+            "legacy TRAE Ready evidence must be normalized so later restarts remain stable"
+        );
         assert_eq!(retained_snapshot.models[0].id, "trae-default");
         assert_eq!(
             rediscovered.model_catalog.status,

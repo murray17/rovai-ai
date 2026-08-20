@@ -1705,7 +1705,7 @@ fn trae_permission_options(session_result: &Value) -> Result<Vec<PermissionOptio
     }])
 }
 
-fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor> {
+pub(crate) fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
