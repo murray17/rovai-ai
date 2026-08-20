@@ -106,7 +106,7 @@ last_updated: 2026-08-17
 - 既有日常数据被正确登记为 `completed(origin = "existing_installation")`，`onboarding.json` 权限为
   `0600`，没有创建训练 Camp 或覆盖 daily userData；
 - v0.96 安装包保留在
-  `/Users/murray.xue/Downloads/Rovai AI.app.backup-before-v0.97-0402ae54.app`，可用于显式人工回退；
+  `<local-backup>/Rovai AI.app.backup-before-v0.97-0402ae54.app`，可用于显式人工回退；
 - 构建使用仓库既有 ad-hoc hardened-runtime 签名配置，严格本地校验通过；本次没有配置 Apple notarization。
 
 ## References

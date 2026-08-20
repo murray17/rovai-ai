@@ -137,8 +137,8 @@ last_updated: 2026-08-17
 - 安装：`/Applications/Rovai AI.app` 已从该包启动，Main/Core 进程来源正确；日常数据为
   Data Contract v0.98、projection schema 46、Migration 91，foreign-key check 为空；
 - 回滚：原 v0.97 备份为
-  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.97-20260817-122925`，最终交换前 v0.98 备份为
-  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.98-pre-final-20260817-123550`。
+  `<local-backup>/Rovai AI.app.backup-v0.97-20260817-122925`，最终交换前 v0.98 备份为
+  `<local-backup>/Rovai AI.app.backup-v0.98-pre-final-20260817-123550`。
 
 ## References
 

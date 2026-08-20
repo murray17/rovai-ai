@@ -114,7 +114,7 @@ last_updated: 2026-08-13
   受控退出报告 `deadlineExpired=false`、`forcedSignal=null`；随后安装到 `/Applications/Rovai-ai.app`，
   旧 bundle 备份为 `/Applications/Rovai-ai.backup-20260813-154719.app`；
 - 日常安装版从 `/Applications` 启动，Renderer 与 Core 均使用
-  `/Users/murray.xue/Library/Application Support/Rovai-ai`；重启后的日常数据库一致性为 `ok`，
+  `$HOME/Library/Application Support/Rovai-ai`；重启后的日常数据库一致性为 `ok`，
   四条 generated 标题均保持去除开头 Mention 后的值。
 
 ### 真实模型行为
