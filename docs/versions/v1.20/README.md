@@ -12,7 +12,8 @@ last_updated: 2026-08-21
 # Rovai-ai v1.20：会话附件系统打开
 
 > 当前状态：设计与实现已完成，仓库自动化验收除一项既有 Runtime compatibility register 摘要失配外
-> 已通过；隔离 App 人工交互验收与发布交付待后续执行。
+> 已通过；提交 `75930b1e` 的 macOS arm64 包已通过签名、架构、Sidecar UUID 与隔离 App 基础验收并完成本机
+> 安装，附件动作的完整隔离交互矩阵仍待后续执行。
 >
 > 前置版本：[v1.19 Agent 文件入口隔离与纯附件发送](../v1.19/README.md)。v1.19 已按完成事实冻结为
 > historical；其 Authority ingress、统一 publication 与 Runtime View v3 继续作为本版基线。
@@ -56,7 +57,9 @@ ContextManifest、Run Facts、Built-in Tool 或模型输入字节。Camp Attachm
   attention notice；raw stderr、provider body 与凭证不进入公开投影；
 - 定向 Rust、TypeScript、Vitest、fmt、Clippy、Desktop build、文档与全量前端测试通过。Rust PR suite 的
   功能无关唯一失败是当前 `main` 已存在的 `runtime-compatibility.md` 摘要与
-  `MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION` 常量不一致；本版不擅自吸收另一分支上的独立修复。
+  `MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION` 常量不一致；本版不擅自吸收另一分支上的独立修复；
+- 提交 `75930b1e` 的 macOS arm64 App 已完成深度验签、三枚 Mach-O 架构检查、Core/CLI 构建与包内 UUID
+  一致性检查，并以全新隔离 `userData` 通过 packaged onboarding、Runtime 探测、Camp/Draft、重启和双主题验收。
 
 ## 明确不做
 
