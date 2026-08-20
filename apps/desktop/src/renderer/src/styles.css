@@ -4199,6 +4199,78 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 }
 .app-dialog-choice strong { font-size: 10.5px; }
 .app-dialog-supporting-copy { margin: 10px 0 0; color: var(--faint); font-size: 9.5px; line-height: 1.55; }
+.dialog-content.app-dialog.memory-review-schedule-dialog { width: min(560px, calc(100vw - 48px)); }
+.memory-review-schedule-heading { display: grid; gap: 2px; margin-bottom: 9px; }
+.memory-review-schedule-heading strong { font-size: 11.5px; }
+.memory-review-schedule-heading span { color: var(--faint); font-size: 10.5px; line-height: 1.45; }
+.memory-review-schedule-choice-group { display: grid; gap: 8px; }
+.memory-review-schedule-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.memory-review-schedule-option,
+.memory-review-schedule-custom-trigger {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  min-height: 60px;
+  gap: 3px;
+  padding: 10px 11px;
+  border: 1px solid var(--control-line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  text-align: left;
+  cursor: pointer;
+}
+.memory-review-schedule-option:hover:not(:disabled),
+.memory-review-schedule-custom-trigger:hover:not(:disabled) { background: var(--surface-hover); }
+.memory-review-schedule-option[aria-checked="true"],
+.memory-review-schedule-custom-trigger[aria-checked="true"] {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--brand) 30%, transparent);
+}
+.memory-review-schedule-option strong,
+.memory-review-schedule-custom-trigger strong { min-width: 0; font-size: 10.5px; line-height: 1.4; }
+.memory-review-schedule-option small,
+.memory-review-schedule-custom-trigger small { min-width: 0; overflow-wrap: anywhere; color: var(--faint); font-size: 10.5px; line-height: 1.42; }
+.memory-review-schedule-custom-trigger { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.memory-review-schedule-custom-trigger > span { display: grid; min-width: 0; gap: 3px; }
+.memory-review-schedule-custom-trigger > svg { width: 18px; height: 18px; fill: none; stroke: var(--muted); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.memory-review-schedule-custom-field { display: grid; gap: 7px; margin-top: 10px; }
+.memory-review-schedule-custom-field > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.memory-review-schedule-custom-field label { color: var(--ink); font-size: 10.5px; font-weight: 700; }
+.memory-review-schedule-custom-field small { color: var(--faint); font-size: 10.5px; line-height: 1.4; }
+.memory-review-schedule-custom-field input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--control-line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--input);
+  font-size: 11px;
+}
+.memory-review-schedule-custom-field input[aria-invalid="true"] { border-color: var(--danger); }
+.memory-review-schedule-validation { min-height: 17px; margin-top: 5px; color: var(--faint); font-size: 10.5px; line-height: 1.5; }
+.memory-review-schedule-validation.is-error { color: var(--danger); }
+.memory-review-schedule-alert,
+.memory-review-schedule-note { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; margin-top: 12px; padding: 10px 11px; font-size: 10.5px; line-height: 1.55; }
+.memory-review-schedule-alert { border: 1px solid color-mix(in srgb, var(--danger) 42%, var(--line)); border-left: 3px solid var(--danger); border-radius: 7px; color: var(--danger); background: var(--danger-soft); }
+.memory-review-schedule-alert.is-info { border-color: color-mix(in srgb, var(--brand) 38%, var(--line)); border-left-color: var(--brand); color: var(--brand-ink); background: var(--brand-soft); }
+.memory-review-schedule-note { border-left: 3px solid var(--brand); color: var(--muted); background: var(--brand-soft); }
+.memory-review-schedule-alert > svg,
+.memory-review-schedule-note > svg { width: 17px; height: 17px; margin-top: 1px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.memory-review-schedule-alert > div,
+.memory-review-schedule-note > div { display: grid; min-width: 0; gap: 3px; }
+.memory-review-schedule-alert strong,
+.memory-review-schedule-note strong { color: var(--ink); font-size: 10.5px; }
+.memory-review-schedule-alert p,
+.memory-review-schedule-note p { margin: 0; overflow-wrap: anywhere; font-size: 10.5px; line-height: 1.55; }
+.memory-review-schedule-alert button { width: fit-content; margin-top: 4px; }
+.memory-review-schedule-footer-leading { display: flex; min-width: 0; align-items: center; gap: 9px; }
+.memory-review-schedule-footer-leading > span { color: var(--faint); font-size: 10.5px; line-height: 1.45; }
+.memory-review-schedule-dialog .app-dialog-footer-copy { flex: 1 1 auto; }
+.memory-review-schedule-dialog .app-dialog-footer-copy .quiet-button { flex: 0 0 auto; }
 .dialog-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .dialog-heading h2 { margin: 5px 0 0; font: 700 21px/1.25 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
 .dialog-close { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 7px; color: var(--muted); background: var(--surface-muted); cursor: pointer; font-size: 18px; }
@@ -6036,6 +6108,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   .app-dialog-fact-grid { grid-template-columns: minmax(0, 1fr); }
   .app-dialog-fact { border-right: 0; border-bottom: 1px solid var(--line); }
   .app-dialog-fact:last-child { border-bottom: 0; }
+  .dialog-content.app-dialog.memory-review-schedule-dialog { width: calc(100vw - 24px); }
   .member-dialog { width: calc(100vw - 24px); }
   .member-identity-overview { grid-template-columns: minmax(0, 1fr); }
   .member-identity-copy { grid-template-columns: minmax(0, 1fr); }
@@ -6043,6 +6116,23 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   .member-avatar-editor { padding-right: 0; padding-bottom: 18px; border-right: 0; border-bottom: 1px solid var(--line); }
   .member-form-grid { grid-template-columns: minmax(0, 1fr); }
   .member-avatar-preset-list { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 520px) {
+  .memory-review-schedule-options { grid-template-columns: minmax(0, 1fr); }
+  .memory-review-schedule-option { min-height: 52px; }
+  .memory-review-schedule-custom-field > div { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .memory-review-schedule-dialog .app-dialog-footer { flex-direction: column; }
+  .memory-review-schedule-dialog .app-dialog-footer-copy { width: 100%; }
+  .memory-review-schedule-footer-leading { align-items: flex-start; justify-content: space-between; }
+  .memory-review-schedule-dialog .app-dialog-footer .dialog-actions { width: 100%; }
+  .memory-review-schedule-dialog .app-dialog-footer .dialog-actions button { flex: 1 1 0; }
+}
+
+@media (max-height: 620px) {
+  .memory-review-schedule-dialog .app-dialog-header { padding-top: 17px; padding-bottom: 12px; }
+  .memory-review-schedule-dialog .app-dialog-body { padding-top: 13px; padding-bottom: 14px; }
+  .memory-review-schedule-dialog .app-dialog-footer { min-height: 56px; padding-top: 10px; padding-bottom: 10px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -6076,4 +6166,12 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
   }
   .member-sidebar-row.selected,
   .member-tabs button[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .memory-review-schedule-dialog,
+  .memory-review-schedule-option,
+  .memory-review-schedule-custom-trigger,
+  .memory-review-schedule-custom-field input,
+  .memory-review-schedule-alert,
+  .memory-review-schedule-note { border-color: CanvasText; }
+  .memory-review-schedule-option[aria-checked="true"],
+  .memory-review-schedule-custom-trigger[aria-checked="true"] { outline: 2px solid Highlight; outline-offset: -3px; }
 }
