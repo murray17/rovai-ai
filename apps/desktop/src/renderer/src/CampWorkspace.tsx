@@ -329,6 +329,16 @@ export function preferredAgentProcessRun(runs: AgentRunView[]): AgentRunView | n
     ?? null
 }
 
+export function runningAgentRunForWorkspaceEntry(
+  runs: readonly AgentRunView[]
+): AgentRunView | null {
+  return runs
+    .filter((run) => run.status === 'running')
+    .sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+    )[0] ?? null
+}
+
 export function agentExecutionProcesses(runs: AgentRunView[]): AgentExecutionProcess[] {
   const grouped = new Map<string, AgentRunView[]>()
   for (const run of runs) {
@@ -1047,6 +1057,7 @@ export function CampWorkspace({
   onStop,
   executionPlacement = 'bottom',
   onExecutionPlacementChange = async () => undefined,
+  workspaceEntrySnapshotReady = true,
   inspectorVisible = true,
   inspectorTab: controlledInspectorTab,
   onInspectorTabChange,
@@ -1084,6 +1095,7 @@ export function CampWorkspace({
   onStop(): void
   executionPlacement?: ExecutionConsolePlacement
   onExecutionPlacementChange?(placement: ExecutionConsolePlacement): Promise<ExecutionConsolePlacement | void>
+  workspaceEntrySnapshotReady?: boolean
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
   onInspectorTabChange?(tab: CampInspectorTab): void
@@ -1184,17 +1196,28 @@ export function CampWorkspace({
   )
   const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
+  const [workspaceEntryRunningRun] = useState<AgentRunView | null>(() =>
+    workspaceEntrySnapshotReady
+      ? runningAgentRunForWorkspaceEntry(snapshot.agentRuns)
+      : null
+  )
   const [executionPlacementPending, setExecutionPlacementPending] = useState(false)
   const [executionPlacementError, setExecutionPlacementError] = useState<{
     message: string
     detail: string | null
   } | null>(null)
-  const [executionInspectorActive, setExecutionInspectorActive] = useState(false)
-  const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(null)
-  const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(null)
+  const [executionInspectorActive, setExecutionInspectorActive] = useState(
+    executionPlacement === 'inspector' && workspaceEntryRunningRun !== null
+  )
+  const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(
+    workspaceEntryRunningRun?.agentId ?? null
+  )
+  const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(
+    workspaceEntryRunningRun?.id ?? null
+  )
   const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
-    sequence: 0,
-    moveDomFocus: true
+    sequence: workspaceEntryRunningRun ? 1 : 0,
+    moveDomFocus: false
   })
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
@@ -1209,6 +1232,9 @@ export function CampWorkspace({
   const executionReadingRestoreFrames = useRef<[number, number] | null>(null)
   const executionPlacementRequest = useRef(false)
   const executionPlacementMounted = useRef(true)
+  const workspaceEntrySnapshotHandled = useRef(workspaceEntrySnapshotReady)
+  const workspaceEntryInspectorHandled = useRef(false)
+  const mountedCampId = useRef(snapshot.camp.id)
   const [executionDrawerPortal] = useState<HTMLDivElement | null>(() => {
     if (typeof document === 'undefined') return null
     const portal = document.createElement('div')
@@ -1375,14 +1401,61 @@ export function CampWorkspace({
   }
 
   useEffect(() => setMentionPopover(null), [snapshot.camp.id])
-  useEffect(() => {
-    setExecutionDrawerAgentId(null)
-    setExecutionDrawerFocusedRunId(null)
-    setSubmittedExecutionRequest(null)
-    setExecutionInspectorActive(false)
+  useLayoutEffect(() => {
+    if (workspaceEntrySnapshotHandled.current || !workspaceEntrySnapshotReady) return
+    workspaceEntrySnapshotHandled.current = true
+    const runningRun = runningAgentRunForWorkspaceEntry(snapshot.agentRuns)
+    setExecutionDrawerAgentId(runningRun?.agentId ?? null)
+    setExecutionDrawerFocusedRunId(runningRun?.id ?? null)
+    setExecutionDrawerFocusRequest((request) => ({
+      sequence: request.sequence + 1,
+      moveDomFocus: false
+    }))
+    setExecutionInspectorActive(executionPlacement === 'inspector' && runningRun !== null)
     executionDrawerTriggerRef.current = null
     executionDrawerReturnAgentIdRef.current = null
-  }, [snapshot.camp.id])
+    if (runningRun && executionPlacement === 'inspector') {
+      onOpenInspector?.(inspectorTab)
+    }
+  }, [
+    executionPlacement,
+    inspectorTab,
+    onOpenInspector,
+    snapshot.agentRuns,
+    workspaceEntrySnapshotReady
+  ])
+  useLayoutEffect(() => {
+    if (workspaceEntryInspectorHandled.current) return
+    if (!workspaceEntrySnapshotReady) return
+    workspaceEntryInspectorHandled.current = true
+    if (workspaceEntryRunningRun && executionPlacement === 'inspector') {
+      onOpenInspector?.(inspectorTab)
+    }
+  }, [
+    executionPlacement,
+    inspectorTab,
+    onOpenInspector,
+    workspaceEntryRunningRun,
+    workspaceEntrySnapshotReady
+  ])
+  useLayoutEffect(() => {
+    if (mountedCampId.current === snapshot.camp.id) return
+    mountedCampId.current = snapshot.camp.id
+    const runningRun = runningAgentRunForWorkspaceEntry(snapshot.agentRuns)
+    setExecutionDrawerAgentId(runningRun?.agentId ?? null)
+    setExecutionDrawerFocusedRunId(runningRun?.id ?? null)
+    setExecutionDrawerFocusRequest((request) => ({
+      sequence: request.sequence + 1,
+      moveDomFocus: false
+    }))
+    setSubmittedExecutionRequest(null)
+    setExecutionInspectorActive(executionPlacement === 'inspector' && runningRun !== null)
+    executionDrawerTriggerRef.current = null
+    executionDrawerReturnAgentIdRef.current = null
+    if (runningRun && executionPlacement === 'inspector') {
+      onOpenInspector?.(inspectorTab)
+    }
+  }, [executionPlacement, inspectorTab, onOpenInspector, snapshot.agentRuns, snapshot.camp.id])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
@@ -3692,33 +3765,12 @@ export function CampWorkspace({
             className="activity-tabs"
           >
             <Tabs.List className="tabs-list sticky-tabs" aria-label="会话详情">
-              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
               {executionPlacement === 'inspector' && (
                 <Tabs.Trigger value="execution">执行 <small>{executionProcesses.length}</small></Tabs.Trigger>
               )}
+              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
             </Tabs.List>
-            <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
-              <TaskPanel
-                snapshot={snapshot}
-                coverage={openCoverage?.tasks ?? null}
-                busy={busy}
-                focusTaskId={focusedTaskId}
-                focusRequest={taskFocusRequest}
-                onTasksChanged={onTasksChanged}
-                onOpenAgent={openExecutionProcess}
-                onCreateModeChange={setTaskCreationActive}
-              />
-            </Tabs.Content>
-            <Tabs.Content value="members" className="tab-scroll camp-members-panel">
-              <CampMembersPanel
-                snapshot={snapshot}
-                profileById={profileById}
-                installations={installations}
-                busy={busy}
-                onChangeLead={onChangeLead}
-              />
-            </Tabs.Content>
             <Tabs.Content value="execution" forceMount className="execution-sidecar-panel">
               {executionPlacement === 'inspector' && (
                 <RunPulse
@@ -3745,6 +3797,27 @@ export function CampWorkspace({
                     </div>
                 )}
               </div>
+            </Tabs.Content>
+            <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
+              <TaskPanel
+                snapshot={snapshot}
+                coverage={openCoverage?.tasks ?? null}
+                busy={busy}
+                focusTaskId={focusedTaskId}
+                focusRequest={taskFocusRequest}
+                onTasksChanged={onTasksChanged}
+                onOpenAgent={openExecutionProcess}
+                onCreateModeChange={setTaskCreationActive}
+              />
+            </Tabs.Content>
+            <Tabs.Content value="members" className="tab-scroll camp-members-panel">
+              <CampMembersPanel
+                snapshot={snapshot}
+                profileById={profileById}
+                installations={installations}
+                busy={busy}
+                onChangeLead={onChangeLead}
+              />
             </Tabs.Content>
           </Tabs.Root>
           <div className="inspector-meta">

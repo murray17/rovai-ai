@@ -186,10 +186,11 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 保持原位置并在控件附近提供可重试错误。Camp workspace 必须在偏好解析后以正确位置挂载，不得先显示
 底部再跳到右侧。
 
-移到现有 Inspector 时，底部入口与详情完全移除，Inspector 临时增加“执行”第三 Tab，并自动显示、
+移到现有 Inspector 时，底部入口与详情完全移除，Inspector 临时增加首个“执行”Tab，并自动显示、
 激活该 Tab。右侧使用既有 310px / compact 260px 宽度，不新增可拖宽 Sidecar。移回底部后恢复用户
 切换前最后使用的“任务 / 队员”基础 Tab。位置偏好只拥有承载位置，不跨 Camp 保存 Agent/Run selection、
-Drawer 开合、Tool 全文或滚动位置，也不根据 Camp、运行状态或窗口宽度自动改变。
+Drawer 开合、Tool 全文或滚动位置，也不根据窗口宽度自动改变。重新进入 Camp 时可以从当前权威 snapshot
+推导最新 running Run；这是新的瞬时 selection，不是恢复旧 Drawer 状态，也不改写位置偏好。
 
 两个位置共享当前 Agent 与精确 Run selection、Evidence load 和状态投影，不允许同时存在两套过程列表
 或详情。位置切换通过稳定 host 移动同一个已挂载 Drawer DOM，保留 disclosure、加载状态、
@@ -203,7 +204,11 @@ Drawer/结果阅读位置与 DOM identity，不得条件卸载后重建。底部
 发送成功且未在查看 non-terminal Run 时，按 Core 有序回执打开首个 Run 的精确 stage，但不夺走
 Composer 焦点。若用户正在可见的“任务”Tab 新建任务，Renderer 消费本次自动聚焦请求但不切走表单，
 离开表单后也不补跳；仅浏览任务、编辑既有任务或查看队员仍按回执自动打开执行。右侧不可见的旧 Run
-selection 不算“正在查看 non-terminal Run”。后台 A2A、Runtime 事件、重载与恢复不得自动打开、切换或抢焦点。
+selection 不算“正在查看 non-terminal Run”。从其他 Camp、一级页面或应用启动/恢复进入当前 Camp 时，若
+权威 snapshot 含 running Run，则自动选择 `createdAt + id` 最新者并展开；右侧 placement 同时显示 Inspector、
+激活首个“执行”Tab，底部 placement 直接展开 Drawer，均不移动 DOM 键盘焦点。没有 running Run 时不自动
+打开；`queued`、`waiting`、`recovery_blocked` 与 terminal 均不具备资格。用户已经停留在同一 workspace 时，
+后台 A2A、Runtime 事件、refresh 或后续状态变化不得自动打开、切换或抢焦点。
 
 聚焦 live Run 且用户停留详情底部时可跟随最新输出；手动上滚后暂停，回到底部恢复。该跟随
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
@@ -236,7 +241,7 @@ Tool disclosure 展开后在原位渲染完整公开结果，不再截断，不�
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)。
+[Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
@@ -246,7 +251,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)。
+[Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -274,7 +279,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)。
+[Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)。
 
 ## Camp Composer
 
@@ -330,15 +335,17 @@ AgentProfile，并通过既有 versioned Core 命令提供唯一 Default Lead �
 Runtime Input Delivery Evidence 继续存在于 Core/Snapshot，但不进入普通 Inspector；审批只在
 Approval Dock 决定。
 
-仅当用户把执行台移到右侧时，Inspector 增加条件式“执行”第三 Tab；它承载同一 Agent 过程详情，
+仅当用户把执行台移到右侧时，Inspector 增加条件式首个“执行”Tab；右侧 Tab 的 DOM、视觉与键盘顺序为
+“执行 / 任务 / 队员”。它承载同一 Agent 过程详情，
 不是新的 Activity/Audit timeline，也不改变 Task、队员、Default Lead 或 Approval 边界。移回底部后
 该 Tab 从 DOM 和键盘顺序中消失。
 
 Inspector 可从 Camp 顶栏完整隐藏/恢复，常规宽 310px，`1040–1179px` 为 260px。隐藏不会改变
 当前页签、Draft、选择或消息滚动位置。Inspector visibility 与执行台 placement 独立持久：当偏好位置
 为右侧而 Inspector 被隐藏时，执行台仍归右侧并随 Inspector 不可见，Header 恢复后返回保留的“执行”
-上下文；普通切 Camp、应用恢复或后台事件不强制显示 Inspector，也不把执行台临时搬回底部。用户显式
-“移到右侧”和既有精确执行导航仍显示 Inspector、激活“执行”并定位目标。
+上下文；进入不含 running Run 的 Camp 或已挂载 workspace 的后台事件不强制显示 Inspector，也不把执行台
+临时搬回底部。进入含 running Run 的 Camp、用户显式“移到右侧”和既有精确执行导航会显示 Inspector、
+激活首个“执行”Tab，并定位目标。
 
 ## Camp 顶栏与关闭等待面
 

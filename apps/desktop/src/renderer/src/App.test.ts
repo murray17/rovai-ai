@@ -102,6 +102,7 @@ import {
   memberRuntimeConfigurationPresentation,
   preferredAgentProcessRun,
   rectanglesOverlap,
+  runningAgentRunForWorkspaceEntry,
   runPulseMemberNameLines,
   runtimeOptionsForDisplay,
   taskCreationBlocksSubmittedRunAutoFocus
@@ -2331,6 +2332,19 @@ describe('task event projections', () => {
     expect(processes[0].agentId).toBe('agent_2')
     expect(processes[0].runs.map((run) => run.id)).toEqual(['run-muwa-history', 'run-muwa'])
     expect(preferredAgentProcessRun(processes[0].runs)?.id).toBe('run-muwa')
+    expect(runningAgentRunForWorkspaceEntry(groupedSnapshot.agentRuns)?.id).toBe('run-muwa')
+    expect(runningAgentRunForWorkspaceEntry([
+      { ...historicalRun, status: 'waiting' },
+      historicalRun
+    ])).toBeNull()
+    expect(runningAgentRunForWorkspaceEntry([
+      snapshot.agentRuns[0],
+      {
+        ...snapshot.agentRuns[0],
+        id: 'run-muwa-newer',
+        createdAt: '2026-07-28T05:30:00Z'
+      }
+    ])?.id).toBe('run-muwa-newer')
     expect(executionDisclosureOpenAfterActivity(true, false)).toBe(true)
     expect(executionDisclosureOpenAfterActivity(false, true)).toBe(true)
     expect(executionDisclosureOpenAfterActivity(false, false)).toBe(false)
@@ -2441,7 +2455,7 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="Agent 执行台"')
     expect(markup).toContain('aria-label="将执行台移到右侧检查器并记住此位置"')
     expect(markup).toContain('class="run-pulse-title"')
-    expect(markup).toContain('class="run-pulse-chip"')
+    expect(markup).toContain('class="run-pulse-chip is-selected"')
     expect((markup.match(/class="run-pulse-chip(?: is-selected)?"/g) ?? [])).toHaveLength(1)
     expect(markup).not.toContain('<small>执行过程</small>')
     expect(markup).toContain('class="run-pulse-chip-copy"><strong><span>沐瓦</span></strong>')
@@ -2459,21 +2473,62 @@ describe('task event projections', () => {
     expect(markup).not.toContain('完整证据')
     expect(markup).not.toContain('正在整理思路')
     expect(markup).not.toContain('Progress')
-    expect(markup).not.toContain('正在补充复制入口。')
+    expect(markup).toContain('正在补充复制入口。')
     expect(markup).not.toContain('Steps')
     expect(markup).toContain('aria-label="会话世界地图"')
     expect(markup).toContain('执行 · 正在运行')
     expect(markup).toContain('pnpm test')
     expect(markup).not.toContain('pnpm test：pnpm test')
     expect(markup).not.toContain('conversation-bubble agent agent-run-message')
-    expect(markup).not.toContain('execution-disclosure')
+    expect(markup).toContain('execution-disclosure')
     expect(markup).not.toContain('stream-reasoning')
-    expect(markup).not.toContain('process-copy stream-narration')
-    expect(markup).not.toContain('tool-call-disclosure')
+    expect(markup).toContain('process-copy stream-narration')
+    expect(markup).toContain('tool-call-disclosure')
     expect(markup).not.toContain('working-row')
     expect(markup).not.toContain('live-execution-progress')
     expect(markup).toContain('aria-label="停止当前执行"')
     expect(markup).not.toContain('class="primary-button composer-send"')
+
+    const cachedPreviewMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: groupedSnapshot,
+      projectName: 'Rovai',
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined,
+      workspaceEntrySnapshotReady: false
+    }))
+    expect(cachedPreviewMarkup).toContain('class="run-pulse-chip"')
+    expect(cachedPreviewMarkup).not.toContain('class="run-pulse-chip is-selected"')
+    expect(cachedPreviewMarkup).not.toContain('execution-disclosure')
+
+    const inspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: groupedSnapshot,
+      projectName: 'Rovai',
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined,
+      executionPlacement: 'inspector',
+      inspectorVisible: true
+    }))
+    const inspectorTabListStart = inspectorMarkup.indexOf('class="tabs-list sticky-tabs"')
+    const inspectorTabListEnd = inspectorMarkup.indexOf('</div>', inspectorTabListStart)
+    const inspectorTabList = inspectorMarkup.slice(inspectorTabListStart, inspectorTabListEnd)
+    expect(inspectorTabList.indexOf('>执行 <small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>任务 <small>'))
+    expect(inspectorTabList.indexOf('>任务 <small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>队员 <small>'))
+    expect(inspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-execution/)
+    expect(inspectorMarkup).toContain('data-placement="inspector"')
 
     const groupedEvidenceMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {
@@ -2547,7 +2602,7 @@ describe('task event projections', () => {
       stopping: false,
       onStop: () => undefined
     }))
-    expect(groupedEvidenceMarkup).not.toContain('tool-call-disclosure')
+    expect(groupedEvidenceMarkup).toContain('tool-call-disclosure')
     expect(groupedEvidenceMarkup).not.toContain('complete-evidence-control')
     expect(groupedEvidenceMarkup).not.toContain('查看完整工具调用')
     expect(groupedEvidenceMarkup).not.toContain('查看完整文件变更')
@@ -2569,8 +2624,8 @@ describe('task event projections', () => {
       onStop: () => undefined
     }))
     expect(cancellingMarkup).toContain('正在停止')
-    expect(cancellingMarkup).not.toContain('停止请求已发送，正在等待 Agent 运行时退出。')
-    expect(cancellingMarkup).not.toContain('execution-disclosure')
+    expect(cancellingMarkup).toContain('停止请求已发送，正在等待 Agent 运行时退出。')
+    expect(cancellingMarkup).toContain('execution-disclosure run-live is-cancelling')
     expect(cancellingMarkup).toContain('aria-label="正在停止当前执行"')
     expect(cancellingMarkup).not.toMatch(/<textarea[^>]*disabled/)
     expect(cancellingMarkup).not.toContain('execution-disclosure is-running')

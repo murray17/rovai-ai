@@ -49,7 +49,7 @@ Main Window Session 内已接收的运行事件全部保留。terminal Evidence�
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Camp Open Read Path](../../architecture/camp-open-read-path.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
-- [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
 
 <a id="v1-15-d02"></a>
 
@@ -90,7 +90,7 @@ Drawer，使已展开状态和阅读位置丢失。
 
 ### 当前权威影响
 
-- [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
 - [Product/Renderer 基础不变量](../../architecture/foundational-invariants.md#product-execution-surface)
 
@@ -217,10 +217,11 @@ ADR-0190 把 `bottom | inspector` 定义为每个 mounted Camp Workspace 的 Ren
 生效。现有“移到右侧 / 移回底部”按钮是唯一写入口；Settings 不增加第二个“默认位置”。Main 写入成功并
 返回权威 snapshot 后，Renderer 才移动同一个已挂载 Drawer；写入失败保持旧位置并原位提供重试。
 
-Placement 与 Inspector visibility 独立成立。用户隐藏 Inspector 时，右侧执行台随 Inspector 不可见，
-普通 Camp 切换、应用恢复和后台事件不推翻隐藏选择，也不偷偷把执行台搬到底部；用户显式移到右侧或使用
-既有精确执行导航时仍显示 Inspector、激活“执行”。Camp workspace 在权威偏好到位后才挂载，避免恢复时
-先显示底部再跳到右侧。
+Placement 与 Inspector visibility 独立成立。用户隐藏 Inspector 时，右侧执行台随 Inspector 不可见；进入
+不含 running Run 的 Camp 和已挂载 workspace 中的后台事件不推翻隐藏选择，也不偷偷把执行台搬到底部。
+进入权威 snapshot 含 running Run 的 Camp 是精确执行导航，会显示 Inspector、激活首个“执行”Tab，并选择
+最新 running Run；用户显式移到右侧或使用其他既有精确执行导航时同样显示 Inspector、激活“执行”。
+Camp workspace 在权威偏好到位后才挂载，避免恢复时先显示底部再跳到右侧。
 
 旧 General Preferences 没有位置字段时只补 `bottom`，并保留可识别的其他偏好。不从历史 Camp、旧
 Renderer 瞬时状态、Inspector 显隐或窗口尺寸推断位置，不提供旧版本 downgrade reader。本决定局部替代
@@ -233,6 +234,8 @@ Renderer 瞬时状态、Inspector 显隐或窗口尺寸推断位置，不提供�
 - General Preferences schema、Main/Preload API、启动投影和 Renderer ownership 需要同步推进，但 Core、
   SQLite、Camp Snapshot、Runtime 与云同步语义不变；
 - Inspector hidden 与右侧 placement 可以同时存在，Header 显隐控件必须保持可发现、可键盘到达；
+- 重新进入带 running Run 的 Camp 会从当前权威 snapshot 建立瞬时 selection 并显示执行台，但不持久化旧
+  Agent/Run selection，也不把键盘焦点移入 Drawer；
 - 自动验收必须覆盖旧偏好默认、跨 Camp/页面/重启、写失败不移动、首屏无闪跳以及 hidden 组合；
 - Agent/Run selection、Drawer 开合、已读 Tool 全文和滚动位置仍是 workspace/Drawer 局部状态，不随全局
   placement 跨 Camp 持久化。
@@ -243,12 +246,13 @@ Renderer 瞬时状态、Inspector 显隐或窗口尺寸推断位置，不提供�
 - 按 Camp 分别持久化：把个人布局误建模为 Camp 事实，并正面保留逐 Camp 配置负担；
 - 在 Settings 增加“默认位置”，位置按钮只作临时覆盖：制造“当前”和“默认”两个概念及竞争写入口；
 - 仅写 Renderer localStorage：与现有 Main-owned General Preferences 分裂加载、失败和迁移生命周期；
-- Inspector hidden 时自动显示或回退底部：前者推翻用户显式隐藏，后者让偏好位置与实际位置静默分叉。
+- Inspector hidden 时无差别自动显示或回退底部：前者会让没有 running Run 的普通导航推翻用户显式隐藏，
+  后者让偏好位置与实际位置静默分叉；只为进入 running Camp 的精确执行上下文保留显示例外。
 
 ### 当前权威影响
 
 - [产品/Renderer 基础不变量](../../architecture/foundational-invariants.md#product-execution-surface)
-- [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
 - [桌面 UI 验收](../../development/ui-acceptance.md#agent-执行过程门禁)
 

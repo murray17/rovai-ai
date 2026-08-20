@@ -448,7 +448,11 @@ export function App(): React.JSX.Element {
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [memoryFocusId, setMemoryFocusId] = useState<string | null>(null)
   const [memoryReviewDrawerSignal, setMemoryReviewDrawerSignal] = useState(0)
-  const [campSnapshot, setCampSnapshotState] = useState<CampSurfaceSnapshot | null>(null)
+  const [campSnapshotState, setCampSnapshotState] = useState<{
+    snapshot: CampSurfaceSnapshot | null
+    entryPreview: boolean
+  }>({ snapshot: null, entryPreview: false })
+  const campSnapshot = campSnapshotState.snapshot
   const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
@@ -530,10 +534,13 @@ export function App(): React.JSX.Element {
     notificationPresentationRef.current = createNotificationPresentationCoordinator()
   }
 
-  const setCampSnapshot = useCallback((snapshot: CampSurfaceSnapshot | null): void => {
+  const setCampSnapshot = useCallback((
+    snapshot: CampSurfaceSnapshot | null,
+    entryPreview = false
+  ): void => {
     campSnapshotRef.current = snapshot
     if (snapshot) rememberCampSnapshot(campSnapshotCache.current, snapshot)
-    setCampSnapshotState(snapshot)
+    setCampSnapshotState({ snapshot, entryPreview })
   }, [])
 
   const clearCampOpenFeedback = useCallback((): void => {
@@ -900,7 +907,10 @@ export function App(): React.JSX.Element {
       cachedSnapshot,
       campId
     )
-    const commitCampSurface = (snapshot: CampSurfaceSnapshot): void => {
+    const commitCampSurface = (
+      snapshot: CampSurfaceSnapshot,
+      entryPreview = false
+    ): void => {
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
@@ -916,12 +926,12 @@ export function App(): React.JSX.Element {
         })
       }
       setActiveCampId(campId)
-      setCampSnapshot(snapshot)
+      setCampSnapshot(snapshot, entryPreview)
       lastMainView.current = 'camp'
       setView('camp')
     }
     if (previewSnapshot) {
-      commitCampSurface(previewSnapshot)
+      commitCampSurface(previewSnapshot, true)
     } else {
       campOpenFeedbackTimer.current = setTimeout(() => {
         campOpenFeedbackTimer.current = null
@@ -2752,6 +2762,7 @@ export function App(): React.JSX.Element {
             onStop={() => void stopCampRuns()}
             executionPlacement={generalPreferences.executionConsolePlacement}
             onExecutionPlacementChange={changeExecutionConsolePlacement}
+            workspaceEntrySnapshotReady={!campSnapshotState.entryPreview}
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}

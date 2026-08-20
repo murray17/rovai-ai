@@ -122,6 +122,20 @@ try {
     `document.querySelectorAll(${JSON.stringify(runArticleSelector)}).length`)
   assert(renderedMessageCount === runtimes.length,
     `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
+  const workspaceEntryExecution = await evaluate(app.cdp, `(() => ({
+    placement: document.querySelector('.execution-drawer')?.dataset.placement ?? null,
+    selectedAgentId: document.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
+    drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
+  }))()`)
+  assert(workspaceEntryExecution.placement === 'bottom'
+    && workspaceEntryExecution.selectedAgentId === activeAgentId
+    && workspaceEntryExecution.focusedRunId === activeRunId
+    && !workspaceEntryExecution.drawerOwnsFocus,
+    `Entering the running Camp did not open its latest Run without stealing focus: ${JSON.stringify(workspaceEntryExecution)}`)
+  await evaluate(app.cdp,
+    `document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()`)
+  await waitForExpression(app.cdp, `!document.querySelector('.execution-drawer')`)
 
   if (worldMapOnly) {
     const worldMapAcceptance = await verifyCampWorldMap(app.cdp, outputDir)
@@ -356,7 +370,7 @@ try {
   await waitForExpression(app.cdp,
     `document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'`)
   const executionSidecar = await collectExecutionSidecar(app.cdp)
-  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['任务', '队员', '执行'])
+  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '任务', '队员'])
     && executionSidecar.activeTab === '执行'
     && executionSidecar.bottomDockCount === 0
     && executionSidecar.sideDockCount === 1
@@ -3801,33 +3815,40 @@ async function verifyGlobalExecutionPlacement(cdp) {
   await openCamp(cdp, campId)
   await waitForExpression(cdp,
     `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`)
-  const hiddenCombination = await evaluate(cdp, `(() => ({
+  const runningEntryReveal = await evaluate(cdp, `(() => ({
     inspectorCollapsed: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
-    bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length
+    bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
+    activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+      ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
+    selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
+    drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
   }))()`)
-  assert(hiddenCombination.inspectorCollapsed && hiddenCombination.bottomDockCount === 0,
-    `Hidden Inspector forced a reveal or bottom fallback: ${JSON.stringify(hiddenCombination)}`)
+  assert(!runningEntryReveal.inspectorCollapsed
+    && runningEntryReveal.bottomDockCount === 0
+    && runningEntryReveal.activeTab === '执行'
+    && runningEntryReveal.selectedAgentId === activeAgentId
+    && runningEntryReveal.focusedRunId === activeRunId
+    && !runningEntryReveal.drawerOwnsFocus,
+    `Entering a running Camp did not reveal its current Inspector Run without stealing focus: ${JSON.stringify(runningEntryReveal)}`)
 
-  await evaluate(cdp,
-    `document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')?.click()`)
+  await evaluate(cdp, `document.querySelector('.unified-sidebar button[aria-label="设置"]')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`)
+  await evaluate(cdp, `document.querySelector('.settings-sidebar-back')?.click()`)
   await waitForExpression(cdp,
-    `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
-  await evaluate(cdp, `(() => {
-    const tab = [...document.querySelectorAll('.activity-tabs [role="tab"]')]
-      .find((candidate) => candidate.textContent?.includes('执行'))
-    tab?.click()
-    return Boolean(tab)
-  })()`)
-  await waitForExpression(cdp, `Boolean(document.querySelector('.run-pulse-inspector'))`)
-  await evaluate(cdp, `(() => {
-    const chip = document.querySelector(
-      ${JSON.stringify(`.run-pulse-inspector .run-pulse-chip[data-agent-id="${activeAgentId}"]`)}
-    )
-    chip?.click()
-    return Boolean(chip)
-  })()`)
-  await waitForExpression(cdp,
-    `document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'`)
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`)
+  const runningPageReturn = await evaluate(cdp, `(() => ({
+    activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+      ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
+    selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
+    drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
+  }))()`)
+  assert(runningPageReturn.activeTab === '执行'
+    && runningPageReturn.selectedAgentId === activeAgentId
+    && runningPageReturn.focusedRunId === activeRunId
+    && !runningPageReturn.drawerOwnsFocus,
+    `Returning from another primary page did not restore the running Run: ${JSON.stringify(runningPageReturn)}`)
 
   return {
     authority,
@@ -3835,7 +3856,8 @@ async function verifyGlobalExecutionPlacement(cdp) {
     acrossCampAuthority,
     acrossPage,
     acrossPageAuthority,
-    hiddenCombination
+    runningEntryReveal,
+    runningPageReturn
   }
 }
 
@@ -3868,20 +3890,22 @@ async function verifyExecutionPlacementAcrossRestart(currentApp) {
       inspectorDockCount: document.querySelectorAll('.run-pulse-inspector').length,
       executionTabCount: [...document.querySelectorAll('.activity-tabs [role="tab"]')]
         .filter((tab) => tab.textContent?.includes('执行')).length,
-      inspectorHidden: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false
+      inspectorHidden: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
+      activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+        ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
+      selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+      focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null
     }))()`)
     assert(afterRestart.executionConsolePlacement === 'inspector'
       && firstCampPaint.bottomDockCount === 0
-      && (firstCampPaint.inspectorHidden
-        || (firstCampPaint.inspectorDockCount === 1 && firstCampPaint.executionTabCount === 1)),
+      && !firstCampPaint.inspectorHidden
+      && firstCampPaint.inspectorDockCount === 1
+      && firstCampPaint.executionTabCount === 1
+      && firstCampPaint.activeTab === '任务'
+      && firstCampPaint.selectedAgentId === null
+      && firstCampPaint.focusedRunId === null,
     `Relaunch did not restore Inspector placement before Camp mount: ${JSON.stringify({ afterRestart, firstCampPaint })}`)
 
-    if (firstCampPaint.inspectorHidden) {
-      await evaluate(relaunchedApp.cdp,
-        `document.querySelector('.topbar-inspector-toggle[aria-pressed="false"]')?.click()`)
-      await waitForExpression(relaunchedApp.cdp,
-        `!document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
-    }
     await evaluate(relaunchedApp.cdp, `(() => {
       const tab = [...document.querySelectorAll('.activity-tabs [role="tab"]')]
         .find((candidate) => candidate.textContent?.includes('执行'))

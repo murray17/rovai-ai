@@ -405,8 +405,10 @@ last_updated: 2026-08-20
   placement 是 Main-owned 的本机安装级展示偏好，最后一次成功的显式位置选择跨 Camp、页面切换和应用重启
   生效，但不进入 Camp/Core/SQLite 或云同步。旧偏好没有该字段时只补 `bottom`，不从历史 workspace、
   Inspector 显隐或窗口尺寸推断；权威偏好在 Camp 挂载前解析，写失败时保持旧位置和旧 snapshot。
-- Placement 与 Inspector visibility 独立：右侧位置可随用户隐藏的 Inspector 一起不可见，普通 Camp 切换或
-  后台事件不得强制显示 Inspector 或把执行台临时搬回底部；显式“移到右侧”和既有精确执行导航仍会显示并
-  激活“执行”。移动必须复用同一已挂载 DOM，保留 selection、disclosure、局部加载和嵌套阅读位置，不复制
-  console、不改变 Run 状态。
+- Placement 与 Inspector visibility 独立：右侧位置可随用户隐藏的 Inspector 一起不可见；没有 running Run
+  的普通 Camp 切换和已挂载 workspace 中的后台事件不得强制显示 Inspector 或把执行台临时搬回底部。进入
+  权威 snapshot 含 running Run 的 Camp 属于精确执行导航：Renderer 从当前事实选择最新 running Run，显示
+  Inspector 并激活首个“执行”Tab，但不把键盘焦点移入执行台。该 selection 不持久化；重进时重新推导，
+  不是恢复旧 Drawer 状态。显式“移到右侧”和其他既有精确执行导航仍会显示并激活“执行”。移动必须复用
+  同一已挂载 DOM，保留 selection、disclosure、局部加载和嵌套阅读位置，不复制 console、不改变 Run 状态。
 - Tool 全文不属于 Camp open 默认 DOM；截断 Evidence/Managed Blob 只在用户展开精确 Canonical Tool 行后读取，并只提取公开结果字段。读取成功后允许完整结果在当前 Drawer 会话内挂载于有最大高度的内部滚动 region，但不得暴露 Envelope 或建立 standalone raw Evidence surface。

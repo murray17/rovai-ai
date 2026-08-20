@@ -184,7 +184,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v14](../contracts/run-process-detail-surface-v14.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v15](../contracts/run-process-detail-surface-v15.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -203,15 +203,17 @@ pnpm accept:runtime-activity-ui
   用户发送按 Core `agentRunIds` 顺序打开第一条精确 Run，并证明自动打开后 Composer 仍持有键盘焦点；
   已经聚焦任意 non-terminal Run 时，新提交不得改选；
 - 聚焦 live Run 且位于 Drawer 底部时，新公开输出跟随到底部；手动上滚后 `data-following-latest=false`，
-  回到底部后恢复，仍在跟随时终态最后输出只定位一次；后台 A2A、Runtime 事件、重载和恢复仍不打开
-  Drawer、不改选队员/stage、不滚动公共消息时间线或抢焦点；关闭和 Drawer 内 Escape 将焦点返回真实
-  原入口；
+  回到底部后恢复，仍在跟随时终态最后输出只定位一次；从其他 Camp、一级页面或应用启动/恢复进入含
+  running Run 的 Camp 时自动展开 `createdAt + id` 最新 Run，queued/waiting/terminal 不触发，且不把 DOM
+  焦点移入执行台；已经停留在同一 workspace 后，后台 A2A、Runtime 事件和 refresh 仍不打开 Drawer、
+  不改选队员/stage、不滚动公共消息时间线或抢焦点；关闭和 Drawer 内 Escape 将焦点返回真实原入口；
 - Drawer 顶边必须存在可聚焦的水平 resize separator；真实鼠标拖拽、方向键、PageUp/PageDown、
   Home/End、Enter 恢复默认和 ARIA 数值均通过。用户高度在同一 Main Window Session 的收起重开、
   切换 Agent/Camp 后保持；调整不得改变所选 Agent/stage，sticky-bottom 仍跟随，手动上滚仍暂停；
   最大高度在 1040×700 与 200% zoom 下不覆盖消息历史、Agent 执行台、Approval Dock 或 Composer；
 - 默认底部 placement 下 Inspector 仅有“任务 / 队员”；点击“移到右侧”后底部 Run Pulse/Drawer
-  消失，Inspector 自动显示并增加、激活唯一“执行”第三 Tab。两处入口都只显示头像、最多两行名称和
+  消失，Inspector 自动显示并增加、激活唯一且位于首位的“执行”Tab，完整顺序为“执行 / 任务 / 队员”。
+  两处入口都只显示头像、最多两行名称和
   带形状的状态标记，不显示状态文字；右侧入口为全宽纵向列表、最多约四行且超出内部滚动，详情不显示
   resize separator。点击“移回底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
   focused Run 和底部高度偏好；移动前后必须是同一个 Drawer 与结果 DOM，并按比例保留 Drawer/结果
@@ -220,9 +222,10 @@ pnpm accept:runtime-activity-ui
   一级页面再返回和完整应用重启都继续由 Inspector 承载，再显式移回底部后同一矩阵继续由底部承载；
   保存中重复点击被拒绝，注入偏好原子写失败后执行台和旧 snapshot 均保持原位并显示可重试错误，恢复
   Inspector 偏好时首个 Camp meaningful paint 不出现 bottom→inspector 闪跳；
-- placement=inspector 与 Inspector hidden 可以同时成立：普通切 Camp、应用恢复和后台事件不强制显示
-  Inspector，也不临时回退到底部；Header 恢复后返回“执行”上下文，用户显式“移到右侧”与 Task/
-  停止结果/世界地图等精确导航仍显示 Inspector、激活“执行”并定位目标；
+- placement=inspector 与 Inspector hidden 可以同时成立：进入不含 running Run 的 Camp 和已挂载 workspace
+  的后台事件不强制显示 Inspector，也不临时回退到底部；进入含 running Run 的 Camp 必须显示 Inspector、
+  激活首个“执行”Tab，并定位最新 Run。Header 恢复、用户显式“移到右侧”与 Task/停止结果/世界地图等
+  精确导航仍显示 Inspector、激活“执行”并定位目标；
 - Context Delivery/Approval/Activity/Audit Tab、旧 route/state 不得返回；“队员”读取真实
   CampMember/AgentProfile，并用既有 Core 命令切换一个符合 presence/leave 约束的 Default Lead；
   Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程，顶栏不存在执行入口；
