@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.18
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-20
 >
 > 前置版本：[v1.17 统一附件发布与 Agent 文件发送](../v1.17/README.md)。v1.17 已按完成事实冻结为
 > historical；其统一附件 publication、Delivery gate 与 Runtime View 语义继续作为本版基线。
+>
+> 后续版本：[v1.19 Agent 文件入口隔离与纯附件发送](../v1.19/README.md)。
 
 ## 版本目标
 

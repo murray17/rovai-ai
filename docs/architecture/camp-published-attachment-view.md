@@ -8,7 +8,7 @@ last_updated: 2026-08-20
 
 本架构拥有 Camp 已发布附件从私有 Authority 到 Runtime 可读共享视图的组件边界、数据流、并发门和恢复关系。
 字段、状态、路径、限额与错误由 [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
-和 [Camp Attachment v3](../contracts/camp-attachment-v3.md)拥有。
+和 [Camp Attachment v4](../contracts/camp-attachment-v4.md)拥有。
 
 ## Authority 与授权域
 
@@ -32,7 +32,9 @@ View 不改变消息、历史 ContextManifest、Managed Blob、摘要或 Authori
 
 - Desktop 从 canonical `userData` 派生 macOS instance key，或在 Windows 选择 `<data_dir>\runtime-files`，并把
   完整绝对 `--runtime-camp-files-root` 显式传给 Core；Core 不从 Home 猜共享默认值。
-- `CampAttachmentStore` 只负责 Composer/Agent Authority ingress、不可变快照和 no-follow 源校验。
+- `CampAttachmentStore` 只负责 Composer/Agent Authority ingress、不可变快照和 no-follow 源校验。所有实例按
+  exact Authority root + Camp ID 共享 per-Camp ingress admission；Camp root 权限切换、child create/remove、
+  failure cleanup 与 Camp Authority removal 必须持有一次 admission，已持有者使用私有 root helper，不可重入。
 - `CampAttachmentPublicationCoordinator` 以一个小 interface 统一语义 commit、revision、reservation、writer
   intent、operation 与 Delivery gate；两条 ingress adapter 不复制 publication 规则。
 - `CampAttachmentProjectionWorker` 按 Camp semantic revision FIFO 驱动 View copy/promote/recovery；
@@ -43,8 +45,9 @@ View 不改变消息、历史 ContextManifest、Managed Blob、摘要或 Authori
   authorization、Host acquire、resume 与模型输入投递都复用这份 admission，不在内部嵌套申请 read gate。
 - Core 在该 admission 内为一次 dispatch 生成一份 verified Runtime authorization；Context materializer 复用其
   结果冻结 Formatter 21 / Manifest 21 与 `RUN_FACTS.campResources`，Runtime launch 用同一结果记录 Runtime
-  Attachment Auth Receipt，并且只把当前 Camp 精确 `attachments` 根交给 Adapter。模型 bytes 不因 Manifest
-  版本推进而改变。
+  Attachment Auth Receipt，并且只把当前 Camp 精确 `attachments` 根交给 Adapter。Adapter 另把当前 lease
+  已重置的 exact `ROVAI_RUN_TMP` 作为 writable root 交给 Runtime，但不暴露其父目录；模型 bytes 不因
+  Manifest 版本推进而改变。
 
 ## 发布与并发
 
@@ -58,6 +61,10 @@ Worker 取得 per-Camp write admission 后 fence 不兼容 Host，在无全局 D
 推进 catalog/resolved revision、消费 reservation 并释放 Delivery/Scheduler gate；可恢复失败保留 intent 与
 reservation；terminal failure 写 `failed` tombstone、推进 resolution digest、释放 reservation 并终态结算
 Delivery。常规 completion 只校验本 operation 新 Entry 与既有 catalog/resolution receipt，不重哈希历史 View。
+
+Authority ingress admission 与 Published View write admission 是两把不同的 per-Camp 锁。前者只保护私有
+Authority 根的权限 mode 和 child mutation，可在同 Camp copy/hash 期间保持；后者只保护派生 Runtime View 与
+Host generation。Authority ingress 不持有 Database mutex 或 built-in invocation guard，不同 Camp 可并行。
 
 调度器必须在把 AgentRun 从 queued Claim 为 running 前先取得 Camp View read admission，并把 owned guard 移入
 AgentRun task，使其覆盖 Skill/MCP 准备、launch 和整次 Run。这样 write gate 已进入时新 Run 保持 queued，Run
@@ -130,9 +137,10 @@ directory allowlist evidence。存在不受控 ambient filesystem access 时，�
 ## References
 
 - [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
-- [Camp Attachment v3](../contracts/camp-attachment-v3.md)
+- [Camp Attachment v4](../contracts/camp-attachment-v4.md)
 - [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
-- [Runtime Launch and Verification v12](../contracts/runtime-launch-and-verification-v12.md)
+- [Runtime Launch and Verification v13](../contracts/runtime-launch-and-verification-v13.md)
+- [V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)
 - [V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)
 - [V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)
 - [V1.15-D05](../versions/v1.15/decisions.md#v1-15-d05)

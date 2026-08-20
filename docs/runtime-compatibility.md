@@ -108,7 +108,7 @@ Camp 的精确 `attachments` root。该实现选择是保守 fallback，不是 R
 证据；既有 TRAE warm Host、Session reuse、HistoryRestore、MCP 或普通文件工具 Probe 都没有验证“同一
 IdleWarm Host/Session 在两个可靠 terminal 之间观察由正式 publication gate 原子追加的 file + directory”。
 因此 TRAE 不启用 `live_append_v1`，compatibility generation 不能为 null。其他 Adapter 同样没有被旧证据
-隐式升级。完整条件见 [Runtime Launch and Verification v12](contracts/runtime-launch-and-verification-v12.md)。
+隐式升级。完整条件见 [Runtime Launch and Verification v13](contracts/runtime-launch-and-verification-v13.md)。
 
 ### 2026-08-17 OpenCode Usage 与 Codex Cost Projection
 
@@ -243,7 +243,7 @@ HistoryRestore、New；load 前 route 为 `LoadingReplay`，成功 response 后�
 assistant/tool/permission/usage/server request 全部静默隔离，并受 4096 event、8 MiB、30 秒限制。
 workspace、模型、权限、Host config 或 executable fingerprint 不兼容时不尝试 load；错误 ID、协议异常或
 超限持久记录 continuity lost、停止 Host、轮换 Binding 并建立新 Session。当前规范入口为
-[Runtime Launch and Verification v12](contracts/runtime-launch-and-verification-v12.md)。
+[Runtime Launch and Verification v13](contracts/runtime-launch-and-verification-v13.md)。
 
 隔离 Core smoke `pnpm smoke:trae-cold-resume` 进一步通过：首个 Host 的工具读取随机私密 marker 后删除
 源文件并重启 Core；新 Host 使用同一 Native Session ID 恢复 marker，Host ID 明确变化，恢复 Run 投影的
@@ -262,7 +262,7 @@ Action/Approval 均为 0。恢复后的新文件工具与 Approval 成功，运�
 
 上面的 2026-08-20 定向复核新增了 asynchronous metadata、Skill discovery/invocation、Compaction 与统一
 Machine Ready 证据，但没有冒充重新运行完整 Built-in CLI/MCP/Approval 矩阵。统一 launch-policy、fake ACP
-Health/Dispatch 与持久化回归测试拥有当前产品行为；当前规范入口为 [Runtime Launch and Verification v12](contracts/runtime-launch-and-verification-v12.md)
+Health/Dispatch 与持久化回归测试拥有当前产品行为；当前规范入口为 [Runtime Launch and Verification v13](contracts/runtime-launch-and-verification-v13.md)
 和 [Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)。
 
 ### 2026-08-17 Runtime command output 协议修正

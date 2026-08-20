@@ -9,7 +9,7 @@ last_updated: 2026-08-20
 # Public A2A Message 与 Message Delivery 架构
 
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
-分别见 [Camp Message Send v11](../contracts/camp-message-send-v11.md)、
+分别见 [Camp Message Send v12](../contracts/camp-message-send-v12.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
 [Message Delivery v5](../contracts/message-delivery-v5.md)、
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)、

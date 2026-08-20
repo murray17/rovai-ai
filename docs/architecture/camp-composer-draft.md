@@ -120,7 +120,7 @@ message回看更早记录。动态空白候选可以因失效被抑制；已经�
 ## References
 
 - [Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)
-- [Camp Attachment v3](../contracts/camp-attachment-v3.md)
+- [Camp Attachment v4](../contracts/camp-attachment-v4.md)
 - [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
 - [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)

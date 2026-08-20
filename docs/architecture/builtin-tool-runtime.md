@@ -9,11 +9,11 @@ last_updated: 2026-08-20
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v18](../contracts/builtin-tool-transport-v18.md)、
+[Built-in Tool Transport v19](../contracts/builtin-tool-transport-v19.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v11](../contracts/camp-message-send-v11.md)、
+[Camp Message Send v12](../contracts/camp-message-send-v12.md)、
 [Gather v3](../contracts/gather-v3.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v16 及更早 Transport 只保留
@@ -166,9 +166,20 @@ Send exact help 公开 line-leading display-name alias：它必须是 logical li
 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
-当前 v17 contract/CLI command version、`builtin_cli.transport.v17` capability 与 IPC protocol 2 必须同时进入
+当前 v19 contract/CLI command version、`builtin_cli.transport.v19` capability 与 IPC protocol 2 必须同时进入
 Binding compatibility 和 digest。Camp History 使用 v4；Session Charter bytes 保持不变，动态 Context 使用
-Formatter 21 / ContextManifest 21。v17 Context 不做 endpoint 猜测并 fail closed。
+Formatter 21 / ContextManifest 21。v19 Context 不做 endpoint 猜测并 fail closed。
+
+`ROVAI_RUN_TMP` 是 Runtime Host 启动时继承的稳定精确路径，不是 process root、Camp workspace 或附件存储。
+每次新 lease 在 active context 写入前 fail-closed 清空并重建该目录；unbind/fence 只做 best-effort 清理，后继
+bind 必须再次成功重置。Codex `runtimeWorkspaceRoots`、Claude/Antigravity `--add-dir`、ACP
+`additionalDirectories` 与 Copilot Host 参数都显式加入这一 exact root，不加入其父目录。Runtime 只能把当前
+lease 生成的临时输出交给 `--file`，authentication 与 freeze 继续绑定 process、lease generation、Run、epoch
+和 exact Run tmp identity。
+
+Send v12 的 `body` 缺省为空字符串，`files` 缺省为空数组；领域服务要求 trim 后正文非空或至少一个文件。
+因此 `rovai send --file <path>` 是完整命令，不生成占位正文。Schema/default 只负责 transport shape，跨字段
+payload 门禁仍在 Domain Service。
 
 `member.create` 只接受 attested active、direct user-triggered AgentRun。Agent 依照 `member-studio` 展示完整
 名牌并取得用户确认，可选地把当前 Run 中 Core 可读的 PNG/JPEG 路径交给 CLI；Core 在领域提交前完成
@@ -592,5 +603,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v18 command、projection、replay、
+- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v19 command、projection、replay、
   fence 和 negative-path 验收：对应平台版本不得完成。未准入 Windows Runtime 不进入 AgentRun。

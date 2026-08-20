@@ -333,7 +333,7 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
 视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
 占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v3](../../contracts/camp-attachment-v3.md)，发送边界见
+快照限制见 [Camp Attachment v4](../../contracts/camp-attachment-v4.md)，发送边界见
 [Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
 
 Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
