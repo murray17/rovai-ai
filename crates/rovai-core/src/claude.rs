@@ -416,7 +416,10 @@ impl ClaudeCodeCliRuntimeAdapter {
             request.runtime_events.clone(),
             acceptance_observed.clone(),
         ));
-        let stderr_task = tokio::spawn(capture_bounded(stderr));
+        let stderr_task = tokio::spawn(capture_claude_stderr(
+            stderr,
+            request.runtime_events.clone(),
+        ));
         tokio::pin!(interrupted);
         let mut was_interrupted = false;
         let status = tokio::select! {
@@ -1299,13 +1302,27 @@ struct CapturedBytes {
     digest: String,
 }
 
-async fn capture_bounded<R>(mut reader: R) -> Result<CapturedBytes>
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ClaudeCodeApiRetryDiagnostic {
+    attempt: u64,
+    max_attempts: u64,
+    retry_after_seconds: u64,
+}
+
+const MAX_STDERR_DIAGNOSTIC_SCAN_BYTES: usize = 16 * 1024;
+
+async fn capture_claude_stderr<R>(
+    mut reader: R,
+    runtime_events: Option<mpsc::UnboundedSender<ClaudeCodeRuntimeEvent>>,
+) -> Result<CapturedBytes>
 where
     R: AsyncRead + Unpin,
 {
     let mut bytes = Vec::new();
     let mut total_bytes = 0_usize;
     let mut digest = Sha256::new();
+    let mut diagnostic_scan = Vec::new();
+    let mut emitted_retries = HashSet::new();
     let mut buffer = [0_u8; 16 * 1024];
     loop {
         let read = reader.read(&mut buffer).await?;
@@ -1318,12 +1335,131 @@ where
             let remaining = MAX_CAPTURE_BYTES - bytes.len();
             bytes.extend_from_slice(&buffer[..read.min(remaining)]);
         }
+
+        diagnostic_scan.extend_from_slice(&buffer[..read]);
+        if diagnostic_scan.len() > MAX_STDERR_DIAGNOSTIC_SCAN_BYTES {
+            diagnostic_scan.drain(
+                ..diagnostic_scan
+                    .len()
+                    .saturating_sub(MAX_STDERR_DIAGNOSTIC_SCAN_BYTES),
+            );
+        }
+        let public_lines = strip_claude_terminal_controls(&diagnostic_scan);
+        for line in public_lines.lines() {
+            let Some(retry) = parse_claude_api_retry_diagnostic(line) else {
+                continue;
+            };
+            if !emitted_retries.insert((retry.attempt, retry.max_attempts)) {
+                continue;
+            }
+            if let Some(sender) = runtime_events.as_ref() {
+                let _ = sender.send(ClaudeCodeRuntimeEvent {
+                    event_type: "runtime.diagnostic",
+                    payload: serde_json::json!({
+                        "diagnosticId": "claude-api-retry",
+                        "code": "runtime_api_retrying",
+                        "status": "retrying",
+                        "attempt": retry.attempt,
+                        "maxAttempts": retry.max_attempts,
+                        "retryAfterSeconds": retry.retry_after_seconds,
+                    }),
+                });
+            }
+        }
     }
     Ok(CapturedBytes {
         bytes,
         total_bytes,
         digest: format!("sha256:{:x}", digest.finalize()),
     })
+}
+
+fn parse_claude_api_retry_diagnostic(line: &str) -> Option<ClaudeCodeApiRetryDiagnostic> {
+    let normalized = line.to_ascii_lowercase();
+    if !normalized.contains("api error") || !normalized.contains("retrying in") {
+        return None;
+    }
+    let attempt_tail = normalized.rsplit_once("attempt")?.1.trim_start();
+    let attempt_digits = attempt_tail
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    let attempt = attempt_digits.parse::<u64>().ok()?;
+    let max_tail = attempt_tail.get(attempt_digits.len()..)?.trim_start();
+    let max_tail = max_tail.strip_prefix('/')?.trim_start();
+    let max_digits = max_tail
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    let max_attempts = max_digits.parse::<u64>().ok()?;
+    if attempt == 0 || max_attempts == 0 || attempt > max_attempts {
+        return None;
+    }
+
+    let retry_tail = normalized.split_once("retrying in")?.1.trim_start();
+    let retry_digits = retry_tail
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    let retry_after_seconds = retry_digits.parse::<u64>().ok()?;
+    Some(ClaudeCodeApiRetryDiagnostic {
+        attempt,
+        max_attempts,
+        retry_after_seconds,
+    })
+}
+
+fn strip_claude_terminal_controls(raw: &[u8]) -> String {
+    let mut output = Vec::with_capacity(raw.len());
+    let mut index = 0;
+    while index < raw.len() {
+        if raw[index] == 0x1b {
+            index += 1;
+            if index >= raw.len() {
+                break;
+            }
+            match raw[index] {
+                b'[' => {
+                    index += 1;
+                    while index < raw.len() {
+                        let byte = raw[index];
+                        index += 1;
+                        if (0x40..=0x7e).contains(&byte) {
+                            break;
+                        }
+                    }
+                }
+                b']' => {
+                    index += 1;
+                    while index < raw.len() {
+                        if raw[index] == 0x07 {
+                            index += 1;
+                            break;
+                        }
+                        if raw[index] == 0x1b && raw.get(index + 1).copied() == Some(b'\\') {
+                            index += 2;
+                            break;
+                        }
+                        index += 1;
+                    }
+                }
+                _ => index += 1,
+            }
+            continue;
+        }
+        let byte = raw[index];
+        index += 1;
+        match byte {
+            b'\n' | b'\r' => output.push(b'\n'),
+            b'\t' => output.push(b' '),
+            0x00..=0x1f | 0x7f => {}
+            _ => output.push(byte),
+        }
+    }
+    String::from_utf8_lossy(&output)
+        .chars()
+        .filter(|character| !character.is_control() || *character == '\n')
+        .collect()
 }
 
 fn validate_session_id(value: &str) -> Result<()> {
@@ -1454,6 +1590,70 @@ mod tests {
                 "bootstrap-latest",
             ]
         );
+    }
+
+    #[test]
+    fn recognizes_only_bounded_claude_api_retry_status() {
+        assert_eq!(
+            parse_claude_api_retry_diagnostic("✻ API error · Retrying in 0s · attempt 1/10"),
+            Some(ClaudeCodeApiRetryDiagnostic {
+                attempt: 1,
+                max_attempts: 10,
+                retry_after_seconds: 0,
+            })
+        );
+        assert_eq!(
+            parse_claude_api_retry_diagnostic("API Error · Retrying in 12s · attempt 10/10"),
+            Some(ClaudeCodeApiRetryDiagnostic {
+                attempt: 10,
+                max_attempts: 10,
+                retry_after_seconds: 12,
+            })
+        );
+        assert!(
+            parse_claude_api_retry_diagnostic(
+                "API error: api_key=private-key; request payload follows"
+            )
+            .is_none()
+        );
+        assert!(
+            parse_claude_api_retry_diagnostic("API error · Retrying in 0s · attempt 11/10")
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn stderr_retry_status_is_emitted_before_the_claude_process_exits() {
+        let (mut writer, reader) = tokio::io::duplex(1_024);
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
+        let capture = tokio::spawn(capture_claude_stderr(reader, Some(runtime_event_sender)));
+        let status = b"\x1b[31m\xe2\x9c\xbb API error\x1b[0m \xc2\xb7 Retrying in 0s \xc2\xb7 attempt 1/10\r";
+        writer.write_all(status).await.unwrap();
+
+        let event = tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
+            .await
+            .expect("retry status must be projected while stderr remains open")
+            .expect("retry status channel should remain open");
+        assert_eq!(event.event_type, "runtime.diagnostic");
+        assert_eq!(event.payload["diagnosticId"], "claude-api-retry");
+        assert_eq!(event.payload["code"], "runtime_api_retrying");
+        assert_eq!(event.payload["status"], "retrying");
+        assert_eq!(event.payload["attempt"], 1);
+        assert_eq!(event.payload["maxAttempts"], 10);
+        assert_eq!(event.payload["retryAfterSeconds"], 0);
+        assert!(
+            !event
+                .payload
+                .to_string()
+                .to_ascii_lowercase()
+                .contains("api error"),
+            "raw stderr must not become public Runtime Evidence"
+        );
+
+        writer.shutdown().await.unwrap();
+        let captured = capture.await.unwrap().unwrap();
+        assert_eq!(captured.bytes, status);
+        assert_eq!(captured.total_bytes, status.len());
     }
 
     #[test]

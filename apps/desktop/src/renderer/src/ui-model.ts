@@ -103,9 +103,19 @@ export type ExecutionStep = {
   credibility: string
 }
 
+export type RuntimeDiagnostic = {
+  id: string
+  code: 'runtime_api_retrying'
+  status: 'retrying'
+  attempt: number
+  maxAttempts: number
+  retryAfterSeconds: number
+}
+
 export type ExecutionProgressItem =
   | { key: string; kind: 'narration'; body: string }
   | { key: string; kind: 'plan'; explanation: string; plan: ExecutionPlanStep[] }
+  | { key: string; kind: 'diagnostic'; diagnostic: RuntimeDiagnostic }
   | { key: string; kind: 'tool'; step: ExecutionStep }
 
 export type LiveExecutionProgress = {
@@ -222,6 +232,7 @@ const LIVE_RUNTIME_EVENT_TYPES = new Set([
   'agent.thought.delta',
   'runtime.plan',
   'runtime.plan.delta',
+  'runtime.diagnostic',
   'runtime.action'
 ])
 
@@ -266,6 +277,7 @@ export function buildLiveExecutionProgress(
   let activeAnonymousNarrationItemId: string | null = null
   let planExplanation = ''
   let plan: ExecutionPlanStep[] = []
+  const diagnosticsById = new Map<string, RuntimeDiagnostic>()
   const steps: ExecutionStep[] = []
   const stepIndexes = new Map<string, number>()
   const itemOrder: string[] = []
@@ -345,6 +357,41 @@ export function buildLiveExecutionProgress(
       rememberItem('plan')
       const delta = stringField(payload, 'delta') ?? ''
       if (delta) planExplanation += delta
+      continue
+    }
+
+    if (event.eventType === 'runtime.diagnostic') {
+      finishNarrationStream()
+      const diagnosticId = stringField(payload, 'diagnosticId')
+      const code = stringField(payload, 'code')
+      const status = stringField(payload, 'status')
+      const attempt = numberField(payload, 'attempt')
+      const maxAttempts = numberField(payload, 'maxAttempts')
+      const retryAfterSeconds = numberField(payload, 'retryAfterSeconds')
+      if (
+        diagnosticId
+        && code === 'runtime_api_retrying'
+        && status === 'retrying'
+        && attempt !== null
+        && maxAttempts !== null
+        && retryAfterSeconds !== null
+        && Number.isInteger(attempt)
+        && Number.isInteger(maxAttempts)
+        && Number.isInteger(retryAfterSeconds)
+        && attempt >= 1
+        && maxAttempts >= attempt
+        && retryAfterSeconds >= 0
+      ) {
+        rememberItem(`diagnostic:${diagnosticId}`)
+        diagnosticsById.set(diagnosticId, {
+          id: diagnosticId,
+          code,
+          status,
+          attempt,
+          maxAttempts,
+          retryAfterSeconds
+        })
+      }
       continue
     }
 
@@ -440,6 +487,10 @@ export function buildLiveExecutionProgress(
       const itemId = key.slice('narration:'.length)
       const body = (narrationByItem.get(itemId) ?? '').trim().slice(-4_000)
       return body ? [{ key, kind: 'narration', body }] : []
+    }
+    if (key.startsWith('diagnostic:')) {
+      const diagnostic = diagnosticsById.get(key.slice('diagnostic:'.length))
+      return diagnostic ? [{ key, kind: 'diagnostic', diagnostic }] : []
     }
     if (key.startsWith('tool:')) {
       const step = stepById.get(key.slice('tool:'.length))
