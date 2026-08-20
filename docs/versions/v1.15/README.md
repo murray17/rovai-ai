@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.15
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
@@ -42,6 +42,8 @@ last_updated: 2026-08-20
 > operation，gate 前重验 Draft，遗留重复 staging 可安全收敛。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
+>
+> 后续版本：[v1.16 Camp 纯附件消息](../v1.16/README.md)。
 
 ## 版本目标
 

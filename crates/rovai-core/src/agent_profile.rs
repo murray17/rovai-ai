@@ -19,7 +19,8 @@ use crate::{
         ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
         AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
         TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
-        trae_static_permission_options,
+        trae_static_permission_options, validate_machine_ready_snapshot,
+        validate_trae_machine_ready_evidence,
     },
     collaboration::end_camp_membership,
     command::{
@@ -1317,6 +1318,21 @@ impl AgentProfileService {
                 }),
             )));
         }
+        if runtime.adapter_kind == AdapterKind::TraeCnCli
+            && let Err(error) = validate_trae_machine_ready_evidence(
+                runtime.reported_version.as_deref(),
+                Some(&runtime.executable_fingerprint),
+                &runtime.capabilities,
+            )
+        {
+            return Ok(Some(runtime_blocker(
+                "runtime_probe_required",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "detail": error.to_string(),
+                }),
+            )));
+        }
         Ok(None)
     }
 
@@ -1428,6 +1444,7 @@ impl AgentProfileService {
         validate_installation(&verified.executable_path, &verified.auth_scope)?;
         validate_command_name(&verified.command_name)?;
         validate_snapshot(&verified.snapshot)?;
+        validate_machine_ready_snapshot(verified.adapter_kind, &verified.snapshot)?;
         if verified.snapshot.probe_status != "ready"
             || verified.snapshot.executable_fingerprint.is_none()
         {
@@ -1438,6 +1455,9 @@ impl AgentProfileService {
         }
         let executable_identity =
             observe_executable_file_identity(Path::new(&verified.executable_path)).ok();
+        if verified.adapter_kind == AdapterKind::TraeCnCli && executable_identity.is_none() {
+            anyhow::bail!("TRAE machine Ready requires the current executable identity");
+        }
 
         let transaction = database.connection_mut().transaction()?;
         let existing = transaction
@@ -2673,8 +2693,16 @@ impl AgentProfileService {
             if version != envelope.payload.expected_installation_version {
                 return Ok(version_conflict(version));
             }
+            let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
+            validate_machine_ready_snapshot(adapter_kind, &envelope.payload.snapshot)?;
+            if adapter_kind == AdapterKind::TraeCnCli
+                && envelope.payload.snapshot.probe_status == "ready"
+                && executable_identity.is_none()
+            {
+                anyhow::bail!("TRAE machine Ready requires the current executable identity");
+            }
             if let Some(failure) = envelope.payload.failure.as_ref()
-                && failure.runtime_kind.as_str() != adapter_kind
+                && failure.runtime_kind != adapter_kind
             {
                 anyhow::bail!("public Runtime failure kind must match Adapter installation");
             }
@@ -6129,6 +6157,8 @@ mod slow_tests {
         let service = AgentProfileService::default();
         let executable_path = directory.join("traecli");
         std::fs::write(&executable_path, b"static-trae-fixture").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
         let fingerprint = "sha256:trae-static".to_string();
         let observed_at = chrono::Utc::now().to_rfc3339();
         let static_snapshot = AgentRuntimeAdapterRegistry::default()
@@ -6217,7 +6247,7 @@ mod slow_tests {
         let deep_probe_at = chrono::Utc::now() - chrono::Duration::hours(2);
         let mut live_snapshot = AgentRuntimeAdapterRegistry::default()
             .trae_live_session_capability_snapshot(
-                None,
+                Some("traecli 0.120.52".to_string()),
                 fingerprint.clone(),
                 json!({
                     "protocolVersion": 1,
@@ -6247,7 +6277,10 @@ mod slow_tests {
                 deep_probe_at.to_rfc3339(),
             )
             .unwrap();
-        assert_eq!(live_snapshot.reported_version, None);
+        assert_eq!(
+            live_snapshot.reported_version.as_deref(),
+            Some("traecli 0.120.52")
+        );
         // v1.03 deep probes digested the Session-advertised descriptors themselves. An upgrade
         // must recognize that exact legacy format without treating it as current schema drift.
         live_snapshot.permission_schema_digest = canonical_json_digest(
@@ -6298,7 +6331,10 @@ mod slow_tests {
         let verified = resolve_frozen_runtime_binding(database.connection(), &binding)
             .unwrap()
             .unwrap();
-        assert_eq!(verified.reported_version, None);
+        assert_eq!(
+            verified.reported_version.as_deref(),
+            Some("traecli 0.120.52")
+        );
         assert_eq!(verified.model.source, "runtime_default");
         assert_eq!(verified.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
         assert!(
@@ -6308,6 +6344,15 @@ mod slow_tests {
                 .is_none(),
             "the same Runtime may dispatch only after the unified deep probe reaches ready"
         );
+        let mut legacy_weak_ready = verified.clone();
+        legacy_weak_ready
+            .capabilities
+            .retain(|capability| capability != "session.config_shape");
+        let weak_blocker = service
+            .runtime_dispatch_blocker(&database, &legacy_weak_ready)
+            .unwrap()
+            .expect("Dispatch must recheck the same TRAE machine Ready requirements");
+        assert_eq!(weak_blocker.code, "runtime_probe_required");
 
         let explicit_binding = ResolvedRuntimeBinding {
             adapter_kind: AdapterKind::TraeCnCli,

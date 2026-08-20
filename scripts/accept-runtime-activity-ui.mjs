@@ -52,9 +52,10 @@ const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
   return `fixture output line ${index + 1} · vehicle prepayment reconciliation`
 }).join('\n')
 const directoryAttachmentSource = join(fixtureRoot, '项目资料')
+const codexExpectedCommand = 'rovai camp read --mode timeline --direction before --limit 20'
 
 const runtimes = [
-  runtime('codex', 'codex-cli', 'Codex CLI', 'rovai camp read', {
+  runtime('codex', 'codex-cli', 'Codex CLI', codexExpectedCommand, {
     protocol: 'codex-app-server', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '执行 Shell 命令', payload: {
       item: {
@@ -351,7 +352,7 @@ try {
     `Agent dock is not attached below the conversation timeline: ${JSON.stringify(agentDock)}`)
   assert(agentDock.topRunBadgeCount === 0
     && agentDock.auditTabCount === 0
-    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
   `Removed top Run/Audit entries or legacy Inspector tabs returned: ${JSON.stringify(agentDock)}`)
 
   await evaluate(app.cdp, `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
@@ -370,7 +371,7 @@ try {
   await waitForExpression(app.cdp,
     `document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'`)
   const executionSidecar = await collectExecutionSidecar(app.cdp)
-  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '任务', '队员'])
+  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '队员', '任务'])
     && executionSidecar.activeTab === '执行'
     && executionSidecar.bottomDockCount === 0
     && executionSidecar.sideDockCount === 1
@@ -415,7 +416,7 @@ try {
     && returnedExecutionSelection.selectedAgentId === activeAgentId
     && returnedExecutionSelection.drawerPlacement === 'bottom'
     && returnedExecutionSelection.resizeHandle
-    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
   `Execution console did not return to the production bottom surface: ${JSON.stringify({ returnedExecutionDock, returnedExecutionSelection })}`)
 
   await setTheme(app.cdp, 'night')
@@ -2142,7 +2143,7 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
   await wait(150)
   const openedLongResultAtZoom = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
     if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
     return Boolean(disclosure)
   })()`)
@@ -2427,7 +2428,7 @@ function assertConversationDropPresentation(presentation, context, expectedCallo
     && presentation.layerInsideGrid
     && presentation.inspectorExcluded
     && Math.abs(presentation.calloutWidth - expectedCalloutWidth) <= 1
-    && JSON.stringify(presentation.tabs) === JSON.stringify(['任务', '队员'])
+    && JSON.stringify(presentation.tabs) === JSON.stringify(['队员', '任务'])
     && !presentation.documentOverflow
     && !presentation.sourcePathVisible,
   `${context} conversation drop presentation failed: ${JSON.stringify(presentation)}`)
@@ -2545,7 +2546,7 @@ async function verifyRecoveryBlockerResolution(cdp) {
 async function verifyCompleteToolOutput(cdp) {
   const opened = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
     const beforeText = disclosure?.querySelector('.tool-call-detail')?.textContent ?? ''
     if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
     return {
@@ -2577,6 +2578,7 @@ async function verifyCompleteToolOutput(cdp) {
       hasFirstMarker: text.includes(${JSON.stringify(longToolOutputFirstMarker)}),
       hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
       hasLastMarker: text.includes(${JSON.stringify(longToolOutputLastMarker)}),
+      startsWithCommandAndOutputSections: text.startsWith(${JSON.stringify(`命令\n${codexExpectedCommand}\n\n输出\n${longToolOutputFirstMarker}`)}),
       endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
       hasCutNotice: text.includes('…（后续内容未显示）'),
       leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
@@ -2596,8 +2598,9 @@ async function verifyCompleteToolOutput(cdp) {
   assert(presentation.hasFirstMarker
     && presentation.hasMiddleMarker
     && presentation.hasLastMarker
+    && presentation.startsWithCommandAndOutputSections
     && presentation.endsWithPublicOutput
-    && presentation.lineCount === 8_432
+    && presentation.lineCount === 8_436
     && presentation.verticalOverflow
     && !presentation.hasCutNotice
     && !presentation.leakedEnvelope,

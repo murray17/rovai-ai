@@ -24,7 +24,8 @@ use rovai_core::builtin_tool_transport::{
     builtin_tool_identity_by_command,
 };
 use rovai_core::camp_message_send_teaching::{
-    CAMP_MESSAGE_SEND_HELP_EXAMPLES, CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
+    CAMP_MESSAGE_SEND_FILE_HELP, CAMP_MESSAGE_SEND_HELP_EXAMPLES,
+    CAMP_MESSAGE_SEND_PUBLIC_ONLY_HELP, CAMP_MESSAGE_SEND_TO_HELP,
     CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP,
 };
 use rovai_core::command::canonical_json_digest;
@@ -1573,6 +1574,9 @@ fn render_flat_input_help(output: &mut String, description: &BuiltinToolDescript
         if description.name == "camp.message.send" && argument.field == "mentionUser" {
             write_indented_help(output, CAMP_MESSAGE_SEND_TO_PRINCIPAL_HELP);
         }
+        if description.name == "camp.message.send" && argument.field == "files" {
+            write_indented_help(output, CAMP_MESSAGE_SEND_FILE_HELP);
+        }
         if description.name == "memory.view" && argument.field == "scope" {
             writeln!(output, "      One of: hearth, companion, relationship.")
                 .expect("writing help to a String cannot fail");
@@ -2539,6 +2543,12 @@ mod tests {
         assert!(description.summary.contains("public-only"));
         assert!(description.summary.contains("--to-principal"));
         assert!(!description.summary.contains("--to-user"));
+        let body = description
+            .arguments
+            .iter()
+            .find(|argument| argument.field == "body")
+            .unwrap();
+        assert!(!body.required);
         let to = description
             .arguments
             .iter()
@@ -2588,6 +2598,17 @@ mod tests {
             .unwrap(),
             json!({"body": "Legacy spelling", "mentionUser": true})
         );
+        assert_eq!(
+            parse_operation_input(
+                &description,
+                &[
+                    "--file".to_string(),
+                    "$ROVAI_RUN_TMP/report.pdf".to_string(),
+                ]
+            )
+            .unwrap(),
+            json!({"files": ["$ROVAI_RUN_TMP/report.pdf"]})
+        );
         let input_file =
             std::env::temp_dir().join(format!("rovai-send-v4-input-{}.json", Uuid::new_v4()));
         std::fs::write(
@@ -2614,6 +2635,7 @@ mod tests {
                 "rovai send --public-only --body 'Final conclusion: the failure is a client-version regression.'",
                 "rovai send --to agent_5 --body 'Please reproduce on the previous client build and return the version and result.'",
                 "rovai send --public-only --to-principal --body 'Please choose whether to roll back the client or continue the token investigation.'",
+                "rovai send --file \"$ROVAI_RUN_TMP/report.pdf\"",
             ]
         );
         let help = operation_help_text(&description);
@@ -2626,6 +2648,7 @@ mod tests {
         assert!(help.contains("Agent addressing schedules concrete continuing work, not CC."));
         assert!(help.contains("This option is invalid with --public-only."));
         assert!(help.contains("Restricted inline Agent addressing is disabled"));
+        assert!(help.contains("--body may be omitted for an attachment-only message"));
         assert!(help.contains("It may be combined with --to-principal."));
         assert!(!help.contains("--to-user"));
         assert!(!help.contains("--to agent_5 --public-only"));

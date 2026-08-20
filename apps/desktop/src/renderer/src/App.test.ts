@@ -30,6 +30,7 @@ import {
   campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
+  campMessageExecutionPurpose,
   campMessageSendParams,
   campOpenProjectionAsSnapshot,
   campSnapshotWithCurrentAnchor,
@@ -74,11 +75,14 @@ import {
   attachmentDropIsBlocked,
   agentRunStopViewState,
   canStopAgentRun,
+  campConversationHasVisibleHistory,
   campConversationViewFromStoredValue,
   campConversationTimeline,
   composerDraftNeedsContinuationRepair,
   composerDraftNeedsReplyRepair,
+  composerHasSendablePayload,
   composerRecipientSummary,
+  composerSendIsDisabled,
   campInspectorMembers,
   campMemberIsLeadEligible,
   clampExecutionDrawerHeight,
@@ -631,6 +635,17 @@ describe('task event projections', () => {
       [task]
     )
 
+    const initializationMessage = {
+      ...message('camp-initialized', 1, '2026-08-05T01:58:00Z'),
+      authorType: 'system' as const,
+      authorId: 'camp-initializer'
+    }
+    expect(campConversationHasVisibleHistory([])).toBe(false)
+    expect(campConversationHasVisibleHistory(
+      campConversationTimeline([initializationMessage])
+    )).toBe(false)
+    expect(campConversationHasVisibleHistory(projected)).toBe(true)
+
     expect(projected.map((item) => item.id)).toEqual([
       'before-task',
       `task:${task.taskId}`,
@@ -657,6 +672,7 @@ describe('task event projections', () => {
       assigneeAgentId: null,
       version: 5
     }])
+    expect(campConversationHasVisibleHistory(updated)).toBe(true)
     expect(updated).toHaveLength(1)
     expect(updated[0]).toMatchObject({
       id: `task:${task.taskId}`,
@@ -946,6 +962,83 @@ describe('task event projections', () => {
     expect(params).not.toHaveProperty('preparedAttachmentIds')
     expect(params).not.toHaveProperty('replyToCampMessageId')
     expect(params.execution).not.toHaveProperty('expectedOutput')
+  })
+
+  it('enables one send gate for text or ready attachments and blocks unfinished attachments', () => {
+    const baseGate = {
+      hasUnavailableMention: false,
+      replyRepairRequired: false,
+      continuationRepairRequired: false,
+      busy: false,
+      composerSubmitting: false,
+      routingMutating: false,
+      composerDraftAvailable: true,
+      preparingAttachmentCount: 0,
+      failedAttachmentCount: 0
+    }
+
+    expect(composerHasSendablePayload('', true)).toBe(true)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: composerHasSendablePayload('', true)
+    })).toBe(false)
+    expect(composerHasSendablePayload('   ', false)).toBe(false)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: composerHasSendablePayload('   ', false)
+    })).toBe(true)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: true,
+      preparingAttachmentCount: 1
+    })).toBe(true)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: true,
+      failedAttachmentCount: 1
+    })).toBe(true)
+  })
+
+  it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {
+    const draft: CampComposerDraftView = {
+      campId: 'camp-attachment-only',
+      body: '',
+      content: [],
+      revision: 4,
+      attachments: [{
+        id: 'attachment-only',
+        displayName: '说明.txt',
+        kind: 'file',
+        fileCount: 1,
+        mediaType: 'text/plain',
+        byteSize: 12,
+        previewKind: 'none',
+        state: 'ready',
+        errorMessage: null,
+        createdAt: '2026-08-20T00:00:00Z'
+      }],
+      replyIntent: null,
+      continuationIntent: null,
+      updatedAt: '2026-08-20T00:00:00Z',
+      expiresAt: '2026-08-27T00:00:00Z'
+    }
+
+    expect(campMessageExecutionPurpose(draft)).toBe('Camp attachment-only message')
+    expect(campMessageSendParams('command-attachment-only', draft.campId, draft)).toEqual({
+      commandId: 'command-attachment-only',
+      campId: draft.campId,
+      draftRevision: 4,
+      execution: {
+        taskId: null,
+        purpose: 'Camp attachment-only message',
+        completionRole: 'required'
+      }
+    })
+    expect(optimisticCampMessage(null, 'command-attachment-only', draft)).toMatchObject({
+      body: '',
+      content: [],
+      attachments: [{ id: 'attachment-only' }]
+    })
   })
 
   it('keeps local cancelling state until the authoritative turn becomes terminal', () => {
@@ -2045,6 +2138,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('给 洛可 发消息')
+    expect(markup).toContain('集结队伍，写下这次冒险的目标…')
+    expect(markup).not.toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
     expect(markup).not.toContain('默认由 Lead · 洛可接收')
     expect(markup).toContain('开始这段协作')
     expect(markup).toContain('快速对话')
@@ -2449,6 +2544,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('aria-label="复制这条消息"')
+    expect(markup).toContain('和队伍继续前行：补充线索、调整方向或布置新任务…')
+    expect(markup).not.toContain('集结队伍，写下这次冒险的目标…')
     expect(markup).toContain('>复制</button>')
     expect(markup).toContain('class="message-surface"')
     expect(markup).toContain('class="message-mention-token is-interactive"')
@@ -2533,9 +2630,9 @@ describe('task event projections', () => {
     const inspectorTabListEnd = inspectorMarkup.indexOf('</div>', inspectorTabListStart)
     const inspectorTabList = inspectorMarkup.slice(inspectorTabListStart, inspectorTabListEnd)
     expect(inspectorTabList.indexOf('>执行 <small>'))
-      .toBeLessThan(inspectorTabList.indexOf('>任务 <small>'))
-    expect(inspectorTabList.indexOf('>任务 <small>'))
       .toBeLessThan(inspectorTabList.indexOf('>队员 <small>'))
+    expect(inspectorTabList.indexOf('>队员 <small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>任务 <small>'))
     expect(inspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-execution/)
     expect(inspectorMarkup).toContain('data-placement="inspector"')
 
@@ -2968,6 +3065,91 @@ describe('task event projections', () => {
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
   })
 
+  it('renders an attachment-only message shell without an empty body bubble', () => {
+    const attachmentOnlyMessage: CampMessageView = {
+      id: 'message-attachment-only',
+      sequence: 1,
+      timelineGlobalSequence: 1,
+      authorType: 'user',
+      authorId: 'local_user',
+      sourceAgentRunId: null,
+      body: '',
+      content: [],
+      attachments: [{
+        id: 'attachment-timeline',
+        displayName: '说明.txt',
+        kind: 'file',
+        fileCount: 1,
+        mediaType: 'text/plain',
+        byteSize: 12,
+        previewKind: 'none',
+        runtimeProjectionState: 'pending'
+      }, {
+        id: 'attachment-timeline-failed',
+        displayName: '不可用.txt',
+        kind: 'file',
+        fileCount: 1,
+        mediaType: 'text/plain',
+        byteSize: 8,
+        previewKind: 'none',
+        runtimeProjectionState: 'failed'
+      }],
+      addressMode: 'default',
+      addressedAgentIds: ['agent_1'],
+      replyToCampMessageId: null,
+      campTurnId: 'turn-attachment-only',
+      presentation: null,
+      createdAt: '2026-08-20T00:00:00Z'
+    }
+    const snapshot: CampSnapshot = {
+      schemaVersion: 32,
+      throughGlobalSequence: 1,
+      camp: {
+        id: 'camp-attachment-only', title: '附件消息', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        defaultLeadAgentId: 'agent_1', version: 1,
+        createdAt: '2026-08-20T00:00:00Z', updatedAt: '2026-08-20T00:00:00Z'
+      },
+      members: [{
+        agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
+        avatarRef: null, accent: '#526f88', membershipStatus: 'active', leaveRequestedAt: null,
+        profilePresence: 'present', memberOrder: 0, isDefaultLead: true, version: 1
+      }],
+      tasks: [],
+      messages: [attachmentOnlyMessage],
+      messageDeliveries: [],
+      turns: [],
+      agentRuns: [],
+      contextManifests: [],
+      executionEvidence: [],
+      approvals: [],
+      actions: [],
+      timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: null,
+      agents: [agentProfile()],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+
+    expect(markup).toContain('class="timeline-node conversation-bubble user"')
+    expect(markup).toContain('<strong>你</strong>')
+    expect(markup).toContain('aria-label="回复这条消息"')
+    expect(markup).toContain('class="timeline-attachments" aria-label="消息附件"')
+    expect(markup).toContain('说明.txt')
+    expect(markup).toContain('正在准备供队员读取')
+    expect(markup).toContain('队员读取不可用')
+    expect(markup).toContain('attachment-projection-pending')
+    expect(markup).toContain('attachment-projection-failed')
+    expect(markup).not.toContain('class="message-bubble"')
+  })
+
   it('renders a public A2A message with the Scheme C handoff footer', () => {
     const publicMessage: CampMessageView = {
       id: 'public-a2a-message',
@@ -3318,7 +3500,7 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({
       step: {
         title: 'pnpm test',
-        detail: 'pnpm test',
+        detail: '命令\npnpm test',
         status: 'running'
       }
     })
@@ -3422,7 +3604,8 @@ describe('task event projections', () => {
       payload: {
         item: {
           id: 'native-command-1', type: 'commandExecution',
-          command: 'sed -n 1,120p SKILL.md', status: 'inProgress'
+          command: 'sed -n 1,120p SKILL.md', status: 'inProgress',
+          commandActions: [{ type: 'read', path: 'SKILL.md' }]
         }
       },
       canonical,
@@ -3434,7 +3617,8 @@ describe('task event projections', () => {
       payload: {
         item: {
           id: 'native-command-1', type: 'commandExecution',
-          command: 'sed -n 1,120p SKILL.md', status: 'completed'
+          command: 'sed -n 1,120p SKILL.md', status: 'completed',
+          commandActions: [{ type: 'read', path: 'SKILL.md' }]
         }
       },
       canonical,
@@ -3790,6 +3974,7 @@ describe('task event projections', () => {
     expect(markup).toContain('class="tool-call-state status-completed"')
     expect(markup).toContain('aria-label="成功"')
     expect(markup).toContain('tool-call-result-scroll')
+    expect(markup).toContain('class="tool-call-title" title="printf"')
     expect(markup).not.toContain('tool-output-copy-button')
     expect(markup).not.toContain('>已完成<')
     expect(markup).not.toContain('tool-call-static')
@@ -3814,21 +3999,22 @@ describe('task event projections', () => {
     expect(failedMarkup).toContain('aria-label="失败"')
   })
 
-  it('uses bounded concrete command labels across the current ten Runtime adapters', () => {
+  it('uses truthful Codex command previews without changing the other Runtime adapters', () => {
     const genericShell = canonicalActivity('shell-command', {
       activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null,
       presentationHint: '执行 Shell 命令', phase: 'started', outcome: 'unknown'
+    })
+    const codexPayload = (command: string): Record<string, unknown> => ({
+      item: { type: 'commandExecution', command, commandActions: [{ type: 'unknown' }] }
     })
     const cases = [
       {
         adapter: 'codex-cli',
         canonical: genericShell,
-        payload: {
-          item: {
-            command: "/bin/zsh -lc 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'"
-          }
-        },
-        expected: 'rovai camp read --help'
+        payload: codexPayload(
+          "/bin/zsh -lc 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'"
+        ),
+        expected: 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'
       },
       { adapter: 'opencode-cli', canonical: { ...genericShell, presentationHint: 'Run fixed printf' }, payload: {}, expected: 'Run fixed printf' },
       { adapter: 'copilot-cli', canonical: { ...genericShell, presentationHint: 'Inspect attachment file' }, payload: {}, expected: 'Inspect attachment file' },
@@ -3858,29 +4044,56 @@ describe('task event projections', () => {
         testCase.adapter
       ).toBe(testCase.expected)
     }
-    expect(executionActivityTitle(genericShell, {
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
+    ))).toBe('rovai send --public-only --body [已隐藏]')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `/bin/zsh -lc 'rovai --help'`
+    ))).toBe('rovai --help')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `/bin/zsh -lc 'rovai send --help'`
+    ))).toBe('rovai send --help')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rg --help /private/project/path`
+    ))).toBe('rg --help /private/project/path')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rovai send --body '--help'`
+    ))).toBe('rovai send --body [已隐藏]')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rovai send 'TOP_SECRET_POSITIONAL_BODY'`
+    ))).toBe('rovai send [已隐藏]')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rovai camp TOP_SECRET_UNKNOWN_ACTION`
+    ))).toBe('rovai camp TOP_SECRET_UNKNOWN_ACTION')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `git status && git checkout feature/command-preview && git rebase main`
+    ))).toBe('git status && git checkout feature/command-preview && git rebase main')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `node -e 'console.log("一段很长的内联脚本")'`
+    ))).toBe(`node -e 'console.log("一段很长的内联脚本")'`)
+    expect(executionActivityTitle(genericShell, codexPayload(
+      "node <<'NODE'\nconst message = 'heredoc script';\nconsole.log(message);\nNODE"
+    ))).toBe("node const message = 'heredoc script' ; console.log(message)")
+    const sensitive = executionActivityTitle(genericShell, codexPayload(
+      `OPENAI_API_KEY=sk-secret curl -H 'Authorization: Bearer secret-token' --token abc https://example.test`
+    ))
+    expect(sensitive).toContain('OPENAI_API_KEY=[已隐藏]')
+    expect(sensitive).toContain('"Authorization: [已隐藏]"')
+    expect(sensitive).toContain('--token [已隐藏]')
+    expect(sensitive).not.toContain('sk-secret')
+    expect(sensitive).not.toContain('secret-token')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `curl --header='Authorization: Bearer another-secret' https://example.test`
+    ))).toBe('curl --header="Authorization: [已隐藏]" https://example.test')
+    expect(executionActivityTitle({
+      ...genericShell,
+      presentationHint: '搜索项目文件'
+    }, {
       item: {
-        command: `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
+        type: 'commandExecution', command: 'rg executionActivityTitle apps',
+        commandActions: [{ type: 'search', query: 'executionActivityTitle', path: 'apps' }]
       }
-    })).toBe('rovai send')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `/bin/zsh -lc 'rovai --help'` }
-    })).toBe('rovai --help')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `/bin/zsh -lc 'rovai send --help'` }
-    })).toBe('rovai send --help')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rg --help /private/project/path` }
-    })).toBe('rg --help')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rovai send --body '--help'` }
-    })).toBe('rovai send')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rovai send 'TOP_SECRET_POSITIONAL_BODY'` }
-    })).toBe('rovai send')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rovai camp TOP_SECRET_UNKNOWN_ACTION` }
-    })).toBe('rovai camp')
+    })).toBe('搜索项目文件')
     expect(executionActivityTitle(canonicalActivity('file-write', {
       activityDomain: 'file', semanticKind: 'file.write', toolName: null,
       presentationHint: 'write_file', phase: 'started', outcome: 'unknown'
@@ -3889,13 +4102,14 @@ describe('task event projections', () => {
     })).toBe('write_file')
   })
 
-  it('uses the Core Codex presentation hint without parsing the command in Renderer', () => {
+  it('keeps the Core Codex presentation hint for structured read commands', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'codex-command', agentRunId: 'run-codex', eventType: 'activity.started',
       payload: {
         item: {
           id: 'command-1', type: 'commandExecution', status: 'inProgress',
-          command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"'
+          command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
+          commandActions: [{ type: 'read', path: '/repo/docs/README.md' }]
         }
       },
       canonical: canonicalActivity('command-1', {
@@ -3909,7 +4123,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: '读取 README.md',
-        detail: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
+        detail: '命令\nsed -n 1,120p /repo/docs/README.md',
         activityDomain: 'shell'
       }
     })
@@ -3992,7 +4206,16 @@ describe('task event projections', () => {
         exitCode: 0
       },
       _rovaiTruncated: true
-    })).toBe('full diff\nsecond line')
+    })).toBe('命令\ngit diff\n\n输出\nfull diff\nsecond line')
+    expect(executionEvidenceResultText('activity.completed', {
+      item: {
+        type: 'commandExecution',
+        command: "node <<'NODE'\nconst token = 'must-not-leak';\nconsole.log('done');\nNODE",
+        aggregatedOutput: 'done'
+      }
+    })).toBe(
+      "命令\nnode <<'NODE' ; const token = '[已隐藏]' ; console.log('done') ; NODE\n\n输出\ndone"
+    )
     expect(executionEvidenceResultText('runtime.action', {
       output: { status: 'accepted', receiptId: 'receipt-1' },
       rawOutputDigest: 'must-not-be-rendered'

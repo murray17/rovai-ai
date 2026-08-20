@@ -11,7 +11,7 @@ last_updated: 2026-08-19
 
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
-| `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；command/file 无工具名时先用 `commandActions` / `changes` 生成有界 presentation hint；仍为通用 Shell 标题时，Renderer 只从公开 `command` 提炼可执行文件名与有界子命令，不展示参数 | 受控 fixture 与 Renderer 十 Runtime presentation matrix 通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；新版 Core 标题 post-fix smoke 待运行，Renderer fallback 已用真实 Camp Evidence 回归 |
+| `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；commandActions 全为 read/list/search 时使用中文语义 hint；其他 command 从公开 `command` 生成去 wrapper、保留完整序列并脱敏的 Renderer 标题，展开后分开显示命令与 output | 受控 fixture、Renderer 十 Runtime matrix 与 v1.18 命令/脱敏/详情回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；新版 Core 标题 post-fix smoke 待运行，Renderer fallback 已用真实 Camp Evidence 回归 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；`1.18.15` 真实 command-output 与完整 allow/deny smoke 通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 command-output smoke 通过 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | 受控 fixture 通过 | ACP session + Skill turn + MCP projection 通过 |
@@ -69,11 +69,11 @@ command output 与生命周期投影，不把一次 pass 扩大为所有模型�
 | `dynamicToolCall` / collab tool | `tool` | `tool.call` | Runtime `tool` 字段 | Runtime title 或 Core domain hint |
 
 `item.id` 是 lifecycle identity。`item.title` 与上述结构化 presentation 字段只进入 Core
-`presentationHint`；原始 command string 不参与 Canonical 标题生成、分类或 identity。Renderer 仅在
-Canonical 标题仍是通用 Shell 文案时，可以从已经公开的 `item.command` 提炼可执行文件 basename 与最多
-两个安全子命令；只有紧随已展示命令或子命令的精确 `--help` 可以原样追加，不得扫描后续 token
-猜测帮助语义。其他 Shell 参数、正文、路径、环境值和 token 不进入标题。这个 fallback 同时消费 live 与
-恢复后的同一 Evidence shape，不创造新事实。Codex `0.147.0` 的本地 app-server schema 与实际 AgentRun
+`presentationHint`；原始 command string 不参与 Canonical 标题生成、分类或 identity。Renderer 对
+`commandActions` 全为 read/list/search 的 command 使用结构化中文 hint；其他 command 从已经公开的
+`item.command` 生成去除外层 Shell wrapper、保留完整子命令/参数/运算符并确定性脱敏的单行标题。视觉宽度
+不足时由 CSS ellipsis 省略，展开后完整脱敏命令与公开 output 分区显示。这个 projection 同时消费 live 与
+恢复后的同一 Evidence shape，不创造新事实，也不扩大其他 Runtime 的 command input 边界。Codex `0.147.0` 的本地 app-server schema 与实际 AgentRun
 均证明 `commandExecution.title` 可以为空，而 `commandActions` 是协议必填字段；修复 fixture 使用该真实
 wire shape，Core post-fix live smoke 仍需单独运行。
 
@@ -129,8 +129,8 @@ Capability snapshot 明确包含 `output.stream_json` 时，Adapter 消费公开
 - lifecycle completion 可以只报告 identity/status；这类稀疏更新只推进 phase/outcome，不得用 Evidence-kind fallback 覆盖同一 operation 已报告的结构化 domain、semantic kind 或 title；
 - terminal 冲突为 `unsettled`；
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
-- title、命令字符串、provider 和 Runtime 名称永远不决定 domain 或 identity；命令字符串只允许按上述
-  Renderer 边界生成无参数的有界展示标签。
+- title、命令字符串、provider 和 Runtime 名称永远不决定 domain 或 identity；Codex 命令字符串只允许按上述
+  Renderer 边界生成完整脱敏的 presentation。
 
 ## Runtime-specific transport notes
 

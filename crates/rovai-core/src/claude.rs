@@ -306,6 +306,9 @@ impl ClaudeCodeCliRuntimeAdapter {
         if let Some(root) = request.attachment_access_root.as_deref() {
             command.arg("--add-dir").arg(root);
         }
+        if let Some(config) = request.builtin_tools.as_ref() {
+            command.arg("--add-dir").arg(config.run_tmp());
+        }
         if permission_mode == "bypassPermissions" {
             command.arg("--dangerously-skip-permissions");
         }
@@ -582,6 +585,9 @@ fn claude_sensitive_paths<'a>(
     ];
     if let Some(root) = request.attachment_access_root.as_deref() {
         sensitive_paths.push((root, "<attachment-root>"));
+    }
+    if let Some(config) = request.builtin_tools.as_ref() {
+        sensitive_paths.push((config.run_tmp(), "<run-tmp>"));
     }
     sensitive_paths
 }

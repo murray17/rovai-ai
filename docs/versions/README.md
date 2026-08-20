@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.15
+current_version: v1.19
 last_updated: 2026-08-20
 ---
 
@@ -166,4 +166,8 @@ last_updated: 2026-08-20
 | v1.12 | `historical` | User-only AgentRun 局部停止、立即写 fence 与权威状态投影 | [v1.12/README.md](v1.12/README.md) |
 | v1.13 | `historical` | 十 Runtime 的 AgentRun 首个实际模型观测与执行台展示 | [v1.13/README.md](v1.13/README.md) |
 | v1.14 | `historical` | `camp.read` 安全 Timeline 默认、显式消息锚点模式与 Built-in Transport v17 | [v1.14/README.md](v1.14/README.md) |
-| v1.15 | `current` | Windows x64 产品实现与资格闭环；Profile v4 自身消息过滤、本机安装级执行台位置偏好与可重建 Runtime Attachment semantic receipt | [v1.15/README.md](v1.15/README.md) |
+| v1.15 | `historical` | Windows x64 产品实现与资格闭环；Profile v4 自身消息过滤、本机安装级执行台位置偏好与可重建 Runtime Attachment semantic receipt | [v1.15/README.md](v1.15/README.md) |
+| v1.16 | `historical` | Camp 纯附件消息、统一发送门禁与无空白正文气泡的 Timeline 投影 | [v1.16/README.md](v1.16/README.md) |
+| v1.17 | `historical` | Agent 文件发送、语义先提交的统一附件发布与 Runtime 可用性投影 | [v1.17/README.md](v1.17/README.md) |
+| v1.18 | `historical` | Codex 执行台真实命令预览、敏感参数脱敏与完整命令/输出详情 | [v1.18/README.md](v1.18/README.md) |
+| v1.19 | `current` | Agent 文件入口 lease 隔离、同 Camp Authority 串行化与纯附件发送 | [v1.19/README.md](v1.19/README.md) |

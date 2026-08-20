@@ -369,7 +369,7 @@ try {
   await waitForExpression(cdp, `document.querySelector('.skill-card[data-skill-name="tasteful-ui"] .skill-card-details')?.hidden === true`, 5_000)
 
   await clickElement(cdp, '.skill-group-select')
-  await waitForExpression(cdp, `document.querySelectorAll('.skill-group-option').length === 9`, 5_000)
+  await waitForExpression(cdp, `document.querySelectorAll('.skill-group-option').length === 10`, 5_000)
   const groupMenu = await evaluate(cdp, `(() => {
     const options = [...document.querySelectorAll('.skill-group-option')]
     const codex = options.find((option) => option.textContent?.includes('.codex/skills'))
@@ -383,11 +383,11 @@ try {
       unverifiedCount: options.filter((option) => option.querySelector('.skill-group-name-line > i.unverified')?.textContent === '暂未验证').length
     }
   })()`)
-  if (groupMenu.groupCount !== 9
+  if (groupMenu.groupCount !== 10
       || !groupMenu.codexMemberName?.includes('叮叮')
       || !groupMenu.realAvatarRendered
       || groupMenu.legacyLetterAvatarVisible
-      || groupMenu.verifiedCount !== 9
+      || groupMenu.verifiedCount !== 10
       || groupMenu.unverifiedCount !== 0) {
     throw new Error(`Skill group menu acceptance failed: ${JSON.stringify(groupMenu)}`)
   }

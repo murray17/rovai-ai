@@ -8,7 +8,7 @@ mod runtime_fleet;
 mod runtime_mcp;
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     future::Future,
     path::{Path, PathBuf},
     sync::Arc,
@@ -67,9 +67,13 @@ use rovai_core::{
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
+    camp_attachment_publication::{
+        AuthorityAttachment, database_has_unresolved_writer_intent, frozen_sources_are_owned,
+        unresolved_publication_camp_ids,
+    },
     camp_attachment_view::{
-        CampAttachmentPublicationStaging, CampAttachmentRuntimeAuthorization,
-        CampAttachmentViewStore, CampAttachmentVisibilityMode, PreparedCampAttachmentCleanup,
+        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, CampAttachmentVisibilityMode,
+        PreparedCampAttachmentCleanup,
     },
     camp_content::StructuredCampMessageContent,
     camp_history::{
@@ -139,9 +143,9 @@ use rovai_core::{
     },
     message_delivery::{
         CAMP_MESSAGE_SEND_TOOL_NAME, CancelMessageDeliveryCommand, DeliveryDispatchTrigger,
-        MessageDeliveryService, RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
-        mark_unstarted_deliveries_interrupted_before_dispatch, runtime_waiting_camps,
-        runtime_waiting_recipients,
+        MessageDeliveryService, RetryMessageDeliveryCommand, dispatch_accepted_deliveries,
+        dispatch_pending_for_recipient, mark_unstarted_deliveries_interrupted_before_dispatch,
+        runtime_waiting_camps, runtime_waiting_recipients,
     },
     monitoring::{
         MonitoringFilter, MonitoringService, ParsedRuntimeUsage, RuntimeUsageBuffer,
@@ -258,6 +262,15 @@ impl CampAttachmentReadAdmission {
         }
         Ok(())
     }
+}
+
+fn release_agent_run_attachment_admission(
+    admission: CampAttachmentReadAdmission,
+    projection_requests: &mpsc::UnboundedSender<String>,
+) -> bool {
+    let camp_id = admission.camp_id.clone();
+    drop(admission);
+    projection_requests.send(camp_id).is_ok()
 }
 
 #[derive(Debug, Deserialize)]
@@ -1029,6 +1042,7 @@ struct Core {
     runtime_check_activity:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeCheckActivity>>,
     runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckRequest>,
+    attachment_projection_requests: mpsc::UnboundedSender<String>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
@@ -3086,7 +3100,7 @@ impl Core {
                 "Built-in Tool IPC protocol version is unsupported",
             );
         }
-        let _invocation_guard = self.builtin_tool_leases.invocation_guard().await;
+        let invocation_guard = self.builtin_tool_leases.invocation_guard().await;
         let authorized = match self.builtin_tool_leases.authenticate(&auth).await {
             Ok(authorized) => authorized,
             Err(error) => return BuiltinToolIpcResponse::ipc_error(error.code, error.message),
@@ -3145,6 +3159,113 @@ impl Core {
                         );
                     }
                 }
+                let mut frozen_files = Vec::<AuthorityAttachment>::new();
+                let mut attachment_camp_id = None::<String>;
+                if operation == CAMP_MESSAGE_SEND_TOOL_NAME {
+                    let send_input =
+                        match serde_json::from_value::<CampMessageSendInput>(input.clone()) {
+                            Ok(input) => input,
+                            Err(_) => {
+                                return builtin_tool_rejection(
+                                    &operation,
+                                    &request_id,
+                                    "builtin_tool.invalid_input",
+                                    "Command input does not match the accepted arguments.",
+                                );
+                            }
+                        };
+                    let scoped_tool_call_id = scoped_runtime_tool_call_id(
+                        &authorized.agent_run_id,
+                        &format!("builtin-cli:{request_id}"),
+                    );
+                    let domain_command_id = TeamToolService::default().binding_command_id(
+                        &authorized.native_binding.native_binding_id,
+                        &authorized.native_binding.binding_credential,
+                        &scoped_tool_call_id,
+                    );
+                    let domain_recorded = if let Ok(command_id) = domain_command_id {
+                        let database = self.database.lock().await;
+                        TeamToolService::default()
+                            .recorded_binding_command_exists(&database, &command_id)
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    if !send_input.files.is_empty() && !domain_recorded {
+                        let scope = {
+                            let database = self.database.lock().await;
+                            TeamToolService::default().agent_file_ingress_scope(
+                                &database,
+                                &authorized.agent_run_id,
+                                authorized.execution_epoch,
+                            )
+                        };
+                        let (camp_id, workspace) = match scope {
+                            Ok(Some(scope)) => scope,
+                            _ => {
+                                return BuiltinToolIpcResponse::ipc_error(
+                                    "builtin_tool.run_not_bound",
+                                    "Built-in Tool CLI is not bound to the current AgentRun",
+                                );
+                            }
+                        };
+                        let data_dir = self.data_dir.clone();
+                        let run_tmp = authorized.run_tmp.clone();
+                        let files = send_input.files.clone();
+                        let freeze_camp_id = camp_id.clone();
+                        drop(invocation_guard);
+                        frozen_files = match tokio::task::spawn_blocking(move || {
+                            CampAttachmentStore::new(&data_dir).freeze_agent_sources(
+                                &freeze_camp_id,
+                                &files,
+                                workspace.path(),
+                                &run_tmp,
+                            )
+                        })
+                        .await
+                        {
+                            Ok(Ok(frozen)) => frozen,
+                            Ok(Err(error)) => {
+                                return builtin_tool_rejection(
+                                    &operation,
+                                    &request_id,
+                                    "builtin_tool.invalid_input",
+                                    &format!("Attachment source was rejected: {error:#}"),
+                                );
+                            }
+                            Err(error) => {
+                                return BuiltinToolIpcResponse::ipc_error(
+                                    "builtin_tool.internal_error",
+                                    format!("Attachment freeze task failed: {error}"),
+                                );
+                            }
+                        };
+                        attachment_camp_id = Some(camp_id);
+                        let reauthorized = self.builtin_tool_leases.authenticate(&auth).await;
+                        if !matches!(
+                            reauthorized,
+                            Ok(ref current)
+                                if current.agent_run_id == authorized.agent_run_id
+                                    && current.execution_epoch == authorized.execution_epoch
+                                    && current.native_binding.native_binding_id
+                                        == authorized.native_binding.native_binding_id
+                                    && current.run_tmp == authorized.run_tmp
+                        ) {
+                            CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
+                                attachment_camp_id.as_deref().unwrap_or_default(),
+                                &frozen_files,
+                            );
+                            return BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.run_not_bound",
+                                "Built-in Tool CLI is not bound to the current AgentRun",
+                            );
+                        }
+                    } else {
+                        drop(invocation_guard);
+                    }
+                } else {
+                    drop(invocation_guard);
+                }
                 let domain_response = self
                     .handle_builtin_operation(
                         TeamToolIpcRequest {
@@ -3159,8 +3280,22 @@ impl Core {
                         },
                         Some((authorized.agent_run_id, authorized.execution_epoch)),
                         Some(request_id.clone()),
+                        frozen_files.clone(),
                     )
                     .await;
+                let mut attachments_adopted = false;
+                if !frozen_files.is_empty() {
+                    attachments_adopted = {
+                        let database = self.database.lock().await;
+                        frozen_sources_are_owned(&database, &frozen_files).unwrap_or(false)
+                    };
+                    if !attachments_adopted {
+                        CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
+                            attachment_camp_id.as_deref().unwrap_or_default(),
+                            &frozen_files,
+                        );
+                    }
+                }
                 if domain_response.error.as_ref().is_some_and(|error| {
                     matches!(
                         error.code.as_str(),
@@ -3211,6 +3346,9 @@ impl Core {
                     .await
                 {
                     return BuiltinToolIpcResponse::ipc_error(error.code, error.message);
+                }
+                if attachments_adopted && let Some(camp_id) = attachment_camp_id.as_deref() {
+                    self.request_camp_attachment_projection(camp_id);
                 }
                 BuiltinToolIpcResponse::Envelope { envelope }
             }
@@ -3289,6 +3427,7 @@ impl Core {
         mut request: TeamToolIpcRequest,
         attested_run: Option<(String, i64)>,
         evidence_request_id: Option<String>,
+        frozen_files: Vec<AuthorityAttachment>,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
         let evidence_input = request.input.clone();
@@ -3387,6 +3526,7 @@ impl Core {
                         binding_credential: request.binding_credential,
                         runtime_tool_call_id: request.runtime_tool_call_id,
                         input,
+                        frozen_files,
                     };
                     let execution =
                         if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
@@ -5387,162 +5527,13 @@ impl Core {
             }));
         }
 
-        let staging = {
-            let mut database = self.database.lock().await;
-            let draft = CampAttachmentStore::new(&self.data_dir)
-                .load_draft(&database, params.camp_id.as_str())?;
-            if draft.revision == params.draft_revision {
-                let attachment_ids = draft
-                    .attachments
-                    .iter()
-                    .map(|attachment| attachment.id.clone())
-                    .collect::<Vec<_>>();
-                CampAttachmentStore::new(&self.data_dir).verify_send(
-                    &database,
-                    params.camp_id.as_str(),
-                    &attachment_ids,
-                )?;
-            }
-            self.attachment_views.plan_publication(
-                &mut database,
-                params.camp_id.as_str(),
-                &params.command_id,
-                params.draft_revision,
-            )?
-        };
-        let publication = match staging {
-            CampAttachmentPublicationStaging::None => None,
-            CampAttachmentPublicationStaging::Ready(publication) => Some(publication),
-            CampAttachmentPublicationStaging::Copy(plan) => {
-                let operation_id = plan.operation_id().to_string();
-                let attachment_store = CampAttachmentStore::new(&self.data_dir);
-                let copied = match tokio::task::spawn_blocking(move || {
-                    CampAttachmentViewStore::copy_publication(&attachment_store, plan)
-                })
-                .await
-                {
-                    Ok(Ok(copied)) => copied,
-                    Ok(Err(error)) => {
-                        let mut database = self.database.lock().await;
-                        self.attachment_views.rollback_publication(
-                            &mut database,
-                            &operation_id,
-                            "camp_attachment_view_source_invalid",
-                        )?;
-                        return Err(error).context("camp_attachment_view_source_invalid");
-                    }
-                    Err(error) => {
-                        let mut database = self.database.lock().await;
-                        self.attachment_views.rollback_publication(
-                            &mut database,
-                            &operation_id,
-                            "camp_attachment_view_source_invalid",
-                        )?;
-                        return Err(error).context("Camp Attachment View copy task failed");
-                    }
-                };
-                let staged = {
-                    let mut database = self.database.lock().await;
-                    self.attachment_views
-                        .finish_publication_staging(&mut database, copied)
-                };
-                match staged {
-                    Ok(publication) => Some(publication),
-                    Err(error) => {
-                        let rollback_error_code = if error
-                            .chain()
-                            .any(|cause| cause.to_string() == "draft_changed")
-                        {
-                            "draft_changed"
-                        } else {
-                            "camp_attachment_view_recovery_required"
-                        };
-                        let mut database = self.database.lock().await;
-                        self.attachment_views.rollback_publication(
-                            &mut database,
-                            &operation_id,
-                            rollback_error_code,
-                        )?;
-                        return Err(error);
-                    }
-                }
-            }
-        };
-        let execution = if let Some(publication) = publication.as_ref() {
-            let (_view_mutation, mutation_deadline) = match self
-                .acquire_camp_attachment_mutation(params.camp_id.as_str())
-                .await
-            {
-                Ok(admission) => admission,
-                Err(error) => {
-                    // Staging is outside the Runtime-authorized Camp tree, so it can be
-                    // rolled back without the write admission. Do not retain a quota
-                    // reservation merely because an active Run held the read guard.
-                    let mut database = self.database.lock().await;
-                    self.attachment_views.rollback_publication(
-                        &mut database,
-                        &publication.operation_id,
-                        "camp_attachment_view_busy",
-                    )?;
-                    return Err(error);
-                }
-            };
-            if let Err(error) = self
-                .wait_for_camp_attachment_quiescence(params.camp_id.as_str(), mutation_deadline)
-                .await
-            {
-                let mut database = self.database.lock().await;
-                self.attachment_views.rollback_publication(
-                    &mut database,
-                    &publication.operation_id,
-                    "camp_attachment_view_busy",
-                )?;
-                return Err(error);
-            }
-            {
-                let mut database = self.database.lock().await;
-                self.attachment_views
-                    .gate_publication(&mut database, publication)?;
-                self.attachment_views
-                    .promote_publication(&mut database, publication)?;
-            }
-            let committed = {
-                let mut database = self.database.lock().await;
-                CollaborationService::default().send_user_camp_draft_with_publication(
-                    &mut database,
-                    &envelope,
-                    Some(&publication.operation_id),
-                )
-            };
-            match committed {
-                Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                    self.complete_camp_attachment_publication(&publication.operation_id)
-                        .await?;
-                    execution
-                }
-                Ok(execution) => {
-                    let mut database = self.database.lock().await;
-                    self.attachment_views.rollback_publication(
-                        &mut database,
-                        &publication.operation_id,
-                        "camp_attachment_view_publish_failed",
-                    )?;
-                    execution
-                }
-                Err(error) => {
-                    let mut database = self.database.lock().await;
-                    self.attachment_views.rollback_publication(
-                        &mut database,
-                        &publication.operation_id,
-                        "camp_attachment_view_publish_failed",
-                    )?;
-                    return Err(error);
-                }
-            }
-        } else {
+        let execution = {
             let mut database = self.database.lock().await;
             CollaborationService::default().send_user_camp_draft(&mut database, &envelope)?
         };
+        if execution.result.status != CommandResultStatus::Rejected {
+            self.request_camp_attachment_projection(params.camp_id.as_str());
+        }
         Ok(json!({
             "commandResult": execution.result,
             "replayed": execution.replayed,
@@ -5551,48 +5542,125 @@ impl Core {
         }))
     }
 
-    async fn complete_camp_attachment_publication(&self, operation_id: &str) -> Result<()> {
-        let verification = {
-            let mut database = self.database.lock().await;
-            self.attachment_views
-                .prepare_publication_completion(&mut database, operation_id)?
-        };
-        let camp_id = verification.camp_id().to_string();
-        let operation_id = verification.operation_id().to_string();
-        let verified = match tokio::task::spawn_blocking(move || verification.verify()).await {
-            Ok(Ok(verified)) => verified,
-            Ok(Err(error)) => {
-                let mut database = self.database.lock().await;
-                self.attachment_views.fail_publication_completion(
-                    &mut database,
-                    &operation_id,
-                    &camp_id,
-                )?;
-                return Err(error).context("camp_attachment_view_integrity_failed");
-            }
-            Err(error) => {
-                let mut database = self.database.lock().await;
-                self.attachment_views.fail_publication_completion(
-                    &mut database,
-                    &operation_id,
-                    &camp_id,
-                )?;
-                return Err(error).context("Camp Attachment View verification task failed");
-            }
-        };
-        let mut database = self.database.lock().await;
-        if let Err(error) = self
-            .attachment_views
-            .complete_verified_publication(&mut database, verified)
+    fn request_camp_attachment_projection(&self, camp_id: &str) {
+        if self
+            .attachment_projection_requests
+            .send(camp_id.to_string())
+            .is_err()
         {
-            self.attachment_views.fail_publication_completion(
-                &mut database,
-                &operation_id,
-                &camp_id,
-            )?;
-            return Err(error);
+            eprintln!(
+                "Camp Attachment projection worker is unavailable; {camp_id} remains recoverable"
+            );
         }
-        Ok(())
+    }
+
+    async fn drive_camp_attachment_publications(&self, camp_id: &str) -> Result<()> {
+        loop {
+            let plan = {
+                let mut database = self.database.lock().await;
+                self.attachment_views
+                    .plan_queued_publication(&mut database, camp_id)?
+            };
+            let Some(plan) = plan else {
+                return Ok(());
+            };
+            let operation_id = plan.operation_id().to_string();
+            let attachment_store = CampAttachmentStore::new(&self.data_dir);
+            let copied = match tokio::task::spawn_blocking(move || {
+                CampAttachmentViewStore::copy_publication(&attachment_store, plan)
+            })
+            .await
+            {
+                Ok(Ok(copied)) => copied,
+                Ok(Err(error)) => {
+                    let recipients = {
+                        let mut database = self.database.lock().await;
+                        self.attachment_views
+                            .resolve_semantic_publication_terminal_failure(
+                                &mut database,
+                                &operation_id,
+                                "camp_attachment_view_source_invalid",
+                            )?
+                    };
+                    let recipients = recipients.into_iter().collect::<BTreeSet<_>>();
+                    for (recipient_camp_id, recipient_agent_id) in recipients {
+                        let mut database = self.database.lock().await;
+                        let _ = dispatch_pending_for_recipient(
+                            &mut database,
+                            &recipient_camp_id,
+                            &recipient_agent_id,
+                            DeliveryDispatchTrigger::TargetRunEnded,
+                            true,
+                        )?;
+                    }
+                    eprintln!(
+                        "Camp Attachment publication {operation_id} terminalized after an invalid Authority source: {error:#}"
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .mark_semantic_publication_recovery_required(
+                            &mut database,
+                            &operation_id,
+                            "camp_attachment_view_copy_task_failed",
+                        )?;
+                    return Err(error).context("Camp Attachment View copy task failed");
+                }
+            };
+            let projection = async {
+                let publication = {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .finish_publication_staging(&mut database, copied)?
+                };
+                let (view_mutation, mutation_deadline) =
+                    self.acquire_camp_attachment_mutation(camp_id).await?;
+                self.wait_for_camp_attachment_quiescence(camp_id, mutation_deadline)
+                    .await?;
+                {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .gate_publication(&mut database, &publication)?;
+                    self.attachment_views
+                        .promote_publication(&mut database, &publication)?;
+                }
+                drop(view_mutation);
+                let delivery_ids = {
+                    let mut database = self.database.lock().await;
+                    let delivery_ids = self
+                        .attachment_views
+                        .resolve_semantic_publication_success(&mut database, &operation_id)?;
+                    self.attachment_views
+                        .finish_semantic_publication(&mut database, &operation_id)?;
+                    delivery_ids
+                };
+                if !delivery_ids.is_empty() {
+                    let mut database = self.database.lock().await;
+                    dispatch_accepted_deliveries(&mut database, &delivery_ids)?;
+                }
+                Ok::<(), anyhow::Error>(())
+            }
+            .await;
+            if let Err(error) = projection {
+                let recovery = {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .mark_semantic_publication_recovery_required(
+                            &mut database,
+                            &operation_id,
+                            "camp_attachment_view_projection_failed",
+                        )
+                };
+                if let Err(recovery_error) = recovery {
+                    eprintln!(
+                        "Camp Attachment publication {operation_id} could not persist recovery state: {recovery_error:#}"
+                    );
+                }
+                return Err(error);
+            }
+        }
     }
 
     async fn deep_probe_candidate(
@@ -5871,6 +5939,9 @@ impl Core {
             attachment_view_gate,
             || async {
                 let mut database = self.database.lock().await;
+                if database_has_unresolved_writer_intent(&database, &candidate.camp_id)? {
+                    anyhow::bail!("camp_attachment_view_not_ready");
+                }
                 ExecutionRuntimeService::default().claim_agent_run(
                     &mut database,
                     &CommandEnvelope {
@@ -5996,6 +6067,19 @@ impl Core {
                     &mut launch_permit,
                 )
                 .await;
+            // Agent-authored attachment publication cannot take the Camp write admission
+            // while this Run owns its lifecycle read admission. Release first, then wake the
+            // persistent projection intent so a prior write timeout does not strand it until
+            // the next process restart.
+            if !release_agent_run_attachment_admission(
+                attachment_view_admission,
+                &core.attachment_projection_requests,
+            ) {
+                eprintln!(
+                    "Camp Attachment projection worker is unavailable; {} remains recoverable",
+                    execution.camp_id
+                );
+            }
             if launch_result.is_ok() {
                 core.planned_shutdown
                     .remove_active_if_unbound(&active_key)
@@ -9989,6 +10073,70 @@ fn main() -> Result<()> {
     result
 }
 
+async fn process_attachment_projection_worker(
+    core: Arc<Core>,
+    mut requests: mpsc::UnboundedReceiver<String>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    let mut active_camps = HashSet::new();
+    let mut rerun_camps = HashSet::new();
+    let mut tasks = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut shutdown => break,
+            camp_id = requests.recv() => {
+                let Some(camp_id) = camp_id else { break };
+                if active_camps.insert(camp_id.clone()) {
+                    spawn_attachment_projection_task(&mut tasks, core.clone(), camp_id);
+                } else {
+                    rerun_camps.insert(camp_id);
+                }
+            }
+            completed = tasks.join_next(), if !tasks.is_empty() => {
+                match completed {
+                    Some(Ok((camp_id, result))) => {
+                        active_camps.remove(&camp_id);
+                        if let Err(error) = result {
+                            eprintln!("Camp Attachment projection for {camp_id} requires recovery: {error:#}");
+                        }
+                        if rerun_camps.remove(&camp_id) {
+                            active_camps.insert(camp_id.clone());
+                            spawn_attachment_projection_task(&mut tasks, core.clone(), camp_id);
+                        }
+                    }
+                    Some(Err(error)) => {
+                        eprintln!("Camp Attachment projection task failed: {error}");
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    while let Some(completed) = tasks.join_next().await {
+        match completed {
+            Ok((camp_id, Err(error))) => eprintln!(
+                "Camp Attachment projection for {camp_id} requires recovery during shutdown: {error:#}"
+            ),
+            Ok((_, Ok(()))) => {}
+            Err(error) => {
+                eprintln!("Camp Attachment projection task failed during shutdown: {error}")
+            }
+        }
+    }
+}
+
+fn spawn_attachment_projection_task(
+    tasks: &mut tokio::task::JoinSet<(String, Result<()>)>,
+    core: Arc<Core>,
+    camp_id: String,
+) {
+    tasks.spawn(async move {
+        let result = core.drive_camp_attachment_publications(&camp_id).await;
+        (camp_id, result)
+    });
+}
+
 async fn run_core(
     runtime_search_environment: Arc<RuntimeSearchEnvironment>,
     startup_started_at: Instant,
@@ -10163,6 +10311,7 @@ async fn run_core(
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     let (output_control_tx, output_control_rx) = mpsc::channel(1);
     let (runtime_check_tx, runtime_check_rx) = mpsc::unbounded_channel();
+    let (attachment_projection_tx, attachment_projection_rx) = mpsc::unbounded_channel();
     let output_handle = tokio::spawn(write_output(output_rx, output_control_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
@@ -10197,6 +10346,7 @@ async fn run_core(
         runtime_product_diagnostics: RwLock::new(BTreeMap::new()),
         runtime_check_activity: RwLock::new(BTreeMap::new()),
         runtime_check_requests: runtime_check_tx,
+        attachment_projection_requests: attachment_projection_tx,
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
@@ -10275,6 +10425,19 @@ async fn run_core(
         builtin_tool_leases,
         data_dir,
     });
+    let (attachment_projection_shutdown_tx, attachment_projection_shutdown_rx) = oneshot::channel();
+    let mut attachment_projection_handle = tokio::spawn(process_attachment_projection_worker(
+        core.clone(),
+        attachment_projection_rx,
+        attachment_projection_shutdown_rx,
+    ));
+    let startup_publication_camps = {
+        let database = core.database.lock().await;
+        unresolved_publication_camp_ids(&database)?
+    };
+    for camp_id in startup_publication_camps {
+        core.request_camp_attachment_projection(&camp_id);
+    }
     let (fleet_sweeper_shutdown_tx, fleet_sweeper_shutdown_rx) = oneshot::channel();
     let mut fleet_sweeper_handle = tokio::spawn(
         core.runtime_fleet
@@ -10458,6 +10621,7 @@ async fn run_core(
         // signals follow it, so no new recovery or scheduler launch can enter.
         core.planned_shutdown.close_launch_admission();
         let _ = scheduler_shutdown_tx.send(());
+        let _ = attachment_projection_shutdown_tx.send(());
         let _ = runtime_check_shutdown_tx.send(());
         let _ = fleet_sweeper_shutdown_tx.send(());
         runtime_discovery_handle.abort();
@@ -10524,6 +10688,8 @@ async fn run_core(
             drain_join_set_until(&mut background_requests, settlement_deadline).await;
         let scheduler_quiesced =
             join_or_abort_until(&mut scheduler_handle, settlement_deadline).await;
+        let attachment_projection_quiesced =
+            join_or_abort_until(&mut attachment_projection_handle, settlement_deadline).await;
         let runtime_checks_quiesced =
             join_or_abort_until(&mut runtime_check_handle, settlement_deadline).await;
         let fleet_sweeper_quiesced =
@@ -10602,6 +10768,7 @@ async fn run_core(
             && runtime_discovery_quiesced
             && background_requests_quiesced
             && scheduler_quiesced
+            && attachment_projection_quiesced
             && runtime_checks_quiesced
             && fleet_sweeper_quiesced
             && builtin_tool_quiesced
@@ -10677,6 +10844,7 @@ async fn run_core(
             || !runtime_discovery_quiesced
             || !background_requests_quiesced
             || !scheduler_quiesced
+            || !attachment_projection_quiesced
             || !runtime_checks_quiesced
             || !fleet_sweeper_quiesced
             || !stop_wait_completed
@@ -10732,6 +10900,8 @@ async fn run_core(
         let _ = runtime_discovery_handle.await;
         let _ = scheduler_shutdown_tx.send(());
         let _ = scheduler_handle.await;
+        let _ = attachment_projection_shutdown_tx.send(());
+        let _ = attachment_projection_handle.await;
         let _ = runtime_check_shutdown_tx.send(());
         let _ = runtime_check_handle.await;
         let _ = fleet_sweeper_shutdown_tx.send(());
@@ -15123,10 +15293,15 @@ mod tests {
                 .is_err(),
             "the returned admission must cover the claimed Run lifecycle"
         );
-        drop(admission);
+        let (projection_tx, mut projection_rx) = mpsc::unbounded_channel();
+        assert!(release_agent_run_attachment_admission(
+            admission,
+            &projection_tx
+        ));
+        assert_eq!(projection_rx.recv().await.as_deref(), Some("rvcamp_test"));
         tokio::time::timeout(Duration::from_secs(1), gate.write_owned())
             .await
-            .expect("the write gate should reopen when the Run admission ends");
+            .expect("the write gate should reopen before projection is reawakened");
     }
 
     #[test]

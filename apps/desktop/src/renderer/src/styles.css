@@ -2645,6 +2645,13 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 .attachment-preparing { opacity: .76; }
 .attachment-error { border-color: color-mix(in srgb, var(--danger) 52%, var(--line)); }
 .attachment-error .attachment-visual { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); }
+.attachment-projection-pending,
+.attachment-projection-recovery_required { border-color: var(--line-strong); }
+.attachment-projection-pending .attachment-visual,
+.attachment-projection-recovery_required .attachment-visual { color: var(--muted); background: var(--surface-muted); }
+.attachment-projection-failed { border-color: color-mix(in srgb, var(--danger) 52%, var(--line)); }
+.attachment-projection-failed .attachment-visual { color: var(--danger); background: color-mix(in srgb, var(--danger) 9%, var(--surface)); }
+.attachment-projection-failed .attachment-copy small { color: var(--danger); }
 .attachment-loading { width: 14px; height: 14px; border: 1.5px solid var(--line-strong); border-top-color: var(--brand); border-radius: 50%; animation: attachment-spin .8s linear infinite; }
 @keyframes attachment-spin { to { transform: rotate(360deg); } }
 .conversation-drop-layer { position: relative; z-index: 12; display: grid; min-width: 0; min-height: 0; grid-column: 1; grid-row: 1 / span 2; margin: 10px; place-items: center; border: 1.5px dashed color-mix(in srgb, var(--brand) 80%, var(--line-strong)); border-radius: 10px; background: color-mix(in srgb, var(--brand-soft) 54%, transparent); pointer-events: none; animation: conversation-drop-enter 120ms ease-out; }

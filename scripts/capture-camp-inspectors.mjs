@@ -138,7 +138,7 @@ try {
       || !visibleInspector?.inspectorSpansControls
       || !visibleInspector?.copyInsideContent
       || !visibleInspector?.copyAbsentFromMetadata
-      || JSON.stringify(visibleInspector?.tabLabels) !== JSON.stringify(['任务', '队员'])
+      || JSON.stringify(visibleInspector?.tabLabels) !== JSON.stringify(['队员', '任务'])
       || visibleInspector?.horizontalOverflow) {
     throw new Error(`Visible Camp Inspector acceptance failed: ${JSON.stringify(visibleInspector)}`)
   }
@@ -474,7 +474,7 @@ try {
 
   if (relaxed) {
     const panelCounts = {}
-    for (const tabName of ['任务', '队员']) {
+    for (const tabName of ['队员', '任务']) {
       await openTab(cdp, tabName)
       const tabSlug = ({ 任务: 'tasks', 队员: 'members' })[tabName]
       const selector = ({
@@ -586,7 +586,7 @@ try {
       returnByValue: true
     })
     const result = { a2aRows, approvalRouting, ...inspection.result?.result?.value }
-    if (JSON.stringify(result?.tabLabels) !== JSON.stringify(['任务', '队员'])
+    if (JSON.stringify(result?.tabLabels) !== JSON.stringify(['队员', '任务'])
         || result?.memberRows < 2
         || !result?.summaryPresent
         || !result?.leadPickerPresent

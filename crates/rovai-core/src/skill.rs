@@ -2357,6 +2357,7 @@ fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
         SkillDeliveryGroupKey::Qoder => "Qoder",
         SkillDeliveryGroupKey::Codebuddy => "CodeBuddy",
         SkillDeliveryGroupKey::Qwen => "Qwen",
+        SkillDeliveryGroupKey::Trae => "TRAE",
     }
 }
 
@@ -4332,7 +4333,10 @@ mod slow_tests {
         service.install_bundled_skills(&mut database).unwrap();
         let refreshed = service.get(&database, &worktree.id).unwrap().unwrap();
         assert!(!refreshed.enabled);
-        assert_eq!(refreshed.group_assignments.len(), 8);
+        assert_eq!(
+            refreshed.group_assignments.len(),
+            SkillDeliveryGroupKey::ALL.len() - 1
+        );
         assert!(
             refreshed
                 .group_assignments

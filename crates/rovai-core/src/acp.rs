@@ -204,6 +204,7 @@ enum AcpSessionPhase {
         replay_event_count: u64,
         replay_byte_count: u64,
         started_at: Instant,
+        last_event_at: Option<Instant>,
     },
     Ready,
     PromptActive(AcpActivePrompt),
@@ -219,6 +220,7 @@ impl AcpSessionPhase {
             replay_event_count: 0,
             replay_byte_count: 0,
             started_at: Instant::now(),
+            last_event_at: None,
         }
     }
 }
@@ -250,15 +252,53 @@ enum AcpSessionMessageRoute {
         active_prompt: AcpActivePrompt,
         sequence: u64,
     },
+    SessionMetadata,
     ReplayQuarantined,
     Quarantined(String),
     ReplayRejected(String),
     Missing,
 }
 
+fn is_session_catalog_update(message: &Value) -> bool {
+    message.get("id").is_none()
+        && message.get("method").and_then(Value::as_str) == Some("session/update")
+        && matches!(
+            message
+                .pointer("/params/update/sessionUpdate")
+                .and_then(Value::as_str),
+            Some(
+                "available_commands_update"
+                    | "config_option_update"
+                    | "current_mode_update"
+                    | "session_info_update"
+            )
+        )
+}
+
+fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Value) -> bool {
+    message.get("id").is_none()
+        && matches!(
+            (adapter_kind, message.get("method").and_then(Value::as_str)),
+            (AdapterKind::KiroCli, Some("_kiro.dev/compaction/status"))
+        )
+}
+
+fn is_idle_session_metadata(adapter_kind: AdapterKind, message: &Value) -> bool {
+    is_session_catalog_update(message)
+        || is_known_session_lifecycle_extension(adapter_kind, message)
+        || (message.get("id").is_none()
+            && message.get("method").and_then(Value::as_str) == Some("session/update")
+            && message
+                .pointer("/params/update/sessionUpdate")
+                .and_then(Value::as_str)
+                == Some("usage_update"))
+}
+
 const ACP_HISTORY_RESTORE_MAX_EVENTS: u64 = 4_096;
 const ACP_HISTORY_RESTORE_MAX_BYTES: u64 = 8 * 1024 * 1024;
 const ACP_HISTORY_RESTORE_TIMEOUT: Duration = Duration::from_secs(30);
+const ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE: Duration = Duration::from_secs(2);
+const ACP_HISTORY_RESTORE_QUIET_PERIOD: Duration = Duration::from_millis(100);
 
 fn replay_budget_violation(
     event_count: u64,
@@ -401,6 +441,9 @@ impl AcpHost {
             private_runtime_dir,
             private_config_root.as_deref(),
             attachment_access_root,
+            builtin_tools
+                .as_ref()
+                .map(BuiltinToolProcessConfig::run_tmp),
         )
         .context("failed to configure ACP Runtime command")?;
         let detector_config_root = if compaction_detector_policy
@@ -571,7 +614,8 @@ impl AcpHost {
                             .map(str::to_string);
                         let route = match session_id.as_deref() {
                             Some(session_id) => {
-                                host.route_session_message(session_id, line.len()).await
+                                host.route_session_message(session_id, &message, line.len())
+                                    .await
                             }
                             None => AcpSessionMessageRoute::Missing,
                         };
@@ -594,6 +638,13 @@ impl AcpHost {
                                     sequence,
                                     message,
                                 ));
+                            }
+                            AcpSessionMessageRoute::SessionMetadata => {
+                                let session_id = session_id
+                                    .as_deref()
+                                    .expect("Session metadata route has Session ID");
+                                host.forward_compaction_observation(session_id, &message)
+                                    .await;
                             }
                             AcpSessionMessageRoute::ReplayQuarantined => {
                                 if message.get("id").is_some() {
@@ -809,21 +860,56 @@ impl AcpHost {
         Ok(())
     }
 
-    async fn mark_session_ready(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
-        let mut routes = self.routes.write().await;
-        let route = routes
-            .get_mut(session_id)
-            .context("ACP Session has no loading route")?;
-        if &route.owner != owner || !matches!(route.phase, AcpSessionPhase::LoadingReplay { .. }) {
-            bail!("ACP Session loading route failed Host/Run fencing");
+    async fn settle_loading_replay(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
+        let response_received_at = Instant::now();
+        loop {
+            let wait_for = {
+                let mut routes = self.routes.write().await;
+                let route = routes
+                    .get_mut(session_id)
+                    .context("ACP Session has no loading route")?;
+                if &route.owner != owner {
+                    bail!("ACP Session loading route failed Host/Run fencing");
+                }
+                let AcpSessionPhase::LoadingReplay {
+                    started_at,
+                    last_event_at,
+                    ..
+                } = &route.phase
+                else {
+                    bail!("ACP Session loading route failed Host/Run fencing");
+                };
+                let grace_remaining = ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE
+                    .saturating_sub(response_received_at.elapsed());
+                let quiet_remaining = last_event_at.map_or(Duration::ZERO, |last_event_at| {
+                    ACP_HISTORY_RESTORE_QUIET_PERIOD.saturating_sub(last_event_at.elapsed())
+                });
+                let required_wait = grace_remaining.max(quiet_remaining);
+                if required_wait.is_zero() {
+                    route.phase = AcpSessionPhase::Ready;
+                    return Ok(());
+                }
+                let timeout_remaining =
+                    ACP_HISTORY_RESTORE_TIMEOUT.saturating_sub(started_at.elapsed());
+                if timeout_remaining.is_zero() {
+                    let reason =
+                        "ACP History Restore did not settle before its deadline".to_string();
+                    route.phase = AcpSessionPhase::ProtocolViolated {
+                        reason: reason.clone(),
+                    };
+                    self.protocol_violated.store(true, Ordering::Release);
+                    bail!(reason);
+                }
+                required_wait.min(timeout_remaining)
+            };
+            tokio::time::sleep(wait_for).await;
         }
-        route.phase = AcpSessionPhase::Ready;
-        Ok(())
     }
 
     async fn route_session_message(
         &self,
         session_id: &str,
+        message: &Value,
         message_bytes: usize,
     ) -> AcpSessionMessageRoute {
         let mut routes = self.routes.write().await;
@@ -832,6 +918,11 @@ impl AcpHost {
         };
         match &mut route.phase {
             AcpSessionPhase::PromptActive(active_prompt) => {
+                if is_session_catalog_update(message)
+                    || is_known_session_lifecycle_extension(self.adapter_kind, message)
+                {
+                    return AcpSessionMessageRoute::SessionMetadata;
+                }
                 route.sequence = route.sequence.saturating_add(1);
                 AcpSessionMessageRoute::Forward {
                     owner: route.owner.clone(),
@@ -843,6 +934,7 @@ impl AcpHost {
                 replay_event_count,
                 replay_byte_count,
                 started_at,
+                last_event_at,
             } => {
                 let event_count = replay_event_count.saturating_add(1);
                 let byte_count = replay_byte_count
@@ -859,9 +951,13 @@ impl AcpHost {
                 }
                 *replay_event_count = event_count;
                 *replay_byte_count = byte_count;
+                *last_event_at = Some(Instant::now());
                 AcpSessionMessageRoute::ReplayQuarantined
             }
             AcpSessionPhase::Ready => {
+                if is_idle_session_metadata(self.adapter_kind, message) {
+                    return AcpSessionMessageRoute::SessionMetadata;
+                }
                 let reason = "session-scoped message arrived without an active prompt".to_string();
                 route.phase = AcpSessionPhase::ProtocolViolated {
                     reason: reason.clone(),
@@ -870,6 +966,9 @@ impl AcpHost {
                 AcpSessionMessageRoute::Quarantined(reason)
             }
             AcpSessionPhase::PromptCompleted(_) => {
+                if is_idle_session_metadata(self.adapter_kind, message) {
+                    return AcpSessionMessageRoute::SessionMetadata;
+                }
                 let reason = "session-scoped message arrived after prompt completion".to_string();
                 route.phase = AcpSessionPhase::ProtocolViolated {
                     reason: reason.clone(),
@@ -1531,8 +1630,13 @@ impl AcpRuntime {
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
+        let run_tmp = self
+            .host
+            .builtin_tool_process_config()
+            .context("ACP Runtime has no Built-in Tool Run tmp")?
+            .run_tmp();
         let additional_directories =
-            session_additional_directories(self.attachment_access_root.as_deref())?;
+            session_additional_directories(self.attachment_access_root.as_deref(), Some(run_tmp))?;
         let mcp_servers = if !matches!(
             self.host.adapter_kind,
             AdapterKind::CopilotCli
@@ -1691,7 +1795,7 @@ impl AcpRuntime {
         }
         if prebound_session {
             self.host
-                .mark_session_ready(&session_id, &self.owner)
+                .settle_loading_replay(&session_id, &self.owner)
                 .await?;
         } else {
             self.host
@@ -2445,6 +2549,7 @@ fn configure_runtime_command(
     private_runtime_dir: &Path,
     private_config_root: Option<&Path>,
     attachment_access_root: Option<&Path>,
+    run_tmp: Option<&Path>,
 ) -> Result<Option<EphemeralMcpConfigFile>> {
     let values = runtime
         .permissions
@@ -2493,6 +2598,9 @@ fn configure_runtime_command(
                     && workspace.access == "read_only");
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
             if let Some(root) = attachment_access_root {
+                command.arg("--add-dir").arg(root);
+            }
+            if let Some(root) = run_tmp {
                 command.arg("--add-dir").arg(root);
             }
             if isolated {
@@ -2951,11 +3059,18 @@ fn launchable_acp_adapter(kind: AdapterKind) -> bool {
     kind.uses_acp()
 }
 
-fn session_additional_directories(attachment_access_root: Option<&Path>) -> Result<Vec<String>> {
-    let root = attachment_access_root.context(
+fn session_additional_directories(
+    attachment_access_root: Option<&Path>,
+    run_tmp: Option<&Path>,
+) -> Result<Vec<String>> {
+    let attachment_root = attachment_access_root.context(
         "camp_attachment_view_runtime_unsupported: ACP Session has no exact Camp attachment root",
     )?;
-    Ok(vec![root.to_string_lossy().into_owned()])
+    let run_tmp = run_tmp.context("ACP Session has no exact Built-in Tool Run tmp root")?;
+    Ok(vec![
+        attachment_root.to_string_lossy().into_owned(),
+        run_tmp.to_string_lossy().into_owned(),
+    ])
 }
 
 #[cfg(unix)]
@@ -3607,6 +3722,7 @@ mod tests {
                 &root,
                 Some(&root),
                 None,
+                None,
             )
             .unwrap();
             command
@@ -3726,6 +3842,114 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
+    async fn idle_session_metadata_stays_out_of_prompt_output_and_preserves_the_session() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-idle-session-metadata-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        let emit_metadata = root.join("emit-metadata");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-idle-metadata","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}},"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
+while [ ! -f '{}' ]; do sleep 0.01; done
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-idle-metadata","update":{{"sessionUpdate":"available_commands_update","availableCommands":[{{"name":"audit-skill","description":"must stay out of prompt output"}}]}}}}}}'
+IFS= read -r barrier || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{}}}}'
+IFS= read -r prompt || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-idle-metadata","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"current"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-idle-metadata","update":{{"sessionUpdate":"config_option_update","configOptions":[{{"id":"model","currentValue":"trae-default","options":[]}}]}}}}}}'
+IFS= read -r terminal_barrier || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                emit_metadata.display()
+            ),
+        );
+
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            None,
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-idle-metadata".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "runtime_managed".to_string(),
+        );
+
+        let session_id = runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        std::fs::write(&emit_metadata, b"ready").unwrap();
+        host.rpc("audit/barrier", json!({})).await.unwrap();
+
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
+        assert!(receiver.try_recv().is_err());
+        let prompt_id = runtime
+            .start_prompt("delivery-after-metadata", "continue")
+            .await
+            .unwrap();
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AcpIncoming::Message {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence: 1,
+                message,
+                ..
+            }) if native_session_id == session_id
+                && native_prompt_id == prompt_id
+                && delivery_id == "delivery-after-metadata"
+                && message.pointer("/params/update/content/text").and_then(Value::as_str)
+                    == Some("current")
+        ));
+        receive_through_prompt_completion(&mut receiver).await;
+        host.rpc("audit/terminal-barrier", json!({})).await.unwrap();
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
+        assert!(receiver.try_recv().is_err());
+
+        host.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
     async fn real_acp_session_catalog_rejects_a_missing_explicit_model_without_fallback() {
         let root = std::env::temp_dir().join(format!(
             "rovai-acp-live-model-validation-{}",
@@ -3812,12 +4036,13 @@ printf '%s\n' "$initialize" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
 IFS= read -r resume || exit 1
 printf '%s\n' "$resume" >> '{}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"historical"}}}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"tool_call","toolCallId":"historical-tool","kind":"execute","title":"historical"}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"usage_update","used":999}}}}}}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{{"sessionId":"session-old","toolCall":{{"toolCallId":"historical-tool"}},"options":[]}}}}'
 IFS= read -r quarantined_permission || exit 1
 printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}'
+sleep 0.2
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"historical"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"tool_call","toolCallId":"historical-tool","kind":"execute","title":"historical"}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"usage_update","used":999}}}}}}'
 IFS= read -r prompt || exit 1
 printf '%s\n' "$prompt" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"current"}}}}}}}}'
@@ -4338,17 +4563,27 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn every_acp_session_receives_the_exact_enumerable_camp_attachment_root() {
+    fn every_acp_session_receives_exact_attachment_and_run_tmp_roots() {
         let root = Path::new("/tmp/rovai-camp-attachments/camp-id");
+        let run_tmp = Path::new("/tmp/rovai-process/run-tmp");
         assert_eq!(
-            session_additional_directories(Some(root)).unwrap(),
-            vec![root.to_string_lossy().into_owned()]
+            session_additional_directories(Some(root), Some(run_tmp)).unwrap(),
+            vec![
+                root.to_string_lossy().into_owned(),
+                run_tmp.to_string_lossy().into_owned(),
+            ]
         );
         assert!(
-            session_additional_directories(None)
+            session_additional_directories(None, Some(run_tmp))
                 .unwrap_err()
                 .to_string()
                 .contains("camp_attachment_view_runtime_unsupported")
+        );
+        assert!(
+            session_additional_directories(Some(root), None)
+                .unwrap_err()
+                .to_string()
+                .contains("Built-in Tool Run tmp")
         );
     }
 

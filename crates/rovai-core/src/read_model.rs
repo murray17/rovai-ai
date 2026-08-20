@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    camp_attachment::managed_attachment_summary,
+    camp_attachment::{DIRECTORY_MEDIA_TYPE, managed_attachment_summary},
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     camp_message_publication::{
         public_camp_message_event_predicate, public_camp_message_publication_cte,
@@ -207,6 +207,7 @@ pub struct CampMessageAttachmentView {
     pub media_type: String,
     pub byte_size: i64,
     pub preview_kind: String,
+    pub runtime_projection_state: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1909,7 +1910,8 @@ fn hydrate_message_views(
         )
         SELECT attachment.camp_message_id,
                attachment.id, attachment.display_name, attachment.media_type,
-               attachment.byte_size, attachment.preview_kind, attachment.storage_path
+               attachment.byte_size, attachment.preview_kind, attachment.storage_path,
+               attachment.runtime_projection_state
         FROM requested
         JOIN message_attachment AS attachment
           ON attachment.camp_message_id = requested.camp_message_id
@@ -1926,22 +1928,42 @@ fn hydrate_message_views(
                 row.get::<_, i64>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut attachments_by_message_id = BTreeMap::<String, Vec<CampMessageAttachmentView>>::new();
-    for (message_id, id, display_name, media_type, byte_size, preview_kind, storage_path) in
-        attachment_rows
+    for (
+        message_id,
+        id,
+        display_name,
+        media_type,
+        byte_size,
+        preview_kind,
+        storage_path,
+        runtime_projection_state,
+    ) in attachment_rows
     {
-        let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+        let (kind, file_count) = if runtime_projection_state == "available" {
+            let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+            (summary.kind, summary.file_count)
+        } else if media_type == DIRECTORY_MEDIA_TYPE {
+            // Pending/recovery/failed cards are a semantic projection. Their Authority source
+            // may be unavailable (and can be the reason for a terminal tombstone), so Camp
+            // reads must not traverse it merely to render a status card.
+            ("directory".to_string(), 0)
+        } else {
+            ("file".to_string(), 1)
+        };
         let attachment = CampMessageAttachmentView {
             id,
             display_name,
-            kind: summary.kind,
-            file_count: summary.file_count,
+            kind,
+            file_count,
             media_type,
             byte_size,
             preview_kind,
+            runtime_projection_state,
         };
         attachments_by_message_id
             .entry(message_id)
@@ -3765,6 +3787,32 @@ mod slow_tests {
         assert_eq!(anchor.attachments[0].display_name, "anchor.txt");
         assert_eq!(anchor.attachments[0].kind, "file");
         assert_eq!(anchor.attachments[0].file_count, 1);
+
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE message_attachment
+                SET media_type = 'inode/directory',
+                    storage_path = '/missing/terminal-attachment',
+                    runtime_projection_state = 'failed'
+                WHERE id = 'around-attachment'
+                "#,
+                [],
+            )
+            .unwrap();
+        let failed_projection = read_model
+            .camp_messages_around(&mut database, &camp_id, "around-message-25")
+            .expect("a failed attachment source must not make Camp history unreadable");
+        let failed_attachment = &failed_projection
+            .messages
+            .iter()
+            .find(|message| message.id == failed_projection.anchor_message_id)
+            .unwrap()
+            .attachments[0];
+        assert_eq!(failed_attachment.kind, "directory");
+        assert_eq!(failed_attachment.file_count, 0);
+        assert_eq!(failed_attachment.runtime_projection_state, "failed");
 
         for (requested_camp, requested_message) in [
             (other_camp_id.as_str(), "around-message-25"),

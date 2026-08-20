@@ -47,9 +47,19 @@ SkillExposureSnapshot (immutable start-time evidence in ContextManifest)
 
 Skill Library view 的 `managementPolicy` 来自 bundled official manifest，而不是用户可改数据库字段。
 `cli-operations` 与 `memory-stewardship` 为 `system_required`：bundled install 以 DB-only 事务恢复 enabled
-与全部九组 Assignment，命令边界拒绝修改；其余十一项 official Skill 为 `user_managed`。当前 inventory
+与全部十组 Assignment，命令边界拒绝修改；其余十一项 official Skill 为 `user_managed`。当前 inventory
 精确为十三项，名称和 provenance 由 ADR-0191 冻结。该策略只决定 Library desired
 state，不改变 projection ownership、preflight、Snapshot 或 Runtime load 证明。
+
+TRAE delivery group 的 Rovai-owned root 固定为项目 `.trae/skills`。该路径已用唯一名称/内容在
+`traecli 0.120.52` 上同时验证新 Session 的 `available_commands_update` 和精确 `/skill` 调用；warm Host 的新
+Session 与 cold `session/load` 都重新扫描，既有 Idle Session 未观察到动态 refresh。TRAE 还会兼容扫描项目
+`.agents/skills`、项目 `.traecli/skills` 以及若干用户目录，但它们是 Runtime 自有 discovery surface，不进入
+Rovai projection、ownership、reconcile 或 cleanup。
+
+`available_commands_update` 只属于 Runtime-advertised catalog。它把内建 Slash Command 与已加载 Skill 统一为
+command entry，不能替代 SkillExposureSnapshot，也不能由“advertised”推导文件投递成功；反向地，managed
+projection 的 Ready 也不保证某个已经存在的 Session 动态刷新 catalog。
 
 ## 组件职责
 
