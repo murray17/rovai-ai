@@ -36,8 +36,8 @@ last_updated: 2026-08-20
 - [x] 定向回归覆盖 Agent source boundary、真实 accepted IDs、FIFO gate、同 Camp queue、startup recovery、
   failed Runtime exclusion、quota、统一 aggregate、Migration 102 与 Renderer 状态；
 - [x] 通过 Rust fmt/Clippy/PR suite、TypeScript、Vitest、Desktop build 与文档门禁；
-- [ ] 从治理提交 worktree 完成功能提交，快进 main 并 push；
-- [ ] 完成 macOS arm64 package、签名/架构校验与 `/Applications` 安装交接。
+- [x] 从治理提交 worktree 完成功能提交，快进 main 并 push；
+- [x] 完成 macOS arm64 package、签名/架构校验与 `/Applications` 安装交接。
 
 ## References
 
