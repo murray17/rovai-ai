@@ -10,7 +10,7 @@ last_updated: 2026-08-20
 本文描述 Core 重启后 AgentRun、Native Session 与 Native Turn 的长期恢复边界。规范依据是
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)。受控关闭后的 product
 fence 由 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)拥有；字段级状态与命令见
-[Accepted Input Recovery v2](../contracts/accepted-input-recovery-v2.md)与
+[Accepted Input Recovery v3](../contracts/accepted-input-recovery-v3.md)与
 [Planned Shutdown v2](../contracts/planned-shutdown-v2.md)。
 
 ## 1. 三个独立恢复对象
@@ -46,9 +46,10 @@ Approval、Runtime Delivery 和 prepared input，再分类 AgentRun：
 `recovery_blocked` 的 `runtime_recovery_required` 必须为 false。第二次启动不得重新标记为自动恢复，
 不得增加 execution epoch，也不得改变 accepted Delivery。
 
-Migration 99 是一次性 clean break：所有旧 Formatter 20 非终态输入在 Runtime View backfill 前按
-delivery/action evidence 终结，accepted outcome unknown 绝不能降为 cancelled。旧 Manifest、payload Blob、ACK、
-Binding identity 和执行证据保留为 non-dispatchable history；新的 Scheduler 只接受 Formatter 21/Manifest 20。
+Migration 99/100 是两次 evidence-aware clean break：旧 Formatter 20 或 Manifest 20/Receipt v1 非终态输入在
+相应 View migration 前按 delivery/action evidence 终结，accepted outcome unknown 绝不能降为 cancelled。旧
+Manifest、payload Blob、Runtime Auth Receipt、ACK、Binding identity 和执行证据保留为 non-dispatchable history；
+新的 Scheduler 只接受 Formatter 21/Manifest 21。
 
 ## 3. 调度与 Adapter 边界
 

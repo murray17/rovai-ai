@@ -7,7 +7,7 @@ last_updated: 2026-08-20
 # Camp Published Attachment View
 
 本架构拥有 Camp 已发布附件从私有 Authority 到 Runtime 可读共享视图的组件边界、数据流、并发门和恢复关系。
-字段、状态、路径、限额与错误由 [Camp Published Attachment View v1](../contracts/camp-published-attachment-view-v1.md)
+字段、状态、路径、限额与错误由 [Camp Published Attachment View v2](../contracts/camp-published-attachment-view-v2.md)
 和 [Camp Attachment v2](../contracts/camp-attachment-v2.md)拥有。
 
 ## Authority 与授权域
@@ -38,14 +38,15 @@ View 不改变消息、历史 ContextManifest、Managed Blob、摘要或 Authori
 - `PublishedAttachmentPathResolver` 只从 ready View Entry receipt 解析稳定 Runtime path；它不做字符串前缀替换，
   不从模型、Manifest 或目录扫描接受任意路径。
 - Context materializer 在同一 Camp read admission 内选择消息、解析所有显式 attachment occurrence、加入
-  `RUN_FACTS.campResources` 并冻结 Formatter 21 / Manifest 20 bytes。
+  `RUN_FACTS.campResources` 并冻结 Formatter 21 / Manifest 21；模型 bytes 不因 Manifest 版本推进而改变。
 - Runtime launch 再验证同一 View receipt，记录 Runtime Attachment Auth Receipt，并且只把当前 Camp 精确
   `attachments` 根交给 Adapter。
 
 ## 发布与并发
 
-带附件的 Camp Message 先在 Runtime 不可达的 `.staging/<operation-id>` 完成全组复制、摘要复核和持久化，
-再取得 per-Camp mutation gate。该 gate 与 Context freeze、Host acquire、resume、prompt dispatch 的 Camp read
+带附件的 Camp Message 先用短数据库锁冻结 CopyPlan、journal 和 quota reservation，释放全局 Database mutex 后在
+Runtime 不可达的 `.staging/<operation-id>` 完成全组复制、摘要/identity 复核与 fsync，再以短数据库 CAS 复核
+Draft/CopyPlan 并进入 staged。之后才取得 per-Camp mutation gate。该 gate 与 Context freeze、Host acquire、resume、prompt dispatch 的 Camp read
 admission 互斥。Core 在 gate 内停止或 fence 不兼容 Host、原子 promote 完整 Entry subtree，最后在一个短
 SQLite transaction 中提交消息、`message_attachment`、View Entry、generation 和既有 Turn/Run 业务事实。
 SQLite commit 是 Draft→Published 与 Camp 共享授权的线性化点。
@@ -76,7 +77,9 @@ Actual  = View Entry receipts + filesystem entries
 ```
 
 未提交 operation 按数据库事实 adopt 或 rollback；已提交 Entry 缺失、被替换或摘要漂移先进入
-`integrity_failed` 并 fence Camp Host，再用 journaled whole-Camp rebuild 从 Authority 重建。Authority 不一致时
+`integrity_failed` 并 fence Camp Host，再用 journaled whole-Camp rebuild 从 Authority 重建。受控重建只更新
+root/Entry identity、operation 和 physical generation；稳定 catalog revision、Entry semantic identity 与 digest
+必须保持不变，使历史 Manifest 21 在模型可见语义未变时仍可恢复。Authority 不一致时
 保持 fail closed。Camp 存在期间 View Entry 不因 Run、Session、Context 或预算结束而删除；Camp 永久删除捕获
 typed cleanup identity，业务事务提交后清理派生 View。未知名称、symlink/reparse 或 containment 异常保留并阻断，
 删除不会跟随链接或越出已准入实例根。
@@ -84,6 +87,11 @@ typed cleanup identity，业务事务提交后清理派生 View。未知名称�
 Migration 99 对 schema 53 做本机 clean break：旧非终态 Formatter 20 输入按 accepted/delivery/action evidence
 诚实终结，旧 Manifest/Blob/ACK/执行证据逐字节保留且不可再 dispatch；随后只从 `message_attachment` 回填 View。
 `prepared_attachment` 和历史 Authority 路径从不迁移到 View。
+
+Migration 100 对 schema 54 做第二次本机 clean break：旧非终态 Manifest 20/Receipt v1 继续按同一 evidence
+分类诚实终结，历史物理 receipt 与执行证据不改写；现有 View 回填稳定 semantic catalog 后，新写入只接受
+Manifest 21/Receipt v2。物理 identity 继续用于当前本机完整性与 Runtime authorization，不再决定历史 Context
+是否有效。
 
 ## 安全声明
 
@@ -94,8 +102,9 @@ directory allowlist evidence。存在不受控 ambient filesystem access 时，�
 
 ## References
 
-- [Camp Published Attachment View v1](../contracts/camp-published-attachment-view-v1.md)
+- [Camp Published Attachment View v2](../contracts/camp-published-attachment-view-v2.md)
 - [Camp Attachment v2](../contracts/camp-attachment-v2.md)
-- [ContextManifest Evidence v20](../contracts/context-manifest-evidence-v20.md)
-- [Runtime Launch and Verification v10](../contracts/runtime-launch-and-verification-v10.md)
+- [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
+- [Runtime Launch and Verification v11](../contracts/runtime-launch-and-verification-v11.md)
 - [V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)
+- [V1.15-D05](../versions/v1.15/decisions.md#v1-15-d05)

@@ -12,10 +12,11 @@ const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.m
 use crate::{
     agent_profile::{AdapterKind, validate_stored_member_identity},
     camp_attachment_view::{
-        CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION, CampAttachmentViewReceiptV1,
+        CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION, CampAttachmentViewReceiptV2,
         CampAttachmentVisibilityMode, RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
         load_camp_attachment_view_receipt, resolve_published_attachment_path,
-        runtime_attachment_auth_receipt, validate_append_only_view_receipt,
+        resolve_published_attachment_root, runtime_attachment_auth_receipt,
+        validate_append_only_view_receipt,
     },
     camp_content::{
         AGENT_MESSAGE_PROJECTION_AUDIENCE, StructuredCampMessageContent, mentions_current_user,
@@ -1958,7 +1959,7 @@ fn validate_manifest_view_receipt(
     if canonical_json_digest(&receipt_value)? != expected_digest {
         anyhow::bail!("ContextManifest Camp Attachment View receipt digest is invalid");
     }
-    let receipt: CampAttachmentViewReceiptV1 = serde_json::from_value(receipt_value)
+    let receipt: CampAttachmentViewReceiptV2 = serde_json::from_value(receipt_value)
         .context("ContextManifest Camp Attachment View receipt is invalid")?;
     if receipt.camp_id != camp_id {
         anyhow::bail!("ContextManifest Camp Attachment View receipt belongs to another Camp");
@@ -2953,16 +2954,13 @@ fn build_run_facts<R: ContextReadConnection>(
     requires_new_native_session: bool,
     a2a_run_count: i64,
 ) -> Result<RunFacts> {
-    let (view_receipt, _) = load_camp_attachment_view_receipt(
-        database.context_connection(),
-        &snapshot.camp_id,
-        Vec::new(),
-    )?;
+    let published_attachment_root =
+        resolve_published_attachment_root(database.context_connection(), &snapshot.camp_id)?;
     let mut facts = RunFacts {
         schema_version: 2,
         camp_resources: CampResourcesFact {
             camp_id: snapshot.camp_id.clone(),
-            published_attachment_root: view_receipt.published_attachment_root,
+            published_attachment_root,
             access: "enumerate_and_read",
             scope: "current_camp",
             mutability: "read_only",
@@ -5468,7 +5466,7 @@ fn validate_frozen_view_receipt<R: ContextReadConnection>(
     let receipt_value = selection
         .get("campAttachmentViewReceipt")
         .context("Frozen Delivery Context has no Camp Attachment View receipt")?;
-    let receipt: CampAttachmentViewReceiptV1 = serde_json::from_value(receipt_value.clone())
+    let receipt: CampAttachmentViewReceiptV2 = serde_json::from_value(receipt_value.clone())
         .context("Frozen Delivery Context Camp Attachment View receipt is invalid")?;
     let expected_digest = selection
         .get("campAttachmentViewReceiptDigest")
@@ -8171,7 +8169,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.15".to_string(), 54, 1));
+        assert_eq!(contract, ("v1.15".to_string(), 55, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

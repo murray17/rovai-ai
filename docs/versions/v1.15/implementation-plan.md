@@ -37,6 +37,21 @@ last_updated: 2026-08-20
 - [x] 覆盖 root admission、publication crash/retry、mutation concurrency、integrity rebuild、Runtime guard、
   force delete、Migration classification/backfill、Desktop 参数及 temporary Smoke root cleanup。
 
+## Checkpoint 0B：可重建 Runtime View 的语义 Context receipt
+
+- [x] 完成并二次确认 runtime attachment semantic receipt revision 1；Formatter 21、模型 bytes、Run Facts v2
+  与 generation-fenced publication 产品规则不变，并记录 [V1.15-D06](decisions.md#v1-15-d06)；
+- [x] 将 View catalog 分为稳定 `catalogRevision/publishedCatalogRevision/semanticCatalogDigest` 与物理
+  generation/root/Entry identity/operation/catalog digest 两个轴；controlled rebuild 只更新物理轴；
+- [x] 新写入使用 Manifest 21/View Receipt v2，只冻结 Camp ID、稳定相对 payload path、attachment semantics
+  与 append-only catalog prefix；Runtime Auth Receipt v1 保留当前本机物理 evidence；
+- [x] 实现 Migration 100/schema 55：诚实终结旧非终态 Manifest 20/Receipt v1，保留历史 Manifest/Blob/Auth
+  Receipt/ACK/Evidence，并为现有 View backfill semantic catalog；
+- [x] publication staging 拆为短 DB CopyPlan/journal、无 Database mutex copy/digest/fsync、短 DB CAS；
+  Draft/CopyPlan drift 失败不产生公共消息或部分 Draft 消费；
+- [x] 覆盖 append 与 controlled rebuild 后旧 v2 receipt 可恢复、语义漂移失败、物理 Auth Receipt 更新、
+  publication copy phase 释放共享数据库锁，以及 Migration 100 source/backfill/clean-break。
+
 ## Checkpoint 1：平台、进程与私有文件系统
 
 - [x] 建立 Windows x64 compile baseline、平台 local IPC seam、target-aware sidecar staging 与 native frame；
@@ -114,11 +129,12 @@ last_updated: 2026-08-20
 - [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
 - [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
 - [Camp Published Attachment View architecture](../../architecture/camp-published-attachment-view.md)
-- [Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
 - [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
-- [ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
 - [Run Facts v2](../../contracts/run-facts-v2.md)
-- [Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)

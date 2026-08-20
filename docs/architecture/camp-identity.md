@@ -63,7 +63,7 @@ Run、Turn、Delivery 与 Gather。
 ## References
 
 - [Camp Identity v1](../contracts/camp-identity-v1.md)
-- [ContextManifest Evidence v20](../contracts/context-manifest-evidence-v20.md)
+- [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
 - [Camp History Retrieval v4](../contracts/camp-history-v4.md)
 - [Built-in Tool Transport v17](../contracts/builtin-tool-transport-v17.md)
 - [AgentRun Recovery](agent-run-recovery.md)

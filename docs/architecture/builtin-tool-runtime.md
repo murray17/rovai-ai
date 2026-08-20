@@ -36,7 +36,7 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 omission 的 bounded aggregate 边界见
 [公共上下文不变量](foundational-invariants.md#context-public-history)和
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、
-[ContextManifest Evidence v20](../contracts/context-manifest-evidence-v20.md)及
+[ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)及
 [Run Facts v2](../contracts/run-facts-v2.md)。Task authority 与
 self-active awareness 见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；真实空集合
@@ -168,7 +168,7 @@ Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
 当前 v17 contract/CLI command version、`builtin_cli.transport.v17` capability 与 IPC protocol 2 必须同时进入
 Binding compatibility 和 digest。Camp History 使用 v4；Session Charter bytes 保持不变，动态 Context 使用
-Formatter 21 / ContextManifest 20。v17 Context 不做 endpoint 猜测并 fail closed。
+Formatter 21 / ContextManifest 21。v17 Context 不做 endpoint 猜测并 fail closed。
 
 `member.create` 只接受 attested active、direct user-triggered AgentRun。Agent 依照 `member-studio` 展示完整
 名牌并取得用户确认，可选地把当前 Run 中 Core 可读的 PNG/JPEG 路径交给 CLI；Core 在领域提交前完成

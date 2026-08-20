@@ -135,7 +135,7 @@ projection：消息继续持久化并对用户、其他 Agent、Timeline、Histo
 ### 当前权威影响
 
 - [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
-- [ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
 - [有界公共上下文与引用闭包](../../architecture/foundational-invariants.md#context-public-history)
 - [Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
 
@@ -187,12 +187,12 @@ accepted-input 事实终结旧非终态 Formatter 20 执行，再从 `message_at
 ### 当前权威影响
 
 - [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
-- [Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
 - [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
-- [ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
 - [Run Facts v2](../../contracts/run-facts-v2.md)
-- [Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)
-- [Accepted Input Recovery v2](../../contracts/accepted-input-recovery-v2.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
 - [Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)
 - [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)
 
@@ -251,3 +251,54 @@ Renderer 瞬时状态、Inspector 显隐或窗口尺寸推断位置，不提供�
 - [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
 - [桌面 UI 验收](../../development/ui-acceptance.md#agent-执行过程门禁)
+
+<a id="v1-15-d06"></a>
+
+## V1.15-D06：冻结 Context 只绑定附件语义，不绑定可重建 View 的物理身份
+
+### 背景
+
+D04 建立的 Camp-shared Runtime View 是可删除、可重建的派生数据，但 Manifest 20 receipt 同时冻结了绝对
+published root、root/Entry filesystem identity、publication operation 和 physical generation。controlled rebuild
+即使保持 Authority bytes、`contentDigest` 和 Runtime 可见路径完全相同，也会生成新的 inode/file identity、
+operation 与 generation，从而使历史 Context 被错误判为不兼容。与此同时，大目录 staging 在全局 Database
+mutex 下执行递归 copy/digest/fsync，会阻塞无关状态推进，并放大 generation gate 的等待成本。
+
+### 决定
+
+ContextManifest 21 使用 View Receipt v2，只冻结 Camp ID、稳定相对 payload path、attachment kind/count/bytes/
+`contentDigest` 和 append-only semantic catalog revision/digest。root/Entry identity、publication operation、
+physical generation 与 physical catalog digest 继续用于本机完整性、Host compatibility 和 Runtime Auth Receipt，
+但不再决定历史 Context 语义有效性。
+
+View 持久化显式分离 semantic catalog revision 和 physical generation。controlled rebuild 必须逐项证明稳定
+语义不变，只更新物理轴。publication staging 同时拆为“短 DB CopyPlan/journal → 无 DB mutex copy/fsync →
+短 DB CAS”，最终 Camp mutation gate、55 秒 busy 和 generation-fenced 产品规则保持不变。
+
+### 后果
+
+- 相同 Authority bytes、相同 `contentDigest` 和稳定相对路径的 View 重建后，历史 Manifest 21 仍可恢复；
+- 当前 dispatch 仍必须重新验证本机物理 View，生成新的 Auth Receipt，并由 generation fence 阻止旧 Host 复用；
+- append 保持旧 semantic receipt 为合法 ancestor，删除、替换、digest/kind/count/path 漂移继续 fail closed；
+- Migration 100 诚实终结旧非终态 Manifest 20/Receipt v1 执行，保留历史 Evidence，并为现有 View 回填
+  semantic catalog；
+- 大附件复制不再长期占用 Core 全局 Database mutex，但 Draft/CopyPlan 漂移仍由短 CAS 拒绝且不部分发送；
+- Runtime 活跃期间禁止带附件 publication 是明确保留的产品限制，不在本决定中改为 live append。
+
+### 被拒绝方案
+
+- 让 controlled rebuild 复用 inode、operation 或 generation：文件系统不保证物理身份可复现，也会把派生目录
+  错误提升为历史业务权威；
+- 恢复时忽略整个 receipt：会失去对附件删除、替换、语义 path 和 catalog 非 append-only 漂移的验证；
+- 改写历史 Manifest/receipt 为新物理身份：破坏冻结证据、Managed Blob digest 与 accepted delivery 审计；
+- 取消 generation fence 或允许运行中发布：没有 TRAE live-append 正向 Probe，且产品明确选择运行期禁止新增数据；
+- 只缩短 SQLite transaction、不释放外层 Database mutex：文件复制仍会阻塞所有共享数据库操作。
+
+### 当前权威影响
+
+- [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
+- [Runtime 与 Context 基础不变量](../../architecture/foundational-invariants.md#runtime-recovery-shutdown)

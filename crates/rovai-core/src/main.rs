@@ -68,8 +68,8 @@ use rovai_core::{
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
     camp_attachment_view::{
-        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, CampAttachmentVisibilityMode,
-        PreparedCampAttachmentCleanup,
+        CampAttachmentPublicationStaging, CampAttachmentRuntimeAuthorization,
+        CampAttachmentViewStore, CampAttachmentVisibilityMode, PreparedCampAttachmentCleanup,
     },
     camp_content::StructuredCampMessageContent,
     camp_history::{
@@ -5336,7 +5336,7 @@ impl Core {
             }));
         }
 
-        let publication = {
+        let staging = {
             let mut database = self.database.lock().await;
             let draft = CampAttachmentStore::new(&self.data_dir)
                 .load_draft(&database, params.camp_id.as_str())?;
@@ -5352,13 +5352,70 @@ impl Core {
                     &attachment_ids,
                 )?;
             }
-            self.attachment_views.stage_publication(
+            self.attachment_views.plan_publication(
                 &mut database,
-                &CampAttachmentStore::new(&self.data_dir),
                 params.camp_id.as_str(),
                 &params.command_id,
                 params.draft_revision,
             )?
+        };
+        let publication = match staging {
+            CampAttachmentPublicationStaging::None => None,
+            CampAttachmentPublicationStaging::Ready(publication) => Some(publication),
+            CampAttachmentPublicationStaging::Copy(plan) => {
+                let operation_id = plan.operation_id().to_string();
+                let attachment_store = CampAttachmentStore::new(&self.data_dir);
+                let copied = match tokio::task::spawn_blocking(move || {
+                    CampAttachmentViewStore::copy_publication(&attachment_store, plan)
+                })
+                .await
+                {
+                    Ok(Ok(copied)) => copied,
+                    Ok(Err(error)) => {
+                        let mut database = self.database.lock().await;
+                        self.attachment_views.rollback_publication(
+                            &mut database,
+                            &operation_id,
+                            "camp_attachment_view_source_invalid",
+                        )?;
+                        return Err(error).context("camp_attachment_view_source_invalid");
+                    }
+                    Err(error) => {
+                        let mut database = self.database.lock().await;
+                        self.attachment_views.rollback_publication(
+                            &mut database,
+                            &operation_id,
+                            "camp_attachment_view_source_invalid",
+                        )?;
+                        return Err(error).context("Camp Attachment View copy task failed");
+                    }
+                };
+                let staged = {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .finish_publication_staging(&mut database, copied)
+                };
+                match staged {
+                    Ok(publication) => Some(publication),
+                    Err(error) => {
+                        let rollback_error_code = if error
+                            .chain()
+                            .any(|cause| cause.to_string() == "draft_changed")
+                        {
+                            "draft_changed"
+                        } else {
+                            "camp_attachment_view_recovery_required"
+                        };
+                        let mut database = self.database.lock().await;
+                        self.attachment_views.rollback_publication(
+                            &mut database,
+                            &operation_id,
+                            rollback_error_code,
+                        )?;
+                        return Err(error);
+                    }
+                }
+            }
         };
         let execution = if let Some(publication) = publication.as_ref() {
             let (_view_mutation, mutation_deadline) = match self

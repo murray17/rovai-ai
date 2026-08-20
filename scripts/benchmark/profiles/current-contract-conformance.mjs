@@ -3,7 +3,7 @@ import { digestJson } from '../protocol/canonical.mjs'
 
 export const CURRENT_CONTRACT_DATA_STORE = Object.freeze({
   version: 'v1.15',
-  projectionSchemaVersion: 54
+  projectionSchemaVersion: 55
 })
 
 const criteria = [
@@ -35,7 +35,7 @@ const criteria = [
   criterion('CCC-009', 'Large-history omission JSON remains bounded rather than growing with all message IDs', [
     test('crates/rovai-core/src/context.rs', 'whole_history_omission_evidence_stays_bounded_for_large_intervals')
   ]),
-  criterion('CCC-010', 'ContextManifest version is 20 and Context Formatter version is 21', [
+  criterion('CCC-010', 'ContextManifest version is 21 and Context Formatter version is 21', [
     test('crates/rovai-core/src/context_contract.rs', 'binding_contract_freezes_each_context_axis_version')
   ]),
   criterion(
@@ -58,6 +58,11 @@ const criteria = [
   ]),
   criterion('CCC-015', 'Self-authored recent messages are excluded before the top-15 and omission aggregate', [
     test('crates/rovai-core/src/context.rs', 'recent_public_messages_filter_self_before_limit_and_omission_aggregation')
+  ]),
+  criterion('CCC-016', 'Attachment Context freezes stable semantics while rebuild identity and publication copy remain independently fenced', [
+    test('crates/rovai-core/src/camp_attachment_view.rs', 'rollback_append_only_validation_and_controlled_rebuild_preserve_committed_entries'),
+    test('crates/rovai-core/src/camp_attachment_view.rs', 'publication_copy_phase_releases_the_shared_database_mutex'),
+    test('crates/rovai-core/src/db.rs', 'v100_backfills_stable_catalog_and_terminalizes_old_nonterminal_runs')
   ])
 ]
 

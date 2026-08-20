@@ -31,6 +31,11 @@ last_updated: 2026-08-20
 > schema 3、Main/IPC/Renderer 控制链路、旧偏好默认、pending/失败重试与独立 Inspector visibility 均已进入
 > 生产代码；自动测试和 packaged macOS App 已覆盖跨 Camp、一级页面、原子写失败与完整重启恢复。
 >
+> [Runtime attachment semantic receipt revision 1](model-context-change-runtime-attachment-semantic-receipt.md)
+> 已由开发者二次确认并实施：Formatter 21 模型 bytes 不变，Manifest 21/View Receipt v2 只冻结稳定 attachment
+> semantics；物理 root/Entry identity、operation 与 generation 继续进入本机完整性和 Runtime Auth Receipt。
+> publication copy phase 同时移出全局 Database mutex；generation fence 与运行期禁止带附件发布保持不变。
+>
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 
 ## 版本目标
@@ -51,8 +56,9 @@ Platform。历史 v1.05 只保留当时设计过程和未实施快照，不作�
 - Windows Runtime search、native EXE/validated Node shim、file identity 与平台资格矩阵保持单一 Rust 权威；
 - `%LOCALAPPDATA%` Core/User Data/Session Data/Logs/CrashDumps 使用 local NTFS admission 和创建时 protected DACL；
 - Attachment 使用 retained handle 与 handle-relative traversal，拒绝 reparse、identity drift 与非准入存储；
-- 新增 journaled Camp Published Attachment View、统一 Runtime path resolver、Camp generation fence 与
-  Migration 99 clean break/backfill，同时保持 Authority、历史 Manifest/Blob/Evidence 和 `contentDigest` 不变；
+- 新增 journaled Camp Published Attachment View、统一 Runtime path resolver、Camp generation fence、稳定 semantic
+  catalog/receipt 与 Migration 99/100 clean break/backfill，同时保持 Authority、历史 Manifest/Blob/Evidence 和
+  `contentDigest` 不变；附件 staging copy/digest/fsync 不持有全局 Database mutex；
 - Skill Library 使用 Windows logical mode；Skill Projection 使用同父目录 copy、schema 2 journal、operationId、
   NTFS entry identity、持久 Run registration、bounded sharing retry 和 crash-window recovery；
 - 完成 secured Named Pipe Built-in Transport v17、Windows Renderer Interaction Delta、NSIS、PE/manifest verifier、
@@ -98,6 +104,12 @@ delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行�
 文件在读取时保留可识别字段并补 `executionConsolePlacement=bottom`，不从历史 Camp 或 Renderer 瞬时状态
 回填，也不提供 downgrade reader。
 
+Migration 100 只接受已完整应用 Migration 99 的 `v1.15 / projection schema 54`。它按同一 delivery/action
+evidence 诚实终结旧非终态 Manifest 20/Receipt v1 Run、Turn、Delivery、Gather 与可恢复 execution，fence 当前
+Binding/Session，但逐字节保留历史 Manifest/模型输入 Blob/Runtime Auth Receipt/ACK/摘要/执行证据。现有空 View
+backfill 为 semantic catalog revision 0，非空 View backfill 为 revision 1；新写入只允许 Formatter 21 /
+Manifest 21 / Run Facts v2 / Receipt v2，并推进到 `v1.15 / projection schema 55`。
+
 ## 验收边界
 
 - macOS workspace、Core tests、Desktop 与既有文档门禁保持通过；
@@ -125,26 +137,27 @@ delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.14 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.15。 |
-| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果与稳定执行台 DOM；[V1.15-D03](decisions.md#v1-15-d03)记录自身公屏输出不再作为同一 Agent 的 recent 未读候选；[V1.15-D04](decisions.md#v1-15-d04)记录 Camp-shared Published Attachment View；[V1.15-D05](decisions.md#v1-15-d05)记录 Main-owned 本机安装级执行台位置偏好。 |
-| Contracts | 已更新 | [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)成为执行台当前入口；[Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)、[Camp Attachment v2](../../contracts/camp-attachment-v2.md)、[ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)、[Run Facts v2](../../contracts/run-facts-v2.md)、[Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)、[Accepted Input Recovery v2](../../contracts/accepted-input-recovery-v2.md)、[Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)与[Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)继续拥有其各自当前边界。 |
-| Architecture | 已更新 | [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)继续拥有 Authority/View、publication gate、generation、恢复与生命周期；[产品/执行表面不变量](../../architecture/foundational-invariants.md#product-execution-surface)增加 Main-owned 全局 placement、旧偏好默认及独立 Inspector visibility。 |
+| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果与稳定执行台 DOM；[V1.15-D03](decisions.md#v1-15-d03)记录自身公屏输出不再作为同一 Agent 的 recent 未读候选；[V1.15-D04](decisions.md#v1-15-d04)记录 Camp-shared Published Attachment View；[V1.15-D05](decisions.md#v1-15-d05)记录 Main-owned 本机安装级执行台位置偏好；[V1.15-D06](decisions.md#v1-15-d06)分离冻结 attachment semantics 与可重建物理 View，并保留 generation fence。 |
+| Contracts | 已更新 | [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)成为执行台当前入口；[Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)、[Camp Attachment v2](../../contracts/camp-attachment-v2.md)、[ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)、[Run Facts v2](../../contracts/run-facts-v2.md)、[Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)、[Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)、[Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)与[Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)成为当前入口。 |
+| Architecture | 已更新 | [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)拥有 Authority/View、publication gate、generation、恢复与生命周期；基础不变量、Runtime/Recovery 与 Windows Platform 路由同一边界；[产品/执行表面不变量](../../architecture/foundational-invariants.md#product-execution-surface)拥有 Main-owned 全局 placement、旧偏好默认及独立 Inspector visibility。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止、完整 chronology、唯一 Drawer DOM 与完整 Tool 结果，并增加跨 Camp/重启的位置偏好、写失败及 Inspector hidden 组合。 |
 | Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
 | Runtime compatibility | 已更新 | 所有 Adapter 当前 attachment visibility 均记录为 `generation_fenced_v1`；没有 TRAE live-append 正向 Probe，Windows 行继续保持 `not_qualified`。 |
-| Documentation routing | 已更新 | 文档导航、Architecture/Contract 索引、决定导航、UI 验收、版本概览和实施计划路由到 Run Process Detail Surface v14；既有 Camp Published Attachment View 与 Manifest 20/Run Facts v2 路由继续有效。 |
+| Documentation routing | 已更新 | 文档导航、Architecture/Contract 索引、决定导航、UI 验收、版本概览和实施计划同时路由到 Run Process Detail Surface v14、Camp Published Attachment View v2 与 Manifest 21/Run Facts v2 当前入口。 |
 | Root README | 确认无需更新 | Windows 尚未完成真实验收或发布，根 README 不提前声明常青 Windows 支持。 |
 
 ## References
 
 - [模型上下文变更 revision 1：排除自身发布的 recent public message](model-context-change-self-authored-recent-messages.md)
 - [模型上下文变更 revision 2：Camp Published Attachment Runtime View](model-context-change-runtime-attachment-session-projection.md)
+- [模型上下文变更 revision 1：Runtime attachment semantic receipt](model-context-change-runtime-attachment-semantic-receipt.md)
 - [实施与验收计划](implementation-plan.md)
 - [v1.15 决策记录](decisions.md)
 - [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
-- [Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
 - [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
 - [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
-- [ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
 - [Run Facts v2](../../contracts/run-facts-v2.md)
 - [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)
 - [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
@@ -152,7 +165,8 @@ delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行�
 - [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)
 - [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
 - [Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)
-- [Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
 - [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)

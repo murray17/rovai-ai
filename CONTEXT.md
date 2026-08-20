@@ -1626,6 +1626,10 @@ _Avoid_: Prepared Attachment, addressed-recipient attachment, Context-scoped gra
 The instance-isolated, derived and rebuildable Runtime filesystem catalog containing exactly one Camp's Published Attachments and no Draft Attachment or Core-private metadata. Runtime receives only that Camp's exact `attachments` root; the View follows the Camp lifecycle, is not a second content authority, and never becomes a Camp Workspace Binding, Git worktree, Run projection, Session projection, or cross-Camp library.
 _Avoid_: Authority Attachment root, Run Attachment Projection, Agent Session projection, Project attachment folder, global Runtime files root
 
+**Camp Attachment Semantic Receipt**:
+The immutable ContextManifest evidence that freezes one Camp's stable attachment catalog revision, semantic digest, relative payload paths and complete semantic identity for explicitly referenced Published Attachments. It proves that the current View is an append-only semantic successor while excluding absolute roots, device/inode/file identity, publication operation and physical generation. Current local filesystem integrity and dispatch authorization remain separate Runtime Attachment Auth Receipt concerns, so a semantics-preserving controlled rebuild cannot invalidate historical Context.
+_Avoid_: filesystem receipt, Runtime Auth Receipt, inode proof, rebuild generation, attachment authorization token
+
 **Published Attachment Path**:
 The stable, read-only path of one Published Attachment payload inside its Camp Published Attachment View. New model input and ContextManifest attachment references obtain it from the Core resolver; every eligible Agent in that Camp may discover and read it even when the owning message is outside the current frozen Context. It is neither an Authority Attachment path nor permission to enumerate Drafts, another Camp, the View parent, or a user-selected Project workspace.
 _Avoid_: Authority storage path, Context-scoped grant, original local path, Managed Blob path, Project file

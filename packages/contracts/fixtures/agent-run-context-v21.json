@@ -2,7 +2,7 @@
   "nativeSessionBootstrap": "native_session_bootstrap_v3",
   "bootstrapFormatterVersion": 3,
   "agentRunContextFormatterVersion": 21,
-  "contextManifestVersion": 20,
+  "contextManifestVersion": 21,
   "contextManifestFormatterVersion": 21,
   "contextDeliveryProfileVersion": 4,
   "messageProjectionAudience": "agent_v1",
@@ -101,8 +101,10 @@
     "emptyOptionalProjection": "camp_resources_only"
   },
   "campAttachmentViewReceipt": {
-    "schemaVersion": 1,
-    "requiredFields": ["campId", "publishedAttachmentRoot", "rootIdentityDigest", "minimumReadyGeneration", "catalogEntryCount", "catalogDigest", "referencedAttachmentIds", "referencedAttachmentSetDigest"]
+    "schemaVersion": 2,
+    "requiredFields": ["campId", "attachmentRootRelativePath", "catalogRevision", "catalogEntryCount", "semanticCatalogDigest", "referencedEntries", "referencedEntriesDigest"],
+    "semanticEntryRequiredFields": ["attachmentId", "kind", "byteSize", "fileCount", "directoryCount", "nodeCount", "contentDigest", "rootRelativePayloadPath"],
+    "forbiddenPhysicalFields": ["publishedAttachmentRoot", "rootIdentityDigest", "minimumReadyGeneration", "entryIdentityDigest", "publishedGeneration", "publicationOperationId"]
   },
   "runtimeAttachmentAuthReceipt": {
     "schemaVersion": 1,
