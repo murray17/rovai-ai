@@ -903,7 +903,12 @@ mod tests {
             .into_iter()
             .find(|definition| definition["name"] == CAMP_MESSAGE_SEND_TOOL_NAME)
             .unwrap();
-        assert_eq!(send["inputSchema"]["required"], json!(["body"]));
+        assert!(send["inputSchema"].get("required").is_none());
+        assert_eq!(send["inputSchema"]["properties"]["body"]["default"], "");
+        assert_eq!(
+            send["inputSchema"]["properties"]["files"]["default"],
+            json!([])
+        );
         assert!(send["inputSchema"]["properties"].get("campId").is_none());
         assert!(
             send["inputSchema"]["properties"]
@@ -926,6 +931,11 @@ mod tests {
         );
         validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &json!({"body": "hello"}))
             .unwrap();
+        validate_builtin_tool_input(
+            CAMP_MESSAGE_SEND_TOOL_NAME,
+            &json!({"files": ["report.pdf"]}),
+        )
+        .unwrap();
         validate_builtin_tool_input(
             CAMP_MESSAGE_SEND_TOOL_NAME,
             &json!({"body": "hello", "mentionUser": true}),
@@ -958,9 +968,7 @@ mod tests {
         assert!(
             validate_builtin_tool_input(TEAM_LIST_TASKS_TOOL_NAME, &json!({"limit": 101})).is_err()
         );
-        assert!(
-            validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &json!({"body": ""})).is_err()
-        );
+        validate_builtin_tool_input(CAMP_MESSAGE_SEND_TOOL_NAME, &json!({"body": ""})).unwrap();
         validate_builtin_tool_input(TEAM_LIST_TASKS_TOOL_NAME, &json!({"limit": 100})).unwrap();
     }
 

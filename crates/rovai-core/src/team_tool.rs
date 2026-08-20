@@ -70,6 +70,7 @@ static TEAM_TOOL_PROCESS_SECRET: OnceLock<String> = OnceLock::new();
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CampMessageSendInput {
+    #[serde(default)]
     pub body: String,
     #[serde(default)]
     pub to: Vec<String>,
@@ -544,13 +545,12 @@ impl TeamToolService {
         json!({
             "type": "object",
             "additionalProperties": false,
-            "required": ["body"],
             "properties": {
                 "body": {
                     "type": "string",
-                    "minLength": 1,
+                    "default": "",
                     "maxLength": CAMP_MESSAGE_SEND_MAX_BODY_BYTES,
-                    "description": "Exact public message body. Canonical inline @agent_N tokens retain their existing positions. An exact active Camp member @display-name alias participates only as the first non-whitespace token on a line and must be followed by whitespace or end-of-body; put trailing routing on a dedicated final line. Code, URLs, and escaped literal regions are excluded."
+                    "description": "Optional exact public message body; omit it when at least one file supplies the complete payload. Canonical inline @agent_N tokens retain their existing positions. An exact active Camp member @display-name alias participates only as the first non-whitespace token on a line and must be followed by whitespace or end-of-body; put trailing routing on a dedicated final line. Code, URLs, and escaped literal regions are excluded."
                 },
                 "to": {
                     "type": "array",
@@ -576,6 +576,7 @@ impl TeamToolService {
                 },
                 "files": {
                     "type": "array",
+                    "default": [],
                     "maxItems": MAX_PREPARED_ATTACHMENTS,
                     "uniqueItems": true,
                     "items": {"type": "string", "minLength": 1},
@@ -1690,10 +1691,10 @@ fn validate_public_send_invocation(invocation: &CampMessageSendInvocation) -> Re
         &invocation.binding_credential,
         &invocation.runtime_tool_call_id,
     )?;
-    if invocation.input.body.trim().is_empty() {
+    if invocation.input.body.trim().is_empty() && invocation.input.files.is_empty() {
         return Err(invocation_error(
             "message.invalid_input",
-            "a non-empty body is required",
+            "a non-empty body or at least one file is required",
         ));
     }
     if invocation.input.body.len() > CAMP_MESSAGE_SEND_MAX_BODY_BYTES {
@@ -2830,17 +2831,26 @@ mod tests {
     }
 
     #[test]
+    fn public_send_rejects_an_empty_body_without_files() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation("empty-send", "   ", &[]);
+        let error = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap_err();
+        let error = error.downcast_ref::<TeamToolInvocationError>().unwrap();
+        assert_eq!(error.code, "message.invalid_input");
+        assert!(error.message.contains("body or at least one file"));
+    }
+
+    #[test]
     fn attachment_send_returns_real_ids_and_terminal_projection_failure_settles_without_attempt() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
         let authority_path = fixture.directory.join("frozen-agent-file.txt");
         std::fs::write(&authority_path, b"file").unwrap();
         let attachment_id = Uuid::new_v4().to_string();
-        let mut invocation = fixture.public_send_invocation(
-            "attachment-send-real-identities",
-            "Review the attached file",
-            &["agent_2"],
-        );
+        let mut invocation =
+            fixture.public_send_invocation("attachment-send-real-identities", "", &["agent_2"]);
         invocation.input.files = vec!["frozen-agent-file.txt".to_string()];
         invocation.frozen_files = vec![AuthorityAttachment {
             attachment_id: attachment_id.clone(),
@@ -2866,6 +2876,16 @@ mod tests {
             .to_string();
         assert!(Uuid::parse_str(&message_id).is_ok());
         assert!(Uuid::parse_str(&delivery_id).is_ok());
+        let body: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT body FROM camp_message WHERE id = ?1",
+                [&message_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(body, "");
         let operation_id: String = fixture
             .database
             .connection()

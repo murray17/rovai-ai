@@ -441,6 +441,9 @@ impl AcpHost {
             private_runtime_dir,
             private_config_root.as_deref(),
             attachment_access_root,
+            builtin_tools
+                .as_ref()
+                .map(BuiltinToolProcessConfig::run_tmp),
         )
         .context("failed to configure ACP Runtime command")?;
         let detector_config_root = if compaction_detector_policy
@@ -1627,8 +1630,13 @@ impl AcpRuntime {
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = self.execution_root.to_string_lossy().to_string();
+        let run_tmp = self
+            .host
+            .builtin_tool_process_config()
+            .context("ACP Runtime has no Built-in Tool Run tmp")?
+            .run_tmp();
         let additional_directories =
-            session_additional_directories(self.attachment_access_root.as_deref())?;
+            session_additional_directories(self.attachment_access_root.as_deref(), Some(run_tmp))?;
         let mcp_servers = if !matches!(
             self.host.adapter_kind,
             AdapterKind::CopilotCli
@@ -2541,6 +2549,7 @@ fn configure_runtime_command(
     private_runtime_dir: &Path,
     private_config_root: Option<&Path>,
     attachment_access_root: Option<&Path>,
+    run_tmp: Option<&Path>,
 ) -> Result<Option<EphemeralMcpConfigFile>> {
     let values = runtime
         .permissions
@@ -2589,6 +2598,9 @@ fn configure_runtime_command(
                     && workspace.access == "read_only");
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
             if let Some(root) = attachment_access_root {
+                command.arg("--add-dir").arg(root);
+            }
+            if let Some(root) = run_tmp {
                 command.arg("--add-dir").arg(root);
             }
             if isolated {
@@ -3047,11 +3059,18 @@ fn launchable_acp_adapter(kind: AdapterKind) -> bool {
     kind.uses_acp()
 }
 
-fn session_additional_directories(attachment_access_root: Option<&Path>) -> Result<Vec<String>> {
-    let root = attachment_access_root.context(
+fn session_additional_directories(
+    attachment_access_root: Option<&Path>,
+    run_tmp: Option<&Path>,
+) -> Result<Vec<String>> {
+    let attachment_root = attachment_access_root.context(
         "camp_attachment_view_runtime_unsupported: ACP Session has no exact Camp attachment root",
     )?;
-    Ok(vec![root.to_string_lossy().into_owned()])
+    let run_tmp = run_tmp.context("ACP Session has no exact Built-in Tool Run tmp root")?;
+    Ok(vec![
+        attachment_root.to_string_lossy().into_owned(),
+        run_tmp.to_string_lossy().into_owned(),
+    ])
 }
 
 #[cfg(unix)]
@@ -3702,6 +3721,7 @@ mod tests {
                 &BTreeMap::new(),
                 &root,
                 Some(&root),
+                None,
                 None,
             )
             .unwrap();
@@ -4543,17 +4563,27 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn every_acp_session_receives_the_exact_enumerable_camp_attachment_root() {
+    fn every_acp_session_receives_exact_attachment_and_run_tmp_roots() {
         let root = Path::new("/tmp/rovai-camp-attachments/camp-id");
+        let run_tmp = Path::new("/tmp/rovai-process/run-tmp");
         assert_eq!(
-            session_additional_directories(Some(root)).unwrap(),
-            vec![root.to_string_lossy().into_owned()]
+            session_additional_directories(Some(root), Some(run_tmp)).unwrap(),
+            vec![
+                root.to_string_lossy().into_owned(),
+                run_tmp.to_string_lossy().into_owned(),
+            ]
         );
         assert!(
-            session_additional_directories(None)
+            session_additional_directories(None, Some(run_tmp))
                 .unwrap_err()
                 .to_string()
                 .contains("camp_attachment_view_runtime_unsupported")
+        );
+        assert!(
+            session_additional_directories(Some(root), None)
+                .unwrap_err()
+                .to_string()
+                .contains("Built-in Tool Run tmp")
         );
     }
 

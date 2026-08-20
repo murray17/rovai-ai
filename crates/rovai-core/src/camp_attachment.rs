@@ -1,8 +1,10 @@
 use std::{
+    collections::HashMap,
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, Weak},
 };
 
 #[cfg(unix)]
@@ -52,6 +54,9 @@ const MAX_PREVIEW_EDGE: u64 = 16_384;
 const MAX_PREVIEW_PIXELS: u64 = 40_000_000;
 const ATTACHMENT_METADATA_FILE: &str = ".rovai-attachment.json";
 const ATTACHMENT_METADATA_SCHEMA_VERSION: u32 = 1;
+type CampAuthorityIngressGate = Arc<Mutex<()>>;
+type CampAuthorityIngressGateRegistry = Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>;
+static CAMP_AUTHORITY_INGRESS_GATES: OnceLock<CampAuthorityIngressGateRegistry> = OnceLock::new();
 #[cfg(all(test, any(windows, feature = "slow-tests")))]
 const DIRECTORY_SNAPSHOT_FIXTURE_DIGEST: &str =
     "sha256:69c6a7b4e706d0177bdcc3b806c25daac505628a8d9f22c4976fd5c93ef87501";
@@ -177,11 +182,35 @@ impl CampAttachmentStore {
     }
 
     pub fn camp_root(&self, camp_id: &str) -> Result<PathBuf> {
+        let gate = self.authority_ingress_gate(camp_id)?;
+        let admission = lock_unpoisoned(&gate);
+        self.camp_root_with_admission(camp_id, &admission)
+    }
+
+    fn camp_root_with_admission(
+        &self,
+        camp_id: &str,
+        _admission: &MutexGuard<'_, ()>,
+    ) -> Result<PathBuf> {
         let camp_id = CampId::parse(camp_id)?;
         let root = self.root.join(camp_id.as_str());
         ensure_directory(&root)?;
         restrict_discovery(&root)?;
         Ok(root)
+    }
+
+    fn authority_ingress_gate(&self, camp_id: &str) -> Result<CampAuthorityIngressGate> {
+        let camp_id = CampId::parse(camp_id)?;
+        let identity = self.root.join(camp_id.as_str());
+        let registry = CAMP_AUTHORITY_INGRESS_GATES.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut registry = lock_unpoisoned(registry);
+        registry.retain(|_, gate| gate.strong_count() > 0);
+        if let Some(gate) = registry.get(&identity).and_then(Weak::upgrade) {
+            return Ok(gate);
+        }
+        let gate = Arc::new(Mutex::new(()));
+        registry.insert(identity, Arc::downgrade(&gate));
+        Ok(gate)
     }
 
     pub fn freeze_agent_sources(
@@ -198,7 +227,9 @@ impl CampAttachmentStore {
         let workspace_root = fs::canonicalize(execution_workspace)
             .context("AgentRun execution workspace is unavailable")?;
         let run_tmp_root = fs::canonicalize(run_tmp).context("ROVAI_RUN_TMP is unavailable")?;
-        let camp_root = self.camp_root(camp_id)?;
+        let gate = self.authority_ingress_gate(camp_id)?;
+        let admission = lock_unpoisoned(&gate);
+        let camp_root = self.camp_root_with_admission(camp_id, &admission)?;
         allow_directory_update(&camp_root)?;
         let mut frozen = Vec::with_capacity(requested_paths.len());
         let freeze_result = (|| -> Result<()> {
@@ -286,7 +317,11 @@ impl CampAttachmentStore {
     }
 
     pub fn cleanup_unowned_agent_sources(&self, camp_id: &str, frozen: &[AuthorityAttachment]) {
-        let Ok(camp_root) = self.camp_root(camp_id) else {
+        let Ok(gate) = self.authority_ingress_gate(camp_id) else {
+            return;
+        };
+        let admission = lock_unpoisoned(&gate);
+        let Ok(camp_root) = self.camp_root_with_admission(camp_id, &admission) else {
             return;
         };
         let _ = allow_directory_update(&camp_root);
@@ -865,24 +900,29 @@ impl CampAttachmentStore {
         validate_draft_capacity(database, camp_id, 0)?;
         let display_name = normalize_display_name(requested_display_name)?;
         let attachment_id = Uuid::new_v4().to_string();
-        let camp_root = self.camp_root(camp_id)?;
-        allow_directory_update(&camp_root)?;
-        let attachment_directory = camp_root.join(&attachment_id);
-        let prepared = (|| -> Result<PreparedAttachment> {
-            ensure_directory(&attachment_directory)?;
-            let destination = attachment_directory.join(&display_name);
-            let prepared = copy_and_inspect(source_path, &destination)?;
-            write_attachment_metadata(&attachment_directory, &prepared)?;
-            restrict_discovery(&attachment_directory)?;
-            Ok(prepared)
-        })();
-        let _ = restrict_discovery(&camp_root);
-        let prepared = match prepared {
-            Ok(prepared) => prepared,
-            Err(error) => {
-                cleanup_unowned_attachment(&camp_root, &attachment_directory);
-                return Err(error);
-            }
+        let (camp_root, attachment_directory, prepared) = {
+            let gate = self.authority_ingress_gate(camp_id)?;
+            let admission = lock_unpoisoned(&gate);
+            let camp_root = self.camp_root_with_admission(camp_id, &admission)?;
+            allow_directory_update(&camp_root)?;
+            let attachment_directory = camp_root.join(&attachment_id);
+            let prepared = (|| -> Result<PreparedAttachment> {
+                ensure_directory(&attachment_directory)?;
+                let destination = attachment_directory.join(&display_name);
+                let prepared = copy_and_inspect(source_path, &destination)?;
+                write_attachment_metadata(&attachment_directory, &prepared)?;
+                restrict_discovery(&attachment_directory)?;
+                Ok(prepared)
+            })();
+            let _ = restrict_discovery(&camp_root);
+            let prepared = match prepared {
+                Ok(prepared) => prepared,
+                Err(error) => {
+                    cleanup_unowned_attachment(&camp_root, &attachment_directory);
+                    return Err(error);
+                }
+            };
+            (camp_root, attachment_directory, prepared)
         };
 
         let persistence = (|| -> Result<()> {
@@ -934,6 +974,8 @@ impl CampAttachmentStore {
             Ok(())
         })();
         if let Err(error) = persistence {
+            let gate = self.authority_ingress_gate(camp_id)?;
+            let _admission = lock_unpoisoned(&gate);
             cleanup_unowned_attachment(&camp_root, &attachment_directory);
             return Err(error);
         }
@@ -979,7 +1021,9 @@ impl CampAttachmentStore {
             params![camp_id, now, expires_at],
         )?;
         transaction.commit()?;
-        let camp_root = self.camp_root(camp_id)?;
+        let gate = self.authority_ingress_gate(camp_id)?;
+        let admission = lock_unpoisoned(&gate);
+        let camp_root = self.camp_root_with_admission(camp_id, &admission)?;
         let cleanup = (|| -> Result<()> {
             allow_directory_update(&camp_root)?;
             let removal = remove_attachment_file_parent(Path::new(&path));
@@ -1004,6 +1048,8 @@ impl CampAttachmentStore {
             "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
             [camp_id],
         )?;
+        let gate = self.authority_ingress_gate(camp_id)?;
+        let _admission = lock_unpoisoned(&gate);
         let camp_root = self.root.join(parsed_camp_id.as_str());
         if !paths.is_empty() && camp_root.exists() {
             allow_directory_update(&camp_root)?;
@@ -1183,6 +1229,8 @@ impl CampAttachmentStore {
 
     pub fn remove_camp(&self, camp_id: &str) -> Result<()> {
         let camp_id = CampId::parse(camp_id)?;
+        let gate = self.authority_ingress_gate(camp_id.as_str())?;
+        let _admission = lock_unpoisoned(&gate);
         let root = self.root.join(camp_id.as_str());
         if !root.exists() {
             return Ok(());
@@ -3246,6 +3294,12 @@ fn error_message(code: String) -> String {
     }
 }
 
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn ensure_directory(path: &Path) -> Result<()> {
     fs::create_dir_all(path)?;
     let metadata = fs::symlink_metadata(path)?;
@@ -3393,6 +3447,31 @@ fn sync_parent(_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod agent_source_tests {
     use super::*;
+
+    #[test]
+    fn authority_ingress_gate_is_shared_per_camp_and_exclusive() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-authority-ingress-gate-test-{}",
+            Uuid::new_v4()
+        ));
+        let first_store = CampAttachmentStore::new(&directory);
+        let second_store = CampAttachmentStore::new(&directory);
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let other_camp_id = "rvcamp_01m0evhykseprr56s0b940zrr3";
+
+        let first = first_store.authority_ingress_gate(camp_id).unwrap();
+        let same_camp = second_store.authority_ingress_gate(camp_id).unwrap();
+        let other_camp = second_store.authority_ingress_gate(other_camp_id).unwrap();
+        assert!(Arc::ptr_eq(&first, &same_camp));
+        assert!(!Arc::ptr_eq(&first, &other_camp));
+
+        let first_admission = lock_unpoisoned(&first);
+        assert!(same_camp.try_lock().is_err());
+        let other_admission = other_camp.try_lock().unwrap();
+        drop(other_admission);
+        drop(first_admission);
+        assert!(same_camp.try_lock().is_ok());
+    }
 
     #[test]
     fn agent_sources_are_frozen_only_from_the_exact_run_workspace_or_tmp() {

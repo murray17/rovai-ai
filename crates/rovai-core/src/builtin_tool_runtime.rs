@@ -183,6 +183,7 @@ struct ActiveLease {
     agent_run_id: String,
     execution_epoch: i64,
     native_binding: BuiltinToolBindingCredential,
+    run_tmp: PathBuf,
     replay: HashMap<String, ReplayEntry>,
     replay_order: VecDeque<String>,
 }
@@ -244,7 +245,9 @@ impl BuiltinToolLeaseRegistry {
             // Run on the same warm process. Any context copied from the prior acquire
             // is therefore fenced by generation and token.
             process.active = None;
+            process.config.write_context(None)?;
         }
+        let run_tmp = process.config.reset_run_tmp()?;
         process.lease_generation = process.lease_generation.saturating_add(1).max(1);
         let active = ActiveLease {
             lease_id: uuid::Uuid::new_v4().to_string(),
@@ -253,6 +256,7 @@ impl BuiltinToolLeaseRegistry {
             agent_run_id: agent_run_id.to_string(),
             execution_epoch,
             native_binding: native_binding.clone(),
+            run_tmp,
             replay: HashMap::new(),
             replay_order: VecDeque::new(),
         };
@@ -286,6 +290,9 @@ impl BuiltinToolLeaseRegistry {
             if let Err(error) = process.config.write_context(None) {
                 eprintln!("failed to fence Built-in Tool context: {error:#}");
             }
+            if let Err(error) = process.config.clear_run_tmp() {
+                eprintln!("failed to clear Built-in Tool Run tmp: {error:#}");
+            }
         }
     }
 
@@ -293,6 +300,7 @@ impl BuiltinToolLeaseRegistry {
         let _gate = self.invocation_gate.lock().await;
         if let Some(process) = self.processes.lock().await.remove(process_id) {
             let _ = process.config.write_context(None);
+            let _ = process.config.clear_run_tmp();
         }
     }
 
@@ -306,6 +314,9 @@ impl BuiltinToolLeaseRegistry {
             }
             if let Err(error) = process.config.write_context(None) {
                 eprintln!("failed to fence Built-in Tool context: {error:#}");
+            }
+            if let Err(error) = process.config.clear_run_tmp() {
+                eprintln!("failed to clear Built-in Tool Run tmp: {error:#}");
             }
         }
         fenced
@@ -341,7 +352,7 @@ impl BuiltinToolLeaseRegistry {
             agent_run_id: active.agent_run_id.clone(),
             execution_epoch: active.execution_epoch,
             native_binding: active.native_binding.clone(),
-            run_tmp: process.config.run_tmp().to_path_buf(),
+            run_tmp: active.run_tmp.clone(),
         })
     }
 
@@ -437,6 +448,46 @@ impl BuiltinToolLeaseRegistry {
             .values()
             .filter(|process| process.active.is_some())
             .count()
+    }
+}
+
+impl BuiltinToolProcessConfig {
+    fn reset_run_tmp(&self) -> Result<PathBuf> {
+        self.clear_run_tmp()?;
+        fs::create_dir(&self.inner.run_tmp).with_context(|| {
+            format!(
+                "failed to recreate Built-in Tool Run tmp {}",
+                self.inner.run_tmp.display()
+            )
+        })?;
+        restrict_directory(&self.inner.run_tmp)?;
+        validate_exact_run_tmp_root(&self.inner.process_root, &self.inner.run_tmp)?;
+        Ok(self.inner.run_tmp.clone())
+    }
+
+    fn clear_run_tmp(&self) -> Result<()> {
+        validate_configured_run_tmp_path(&self.inner.process_root, &self.inner.run_tmp)?;
+        let metadata = match fs::symlink_metadata(&self.inner.run_tmp) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(error.into()),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            fs::remove_file(&self.inner.run_tmp).with_context(|| {
+                format!(
+                    "failed to remove unsafe Built-in Tool Run tmp {}",
+                    self.inner.run_tmp.display()
+                )
+            })?;
+        } else {
+            fs::remove_dir_all(&self.inner.run_tmp).with_context(|| {
+                format!(
+                    "failed to clear Built-in Tool Run tmp {}",
+                    self.inner.run_tmp.display()
+                )
+            })?;
+        }
+        Ok(())
     }
 }
 
@@ -538,6 +589,25 @@ fn restrict_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn validate_configured_run_tmp_path(process_root: &Path, run_tmp: &Path) -> Result<()> {
+    if run_tmp.parent() != Some(process_root) || run_tmp.file_name() != Some("run-tmp".as_ref()) {
+        bail!("Built-in Tool Run tmp is outside its exact process root");
+    }
+    Ok(())
+}
+
+fn validate_exact_run_tmp_root(process_root: &Path, run_tmp: &Path) -> Result<()> {
+    validate_configured_run_tmp_path(process_root, run_tmp)?;
+    let canonical_process_root =
+        fs::canonicalize(process_root).context("failed to resolve Built-in Tool process root")?;
+    let canonical_run_tmp =
+        fs::canonicalize(run_tmp).context("failed to resolve Built-in Tool Run tmp")?;
+    if canonical_run_tmp.parent() != Some(canonical_process_root.as_path()) {
+        bail!("Built-in Tool Run tmp escaped its exact process root");
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,6 +644,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(registry.active_count().await, 1);
+        fs::write(
+            config.run_tmp().join("stale-from-first-lease.txt"),
+            b"stale",
+        )
+        .unwrap();
         let rotated = registry
             .bind(&config, "run-1", 1, &binding())
             .await
@@ -581,6 +656,13 @@ mod tests {
         assert!(rotated.lease_generation > first.lease_generation);
         assert_ne!(rotated.lease_id, first.lease_id);
         assert!(registry.authenticate(&first).await.is_err());
+        assert!(config.run_tmp().is_dir());
+        assert!(!config.run_tmp().join("stale-from-first-lease.txt").exists());
+        fs::write(
+            config.run_tmp().join("stale-from-rotated-lease.txt"),
+            b"stale",
+        )
+        .unwrap();
         let envelope = BuiltinToolInvocationEnvelope::success(
             "camp.list",
             "7b5db24c-4a43-4cab-9217-d982b08f7691",
@@ -605,6 +687,7 @@ mod tests {
         );
         registry.unbind(config.process_id(), "run-1", 1).await;
         assert!(registry.authenticate(&rotated).await.is_err());
+        assert!(!config.run_tmp().exists());
         let second = registry
             .bind(&config, "run-2", 2, &binding())
             .await
@@ -612,6 +695,13 @@ mod tests {
         assert!(second.lease_generation > rotated.lease_generation);
         assert_ne!(second.lease_id, rotated.lease_id);
         assert!(registry.authenticate(&first).await.is_err());
+        assert!(config.run_tmp().is_dir());
+        assert!(
+            !config
+                .run_tmp()
+                .join("stale-from-rotated-lease.txt")
+                .exists()
+        );
         registry.unbind(config.process_id(), "run-2", 2).await;
         drop(config);
         let _ = fs::remove_dir_all(root);
