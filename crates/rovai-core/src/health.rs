@@ -10,7 +10,8 @@ use anyhow::{Context, Result, bail};
 use rovai_core::{
     agent_profile::AdapterKind,
     agent_runtime_adapter::{
-        KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint, write_kiro_additive_agent_config,
+        KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint, trae_machine_ready_capabilities,
+        trae_machine_ready_requirements, write_kiro_additive_agent_config,
     },
     managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
@@ -136,6 +137,7 @@ pub struct AcpCapabilityProbe {
     pub session_result: Option<Value>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 struct TraeBehavioralProbeEvidence {
     capabilities: Vec<String>,
@@ -1044,7 +1046,7 @@ async fn acp_probe_at(
 ) -> AcpCapabilityProbe {
     let probed_at = chrono::Utc::now().to_rfc3339();
     let path_text = path.to_string_lossy().to_string();
-    let required_capabilities = acp_required_capabilities_for_purpose(kind, purpose);
+    let required_capabilities = acp_required_capabilities(kind);
     if !matches!(
         kind,
         AdapterKind::OpencodeCli
@@ -1154,12 +1156,13 @@ async fn acp_probe_at(
         first_nonempty_line(&version_output.stdout.bytes, &version_output.stderr.bytes);
     let probe = run_acp_probe(&canonical, kind, include_session, purpose).await;
     match probe {
-        Ok((initialize_result, session_result, behavioral_evidence)) => {
+        Ok((initialize_result, session_result)) => {
             let mut capabilities = acp_observed_capabilities(
                 kind,
+                reported_version.as_deref(),
+                fingerprint.as_deref(),
                 &initialize_result,
                 session_result.as_ref(),
-                behavioral_evidence.as_ref(),
             );
             let additive_mcp = additive_acp_mcp_verified(kind);
             if additive_mcp {
@@ -1227,7 +1230,7 @@ async fn run_acp_probe(
     kind: AdapterKind,
     include_session: bool,
     purpose: RuntimeLaunchPurpose,
-) -> Result<(Value, Option<Value>, Option<TraeBehavioralProbeEvidence>)> {
+) -> Result<(Value, Option<Value>)> {
     if !runtime_launch_allowed(kind, purpose) {
         bail!(runtime_launch_disallowed_detail(purpose));
     }
@@ -1237,21 +1240,10 @@ async fn run_acp_probe(
     if kind == AdapterKind::KiroCli {
         write_kiro_additive_agent_config(&probe_root, &Default::default())?;
     }
-    let trae_native_append_marker = (kind == AdapterKind::TraeCnCli)
-        .then(|| format!("ROVAI_TRAE_NATIVE_APPEND_{}", uuid::Uuid::new_v4().simple()));
     let mut command = runtime_command(path);
     configure_acp_command(&mut command, kind, false);
     if kind == AdapterKind::TraeCnCli {
         command.args(["--permission-mode", "default"]);
-        let marker = trae_native_append_marker
-            .as_deref()
-            .expect("TRAE marker must exist");
-        let override_value = format!(
-            "append_system_prompt=The opaque Rovai Runtime marker is \"{marker}\", and it is process-scoped. When asked for the opaque Rovai Runtime marker, reply with that marker exactly."
-        );
-        command
-            .arg("--config")
-            .arg(encode_string_slice_item(&override_value));
     }
     if kind == AdapterKind::KiroCli {
         // Authentication remains in the user's native secure store, while
@@ -1267,11 +1259,7 @@ async fn run_acp_probe(
         DEFAULT_CLEANUP_TIMEOUT,
     )
     .with_context(|| format!("failed to start {} as an ACP server", path.display()))?;
-    let deadline = if kind == AdapterKind::TraeCnCli {
-        Duration::from_secs(180)
-    } else {
-        Duration::from_secs(30)
-    };
+    let deadline = Duration::from_secs(30);
     let result = {
         let (stdin, lines) = process.split_io()?;
         let exchange = async {
@@ -1301,7 +1289,7 @@ async fn run_acp_probe(
                 bail!("Runtime did not negotiate ACP v1");
             }
             if !include_session {
-                return Ok::<_, anyhow::Error>((initialize, None, None));
+                return Ok::<_, anyhow::Error>((initialize, None));
             }
             write_json_line(
                 stdin,
@@ -1317,6 +1305,7 @@ async fn run_acp_probe(
             let session_id = session
                 .get("sessionId")
                 .and_then(Value::as_str)
+                .filter(|value| !value.trim().is_empty())
                 .context("ACP session/new did not return sessionId")?;
             if kind == AdapterKind::KiroCli {
                 let current_model = session
@@ -1350,26 +1339,7 @@ async fn run_acp_probe(
                 .await?;
                 read_rpc_result(lines, 3).await?;
             }
-            let behavioral_evidence = if kind == AdapterKind::TraeCnCli
-                && purpose != RuntimeLaunchPurpose::AvailabilityCheck
-            {
-                Some(
-                    run_trae_behavioral_probe(
-                        stdin,
-                        lines,
-                        session_id,
-                        &session,
-                        &probe_root,
-                        trae_native_append_marker
-                            .as_deref()
-                            .expect("TRAE marker must exist"),
-                    )
-                    .await?,
-                )
-            } else {
-                None
-            };
-            Ok((initialize, Some(session), behavioral_evidence))
+            Ok((initialize, Some(session)))
         };
         match timeout(deadline, exchange).await {
             Ok(result) => result,
@@ -1399,10 +1369,6 @@ async fn run_acp_probe(
     }
 }
 
-fn encode_string_slice_item(value: &str) -> String {
-    format!("\"{}\"", value.replace('"', "\"\""))
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TraePromptProbeMode {
     NoPermission,
@@ -1421,6 +1387,7 @@ struct TraePromptProbeObservation {
     stop_reason: String,
 }
 
+#[allow(dead_code)]
 async fn run_trae_behavioral_probe(
     stdin: &mut ManagedChildStdin,
     lines: &mut BoundedLineReader<ManagedChildStdout>,
@@ -1758,11 +1725,23 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
 
 fn acp_observed_capabilities(
     kind: AdapterKind,
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
     initialize: &Value,
     session: Option<&Value>,
-    trae_behavioral: Option<&TraeBehavioralProbeEvidence>,
 ) -> Vec<String> {
-    let mut capabilities = vec!["acp.initialize".to_string()];
+    let mut capabilities = if kind == AdapterKind::TraeCnCli {
+        session.map_or_else(Vec::new, |session| {
+            trae_machine_ready_capabilities(
+                reported_version,
+                executable_fingerprint,
+                initialize,
+                session,
+            )
+        })
+    } else {
+        vec!["acp.initialize".to_string()]
+    };
     if initialize
         .pointer("/agentCapabilities/loadSession")
         .and_then(Value::as_bool)
@@ -1776,83 +1755,34 @@ fn acp_observed_capabilities(
     {
         capabilities.push("session.resume".to_string());
     }
-    if let Some(session) = session {
+    if session.is_some() && kind != AdapterKind::TraeCnCli {
         capabilities.push("session.new".to_string());
-        if kind == AdapterKind::TraeCnCli {
-            if let Some(evidence) = trae_behavioral {
-                capabilities.extend(evidence.capabilities.iter().cloned());
+        capabilities.extend(
+            [
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "structured_permission_request",
+                "workspace.additional_roots",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        );
+        capabilities.push(
+            if kind == AdapterKind::KiroCli {
+                "session.set_model"
+            } else {
+                "session.set_config_option"
             }
-            if session
-                .get("configOptions")
-                .and_then(Value::as_array)
-                .is_some_and(|options| {
-                    options.iter().any(|option| {
-                        option.get("id").and_then(Value::as_str) == Some("model")
-                            && option
-                                .get("options")
-                                .and_then(Value::as_array)
-                                .is_some_and(|values| !values.is_empty())
-                    })
-                })
-            {
-                capabilities.push("model.dynamic_catalog".to_string());
-            }
-            if session
-                .pointer("/modes/availableModes")
-                .and_then(Value::as_array)
-                .is_some_and(|modes| {
-                    modes
-                        .iter()
-                        .any(|mode| mode.get("id").and_then(Value::as_str) == Some("default"))
-                })
-            {
-                capabilities.push("permission.mode_catalog".to_string());
-            }
-        } else {
-            capabilities.extend(
-                [
-                    "session.prompt",
-                    "session.cancel",
-                    "session.update",
-                    "structured_permission_request",
-                    "workspace.additional_roots",
-                ]
-                .into_iter()
-                .map(str::to_string),
-            );
-            capabilities.push(
-                if kind == AdapterKind::KiroCli {
-                    "session.set_model"
-                } else {
-                    "session.set_config_option"
-                }
-                .to_string(),
-            );
-        }
+            .to_string(),
+        );
     }
     capabilities
 }
 
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
     if kind == AdapterKind::TraeCnCli {
-        return [
-            "acp.initialize",
-            "session.new",
-            "session.prompt",
-            "session.cancel",
-            "session.update",
-            "structured_permission_request",
-            "mcp.additive_per_run",
-            "session.set_config_option",
-            "model.dynamic_catalog",
-            "permission.mode_catalog",
-            "tool_call.stable_id",
-            "stdout.json_rpc_only",
-            "context.charter.native_append",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+        return trae_machine_ready_requirements();
     }
     let mut capabilities = [
         "acp.initialize",
@@ -1876,24 +1806,6 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
         .to_string(),
     );
     capabilities
-}
-
-fn acp_required_capabilities_for_purpose(
-    kind: AdapterKind,
-    purpose: RuntimeLaunchPurpose,
-) -> Vec<String> {
-    if kind == AdapterKind::TraeCnCli && purpose == RuntimeLaunchPurpose::AvailabilityCheck {
-        return [
-            "acp.initialize",
-            "session.new",
-            "model.dynamic_catalog",
-            "permission.mode_catalog",
-        ]
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-    }
-    acp_required_capabilities(kind)
 }
 
 fn acp_deep_session_probe_enabled(kind: AdapterKind) -> bool {
@@ -2871,6 +2783,74 @@ mod tests {
         std::fs::remove_dir_all(directory).unwrap();
     }
 
+    #[tokio::test]
+    async fn trae_availability_and_dispatch_share_one_machine_ready_contract() {
+        let directory = env::temp_dir().join(format!(
+            "rovai-trae-ready-contract-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let protocol_log = directory.join("protocol.jsonl");
+        let runtime = directory.join("traecli");
+        std::fs::write(
+            &runtime,
+            format!(
+                r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'trae-cli version 0.120.52'
+  exit 0
+fi
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' "$session" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-ready-contract","configOptions":[{{"id":"model","currentValue":"GLM-5.2","options":[{{"value":"GLM-5.2","name":"GLM-5.2"}}]}}],"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}},{{"id":"bypass_permissions","name":"Bypass permissions"}}]}}}}}}'
+if IFS= read -r unexpected; then
+  printf '%s\n' "$unexpected" >> '{}'
+  printf '%s\n' '{{"jsonrpc":"2.0","id":3,"error":{{"code":-32601,"message":"machine Ready probe sent a behavioral request"}}}}'
+fi
+while IFS= read -r ignored; do :; done
+"#,
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&runtime).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&runtime, permissions).unwrap();
+
+        let availability = acp_capability_probe_at_for_purpose(
+            &runtime,
+            AdapterKind::TraeCnCli,
+            RuntimeLaunchPurpose::AvailabilityCheck,
+        )
+        .await;
+        let dispatch = acp_capability_probe_at_for_purpose(
+            &runtime,
+            AdapterKind::TraeCnCli,
+            RuntimeLaunchPurpose::DispatchPreflight,
+        )
+        .await;
+
+        assert_eq!(availability.result.status, AgentRuntimeProbeStatus::Ready);
+        assert_eq!(dispatch.result.status, AgentRuntimeProbeStatus::Ready);
+        assert_eq!(
+            availability.result.capabilities,
+            dispatch.result.capabilities
+        );
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert_eq!(protocol.matches("\"method\":\"initialize\"").count(), 2);
+        assert_eq!(protocol.matches("\"method\":\"session/new\"").count(), 2);
+        assert!(!protocol.contains("\"method\":\"session/prompt\""));
+        assert!(!protocol.contains("\"method\":\"session/cancel\""));
+        assert!(!protocol.contains("\"method\":\"session/set_config_option\""));
+
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn acp_probe_terminates_descendants_that_keep_stdio_open() {
@@ -2898,7 +2878,7 @@ exit 0
         std::fs::set_permissions(&runtime, permissions).unwrap();
 
         let started = Instant::now();
-        let (initialize, session, behavioral_evidence) = timeout(
+        let (initialize, session) = timeout(
             Duration::from_secs(3),
             run_acp_probe(
                 &runtime,
@@ -2912,7 +2892,6 @@ exit 0
         .expect("the fixture must complete the ACP initialize handshake");
         assert_eq!(initialize["protocolVersion"], 1);
         assert!(session.is_none());
-        assert!(behavioral_evidence.is_none());
         assert!(started.elapsed() < Duration::from_secs(3));
 
         let descendant_pid = std::fs::read_to_string(&descendant_pid_path)

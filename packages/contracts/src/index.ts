@@ -1936,6 +1936,7 @@ export type SkillDeliveryGroupKey =
   | 'qoder'
   | 'codebuddy'
   | 'qwen'
+  | 'trae'
 
 export interface SkillRiskSummary {
   executableFileCount: number

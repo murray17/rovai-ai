@@ -16,7 +16,7 @@ last_updated: 2026-08-20
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v10.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v12.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
 
@@ -39,6 +39,10 @@ last_updated: 2026-08-20
 - [ ] 空输出、stderr、非零退出、超时、格式变化和命令不存在均有明确结果。
 - [ ] 显式深检只检查用户选择的 Runtime；页面进入和成员选择不自动深检。
 - [ ] Discovery、Availability Check、Probe 和 AgentRun 使用不同 launch purpose。
+- [ ] Adapter/version/platform 的行为资格与当前机器 Runtime Ready 分开记录；行为 Smoke 不进入
+      Availability Check 或每次 Dispatch 的 Ready 前置条件。
+- [ ] Availability Check 写入 `ready` 与 Scheduler/Dispatch Preflight 接受 `ready` 使用同一证据合同和
+      同一校验函数；不得由较弱检查写入 `ready` 后跳过较强门禁。
 - [ ] stdout、stderr、临时目录和私有配置目录均有界且可清理。
 - [ ] Runtime 及其后代进程受进程组或 Job Object 管理。
 - [ ] completion、failure、cancel、Probe timeout 和 App shutdown 后无残留进程。
@@ -64,11 +68,45 @@ last_updated: 2026-08-20
 - [ ] `initialize.protocolVersion` 和必要 capability 均符合要求。
 - [ ] `session/new` 返回稳定且非空的 Session ID。
 - [ ] 模型、mode 和权限目录来自真实 Session 返回。
+- [ ] `session/new` response 到达后继续在明确的有界窗口内读取异步消息，并记录首条/末条消息相对
+      response 的到达时间、method、`sessionUpdate` variant、数量与字节数。
+- [ ] 标准 `available_commands_update`、config/mode/session-info catalog update、Idle usage metadata 和已知
+      Runtime lifecycle extension 可以在没有 Active Prompt 的 Session 合法到达；它们不进入 Prompt output，
+      也不把 Session 标记为 `ProtocolViolated`。
+- [ ] 未知 Idle 消息仍 fail closed；“当前 parser 没有识别”只证明 Host 尚未分类该 shape，不等于 Runtime
+      没有提供对应能力。
 - [ ] Session 消息按 Host、Session、Prompt、delivery 和 execution epoch 隔离。
 - [ ] Prompt 完成后、旧 Run 和恢复 replay 的迟到事件不会进入当前 Run。
 - [ ] Permission request 的 option ID 可以被批准或拒绝并正确返回 Runtime。
 - [ ] cancel 返回明确终态，且取消后不会产生延迟副作用。
 - [ ] ACP 支持矩阵逐能力记录，不以“支持 ACP v1”代替行为验证。
+
+### ACP 完整消息面枚举
+
+每个阶段都必须分别保存脱敏 shape；不能只记录一次成功 Prompt：
+
+- [ ] `initialize` response 后、`session/new` 前的通知和 extension。
+- [ ] `session/new` response 后的有界异步 Session metadata/catalog。
+- [ ] 无 Active Prompt 的 Idle Session。
+- [ ] Prompt active 期间的 narration、thought、plan、tool、permission、usage、catalog 和 extension。
+- [ ] Prompt terminal response 后、下一 Prompt 前的迟到消息。
+- [ ] `session/load` / resume 的 response 前 replay、response 后迟到 replay 与稳定 quiet boundary。
+- [ ] `session/cancel` 后直到可靠 terminal/cleanup 的消息。
+
+每条消息必须先归入 `PromptOutput | SessionMetadata | LifecycleExtension | Replay | Unknown`，再决定公开、
+隔离、内部消费或 fail closed；“没有 Active Prompt”本身不是 metadata 违规依据。
+
+### Runtime command 与 Skill 分层
+
+- [ ] 文件投递层：分别验证受管项目级路径、用户级路径、同名优先级和 Rovai ownership/cleanup 边界。
+- [ ] Runtime 发现与加载层：用唯一名称/内容验证 cold Host、warm Host、新 Session、`session/load` 和既有
+      Idle Session 的扫描/刷新时机。
+- [ ] ACP 公开层：记录 `available_commands_update.availableCommands[]` 的 name/description/input shape，
+      分开 Runtime 内建 Slash Command 与由 Skill 转换出的 command。
+- [ ] `Runtime advertised command/Skill`、`Runtime 实际加载 Skill` 和 `Rovai managed Skill delivery` 是三个
+      独立结论；任一层 Verified 不自动升级其他层。
+- [ ] 不修改或覆盖用户现有全局 Skill；只有稳定、可清理且通过真实调用的项目级路径才能新增
+      `SkillDeliveryGroupKey`。
 
 ## 4. Session Continuation 与 Resume
 
@@ -135,7 +173,21 @@ last_updated: 2026-08-20
 - [ ] Eligibility 按 `Runtime × version × field` 冻结，并记录 Coverage。
 - [ ] 不持久化完整原始 Usage payload、Prompt、Output、Tool 内容或 Native ID。
 
-## 8. 必过真实 Smoke
+## 8. Compaction 信号
+
+- [ ] 先检查 Runtime advertised commands 中是否存在 `compact`、`compress` 或等价入口，并优先通过该入口
+      分别触发 manual 与 auto 场景。
+- [ ] 记录所有 ACP method、`sessionUpdate` variant、Runtime 私有 notification 与 Hook source；普通 assistant
+      文本不能充当 signal。
+- [ ] signal 必须具有明确 source、可区分的 started/completed lifecycle、准入边界，以及稳定 occurrence ID
+      或其他可证明的去重依据，才可接入 detector。
+- [ ] Hook 必须在实际 Adapter launch 方式下可达；文档声明或普通 CLI/TUI 可达不等于 ACP Host 可达。
+- [ ] token/usage 下降、Session usage reset、恢复后历史变短、模型 summary 或正文提到压缩均不得推断
+      compaction。
+- [ ] 未观察到可靠信号时保持 `CompactionDetectorPolicy::Disabled`，状态写为 `NotObserved` / `Unverified`；
+      只有上游明确不提供且证据充分时才能写 `Unsupported`。
+
+## 9. 必过真实 Smoke
 
 | Case | 通过条件 |
 | --- | --- |
@@ -155,7 +207,7 @@ last_updated: 2026-08-20
 | Process cleanup | 所有退出路径都无残留进程 |
 | Usage（若支持） | 无重复累计，Token/Cache bucket 与原生事件一致 |
 
-## 9. 自动化与证据
+## 10. 自动化与证据
 
 - [ ] 为 parser、缺字段、重复事件、错误 ID 和输出边界增加确定性 Fixture。
 - [ ] 增加子进程持有 stdio 的进程树清理测试。
@@ -165,8 +217,12 @@ last_updated: 2026-08-20
 - [ ] 记录 Runtime 版本、模型、平台、fingerprint、日期和仓库 revision。
 - [ ] 一次实测不外推为其他版本、模型或账号均兼容。
 - [ ] 已知限制和未支持能力写入 [Runtime 兼容性清单](../runtime-compatibility.md)。
+- [ ] 每项能力使用且只使用以下状态之一：
+      `Verified`（当前 Adapter/version/platform 有可复现行为证据）、
+      `DocumentationOnly`（只有上游文档）、`Unverified`（有候选 surface 但未完成行为证明）、
+      `NotObserved`（已按记录窗口/场景查找但未看到）、`Unsupported`（上游或结构化负证据证明不提供）。
 
-## 10. 硬性阻断条件
+## 11. 硬性阻断条件
 
 出现任一情况，不得标记为正式支持：
 
@@ -184,8 +240,11 @@ last_updated: 2026-08-20
 - [ ] Usage 缺少来源、scope、counter mode 或版本证据却被声明为支持。
 - [ ] Usage 重发会重复累计，或 Session cost 被误记为 Run cost。
 - [ ] 只有 `initialize` 或一次普通回复成功，没有完整行为 Smoke。
+- [ ] Availability Check 与 Dispatch Preflight 对同一 Adapter/version/fingerprint 使用不同 Ready requirements，
+      或 persisted `ready` 无法通过当前统一 Ready validator。
+- [ ] 合法 Idle Session metadata 被投影为 Prompt output、被标记为无 Prompt 泄漏或使 Session 协议违规。
 
-## 11. 准入结论
+## 12. 准入结论
 
 ```text
 Runtime:
@@ -194,8 +253,10 @@ Platform:
 Admission: qualified | not_qualified | unsupported
 Evidence revision:
 Verified version/model/account:
-Supported capabilities:
-Known limitations:
+Capabilities (`Verified | DocumentationOnly | Unverified | NotObserved | Unsupported` per item):
+Machine Ready contract:
+Adapter behavior evidence:
+Known limitations and parser gaps:
 Reviewer:
 Date:
 ```

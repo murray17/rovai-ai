@@ -1,7 +1,7 @@
 ---
 document_type: runtime-probe-record
 runtime: trae-cn-cli
-observed_at: 2026-08-18
+observed_at: 2026-08-20
 status: verified-local
 ---
 
@@ -27,10 +27,60 @@ status: verified-local
 - `agentCapabilities.loadSession` 为 `true`，并返回 Session list 与 HTTP/SSE MCP capability。
 - 当前已认证环境返回空 `authMethods`，没有要求交互式登录。
 - `session/new` 返回非空稳定 `sessionId`。
-- Session 的 `configOptions` 实际包含 `model` select；当前模型为 `GLM-5.2`，本次返回 16 个可选模型。
+- Session 的 `configOptions` 实际包含 `model` select；当前模型为 `GLM-5.2`，2026-08-20 复核返回 19 个可选模型。
 - Session 的 mode catalog 实际包含 `default`、`bypass_permissions`、`plan`。
 - 同一真实模型配置通过 `session/set_config_option` round-trip。
 - 第二个 Host 对首个 Host 创建的 Session 执行 `session/load` 成功，后续 prompt 能恢复上一轮 marker。
+
+## `session/new` 后的异步 catalog
+
+2026-08-20 基线不在收到 `session/new` response 后立即退出，而是继续读取有界窗口。initialize response 在
+约 1001 ms、`session/new` response 在约 1215 ms 到达；约 1727 ms 收到：
+
+```text
+session/update
+  params.sessionId = <same-session>
+  params.update.sessionUpdate = available_commands_update
+  params.update.availableCommands[] = { name, description, input: { hint } }
+```
+
+即 catalog notification 比 `session/new` response 晚约 512 ms。基线 17 项中，`agent-new`、`init`、`loop`、
+`compact` 是 Runtime 内建 Slash Commands；其余 13 项的 name/description 与当时用户已有 Skill 对应：
+`code-review`、`codebase-design`、`documentation-lookup`、`domain-modeling`、`feishu-docs`、`grill-me`、
+`grill-with-docs`、`grilling`、`handoff`、`improve-codebase-architecture`、`mac-performance-doctor`、`officecli`、
+`setup-matt-pocock-skills`。该消息位于 Idle Session，符合 ACP 动态 catalog 语义。旧 Rovai Host 会以
+“without an active prompt”将它标为协议违规；当前实现路由为 Session metadata，不进入 Prompt output。
+
+## Skill 路径与扫描时机
+
+所有路径使用不同唯一名称与正文，且没有修改或覆盖真实用户全局 Skill：
+
+| 路径 | Advertisement | 精确调用 | 结论 |
+| --- | --- | --- | --- |
+| 项目 `.trae/skills` | pass | pass | Rovai managed delivery `Verified` |
+| 项目 `.agents/skills` | pass | pass | Runtime compatibility discovery；非 Rovai-owned TRAE path |
+| 项目 `.traecli/skills` | pass | pass | Runtime compatibility discovery；未见公开文档，不纳入 managed path |
+| 项目 `.coco/skills` | 未出现 | 未执行 | `NotObserved` |
+| 隔离用户 `~/.trae/skills`、`~/.trae-cn/skills`、`~/.traecli/skills`、`~/.agents/skills` | pass | 未完成 | discovery/advertisement `Verified`；隔离 HOME 无模型目录，Prompt 在调用前报 `Models is required`，invocation `Unverified` |
+| 隔离用户 `~/.coco/skills` | 未出现 | 未执行 | `NotObserved` |
+
+项目 `.trae/skills/documentation-lookup` 与用户 `~/.agents/skills/documentation-lookup` 同名时，catalog description
+及真实调用结果都来自项目唯一 marker。扫描发生在 `session/new` / `session/load`：同一 warm Host 新建 Session
+可见新加入 Skill；已经建立的 Idle Session 在 5 秒内没有 refresh；cold Host `session/load` 可见。只有
+`.trae/skills` 同时具备稳定项目作用域、advertisement 与真实调用证据，因此 Rovai 新增 TRAE delivery group
+只映射该路径。本次 `traecli` help/config 检查没有提供足以把其他目录提升为 Rovai-owned canonical delivery
+path 的公开合同；特别是项目 `.traecli/skills` 虽有行为证据，仍只记录为 Runtime compatibility surface。
+
+## Compaction 观察
+
+`available_commands_update` 公开 `compact`。手动 `/compact` 的 ACP trace 只出现普通 Session updates 和
+assistant 文本 `Compaction Completed`；自动阈值 `0.01` 下触发的重复压缩同样没有标准
+`compaction_update`、TRAE 私有 started/completed method、稳定 occurrence ID 或去重依据。文档所述
+`pre_compact` / `post_compact` 项目 Hook 在 `acp serve` 下未触发，控制 Hook 也未触发。
+
+因此当前结构化 Compaction signal 为 `NotObserved`，detector 为 `Unverified`，policy 继续
+`CompactionDetectorPolicy::Disabled`；不能写成 TRAE 上游没有该 event，更不能用 usage/token 回退、历史变短、
+summary 或普通 assistant 文本补猜。
 
 ## 2026-08-18 exact-ID Provider Resume 复核
 
@@ -111,8 +161,8 @@ IdleWarm；warm successor 直接复用同一 Host Session。Host 被回收或 Co
 ## 边界说明
 
 - 不传 `--yolo`；默认保存的 native permission mode 为 `default`。
-- TRAE 会读取其原生的用户级 instruction 文件。这是 Runtime 自有行为，不构成 Rovai Skill
-  projection 证据；第一版 Skill discovery 仍为空且标记 documentation-only。
+- TRAE 会读取并通过 ACP catalog 公开多种项目级/用户级 Skill 路径；这是 Runtime discovery/load 能力。
+  Rovai managed projection 是另一层，只把已验证且可安全拥有的项目 `.trae/skills` 作为 TRAE delivery group。
 - 当前兼容 AgentRun 完成后允许 warm Host/Session 复用；cold continuation 使用 exact persisted ID 的受控
   HistoryRestore。禁止 `--resume AUTO`、最近 Session 扫描和 TRAE 私有 `events.jsonl` 解析。
 - Missing-Send Recovery 只接受 `end_turn` 后最后一个无歧义 assistant suffix，并已通过 zero-send、

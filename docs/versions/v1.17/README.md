@@ -41,13 +41,18 @@ Runtime View 在事务后异步物化；Delivery 与 AgentRun admission 在物�
 - 完整 View 校验采用短数据库 snapshot、无锁 `spawn_blocking` 文件扫描、短数据库 CAS，单次 Run 只复用一份
   verified authorization；
 - Renderer 对 pending/recovery 显示克制的“正在准备供队员读取”，对 failed 显示“队员读取不可用”。
+- 修正 TRAE `0.120.52` 的 ACP Idle Session metadata 路由，把 Runtime advertised command/Skill 与 Rovai
+  managed `.trae/skills` 投递分层，并让 Availability Check/Dispatch Preflight 使用唯一 Machine Ready 合同；
+  Compaction 在无结构化完成信号时继续保守 Disabled。
 
 ## 数据与 Context 兼容性
 
-本版升级到 Data Contract `v1.17 / projection schema 57 / Migration 102`。既有 `message_attachment` 回填为
-`available`；既有 View catalog 作为 append-only Runtime-available catalog 的合法前缀。Migration 安装统一
-publication operation、semantic/resolved revision、resolution digest/tombstone、quota reservation 和
-Delivery projection gate 所需状态。
+本版升级到 Data Contract `v1.17 / projection schema 58 / Migration 103`。Migration 102 把既有
+`message_attachment` 回填为 `available`，并把既有 View catalog 作为 append-only Runtime-available
+catalog 的合法前缀，同时安装统一 publication operation、semantic/resolved revision、resolution
+digest/tombstone、quota reservation 和 Delivery projection gate 所需状态。Migration 103 在完整
+schema 57 上扩展 TRAE Skill delivery group，并使旧 TRAE 弱 `ready` snapshot 降级后重新取得统一
+Machine Ready 证据。
 
 `CampAttachmentViewReceiptV2` wire、Formatter 21、ContextManifest 21、Run Facts v2、Profile v4 与 Session
 Charter bytes 不变。View contract 升级到 3，Host 兼容性据此 fence；Runtime Launch and Verification 升级到
@@ -66,13 +71,13 @@ v12。Receipt 中的 catalog 明确定义为 Runtime-available catalog，failed 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.16 按完成事实冻结；本概览、实施计划与索引建立唯一 current v1.17。 |
-| Decisions | 已更新 | [V1.17-D01](decisions.md#v1-17-d01)记录语义先提交、Runtime 可用性投影与失败 tombstone。 |
-| Contracts | 已更新 | Send、Attachment/View、Composer、Open、Delivery、Built-in 与 Runtime Launch 合同同步升级。 |
-| Architecture | 已更新 | Attachment View、Composer、A2A Delivery、Built-in、Runtime Catalog 与基础不变量统一发布和 admission。 |
+| Decisions | 已更新 | [V1.17-D01](decisions.md#v1-17-d01)记录附件发布；[V1.17-D02](decisions.md#v1-17-d02)记录 TRAE catalog/Skill/Ready 分层。 |
+| Contracts | 已更新 | Send、Attachment/View、Composer、Open、Delivery、Built-in 与 Runtime Launch 合同同步升级；Runtime Launch v12 冻结统一 TRAE Ready 与 Idle metadata。 |
+| Architecture | 已更新 | Attachment View、Composer、A2A Delivery、Built-in、Runtime Catalog、Skill Projection 与基础不变量同步收敛。 |
 | UI | 已更新 | 会话附件卡增加 Runtime pending/recovery/failed 的诚实状态。 |
 | Runtime Activity | 确认无需更新 | publication 是 Core 资源状态，不新增 Runtime activity 或 Evidence 类型。 |
-| Runtime compatibility | 确认无需更新 | 不改变已实测 Adapter 能力；View contract 3 仅触发现有 Host compatibility fence。 |
-| Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航切换到 v1.17 合同。 |
+| Runtime compatibility | 已更新 | 记录 TRAE `0.120.52` async command/Skill、路径优先级、Compaction `NotObserved` 与统一 Ready 证据。 |
+| Documentation routing | 已更新 | 文档导航、Runtime 接入 checklist、合同索引和当前决定导航切换到 v1.17 当前合同。 |
 | Root README | 确认无需更新 | 不改变项目定位、平台范围或安装入口。 |
 
 ## References
