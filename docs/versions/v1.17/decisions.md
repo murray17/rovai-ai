@@ -66,3 +66,64 @@ authorization 与 path resolution 必须消费同一 available-set 定义和 res
 - [Camp Published Attachment View 架构](../../architecture/camp-published-attachment-view.md)
 - [Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
 
+<a id="v1-17-d02"></a>
+
+## V1.17-D02：TRAE advertised catalog、managed Skill 与 Machine Ready 使用独立证据
+
+### 背景
+
+TRAE `session/new` response 本身不包含 Skill，但 `traecli 0.120.52` 会稍后在 Idle Session 发送标准
+`available_commands_update`，同时公开内建 Slash Commands 与已加载 Skills。既有 ACP Host 把所有“无 Active
+Prompt 的 Session message”视为协议泄漏，因而在 notification 到达时错误地破坏已 Ready Session。此前
+TRAE Ready 又在 Availability Check 与 Dispatch Preflight 使用两套 requirements：弱检查可以先写入
+`ready`，Scheduler 随后跳过包含真实模型 Prompt、Tool 副作用和 cancel 的另一套行为 Probe。
+
+Runtime advertised Skill 并不回答 Rovai 应向哪个目录投递。TRAE 会扫描多个项目/用户路径；若把任一
+advertisement 直接升级为 managed delivery，Rovai 会错误取得 Runtime 用户目录或兼容路径的 ownership。
+同样，advertised `compact` 和 assistant 完成文本也不提供 detector 所需的结构化完成边界与去重依据。
+
+### 决定
+
+ACP Host 建立显式 `SessionMetadata` route。标准 command/config/mode/session-info catalog、Idle usage metadata
+和已准入 Runtime lifecycle extension 在 Idle 或 Prompt terminal 后可以合法到达，保持在 Prompt output 之外；
+未知 Idle shape 继续 fail closed。HistoryRestore 在 `session/load` response 后等待有界 settling/quiet window，
+继续隔离迟到 replay。
+
+TRAE Skill 分为三层独立证据：文件投递、Runtime discovery/load、ACP advertised catalog。只有项目
+`.trae/skills` 同时通过唯一 Skill 的 advertisement、真实调用、优先级及 warm/cold/load 行为验证，因此新增
+`SkillDeliveryGroupKey::Trae` 只映射该路径；其他项目/用户扫描路径留作 Runtime compatibility evidence，不由
+Rovai 写入或清理。
+
+TRAE Machine Ready 固定为 version、当前 executable identity/fingerprint、ACP v1 initialize、成功
+`session/new` 与非空 Session ID、非空动态 model catalog、非空 permission/mode catalog，以及 current
+model/mode 存在于相应 options 的 coherent Session config shape。Availability Check 与 Dispatch Preflight
+共享同一 builder/validator；模型 Prompt、system marker、写入拒绝、sleep/cancel、Tool 副作用和 config
+round-trip 只保留为 Adapter/version/platform 独立资格证据。旧弱 TRAE `ready` 必须降级后重验。
+
+TRAE Compaction 继续 `Disabled`，能力状态为 `NotObserved` / `Unverified`。只有未来出现结构化、可区分
+completed boundary 且有 occurrence ID/去重依据的信号时才改变 detector；不使用 token、usage、历史长度、
+summary 或普通 assistant 文本推断。
+
+### 后果
+
+- Runtime 可以在 Idle Session 动态更新 catalog，而不会污染 Prompt 或破坏 Session；
+- TRAE managed Skill projection 获得清晰的项目 ownership，用户已有 Skill 保持 Runtime 自管；
+- Availability 与正式 Dispatch 对 `ready` 的含义完全相同，机器检查不再产生模型费用或 Tool 副作用；
+- Runtime 行为资格、机器 Ready、Skill 三层与 Compaction detector 可以分别演进，不再用一个 Verified 状态
+  掩盖其他证据缺口。
+
+### 被拒绝方案
+
+- `session/new` 返回后立即停止读取：会稳定漏掉异步 command/Skill catalog；
+- 所有无 Active Prompt 消息均协议违规：违反 ACP 动态 Session metadata 语义；
+- 把所有 TRAE 扫描目录都纳入 managed projection：越过用户/Runtime ownership，且文档与调用证据不一致；
+- 继续用真实 Prompt/Tool Smoke 作为每台机器 Ready：费用、副作用和不稳定模型行为不能定义结构化可启动性；
+- 用 `Compaction Completed` 文本或 usage 回退接 detector：没有 lifecycle/occurrence 边界，无法可靠去重。
+
+### 当前权威影响
+
+- [Runtime Launch and Verification v12](../../contracts/runtime-launch-and-verification-v12.md)
+- [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)
+- [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)
+- [Runtime 兼容性清单](../../runtime-compatibility.md)
+- [Runtime 接入 Checklist](../../development/runtime-integration-checklist.md)

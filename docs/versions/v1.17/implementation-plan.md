@@ -39,6 +39,21 @@ last_updated: 2026-08-20
 - [x] 从治理提交 worktree 完成功能提交，快进 main 并 push；
 - [x] 完成 macOS arm64 package、签名/架构校验与 `/Applications` 安装交接。
 
+## 5. TRAE Runtime 接入复核
+
+- [x] 在 `traecli 0.120.52` 上有界观察 `session/new` 后异步消息，确认
+  `available_commands_update`、17 项 command shape 与 Slash Command/Skill 分层；
+- [x] 修复 ACP Idle Session metadata/lifecycle 路由，并为 `session/load` response 后迟到 replay 增加有界
+  settling/quiet quarantine；
+- [x] 逐项验证 TRAE 项目/用户 Skill 路径、调用、优先级、warm/cold/load 扫描时机，只将项目
+  `.trae/skills` 纳入 managed delivery group；
+- [x] 手动/自动 Compaction 场景均未观察到结构化完成边界或去重依据，保持 detector Disabled、
+  `NotObserved` / `Unverified`；
+- [x] Availability Check 与 Dispatch Preflight 共用不发模型/Tool Prompt 的 TRAE Machine Ready 合同，并使
+  旧弱 `ready` snapshot 失效；
+- [ ] 在并行 Attachment Migration 102 落地后，以后续唯一 Migration 扩展十组 Skill assignment CHECK，
+  再运行完整 Rust/Docs/Desktop 门禁并随本版发布。
+
 ## References
 
 - [v1.17 版本概览](README.md)

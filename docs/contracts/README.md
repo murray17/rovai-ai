@@ -43,7 +43,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [Runtime Launch and Verification v12（当前）](runtime-launch-and-verification-v12.md) | v11 exact-root/receipt 不变；View contract 3 要求 resolution ledger、available Desired set 与无 writer intent |
+| [Runtime Launch and Verification v12（当前）](runtime-launch-and-verification-v12.md) | v11 exact-root/receipt 不变；View contract 3 要求 resolved publication；TRAE 使用统一 Machine Ready，并允许 Idle Session metadata |
 | [Runtime Launch and Verification v11（历史）](runtime-launch-and-verification-v11.md) | v10 exact-root/generation fence 不变；View contract 2 分离冻结语义 receipt 与当前物理 Runtime authorization |
 | [Runtime Launch and Verification v10（历史）](runtime-launch-and-verification-v10.md) | v9 边界不变；每次 launch 绑定当前 Camp 精确 Published Attachment root、View receipt、visibility mode 与 generation；仍把 Manifest 恢复绑定到物理 identity |
 | [Runtime Launch and Verification v9（历史）](runtime-launch-and-verification-v9.md) | v8 边界不变；增加 60 秒/24 小时模型目录 SWR、Picker-open、主动检查终态与真实 Session 显式模型校验；不含 Published View 授权 |

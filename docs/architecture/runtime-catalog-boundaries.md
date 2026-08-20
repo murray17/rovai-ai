@@ -64,6 +64,32 @@ capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 统一收口 success、failure、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
 和整进程树 cleanup。
 
+### Machine Ready 与 Adapter 行为证据
+
+机器 Ready 只回答“当前 canonical executable/fingerprint 是否能用当前结构化协议建立可配置 Session”。
+Availability Check 与 Dispatch Preflight 必须共享同一 Adapter-specific requirements、evidence builder 与 persisted
+snapshot validator；任一入口写入的 `ready` 必须正好可被 Scheduler 接受。若 requirements 变化，旧 snapshot
+先降级，不能因数据库已有较弱 `ready` 而跳过 Dispatch Preflight。
+
+TRAE 的统一 Machine Ready 精确定义为：非空 version、当前 executable identity/fingerprint、ACP v1
+`initialize`、成功 `session/new` 与非空 Session ID、非空动态 model catalog、非空 permission/mode catalog，以及
+current model/mode 均存在于相应 options 的 coherent Session config shape。成功结构化 handshake 产生
+authenticated 分类；不发送模型 Prompt、system marker、文件写入/拒绝、sleep/cancel、Tool side effect 或
+`session/set_config_option`。这些行为可以形成 Adapter/version/platform qualification evidence，但不成为每台机器
+或每次 Dispatch 的 Ready 前置条件。
+
+### Runtime advertised catalog 与 managed Skill delivery
+
+ACP `available_commands_update` 属于 Session 建立后的动态 Runtime catalog；它可以在 Idle Session 合法到达，
+不得进入当前 Prompt output，也不能因“没有 Active Prompt”标记协议违规。Host 对已知 config/mode/session-info/
+usage metadata 与 lifecycle extension 使用同一 SessionMetadata 路由，未知 Idle shape 继续 fail closed。
+
+Runtime advertised command、Runtime Skill discovery/load 与 Rovai managed Skill delivery 是三套证据。TRAE
+`0.120.52` 已实测把内建 Slash Commands 和已加载 Skills 一起投影为 `availableCommands[]`；这只证明 Runtime
+catalog。Rovai 只有在唯一内容的项目 Skill 同时通过新 Session advertisement 与真实调用、且 ownership/cleanup
+边界明确时才建立 delivery group。当前 managed TRAE group 只写项目 `.trae/skills`；Runtime 兼容扫描到的
+`.agents/skills`、`.traecli/skills` 或用户目录不因此成为 Rovai-owned 投影目标。
+
 ## 模型目录缓存与执行事实
 
 模型目录是 Product Runtime Availability snapshot 的一部分，但其配置体验与执行事实分离。只有 deep probe

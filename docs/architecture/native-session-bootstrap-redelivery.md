@@ -46,6 +46,7 @@ pending。
 | CodeBuddy | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_CODEBUDDY_COMPACTION_DETECTOR_POLICY` |
 | Qwen Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY` |
 | Antigravity | `unavailable_no_qualified_signal` | `disabled` | `ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY`；v0.48 不允许 enable |
+| TRAE CLI CN | `not_observed_no_qualified_signal` | `disabled` | 无；`0.120.52` manual/auto ACP 与 Hook Probe 未见结构化完成边界，状态不是 `Unsupported` |
 | Claude Code | `protected_instruction_layer` | 不适用 | 无 |
 | Codex CLI | `protected_instruction_layer` | 不适用 | 无 |
 
@@ -68,6 +69,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | Qoder | `PostCompact` / `completed` | 隔离 `--settings` Hook | 目标版本真实 `/compact` 完成态可靠 |
 | CodeBuddy | `SessionStart(source=compact)` / `completed` | 隔离 `--plugin-dir` Plugin Hook | `2.133.1` emergency auto compaction 完成后真实触发；CLI additional settings 未注册 lifecycle Hook。该版本 pre-message compaction 绕过全部相关 Hook，故 detector 仍是有明确 coverage gap 的 `best_effort`，不做 token 推断 |
 | Qwen Code | `PostCompact` / `completed` | 私有 `QWEN_HOME` user Hook | 上游 HookRegistry 不读取 system Hook；私有 user settings 保留原配置且不修改用户文件。trigger matcher 为 exact match，使用 `*` 后由 relay 校验 `manual|auto` |
+| TRAE CLI CN | none observed | none | `0.120.52` advertised `/compact` 已执行 manual/auto；只有普通 update/assistant 文本，项目/控制 Hook 在 `acp serve` 下未触发；保持 `NotObserved` / `Unverified` |
 | Claude Code / Codex / Antigravity | none | none | protected layer 或无合格 event |
 
 Hook relay command 冻结 adapter、Host 与 expected source signal，不信任 payload 自报 source；payload

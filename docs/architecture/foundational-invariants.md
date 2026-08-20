@@ -184,7 +184,7 @@ last_updated: 2026-08-20
 - Core 在启动时构建不可变 Runtime Search Environment，按既有 Installation、显式自定义入口、Adapter 专用环境、继承/login-shell `PATH` 与平台已知目录的受控优先级规范化候选。它不修改全局 `PATH`，不收集 Shell 其他环境或凭据，发现、检查和真实启动都显式使用冻结快照。
 - 静态 discovery/rescan 只允许路径、权限、文件身份和 Adapter 声明的无副作用有界身份命令。纯找到可执行文件是 `found_uninspected`；身份命令成功才可形成 `light_ready`，但二者都不声称认证、协议、模型、Session 或 capability Ready。启动、页面打开、成员选择、过期和重扫不自动深检；深检只由用户明确检查、模型 Picker 的按需刷新或真实 Run 的统一 Dispatch Preflight 触发。
 - Runtime Check Manager 是 deep-verification attempt 生命周期的唯一所有者：同 Runtime 最多一个在途 attempt，全局上限为二，执行优先于显式检查。success/error/timeout/panic/abort/cancel/shutdown 经同一 finalize 收口，提交必须同时匹配 search generation 与 fingerprint；短命进程必须有独立进程树、绝对 deadline、有界输出和有界 cleanup。
-- TRAE 参加与其他 Runtime 相同的 light discovery、Availability Check、Installation Refresh、Health Probe 与 Dispatch Preflight 生命周期。用户点击“检查可用性”显式授权一次 `AvailabilityCheck` ACP Host，只执行 version、initialize、`session/new` 与动态目录校验，不发送 Prompt、模型请求、工具或 Approval；所有 Runtime 在真实 Run 启动前都必须由统一 Dispatch Preflight 得到 `ready`。旧 `installed_unverified` 只可作为历史读状态，不再是可配置或可执行入口。TRAE 的本机真实进程验收必须串行，第三方密钥或状态文件竞争不形成产品分支。
+- TRAE 参加与其他 Runtime 相同的 light discovery、Availability Check、Installation Refresh、Health Probe 与 Dispatch Preflight 生命周期。`AvailabilityCheck` 与 `DispatchPreflight` 共享唯一 Machine Ready 合同：非空 version、当前 executable identity/fingerprint、ACP v1 `initialize`、`session/new` 与非空 Session ID、非空动态 model catalog、非空 permission/mode catalog，以及 current model/mode 都存在于相应 options 的 coherent Session config shape。检查不发送 Prompt、system marker、文件拒绝、sleep/cancel、Tool 副作用或 `session/set_config_option`；这些只属于独立 Adapter/version/platform 行为证据。旧 `ready` 缺少当前合同任一证据时先降级，不能让弱检查跳过 Scheduler 门禁。旧 `installed_unverified` 只可作为历史读状态，不再是可配置或可执行入口。TRAE 的本机真实进程验收必须串行，第三方密钥或状态文件竞争不形成产品分支。
 - `MemberRuntimeConfiguration` 是成员唯一持久、公开投影的 Runtime 值，将 Product Runtime、model policy 和 Adapter-native permissions 作为一个 exact-version 原子值保存。通常只有当前 capability evidence 可验证的完整配置才能提交；`light_ready` 只允许已声明的 runtime-default model 和静态 permission descriptor。TRAE 新配置默认使用已验证的最高权限 `bypass_permissions`，用户可以显式选择 `default`；背景发现不代用户创建、扩权、补全或改写配置，capability/permission schema 漂移只改变 Readiness 并要求显式重存。
 - 成员保存的 model policy 与单次 AgentRun 的实际模型观测是不同事实。`runtime_default` 只在 Runtime-native、结构化且可归因到当前 Thread/Session 的字段出现时记录首个模型；目录默认值、请求参数、冻结配置、Usage 或文本输出不得补推。观测按 Run execution epoch、default-only、write-once 持久化，缺失或拒绝不改变 Run 终态，也不回写成员配置。
 - `ResolvedRuntimeBinding` 只是调度、诊断和 Run 冻结使用的内部执行状态，不进入普通 AgentProfile 读取或成员编辑。用户发送先按消息、目标和冻结配置完成业务接受，Runtime resolution、workspace launchability 和完整执行 Preflight 由 Scheduler 在真实执行边界重查；失败形成诚实 Run 结果，不回滚已接受消息或静默改派目标。
@@ -206,6 +206,7 @@ last_updated: 2026-08-20
 - Rovai 启动 Codex 时不设置/覆盖 `CODEX_HOME`，不拥有 Codex Home、Home lock、Camp cleanup 或 orphan GC；用户、Project、managed、plugin、hook、memory 和 native MCP 按目标 executable、process environment 与 cwd 的 Codex 原生规则生效。Conversation 只持久 Native Binding/thread ID 和证据，逻辑私有连续性不承诺 Camp/member 级物理 Home 隔离；Camp 删除也不宣称删除外部 Runtime 数据。
 - Codex Adapter 在 thread start/resume 前通过 native `config/read(includeLayers=true, cwd=executionRoot)` 发现有效 top-level MCP 名称，只将不同名的 Rovai Server 以 thread-scoped addition 传入。Codex process compatibility 只包含真正 process-scoped 输入，不包含 Conversation Home 或 thread MCP；每次 acquire 都重新发现并 finalise 本 Run 的 additive projection。
 - Runtime launch 明确区分 discovery、light verification、用户授权 deep probe 和执行期验证，且每次子进程启动必须通过中央 purpose policy。Probe/check attempt 由 Manager 拥有、按 generation/fingerprint fencing，使用比产品执行更窄的进程与权限边界；未验证身份不能冒充 Ready。
+- ACP Session 建立后的 `available_commands_update`、config/mode/session-info catalog、Idle usage metadata 与已准入 lifecycle extension 可以在无 Active Prompt 时合法到达。Host 将其路由为 Session metadata/内部 lifecycle，不进入 Prompt output，也不因无 Prompt 自动标记协议违规；未知 Idle shape 仍 fail closed。`session/load` response 后的迟到 replay 继续在有界 settling/quiet window 内隔离。
 
 <a id="runtime-recovery-shutdown"></a>
 
@@ -238,7 +239,7 @@ last_updated: 2026-08-20
 - Bootstrap 各组件、完整序列化 bytes 和实际投递是不同 evidence 层；不用“已生成完整 Bootstrap”替代 Runtime accepted evidence。ContextManifest 记录冻结 digest/versions，Runtime Input Delivery Evidence 记录实际 bytes 与 accepted ACK；只有 accepted ACK 推进 Conversation 投递水位，失败/未知必须在后续输入重试。
 - Bootstrap redelivery 是 durable requirement，但 detector signal 本身不证明 compaction、不授权发送。Core 通过每 Native Session 唯一的 observer lease/generation、Runtime-owned policy epoch、prepared-input cutoff 和幂等 Session-scoped command 决定下一个尚未准备的输入是否需要 redelivery；旧 binding、旧 generation、迟到信号或已经 prepare 的输入都 fail closed。
 - 所有 Runtime 输入在一个 Core-owned 串行 preparation boundary 中冻结。Redelivery 是完整 Bootstrap 在本次输入上的 transient overlay，不改写 Session Charter、正常 Dynamic Context 或历史消息；Bootstrap+Current Input 共享有界 payload 门禁，无法完整交付时本次输入整体失败，不部分发送。
-- Runtime 特定 compaction detector 只能在真实 probe 证明 best-effort、非阻塞、不消费/伪造用户输入、不破坏 Session 且有可控停止边界时准入。Detector state 不是 Runtime Readiness，中断/恢复不可追溯推断 compaction；无能力的 Adapter 诚实声明 unsupported，支持声明绑定真实 evidence 与当前版本 policy。
+- Runtime 特定 compaction detector 只能在真实 probe 证明 best-effort、非阻塞、不消费/伪造用户输入、不破坏 Session 且有可控停止边界时准入。Detector state 不是 Runtime Readiness，中断/恢复不可追溯推断 compaction；只有明确、结构化、可区分完成边界且有 occurrence ID/去重依据的 signal 才能 admission。token/usage 下降、历史变短、模型 summary 或普通 assistant 文本不能补猜。已按目标场景查找但未见可靠信号时状态为 `NotObserved` / `Unverified` 且 policy `Disabled`；只有结构化负证据证明上游不提供时才声明 `Unsupported`。
 
 <a id="context-public-history"></a>
 
@@ -330,6 +331,7 @@ last_updated: 2026-08-20
 ### Skill Library、投影与完整性
 
 - Rovai Skill Library 只包含 official 或用户显式导入的 Skill；名称全局唯一，Revision 内容不可变且按内容 digest 验证。新安装 Skill 默认 enabled，并显式分配给全部当前 Skill Delivery Groups；后续 assignment 由用户管理，不存在隐式“未分配即全部”语义。
+- Skill 文件投递、Runtime 发现/加载与协议 advertised command/Skill 是三层独立能力，分别记录 `Verified | DocumentationOnly | Unverified | NotObserved | Unsupported`。当前 parser 未识别只表示 Host 分类缺口，不能反推 Runtime 没有提供。TRAE managed projection 只拥有已通过唯一内容 advertisement 与真实调用验证的项目 `.trae/skills`；Runtime 同时扫描的其他项目/用户路径不进入 Rovai ownership 或 cleanup。
 - 投影只物化当前 Run 冻结且目标 Runtime 可投递的 Revision，不扫描未管理目录来扩大 Library。重叠 native discovery 必须有明确所有权/冲突策略，不覆盖 Project 或外部修改项。已启动 Run 使用冻结 exposure；新 Run 不得在 desired state 未收敛或内容无法证明时继续。
 - Library desired state、root access ledger 和 per-Run frozen exposure 是三个独立权威。事件只标记精确 root dirty，Reconciler 在 root scope 内去重、串行收敛并以 generation/digest 阻止迟到结果；失败不回滚 Library 真源，但相关新 Run fail closed。Run 启动前必须重新验证 Revision 路径、类型、大小、权限和 digest，不依赖历史目录扫描或 active-Run 引用作为新 Run 准入。
 - Bundled Skill bootstrap 在数据库 digest 与 expected digest 相同时走只读快速验证；只有变化或不一致才在私有 staging 中物化并原子 promote，经失败注入也不能让半成品满足执行门禁。Windows copy projection 使用 operation journal、backup/promote/verify/metadata/cleanup 多阶段恢复；Execution Root Gate 将 launch registration 与 replacement 串行化，崩溃后先按 journal 收敛再准入。
