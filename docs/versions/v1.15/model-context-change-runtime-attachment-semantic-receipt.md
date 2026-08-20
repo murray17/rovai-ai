@@ -303,6 +303,10 @@ Migration 100 只接受完整 schema 54/Migration 99 state：
 不提供 Manifest V1→V2 rewrite、历史 digest 重算、dual write、dispatch-time receipt translation 或 downgrade
 reader。Migration 后新 Run 全部使用 Manifest 21/Receipt V2；历史已完成记录保留但不再 dispatch。
 
+后续 Migration 101 从这里建立的 schema 55 推进到当前 schema 56，只增加同一 Camp 单一非终态 publish
+operation 的数据库 guard；它不改变本 revision 的 Manifest/Receipt、模型 bytes、Context 恢复或 Migration 100
+clean-break 结论。上文“变更后”的 schema 55/Migration 100 是本 revision 自身的落点，不应重写成 Migration 101。
+
 ## 验证
 
 ### Context 与 View regression owner

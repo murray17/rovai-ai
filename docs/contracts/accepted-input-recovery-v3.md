@@ -38,6 +38,9 @@ Historical Manifest 20, Formatter 21 payload Blob, Runtime Auth Receipt/ACK, Act
 summary evidence remain byte-for-byte and non-dispatchable. New execution uses Manifest 21/Receipt v2 only. Migration 99
 history and its v2 classification remain valid and are not rewritten.
 
+The subsequent Migration 101/schema 56 publication-serialization guard does not change this classification, rewrite
+historical evidence or add a recovery reader.
+
 ## References
 
 - [Accepted Input Recovery v2](accepted-input-recovery-v2.md)

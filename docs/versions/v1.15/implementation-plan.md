@@ -51,6 +51,9 @@ last_updated: 2026-08-20
   Draft/CopyPlan drift 失败不产生公共消息或部分 Draft 消费；
 - [x] 覆盖 append 与 controlled rebuild 后旧 v2 receipt 可恢复、语义漂移失败、物理 Auth Receipt 更新、
   publication copy phase 释放共享数据库锁，以及 Migration 100 source/backfill/clean-break。
+- [x] 修复 generation-fenced 并发锁序：Scheduler 先取得 Camp View read admission、再 Claim AgentRun，并把
+  owned guard 持有到完整 Run 生命周期；同一 Camp 仅允许一个非终态 publish operation，gate 前重验 Draft，
+  遗留重复 staging 回滚保留其他 operation 已提交的 Entry；Migration 101 推进到 schema 56。
 
 ## Checkpoint 1：平台、进程与私有文件系统
 

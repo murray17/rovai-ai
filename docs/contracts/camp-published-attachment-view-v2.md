@@ -63,6 +63,14 @@ short Database lock  → revalidate Draft/CopyPlan and CAS copying → staged
 The no-lock phase receives no `Database` reference. Draft revision or Authority row drift during copy returns
 `draft_changed`; rollback removes only this operation's managed staging and no Camp message is accepted.
 
+Each Camp admits at most one nonterminal `publish` operation across command IDs. The short planning transaction checks
+the current operation set and the database insert guard enforces the same invariant; a recoverable unfinished operation
+returns `camp_attachment_view_busy`, while `recovery_required` remains fail closed. Retrying the same command keeps its
+existing idempotent path. After staging and after acquiring the mutation gate, Core revalidates the exact Draft revision
+and ordered Prepared Attachment set before promotion. A stale staged operation is rolled back as `draft_changed` and may
+not remove a final Entry already committed by another operation. Startup recovery applies the same ownership rule when
+converging legacy duplicate operations.
+
 The per-Camp mutation gate, 55-second busy boundary and `generation_fenced_v1` behavior do not change. Final promote and
 the short transaction that commits CampMessage, `message_attachment`, View Entry, catalog revision/generation and Draft
 consumption remain the publication linearization boundary. An active or Warm Runtime may therefore continue to block a
@@ -118,13 +126,23 @@ current local root/Entry identities, permissions, Authority digest and physical 
 Receipt. Its digest remains part of `requestDigest`. A controlled rebuild may therefore preserve Context validity while
 still forcing a new Host generation and a new physical Runtime authorization.
 
-## 5. Migration 100 and compatibility
+For `generation_fenced_v1`, the scheduler must acquire the Camp View read admission before changing an AgentRun from
+queued to running/claimed. The owned admission moves into the AgentRun task and remains held through Skill/MCP
+preparation, Runtime launch and the complete Runtime lifecycle. A publication that already owns the write gate therefore
+leaves new work queued; an already admitted Run makes publication wait. No production Claim path may invert that order.
+
+## 5. Migration 100/101 and compatibility
 
 Migration 100 accepts only complete schema 54/Migration 99 state. It terminalizes old nonterminal Manifest 20/Receipt v1
 execution using existing delivery/action evidence, preserves historical Manifest/Blob/Auth Receipt/ACK/Evidence bytes,
 and backfills stable catalogs: an empty catalog is revision 0; a non-empty existing catalog is revision 1 and each existing
 Entry has `publishedCatalogRevision = 1`. It installs Manifest 21/Receipt v2 as the only current write pairing and advances
 to schema 55.
+
+Migration 101 accepts only complete schema 55/Migration 100 state. It installs the per-Camp open-publish index and
+database insert guard, and advances the projection schema to 56. It does not rewrite Context, receipts, Attachment
+Authority, View Entries or existing operation rows. Existing duplicate nonterminal rows remain recovery input rather
+than making migration itself destructive; startup recovery converges them under the ownership checks above.
 
 There is no receipt rewrite, digest recomputation, dual write, dispatch-time translation or downgrade reader. Historical
 Manifest 20 is read-only and non-dispatchable after the clean break.

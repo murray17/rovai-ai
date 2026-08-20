@@ -36,6 +36,8 @@ last_updated: 2026-08-20
 > 已由开发者二次确认并实施：Formatter 21 模型 bytes 不变，Manifest 21/View Receipt v2 只冻结稳定 attachment
 > semantics；物理 root/Entry identity、operation 与 generation 继续进入本机完整性和 Runtime Auth Receipt。
 > publication copy phase 同时移出全局 Database mutex；generation fence 与运行期禁止带附件发布保持不变。
+> 后续并发加固已实现为 Migration 101/schema 56：Scheduler 在 Claim 前取得并终生持有 Camp attachment read
+> admission；同一 Camp 只允许一个非终态 publish operation，gate 前重验 Draft，遗留重复 staging 可安全收敛。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 
@@ -58,8 +60,9 @@ Platform。历史 v1.05 只保留当时设计过程和未实施快照，不作�
 - `%LOCALAPPDATA%` Core/User Data/Session Data/Logs/CrashDumps 使用 local NTFS admission 和创建时 protected DACL；
 - Attachment 使用 retained handle 与 handle-relative traversal，拒绝 reparse、identity drift 与非准入存储；
 - 新增 journaled Camp Published Attachment View、统一 Runtime path resolver、Camp generation fence、稳定 semantic
-  catalog/receipt 与 Migration 99/100 clean break/backfill，同时保持 Authority、历史 Manifest/Blob/Evidence 和
-  `contentDigest` 不变；附件 staging copy/digest/fsync 不持有全局 Database mutex；
+  catalog/receipt、Migration 99/100 clean break/backfill 与 Migration 101 publication serialization，同时保持
+  Authority、历史 Manifest/Blob/Evidence 和 `contentDigest` 不变；附件 staging copy/digest/fsync 不持有全局
+  Database mutex；
 - Skill Library 使用 Windows logical mode；Skill Projection 使用同父目录 copy、schema 2 journal、operationId、
   NTFS entry identity、持久 Run registration、bounded sharing retry 和 crash-window recovery；
 - 完成 secured Named Pipe Built-in Transport v17、Windows Renderer Interaction Delta、NSIS、PE/manifest verifier、
@@ -112,6 +115,12 @@ evidence 诚实终结旧非终态 Manifest 20/Receipt v1 Run、Turn、Delivery�
 Binding/Session，但逐字节保留历史 Manifest/模型输入 Blob/Runtime Auth Receipt/ACK/摘要/执行证据。现有空 View
 backfill 为 semantic catalog revision 0，非空 View backfill 为 revision 1；新写入只允许 Formatter 21 /
 Manifest 21 / Run Facts v2 / Receipt v2，并推进到 `v1.15 / projection schema 55`。
+
+Migration 101 只接受已完整应用 Migration 100 的 `v1.15 / projection schema 55`。它安装同一 Camp
+`publish` operation 的非终态查询索引与 insert guard，推进到 `v1.15 / projection schema 56`。它不改写
+ContextManifest、receipt、Authority、View Entry 或既有 operation；遗留重复 operation 由 startup recovery
+按已提交消息与 Entry ownership 收敛。Scheduler 同时统一为先取得 Camp attachment read admission、再 Claim
+AgentRun，并把 guard 持有到 Run 生命周期终止。
 
 ## 验收边界
 

@@ -46,12 +46,18 @@ View 不改变消息、历史 ContextManifest、Managed Blob、摘要或 Authori
 
 带附件的 Camp Message 先用短数据库锁冻结 CopyPlan、journal 和 quota reservation，释放全局 Database mutex 后在
 Runtime 不可达的 `.staging/<operation-id>` 完成全组复制、摘要/identity 复核与 fsync，再以短数据库 CAS 复核
-Draft/CopyPlan 并进入 staged。之后才取得 per-Camp mutation gate。该 gate 与 Context freeze、Host acquire、resume、prompt dispatch 的 Camp read
-admission 互斥。Core 在 gate 内停止或 fence 不兼容 Host、原子 promote 完整 Entry subtree，最后在一个短
+Draft/CopyPlan 并进入 staged。同一 Camp 在任意时刻最多存在一个非终态 publish operation；短规划事务与数据库
+insert guard 共同串行化不同 command ID，幂等重试继续复用同一 operation。之后才取得 per-Camp mutation gate，
+并在 promote 前再次复核精确 Draft revision 与有序 Prepared Attachment 集合；已过期 staging 按自身 journal
+回滚，不得删除另一个已提交 operation 拥有的 final Entry。该 gate 与 Context freeze、Host acquire、resume、
+prompt dispatch 的 Camp read admission 互斥。Core 在 gate 内停止或 fence 不兼容 Host、原子 promote 完整 Entry subtree，最后在一个短
 SQLite transaction 中提交消息、`message_attachment`、View Entry、generation 和既有 Turn/Run 业务事实。
 SQLite commit 是 Draft→Published 与 Camp 共享授权的线性化点。
 
-Runtime 对 Camp View 的 read guard 覆盖 launch 和整次 Run。发布、Draft discard、Camp 删除和完整性重建取得
+调度器必须在把 AgentRun 从 queued Claim 为 running 前先取得 Camp View read admission，并把 owned guard 移入
+AgentRun task，使其覆盖 Skill/MCP 准备、launch 和整次 Run。这样 write gate 已进入时新 Run 保持 queued，Run
+已获 read admission 时 publication 等待，不会形成“running Run 等待 publication write guard”的锁序环。
+发布、Draft discard、Camp 删除和完整性重建取得
 有界 write gate；force Camp delete 先停止/fence 相关 Runtime，再等待 write gate，避免 read guard 与 stop
 互相等待。gate 超时不会消费 Draft或产生公共消息。
 
@@ -92,6 +98,10 @@ Migration 100 对 schema 54 做第二次本机 clean break：旧非终态 Manife
 分类诚实终结，历史物理 receipt 与执行证据不改写；现有 View 回填稳定 semantic catalog 后，新写入只接受
 Manifest 21/Receipt v2。物理 identity 继续用于当前本机完整性与 Runtime authorization，不再决定历史 Context
 是否有效。
+
+Migration 101 从完整 schema 55 安装同一 Camp 单一非终态 publish 的数据库 insert guard，并推进到 schema 56；
+它不改写 Context、Authority、View Entry 或遗留 operation。已有重复 operation 由 startup recovery 按已提交
+消息/Entry ownership 收敛，不能把合法 final View 标成由待回滚 operation 所有。
 
 ## 安全声明
 

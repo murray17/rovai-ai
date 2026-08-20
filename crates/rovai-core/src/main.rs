@@ -226,6 +226,19 @@ const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+async fn claim_agent_run_under_attachment_admission<F, Fut, T>(
+    gate: Arc<RwLock<()>>,
+    claim: F,
+) -> (tokio::sync::OwnedRwLockReadGuard<()>, T)
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = T>,
+{
+    let admission = gate.read_owned().await;
+    let claim = claim().await;
+    (admission, claim)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PlannedShutdownParams {
@@ -5771,33 +5784,36 @@ impl Core {
             }
         }
         let starting_git_observation = Some(git::observe_git(&workspace_path).await);
-        let claim = {
-            let mut database = self.database.lock().await;
-            ExecutionRuntimeService::default().claim_agent_run(
-                &mut database,
-                &CommandEnvelope {
-                    command_id: uuid::Uuid::new_v4().to_string(),
-                    actor: ActorRef::System {
-                        component_id: "agent-run-scheduler".to_string(),
+        let attachment_view_gate = self.attachment_view_gate(&candidate.camp_id).await;
+        let (attachment_view_admission, claim) =
+            claim_agent_run_under_attachment_admission(attachment_view_gate, || async {
+                let mut database = self.database.lock().await;
+                ExecutionRuntimeService::default().claim_agent_run(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::System {
+                            component_id: "agent-run-scheduler".to_string(),
+                        },
+                        camp_id: Some(candidate.camp_id.clone()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: ClaimAgentRunCommand {
+                            agent_run_id: candidate.agent_run_id.clone(),
+                            expected_version: candidate.version,
+                            lease_owner: format!(
+                                "codex:{}:{}",
+                                candidate.agent_run_id,
+                                uuid::Uuid::new_v4()
+                            ),
+                            lease_seconds: 120,
+                            workspace: Some(workspace),
+                            starting_git_observation,
+                        },
                     },
-                    camp_id: Some(candidate.camp_id.clone()),
-                    expected_versions: Vec::new(),
-                    execution_epoch: None,
-                    payload: ClaimAgentRunCommand {
-                        agent_run_id: candidate.agent_run_id.clone(),
-                        expected_version: candidate.version,
-                        lease_owner: format!(
-                            "codex:{}:{}",
-                            candidate.agent_run_id,
-                            uuid::Uuid::new_v4()
-                        ),
-                        lease_seconds: 120,
-                        workspace: Some(workspace),
-                        starting_git_observation,
-                    },
-                },
-            )
-        };
+                )
+            })
+            .await;
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
             Ok(_) => return,
@@ -5887,6 +5903,7 @@ impl Core {
         let mut agent_run_tasks = self.agent_run_tasks.lock().await;
         while agent_run_tasks.try_join_next().is_some() {}
         agent_run_tasks.spawn(async move {
+            let _attachment_view_admission = attachment_view_admission;
             let mut launch_permit = launch_permit;
             let launch_result = core
                 .launch_agent_run(&execution, &output, &mut launch_permit)
@@ -7794,8 +7811,6 @@ impl Core {
             .prepare_agent_run_mcp_projection(execution)
             .await
             .context("failed to prepare AgentRun MCP projection")?;
-        let attachment_view_gate = self.attachment_view_gate(&execution.camp_id).await;
-        let _attachment_view_admission = attachment_view_gate.read_owned().await;
         // No Adapter is promoted to live-append compatibility until a persisted,
         // artifact-bound positive probe proves the required warm-host behavior.
         let visibility_mode = CampAttachmentVisibilityMode::GenerationFencedV1;
@@ -14938,6 +14953,44 @@ mod tests {
         assert!(!runtime_check_writes_diagnostic(
             RuntimeCheckFinalization::CleanupOnly
         ));
+    }
+
+    #[tokio::test]
+    async fn agent_run_claim_waits_for_attachment_read_admission_and_retains_it() {
+        let gate = Arc::new(RwLock::new(()));
+        let writer = gate.clone().write_owned().await;
+        let claim_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let claim_started_in_task = claim_started.clone();
+        let claim_task = tokio::spawn(claim_agent_run_under_attachment_admission(
+            gate.clone(),
+            move || async move {
+                claim_started_in_task.store(true, std::sync::atomic::Ordering::Release);
+                "claimed"
+            },
+        ));
+
+        tokio::task::yield_now().await;
+        assert!(
+            !claim_started.load(std::sync::atomic::Ordering::Acquire),
+            "Claim must remain queued while publication owns the write gate"
+        );
+        drop(writer);
+        let (admission, claim) = tokio::time::timeout(Duration::from_secs(1), claim_task)
+            .await
+            .expect("Claim should proceed after publication releases the gate")
+            .unwrap();
+        assert_eq!(claim, "claimed");
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), gate.clone().write_owned())
+                .await
+                .is_err(),
+            "the returned admission must cover the claimed Run lifecycle"
+        );
+        drop(admission);
+        tokio::time::timeout(Duration::from_secs(1), gate.write_owned())
+            .await
+            .expect("the write gate should reopen when the Run admission ends");
     }
 
     #[test]

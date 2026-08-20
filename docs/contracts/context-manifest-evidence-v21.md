@@ -28,8 +28,8 @@ Camp Attachment View Contract = 2
 Camp Attachment View Receipt = 2
 Runtime Attachment Auth Receipt = 1
 Data Contract = v1.15
-Projection Schema = 55
-Latest Migration = 100
+Projection Schema = 56
+Latest Migration = 101
 ```
 
 ## Attachment evidence
@@ -77,6 +77,9 @@ execution evidence bytes. It backfills the stable semantic catalog and installs 
 
 Completed historical Context remains readable evidence but is not rewritten and old unfinished Runtime sessions do not
 resume. New Runs exclusively use Manifest 21/Receipt v2.
+
+Migration 101 subsequently advances schema 55 to 56 only to enforce one nonterminal attachment publication per Camp.
+It does not change Manifest 21, View Receipt v2, model bytes or recovery validation.
 
 ## References
 

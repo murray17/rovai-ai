@@ -49,7 +49,9 @@ pub struct Database {
 }
 
 const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.15";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 55;
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 56;
+const V101_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
+const V101_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 55;
 const V100_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
 const V100_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 54;
 const V099_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
@@ -143,6 +145,7 @@ struct CurrentMigrationState {
     v98: bool,
     v99: bool,
     v100: bool,
+    v101: bool,
 }
 
 impl CurrentMigrationState {
@@ -152,6 +155,41 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101;
+        }
+        if self.v101 {
+            return false;
+        }
+        if contract == V101_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V101_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -832,7 +870,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 97),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 98),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 99),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 100)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 100),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 101)
         "#,
         [],
         |row| {
@@ -868,6 +907,7 @@ fn load_current_migration_state(
                 v98: row.get(28)?,
                 v99: row.get(29)?,
                 v100: row.get(30)?,
+                v101: row.get(31)?,
             })
         },
     )
@@ -2295,6 +2335,9 @@ impl Database {
             if !self.schema_migration_applied(100)? {
                 self.migrate_semantic_attachment_receipt_v100()?;
             }
+            if !self.schema_migration_applied(101)? {
+                self.migrate_single_camp_publication_v101()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2644,6 +2687,9 @@ impl Database {
         }
         if !self.schema_migration_applied(100)? {
             self.migrate_semantic_attachment_receipt_v100()?;
+        }
+        if !self.schema_migration_applied(101)? {
+            self.migrate_single_camp_publication_v101()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -13390,6 +13436,44 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_single_camp_publication_v101(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE INDEX camp_attachment_view_open_publish_camp_idx
+                ON camp_attachment_view_operation(camp_id, status, created_at, id)
+                WHERE kind = 'publish'
+                  AND status NOT IN ('completed','rolled_back');
+
+            CREATE TRIGGER camp_attachment_view_single_open_publish_insert
+            BEFORE INSERT ON camp_attachment_view_operation
+            WHEN NEW.kind = 'publish'
+              AND NEW.status NOT IN ('completed','rolled_back')
+              AND EXISTS(
+                  SELECT 1 FROM camp_attachment_view_operation AS existing
+                  WHERE existing.camp_id = NEW.camp_id
+                    AND existing.kind = 'publish'
+                    AND existing.status NOT IN ('completed','rolled_back')
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'camp_attachment_view_busy');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.15', projection_schema_version = 56,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (101, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -17922,6 +18006,9 @@ fn downgrade_current_schema_to_v99_source_for_test(connection: &Connection) {
             ALTER TABLE camp_attachment_view DROP COLUMN semantic_catalog_digest;
             ALTER TABLE camp_attachment_view DROP COLUMN catalog_revision;
             ALTER TABLE camp_attachment_view_entry DROP COLUMN published_catalog_revision;
+            DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;
+            DROP INDEX IF EXISTS camp_attachment_view_open_publish_camp_idx;
+            DELETE FROM schema_migration WHERE version = 101;
             DELETE FROM schema_migration WHERE version = 100;
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 54
@@ -18311,6 +18398,7 @@ mod tests {
             v98: version >= 98,
             v99: version >= 99,
             v100: version >= 100,
+            v101: version >= 101,
         }
     }
 
@@ -18321,6 +18409,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                101,
+            ),
+            (
+                "v1.15/schema-55",
+                V101_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V101_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 100,
             ),
             (
@@ -18487,7 +18581,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(99);
+        let current = migration_state_through(101);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -18557,7 +18651,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(100));
+        assert_eq!(state, migration_state_through(101));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -19518,6 +19612,74 @@ mod tests {
         view.remove_camp_view(&mut database, &camp_id).unwrap();
         attachment_store.remove_camp(&camp_id).unwrap();
         drop(view);
+    }
+
+    #[test]
+    fn v101_serializes_nonterminal_publish_operations_per_camp() {
+        let (mut database, _directory) = crate::test_support::seeded_runtime_database();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;
+                DROP INDEX IF EXISTS camp_attachment_view_open_publish_camp_idx;
+                DELETE FROM schema_migration WHERE version = 101;
+                UPDATE rovai_data_contract
+                SET projection_schema_version = 55
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        database.migrate_single_camp_publication_v101().unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            56
+        );
+
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_attachment_view_operation(
+                    id, camp_id, kind, status, command_id, draft_revision,
+                    reserved_bytes, error_code, created_at, updated_at, completed_at
+                ) VALUES (?1, ?2, 'publish', 'copying', ?3, 1, 0, NULL, ?4, ?4, NULL)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    camp_id,
+                    Uuid::new_v4().to_string(),
+                    now
+                ],
+            )
+            .unwrap();
+        let error = database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_attachment_view_operation(
+                    id, camp_id, kind, status, command_id, draft_revision,
+                    reserved_bytes, error_code, created_at, updated_at, completed_at
+                ) VALUES (?1, ?2, 'publish', 'copying', ?3, 1, 0, NULL, ?4, ?4, NULL)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    camp_id,
+                    Uuid::new_v4().to_string(),
+                    now
+                ],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("camp_attachment_view_busy"));
     }
 
     #[test]

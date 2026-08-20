@@ -130,7 +130,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Message Delivery v2 (historical)](message-delivery-v2.md) | `forward | return` 冻结边、target lineage、caller continuation，以及 v1 queue/attempt/recovery/settlement |
 | [Message Delivery v1 (historical)](message-delivery-v1.md) | 无 caller-return 分类的 recipient queue、dispatch attempt、waitCondition、retry/cancel 与 settlement |
 | [Current Input Skill Links v1（当前）](current-input-skill-links-v1.md) | Structured Skill Mention、per-Run send snapshot、start-time resolver 与 optional sibling `CURRENT_INPUT.skills[{name,path}]` |
-| [ContextManifest Evidence v21（当前）](context-manifest-evidence-v21.md) | Formatter 21 bytes 不变；View receipt v2 只冻结稳定附件语义，schema 55 与 Migration 100 clean break |
+| [ContextManifest Evidence v21（当前）](context-manifest-evidence-v21.md) | Formatter 21 bytes 不变；View receipt v2 只冻结稳定附件语义；Migration 100 clean break 后由 publication guard 推进到 schema 56/Migration 101 |
 | [ContextManifest Evidence v20（历史）](context-manifest-evidence-v20.md) | Formatter 21、mandatory Run Facts v2、Published View paths/physical receipt、schema 54 与 Migration 99 clean break |
 | [ContextManifest Evidence v19（历史）](context-manifest-evidence-v19.md) | Formatter v20 与 v18 wire 不变；冻结 Profile v4 的自身 recent 作者过滤、eligible omission、schema 53 与 Migration 98 clean break；不含 View receipt |
 | [ContextManifest Evidence v18（历史）](context-manifest-evidence-v18.md) | Formatter v20；v17 section/evidence 不变，Shared Conversation、Manifest 与 History Camp reference 只使用 canonical Camp ID；不含自身 recent 作者过滤 |

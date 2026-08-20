@@ -83,7 +83,7 @@ last_updated: 2026-08-20
 - Camp Attachment 是 `file | directory` 封闭联合。Core 负责分类、无 symlink 遍历、限制、复制、摘要和只读快照；一个目录作为一个层级附件全成全败，包含隐藏项和空目录。
 - Authority Attachment 始终位于 `<data_dir>/camp-attachments/`；Prepared Attachment 与 private metadata 只供 Core 使用。发送事务 commit 后的 Published Attachment 才是 Camp 公共资源，消息寻址、Prompt 选择、Run、Conversation 或 Session 都不缩小其 Camp-wide 枚举/读取授权。
 - Runtime 不读取 Authority Camp tree，而只获得实例隔离、可重建的 Camp Published Attachment View 精确 `attachments` 根。每个 Published Attachment 复制为稳定、只读的 View Entry；模型通过 mandatory `RUN_FACTS.campResources` 主动发现 catalog，显式 Context occurrence 只决定是否展示路径，不授予或撤销文件权。
-- 发布以短数据库锁冻结 CopyPlan/journal，释放全局 Database mutex 后在 Runtime 不可达 staging 中完成整组 copy/verify/fsync，再以短 CAS 进入 staged；最终由 per-Camp mutation gate 与消息事务线性化。该 gate 与 Context freeze 和整次 Runtime launch/run read admission 互斥。缺失/漂移先 fence Host 并受控整 Camp rebuild，不能回退到 Authority root、暴露 Draft 或在活跃 Host 背后静默补文件。
+- 发布以短数据库锁冻结 CopyPlan/journal，释放全局 Database mutex 后在 Runtime 不可达 staging 中完成整组 copy/verify/fsync，再以短 CAS 进入 staged；同一 Camp 只允许一个非终态 publish operation，取得 mutation gate 后仍须复核 Draft 与 Prepared Attachment 集合，旧 staging 回滚不得删除其他 operation 已提交的 Entry。最终由 per-Camp mutation gate 与消息事务线性化。该 gate 与 Context freeze 和整次 Runtime launch/run read admission 互斥；Scheduler 必须先取得 read admission、再 Claim AgentRun，并把 guard 持有到 Run 生命周期结束。缺失/漂移先 fence Host 并受控整 Camp rebuild，不能回退到 Authority root、暴露 Draft 或在活跃 Host 背后静默补文件。
 - 首次安装 admission 与训练进度由 Electron Main 在 Core 启动前以私有版本化 Desktop 状态拥有；产品数据库存在性参与 clean/fail-closed 判定。Provisioning 通过可重试 checkpoint 幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成。
 - Camp 永久删除保持 User-only、exact-version 和单事务聚合删除。普通模式要求 quiescent；用户明确确认的 force 模式先持久化停止/隔离边界，再删除 Camp 聚合并异步清理受管资源，不能把未知 Runtime 外部效果宣称为已撤销。
 

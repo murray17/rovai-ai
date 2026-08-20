@@ -475,6 +475,25 @@ impl CampAttachmentViewStore {
         let operation_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         let transaction = database.connection_mut().transaction()?;
+        let conflicting_status = transaction
+            .query_row(
+                r#"
+                SELECT status FROM camp_attachment_view_operation
+                WHERE camp_id = ?1 AND kind = 'publish'
+                  AND status NOT IN ('completed','rolled_back')
+                ORDER BY created_at, id
+                LIMIT 1
+                "#,
+                [camp_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        if conflicting_status.as_deref() == Some("recovery_required") {
+            anyhow::bail!("camp_attachment_view_recovery_required");
+        }
+        if conflicting_status.is_some() {
+            anyhow::bail!("camp_attachment_view_busy");
+        }
         let current_revision: i64 = transaction.query_row(
             "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
             [camp_id],
@@ -778,6 +797,10 @@ impl CampAttachmentViewStore {
         publication: &PreparedCampAttachmentPublication,
     ) -> Result<()> {
         self.verify_publication_state(database.connection(), publication, "staged")?;
+        if !self.publication_matches_current_draft(database.connection(), publication)? {
+            self.rollback_publication(database, &publication.operation_id, "draft_changed")?;
+            anyhow::bail!("draft_changed");
+        }
         let changed = database.connection().execute(
             "UPDATE camp_attachment_view_operation SET status = 'gated', updated_at = ?2 WHERE id = ?1 AND status = 'staged'",
             params![publication.operation_id, chrono::Utc::now().to_rfc3339()],
@@ -786,6 +809,36 @@ impl CampAttachmentViewStore {
             anyhow::bail!("camp_attachment_view_busy");
         }
         Ok(())
+    }
+
+    fn publication_matches_current_draft(
+        &self,
+        connection: &Connection,
+        publication: &PreparedCampAttachmentPublication,
+    ) -> Result<bool> {
+        let draft_revision = connection
+            .query_row(
+                "SELECT draft_revision FROM camp_attachment_view_operation WHERE id = ?1 AND camp_id = ?2 AND kind = 'publish'",
+                params![publication.operation_id, publication.camp_id],
+                |row| row.get::<_, Option<i64>>(0),
+            )?
+            .context("camp_attachment_view_recovery_required: publish operation has no Draft revision")?;
+        let current_revision = connection
+            .query_row(
+                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                [&publication.camp_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+        if current_revision != Some(draft_revision) {
+            return Ok(false);
+        }
+        let current_attachment_ids =
+            load_prepared_authority_rows(connection, &publication.camp_id)?
+                .into_iter()
+                .map(|row| row.attachment_id)
+                .collect::<Vec<_>>();
+        Ok(current_attachment_ids == publication.attachment_ids)
     }
 
     pub fn complete_publication(&self, database: &mut Database, operation_id: &str) -> Result<()> {
@@ -922,12 +975,21 @@ impl CampAttachmentViewStore {
                         .staging_operation_root(operation_id)?
                         .join(attachment_id);
                     if path_entry_exists(&final_path)? {
+                        let actual_identity = entry_identity_digest(&final_path)?;
+                        if final_entry_is_committed_to_other_operation(
+                            database.connection(),
+                            &camp_id,
+                            attachment_id,
+                            operation_id,
+                            &actual_identity,
+                        )? {
+                            continue;
+                        }
                         if path_entry_exists(&staging_path)? {
                             anyhow::bail!(
                                 "camp_attachment_view_recovery_required: staging and final targets both exist"
                             );
                         }
-                        let actual_identity = entry_identity_digest(&final_path)?;
                         let owned_identity =
                             final_identity.as_deref().or(staging_identity.as_deref());
                         if owned_identity != Some(actual_identity.as_str()) {
@@ -3539,6 +3601,35 @@ fn load_operation_cleanup_entries(
         .collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+fn final_entry_is_committed_to_other_operation(
+    connection: &Connection,
+    camp_id: &str,
+    attachment_id: &str,
+    operation_id: &str,
+    actual_identity_digest: &str,
+) -> Result<bool> {
+    let committed_entry = connection
+        .query_row(
+            r#"
+            SELECT entry.entry_identity_digest, entry.publication_operation_id
+            FROM camp_attachment_view_entry AS entry
+            JOIN camp_attachment_view_operation AS operation
+              ON operation.id = entry.publication_operation_id
+             AND operation.camp_id = entry.camp_id
+            JOIN message_attachment AS attachment
+              ON attachment.id = entry.attachment_id
+             AND attachment.camp_id = entry.camp_id
+            WHERE entry.camp_id = ?1 AND entry.attachment_id = ?2
+              AND entry.publication_operation_id <> ?3
+              AND operation.status IN ('committed','completed')
+            "#,
+            params![camp_id, attachment_id, operation_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?;
+    Ok(committed_entry.is_some_and(|(identity, _)| identity == actual_identity_digest))
+}
+
 fn load_view_entry_ids(
     connection: &Connection,
     camp_id: &str,
@@ -4589,6 +4680,169 @@ mod tests {
         assert!(error.to_string().contains("draft_changed"));
         view.rollback_publication(&mut database, &operation_id, "draft_changed")
             .unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn same_camp_allows_only_one_nonterminal_publish_operation() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let source = data_dir.join("single-publication.txt");
+        fs::write(&source, b"single Camp publication slot").unwrap();
+        let saved = attachment_store
+            .save_body(&mut database, &camp_id, "Single publication")
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                saved.revision,
+                &source,
+                "single-publication.txt",
+            )
+            .unwrap();
+        let first = view
+            .stage_publication(
+                &mut database,
+                &attachment_store,
+                &camp_id,
+                &Uuid::new_v4().to_string(),
+                draft.revision,
+            )
+            .unwrap()
+            .unwrap();
+        let error = view
+            .stage_publication(
+                &mut database,
+                &attachment_store,
+                &camp_id,
+                &Uuid::new_v4().to_string(),
+                draft.revision,
+            )
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("camp_attachment_view_busy"));
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_attachment_view_operation WHERE camp_id = ?1 AND kind = 'publish' AND status NOT IN ('completed','rolled_back')",
+                    [&camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+
+        view.rollback_publication(&mut database, &first.operation_id, "test_cleanup")
+            .unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn legacy_duplicate_publication_rolls_back_without_poisoning_committed_view() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        database
+            .connection()
+            .execute_batch(
+                "DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;",
+            )
+            .unwrap();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let source = data_dir.join("legacy-duplicate.txt");
+        fs::write(&source, b"legacy duplicate publication").unwrap();
+        let saved = attachment_store
+            .save_body(&mut database, &camp_id, "Legacy duplicate")
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                saved.revision,
+                &source,
+                "legacy-duplicate.txt",
+            )
+            .unwrap();
+        let command_a = Uuid::new_v4().to_string();
+        let command_b = Uuid::new_v4().to_string();
+        let publication_a = view
+            .stage_publication(
+                &mut database,
+                &attachment_store,
+                &camp_id,
+                &command_a,
+                draft.revision,
+            )
+            .unwrap()
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_attachment_view_operation SET status = 'completed' WHERE id = ?1",
+                [&publication_a.operation_id],
+            )
+            .unwrap();
+        let publication_b = view
+            .stage_publication(
+                &mut database,
+                &attachment_store,
+                &camp_id,
+                &command_b,
+                draft.revision,
+            )
+            .unwrap()
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_attachment_view_operation SET status = 'staged' WHERE id = ?1",
+                [&publication_a.operation_id],
+            )
+            .unwrap();
+        view.gate_publication(&mut database, &publication_a)
+            .unwrap();
+        view.promote_publication(&mut database, &publication_a)
+            .unwrap();
+        let execution = CollaborationService::default()
+            .send_user_camp_draft_with_publication(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: command_a,
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: draft.revision,
+                        execution: None,
+                    },
+                },
+                Some(&publication_a.operation_id),
+            )
+            .unwrap();
+        assert_eq!(execution.result.status, CommandResultStatus::Applied);
+        view.complete_publication(&mut database, &publication_a.operation_id)
+            .unwrap();
+
+        let error = view
+            .gate_publication(&mut database, &publication_b)
+            .unwrap_err();
+        assert!(format!("{error:#}").contains("draft_changed"));
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status FROM camp_attachment_view_operation WHERE id = ?1",
+                    [&publication_b.operation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "rolled_back"
+        );
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+
         cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
     }
 
