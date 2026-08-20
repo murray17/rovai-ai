@@ -74,6 +74,7 @@ import {
   attachmentDragKind,
   attachmentDropIsBlocked,
   agentRunStopViewState,
+  attachmentRevealLabel,
   canStopAgentRun,
   campConversationHasVisibleHistory,
   campConversationViewFromStoredValue,
@@ -3147,7 +3148,16 @@ describe('task event projections', () => {
     expect(markup).toContain('队员读取不可用')
     expect(markup).toContain('attachment-projection-pending')
     expect(markup).toContain('attachment-projection-failed')
+    expect(markup).toContain('aria-label="使用系统应用打开 说明.txt"')
+    expect(markup).toContain('aria-label="使用系统应用打开 不可用.txt"')
+    expect(markup).not.toContain('aria-label="使用系统应用打开 不可用.txt" disabled=""')
     expect(markup).not.toContain('class="message-bubble"')
+  })
+
+  it('uses platform-native labels for revealing Timeline Attachments', () => {
+    expect(attachmentRevealLabel('darwin')).toBe('在 Finder 中显示')
+    expect(attachmentRevealLabel('win32')).toBe('在文件资源管理器中显示')
+    expect(attachmentRevealLabel('linux')).toBe('显示所在位置')
   })
 
   it('renders a public A2A message with the Scheme C handoff footer', () => {

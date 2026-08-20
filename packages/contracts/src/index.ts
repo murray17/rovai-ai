@@ -1026,6 +1026,18 @@ export interface AttachmentPreview {
   bytes: Uint8Array
 }
 
+export type AttachmentActionError = 'target_unavailable' | 'open_failed' | 'reveal_failed'
+
+export interface AttachmentOpenResult {
+  opened: boolean
+  error: AttachmentActionError | null
+}
+
+export interface AttachmentRevealResult {
+  revealed: boolean
+  error: AttachmentActionError | null
+}
+
 export type CampTimelinePresentation =
   | {
       kind: 'task_event'
@@ -2459,6 +2471,10 @@ export interface RovaiApi {
   composerAttachments: {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
     preview(attachmentId: string): Promise<AttachmentPreview | null>
+  }
+  attachments: {
+    open(campId: string, attachmentId: string): Promise<AttachmentOpenResult>
+    reveal(campId: string, attachmentId: string): Promise<AttachmentRevealResult>
   }
   clipboard: {
     write(input: { text: string; html: string | null }): Promise<void>

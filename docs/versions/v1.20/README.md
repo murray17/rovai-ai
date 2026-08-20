@@ -4,14 +4,15 @@ version: v1.20
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: planned
+implementation_status: implemented
 model_context_change: false
 last_updated: 2026-08-20
 ---
 
 # Rovai-ai v1.20：会话附件系统打开
 
-> 当前状态：设计与长期合同已确认，实施待完成。
+> 当前状态：设计与实现已完成，仓库自动化验收除一项既有 Runtime compatibility register 摘要失配外
+> 已通过；隔离 App 人工交互验收与发布交付待后续执行。
 >
 > 前置版本：[v1.19 Agent 文件入口隔离与纯附件发送](../v1.19/README.md)。v1.19 已按完成事实冻结为
 > historical；其 Authority ingress、统一 publication 与 Runtime View v3 继续作为本版基线。
@@ -40,6 +41,16 @@ last_updated: 2026-08-20
 本版不增加数据库 Migration，不改变 Data Contract、CampMessage/Attachment read model、Runtime View、
 ContextManifest、Run Facts、Built-in Tool 或模型输入字节。Camp Attachment 合同升级到 v5，只新增 Desktop
 本机读取与打开边界；Renderer `RovaiApi` 增加封闭的 `attachments` namespace。
+
+## 实施结果
+
+- Core 将图片预览和 Desktop open target 都拆成短数据库候选查询与无数据库锁的阻塞式 Authority 校验，
+  不在全局数据库 mutex 内读取或哈希 payload；
+- Desktop Main 已实现 closed target parsing、高风险原生确认、系统打开/显示所在位置和稳定无路径错误映射；
+- Timeline 已实现图片预览、普通文件/目录系统打开、右键菜单、`Shift+F10` / Context Menu 键、忙碌与 Toast；
+- 定向 Rust、TypeScript、Vitest、fmt、Clippy、Desktop build、文档与全量前端测试通过。Rust PR suite 的
+  功能无关唯一失败是当前 `main` 已存在的 `runtime-compatibility.md` 摘要与
+  `MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION` 常量不一致；本版不擅自吸收另一分支上的独立修复。
 
 ## 明确不做
 

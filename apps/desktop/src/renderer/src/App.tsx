@@ -2777,6 +2777,7 @@ export function App(): React.JSX.Element {
             firstRunCamp={firstRunCamp}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
+            onNotify={setToast}
           />
         )}
 

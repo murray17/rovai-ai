@@ -183,6 +183,14 @@ const api: RovaiApi = {
       return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
     }
   },
+  attachments: {
+    open(campId, attachmentId) {
+      return ipcRenderer.invoke('rovai:attachment-open', campId, attachmentId)
+    },
+    reveal(campId, attachmentId) {
+      return ipcRenderer.invoke('rovai:attachment-reveal', campId, attachmentId)
+    }
+  },
   clipboard: {
     write(input) {
       return ipcRenderer.invoke('rovai:clipboard-write', input)

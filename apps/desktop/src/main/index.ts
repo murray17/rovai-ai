@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promi
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
+import { isCampId } from '@contracts'
 import type {
   AppearanceSnapshot,
   CoreMethod,
@@ -52,6 +53,13 @@ import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
 import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
 import { windowChromeOptions } from './window-chrome'
+import {
+  isAttachmentId,
+  openDesktopAttachmentTarget,
+  parseDesktopAttachmentTarget,
+  revealDesktopAttachmentTarget,
+  type DesktopAttachmentTarget
+} from './attachment-desktop'
 import {
   bindWindowsDataRootBeforeReady,
   prepareWindowsDataRoot,
@@ -655,6 +663,22 @@ ipcMain.handle(
 const MAX_COMPOSER_ATTACHMENT_BYTES = 25 * 1024 * 1024
 const MAX_COMPOSER_PREVIEW_BYTES = 8 * 1024 * 1024
 
+async function resolveDesktopAttachmentTarget(
+  campId: unknown,
+  attachmentId: unknown
+): Promise<DesktopAttachmentTarget | null> {
+  if (!isCampId(campId) || !isAttachmentId(attachmentId)) return null
+  try {
+    const value = await core.request<unknown>(
+      'camp.attachments.desktopOpenTarget' as CoreMethod,
+      { campId, attachmentId }
+    )
+    return parseDesktopAttachmentTarget(value, attachmentId)
+  } catch {
+    return null
+  }
+}
+
 function requireIpcString(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 1024) {
     throw new Error(`${label} 无效。`)
@@ -739,6 +763,43 @@ ipcMain.handle(
       mediaType: source.mediaType,
       bytes: new Uint8Array(bytes)
     }
+  }
+)
+
+ipcMain.handle(
+  'rovai:attachment-open',
+  async (_event, campId: unknown, attachmentId: unknown) => {
+    const target = await resolveDesktopAttachmentTarget(campId, attachmentId)
+    if (!target) return { opened: false, error: 'target_unavailable' as const }
+    return openDesktopAttachmentTarget(target, {
+      async confirm(displayName) {
+        const options = {
+          type: 'warning' as const,
+          buttons: ['取消', '仍然打开'],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          message: '此文件可能执行程序或安装软件',
+          detail: `只有在你确认来源可信时才继续。\n\n${displayName}`
+        }
+        const result = mainWindow
+          ? await dialog.showMessageBox(mainWindow, options)
+          : await dialog.showMessageBox(options)
+        return result.response === 1
+      },
+      openPath(path) {
+        return shell.openPath(path)
+      }
+    })
+  }
+)
+
+ipcMain.handle(
+  'rovai:attachment-reveal',
+  async (_event, campId: unknown, attachmentId: unknown) => {
+    const target = await resolveDesktopAttachmentTarget(campId, attachmentId)
+    if (!target) return { revealed: false, error: 'target_unavailable' as const }
+    return revealDesktopAttachmentTarget(target, (path) => shell.showItemInFolder(path))
   }
 )
 

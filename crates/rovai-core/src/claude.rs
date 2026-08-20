@@ -461,6 +461,21 @@ impl ClaudeCodeCliRuntimeAdapter {
         }
         if !status.success() {
             let raw_stderr = String::from_utf8_lossy(&stderr.bytes);
+            let exit_diagnostic = format!(
+                "Claude Code process exited with {} (stderrBytes={}, stderrDigest={})",
+                status, stderr.total_bytes, stderr.digest
+            );
+            if raw_stderr.trim().is_empty()
+                && let Some(output) = stdout.final_result.as_ref()
+                && let Err(error) = validate_claude_terminal_result(
+                    output,
+                    &native_session_id,
+                    &native_turn_id,
+                    &claude_sensitive_paths(request, &self.private_runtime_dir),
+                )
+            {
+                return Err(error.context(exit_diagnostic));
+            }
             let compatibility = explicit_mcp_config_rejection(&stderr.bytes)
                 || unsupported_option_rejection(&stderr.bytes);
             let failure = claude_public_failure(
@@ -485,12 +500,7 @@ impl ClaudeCodeCliRuntimeAdapter {
                 Some(&raw_stderr),
                 !compatibility,
             );
-            let internal = anyhow::anyhow!(
-                "Claude Code process exited with {} (stderrBytes={}, stderrDigest={})",
-                status,
-                stderr.total_bytes,
-                stderr.digest
-            );
+            let internal = anyhow::anyhow!(exit_diagnostic);
             return Err(claude_failure_error(
                 internal,
                 failure,
@@ -1356,6 +1366,68 @@ mod tests {
     use serde_json::json;
     use tokio::io::AsyncWriteExt;
 
+    #[cfg(unix)]
+    fn fake_claude_request(
+        workspace: &Path,
+        executable: &Path,
+        agent_run_id: String,
+        session_id: &str,
+    ) -> ClaudeCodeRunRequest {
+        use rovai_core::agent_profile::{
+            AdapterKind, AdapterPermissionConfig, ResolvedModelSelection,
+        };
+
+        ClaudeCodeRunRequest {
+            agent_run_id,
+            execution_epoch: 1,
+            workspace: AgentRunWorkspace {
+                execution_root: workspace.to_string_lossy().to_string(),
+                access: "read_write".to_string(),
+                isolation: "shared".to_string(),
+            },
+            permission_semantics: PermissionSemantics::RuntimeManagedV2,
+            runtime: FrozenAgentRuntimeConfig {
+                adapter_kind: AdapterKind::ClaudeCodeCli,
+                installation_id: "claude-test".to_string(),
+                installation_generation: 1,
+                search_environment_generation: 1,
+                executable_path: executable.to_string_lossy().to_string(),
+                auth_scope: "test".to_string(),
+                reported_version: Some("test".to_string()),
+                executable_fingerprint: "sha256:test".to_string(),
+                capabilities: vec!["cli.print".to_string()],
+                protocol_version: "claude-code-cli-v1".to_string(),
+                model: ResolvedModelSelection {
+                    source: "runtime_default".to_string(),
+                    model_id: CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                    options: json!({}),
+                },
+                permissions: AdapterPermissionConfig {
+                    adapter_kind: AdapterKind::ClaudeCodeCli,
+                    schema_version: 1,
+                    values: json!({"permission_mode": "manual"}),
+                },
+                native_session_compatibility_key: Some(
+                    "claude-code-cli:stream-json-v1".to_string(),
+                ),
+                binding_compatibility_digest: "binding".to_string(),
+                host_config_digest: "host".to_string(),
+                config_digest: "config".to_string(),
+            },
+            prompt: "test input".to_string(),
+            resumable_native_session_id: None,
+            new_native_session_id: Some(session_id.to_string()),
+            session_bootstrap: None,
+            builtin_tools: None,
+            external_mcp_servers: BTreeMap::new(),
+            attachment_access_root: None,
+            persist_session: true,
+            input_accepted: None,
+            runtime_events: None,
+            launch_handoff: None,
+        }
+    }
+
     #[test]
     fn accepts_only_uuid_session_identifiers() {
         assert!(validate_session_id("0bdd2166-d420-40c6-94be-70b93eb290c5").is_ok());
@@ -1464,6 +1536,71 @@ mod tests {
             .downcast_ref::<ClaudeCodeDeliveredFailure>()
             .expect("the incompatible terminal still proves the requested one-shot turn ended");
         assert_eq!(proof.failure.origin, RuntimeFailureOrigin::Compatibility);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn nonzero_exit_with_empty_stderr_preserves_structured_provider_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // This process-boundary fixture owns the exit-status ordering regression;
+        // the pure terminal validator cannot prove that run_process reaches it.
+        let root = std::env::temp_dir().join(format!(
+            "rovai-claude-nonzero-structured-failure-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let workspace = root.join("workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace should be created");
+        let executable = root.join("fake-claude");
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        std::fs::write(
+            &executable,
+            format!(
+                r#"#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{{"type":"stream_event","session_id":"{session_id}","event":{{"type":"message_start"}}}}'
+printf '%s\n' '{{"type":"result","subtype":"error","is_error":true,"result":"API Error: 529 overloaded; api_key=private-key","session_id":"{session_id}"}}'
+exit 1
+"#,
+            ),
+        )
+        .expect("fake Claude executable should be written");
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+            .expect("fake Claude executable should be executable");
+        let adapter = ClaudeCodeCliRuntimeAdapter::new(&root).expect("Adapter should initialize");
+        let mut request = fake_claude_request(
+            &workspace,
+            &executable,
+            uuid::Uuid::new_v4().to_string(),
+            session_id,
+        );
+        let (accepted_sender, mut accepted_receiver) = mpsc::unbounded_channel();
+        request.input_accepted = Some(accepted_sender);
+
+        let error = adapter
+            .run(request)
+            .await
+            .expect_err("structured Provider failure must remain visible on exit 1");
+        let diagnostic = format!("{error:#}");
+        let delivered = error
+            .downcast_ref::<ClaudeCodeDeliveredFailure>()
+            .expect("structured final should prove the delivered turn ended")
+            .clone();
+        let accepted = accepted_receiver
+            .try_recv()
+            .expect("message_start should preserve accepted-input proof");
+        std::fs::remove_dir_all(&root).expect("temporary root should be removed");
+
+        assert_eq!(accepted.native_session_id, session_id);
+        assert_eq!(delivered.error_code, "runtime_terminal_failure");
+        assert_eq!(delivered.failure.origin, RuntimeFailureOrigin::Runtime);
+        assert_eq!(delivered.failure.phase, RuntimeFailurePhase::Terminal);
+        let detail = delivered.failure.detail.as_deref().expect("safe detail");
+        assert!(detail.contains("API Error: 529 overloaded"));
+        assert!(detail.contains("api_key=[redacted]"));
+        assert!(!detail.contains("private-key"));
+        assert!(diagnostic.contains("exit status: 1"));
+        assert!(diagnostic.contains("stderrBytes=0"));
     }
 
     #[test]

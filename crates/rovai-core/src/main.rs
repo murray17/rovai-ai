@@ -386,6 +386,8 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
             | "camp.attachments.prepareFromPath"
+            | "camp.attachments.previewSource"
+            | "camp.attachments.desktopOpenTarget"
             | "campTurns.cancel"
             | "agentRuns.cancel"
             | "runtime.pendingExecution.cancel"
@@ -820,6 +822,13 @@ struct PrepareAttachmentFromPathParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AttachmentPreviewSourceParams {
+    attachment_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DesktopAttachmentTargetParams {
+    camp_id: CampId,
     attachment_id: String,
 }
 
@@ -5214,9 +5223,21 @@ impl Core {
             "camp.attachments.previewSource" => {
                 let params: AttachmentPreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;
-                let database = self.database.lock().await;
-                let source = CampAttachmentStore::new(&self.data_dir)
-                    .preview_source(&database, &params.attachment_id)?;
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let candidate = {
+                    let database = self.database.lock().await;
+                    store.preview_candidate(&database, &params.attachment_id)?
+                };
+                let source = match candidate {
+                    Some(candidate) => Some(
+                        tokio::task::spawn_blocking(move || {
+                            store.verify_preview_candidate(candidate)
+                        })
+                        .await
+                        .context("Attachment preview verification task failed")??,
+                    ),
+                    None => None,
+                };
                 Ok(match source {
                     Some(source) => json!({
                         "path": source.path,
@@ -5225,6 +5246,28 @@ impl Core {
                     }),
                     None => Value::Null,
                 })
+            }
+            "camp.attachments.desktopOpenTarget" => {
+                let params: DesktopAttachmentTargetParams =
+                    serde_json::from_value(request.params.clone())?;
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let candidate = {
+                    let database = self.database.lock().await;
+                    store.desktop_open_candidate(
+                        &database,
+                        params.camp_id.as_str(),
+                        &params.attachment_id,
+                    )?
+                };
+                let Some(candidate) = candidate else {
+                    return Ok(Value::Null);
+                };
+                let target = tokio::task::spawn_blocking(move || {
+                    store.verify_desktop_open_candidate(candidate)
+                })
+                .await
+                .context("Desktop Attachment target verification task failed")??;
+                Ok(serde_json::to_value(target)?)
             }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
