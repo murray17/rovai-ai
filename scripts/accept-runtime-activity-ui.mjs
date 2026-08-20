@@ -911,22 +911,23 @@ async function seedFixture() {
   assert(typeof runtimeRootMarker.rootIdentityDigest === 'string',
     `Runtime Files Root marker did not expose its identity: ${JSON.stringify(runtimeRootMarker)}`)
   const emptyCatalogDigest = '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
+  const attachmentRootRelativePath = `camps/${campId}/attachments`
+  const publishedAttachmentRoot = join(runtimeRoot, attachmentRootRelativePath)
   const campAttachmentViewReceipt = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     campId,
-    publishedAttachmentRoot: join(runtimeRoot, 'camps', campId, 'attachments'),
-    rootIdentityDigest: runtimeRootMarker.rootIdentityDigest,
-    minimumReadyGeneration: 1,
+    attachmentRootRelativePath,
+    catalogRevision: 0,
     catalogEntryCount: 0,
-    catalogDigest: emptyCatalogDigest,
-    referencedAttachmentIds: [],
-    referencedAttachmentSetDigest: canonicalJsonDigest([])
+    semanticCatalogDigest: emptyCatalogDigest,
+    referencedEntries: [],
+    referencedEntriesDigest: canonicalJsonDigest([])
   }
   const campAttachmentViewReceiptDigest = canonicalJsonDigest(campAttachmentViewReceipt)
   const runtimeAttachmentAuthReceipt = {
     schemaVersion: 1,
     campId,
-    publishedAttachmentRoot: campAttachmentViewReceipt.publishedAttachmentRoot,
+    publishedAttachmentRoot,
     rootIdentityDigest: runtimeRootMarker.rootIdentityDigest,
     dispatchGeneration: 1,
     catalogDigestAtDispatch: emptyCatalogDigest,
@@ -1118,12 +1119,13 @@ async function seedFixture() {
     INSERT INTO camp_attachment_view(
       camp_id, state, generation, root_relative_path,
       root_identity_digest, entry_count, aggregate_bytes,
-      catalog_digest, active_operation_id, last_error_code,
+      catalog_digest, catalog_revision, semantic_catalog_digest,
+      active_operation_id, last_error_code,
       created_at, updated_at
     )
     SELECT id, 'ready', 1, 'camps/' || id || '/attachments',
            ${sqlLiteral(runtimeRootMarker.rootIdentityDigest)}, 0, 0,
-           ${sqlLiteral(emptyCatalogDigest)},
+           ${sqlLiteral(emptyCatalogDigest)}, 0, ${sqlLiteral(emptyCatalogDigest)},
            NULL, NULL, ${sqlLiteral(now)}, ${sqlLiteral(now)}
     FROM camp
     WHERE id IN (
@@ -1231,7 +1233,7 @@ async function seedFixture() {
       '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}',
       'agent_v1', '{"schemaVersion":1,"included":false}',
       '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92',
-      20, 2, 1,
+      21, 2, 2,
       ${sqlLiteral(JSON.stringify(campAttachmentViewReceipt))},
       ${sqlLiteral(campAttachmentViewReceiptDigest)}
     );
