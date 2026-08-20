@@ -37,10 +37,12 @@ View 不改变消息、历史 ContextManifest、Managed Blob、摘要或 Authori
   rebuild 与受管清理。
 - `PublishedAttachmentPathResolver` 只从 ready View Entry receipt 解析稳定 Runtime path；它不做字符串前缀替换，
   不从模型、Manifest 或目录扫描接受任意路径。
-- Context materializer 在同一 Camp read admission 内选择消息、解析所有显式 attachment occurrence、加入
-  `RUN_FACTS.campResources` 并冻结 Formatter 21 / Manifest 21；模型 bytes 不因 Manifest 版本推进而改变。
-- Runtime launch 再验证同一 View receipt，记录 Runtime Attachment Auth Receipt，并且只把当前 Camp 精确
-  `attachments` 根交给 Adapter。
+- Scheduler 为每个 AgentRun 只取得一次带 Camp identity 的 read admission；Context materializer、Runtime
+  authorization、Host acquire、resume 与模型输入投递都复用这份 admission，不在内部嵌套申请 read gate。
+- Core 在该 admission 内为一次 dispatch 生成一份 verified Runtime authorization；Context materializer 复用其
+  结果冻结 Formatter 21 / Manifest 21 与 `RUN_FACTS.campResources`，Runtime launch 用同一结果记录 Runtime
+  Attachment Auth Receipt，并且只把当前 Camp 精确 `attachments` 根交给 Adapter。模型 bytes 不因 Manifest
+  版本推进而改变。
 
 ## 发布与并发
 
@@ -52,11 +54,15 @@ insert guard 共同串行化不同 command ID，幂等重试继续复用同一 o
 回滚，不得删除另一个已提交 operation 拥有的 final Entry。该 gate 与 Context freeze、Host acquire、resume、
 prompt dispatch 的 Camp read admission 互斥。Core 在 gate 内停止或 fence 不兼容 Host、原子 promote 完整 Entry subtree，最后在一个短
 SQLite transaction 中提交消息、`message_attachment`、View Entry、generation 和既有 Turn/Run 业务事实。
-SQLite commit 是 Draft→Published 与 Camp 共享授权的线性化点。
+SQLite commit 是 Draft→Published 与 Camp 共享授权的线性化点。commit 后的常规 completion 只对本 operation
+新增 Entry 做 payload/digest/identity 校验，同时枚举顶层 attachment ID 并复核完整 catalog receipt；它不重读和
+重哈希全部历史 Entry。无附件 follow-up 同样只校验 ready View 的数据库 receipt。
 
 调度器必须在把 AgentRun 从 queued Claim 为 running 前先取得 Camp View read admission，并把 owned guard 移入
 AgentRun task，使其覆盖 Skill/MCP 准备、launch 和整次 Run。这样 write gate 已进入时新 Run 保持 queued，Run
 已获 read admission 时 publication 等待，不会形成“running Run 等待 publication write guard”的锁序环。
+Context freeze 或 Runtime launch 不得再次申请同一 Camp read gate；否则等待中的公平 write gate 会与 Run 已持有
+的 read admission 形成锁等待环。
 发布、Draft discard、Camp 删除和完整性重建取得
 有界 write gate；force Camp delete 先停止/fence 相关 Runtime，再等待 write gate，避免 read guard 与 stop
 互相等待。gate 超时不会消费 Draft或产生公共消息。
@@ -74,6 +80,11 @@ generation。Camp A 与 Camp B 不共享 Host/Session/Binding。Runtime 从不�
 其他 Camp root 或 Authority Camp root。
 
 ## 启动恢复与生命周期
+
+每次新 dispatch 或明确可重试 dispatch 仍对当前 Camp 做一次完整物理校验，但完整文件读取不占用全局
+Database mutex：Core 在短数据库锁内冻结 generation、catalog receipt 与 Entry 预期值，在 `spawn_blocking`
+中无数据库锁地枚举和哈希整个 View，再以短数据库锁确认 generation/catalog 未变化并提交 verified
+authorization。Context 构造和 Runtime launch 共享该结果，不重复扫描。
 
 Core 在开放任何 Runtime admission 前取得 data-dir/root locks，收敛 publication/cleanup journal，并逐 Camp 比较：
 

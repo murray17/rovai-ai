@@ -227,16 +227,37 @@ const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55)
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 async fn claim_agent_run_under_attachment_admission<F, Fut, T>(
+    camp_id: String,
     gate: Arc<RwLock<()>>,
     claim: F,
-) -> (tokio::sync::OwnedRwLockReadGuard<()>, T)
+) -> (CampAttachmentReadAdmission, T)
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = T>,
 {
-    let admission = gate.read_owned().await;
+    let guard = gate.read_owned().await;
     let claim = claim().await;
-    (admission, claim)
+    (
+        CampAttachmentReadAdmission {
+            camp_id,
+            _guard: guard,
+        },
+        claim,
+    )
+}
+
+struct CampAttachmentReadAdmission {
+    camp_id: String,
+    _guard: tokio::sync::OwnedRwLockReadGuard<()>,
+}
+
+impl CampAttachmentReadAdmission {
+    fn prove(&self, camp_id: &str) -> Result<()> {
+        if self.camp_id != camp_id {
+            anyhow::bail!("Camp Attachment read admission does not match the AgentRun Camp");
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1038,9 +1059,26 @@ struct PreparedRuntimeLaunch<'a> {
     resume_disposition: NativeSessionResumeDisposition,
     skill_exposure: &'a PreparedSkillExposure,
     mcp_projection: &'a PreparedMcpProjection,
+    attachment_admission: &'a CampAttachmentReadAdmission,
     attachment_authorization: &'a CampAttachmentRuntimeAuthorization,
     output: &'a mpsc::UnboundedSender<String>,
     launch_permit: &'a mut ExecutionLaunchPermit,
+}
+
+#[derive(Clone, Copy)]
+struct CampAttachmentRunAccess<'a> {
+    admission: &'a CampAttachmentReadAdmission,
+    authorization: &'a CampAttachmentRuntimeAuthorization,
+}
+
+impl CampAttachmentRunAccess<'_> {
+    fn prove(self, execution: &AgentRunExecution) -> Result<()> {
+        self.admission.prove(&execution.camp_id)?;
+        if self.authorization.camp_id != execution.camp_id {
+            anyhow::bail!("Camp Attachment Runtime authorization does not match the AgentRun Camp");
+        }
+        Ok(())
+    }
 }
 
 enum AgentRunRuntime {
@@ -5478,9 +5516,8 @@ impl Core {
             };
             match committed {
                 Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                    let mut database = self.database.lock().await;
-                    self.attachment_views
-                        .complete_publication(&mut database, &publication.operation_id)?;
+                    self.complete_camp_attachment_publication(&publication.operation_id)
+                        .await?;
                     execution
                 }
                 Ok(execution) => {
@@ -5512,6 +5549,50 @@ impl Core {
             "preflight": null,
             "pendingExecution": null,
         }))
+    }
+
+    async fn complete_camp_attachment_publication(&self, operation_id: &str) -> Result<()> {
+        let verification = {
+            let mut database = self.database.lock().await;
+            self.attachment_views
+                .prepare_publication_completion(&mut database, operation_id)?
+        };
+        let camp_id = verification.camp_id().to_string();
+        let operation_id = verification.operation_id().to_string();
+        let verified = match tokio::task::spawn_blocking(move || verification.verify()).await {
+            Ok(Ok(verified)) => verified,
+            Ok(Err(error)) => {
+                let mut database = self.database.lock().await;
+                self.attachment_views.fail_publication_completion(
+                    &mut database,
+                    &operation_id,
+                    &camp_id,
+                )?;
+                return Err(error).context("camp_attachment_view_integrity_failed");
+            }
+            Err(error) => {
+                let mut database = self.database.lock().await;
+                self.attachment_views.fail_publication_completion(
+                    &mut database,
+                    &operation_id,
+                    &camp_id,
+                )?;
+                return Err(error).context("Camp Attachment View verification task failed");
+            }
+        };
+        let mut database = self.database.lock().await;
+        if let Err(error) = self
+            .attachment_views
+            .complete_verified_publication(&mut database, verified)
+        {
+            self.attachment_views.fail_publication_completion(
+                &mut database,
+                &operation_id,
+                &camp_id,
+            )?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     async fn deep_probe_candidate(
@@ -5785,8 +5866,10 @@ impl Core {
         }
         let starting_git_observation = Some(git::observe_git(&workspace_path).await);
         let attachment_view_gate = self.attachment_view_gate(&candidate.camp_id).await;
-        let (attachment_view_admission, claim) =
-            claim_agent_run_under_attachment_admission(attachment_view_gate, || async {
+        let (attachment_view_admission, claim) = claim_agent_run_under_attachment_admission(
+            candidate.camp_id.clone(),
+            attachment_view_gate,
+            || async {
                 let mut database = self.database.lock().await;
                 ExecutionRuntimeService::default().claim_agent_run(
                     &mut database,
@@ -5812,8 +5895,9 @@ impl Core {
                         },
                     },
                 )
-            })
-            .await;
+            },
+        )
+        .await;
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
             Ok(_) => return,
@@ -5903,10 +5987,14 @@ impl Core {
         let mut agent_run_tasks = self.agent_run_tasks.lock().await;
         while agent_run_tasks.try_join_next().is_some() {}
         agent_run_tasks.spawn(async move {
-            let _attachment_view_admission = attachment_view_admission;
             let mut launch_permit = launch_permit;
             let launch_result = core
-                .launch_agent_run(&execution, &output, &mut launch_permit)
+                .launch_agent_run(
+                    &execution,
+                    &attachment_view_admission,
+                    &output,
+                    &mut launch_permit,
+                )
                 .await;
             if launch_result.is_ok() {
                 core.planned_shutdown
@@ -6876,17 +6964,15 @@ impl Core {
     async fn materialize_agent_run_context(
         &self,
         execution: &AgentRunExecution,
+        attachment_access: CampAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
         charter_delivery_mode: CharterDeliveryMode,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<PreparedContext>> {
-        let view_gate = self.attachment_view_gate(&execution.camp_id).await;
-        let _view_read = view_gate.read().await;
+        attachment_access.prove(execution)?;
         let materialization = {
             let mut database = self.database.lock().await;
-            self.attachment_views
-                .verify_camp_ready(&database, &execution.camp_id)?;
             ContextService.materialize_with_exposures(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
@@ -6922,20 +7008,18 @@ impl Core {
     async fn materialize_and_prepare_agent_run_input(
         &self,
         execution: &AgentRunExecution,
+        attachment_access: CampAttachmentRunAccess<'_>,
         skill_exposure: &PreparedSkillExposure,
         mcp_projection: &PreparedMcpProjection,
         charter_delivery_mode: CharterDeliveryMode,
         output: &mpsc::UnboundedSender<String>,
     ) -> Result<Option<(PreparedContext, RuntimeInputDelivery)>> {
-        let view_gate = self.attachment_view_gate(&execution.camp_id).await;
-        let _view_read = view_gate.read().await;
+        attachment_access.prove(execution)?;
         let preparation = {
             // The Core database mutex is the logical Runtime Input preparation
             // boundary. A Compaction Observer cannot commit between selecting
             // the pending revision and persisting RuntimeInputDelivery.prepared.
             let mut database = self.database.lock().await;
-            self.attachment_views
-                .verify_camp_ready(&database, &execution.camp_id)?;
             let materialization = ContextService.materialize_with_exposures(
                 &mut database,
                 &ManagedBlobStore::new(&self.data_dir),
@@ -7794,12 +7878,37 @@ impl Core {
         }
     }
 
+    async fn verified_camp_runtime_authorization(
+        &self,
+        camp_id: &str,
+        workspace: &Path,
+        visibility_mode: CampAttachmentVisibilityMode,
+    ) -> Result<CampAttachmentRuntimeAuthorization> {
+        let verification = {
+            let database = self.database.lock().await;
+            self.attachment_views.prepare_camp_runtime_authorization(
+                &database,
+                camp_id,
+                Some(workspace),
+                visibility_mode,
+            )?
+        };
+        let verified = tokio::task::spawn_blocking(move || verification.verify())
+            .await
+            .context("Camp Attachment View verification task failed")??;
+        let database = self.database.lock().await;
+        self.attachment_views
+            .complete_verified_camp_runtime_authorization(&database, verified)
+    }
+
     async fn launch_agent_run(
         self: &Arc<Self>,
         execution: &AgentRunExecution,
+        attachment_admission: &CampAttachmentReadAdmission,
         output: &mpsc::UnboundedSender<String>,
         launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
+        attachment_admission.prove(&execution.camp_id)?;
         let Some(skill_exposure) = self
             .prepare_agent_run_skill_exposure(execution)
             .await
@@ -7814,14 +7923,16 @@ impl Core {
         // No Adapter is promoted to live-append compatibility until a persisted,
         // artifact-bound positive probe proves the required warm-host behavior.
         let visibility_mode = CampAttachmentVisibilityMode::GenerationFencedV1;
-        let attachment_authorization = {
-            let database = self.database.lock().await;
-            self.attachment_views.camp_runtime_authorization(
-                &database,
+        let attachment_authorization = self
+            .verified_camp_runtime_authorization(
                 &execution.camp_id,
-                Some(Path::new(&execution.workspace.execution_root)),
+                Path::new(&execution.workspace.execution_root),
                 visibility_mode,
-            )?
+            )
+            .await?;
+        let attachment_access = CampAttachmentRunAccess {
+            admission: attachment_admission,
+            authorization: &attachment_authorization,
         };
         let attachment_access_root = attachment_authorization.attachment_root.clone();
         let resume_disposition = {
@@ -7850,6 +7961,7 @@ impl Core {
                     resume_disposition,
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
+                    attachment_admission,
                     attachment_authorization: &attachment_authorization,
                     output,
                     launch_permit,
@@ -7863,6 +7975,7 @@ impl Core {
                     resume_disposition,
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
+                    attachment_admission,
                     attachment_authorization: &attachment_authorization,
                     output,
                     launch_permit,
@@ -7876,6 +7989,7 @@ impl Core {
                     resume_disposition,
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
+                    attachment_admission,
                     attachment_authorization: &attachment_authorization,
                     output,
                     launch_permit,
@@ -8052,6 +8166,7 @@ impl Core {
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
+                attachment_access,
                 &skill_exposure,
                 &mcp_projection,
                 CharterDeliveryMode::NativeAppend,
@@ -8151,10 +8266,15 @@ impl Core {
             resume_disposition,
             skill_exposure,
             mcp_projection,
+            attachment_admission,
             attachment_authorization,
             output,
             launch_permit,
         } = launch;
+        let attachment_access = CampAttachmentRunAccess {
+            admission: attachment_admission,
+            authorization: attachment_authorization,
+        };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
@@ -8176,6 +8296,7 @@ impl Core {
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
+                attachment_access,
                 skill_exposure,
                 mcp_projection,
                 CharterDeliveryMode::NativeAppend,
@@ -8698,10 +8819,15 @@ impl Core {
             resume_disposition,
             skill_exposure,
             mcp_projection,
+            attachment_admission,
             attachment_authorization,
             output,
             launch_permit,
         } = launch;
+        let attachment_access = CampAttachmentRunAccess {
+            admission: attachment_admission,
+            authorization: attachment_authorization,
+        };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
@@ -8716,6 +8842,7 @@ impl Core {
         let Some(prepared_context) = self
             .materialize_agent_run_context(
                 execution,
+                attachment_access,
                 skill_exposure,
                 mcp_projection,
                 CharterDeliveryMode::FirstPayload,
@@ -9075,10 +9202,15 @@ impl Core {
             resume_disposition,
             skill_exposure,
             mcp_projection,
+            attachment_admission,
             attachment_authorization,
             output,
             launch_permit,
         } = launch;
+        let attachment_access = CampAttachmentRunAccess {
+            admission: attachment_admission,
+            authorization: attachment_authorization,
+        };
         let attachment_access_root = &attachment_authorization.attachment_root;
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
@@ -9269,6 +9401,7 @@ impl Core {
         let Some((prepared_context, delivery)) = self
             .materialize_and_prepare_agent_run_input(
                 execution,
+                attachment_access,
                 skill_exposure,
                 mcp_projection,
                 CharterDeliveryMode::FirstPayload,
@@ -14962,6 +15095,7 @@ mod tests {
         let claim_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let claim_started_in_task = claim_started.clone();
         let claim_task = tokio::spawn(claim_agent_run_under_attachment_admission(
+            "rvcamp_test".to_string(),
             gate.clone(),
             move || async move {
                 claim_started_in_task.store(true, std::sync::atomic::Ordering::Release);
@@ -14980,6 +15114,8 @@ mod tests {
             .expect("Claim should proceed after publication releases the gate")
             .unwrap();
         assert_eq!(claim, "claimed");
+        admission.prove("rvcamp_test").unwrap();
+        assert!(admission.prove("rvcamp_other").is_err());
 
         assert!(
             tokio::time::timeout(Duration::from_millis(20), gate.clone().write_owned())

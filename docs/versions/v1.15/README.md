@@ -37,7 +37,9 @@ last_updated: 2026-08-20
 > semantics；物理 root/Entry identity、operation 与 generation 继续进入本机完整性和 Runtime Auth Receipt。
 > publication copy phase 同时移出全局 Database mutex；generation fence 与运行期禁止带附件发布保持不变。
 > 后续并发加固已实现为 Migration 101/schema 56：Scheduler 在 Claim 前取得并终生持有 Camp attachment read
-> admission；同一 Camp 只允许一个非终态 publish operation，gate 前重验 Draft，遗留重复 staging 可安全收敛。
+> admission，Context/Runtime 共用一次无 DB 锁的完整物理 authorization，不再嵌套获取 read gate 或重复扫描；
+> publication completion 只物理校验本次新增 Entry 与完整 catalog receipt。同一 Camp 只允许一个非终态 publish
+> operation，gate 前重验 Draft，遗留重复 staging 可安全收敛。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 
@@ -62,7 +64,8 @@ Platform。历史 v1.05 只保留当时设计过程和未实施快照，不作�
 - 新增 journaled Camp Published Attachment View、统一 Runtime path resolver、Camp generation fence、稳定 semantic
   catalog/receipt、Migration 99/100 clean break/backfill 与 Migration 101 publication serialization，同时保持
   Authority、历史 Manifest/Blob/Evidence 和 `contentDigest` 不变；附件 staging copy/digest/fsync 不持有全局
-  Database mutex；
+  Database mutex；每次 dispatch 的完整 View 校验采用短 DB snapshot、无锁 filesystem scan、短 DB CAS，Context
+  与 Runtime launch 复用同一 verified authorization，publication completion 不重哈希历史 Entry；
 - Skill Library 使用 Windows logical mode；Skill Projection 使用同父目录 copy、schema 2 journal、operationId、
   NTFS entry identity、持久 Run registration、bounded sharing retry 和 crash-window recovery；
 - 完成 secured Named Pipe Built-in Transport v17、Windows Renderer Interaction Delta、NSIS、PE/manifest verifier、
@@ -120,7 +123,10 @@ Migration 101 只接受已完整应用 Migration 100 的 `v1.15 / projection sch
 `publish` operation 的非终态查询索引与 insert guard，推进到 `v1.15 / projection schema 56`。它不改写
 ContextManifest、receipt、Authority、View Entry 或既有 operation；遗留重复 operation 由 startup recovery
 按已提交消息与 Entry ownership 收敛。Scheduler 同时统一为先取得 Camp attachment read admission、再 Claim
-AgentRun，并把 guard 持有到 Run 生命周期终止。
+AgentRun，并把唯一 guard 持有到 Run 生命周期终止。Context freeze、Runtime authorization、Host acquire、resume
+与模型输入投递复用该 admission；一次 dispatch 的完整物理校验在全局 Database mutex 外执行并由前后短锁 CAS
+保护，Context 与 Runtime launch 不重复校验。常规 publication completion 只校验本 operation 新增 Entry、完整
+顶层 ID 集合和 catalog receipt；startup recovery、明确诊断、controlled rebuild 与每次 dispatch 保留全量校验。
 
 ## 验收边界
 

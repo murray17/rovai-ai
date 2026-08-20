@@ -76,6 +76,12 @@ the short transaction that commits CampMessage, `message_attachment`, View Entry
 consumption remain the publication linearization boundary. An active or Warm Runtime may therefore continue to block a
 带附件 publication by product design.
 
+After that transaction commits, normal publication completion snapshots the full ready catalog receipt and top-level
+attachment ID set, but physically verifies only the Entries promoted by that operation. It then rechecks the unchanged
+generation/catalog receipt before marking the operation completed. It must not reread or rehash historical Entry
+payloads on this normal path. A no-attachment follow-up validates only the ready database receipt. Startup recovery,
+explicit integrity diagnosis, controlled rebuild and the next dispatch retain the full-view verification boundary.
+
 ## 3. Semantic Context receipt
 
 Every new Manifest stores `CampAttachmentViewReceiptV2`:
@@ -121,15 +127,22 @@ replaced or semantically changed attachments fail closed.
 }
 ```
 
-Before each new or explicitly retryable dispatch, Core validates the frozen semantic receipt, independently verifies the
-current local root/Entry identities, permissions, Authority digest and physical catalog, then creates a current Auth
-Receipt. Its digest remains part of `requestDigest`. A controlled rebuild may therefore preserve Context validity while
-still forcing a new Host generation and a new physical Runtime authorization.
+Before each new or explicitly retryable dispatch, Core validates the frozen semantic receipt and performs exactly one
+full physical verification of the current local root/Entry identities, permissions, Authority digest and catalog, then
+creates a current Auth Receipt. Verification is a three-phase protocol: snapshot generation/catalog/Entry expectations
+under a short Database lock; enumerate, read and hash the View without the Database lock in blocking filesystem work;
+then reacquire a short Database lock and reject the result unless generation, catalog receipt and Entry IDs are unchanged.
+The verified authorization is shared by Context materialization and Runtime launch; neither phase may rescan the View.
+Its digest remains part of `requestDigest`. A controlled rebuild may therefore preserve Context validity while still
+forcing a new Host generation and a new physical Runtime authorization.
 
 For `generation_fenced_v1`, the scheduler must acquire the Camp View read admission before changing an AgentRun from
 queued to running/claimed. The owned admission moves into the AgentRun task and remains held through Skill/MCP
 preparation, Runtime launch and the complete Runtime lifecycle. A publication that already owns the write gate therefore
 leaves new work queued; an already admitted Run makes publication wait. No production Claim path may invert that order.
+Each AgentRun acquires exactly one admission, which carries the Camp identity as a proof for Context materialization and
+Runtime authorization. Code beneath the scheduler must not reacquire the same Camp read gate while that admission is
+held, because a queued fair writer would create a read/write/read wait cycle.
 
 ## 5. Migration 100/101 and compatibility
 

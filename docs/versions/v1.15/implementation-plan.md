@@ -54,6 +54,12 @@ last_updated: 2026-08-20
 - [x] 修复 generation-fenced 并发锁序：Scheduler 先取得 Camp View read admission、再 Claim AgentRun，并把
   owned guard 持有到完整 Run 生命周期；同一 Camp 仅允许一个非终态 publish operation，gate 前重验 Draft，
   遗留重复 staging 回滚保留其他 operation 已提交的 Entry；Migration 101 推进到 schema 56。
+- [x] 将 admission 与 Runtime authorization 收口为每个 AgentRun 各一份：Context freeze、Host acquire、resume
+  和模型输入投递不嵌套获取 read gate；完整 View 校验采用短 DB snapshot、无 Database mutex 的 blocking scan、
+  短 DB CAS，并由 Context materialization 与 Runtime launch 复用 verified authorization。
+- [x] 将常规 publication completion 收口为完整 catalog receipt/top-level ID 复核加本 operation 新增 Entry 的
+  物理校验；历史 Entry 留给 startup/recovery、明确完整性诊断、controlled rebuild 与每次 dispatch 全量扫描，
+  并覆盖 DB mutex 释放、receipt drift CAS、新旧 Entry 校验边界回归。
 
 ## Checkpoint 1：平台、进程与私有文件系统
 

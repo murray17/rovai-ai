@@ -177,6 +177,77 @@ pub struct CampAttachmentRuntimeAuthorization {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+struct ReadyCampViewReceipt {
+    generation: i64,
+    root_relative_path: String,
+    root_identity_digest: String,
+    entry_count: i64,
+    aggregate_bytes: i64,
+    catalog_digest: String,
+    catalog_revision: i64,
+    semantic_catalog_digest: String,
+}
+
+#[derive(Debug)]
+struct CampAttachmentViewVerification {
+    camp_id: String,
+    root: PathBuf,
+    receipt: ReadyCampViewReceipt,
+    filesystem_ids: std::collections::BTreeSet<String>,
+    entries: Vec<CommittedViewEntryRow>,
+}
+
+#[derive(Debug)]
+pub struct CampAttachmentRuntimeAuthorizationVerification {
+    view: CampAttachmentViewVerification,
+    workspace: Option<PathBuf>,
+    visibility_mode: CampAttachmentVisibilityMode,
+}
+
+impl CampAttachmentRuntimeAuthorizationVerification {
+    pub fn verify(self) -> Result<VerifiedCampAttachmentRuntimeAuthorization> {
+        if let Some(workspace) = self.workspace.as_deref() {
+            let canonical_workspace = fs::canonicalize(workspace)
+                .context("AgentRun workspace cannot be canonicalized")?;
+            reject_overlap(&self.view.root, &canonical_workspace)?;
+        }
+        inspect_ready_camp_view(&self.view)?;
+        Ok(VerifiedCampAttachmentRuntimeAuthorization { verification: self })
+    }
+}
+
+#[derive(Debug)]
+pub struct VerifiedCampAttachmentRuntimeAuthorization {
+    verification: CampAttachmentRuntimeAuthorizationVerification,
+}
+
+#[derive(Debug)]
+pub struct CampAttachmentPublicationCompletionVerification {
+    operation_id: String,
+    view: CampAttachmentViewVerification,
+}
+
+impl CampAttachmentPublicationCompletionVerification {
+    pub fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+
+    pub fn camp_id(&self) -> &str {
+        &self.view.camp_id
+    }
+
+    pub fn verify(self) -> Result<VerifiedCampAttachmentPublicationCompletion> {
+        inspect_ready_camp_view(&self.view)?;
+        Ok(VerifiedCampAttachmentPublicationCompletion { verification: self })
+    }
+}
+
+#[derive(Debug)]
+pub struct VerifiedCampAttachmentPublicationCompletion {
+    verification: CampAttachmentPublicationCompletionVerification,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct AuthorityAttachmentRow {
     attachment_id: String,
     media_type: String,
@@ -463,7 +534,7 @@ impl CampAttachmentViewStore {
 
         let rows = load_prepared_authority_rows(database.connection(), camp_id)?;
         if rows.is_empty() {
-            self.verify_camp_ready(database, camp_id)?;
+            self.verify_camp_ready_receipt(database, camp_id)?;
             return Ok(CampAttachmentPublicationStaging::None);
         }
         let requested_bytes = rows.iter().try_fold(0_u64, |total, row| {
@@ -841,38 +912,72 @@ impl CampAttachmentViewStore {
         Ok(current_attachment_ids == publication.attachment_ids)
     }
 
-    pub fn complete_publication(&self, database: &mut Database, operation_id: &str) -> Result<()> {
+    pub fn prepare_publication_completion(
+        &self,
+        database: &mut Database,
+        operation_id: &str,
+    ) -> Result<CampAttachmentPublicationCompletionVerification> {
         validate_operation_id(operation_id)?;
         let camp_id: String = database.connection().query_row(
             "SELECT camp_id FROM camp_attachment_view_operation WHERE id = ?1 AND status = 'committed'",
             [operation_id],
             |row| row.get(0),
         )?;
-        if let Err(error) = self.verify_camp_ready(database, &camp_id) {
-            let now = chrono::Utc::now().to_rfc3339();
-            database.connection().execute(
-                r#"
-                UPDATE camp_attachment_view
-                SET state = 'integrity_failed', active_operation_id = ?2,
-                    last_error_code = 'camp_attachment_view_integrity_failed',
-                    updated_at = ?3
-                WHERE camp_id = ?1
-                "#,
-                params![camp_id, operation_id, now],
+        let preparation = (|| {
+            let operation_attachment_ids =
+                load_all_operation_attachment_ids(database.connection(), operation_id)?
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>();
+            if operation_attachment_ids.is_empty() {
+                anyhow::bail!(
+                    "camp_attachment_view_recovery_required: committed publication has no entries"
+                );
+            }
+            let mut view = prepare_ready_camp_view_verification(
+                database.connection(),
+                &self.root,
+                &self.root_identity_digest,
+                &camp_id,
             )?;
-            database.connection().execute(
-                r#"
-                UPDATE camp_attachment_view_operation
-                SET status = 'recovery_required',
-                    error_code = 'camp_attachment_view_integrity_failed',
-                    updated_at = ?2
-                WHERE id = ?1 AND status = 'committed'
-                "#,
-                params![operation_id, now],
-            )?;
-            return Err(error).context("camp_attachment_view_integrity_failed");
+            view.entries
+                .retain(|entry| operation_attachment_ids.contains(&entry.attachment_id));
+            if view.entries.len() != operation_attachment_ids.len() {
+                anyhow::bail!(
+                    "camp_attachment_view_recovery_required: committed publication entries are incomplete"
+                );
+            }
+            Ok(CampAttachmentPublicationCompletionVerification {
+                operation_id: operation_id.to_string(),
+                view,
+            })
+        })();
+        match preparation {
+            Ok(verification) => Ok(verification),
+            Err(error) => {
+                self.fail_publication_completion(database, operation_id, &camp_id)?;
+                Err(error).context("camp_attachment_view_integrity_failed")
+            }
         }
-        self.remove_operation_staging(database.connection(), operation_id)?;
+    }
+
+    pub fn complete_verified_publication(
+        &self,
+        database: &mut Database,
+        verified: VerifiedCampAttachmentPublicationCompletion,
+    ) -> Result<()> {
+        let verification = verified.verification;
+        confirm_ready_camp_view(database.connection(), &verification.view)?;
+        let operation_id = verification.operation_id;
+        let camp_id = verification.view.camp_id;
+        let operation_camp_id: String = database.connection().query_row(
+            "SELECT camp_id FROM camp_attachment_view_operation WHERE id = ?1 AND status = 'committed'",
+            [&operation_id],
+            |row| row.get(0),
+        )?;
+        if operation_camp_id != camp_id {
+            anyhow::bail!("camp_attachment_view_recovery_required: publication Camp changed");
+        }
+        self.remove_operation_staging(database.connection(), &operation_id)?;
         let now = chrono::Utc::now().to_rfc3339();
         let changed = database.connection().execute(
             r#"
@@ -886,6 +991,53 @@ impl CampAttachmentViewStore {
             anyhow::bail!("camp_attachment_view_recovery_required: operation was not committed");
         }
         Ok(())
+    }
+
+    pub fn fail_publication_completion(
+        &self,
+        database: &mut Database,
+        operation_id: &str,
+        camp_id: &str,
+    ) -> Result<()> {
+        validate_operation_id(operation_id)?;
+        CampId::parse(camp_id)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view
+            SET state = 'integrity_failed', active_operation_id = ?2,
+                last_error_code = 'camp_attachment_view_integrity_failed',
+                updated_at = ?3
+            WHERE camp_id = ?1
+            "#,
+            params![camp_id, operation_id, now],
+        )?;
+        let changed = database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view_operation
+            SET status = 'recovery_required',
+                error_code = 'camp_attachment_view_integrity_failed',
+                updated_at = ?2
+            WHERE id = ?1 AND camp_id = ?3 AND status = 'committed'
+            "#,
+            params![operation_id, now, camp_id],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("camp_attachment_view_recovery_required: operation was not committed");
+        }
+        Ok(())
+    }
+
+    pub fn complete_publication(&self, database: &mut Database, operation_id: &str) -> Result<()> {
+        let verification = self.prepare_publication_completion(database, operation_id)?;
+        let camp_id = verification.camp_id().to_string();
+        match verification.verify() {
+            Ok(verified) => self.complete_verified_publication(database, verified),
+            Err(error) => {
+                self.fail_publication_completion(database, operation_id, &camp_id)?;
+                Err(error).context("camp_attachment_view_integrity_failed")
+            }
+        }
     }
 
     pub fn rollback_publication(
@@ -1061,6 +1213,47 @@ impl CampAttachmentViewStore {
         remove_managed_tree(&staging)
     }
 
+    pub fn prepare_camp_runtime_authorization(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        workspace: Option<&Path>,
+        visibility_mode: CampAttachmentVisibilityMode,
+    ) -> Result<CampAttachmentRuntimeAuthorizationVerification> {
+        let view = prepare_ready_camp_view_verification(
+            database.connection(),
+            &self.root,
+            &self.root_identity_digest,
+            camp_id,
+        )?;
+        Ok(CampAttachmentRuntimeAuthorizationVerification {
+            view,
+            workspace: workspace.map(Path::to_path_buf),
+            visibility_mode,
+        })
+    }
+
+    pub fn complete_verified_camp_runtime_authorization(
+        &self,
+        database: &Database,
+        verified: VerifiedCampAttachmentRuntimeAuthorization,
+    ) -> Result<CampAttachmentRuntimeAuthorization> {
+        let verification = verified.verification;
+        confirm_ready_camp_view(database.connection(), &verification.view)?;
+        let camp_id = verification.view.camp_id;
+        let receipt = verification.view.receipt;
+        let attachment_root = self.camp_attachment_root(&camp_id)?;
+        validate_runtime_attachment_root(&attachment_root)?;
+        Ok(CampAttachmentRuntimeAuthorization {
+            camp_id,
+            attachment_root,
+            root_identity_digest: receipt.root_identity_digest,
+            generation: receipt.generation,
+            catalog_digest: receipt.catalog_digest,
+            visibility_mode: verification.visibility_mode,
+        })
+    }
+
     pub fn camp_runtime_authorization(
         &self,
         database: &Database,
@@ -1068,45 +1261,10 @@ impl CampAttachmentViewStore {
         workspace: Option<&Path>,
         visibility_mode: CampAttachmentVisibilityMode,
     ) -> Result<CampAttachmentRuntimeAuthorization> {
-        CampId::parse(camp_id)?;
-        if let Some(workspace) = workspace {
-            let canonical_workspace = fs::canonicalize(workspace)
-                .context("AgentRun workspace cannot be canonicalized")?;
-            reject_overlap(&self.root, &canonical_workspace)?;
-        }
-        self.verify_camp_ready(database, camp_id)?;
-        let row = database
-            .connection()
-            .query_row(
-                r#"
-                SELECT state, generation, root_identity_digest, catalog_digest
-                FROM camp_attachment_view WHERE camp_id = ?1
-                "#,
-                [camp_id],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                    ))
-                },
-            )
-            .optional()?
-            .context("camp_attachment_view_not_ready")?;
-        if row.0 != "ready" || row.1 < 1 || row.2 != self.root_identity_digest {
-            anyhow::bail!("camp_attachment_view_not_ready");
-        }
-        let attachment_root = self.camp_attachment_root(camp_id)?;
-        validate_runtime_attachment_root(&attachment_root)?;
-        Ok(CampAttachmentRuntimeAuthorization {
-            camp_id: camp_id.to_string(),
-            attachment_root,
-            root_identity_digest: row.2,
-            generation: row.1,
-            catalog_digest: row.3,
-            visibility_mode,
-        })
+        let verification =
+            self.prepare_camp_runtime_authorization(database, camp_id, workspace, visibility_mode)?;
+        let verified = verification.verify()?;
+        self.complete_verified_camp_runtime_authorization(database, verified)
     }
 
     pub fn verify_camp_ready(&self, database: &Database, camp_id: &str) -> Result<()> {
@@ -1116,6 +1274,17 @@ impl CampAttachmentViewStore {
             &self.root_identity_digest,
             camp_id,
         )
+        .with_context(|| format!("camp_attachment_view_integrity_failed: Camp {camp_id}"))
+    }
+
+    pub fn verify_camp_ready_receipt(&self, database: &Database, camp_id: &str) -> Result<()> {
+        prepare_ready_camp_view_verification(
+            database.connection(),
+            &self.root,
+            &self.root_identity_digest,
+            camp_id,
+        )
+        .map(|_| ())
         .with_context(|| format!("camp_attachment_view_integrity_failed: Camp {camp_id}"))
     }
 
@@ -2397,6 +2566,37 @@ fn pause_publication_copy_for_test(operation_id: &str) {
     }
 }
 
+#[cfg(test)]
+fn view_verification_test_pauses() -> &'static std::sync::Mutex<
+    std::collections::BTreeMap<String, std::sync::Arc<PublicationCopyTestPause>>,
+> {
+    static PAUSES: std::sync::OnceLock<
+        std::sync::Mutex<
+            std::collections::BTreeMap<String, std::sync::Arc<PublicationCopyTestPause>>,
+        >,
+    > = std::sync::OnceLock::new();
+    PAUSES.get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
+}
+
+#[cfg(test)]
+fn pause_view_verification_for_test(camp_id: &str) {
+    let pause = view_verification_test_pauses()
+        .lock()
+        .unwrap()
+        .get(camp_id)
+        .cloned();
+    let Some(pause) = pause else {
+        return;
+    };
+    pause
+        .started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let mut released = pause.released.lock().unwrap();
+    while !*released {
+        released = pause.release.wait(released).unwrap();
+    }
+}
+
 fn publication_operation_has_business_commit(
     connection: &Connection,
     operation_id: &str,
@@ -3208,7 +3408,64 @@ fn verify_ready_camp_view(
     root_identity_digest: &str,
     camp_id: &str,
 ) -> Result<()> {
+    let verification =
+        prepare_ready_camp_view_verification(connection, root, root_identity_digest, camp_id)?;
+    inspect_ready_camp_view(&verification)?;
+    confirm_ready_camp_view(connection, &verification)
+}
+
+fn prepare_ready_camp_view_verification(
+    connection: &Connection,
+    root: &Path,
+    root_identity_digest: &str,
+    camp_id: &str,
+) -> Result<CampAttachmentViewVerification> {
     CampId::parse(camp_id)?;
+    let receipt = load_ready_camp_view_receipt(connection, root_identity_digest, camp_id)?;
+
+    let desired = load_published_authority_rows(connection, camp_id)?;
+    let desired_ids = desired
+        .iter()
+        .map(|row| row.attachment_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    let persisted_ids = load_view_entry_ids(connection, camp_id)?;
+    if desired_ids != persisted_ids {
+        anyhow::bail!("Published Attachment and View Entry catalogs differ");
+    }
+
+    let entries = load_committed_view_entries(connection, camp_id)?;
+    for entry in &entries {
+        verify_committed_view_entry_receipt(camp_id, entry)?;
+    }
+    let (entry_count, aggregate_bytes, catalog_digest) = catalog_state(connection, camp_id)?;
+    if entry_count != receipt.entry_count
+        || aggregate_bytes != receipt.aggregate_bytes
+        || catalog_digest != receipt.catalog_digest
+    {
+        anyhow::bail!("Camp Attachment View aggregate receipt is inconsistent");
+    }
+    let (semantic_entry_count, semantic_aggregate_bytes, semantic_catalog_digest) =
+        semantic_catalog_state(connection, camp_id)?;
+    if semantic_entry_count != receipt.entry_count
+        || semantic_aggregate_bytes != receipt.aggregate_bytes
+        || semantic_catalog_digest != receipt.semantic_catalog_digest
+    {
+        anyhow::bail!("Camp Attachment View semantic receipt is inconsistent");
+    }
+    Ok(CampAttachmentViewVerification {
+        camp_id: camp_id.to_string(),
+        root: root.to_path_buf(),
+        receipt,
+        filesystem_ids: persisted_ids,
+        entries,
+    })
+}
+
+fn load_ready_camp_view_receipt(
+    connection: &Connection,
+    root_identity_digest: &str,
+    camp_id: &str,
+) -> Result<ReadyCampViewReceipt> {
     let view = connection
         .query_row(
             r#"
@@ -3247,45 +3504,58 @@ fn verify_ready_camp_view(
     {
         anyhow::bail!("Camp Attachment View state receipt is inconsistent");
     }
-    if directory_identity_digest(root)? != root_identity_digest {
+    Ok(ReadyCampViewReceipt {
+        generation: view.1,
+        root_relative_path: view.2,
+        root_identity_digest: view.3,
+        entry_count: view.4,
+        aggregate_bytes: view.5,
+        catalog_digest: view.6,
+        catalog_revision: view.7,
+        semantic_catalog_digest: view.8,
+    })
+}
+
+fn inspect_ready_camp_view(verification: &CampAttachmentViewVerification) -> Result<()> {
+    #[cfg(test)]
+    pause_view_verification_for_test(&verification.camp_id);
+    if directory_identity_digest(&verification.root)? != verification.receipt.root_identity_digest {
         anyhow::bail!("Runtime Files Root identity changed");
     }
 
-    let camps_root = root.join("camps");
-    let camp_root = camps_root.join(camp_id);
+    let camps_root = verification.root.join("camps");
+    let camp_root = camps_root.join(&verification.camp_id);
     let attachment_root = camp_root.join("attachments");
     validate_managed_directory(&camps_root, Some(0o100))?;
     validate_managed_directory(&camp_root, Some(0o100))?;
     validate_managed_directory(&attachment_root, Some(0o500))?;
 
-    let desired = load_published_authority_rows(connection, camp_id)?;
-    let desired_ids = desired
-        .iter()
-        .map(|row| row.attachment_id.clone())
-        .collect::<std::collections::BTreeSet<_>>();
-    let persisted_ids = load_view_entry_ids(connection, camp_id)?;
-    if desired_ids != persisted_ids {
-        anyhow::bail!("Published Attachment and View Entry catalogs differ");
-    }
     let filesystem_ids = read_typed_attachment_directory_ids(&attachment_root)?;
-    if filesystem_ids != persisted_ids {
+    if filesystem_ids != verification.filesystem_ids {
         anyhow::bail!("Runtime Attachment filesystem catalog differs from SQLite");
     }
 
-    for entry in load_committed_view_entries(connection, camp_id)? {
-        verify_committed_view_entry(root, camp_id, &entry)?;
+    for entry in &verification.entries {
+        verify_committed_view_entry(&verification.root, &verification.camp_id, entry)?;
     }
-    let (entry_count, aggregate_bytes, catalog_digest) = catalog_state(connection, camp_id)?;
-    if entry_count != view.4 || aggregate_bytes != view.5 || catalog_digest != view.6 {
-        anyhow::bail!("Camp Attachment View aggregate receipt is inconsistent");
+    Ok(())
+}
+
+fn confirm_ready_camp_view(
+    connection: &Connection,
+    verification: &CampAttachmentViewVerification,
+) -> Result<()> {
+    let current = load_ready_camp_view_receipt(
+        connection,
+        &verification.receipt.root_identity_digest,
+        &verification.camp_id,
+    )?;
+    if current != verification.receipt {
+        anyhow::bail!("Camp Attachment View changed during physical verification");
     }
-    let (semantic_entry_count, semantic_aggregate_bytes, semantic_catalog_digest) =
-        semantic_catalog_state(connection, camp_id)?;
-    if semantic_entry_count != view.4
-        || semantic_aggregate_bytes != view.5
-        || semantic_catalog_digest != view.8
-    {
-        anyhow::bail!("Camp Attachment View semantic receipt is inconsistent");
+    let persisted_ids = load_view_entry_ids(connection, &verification.camp_id)?;
+    if persisted_ids != verification.filesystem_ids {
+        anyhow::bail!("Camp Attachment View catalog changed during physical verification");
     }
     Ok(())
 }
@@ -3354,15 +3624,8 @@ fn verify_committed_view_entry(
     camp_id: &str,
     entry: &CommittedViewEntryRow,
 ) -> Result<()> {
-    validate_attachment_id(&entry.attachment_id)?;
+    verify_committed_view_entry_receipt(camp_id, entry)?;
     let expected_relative = final_entry_relative(camp_id, &entry.attachment_id);
-    if entry.root_relative_final_path != expected_relative
-        || entry.byte_size != entry.authority_byte_size
-        || entry.content_digest != entry.authority_content_digest
-        || (entry.media_type == DIRECTORY_MEDIA_TYPE) != (entry.kind == "directory")
-    {
-        anyhow::bail!("View Entry authority receipt is inconsistent");
-    }
     let entry_root = root.join(&expected_relative);
     validate_managed_directory(&entry_root, Some(0o500))?;
     if entry_identity_digest(&entry_root)? != entry.entry_identity_digest {
@@ -3390,6 +3653,19 @@ fn verify_committed_view_entry(
         || inspected.content_digest != entry.content_digest
     {
         anyhow::bail!("View Entry content receipt differs from the filesystem");
+    }
+    Ok(())
+}
+
+fn verify_committed_view_entry_receipt(camp_id: &str, entry: &CommittedViewEntryRow) -> Result<()> {
+    validate_attachment_id(&entry.attachment_id)?;
+    let expected_relative = final_entry_relative(camp_id, &entry.attachment_id);
+    if entry.root_relative_final_path != expected_relative
+        || entry.byte_size != entry.authority_byte_size
+        || entry.content_digest != entry.authority_content_digest
+        || (entry.media_type == DIRECTORY_MEDIA_TYPE) != (entry.kind == "directory")
+    {
+        anyhow::bail!("View Entry authority receipt is inconsistent");
     }
     Ok(())
 }
@@ -4231,6 +4507,19 @@ mod tests {
         view: &CampAttachmentViewStore,
         draft_revision: i64,
     ) -> PreparedCampAttachmentPublication {
+        let publication = commit_current_draft(database, data_dir, camp_id, view, draft_revision);
+        view.complete_publication(database, &publication.operation_id)
+            .unwrap();
+        publication
+    }
+
+    fn commit_current_draft(
+        database: &mut Database,
+        data_dir: &Path,
+        camp_id: &str,
+        view: &CampAttachmentViewStore,
+        draft_revision: i64,
+    ) -> PreparedCampAttachmentPublication {
         let command_id = Uuid::new_v4().to_string();
         let publication = view
             .stage_publication(
@@ -4265,8 +4554,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(execution.result.status, CommandResultStatus::Applied);
-        view.complete_publication(database, &publication.operation_id)
-            .unwrap();
         publication
     }
 
@@ -4734,6 +5021,184 @@ mod tests {
         assert!(error.to_string().contains("draft_changed"));
         view.rollback_publication(&mut database, &operation_id, "draft_changed")
             .unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn runtime_authorization_scan_releases_database_mutex_and_rejects_receipt_drift() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let source = data_dir.join("verify-without-database-lock.txt");
+        fs::write(&source, vec![b'v'; 1024 * 1024]).unwrap();
+        let saved = attachment_store
+            .save_body(&mut database, &camp_id, "Verify outside the DB mutex")
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                saved.revision,
+                &source,
+                "verify-without-database-lock.txt",
+            )
+            .unwrap();
+        publish_current_draft(&mut database, &data_dir, &camp_id, &view, draft.revision);
+
+        let verification = view
+            .prepare_camp_runtime_authorization(
+                &database,
+                &camp_id,
+                None,
+                CampAttachmentVisibilityMode::GenerationFencedV1,
+            )
+            .unwrap();
+        let pause = std::sync::Arc::new(PublicationCopyTestPause::new());
+        view_verification_test_pauses()
+            .lock()
+            .unwrap()
+            .insert(camp_id.clone(), pause.clone());
+        let database = std::sync::Arc::new(tokio::sync::Mutex::new(database));
+        let verification_task = tokio::task::spawn_blocking(move || verification.verify());
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !pause.started.load(std::sync::atomic::Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Runtime authorization verification should reach the controlled barrier");
+
+        let original_generation = {
+            let database =
+                tokio::time::timeout(std::time::Duration::from_millis(250), database.lock())
+                    .await
+                    .expect("filesystem verification must not retain the shared Database mutex");
+            let generation = database
+                .connection()
+                .query_row(
+                    "SELECT generation FROM camp_attachment_view WHERE camp_id = ?1",
+                    [&camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    "UPDATE camp_attachment_view SET generation = ?2 WHERE camp_id = ?1",
+                    params![camp_id, generation + 1],
+                )
+                .unwrap();
+            generation
+        };
+        pause.release();
+        view_verification_test_pauses()
+            .lock()
+            .unwrap()
+            .remove(&camp_id);
+        let verified = verification_task.await.unwrap().unwrap();
+
+        let mut database = database.lock().await;
+        let error = view
+            .complete_verified_camp_runtime_authorization(&database, verified)
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("changed during physical verification")
+        );
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_attachment_view SET generation = ?2 WHERE camp_id = ?1",
+                params![camp_id, original_generation],
+            )
+            .unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn publication_completion_verifies_only_new_entries_but_dispatch_verifies_the_full_view() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+
+        let first_source = data_dir.join("existing-entry.txt");
+        let first_body = b"existing published body";
+        fs::write(&first_source, first_body).unwrap();
+        let first_draft = attachment_store
+            .save_body(&mut database, &camp_id, "First publication")
+            .unwrap();
+        let first_draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                first_draft.revision,
+                &first_source,
+                "existing-entry.txt",
+            )
+            .unwrap();
+        let first_attachment_id = first_draft.attachments[0].id.clone();
+        publish_current_draft(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            first_draft.revision,
+        );
+
+        let second_source = data_dir.join("new-entry.txt");
+        fs::write(&second_source, b"new published body").unwrap();
+        let second_draft = attachment_store
+            .save_body(&mut database, &camp_id, "Second publication")
+            .unwrap();
+        let second_draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                second_draft.revision,
+                &second_source,
+                "new-entry.txt",
+            )
+            .unwrap();
+        let second_publication = commit_current_draft(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            second_draft.revision,
+        );
+
+        let first_projected = resolve_published_attachment_path(
+            database.connection(),
+            &camp_id,
+            &first_attachment_id,
+        )
+        .unwrap();
+        set_file_mode(Path::new(&first_projected), 0o600).unwrap();
+        fs::write(&first_projected, b"tampered published body").unwrap();
+        set_file_mode(Path::new(&first_projected), 0o400).unwrap();
+
+        view.complete_publication(&mut database, &second_publication.operation_id)
+            .expect("publication completion should verify only entries promoted by this operation");
+
+        let verification = view
+            .prepare_camp_runtime_authorization(
+                &database,
+                &camp_id,
+                None,
+                CampAttachmentVisibilityMode::GenerationFencedV1,
+            )
+            .unwrap();
+        let error = verification
+            .verify()
+            .expect_err("dispatch must still verify every published entry");
+        assert!(
+            format!("{error:#}").contains("content receipt"),
+            "unexpected verification error: {error:#}"
+        );
+
+        set_file_mode(Path::new(&first_projected), 0o600).unwrap();
+        fs::write(&first_projected, first_body).unwrap();
+        set_file_mode(Path::new(&first_projected), 0o400).unwrap();
+        view.verify_camp_ready(&database, &camp_id).unwrap();
         cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
     }
 
