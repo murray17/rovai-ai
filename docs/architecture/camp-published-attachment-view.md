@@ -8,7 +8,7 @@ last_updated: 2026-08-20
 
 本架构拥有 Camp 已发布附件从私有 Authority 到 Runtime 可读共享视图的组件边界、数据流、并发门和恢复关系。
 字段、状态、路径、限额与错误由 [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
-和 [Camp Attachment v4](../contracts/camp-attachment-v4.md)拥有。
+和 [Camp Attachment v5](../contracts/camp-attachment-v5.md)拥有。
 
 ## Authority 与授权域
 
@@ -27,6 +27,12 @@ Authority Attachment ──copy + digest/identity verification──> Camp Publi
 
 View 不反向修复 Authority，不保存 `.rovai-attachment.json`、display metadata 或数据库 receipt。删除或重建
 View 不改变消息、历史 ContextManifest、Managed Blob、摘要或 Authority `storage_path`。
+
+用户在 Desktop 打开已发布附件使用 Authority，而不是 Runtime View。Renderer 只提交 canonical Camp ID 与
+Attachment ID；Core 只从同 Camp 的 `message_attachment` 解析精确 Authority payload，重验路径、节点、receipt
+和完整树 identity 后，把一次性的 path 与风险结论只交给 Desktop Main。Main 独占原生确认与系统 Shell；
+Renderer 不接收 path 或原始系统错误。`pending | recovery_required | failed` 只表达 Runtime/队员可读性，不阻止
+仍然完整的 Authority 图片预览、系统打开或显示所在位置。
 
 ## 组件职责
 
@@ -137,10 +143,11 @@ directory allowlist evidence。存在不受控 ambient filesystem access 时，�
 ## References
 
 - [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
-- [Camp Attachment v4](../contracts/camp-attachment-v4.md)
+- [Camp Attachment v5](../contracts/camp-attachment-v5.md)
 - [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
 - [Runtime Launch and Verification v13](../contracts/runtime-launch-and-verification-v13.md)
 - [V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)
+- [V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)
 - [V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)
 - [V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)
 - [V1.15-D05](../versions/v1.15/decisions.md#v1-15-d05)

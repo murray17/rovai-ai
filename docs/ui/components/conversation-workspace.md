@@ -333,13 +333,20 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
 视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
 占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v4](../../contracts/camp-attachment-v4.md)，发送边界见
+快照限制见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)，发送边界见
 [Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
 
 Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
-“正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”，并移除会暗示 Runtime
-可读的 preview/open affordance。`available` 沿用现有附件卡行为。状态使用既有 Porcelain Day / Steel Night
-语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
+“正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”。该状态只描述队员
+Runtime View，不禁用用户对仍完整 Authority Attachment 的预览、打开或显示所在位置。状态使用既有
+Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
+
+图片单击继续打开会话内大图预览；图片 Authority preview 失败时，卡片退化为“使用系统应用打开”。普通
+文件单击交给系统默认应用，目录单击在 Finder / 文件资源管理器中打开。Timeline 卡片右键菜单提供同一
+主动作和“在 Finder / 文件资源管理器中显示”；菜单支持键盘循环、Escape 关闭、collision handling 与关闭后
+焦点回到真实卡片。执行中单卡防重复提交；失败显示固定的无路径提示。高风险文件由 Desktop Main 使用原生
+确认，不在 Renderer 判断。Composer Prepared Attachment 保持既有预览/移除交互，不复用 Timeline open API。
+精确安全与结果合同见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)。
 
 ## 空 Camp 欢迎状态
 

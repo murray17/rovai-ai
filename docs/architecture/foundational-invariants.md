@@ -83,6 +83,7 @@ last_updated: 2026-08-20
 
 - Camp Attachment 是 `file | directory` 封闭联合。Core 负责分类、无 symlink 遍历、限制、复制、摘要和只读快照；一个目录作为一个层级附件全成全败，包含隐藏项和空目录。
 - Authority Attachment 始终位于 `<data_dir>/camp-attachments/`；Prepared Attachment、Agent Run-local ingress 与 private metadata 只供 Core 使用。发送事务 commit 后的 `message_attachment` 才是 Camp 公共事实，消息寻址、Prompt、Run、Conversation 或 Session 都不缩小其 Camp-wide 可见性。
+- Timeline 用户打开只以已发布 Authority Attachment 为来源。Renderer 只提交 canonical Camp/Attachment identity；Core 必须匹配同 Camp `message_attachment` 并重验精确受管路径、类型、receipt 与 no-follow tree，Desktop Main 才能执行原生确认和系统 Shell。Authority path 与原始系统错误不得进入 Renderer；Runtime projection state 只影响队员读取，不禁用仍完整的 Authority preview/open/reveal。
 - 同一 Authority instance/Camp 的 root 权限切换、child create/remove、Agent/Composer ingress、失败清理和 Camp removal 必须经过跨 Store 实例共享的 per-Camp admission；已持有者不得重入。不同 Camp 可并行，且该 admission 不得把文件 copy/hash 带入 Database mutex 或 built-in invocation guard。
 - Runtime 不读取 Authority Camp tree，只获得实例隔离、可重建的 Published Attachment View 精确 `attachments` 根。只有 `runtime_projection_state = available` 的公共附件属于 Runtime Desired Catalog；`pending | recovery_required` 阻断新 Runtime admission，`failed` 保留公共/UI 事实但只有 resolution tombstone、没有 Runtime path。
 - Composer 与 Agent ingress 共享统一 publication coordinator：短事务先提交公共语义、revision、reservation、writer intent 与 gate，Worker 再按 Camp FIFO 在数据库锁外 copy/verify/fsync。Scheduler 必须先取得一次 read admission，再在同一数据库临界区确认无 writer intent并 Claim；完整 Run 复用该 admission。成功和 terminal failure 都推进 contiguous resolved revision，failed 不得被 rebuild 静默复活。

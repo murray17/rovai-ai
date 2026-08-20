@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.19
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: complete
@@ -15,6 +15,8 @@ last_updated: 2026-08-20
 >
 > 前置版本：[v1.18 Codex 执行台真实命令预览](../v1.18/README.md)。v1.18 已按完成事实冻结为
 > historical；v1.17 建立的统一附件 publication、Delivery gate 和 Runtime View v3 继续作为本版基线。
+>
+> 后续版本：[v1.20 会话附件系统打开](../v1.20/README.md)。
 
 ## 版本目标
 
