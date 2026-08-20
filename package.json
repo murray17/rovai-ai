@@ -6,7 +6,7 @@
   "type": "module",
   "description": "A local-first workspace for durable agent teams.",
   "author": "murray17",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "packageManager": "pnpm@11.20.0",
   "main": "out/main/index.js",
   "engines": {

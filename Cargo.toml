@@ -5,7 +5,7 @@ resolver = "3"
 [workspace.package]
 version = "0.0.1"
 edition = "2024"
-license = "UNLICENSED"
+license = "MIT"
 
 # Daily development relies on logs and tests instead of a native debugger.
 # Avoid macOS unpacked debug objects; the test profile inherits this setting.
