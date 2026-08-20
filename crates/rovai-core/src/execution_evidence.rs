@@ -89,6 +89,7 @@ impl ExecutionEvidenceService {
                 | "agent.text.delta"
                 | "runtime.plan"
                 | "runtime.plan.delta"
+                | "runtime.diagnostic"
                 | "command.output.delta"
                 | "file.change.updated"
                 | "runtime.action"
@@ -545,6 +546,7 @@ fn evidence_classification(
         }
         "agent.text.delta" => Some(("narration", "updated")),
         "runtime.plan" | "runtime.plan.delta" => Some(("plan", "updated")),
+        "runtime.diagnostic" => Some(("step", "updated")),
         "command.output.delta" => Some(("command", "updated")),
         "file.change.updated" => Some(("file_change", "updated")),
         "runtime.action" => Some((
@@ -586,6 +588,14 @@ fn normalize_public_payload(event_type: &str, payload: &Value) -> Value {
         "runtime.plan" => serde_json::json!({
             "explanation": payload.get("explanation"),
             "plan": payload.get("plan"),
+        }),
+        "runtime.diagnostic" => serde_json::json!({
+            "diagnosticId": payload.get("diagnosticId"),
+            "code": payload.get("code"),
+            "status": payload.get("status"),
+            "attempt": payload.get("attempt"),
+            "maxAttempts": payload.get("maxAttempts"),
+            "retryAfterSeconds": payload.get("retryAfterSeconds"),
         }),
         "command.output.delta" => serde_json::json!({
             "itemId": payload.get("itemId"),
@@ -1348,6 +1358,27 @@ mod tests {
         assert_eq!(command_projection.last_evidence_sequence, 4);
         assert_eq!(command_projection.revision, 3);
         assert_eq!(command_projection.source_evidence_ids.len(), 3);
+
+        let runtime_diagnostic = ExecutionEvidenceService
+            .prepare_runtime_event(
+                "runtime.diagnostic",
+                &json!({
+                    "diagnosticId": "claude-api-retry",
+                    "code": "runtime_api_retrying",
+                    "status": "retrying",
+                    "attempt": 1,
+                    "maxAttempts": 10,
+                    "retryAfterSeconds": 0,
+                    "rawDetail": "api_key=private-key",
+                }),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(runtime_diagnostic.kind, "step");
+        assert_eq!(runtime_diagnostic.phase, "updated");
+        assert_eq!(runtime_diagnostic.payload["attempt"], 1);
+        assert!(runtime_diagnostic.payload.get("rawDetail").is_none());
+        assert!(!runtime_diagnostic.is_inline_delta_batchable());
 
         let oversized = ExecutionEvidenceService
             .prepare_runtime_event(

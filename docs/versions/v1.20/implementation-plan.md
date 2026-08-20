@@ -44,6 +44,14 @@ last_updated: 2026-08-21
   library tests、CLI、slow suite 单独验证；
 - [ ] 在隔离 App fixture 中验证普通文件、图片、目录、高风险确认、失败状态与双主题键盘交互。
 
+## 5. Claude Code 运行中 API 重试维护修复
+
+- [x] 在不等待子进程退出的前提下识别 Claude Code 已知 retry grammar，并保留原有 stderr capture/digest；
+- [x] 只发布固定 diagnostic ID/code/status、attempt/max 与等待秒数，拒绝 raw stderr、provider body 和凭证；
+- [x] 将 diagnostic 持久化为 non-terminal Evidence，明确排除 Canonical Tool Activity；
+- [x] 当前 Run 显示 attention notice 与最新重试次数，终态后移除 stale notice 并服从既有 failure/outcome；
+- [x] Rust 时序/脱敏/分类测试与 Renderer 最新 attempt、状态诚实性和私有字段排除测试通过。
+
 ## References
 
 - [v1.20 版本概览](README.md)

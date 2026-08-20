@@ -355,6 +355,9 @@ export function truncateCampWorldMapSpeech(value: string, maximum = 92): string 
 
 function executionProgressItemText(item: ExecutionProgressItem): string {
   if (item.kind === 'narration') return item.body
+  if (item.kind === 'diagnostic') {
+    return `Claude Code API 暂时不可用，正在自动重试（${item.diagnostic.attempt}/${item.diagnostic.maxAttempts}）`
+  }
   if (item.kind === 'tool') {
     if (!item.step.detail) return item.step.title
     const title = campWorldMapPlainText(item.step.title).toLocaleLowerCase()

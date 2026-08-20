@@ -44,6 +44,7 @@ import {
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
   type LiveRuntimeEvent,
+  type RuntimeDiagnostic,
   localDayKey,
   messageClockTime,
   relativeTimeLabel,
@@ -7073,6 +7074,29 @@ function ToolCallRow({
   )
 }
 
+function RuntimeRetryNotice({ diagnostic }: {
+  diagnostic: RuntimeDiagnostic
+}): JSX.Element {
+  const retryTiming = diagnostic.retryAfterSeconds === 0
+    ? '正在立即重试'
+    : `将在 ${diagnostic.retryAfterSeconds} 秒后重试`
+  return (
+    <section
+      className="runtime-retry-notice"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-label="Claude Code API 暂时不可用"
+    >
+      <strong>Claude Code API 暂时不可用</strong>
+      <p>
+        {retryTiming}（第 {diagnostic.attempt}/{diagnostic.maxAttempts} 次）。
+        本次执行尚未结束，可继续等待或停止执行。
+      </p>
+    </section>
+  )
+}
+
 export function RunExecutionDisclosure({
   run,
   progress,
@@ -7127,6 +7151,10 @@ export function RunExecutionDisclosure({
   const processItems = (effectiveProgress?.items ?? []).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
+  const activeRetryDiagnostic = nonTerminal
+    ? processItems.reduce<RuntimeDiagnostic | null>((latest, item) =>
+        item.kind === 'diagnostic' ? item.diagnostic : latest, null)
+    : null
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
@@ -7162,6 +7190,11 @@ export function RunExecutionDisclosure({
         </p>
       )}
       {processItems.map((item) => {
+        if (item.kind === 'diagnostic') {
+          return nonTerminal
+            ? <RuntimeRetryNotice diagnostic={item.diagnostic} key={item.key} />
+            : null
+        }
         if (item.kind === 'narration') {
           return (
             <div className={`process-copy stream-${item.kind}`} key={item.key}>
@@ -7240,7 +7273,9 @@ export function RunExecutionDisclosure({
             ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
             : run.status === 'queued'
               ? '等待开始'
-              : '正在处理'}</span>
+              : activeRetryDiagnostic
+                ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
+                : '正在处理'}</span>
         </div>
       )}
       {cancelling && nonTerminal && (
