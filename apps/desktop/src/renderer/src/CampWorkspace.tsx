@@ -6853,7 +6853,7 @@ function ToolCallRow({
   const summary = (
     <>
       <ToolCallIcon activityDomain={step.activityDomain} />
-      <span className="tool-call-title">{step.title}</span>
+      <span className="tool-call-title" title={step.title}>{step.title}</span>
       <ToolCallState status={status} />
       <span
         className={`tool-call-disclosure-slot${hasDetail ? '' : ' is-placeholder'}`}

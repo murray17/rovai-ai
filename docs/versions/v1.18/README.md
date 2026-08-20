@@ -4,14 +4,14 @@ version: v1.18
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: planned
+implementation_status: implemented
 model_context_change: false
 last_updated: 2026-08-20
 ---
 
 # Rovai-ai v1.18：Codex 执行台真实命令预览
 
-> 当前状态：展示合同与实施范围已确认，Renderer 实施和发布验收待完成。
+> 当前状态：Renderer 实施与仓库回归已完成；主线合入、macOS 打包和日常安装交接待完成。
 >
 > 前置版本：[v1.17 统一附件发布与 Agent 文件发送](../v1.17/README.md)。v1.17 已按完成事实冻结为
 > historical；其统一附件 publication、Delivery gate 与 Runtime View 语义继续作为本版基线。
