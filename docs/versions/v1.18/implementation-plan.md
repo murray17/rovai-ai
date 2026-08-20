@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.18
 authority: implementation-and-acceptance-status
-status: implemented
+status: complete
 last_updated: 2026-08-20
 ---
 
@@ -25,9 +25,9 @@ last_updated: 2026-08-20
 ## 3. 验证与发布
 
 - [x] Renderer 单测覆盖结构化中文标题、单命令、复合命令、Node inline/heredoc、脱敏与详情分区；
-- [x] 通过 docs、TypeScript、Vitest、Desktop build 与 Impeccable detector；
-- [ ] 从治理提交 worktree 完成功能提交，fast-forward main 并 push；
-- [ ] 完成 macOS arm64 package、签名/架构校验与 `/Applications` 安装交接。
+- [x] 通过 docs、TypeScript、Vitest、Desktop build、Runtime Activity UI 验收与 Impeccable detector；
+- [x] 从治理提交 worktree 完成功能提交，fast-forward main 并 push；
+- [x] 完成 macOS arm64 package、签名/架构校验与 `/Applications` 安装交接。
 
 ## References
 
