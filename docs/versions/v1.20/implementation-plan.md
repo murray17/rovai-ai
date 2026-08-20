@@ -48,11 +48,13 @@ last_updated: 2026-08-21
 
 ## 5. Claude Code 运行中 API 重试维护修复
 
-- [x] 在不等待子进程退出的前提下识别 Claude Code 已知 retry grammar，并保留原有 stderr capture/digest；
+- [x] 在不等待 stdout EOF/子进程退出的前提下识别 Claude Code session-bound `system/api_retry`，并保留严格
+  stderr grammar fallback 与原有 capture/digest；
 - [x] 只发布固定 diagnostic ID/code/status、attempt/max 与等待秒数，拒绝 raw stderr、provider body 和凭证；
 - [x] 将 diagnostic 持久化为 non-terminal Evidence，明确排除 Canonical Tool Activity；
 - [x] 当前 Run 显示 attention notice 与最新重试次数，终态后移除 stale notice 并服从既有 failure/outcome；
-- [x] Rust 时序/脱敏/分类测试与 Renderer 最新 attempt、状态诚实性和私有字段排除测试通过。
+- [x] Rust 时序测试覆盖实际 2.1.220 structured event 在 stdout 保持打开时即时投影，并与脱敏/分类、Renderer
+  最新 attempt、状态诚实性和私有字段排除测试一并通过。
 
 ## References
 

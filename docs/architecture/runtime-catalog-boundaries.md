@@ -14,7 +14,7 @@ last_updated: 2026-08-20
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v14](../contracts/runtime-launch-and-verification-v14.md)。实测版本和能力只由
+[Runtime Launch and Verification v15](../contracts/runtime-launch-and-verification-v15.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -131,7 +131,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v14](../contracts/runtime-launch-and-verification-v14.md)。
+[Runtime Launch and Verification v15](../contracts/runtime-launch-and-verification-v15.md)。
 
 ## TRAE CLI CN 当前边界
 
