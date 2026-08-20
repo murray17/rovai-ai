@@ -34,7 +34,7 @@ describe('Windows data-root startup', () => {
   })
 
   it('accepts only the exact closed layout returned by the native preparer', () => {
-    const root = 'C:\\Users\\Murray\\AppData\\Local\\Rovai AI'
+    const root = 'C:\\Users\\test-user\\AppData\\Local\\Rovai AI'
     const layout = expectedWindowsDataRootLayout(root)
     expect(parseWindowsDataRootLayout(root, `${JSON.stringify(layout)}\r\n`)).toEqual(layout)
 
@@ -49,7 +49,7 @@ describe('Windows data-root startup', () => {
   })
 
   it('invokes the native sidecar once before returning paths', () => {
-    const root = 'C:\\Users\\Murray\\AppData\\Local\\Rovai AI'
+    const root = 'C:\\Users\\test-user\\AppData\\Local\\Rovai AI'
     const layout = expectedWindowsDataRootLayout(root)
     const prepare = vi.fn(() => ({
       status: 0,

@@ -39,7 +39,7 @@ last_updated: 2026-08-12
 
 ## 完成证据
 
-- 打包 App 验收报告：`/Users/murray.xue/Downloads/rovai-v060-tool-output-accept-vFt5b7/runtime-activity-acceptance.json`；
+- 打包 App 验收报告：`<local-output>/rovai-v060-tool-output-accept-vFt5b7/runtime-activity-acceptance.json`；
 - 长输出场景：8,432 行、513,183 字符，Renderer 仅显示前 10 行与截断提示，全文不进入 DOM；
 - 复制验证：按需读取 Managed Blob，剪贴板内容包含首、中、尾标记且不包含 Evidence Envelope；
 - 安装验证：`/Applications/Rovai-ai.app` 的主程序、Core 与 CLI 均为 arm64，安装后从该路径启动。

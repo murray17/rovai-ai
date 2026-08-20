@@ -10,7 +10,7 @@ last_updated: 2026-08-04
 
 ## Reference boundary
 
-`/Users/murray.xue/Downloads/rovai_mcp_settings_prototype_v4.html` 是本页面内容结构、成员
+`<local-input>/rovai_mcp_settings_prototype_v4.html` 是本页面内容结构、成员
 picker、Server tofu、Add/Edit Dialog、Import Preview 与风险确认的定向输入。生产实现保留
 现有 Arctic Dawn 设置侧栏、Token、Radix Dialog、按钮、字体、状态与中文产品词汇；不复制
 原型全局侧栏、演示数据、演示状态切换器、浮动 `@latest` 或不安全配置。

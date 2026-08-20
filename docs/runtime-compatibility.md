@@ -136,7 +136,7 @@ Adapter 允许且无副作用的有界版本/身份命令；只有命令成功�
 ### 2026-08-17 TRAE 启动轻检与用户授权检查复核
 
 v1.03 按 [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)调整当前产品边界，
-不改写上方 v0.87 的历史理由。本机 `/Users/murray.xue/.local/share/trae-cli/trae-cli --version` 在一秒内成功
+不改写上方 v0.87 的历史理由。本机 `$HOME/.local/share/trae-cli/trae-cli --version` 在一秒内成功
 返回 `trae-cli version 0.120.52`、build commit `6756e52a9238b6d493928e55b05127957dbfefb4`；启动与 rescan
 因此可以建立 `light_ready`，其含义仍只是 executable 可选择和尝试。
 
@@ -400,7 +400,7 @@ terminal decision 和 `finalCampMessageId`，不以 Renderer 或 stdout 文本�
 | Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass | pass / pass（3 tool events） | pass |
 
 最终统一报告与六份 ACP 协议 fixture 位于
-`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-12/acceptance/missing-send-recovery-v059/final-all-nine/`。
+`<local-output>/Rovai-ai-comparison-2026-08-12/acceptance/missing-send-recovery-v059/final-all-nine/`。
 Copilot 默认 `claude-sonnet-5` 的 zero-send 路径通过，但该模型三次拒绝从 Camp 输入执行 shell，因此
 不把其模型拒绝冒充 suppression pass；最终统一矩阵为 Copilot Adapter 显式选择同一真实 Runtime
 model catalog 中的 `gpt-5.6-sol`，报告记录了实际选择。该模型行为观察不改变 Core 的全 send 抑制

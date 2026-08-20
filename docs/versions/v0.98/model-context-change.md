@@ -631,4 +631,4 @@ revision 1 已由实现提交 `d95b17940689665299ee632f2dedce688248ecda` 完成�
   `d6c721598e34aee7c3ac91abe3cb648dd47f83807cda888e5476742ce39d418a`；
 - `/Applications/Rovai AI.app` 已替换并只从该路径稳定启动，日常数据库已进入 v0.98/schema 46/Migration
   91 且 foreign-key check 为空；原 v0.97 可恢复备份位于
-  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.97-20260817-122925`。
+  `<local-backup>/Rovai AI.app.backup-v0.97-20260817-122925`。

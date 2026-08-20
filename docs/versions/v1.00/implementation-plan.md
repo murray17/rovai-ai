@@ -64,7 +64,7 @@ last_updated: 2026-08-17
 - 打包 App 使用 `/tmp/rovai-v1.00-package-acceptance.tiiIV1/user-data` 隔离启动，Core 同时绑定对应
   `managed-skill-library` 并到达 ready。随后安装到 `/Applications/Rovai AI.app`，从安装路径启动确认
   Main、Renderer 与 Core 均不引用仓库 `dist/`；旧安装版保存在
-  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.99-pre-v1.00-20260817-221401`。
+  `<local-backup>/Rovai AI.app.backup-v0.99-pre-v1.00-20260817-221401`。
 
 ## References
 

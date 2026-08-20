@@ -753,7 +753,7 @@
                   <div class="empty-state" style="min-height:160px;padding:20px"><div><div class="micro">其余任务会在 Lead 分派后出现。</div></div></div>
                 </div>
                 <div class="inspector-panel" data-tab-panel="context" hidden>
-                  <div class="inspector-item"><div class="inspector-item-head"><span>工作目录</span><span class="tag">local</span></div><p>/Users/murray.xue/VSCodeProjects/opensource/rovai-ai</p></div>
+                  <div class="inspector-item"><div class="inspector-item-head"><span>工作目录</span><span class="tag">local</span></div><p>$HOME/Projects/rovai-ai</p></div>
                   <div class="inspector-item"><div class="inspector-item-head"><span>当前版本</span><span class="tag">v0.52</span></div><p>架构入口与 UI 约束来自当前 canonical documentation。</p></div>
                 </div>
                 <div class="inspector-panel" data-tab-panel="approvals" hidden>
@@ -979,7 +979,7 @@
                     <div class="surface-body">
                       <div class="field">
                         <label class="field-label">项目目录</label>
-                        <div style="display:flex;gap:8px"><input class="input" value="/Users/murray.xue/VSCodeProjects/opensource/rovai-ai" readonly><button class="button" data-action="browse-folder">选择…</button></div>
+                        <div style="display:flex;gap:8px"><input class="input" value="$HOME/Projects/rovai-ai" readonly><button class="button" data-action="browse-folder">选择…</button></div>
                         <div class="field-help">目录只在用户明确选择或创建对话时写入当前配置。</div>
                       </div>
                     </div>
@@ -1361,7 +1361,7 @@ no reverse edge found</div></div></section>
     <section class="overlay-surface dialog" data-overlay-id="new-conversation" role="dialog" aria-modal="true" aria-labelledby="new-conversation-title">
       <div class="dialog-header"><div><div class="eyebrow">New conversation</div><h2 class="dialog-title" id="new-conversation-title">创建新 Camp</h2><p class="dialog-copy">选择工作目录与 Lead；名称可以稍后生成。</p></div><button class="close-button" data-action="close-overlay" aria-label="关闭">×</button></div>
       <div class="dialog-body stack">
-        <div class="field"><label class="field-label">Working directory</label><div style="display:flex;gap:8px"><input class="input" value="/Users/murray.xue/VSCodeProjects/opensource/rovai-ai"><button class="button" data-action="browse-folder">选择…</button></div><div class="field-help">目录必须存在且可访问。</div></div>
+        <div class="field"><label class="field-label">Working directory</label><div style="display:flex;gap:8px"><input class="input" value="$HOME/Projects/rovai-ai"><button class="button" data-action="browse-folder">选择…</button></div><div class="field-help">目录必须存在且可访问。</div></div>
         <div class="field"><label class="field-label">Lead</label><select class="select"><option>Ada · Product engineer</option><option>Schrödinger · Architecture analyst</option><option>Mendel · Renderer specialist</option></select></div>
         <div class="field"><label class="field-label">Camp name <span class="caption">Optional</span></label><input class="input" placeholder="留空则从首条消息生成"></div>
       </div>
@@ -1439,7 +1439,7 @@ docs/versions/v0.49/production-design.md:231</div></div>
 
     <section class="overlay-surface dialog narrow" data-overlay-id="one-click" role="dialog" aria-modal="true" aria-labelledby="one-click-title">
       <div class="dialog-header"><div><div class="eyebrow">Confirm creation</div><h2 class="dialog-title" id="one-click-title">创建一个新 Camp？</h2><p class="dialog-copy">这个动作会立即写入 Core。</p></div><button class="close-button" data-action="close-overlay">×</button></div>
-      <div class="dialog-body"><div class="identity-card"><dl style="margin:0"><dt>Project</dt><dd>ROVAI Core</dd><dt>Working directory</dt><dd>/Users/murray.xue/VSCodeProjects/opensource/rovai-ai</dd><dt>Lead</dt><dd>Ada</dd><dt>Name</dt><dd>从首条消息生成</dd></dl></div></div>
+      <div class="dialog-body"><div class="identity-card"><dl style="margin:0"><dt>Project</dt><dd>ROVAI Core</dd><dt>Working directory</dt><dd>$HOME/Projects/rovai-ai</dd><dt>Lead</dt><dd>Ada</dd><dt>Name</dt><dd>从首条消息生成</dd></dl></div></div>
       <div class="dialog-footer"><button class="button" data-action="close-overlay">取消</button><button class="button primary" data-action="confirm" data-toast="Camp 已创建|使用 Ada 和当前项目目录。">确认创建</button></div>
     </section>
 
@@ -1920,7 +1920,7 @@ A  references/versioning.md  new guidance</div>
           "pin-camp": ["Camp 已固定", "它会保持在当前项目顶部。"],
           "pin-project": ["项目已固定", "Sidecar 顺序已更新。"],
           "copy-camp-id": ["Camp ID 已复制", "camp_rt_boundary_1842"],
-          "copy-project-path": ["项目路径已复制", "/Users/murray.xue/VSCodeProjects/opensource/rovai-ai"],
+          "copy-project-path": ["项目路径已复制", "$HOME/Projects/rovai-ai"],
           "collapse-project": ["其他项目已折叠", "只保留当前项目展开。"],
           "approve-run": ["已批准一次", "Runtime profile 诊断已进入执行队列。"],
           "deny-run": ["请求已拒绝", "Member 会收到明确结果并继续规划。"],
