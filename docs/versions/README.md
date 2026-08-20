@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.19
+current_version: v1.20
 last_updated: 2026-08-20
 ---
 
@@ -170,4 +170,5 @@ last_updated: 2026-08-20
 | v1.16 | `historical` | Camp 纯附件消息、统一发送门禁与无空白正文气泡的 Timeline 投影 | [v1.16/README.md](v1.16/README.md) |
 | v1.17 | `historical` | Agent 文件发送、语义先提交的统一附件发布与 Runtime 可用性投影 | [v1.17/README.md](v1.17/README.md) |
 | v1.18 | `historical` | Codex 执行台真实命令预览、敏感参数脱敏与完整命令/输出详情 | [v1.18/README.md](v1.18/README.md) |
-| v1.19 | `current` | Agent 文件入口 lease 隔离、同 Camp Authority 串行化与纯附件发送 | [v1.19/README.md](v1.19/README.md) |
+| v1.19 | `historical` | Agent 文件入口 lease 隔离、同 Camp Authority 串行化与纯附件发送 | [v1.19/README.md](v1.19/README.md) |
+| v1.20 | `current` | 会话附件的 Authority 校验、系统默认打开与所在位置显示 | [v1.20/README.md](v1.20/README.md) |
