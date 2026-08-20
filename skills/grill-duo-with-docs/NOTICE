@@ -1,0 +1,22 @@
+grill-duo-with-docs is a Rovai-specific translated and adapted rewrite of material from:
+https://github.com/mattpocock/skills
+
+Pinned upstream revision:
+84fdeffd12f2ee307994d1eb6feb48173b6e0502
+
+Pinned upstream paths:
+- skills/productivity/grill-me/SKILL.md
+- skills/productivity/grilling/SKILL.md
+- skills/engineering/grill-with-docs/SKILL.md
+- skills/engineering/domain-modeling/SKILL.md
+- skills/engineering/domain-modeling/CONTEXT-FORMAT.md
+- skills/engineering/domain-modeling/ADR-FORMAT.md
+
+The local Skill and its references retain the upstream concepts of a persistent
+one-question-at-a-time interview, a domain-context/glossary document, and a
+decision record. Rovai AI translates and rewrites the material for Camp-native
+fixed-partner review, repository authority routing, version decisions, and
+event-driven turns; it is not byte-identical vendoring.
+
+The upstream material is licensed under the MIT License in LICENSE. Rovai-specific additions are
+distributed under the repository's applicable project terms.

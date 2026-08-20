@@ -1,0 +1,395 @@
+{
+  "schema_version": 1,
+  "owner_statement": {
+    "generator": "OpenAI / ChatGPT image generation",
+    "classification": "AI_GENERATED_FIRST_PARTY_PROJECT_ARTWORK",
+    "source_distribution": "APPROVED",
+    "binary_distribution": "APPROVED",
+    "limits": "Does not grant rights in unrelated third-party trademarks, characters, people, or source material."
+  },
+  "assets": [
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/luoke/icon-192.png",
+      "sha256": "2680338ed6d3557b6ab543b97460c4620ecffe0d3a801bd34c3c3c06a6eefe9a",
+      "role": "character-avatar",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/luoke/source.png",
+      "sha256": "9bf86dcef1bf9a9c743d390b783c38a024f925e3faa98e745df8ba1a4338d1dc",
+      "role": "character-portrait",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/mianzhi/icon-192.png",
+      "sha256": "9fbd4eb0e7356b4c6ddf2d86a676178476b93747a4687a6e89d06684014ed142",
+      "role": "character-avatar",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/mianzhi/source.png",
+      "sha256": "a4a88ea58ba4ac058032de68b94df28d2792367f0c473b27147b6a3084a463be",
+      "role": "character-portrait",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/muwa/icon-192.png",
+      "sha256": "2f40a6ee8f0a0d1cfc11d8010fc9d990d9dd2dfbb14ea27bbdf97e2c50619a4d",
+      "role": "character-avatar",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/muwa/source.png",
+      "sha256": "3bfdb617fecd666adb97ec40b77e7365b0db380376f1f2fef5c672c56859da0a",
+      "role": "character-portrait",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/qilu/icon-192.png",
+      "sha256": "9abc0b6b53cef994b32e8c14c02fa8cad3be5325168d1f6907c47b327a024438",
+      "role": "character-avatar",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/characters/qilu/source.png",
+      "sha256": "7a568b00debc1475d943ee5231897648e6ac67c5a78eb523d17ca8e92e79dcbf",
+      "role": "character-portrait",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "apps/desktop/src/renderer/src/assets/world-map/harbor-city-2k.webp",
+      "sha256": "a2f8bdd324331d46a31ba1f2771defe4fda22a131a15654a30915e62b8107d94",
+      "role": "world-map",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "build/icon.png",
+      "sha256": "b0427759b487324dfb6ccb2ad0ee18a9dfc0666f23a326db72e800b24a5a003b",
+      "role": "application-icon",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "build/icon.svg",
+      "sha256": "58a0b8ca29b4d04bf44f7358be1485d8ea0efd4757b9db3016a566a53e983d50",
+      "role": "application-icon",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "APPROVED",
+      "status": "APPROVED_FOR_SOURCE_AND_BINARY"
+    },
+    {
+      "path": "docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-day-1040x700.png",
+      "sha256": "d698c6e16d251395f6875e70740e66bf3ba8a1a5b027f7090f8ca9a5a9b1cbe3",
+      "role": "prototype-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-day-1440x920.png",
+      "sha256": "e4d5ce1ddd0235b6ef36059c815f92a49f3762979dd90d9634dfab3bc5776117",
+      "role": "prototype-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-night-1440x920.png",
+      "sha256": "bdb7124aaf4830c572ed5491487a3234fbdbf2e076231058a562cacbfc36d147",
+      "role": "prototype-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-ready-directory.png",
+      "sha256": "f61981f67883eb3a6a6dd5d54b71bd8e19035a10b2da6bc688dc341b3c2b8426",
+      "role": "prototype-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/prototypes/execution-console-command-status/preview-bottom.png",
+      "sha256": "0bc4089ac76b05cdc375c1fce0c9093de9972b196275c8810ba9dfd5f4882a24",
+      "role": "prototype-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/prototypes/execution-console-command-status/preview-right-night.png",
+      "sha256": "b4e8281b87f7df09a54b44b04c25dae0baf7aae3852ea35f384a1090ea53d5cc",
+      "role": "prototype-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/prototypes/execution-console-command-status/preview-right.png",
+      "sha256": "3c4527d030cd81944970ab6205a7ad4ef823dad250e25b5f50a9ed4798eaa954",
+      "role": "prototype-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/prototypes/mention-popover/assets/role-card-fox-4x5.png",
+      "sha256": "9bf86dcef1bf9a9c743d390b783c38a024f925e3faa98e745df8ba1a4338d1dc",
+      "role": "duplicate-prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    }
+  ],
+  "embedded_assets": [
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 1,
+      "media_type": "image/jpeg",
+      "sha256": "879dbc98cb32a76c63ff32811577a29983e638d3ae3d60ff3e141c111c238dc3",
+      "byte_length": 76113,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 2,
+      "media_type": "image/jpeg",
+      "sha256": "e4d2bfb5509e1b497fe3f0cbecc3491cc9b7f643488a36dfedf6516b5ca20b50",
+      "byte_length": 16695,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 3,
+      "media_type": "image/jpeg",
+      "sha256": "fc3c491eb153ddfb56425b5f460dda7fae19738208b7977d3f430f7b5a2ed7b0",
+      "byte_length": 81914,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 4,
+      "media_type": "image/jpeg",
+      "sha256": "019c0db9595296eff4c15b252094a556d1bd4cfee97728bf192daae835352fe5",
+      "byte_length": 15307,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 5,
+      "media_type": "image/jpeg",
+      "sha256": "2eee902e650312862c1330ec5cea3007621f83d2121260830e6c825efcab00ef",
+      "byte_length": 102510,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 6,
+      "media_type": "image/jpeg",
+      "sha256": "7194346a77ab22fd475edf542b9415bb6c37bd740bda51fa4bb53cef4c9ca3c3",
+      "byte_length": 13137,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 7,
+      "media_type": "image/jpeg",
+      "sha256": "077e7b1e735968d37c8ae480fe88c5962f923aaf96a79217c89618dbc21090ad",
+      "byte_length": 67966,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/renderer-p2-empty-camp/rovai-p2-empty-camp.html",
+      "embedded_index": 8,
+      "media_type": "image/jpeg",
+      "sha256": "a68028e4c395a5aba6ca52207df08cbc7a0674de843cd302b4f9a2b55c8cf149",
+      "byte_length": 12628,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 1,
+      "media_type": "image/jpeg",
+      "sha256": "879dbc98cb32a76c63ff32811577a29983e638d3ae3d60ff3e141c111c238dc3",
+      "byte_length": 76113,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 2,
+      "media_type": "image/jpeg",
+      "sha256": "e4d2bfb5509e1b497fe3f0cbecc3491cc9b7f643488a36dfedf6516b5ca20b50",
+      "byte_length": 16695,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 3,
+      "media_type": "image/jpeg",
+      "sha256": "fc3c491eb153ddfb56425b5f460dda7fae19738208b7977d3f430f7b5a2ed7b0",
+      "byte_length": 81914,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 4,
+      "media_type": "image/jpeg",
+      "sha256": "019c0db9595296eff4c15b252094a556d1bd4cfee97728bf192daae835352fe5",
+      "byte_length": 15307,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 5,
+      "media_type": "image/jpeg",
+      "sha256": "2eee902e650312862c1330ec5cea3007621f83d2121260830e6c825efcab00ef",
+      "byte_length": 102510,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 6,
+      "media_type": "image/jpeg",
+      "sha256": "7194346a77ab22fd475edf542b9415bb6c37bd740bda51fa4bb53cef4c9ca3c3",
+      "byte_length": 13137,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 7,
+      "media_type": "image/jpeg",
+      "sha256": "077e7b1e735968d37c8ae480fe88c5962f923aaf96a79217c89618dbc21090ad",
+      "byte_length": 67966,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "container": "docs/prototypes/steel-night-full-app/index.html",
+      "embedded_index": 8,
+      "media_type": "image/jpeg",
+      "sha256": "a68028e4c395a5aba6ca52207df08cbc7a0674de843cd302b4f9a2b55c8cf149",
+      "byte_length": 12628,
+      "role": "prototype-character-illustration",
+      "source_classification": "AI_GENERATED_FIRST_PARTY",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    }
+  ],
+  "design_records": [
+    {
+      "path": ".stitch/runtime-not-ready-design.md",
+      "sha256": "b2301c80bedb088e05454cacafd75dd74337be0c700ccab183467573d14dde94",
+      "source_classification": "FIRST_PARTY_PROJECT_DESIGN",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": ".stitch/runtime-not-ready-options.html",
+      "sha256": "0a09e6f2fb90e2e0db5cef4480e4b1f51e4b1a873c4c097c5b1652c46a06a629",
+      "source_classification": "FIRST_PARTY_PROJECT_DESIGN",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    }
+  ]
+}

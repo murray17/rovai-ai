@@ -106,6 +106,8 @@ const SKILL_DISCOVERY_IGNORED_DIRECTORIES: &[&str] = &[
 
 const ANALYZE_AGENT_CODEBASE_RULES: &str =
     include_str!("../../../skills/analyze-agent-codebase/SKILL.md");
+const ANALYZE_AGENT_CODEBASE_NOTICE: &str =
+    include_str!("../../../skills/analyze-agent-codebase/NOTICE");
 const ANALYZE_AGENT_CODEBASE_OPENAI: &str =
     include_str!("../../../skills/analyze-agent-codebase/agents/openai.yaml");
 const ANALYZE_AGENT_CODEBASE_DOSSIER_REFERENCE: &str =
@@ -118,6 +120,7 @@ const CAMPFIRE_MEMBER_REFERENCE: &str =
     include_str!("../../../skills/campfire/references/member.md");
 const CAMPFIRE_NOTES_REFERENCE: &str = include_str!("../../../skills/campfire/references/notes.md");
 const CLI_OPERATIONS_RULES: &str = include_str!("../../../skills/cli-operations/SKILL.md");
+const CLI_OPERATIONS_NOTICE: &str = include_str!("../../../skills/cli-operations/NOTICE");
 const CLI_OPERATIONS_OPENAI: &str =
     include_str!("../../../skills/cli-operations/agents/openai.yaml");
 const CLI_OPERATIONS_SEND_REFERENCE: &str =
@@ -133,6 +136,7 @@ const CLI_OPERATIONS_MEMORY_REFERENCE: &str =
 const CLI_OPERATIONS_RECOVERY_REFERENCE: &str =
     include_str!("../../../skills/cli-operations/references/recovery.md");
 const MEMORY_STEWARDSHIP_RULES: &str = include_str!("../../../skills/memory-stewardship/SKILL.md");
+const MEMORY_STEWARDSHIP_NOTICE: &str = include_str!("../../../skills/memory-stewardship/NOTICE");
 const MEMORY_STEWARDSHIP_OPENAI: &str =
     include_str!("../../../skills/memory-stewardship/agents/openai.yaml");
 const MEMORY_STEWARDSHIP_AUTHORITY_REFERENCE: &str =
@@ -144,17 +148,24 @@ const MEMORY_STEWARDSHIP_WORKFLOW_REFERENCE: &str =
 const MEMORY_STEWARDSHIP_CONTENT_REFERENCE: &str =
     include_str!("../../../skills/memory-stewardship/references/content-and-keys.md");
 const MEMBER_STUDIO_RULES: &str = include_str!("../../../skills/member-studio/SKILL.md");
+const MEMBER_STUDIO_NOTICE: &str = include_str!("../../../skills/member-studio/NOTICE");
 const MEMBER_STUDIO_OPENAI: &str = include_str!("../../../skills/member-studio/agents/openai.yaml");
 const MEMBER_STUDIO_IDENTITY_REFERENCE: &str =
     include_str!("../../../skills/member-studio/references/identity-generation.md");
 const MEMBER_STUDIO_AVATAR_REFERENCE: &str =
     include_str!("../../../skills/member-studio/references/avatar-sourcing.md");
 const WORKTREE_RULES: &str = include_str!("../../../skills/worktree/SKILL.md");
+const WORKTREE_NOTICE: &str = include_str!("../../../skills/worktree/NOTICE");
 const WORKTREE_OPENAI: &str = include_str!("../../../skills/worktree/agents/openai.yaml");
 const GRILL_DUO_RULES: &str = include_str!("../../../skills/grill-duo/SKILL.md");
+const GRILL_DUO_NOTICE: &str = include_str!("../../../skills/grill-duo/NOTICE");
+const GRILL_DUO_LICENSE: &str = include_str!("../../../skills/grill-duo/LICENSE");
 const GRILL_DUO_OPENAI: &str = include_str!("../../../skills/grill-duo/agents/openai.yaml");
 const GRILL_DUO_WITH_DOCS_RULES: &str =
     include_str!("../../../skills/grill-duo-with-docs/SKILL.md");
+const GRILL_DUO_WITH_DOCS_NOTICE: &str = include_str!("../../../skills/grill-duo-with-docs/NOTICE");
+const GRILL_DUO_WITH_DOCS_LICENSE: &str =
+    include_str!("../../../skills/grill-duo-with-docs/LICENSE");
 const GRILL_DUO_WITH_DOCS_OPENAI: &str =
     include_str!("../../../skills/grill-duo-with-docs/agents/openai.yaml");
 const DOMAIN_MODELING_REFERENCE: &str =
@@ -465,6 +476,7 @@ const MATTPOCOCK_SKILLS_REVISION: &str = "84fdeffd12f2ee307994d1eb6feb48173b6e05
 
 const ANALYZE_AGENT_CODEBASE_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", ANALYZE_AGENT_CODEBASE_RULES, 0o644),
+    ("NOTICE", ANALYZE_AGENT_CODEBASE_NOTICE, 0o644),
     ("agents/openai.yaml", ANALYZE_AGENT_CODEBASE_OPENAI, 0o644),
     (
         "references/dossier-structure.md",
@@ -484,6 +496,7 @@ const CAMPFIRE_FILES: &[(&str, &str, u32)] = &[
 
 const CLI_OPERATIONS_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", CLI_OPERATIONS_RULES, 0o644),
+    ("NOTICE", CLI_OPERATIONS_NOTICE, 0o644),
     ("agents/openai.yaml", CLI_OPERATIONS_OPENAI, 0o644),
     ("references/send.md", CLI_OPERATIONS_SEND_REFERENCE, 0o644),
     (
@@ -511,6 +524,7 @@ const CLI_OPERATIONS_FILES: &[(&str, &str, u32)] = &[
 
 const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", MEMORY_STEWARDSHIP_RULES, 0o644),
+    ("NOTICE", MEMORY_STEWARDSHIP_NOTICE, 0o644),
     ("agents/openai.yaml", MEMORY_STEWARDSHIP_OPENAI, 0o644),
     (
         "references/authority-and-safety.md",
@@ -536,6 +550,7 @@ const MEMORY_STEWARDSHIP_FILES: &[(&str, &str, u32)] = &[
 
 const MEMBER_STUDIO_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", MEMBER_STUDIO_RULES, 0o644),
+    ("NOTICE", MEMBER_STUDIO_NOTICE, 0o644),
     ("agents/openai.yaml", MEMBER_STUDIO_OPENAI, 0o644),
     (
         "references/identity-generation.md",
@@ -551,16 +566,21 @@ const MEMBER_STUDIO_FILES: &[(&str, &str, u32)] = &[
 
 const WORKTREE_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", WORKTREE_RULES, 0o644),
+    ("NOTICE", WORKTREE_NOTICE, 0o644),
     ("agents/openai.yaml", WORKTREE_OPENAI, 0o644),
 ];
 
 const GRILL_DUO_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", GRILL_DUO_RULES, 0o644),
+    ("NOTICE", GRILL_DUO_NOTICE, 0o644),
+    ("LICENSE", GRILL_DUO_LICENSE, 0o644),
     ("agents/openai.yaml", GRILL_DUO_OPENAI, 0o644),
 ];
 
 const GRILL_DUO_WITH_DOCS_FILES: &[(&str, &str, u32)] = &[
     ("SKILL.md", GRILL_DUO_WITH_DOCS_RULES, 0o644),
+    ("NOTICE", GRILL_DUO_WITH_DOCS_NOTICE, 0o644),
+    ("LICENSE", GRILL_DUO_WITH_DOCS_LICENSE, 0o644),
     ("agents/openai.yaml", GRILL_DUO_WITH_DOCS_OPENAI, 0o644),
     (
         "references/domain-modeling.md",
@@ -648,15 +668,15 @@ const BUNDLED_SKILLS: &[BundledDefinition] = &[
     BundledDefinition {
         name: "grill-duo",
         files: GRILL_DUO_FILES,
-        upstream_repository: None,
-        upstream_revision: None,
+        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
+        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
         management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
         name: "grill-duo-with-docs",
         files: GRILL_DUO_WITH_DOCS_FILES,
-        upstream_repository: None,
-        upstream_revision: None,
+        upstream_repository: Some(MATTPOCOCK_SKILLS_REPOSITORY),
+        upstream_revision: Some(MATTPOCOCK_SKILLS_REVISION),
         management_policy: SkillManagementPolicy::UserManaged,
     },
     BundledDefinition {
