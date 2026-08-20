@@ -331,7 +331,7 @@ impl CampAttachmentStore {
                     anyhow::bail!("Attachments exceed the 64 MiB aggregate limit");
                 }
                 write_attachment_metadata(&attachment_directory, &prepared)?;
-                restrict_discovery(&attachment_directory)?;
+                set_directory_read_only(&attachment_directory)?;
                 frozen.push(AuthorityAttachment {
                     attachment_id,
                     display_name,
@@ -951,7 +951,7 @@ impl CampAttachmentStore {
                 let destination = attachment_directory.join(&display_name);
                 let prepared = copy_and_inspect(source_path, &destination)?;
                 write_attachment_metadata(&attachment_directory, &prepared)?;
-                restrict_discovery(&attachment_directory)?;
+                set_directory_read_only(&attachment_directory)?;
                 Ok(prepared)
             })();
             let _ = restrict_discovery(&camp_root);
@@ -1324,6 +1324,11 @@ impl CampAttachmentStore {
             &candidate.media_type,
             &verified.kind,
         )?;
+        let attachment_directory = candidate
+            .path
+            .parent()
+            .context("Published Attachment has no managed container")?;
+        set_directory_read_only(attachment_directory)?;
         Ok(DesktopAttachmentTarget {
             attachment_id: candidate.attachment_id,
             display_name: candidate.display_name,
@@ -4136,6 +4141,21 @@ mod slow_tests {
             .unwrap()
             .unwrap();
         let authority_path = candidate.path.clone();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let attachment_directory = authority_path.parent().unwrap();
+            let new_mode = fs::symlink_metadata(attachment_directory)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(
+                new_mode, 0o500,
+                "new managed containers must be Finder-enumerable without granting mutation"
+            );
+            fs::set_permissions(attachment_directory, fs::Permissions::from_mode(0o100)).unwrap();
+        }
         let target = store
             .verify_desktop_open_candidate(candidate.clone())
             .unwrap();
@@ -4143,6 +4163,19 @@ mod slow_tests {
         assert_eq!(target.kind, "file");
         assert_eq!(target.open_risk, DesktopAttachmentOpenRisk::Normal);
         assert_eq!(target.path, authority_path);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::symlink_metadata(authority_path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(
+                mode, 0o500,
+                "Desktop authorization must upgrade a legacy traversal-only container to a Finder-enumerable read-only directory"
+            );
+        }
         let preview_candidate = store
             .preview_candidate(&database, &attachment_id)
             .unwrap()

@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.20
 lifecycle: current
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # v1.20 决策记录
@@ -26,6 +26,11 @@ Authority 路径、节点、receipt 和 no-follow identity，并返回仅供 Des
 `normal | confirm` 风险结论。Desktop Main 独占系统确认、`shell.openPath` 和 `shell.showItemInFolder`。
 Renderer 只接收 `opened/revealed` 与稳定错误码，不接收 path 或原始 OS/Core error。
 
+Unix Camp root 继续使用 traversal-only `0100`；精确 Attachment container 使用不可写 `0500`，使 Finder 能
+列出已授权 payload 而不能删除、改名、写入或发现兄弟 Attachment ID。历史 container 只在 Core 完整校验
+和 per-Camp Authority admission 内收敛。Main 在 best-effort reveal 前验证 parent 可枚举且 target 仍存在，
+不把 Electron `void` 调用未抛错重新解释为文件管理器已经确认选择。
+
 图片预览和用户打开只依赖已提交 Authority Attachment 的当前完整性；Runtime projection state 继续只表达
 Agent 可读性。Prepared Attachment 不进入这条 Timeline API。
 
@@ -34,6 +39,7 @@ Agent 可读性。Prepared Attachment 不进入这条 Timeline API。
 - 普通文件、目录和图片退化路径获得平台原生行为，且不能把任意 Renderer 字符串提升为本地 Shell target；
 - Runtime View pending、failed 或 controlled rebuild 不会阻止用户访问仍完整的 Authority 附件；
 - 每次动作会执行有界 Authority 完整性校验；大目录打开可能有可见等待，但不会以未验证路径换取即时响应；
+- Finder reveal 只放宽精确 container 的枚举位，不授予写入或删除能力；legacy 权限按需收敛，不做全库扫描；
 - 系统默认应用能否打开只作为 Desktop 动作结果，不表示内容安全、安装成功或 Runtime 可读。
 
 ### 被拒绝方案
@@ -43,6 +49,7 @@ Agent 可读性。Prepared Attachment 不进入这条 Timeline API。
 - 使用 Runtime View：把用户文件访问绑定到派生投影可用性，并打开错误权威；
 - 只按扩展名在 Renderer 确认：不验证 Camp ownership、真实节点、receipt 或可执行内容；
 - 把 `shell.openPath` 原始错误返回 Renderer：错误可能包含 Authority 绝对路径。
+- 把 Attachment container 设为 `0700`：虽然 Finder 可见，但同时授予删除、改名和写入权限，破坏不可变 Authority。
 
 ### 当前权威影响
 

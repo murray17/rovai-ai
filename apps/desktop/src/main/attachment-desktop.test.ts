@@ -82,8 +82,45 @@ describe('Desktop Attachment target boundary', () => {
         throw new Error(`cannot open ${target.path}`)
       }
     })).resolves.toEqual({ opened: false, error: 'open_failed' })
-    expect(revealDesktopAttachmentTarget(target, () => {
-      throw new Error(`cannot reveal ${target.path}`)
-    })).toEqual({ revealed: false, error: 'reveal_failed' })
+    await expect(revealDesktopAttachmentTarget(target, {
+      async canReveal() {
+        return true
+      },
+      revealPath() {
+        throw new Error(`cannot reveal ${target.path}`)
+      }
+    })).resolves.toEqual({ revealed: false, error: 'reveal_failed' })
+  })
+
+  it('does not report reveal success when the native file manager cannot enumerate the target', async () => {
+    const target = {
+      attachmentId: ATTACHMENT_ID,
+      displayName: '计划.md',
+      kind: 'file' as const,
+      mediaType: 'text/plain',
+      path: '/private/managed/计划.md',
+      openRisk: 'normal' as const
+    }
+    let revealRequested = false
+    await expect(revealDesktopAttachmentTarget(target, {
+      async canReveal() {
+        return false
+      },
+      revealPath() {
+        revealRequested = true
+      }
+    })).resolves.toEqual({ revealed: false, error: 'reveal_failed' })
+    expect(revealRequested).toBe(false)
+
+    let revealedPath: string | null = null
+    await expect(revealDesktopAttachmentTarget(target, {
+      async canReveal() {
+        return true
+      },
+      revealPath(path) {
+        revealedPath = path
+      }
+    })).resolves.toEqual({ revealed: true, error: null })
+    expect(revealedPath).toBe(target.path)
   })
 })

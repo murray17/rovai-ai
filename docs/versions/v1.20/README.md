@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: accepted
 implementation_status: implemented
 model_context_change: false
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Rovai-ai v1.20：会话附件系统打开
@@ -47,6 +47,8 @@ ContextManifest、Run Facts、Built-in Tool 或模型输入字节。Camp Attachm
 - Core 将图片预览和 Desktop open target 都拆成短数据库候选查询与无数据库锁的阻塞式 Authority 校验，
   不在全局数据库 mutex 内读取或哈希 payload；
 - Desktop Main 已实现 closed target parsing、高风险原生确认、系统打开/显示所在位置和稳定无路径错误映射；
+- Unix Authority Camp root 保持 `0100`，精确 Attachment container 以 `0500` 允许 Finder 枚举但禁止删除、
+  改名和写入；历史 `0100` container 在完整校验后按需收敛，Main reveal 先验证 parent 可枚举与 target 存在；
 - Timeline 已实现图片预览、普通文件/目录系统打开、右键菜单、`Shift+F10` / Context Menu 键、忙碌与 Toast；
 - 定向 Rust、TypeScript、Vitest、fmt、Clippy、Desktop build、文档与全量前端测试通过。Rust PR suite 的
   功能无关唯一失败是当前 `main` 已存在的 `runtime-compatibility.md` 摘要与

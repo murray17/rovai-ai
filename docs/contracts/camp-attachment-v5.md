@@ -4,7 +4,7 @@ contract: camp-attachment
 version: 5
 status: accepted
 authority: camp-attachment-ingress-publication-runtime-and-desktop-open
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Camp Attachment v5
@@ -64,6 +64,17 @@ override risk.
 Desktop Main MUST show a native warning before opening `confirm`; cancellation is a successful no-op and MUST NOT invoke
 the system Shell. Accepted and normal targets use `shell.openPath(path)`. Reveal uses
 `shell.showItemInFolder(path)`. `shell.openExternal(file://...)` is forbidden.
+
+On Unix, the Authority Camp root remains traversal-only `0100`, while each exact managed Attachment container is
+read/execute-only `0500`; regular payloads and managed directory payloads remain `0400` and `0500` respectively. This
+lets the platform file manager enumerate the one authorized container without granting create, rename, delete or sibling
+Attachment discovery. A legacy `0100` Attachment container MUST be upgraded to `0500` only after the same complete Core
+verification and while holding the per-Camp Authority ingress admission.
+
+Before `shell.showItemInFolder`, Desktop Main MUST prove that the exact target still exists and that its parent can be
+enumerated. Failure MUST return `reveal_failed` without invoking the native Shell. Because Electron exposes this native
+operation as a best-effort `void` call, `revealed: true` means the verified request was handed to the operating system; it
+does not claim that Finder or File Explorer confirmed selection.
 
 The Renderer-facing result is closed and path-free:
 
