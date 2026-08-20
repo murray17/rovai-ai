@@ -3647,6 +3647,15 @@ mod tests {
         attachment_root
     }
 
+    fn exact_builtin_tools(root: &Path) -> BuiltinToolProcessConfig {
+        let cli = root.join("rovai");
+        make_executable(&cli, "#!/bin/sh\nexit 0\n");
+        let endpoint = rovai_core::builtin_tool_transport::LocalIpcEndpoint::UnixSocket {
+            path: root.join("core.sock").to_string_lossy().into_owned(),
+        };
+        BuiltinToolProcessConfig::create(&cli, &endpoint, &root.join("runtime")).unwrap()
+    }
+
     fn frozen_trae_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
         FrozenAgentRuntimeConfig {
             adapter_kind: AdapterKind::TraeCnCli,
@@ -3790,13 +3799,14 @@ while IFS= read -r ignored; do :; done
         let frozen = frozen_trae_runtime(&executable);
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let (incoming, _receiver) = mpsc::unbounded_channel();
+        let builtin_tools = exact_builtin_tools(&root);
         let host = AcpHost::spawn(
             &root,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &frozen,
             incoming,
-            None,
+            Some(builtin_tools),
             CompactionDetectorPolicy::Disabled,
             true,
             &BTreeMap::new(),
@@ -3877,13 +3887,14 @@ while IFS= read -r ignored; do :; done
         let frozen = frozen_trae_runtime(&executable);
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let builtin_tools = exact_builtin_tools(&root);
         let host = AcpHost::spawn(
             &root,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &frozen,
             incoming,
-            None,
+            Some(builtin_tools),
             CompactionDetectorPolicy::Disabled,
             true,
             &BTreeMap::new(),
@@ -3970,13 +3981,14 @@ while IFS= read -r ignored; do :; done
         let frozen = frozen_trae_runtime(&executable);
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let (incoming, _receiver) = mpsc::unbounded_channel();
+        let builtin_tools = exact_builtin_tools(&root);
         let host = AcpHost::spawn(
             &root,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &frozen,
             incoming,
-            None,
+            Some(builtin_tools),
             CompactionDetectorPolicy::Disabled,
             true,
             &BTreeMap::new(),
@@ -4058,13 +4070,14 @@ while IFS= read -r ignored; do :; done
         let frozen = frozen_trae_runtime(&executable);
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let builtin_tools = exact_builtin_tools(&root);
         let host = AcpHost::spawn(
             &root,
             &workspace,
             PermissionSemantics::RuntimeManagedV2,
             &frozen,
             incoming,
-            None,
+            Some(builtin_tools),
             CompactionDetectorPolicy::Disabled,
             true,
             &BTreeMap::new(),
@@ -4183,13 +4196,14 @@ while IFS= read -r ignored; do :; done
             let workspace =
                 AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
             let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let builtin_tools = exact_builtin_tools(&root);
             let host = AcpHost::spawn(
                 &root,
                 &workspace,
                 PermissionSemantics::RuntimeManagedV2,
                 &frozen,
                 incoming,
-                None,
+                Some(builtin_tools),
                 CompactionDetectorPolicy::Disabled,
                 true,
                 &BTreeMap::new(),
