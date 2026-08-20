@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.17
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: implemented
@@ -15,6 +15,8 @@ last_updated: 2026-08-20
 >
 > 前置版本：[v1.16 Camp 纯附件消息](../v1.16/README.md)。v1.16 已按完成事实冻结为
 > historical；其空正文、ready 附件发送和 Timeline 规则继续作为本版基线。
+>
+> 后续版本：[v1.18 Codex 执行台真实命令预览](../v1.18/README.md)。
 
 ## 版本目标
 

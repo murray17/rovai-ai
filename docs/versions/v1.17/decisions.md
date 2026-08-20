@@ -1,7 +1,7 @@
 ---
 document_type: version-decisions
 version: v1.17
-lifecycle: current
+lifecycle: historical
 last_updated: 2026-08-20
 ---
 
@@ -65,4 +65,3 @@ authorization 与 path resolution 必须消费同一 available-set 定义和 res
 - [Message Delivery v5](../../contracts/message-delivery-v5.md)
 - [Camp Published Attachment View 架构](../../architecture/camp-published-attachment-view.md)
 - [Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
-

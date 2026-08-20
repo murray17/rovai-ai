@@ -158,7 +158,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v16（当前）](run-process-detail-surface-v16.md) | v15 进入恢复与执行台语义不变；普通 Inspector 改为“队员 / 任务”，右侧改为“执行 / 队员 / 任务” |
+| [Run Process Detail Surface v17（当前）](run-process-detail-surface-v17.md) | v16 Inspector 顺序不变；Codex structured read/list/search 保留中文语义，其余 Shell 行展示完整脱敏命令并在详情分开显示命令与输出 |
+| [Run Process Detail Surface v16（历史）](run-process-detail-surface-v16.md) | v15 进入恢复与执行台语义不变；普通 Inspector 改为“队员 / 任务”，右侧改为“执行 / 队员 / 任务” |
 | [Run Process Detail Surface v15（历史）](run-process-detail-surface-v15.md) | v14 全局位置偏好与稳定 Drawer 不变；进入带 running Run 的 Camp 时自动打开精确执行，右侧基础 Tab 仍为“任务 / 队员” |
 | [Run Process Detail Surface v14（历史）](run-process-detail-surface-v14.md) | v13 稳定 Drawer 与完整 Tool 结果不变；执行台位置改为 Main-owned 本机安装级全局偏好，定义旧偏好默认、提交失败、启动与 Inspector 显隐组合；不含运行中 Camp 进入恢复与首 Tab 顺序 |
 | [Run Process Detail Surface v13（历史）](run-process-detail-surface-v13.md) | v12 执行过程与直接停止不变；稳定 DOM 移动、四轨 Tool 行、九类 SVG、精简队员入口与展开后完整结果内部滚动；位置仍是 mounted-workspace 瞬时状态 |

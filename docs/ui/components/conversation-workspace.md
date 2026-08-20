@@ -224,24 +224,27 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
 静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
 
-Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Shell 活动只有通用标题、同时公开 Evidence
-含命令文本时，Renderer 可以只提炼可审阅的可执行文件名与有界子命令，例如 `rovai camp read` 或
-`pnpm test`。紧随已展示命令或子命令的精确 `--help` 可以原样保留，使帮助查询区别于实际执行；
-不得扫描后续 token 猜测帮助语义。其他参数、正文、路径和环境值不得进入标题，无法安全提炼时继续使用
-中性回退。该提炼只改变展示，
-不得参与 Activity 分类、identity 或 lifecycle 合并。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
+Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Codex `commandExecution` 只有在结构化
+`commandActions` 全部证明 read/list/search 时继续显示“读取 / 列出 / 搜索 / 检索项目文件”等中文语义；
+其他 Codex Shell 行使用公开 `item.command` 的完整脱敏预览：去掉外层 Shell `-c/-lc` 包装，保留参数、
+Node inline/heredoc 代码开头、全部子命令及 `&&`、`||`、`|`、`;`、`&`。已知 token、password、
+Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题值不做固定字符截断，由名称轨在真实
+宽度内单行视觉省略；完整脱敏值仍可通过 `title` 与辅助技术读取。其他 Runtime 继续使用各自现有
+toolName/title/有界 fallback。命令展示只改变 presentation，不得参与 Activity 分类、identity 或 lifecycle
+合并。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
 16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。类型图标是 Shell、File、Git、
 Network、Permission、Runtime、Plan、Tool 和 Unknown 九类统一 16px 单色线性 SVG，不代表状态。
 Tool 行尾状态仍只使用 7px 小点：运行蓝色、等待审批橙色、成功绿色、失败或停止红色，仅记录为中性色。
 普通 Tool 行不再重复显示“已完成”文字；状态仍须通过 `aria-label` 与 `title` 可读取。
 
-Tool disclosure 展开后在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
+Codex command Tool disclosure 展开后先显示完整脱敏“命令”，再显示存在时的完整公开“输出”，两者不得
+互相替代。其他 Tool disclosure 继续在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
 直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
+[Run Process Detail Surface v17](../../contracts/run-process-detail-surface-v17.md)。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
@@ -251,7 +254,7 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
+[Run Process Detail Surface v17](../../contracts/run-process-detail-surface-v17.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -279,7 +282,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
+[Run Process Detail Surface v17](../../contracts/run-process-detail-surface-v17.md)。
 
 ## Camp Composer
 
