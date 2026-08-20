@@ -2627,8 +2627,24 @@ details summary { min-height: 28px; padding: 5px 0; color: var(--muted); font-si
 .composer-attachment-strip { display: flex; gap: 7px; min-width: 0; max-width: 100%; padding: 1px 0 4px; overflow-x: auto; overscroll-behavior-inline: contain; scrollbar-width: thin; }
 .attachment-card { position: relative; display: flex; flex: 0 0 188px; min-width: 0; height: 52px; align-items: stretch; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); overflow: hidden; }
 .attachment-open { display: flex; flex: 1 1 auto; min-width: 0; align-items: center; gap: 8px; padding: 5px 26px 5px 5px; border: 0; color: inherit; background: transparent; text-align: left; }
-button.attachment-open { cursor: zoom-in; }
+button.attachment-open { cursor: pointer; }
+button.attachment-open.is-preview { cursor: zoom-in; }
 button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, transparent); }
+button.attachment-open:disabled { cursor: wait; opacity: .76; }
+.attachment-card[data-context-open="true"] { border-color: color-mix(in srgb, var(--brand) 68%, var(--line-strong)); box-shadow: 0 0 0 2px var(--focus-soft); }
+.attachment-action-loading { position: absolute; top: 50%; right: 9px; width: 13px; height: 13px; margin-top: -6.5px; border: 1.5px solid var(--line-strong); border-top-color: var(--brand); border-radius: 50%; animation: attachment-spin .8s linear infinite; }
+.attachment-context-anchor { position: fixed; z-index: -1; width: 1px; height: 1px; pointer-events: none; }
+.attachment-context-menu { z-index: 210; display: grid; width: min(248px, calc(100vw - 20px)); padding: 5px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-menu); transform-origin: var(--radix-dropdown-menu-content-transform-origin); }
+.attachment-context-menu[data-state="open"] { animation: sidebar-menu-in 110ms ease-out; }
+.attachment-context-menu-label { display: grid; min-width: 0; gap: 2px; padding: 6px 8px 8px; }
+.attachment-context-menu-label strong, .attachment-context-menu-label small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-context-menu-label strong { font-size: 11px; font-weight: 650; }
+.attachment-context-menu-label small { color: var(--faint); font-size: 9px; font-weight: 500; }
+.attachment-context-menu-item { display: grid; min-height: 32px; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 8px; padding: 6px 8px; border-radius: 5px; outline: 0; cursor: default; font-size: 11.5px; user-select: none; }
+.attachment-context-menu-item[data-highlighted] { color: var(--brand-ink); background: var(--surface-muted); outline: 2px solid var(--focus); outline-offset: -2px; }
+.attachment-context-menu-item[data-disabled] { color: var(--faint); opacity: .58; }
+.attachment-menu-icon { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
+.attachment-context-menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
 .attachment-visual { display: grid; flex: 0 0 40px; width: 40px; height: 40px; place-items: center; border-radius: 5px; color: var(--muted); background: var(--surface-raised); font-size: 12px; font-weight: 700; overflow: hidden; }
 .attachment-visual img { width: 100%; height: 100%; object-fit: cover; }
 .attachment-folder-glyph { width: 25px; height: 25px; overflow: visible; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }

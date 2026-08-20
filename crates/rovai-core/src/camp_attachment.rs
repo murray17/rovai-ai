@@ -169,6 +169,46 @@ pub struct AttachmentPreviewSource {
     pub byte_size: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachmentPreviewCandidate {
+    attachment_id: String,
+    camp_id: String,
+    display_name: String,
+    media_type: String,
+    byte_size: u64,
+    content_digest: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopAttachmentOpenCandidate {
+    attachment_id: String,
+    camp_id: String,
+    display_name: String,
+    media_type: String,
+    byte_size: u64,
+    content_digest: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopAttachmentOpenRisk {
+    Normal,
+    Confirm,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAttachmentTarget {
+    pub attachment_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub media_type: String,
+    pub path: PathBuf,
+    pub open_risk: DesktopAttachmentOpenRisk,
+}
+
 #[derive(Debug, Clone)]
 pub struct CampAttachmentStore {
     root: PathBuf,
@@ -1107,23 +1147,25 @@ impl CampAttachmentStore {
         Ok(())
     }
 
-    pub fn preview_source(
+    pub fn preview_candidate(
         &self,
         database: &Database,
         attachment_id: &str,
-    ) -> Result<Option<AttachmentPreviewSource>> {
-        validate_component(attachment_id, "Attachment")?;
+    ) -> Result<Option<AttachmentPreviewCandidate>> {
+        validate_managed_attachment_id(attachment_id)?;
         let row = database
             .connection()
             .query_row(
                 r#"
-                SELECT storage_path, media_type, byte_size, preview_kind
+                SELECT camp_id, display_name, storage_path, media_type, byte_size,
+                       preview_kind, content_digest
                 FROM prepared_attachment
                 WHERE id = ?1
                 UNION ALL
-                SELECT storage_path, media_type, byte_size, preview_kind
+                SELECT camp_id, display_name, storage_path, media_type, byte_size,
+                       preview_kind, content_digest
                 FROM message_attachment
-                WHERE id = ?1 AND runtime_projection_state = 'available'
+                WHERE id = ?1
                 LIMIT 1
                 "#,
                 [attachment_id],
@@ -1131,32 +1173,165 @@ impl CampAttachmentStore {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((path, media_type, byte_size, preview_kind)) = row else {
+        let Some((
+            camp_id,
+            display_name,
+            path,
+            media_type,
+            byte_size,
+            preview_kind,
+            content_digest,
+        )) = row
+        else {
             return Ok(None);
         };
         if preview_kind != "image" || byte_size < 0 || byte_size as u64 > MAX_PREVIEW_BYTES {
             return Ok(None);
         }
-        let path = PathBuf::from(path);
-        validate_owned_path(&self.root, &path)?;
-        let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || metadata.len() != byte_size as u64
-        {
-            return Ok(None);
-        }
-        Ok(Some(AttachmentPreviewSource {
-            path,
+        Ok(Some(AttachmentPreviewCandidate {
+            attachment_id: attachment_id.to_string(),
+            camp_id,
+            display_name,
             media_type,
             byte_size: byte_size as u64,
+            content_digest,
+            path: PathBuf::from(path),
         }))
+    }
+
+    pub fn verify_preview_candidate(
+        &self,
+        candidate: AttachmentPreviewCandidate,
+    ) -> Result<AttachmentPreviewSource> {
+        let camp_id = CampId::parse(&candidate.camp_id)?;
+        let gate = self.authority_ingress_gate(camp_id.as_str())?;
+        let _admission = lock_unpoisoned(&gate);
+        let normalized_name = normalize_display_name(&candidate.display_name)?;
+        if normalized_name != candidate.display_name {
+            anyhow::bail!("Attachment preview display name is not canonical");
+        }
+        let expected_path = self
+            .root
+            .join(camp_id.as_str())
+            .join(&candidate.attachment_id)
+            .join(&candidate.display_name);
+        if candidate.path != expected_path {
+            anyhow::bail!("Attachment preview path does not match its managed identity");
+        }
+        reject_symlink_path(&self.root, &candidate.path)?;
+        let verified = self.verify_authority_attachment_for_runtime(
+            &candidate.path,
+            &candidate.media_type,
+            candidate.byte_size,
+            &candidate.content_digest,
+        )?;
+        if verified.kind != "file" {
+            anyhow::bail!("Attachment preview target is not a file");
+        }
+        Ok(AttachmentPreviewSource {
+            path: candidate.path,
+            media_type: candidate.media_type,
+            byte_size: candidate.byte_size,
+        })
+    }
+
+    pub fn desktop_open_candidate(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<DesktopAttachmentOpenCandidate>> {
+        let camp_id = CampId::parse(camp_id)?;
+        validate_managed_attachment_id(attachment_id)?;
+        let row = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT display_name, media_type, byte_size, content_digest, storage_path
+                FROM message_attachment
+                WHERE camp_id = ?1 AND id = ?2
+                "#,
+                params![camp_id.as_str(), attachment_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((display_name, media_type, byte_size, content_digest, storage_path)) = row else {
+            return Ok(None);
+        };
+        if byte_size < 0 {
+            anyhow::bail!("Published Attachment byte size is invalid");
+        }
+        Ok(Some(DesktopAttachmentOpenCandidate {
+            attachment_id: attachment_id.to_string(),
+            camp_id: camp_id.to_string(),
+            display_name,
+            media_type,
+            byte_size: byte_size as u64,
+            content_digest,
+            path: PathBuf::from(storage_path),
+        }))
+    }
+
+    pub fn verify_desktop_open_candidate(
+        &self,
+        candidate: DesktopAttachmentOpenCandidate,
+    ) -> Result<DesktopAttachmentTarget> {
+        let gate = self.authority_ingress_gate(&candidate.camp_id)?;
+        let _admission = lock_unpoisoned(&gate);
+        let normalized_name = normalize_display_name(&candidate.display_name)?;
+        if normalized_name != candidate.display_name {
+            anyhow::bail!("Published Attachment display name is not canonical");
+        }
+        let expected_path = self
+            .root
+            .join(&candidate.camp_id)
+            .join(&candidate.attachment_id)
+            .join(&candidate.display_name);
+        if candidate.path != expected_path {
+            anyhow::bail!("Published Attachment path does not match its managed identity");
+        }
+        reject_symlink_path(&self.root, &candidate.path)?;
+        let verified = self.verify_authority_attachment_for_runtime(
+            &candidate.path,
+            &candidate.media_type,
+            candidate.byte_size,
+            &candidate.content_digest,
+        )?;
+        let expected_directory = candidate.media_type == DIRECTORY_MEDIA_TYPE;
+        if (verified.kind == "directory") != expected_directory {
+            anyhow::bail!("Published Attachment kind does not match its persisted media type");
+        }
+        let open_risk = desktop_attachment_open_risk(
+            &candidate.path,
+            &candidate.display_name,
+            &candidate.media_type,
+            &verified.kind,
+        )?;
+        Ok(DesktopAttachmentTarget {
+            attachment_id: candidate.attachment_id,
+            display_name: candidate.display_name,
+            kind: verified.kind,
+            media_type: candidate.media_type,
+            path: candidate.path,
+            open_risk,
+        })
     }
 
     pub(crate) fn copy_verified_authority_attachment_for_runtime(
@@ -2707,6 +2882,103 @@ fn inspect_prefix(prefix: &[u8], byte_size: u64) -> PrefixInspection {
     }
 }
 
+fn desktop_attachment_open_risk(
+    path: &Path,
+    display_name: &str,
+    media_type: &str,
+    kind: &str,
+) -> Result<DesktopAttachmentOpenRisk> {
+    let extension = Path::new(display_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(
+        extension.as_str(),
+        "app"
+            | "pkg"
+            | "dmg"
+            | "exe"
+            | "msi"
+            | "msp"
+            | "com"
+            | "scr"
+            | "cpl"
+            | "bat"
+            | "cmd"
+            | "ps1"
+            | "psm1"
+            | "vbs"
+            | "vbe"
+            | "js"
+            | "jse"
+            | "wsf"
+            | "wsh"
+            | "hta"
+            | "reg"
+            | "lnk"
+            | "url"
+            | "webloc"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "fish"
+            | "command"
+            | "py"
+            | "pyw"
+            | "rb"
+            | "pl"
+            | "jar"
+            | "desktop"
+    ) || matches!(
+        media_type,
+        "application/x-executable"
+            | "application/x-mach-binary"
+            | "application/x-msdownload"
+            | "application/x-sh"
+            | "application/x-shellscript"
+            | "application/vnd.microsoft.portable-executable"
+            | "application/vnd.apple.installer+xml"
+    ) {
+        return Ok(DesktopAttachmentOpenRisk::Confirm);
+    }
+    if kind != "file" {
+        return Ok(DesktopAttachmentOpenRisk::Normal);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::symlink_metadata(path)?.permissions().mode() & 0o111 != 0 {
+            return Ok(DesktopAttachmentOpenRisk::Confirm);
+        }
+    }
+    let mut source = open_source_without_following(path)?;
+    let mut prefix = [0_u8; 4 * 1024];
+    let read = source.read(&mut prefix)?;
+    let prefix = &prefix[..read];
+    let executable_magic = prefix.starts_with(b"#!")
+        || prefix.starts_with(b"MZ")
+        || prefix.starts_with(b"\x7fELF")
+        || matches!(
+            prefix.get(..4),
+            Some(
+                b"\xfe\xed\xfa\xce"
+                    | b"\xce\xfa\xed\xfe"
+                    | b"\xfe\xed\xfa\xcf"
+                    | b"\xcf\xfa\xed\xfe"
+                    | b"\xca\xfe\xba\xbe"
+                    | b"\xbe\xba\xfe\xca"
+                    | b"\xca\xfe\xba\xbf"
+                    | b"\xbf\xba\xfe\xca"
+            )
+        );
+    Ok(if executable_magic {
+        DesktopAttachmentOpenRisk::Confirm
+    } else {
+        DesktopAttachmentOpenRisk::Normal
+    })
+}
+
 fn image_dimensions(bytes: &[u8]) -> Option<(&'static str, u64, u64)> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") && bytes.len() >= 24 {
         return Some((
@@ -3227,6 +3499,14 @@ fn validate_component(value: &str, label: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_managed_attachment_id(value: &str) -> Result<()> {
+    let parsed = Uuid::parse_str(value).context("Attachment ID is invalid")?;
+    if parsed.hyphenated().to_string() != value {
+        anyhow::bail!("Attachment ID is not canonical");
+    }
+    Ok(())
+}
+
 fn validate_runtime_safe_leaf(value: &str) -> Result<()> {
     if value.is_empty()
         || value == "."
@@ -3559,6 +3839,66 @@ mod agent_source_tests {
         make_owned_tree_removable(&directory).unwrap();
         fs::remove_dir_all(directory).unwrap();
     }
+
+    #[test]
+    fn desktop_open_risk_classifies_installers_scripts_and_executable_magic() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-attachment-open-risk-test-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&fixture).unwrap();
+        let normal = fixture.join("notes.txt");
+        let installer = fixture.join("setup.pkg");
+        let script = fixture.join("generated-output");
+        let executable = fixture.join("binary");
+        let app = fixture.join("Review.app");
+        fs::write(&normal, b"review notes").unwrap();
+        fs::write(&installer, b"package bytes").unwrap();
+        fs::write(&script, b"#!/bin/sh\nprintf ok\n").unwrap();
+        fs::write(&executable, b"\x7fELFfixture").unwrap();
+        fs::create_dir(&app).unwrap();
+
+        for (path, name, kind, expected) in [
+            (
+                &normal,
+                "notes.txt",
+                "file",
+                DesktopAttachmentOpenRisk::Normal,
+            ),
+            (
+                &installer,
+                "setup.pkg",
+                "file",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+            (
+                &script,
+                "generated-output",
+                "file",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+            (
+                &executable,
+                "binary",
+                "file",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+            (
+                &app,
+                "Review.app",
+                "directory",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+        ] {
+            assert_eq!(
+                desktop_attachment_open_risk(path, name, "application/octet-stream", kind).unwrap(),
+                expected,
+                "unexpected risk for {name}"
+            );
+        }
+
+        fs::remove_dir_all(fixture).unwrap();
+    }
 }
 
 #[cfg(all(test, windows))]
@@ -3720,6 +4060,117 @@ mod slow_tests {
                 ],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn desktop_open_target_is_published_camp_scoped_and_runtime_state_independent() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-desktop-attachment-open-test-{}",
+            Uuid::new_v4()
+        ));
+        let data_directory = fixture.join("data");
+        fs::create_dir_all(&fixture).unwrap();
+        let source = fixture.join("preview.png");
+        let mut png = vec![0_u8; 24];
+        png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        png[16..20].copy_from_slice(&640_u32.to_be_bytes());
+        png[20..24].copy_from_slice(&480_u32.to_be_bytes());
+        fs::write(&source, &png).unwrap();
+
+        let mut database = Database::open(&data_directory).unwrap();
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let other_camp_id = "rvcamp_01m0evhykseprr56s0b940zrr3";
+        insert_test_camp(&database, camp_id);
+        insert_test_camp(&database, other_camp_id);
+        let store = CampAttachmentStore::new(&data_directory);
+        let draft = store
+            .prepare_from_path(&mut database, camp_id, 0, &source, "preview.png")
+            .unwrap();
+        let attachment_id = draft.attachments[0].id.clone();
+
+        assert!(
+            store
+                .desktop_open_candidate(&database, camp_id, &attachment_id)
+                .unwrap()
+                .is_none(),
+            "Prepared Attachments must not be Desktop open targets"
+        );
+
+        let message_id = "message-desktop-open";
+        insert_test_message(
+            &database,
+            camp_id,
+            message_id,
+            1,
+            "user",
+            CURRENT_USER_ID,
+            "图片",
+        );
+        let transaction = database.connection_mut().transaction().unwrap();
+        consume_prepared_attachments(
+            &transaction,
+            camp_id,
+            message_id,
+            std::slice::from_ref(&attachment_id),
+            "2026-08-20T00:00:00Z",
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE message_attachment SET runtime_projection_state = 'failed' WHERE id = ?1",
+                [&attachment_id],
+            )
+            .unwrap();
+
+        assert!(
+            store
+                .desktop_open_candidate(&database, other_camp_id, &attachment_id)
+                .unwrap()
+                .is_none(),
+            "an Attachment must not authorize a different Camp"
+        );
+        let candidate = store
+            .desktop_open_candidate(&database, camp_id, &attachment_id)
+            .unwrap()
+            .unwrap();
+        let authority_path = candidate.path.clone();
+        let target = store
+            .verify_desktop_open_candidate(candidate.clone())
+            .unwrap();
+        assert_eq!(target.attachment_id, attachment_id);
+        assert_eq!(target.kind, "file");
+        assert_eq!(target.open_risk, DesktopAttachmentOpenRisk::Normal);
+        assert_eq!(target.path, authority_path);
+        let preview_candidate = store
+            .preview_candidate(&database, &attachment_id)
+            .unwrap()
+            .unwrap();
+        store.verify_preview_candidate(preview_candidate).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&authority_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let mut permissions = fs::metadata(&authority_path).unwrap().permissions();
+            permissions.set_readonly(false);
+            fs::set_permissions(&authority_path, permissions).unwrap();
+        }
+        let mut changed = png.clone();
+        changed[23] ^= 1;
+        fs::write(&authority_path, changed).unwrap();
+        assert!(
+            store.verify_desktop_open_candidate(candidate).is_err(),
+            "an Authority payload that no longer matches its digest must fail closed"
+        );
+
+        store.remove_camp(camp_id).unwrap();
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
     }
 
     fn insert_test_explicit_user_message(
