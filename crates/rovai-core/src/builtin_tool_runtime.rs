@@ -279,7 +279,7 @@ impl BuiltinToolLeaseRegistry {
                 });
             (binding, retired_run_tmp)
         };
-        cleanup_retired_run_tmps(retired_run_tmp.into_iter().collect()).await;
+        schedule_retired_run_tmp_cleanup(retired_run_tmp.into_iter().collect());
         binding
     }
 
@@ -308,7 +308,7 @@ impl BuiltinToolLeaseRegistry {
                 }
             }
         };
-        cleanup_retired_run_tmps(retired_run_tmp.into_iter().collect()).await;
+        schedule_retired_run_tmp_cleanup(retired_run_tmp.into_iter().collect());
     }
 
     pub(crate) async fn unregister(&self, process_id: &str) {
@@ -331,7 +331,7 @@ impl BuiltinToolLeaseRegistry {
         // The last config owner may recursively remove its process root. Keep
         // that Drop outside the global invocation/process guards as well.
         drop(process);
-        cleanup_retired_run_tmps(retired_run_tmp.into_iter().collect()).await;
+        schedule_retired_run_tmp_cleanup(retired_run_tmp.into_iter().collect());
     }
 
     pub(crate) async fn fence_all(&self) -> usize {
@@ -357,7 +357,7 @@ impl BuiltinToolLeaseRegistry {
             }
             (fenced, retired_run_tmps)
         };
-        cleanup_retired_run_tmps(retired_run_tmps).await;
+        schedule_retired_run_tmp_cleanup(retired_run_tmps);
         fenced
     }
 
@@ -537,24 +537,16 @@ impl BuiltinToolProcessConfig {
     }
 }
 
-async fn cleanup_retired_run_tmps(paths: Vec<PathBuf>) {
-    let tasks = paths
-        .into_iter()
-        .map(|path| {
-            tokio::task::spawn_blocking(move || {
-                if let Err(error) = remove_retired_run_tmp(&path) {
-                    eprintln!(
-                        "failed to remove retired Built-in Tool Run tmp {}: {error:#}",
-                        path.display()
-                    );
-                }
-            })
-        })
-        .collect::<Vec<_>>();
-    for task in tasks {
-        if let Err(error) = task.await {
-            eprintln!("retired Built-in Tool Run tmp cleanup task failed: {error}");
-        }
+fn schedule_retired_run_tmp_cleanup(paths: Vec<PathBuf>) {
+    for path in paths {
+        let _cleanup = tokio::task::spawn_blocking(move || {
+            if let Err(error) = remove_retired_run_tmp(&path) {
+                eprintln!(
+                    "failed to remove retired Built-in Tool Run tmp {}: {error:#}",
+                    path.display()
+                );
+            }
+        });
     }
 }
 
@@ -909,6 +901,26 @@ mod tests {
 
         pause.release();
         unbind.await.unwrap();
+        let first_process_root = first_config.inner.process_root.clone();
+        let retired_removed = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let has_retired = fs::read_dir(&first_process_root)
+                    .unwrap()
+                    .filter_map(std::result::Result::ok)
+                    .any(|entry| {
+                        entry
+                            .file_name()
+                            .to_string_lossy()
+                            .starts_with(".run-tmp-retired-")
+                    });
+                if !has_retired {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok();
         run_tmp_cleanup_test_pauses()
             .lock()
             .unwrap()
@@ -919,6 +931,7 @@ mod tests {
                 .await;
         }
         assert!(cleanup_started, "the retired Run tmp cleanup did not start");
+        assert!(retired_removed, "the retired Run tmp was not cleaned");
         assert!(
             second_bind.is_some(),
             "recursive cleanup for one Process must not block another Process lease"
