@@ -9338,7 +9338,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn manifest_is_immutable_and_reuses_stable_camp_attachment_paths() {
+    fn attachment_only_current_input_is_empty_and_reuses_stable_camp_attachment_paths() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let camp_message_id: String = fixture
@@ -9348,6 +9348,23 @@ mod slow_tests {
                 "SELECT id FROM camp_message WHERE camp_id = ?1 AND sequence = 1",
                 [&fixture.camp_id],
                 |row| row.get(0),
+            )
+            .unwrap();
+        let empty_content = StructuredCampMessageContent::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_message
+                SET body = '', structured_content_json = ?2, content_digest = ?3
+                WHERE id = ?1
+                "#,
+                params![
+                    camp_message_id,
+                    serde_json::to_string(&empty_content).unwrap(),
+                    canonical_content_digest(&empty_content).unwrap(),
+                ],
             )
             .unwrap();
         let private_attachment_body = "ATTACHMENT_BODY_MUST_NOT_ENTER_PROMPT";
@@ -9419,7 +9436,7 @@ mod slow_tests {
         };
         assert_eq!(first.expected_binding_generation, 1);
         assert!(first.requires_new_native_session);
-        assert_eq!(first.rendered_payload.matches("第一条公开问题").count(), 1);
+        assert!(!first.rendered_payload.contains("第一条公开问题"));
         assert!(!first.rendered_payload.contains("[SESSION_CHARTER]"));
         assert!(!first.rendered_payload.contains("[TURN_ENVELOPE]"));
         assert!(!first.rendered_payload.contains("sourceInboxMessageId"));
@@ -9446,6 +9463,15 @@ mod slow_tests {
             &attachment_id,
         )
         .unwrap();
+        let current_input_json = first
+            .rendered_payload
+            .split_once("[CURRENT_INPUT]\n")
+            .and_then(|(_, suffix)| suffix.split_once("\n[/CURRENT_INPUT]"))
+            .map(|(payload, _)| payload)
+            .expect("CURRENT_INPUT must be present");
+        let current_input: Value = serde_json::from_str(current_input_json).unwrap();
+        assert_eq!(current_input["message"], "");
+        assert_eq!(current_input["attachments"], json!([stable_path.clone()]));
         assert_eq!(
             std::fs::read_to_string(&authority_path).unwrap(),
             private_attachment_body

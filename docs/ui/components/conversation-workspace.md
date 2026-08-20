@@ -320,8 +320,11 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 ### Composer 附件
 
 文件和目录都进入当前 Draft。preparing/error 附件阻止发送；目录保存为一个只读快照附件，原文件
-不移动。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v2](../../contracts/camp-attachment-v2.md)。
+不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
+视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
+占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
+快照限制见 [Camp Attachment v2](../../contracts/camp-attachment-v2.md)，发送边界见
+[Camp Composer Draft v3](../../contracts/camp-composer-draft-v3.md)。
 
 ## 空 Camp 欢迎状态
 

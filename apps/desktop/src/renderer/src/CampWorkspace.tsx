@@ -93,6 +93,38 @@ const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
 const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
+
+export function composerHasSendablePayload(
+  message: string,
+  hasReadyAttachment: boolean
+): boolean {
+  return message.trim().length > 0 || hasReadyAttachment
+}
+
+export function composerSendIsDisabled(input: {
+  hasSendablePayload: boolean
+  hasUnavailableMention: boolean
+  replyRepairRequired: boolean
+  continuationRepairRequired: boolean
+  busy: boolean
+  composerSubmitting: boolean
+  routingMutating: boolean
+  composerDraftAvailable: boolean
+  preparingAttachmentCount: number
+  failedAttachmentCount: number
+}): boolean {
+  return !input.hasSendablePayload
+    || input.hasUnavailableMention
+    || input.replyRepairRequired
+    || input.continuationRepairRequired
+    || input.busy
+    || input.composerSubmitting
+    || input.routingMutating
+    || !input.composerDraftAvailable
+    || input.preparingAttachmentCount > 0
+    || input.failedAttachmentCount > 0
+}
+
 export type CampInspectorTab = 'tasks' | 'members'
 export type CampConversationView = 'conversation' | 'world'
 export interface FirstRunCampContext {
@@ -1556,9 +1588,10 @@ export function CampWorkspace({
     : null
   const continuationRecipientAvailable = continuationRecipient?.membershipStatus === 'active'
     && continuationRecipient.profilePresence === 'present'
+  const hasReadyAttachment = (composerDraft?.attachments.length ?? 0) > 0
+  const hasSendablePayload = composerHasSendablePayload(message, hasReadyAttachment)
   const hasLocalDraftPayload = Boolean(
-    message.trim()
-      || (composerDraft?.attachments.length ?? 0) > 0
+    hasSendablePayload
       || preparingAttachments.length > 0
   )
   const continuationRepairRequired = composerDraftNeedsContinuationRepair(
@@ -1587,6 +1620,18 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
+  const composerSendDisabled = composerSendIsDisabled({
+    hasSendablePayload,
+    hasUnavailableMention,
+    replyRepairRequired,
+    continuationRepairRequired,
+    busy,
+    composerSubmitting,
+    routingMutating,
+    composerDraftAvailable: composerDraft !== null,
+    preparingAttachmentCount: preparingAttachments.length,
+    failedAttachmentCount: failedAttachments.length
+  })
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
@@ -2754,16 +2799,7 @@ export function CampWorkspace({
   const submitMessage = async (): Promise<void> => {
     if (
       executionBlocked
-      || !message.trim()
-      || hasUnavailableMention
-      || replyRepairRequired
-      || continuationRepairRequired
-      || busy
-      || composerSubmitting
-      || routingMutating
-      || composerDraft === null
-      || preparingAttachments.length > 0
-      || failedAttachments.length > 0
+      || composerSendDisabled
     ) return
     const campId = snapshot.camp.id
     followTimelineAfterUserSend(campId)
@@ -3632,46 +3668,46 @@ export function CampWorkspace({
                                     onReveal={() => void revealReplyParent(replyParentId)}
                                   />
                                 )}
-                                {campMessage.authorType === 'agent'
+                                {displayBody.trim().length > 0 && (
+                                  campMessage.authorType === 'agent'
                                   && !campMessage.content?.some((segment) =>
                                     segment.kind === 'current_user_mention'
                                   )
-                                      ? (
-                                          <div className="final-copy">
-                                            <SafeMarkdown>{displayBody}</SafeMarkdown>
-                                          </div>
-                                        )
-                                      : (
-                                          <>
-                                            <div className="message-bubble">
-                                              <StructuredMessageBody
-                                                body={displayBody}
-                                                content={campMessage.content}
-                                                members={snapshot.members}
-                                                renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
-                                                onActivateMemberMention={openMemberProfilePopover}
-                                                onActivateAllMembersMention={(trigger, focusPanel) =>
-                                                  openAllMembersMentionPopover(
-                                                    'history',
-                                                    campMessage.addressedAgentIds,
-                                                    trigger,
-                                                    focusPanel
-                                                  )}
-                                              />
-                                            </div>
-                                            {campMessage.attachments.length > 0 && (
-                                              <div className="timeline-attachments" aria-label="消息附件">
-                                                {campMessage.attachments.map((attachment) => (
-                                                  <AttachmentCard
-                                                    attachment={attachment}
-                                                    key={attachment.id}
-                                                    timeline
-                                                  />
-                                                ))}
-                                              </div>
-                                            )}
-                                          </>
-                                        )}
+                                    ? (
+                                        <div className="final-copy">
+                                          <SafeMarkdown>{displayBody}</SafeMarkdown>
+                                        </div>
+                                      )
+                                    : (
+                                        <div className="message-bubble">
+                                          <StructuredMessageBody
+                                            body={displayBody}
+                                            content={campMessage.content}
+                                            members={snapshot.members}
+                                            renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
+                                            onActivateMemberMention={openMemberProfilePopover}
+                                            onActivateAllMembersMention={(trigger, focusPanel) =>
+                                              openAllMembersMentionPopover(
+                                                'history',
+                                                campMessage.addressedAgentIds,
+                                                trigger,
+                                                focusPanel
+                                              )}
+                                          />
+                                        </div>
+                                      )
+                                )}
+                                {campMessage.attachments.length > 0 && (
+                                  <div className="timeline-attachments" aria-label="消息附件">
+                                    {campMessage.attachments.map((attachment) => (
+                                      <AttachmentCard
+                                        attachment={attachment}
+                                        key={attachment.id}
+                                        timeline
+                                      />
+                                    ))}
+                                  </div>
+                                )}
                               </MessageSurface>
                               <CampMessageDeliveryFooter
                                 deliveries={campMessageDeliveries}
@@ -4143,18 +4179,7 @@ export function CampWorkspace({
                     <button
                       className="primary-button composer-send"
                       type="submit"
-                      disabled={
-                        !message.trim()
-                        || hasUnavailableMention
-                        || replyRepairRequired
-                        || continuationRepairRequired
-                        || busy
-                        || composerSubmitting
-                        || routingMutating
-                        || composerDraft === null
-                        || preparingAttachments.length > 0
-                        || failedAttachments.length > 0
-                      }
+                      disabled={composerSendDisabled}
                     >
                       {busy || composerSubmitting ? '发送中…' : preparingAttachments.length > 0 ? '处理中…' : '发送'}
                     </button>

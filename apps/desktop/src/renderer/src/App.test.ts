@@ -30,6 +30,7 @@ import {
   campInspectorVisibleFromStoredValue,
   cancellableTurnIds,
   campCreationPreflightFromAgents,
+  campMessageExecutionPurpose,
   campMessageSendParams,
   campOpenProjectionAsSnapshot,
   campSnapshotWithCurrentAnchor,
@@ -78,7 +79,9 @@ import {
   campConversationTimeline,
   composerDraftNeedsContinuationRepair,
   composerDraftNeedsReplyRepair,
+  composerHasSendablePayload,
   composerRecipientSummary,
+  composerSendIsDisabled,
   campInspectorMembers,
   campMemberIsLeadEligible,
   clampExecutionDrawerHeight,
@@ -946,6 +949,83 @@ describe('task event projections', () => {
     expect(params).not.toHaveProperty('preparedAttachmentIds')
     expect(params).not.toHaveProperty('replyToCampMessageId')
     expect(params.execution).not.toHaveProperty('expectedOutput')
+  })
+
+  it('enables one send gate for text or ready attachments and blocks unfinished attachments', () => {
+    const baseGate = {
+      hasUnavailableMention: false,
+      replyRepairRequired: false,
+      continuationRepairRequired: false,
+      busy: false,
+      composerSubmitting: false,
+      routingMutating: false,
+      composerDraftAvailable: true,
+      preparingAttachmentCount: 0,
+      failedAttachmentCount: 0
+    }
+
+    expect(composerHasSendablePayload('', true)).toBe(true)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: composerHasSendablePayload('', true)
+    })).toBe(false)
+    expect(composerHasSendablePayload('   ', false)).toBe(false)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: composerHasSendablePayload('   ', false)
+    })).toBe(true)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: true,
+      preparingAttachmentCount: 1
+    })).toBe(true)
+    expect(composerSendIsDisabled({
+      ...baseGate,
+      hasSendablePayload: true,
+      failedAttachmentCount: 1
+    })).toBe(true)
+  })
+
+  it('keeps attachment-only message bytes empty while supplying a non-empty execution purpose', () => {
+    const draft: CampComposerDraftView = {
+      campId: 'camp-attachment-only',
+      body: '',
+      content: [],
+      revision: 4,
+      attachments: [{
+        id: 'attachment-only',
+        displayName: '说明.txt',
+        kind: 'file',
+        fileCount: 1,
+        mediaType: 'text/plain',
+        byteSize: 12,
+        previewKind: 'none',
+        state: 'ready',
+        errorMessage: null,
+        createdAt: '2026-08-20T00:00:00Z'
+      }],
+      replyIntent: null,
+      continuationIntent: null,
+      updatedAt: '2026-08-20T00:00:00Z',
+      expiresAt: '2026-08-27T00:00:00Z'
+    }
+
+    expect(campMessageExecutionPurpose(draft)).toBe('Camp attachment-only message')
+    expect(campMessageSendParams('command-attachment-only', draft.campId, draft)).toEqual({
+      commandId: 'command-attachment-only',
+      campId: draft.campId,
+      draftRevision: 4,
+      execution: {
+        taskId: null,
+        purpose: 'Camp attachment-only message',
+        completionRole: 'required'
+      }
+    })
+    expect(optimisticCampMessage(null, 'command-attachment-only', draft)).toMatchObject({
+      body: '',
+      content: [],
+      attachments: [{ id: 'attachment-only' }]
+    })
   })
 
   it('keeps local cancelling state until the authoritative turn becomes terminal', () => {
@@ -2966,6 +3046,77 @@ describe('task event projections', () => {
     expect(markup).not.toContain('上下文投递')
     expect(markup).not.toContain('>审批<')
     expect(markup.indexOf('class="approval-dock"')).toBeLessThan(markup.indexOf('class="composer"'))
+  })
+
+  it('renders an attachment-only message shell without an empty body bubble', () => {
+    const attachmentOnlyMessage: CampMessageView = {
+      id: 'message-attachment-only',
+      sequence: 1,
+      timelineGlobalSequence: 1,
+      authorType: 'user',
+      authorId: 'local_user',
+      sourceAgentRunId: null,
+      body: '',
+      content: [],
+      attachments: [{
+        id: 'attachment-timeline',
+        displayName: '说明.txt',
+        kind: 'file',
+        fileCount: 1,
+        mediaType: 'text/plain',
+        byteSize: 12,
+        previewKind: 'none'
+      }],
+      addressMode: 'default',
+      addressedAgentIds: ['agent_1'],
+      replyToCampMessageId: null,
+      campTurnId: 'turn-attachment-only',
+      presentation: null,
+      createdAt: '2026-08-20T00:00:00Z'
+    }
+    const snapshot: CampSnapshot = {
+      schemaVersion: 32,
+      throughGlobalSequence: 1,
+      camp: {
+        id: 'camp-attachment-only', title: '附件消息', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+        defaultLeadAgentId: 'agent_1', version: 1,
+        createdAt: '2026-08-20T00:00:00Z', updatedAt: '2026-08-20T00:00:00Z'
+      },
+      members: [{
+        agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
+        avatarRef: null, accent: '#526f88', membershipStatus: 'active', leaveRequestedAt: null,
+        profilePresence: 'present', memberOrder: 0, isDefaultLead: true, version: 1
+      }],
+      tasks: [],
+      messages: [attachmentOnlyMessage],
+      messageDeliveries: [],
+      turns: [],
+      agentRuns: [],
+      contextManifests: [],
+      executionEvidence: [],
+      approvals: [],
+      actions: [],
+      timeline: []
+    }
+    const markup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: null,
+      agents: [agentProfile()],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+
+    expect(markup).toContain('class="timeline-node conversation-bubble user"')
+    expect(markup).toContain('<strong>你</strong>')
+    expect(markup).toContain('aria-label="回复这条消息"')
+    expect(markup).toContain('class="timeline-attachments" aria-label="消息附件"')
+    expect(markup).toContain('说明.txt')
+    expect(markup).not.toContain('class="message-bubble"')
   })
 
   it('renders a public A2A message with the Scheme C handoff footer', () => {

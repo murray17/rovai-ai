@@ -51,6 +51,7 @@ import {
 import {
   CampWorkspace,
   QuickChatWorkspace,
+  composerHasSendablePayload,
   type CampMessageSendReceipt,
   type CampInspectorTab,
   type CampRuntimeRecovery,
@@ -2292,7 +2293,9 @@ export function App(): React.JSX.Element {
   const sendCampMessage = async (
     draft: CampComposerDraftView
   ): Promise<CampMessageSendReceipt | void> => {
-    if (!activeCampId || draft.campId !== activeCampId || !draft.body.trim() || draft.revision < 1) return
+    const hasReadyAttachment = draft.attachments.length > 0
+    const hasSendablePayload = composerHasSendablePayload(draft.body, hasReadyAttachment)
+    if (!activeCampId || draft.campId !== activeCampId || !hasSendablePayload || draft.revision < 1) return
     const campId = activeCampId
     const commandId = crypto.randomUUID()
     const selectionGeneration = campSelectionGeneration.current
@@ -3294,10 +3297,14 @@ export function campMessageSendParams(
     draftRevision: draft.revision,
     execution: {
       taskId: null,
-      purpose: draft.body.trim(),
+      purpose: campMessageExecutionPurpose(draft),
       completionRole: 'required'
     }
   }
+}
+
+export function campMessageExecutionPurpose(draft: CampComposerDraftView): string {
+  return draft.body.trim() || 'Camp attachment-only message'
 }
 
 export function campCreationPreflightFromAgents(

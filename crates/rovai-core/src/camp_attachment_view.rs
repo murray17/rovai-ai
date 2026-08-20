@@ -5780,6 +5780,24 @@ mod tests {
                 .unwrap(),
             1
         );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM camp_message", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM agent_run", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
         fs::remove_file(extra_link).unwrap();
         let retry = view
             .stage_publication(
