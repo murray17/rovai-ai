@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -277,18 +278,65 @@ function flattenPnpmLicenses(grouped, directProduction, directDevelopment, produ
     .sort((left, right) => left.id.localeCompare(right.id))
 }
 
-function packageLicenseFiles(packageRoot) {
+const LEGAL_FILE_BASENAME = /^(?:licen[cs]e|copying|notice|copyrights?|unlicense|patents?)(?:[-._].+)?$/i
+const COPYRIGHT_NOTICE_BASENAME = /^copyrightnotice(?:[-._].+)?$/i
+const NON_LEGAL_SOURCE_SUFFIX = /\.(?:c|cc|cjs|cpp|css|gif|go|h|hpp|java|jpeg|jpg|js|jsx|json|kt|less|mjs|png|ps1|py|rb|rs|sass|scss|sh|svg|swift|test|toml|ts|tsx|webp|xml|ya?ml)$/i
+
+export function legalFileKind(sourceName) {
+  if (basename(sourceName) !== sourceName || NON_LEGAL_SOURCE_SUFFIX.test(sourceName)) return null
+  if (COPYRIGHT_NOTICE_BASENAME.test(sourceName)) return 'COPYRIGHT'
+  if (!LEGAL_FILE_BASENAME.test(sourceName)) return null
+  if (/^notices?(?:[-._]|$)/i.test(sourceName)) return 'NOTICE'
+  if (/^copyrights?(?:[-._]|$)/i.test(sourceName)) return 'COPYRIGHT'
+  if (/^patents?(?:[-._]|$)/i.test(sourceName)) return 'PATENT'
+  return 'LICENSE'
+}
+
+export function isLegalFileBasename(sourceName) {
+  return legalFileKind(sourceName) !== null
+}
+
+export function packageLegalFiles(packageRoot) {
   return readdirSync(packageRoot, { withFileTypes: true })
-    .filter((entry) => entry.isFile() && /^(licen[sc]e|copying|notice)(\..*)?$/i.test(entry.name))
-    .map((entry) => entry.name)
-    .sort()
+    .filter((entry) => entry.isFile() && isLegalFileBasename(entry.name))
+    .map((entry) => ({ kind: legalFileKind(entry.name), source_name: entry.name }))
+    .sort((left, right) => left.source_name < right.source_name ? -1 : left.source_name > right.source_name ? 1 : 0)
 }
 
 function licenseDirectoryName(name, version) {
   return `${name.replaceAll('/', '+')}@${version}`
 }
 
-export function generateJavaScriptManifests(root) {
+function legalFileRecord(root, path, sourceName, kind = legalFileKind(sourceName)) {
+  const bytes = readFileSync(join(root, path))
+  return { kind, source_name: sourceName, path, sha256: sha256(bytes), size: bytes.length }
+}
+
+function legacyLicenseTexts(legalFiles) {
+  return legalFiles.map(({ path, sha256: digest }) => ({ path, sha256: digest }))
+}
+
+function evidenceKind(dependency) {
+  return typeof dependency.license_evidence === 'string'
+    ? dependency.license_evidence
+    : dependency.license_evidence?.kind
+}
+
+export function summarizeLegalCoverage(dependencies) {
+  return {
+    package_instances: dependencies.length,
+    with_package_legal_files: dependencies.filter((entry) => evidenceKind(entry) === 'PACKAGE_LEGAL_FILES').length,
+    with_curated_clarification: dependencies.filter((entry) => evidenceKind(entry) === 'CURATED_LICENSE_CLARIFICATION').length,
+    metadata_only: dependencies.filter((entry) => evidenceKind(entry) === 'PACKAGE_METADATA_ONLY').length,
+    zero_legal_files: dependencies.filter((entry) => entry.legal_files.length === 0).length,
+    with_notice: dependencies.filter((entry) => entry.notice_file_present).length,
+    with_notice_copyright_or_patent: dependencies.filter((entry) => entry.legal_files.some((file) => file.kind !== 'LICENSE')).length,
+    with_multiple_license_files: dependencies.filter((entry) => entry.legal_files.filter((file) => file.kind === 'LICENSE').length > 1).length,
+    legal_file_count: dependencies.reduce((total, entry) => total + entry.legal_files.length, 0)
+  }
+}
+
+function javascriptDependencyEntries(root) {
   const packageJson = readJson(join(root, 'package.json'))
   const directProduction = new Set(Object.keys(packageJson.dependencies ?? {}))
   const directDevelopment = new Set(Object.keys(packageJson.devDependencies ?? {}))
@@ -296,52 +344,81 @@ export function generateJavaScriptManifests(root) {
   const prodGrouped = JSON.parse(run('pnpm', ['licenses', 'list', '--json', '--prod'], { cwd: root }))
   const prodIds = new Set(Object.values(prodGrouped).flat().flatMap((row) => row.versions.map((version) => `${row.name}@${version}`)))
   const binaryIds = new Set([...prodIds].filter((id) => !BINARY_PRUNE_EXCLUSIONS.has(id)))
-  const entries = flattenPnpmLicenses(allGrouped, directProduction, directDevelopment, prodIds, binaryIds)
+  return flattenPnpmLicenses(allGrouped, directProduction, directDevelopment, prodIds, binaryIds)
+}
+
+export function generateJavaScriptManifests(root) {
+  const entries = javascriptDependencyEntries(root)
   const licenseRoot = join(root, 'legal/licenses/javascript')
   rmSync(licenseRoot, { recursive: true, force: true })
   mkdirSync(licenseRoot, { recursive: true })
 
   for (const entry of entries) {
     const targetDirectory = join(licenseRoot, licenseDirectoryName(entry.name, entry.version))
-    const files = packageLicenseFiles(entry.package_root)
+    const packageFiles = packageLegalFiles(entry.package_root)
+    let legalFiles
     if (entry.id === 'react-remove-scroll-bar@2.3.8') {
       mkdirSync(targetDirectory, { recursive: true })
       writeFileSync(join(targetDirectory, 'LICENSE'), REACT_REMOVE_SCROLL_BAR_LICENSE)
-      files.push('LICENSE')
+      const path = `legal/licenses/javascript/${licenseDirectoryName(entry.name, entry.version)}/LICENSE`
+      legalFiles = [legalFileRecord(root, path, 'LICENSE', 'LICENSE')]
       entry.license_evidence = {
-        kind: 'EXACT_PACKAGE_METADATA_AND_PINNED_UPSTREAM_LICENSE',
+        kind: 'CURATED_LICENSE_CLARIFICATION',
+        method: 'EXACT_PACKAGE_METADATA_AND_PINNED_UPSTREAM_LICENSE',
+        package_id: entry.id,
+        spdx_expression: entry.license_expression,
         npm_tarball_sha256: 'ccc872d7a2dc007cbf9d755f30d56b8d80eabdbe22c44c95a709129bfdc46f01',
         npm_git_head: 'b3b1287aad81def2e2ae707274b74531b61ddbaf',
-        upstream_license_revision: '7301c160fda44cb8cf2b9fdfde61efad35736196'
+        upstream_license_revision: '7301c160fda44cb8cf2b9fdfde61efad35736196',
+        why_package_file_unavailable: 'The exact npm package tarball contains no license or notice file.',
+        curated_file_path: path,
+        curated_sha256: legalFiles[0].sha256,
+        copyright_attribution: 'Copyright (c) 2025 Anton Korzunov <thekashey@gmail.com>',
+        manual_review_record: 'TASK_08_RETAIN_EXISTING_CURATED_MIT_SCHEME'
       }
-    } else if (files.length > 0) {
+    } else if (packageFiles.length > 0) {
       mkdirSync(targetDirectory, { recursive: true })
-      for (const file of files) cpSync(join(entry.package_root, file), join(targetDirectory, file))
-      entry.license_evidence = { kind: 'PACKAGE_LICENSE_FILE' }
+      for (const file of packageFiles) {
+        const sourcePath = join(entry.package_root, file.source_name)
+        const sourceStat = lstatSync(sourcePath)
+        assert(sourceStat.isFile() && !sourceStat.isSymbolicLink(), `package legal source must be a regular file: ${entry.id}/${file.source_name}`)
+        cpSync(sourcePath, join(targetDirectory, file.source_name))
+      }
+      legalFiles = packageFiles.map((file) => {
+        const path = `legal/licenses/javascript/${licenseDirectoryName(entry.name, entry.version)}/${file.source_name}`
+        return legalFileRecord(root, path, file.source_name, file.kind)
+      })
+      entry.license_evidence = { kind: 'PACKAGE_LEGAL_FILES' }
     } else {
+      legalFiles = []
       entry.license_evidence = { kind: 'PACKAGE_METADATA_ONLY' }
     }
-    entry.license_texts = [...new Set(files)].sort().map((file) => {
-      const path = `legal/licenses/javascript/${licenseDirectoryName(entry.name, entry.version)}/${file}`
-      return { path, sha256: sha256(readFileSync(join(root, path))) }
-    })
+    entry.legal_files = legalFiles
+    entry.license_texts = legacyLicenseTexts(legalFiles)
+    entry.notice_file_present = legalFiles.some((file) => file.kind === 'NOTICE')
     delete entry.package_root
   }
 
   const sourceManifest = {
-    schema_version: 1,
+    schema_version: 2,
+    ecosystem: 'javascript',
+    distribution_scope: 'source',
     lockfile: 'pnpm-lock.yaml',
     package_instances: entries.length,
     production_instances: entries.filter((entry) => entry.environment === 'production').length,
     development_instances: entries.filter((entry) => entry.environment === 'development').length,
+    coverage: summarizeLegalCoverage(entries),
     dependencies: entries
   }
   const binaryEntries = entries.filter((entry) => entry.bundled)
   const binaryManifest = {
-    schema_version: 1,
+    schema_version: 2,
+    ecosystem: 'javascript',
+    distribution_scope: 'bundled',
     package_format: 'electron-builder app.asar',
     package_instances: binaryEntries.length,
     prune_exclusions: [...BINARY_PRUNE_EXCLUSIONS].sort(),
+    coverage: summarizeLegalCoverage(binaryEntries),
     dependencies: binaryEntries
   }
   writeJson(join(root, 'legal/manifests/javascript-source-dependencies.json'), sourceManifest)
@@ -371,7 +448,7 @@ function parseCargoLock(content) {
   return packages
 }
 
-export function generateRustManifest(root) {
+function rustReleaseContext(root) {
   const { cargo, env } = cargoEnvironment()
   const tree = run(cargo, [
     'tree', '--locked', '-p', 'rovai-core', '--target', 'aarch64-apple-darwin',
@@ -384,22 +461,36 @@ export function generateRustManifest(root) {
   const core = metadata.packages.find((item) => item.name === 'rovai-core')
   const directNames = new Set(core.dependencies.filter((dependency) => dependency.kind !== 'dev').map((dependency) => dependency.name))
   const lock = parseCargoLock(readFileSync(join(root, 'Cargo.lock'), 'utf8'))
+  const packages = metadata.packages.filter((item) => releaseIds.has(`${item.name} v${item.version}`))
+  return { directNames, lock, packages }
+}
+
+export function generateRustManifest(root) {
+  const { directNames, lock, packages } = rustReleaseContext(root)
   const licenseRoot = join(root, 'legal/licenses/rust')
   rmSync(licenseRoot, { recursive: true, force: true })
   mkdirSync(licenseRoot, { recursive: true })
 
-  const dependencies = metadata.packages
-    .filter((item) => releaseIds.has(`${item.name} v${item.version}`))
+  const dependencies = packages
     .map((item) => {
       const id = `${item.name}@${item.version}`
       const packageRoot = dirname(item.manifest_path)
       const targetDirectory = join(licenseRoot, id)
-      const files = packageLicenseFiles(packageRoot)
-      if (files.length > 0) {
+      const packageFiles = packageLegalFiles(packageRoot)
+      if (packageFiles.length > 0) {
         mkdirSync(targetDirectory, { recursive: true })
-        for (const file of files) cpSync(join(packageRoot, file), join(targetDirectory, file))
+        for (const file of packageFiles) {
+          const sourcePath = join(packageRoot, file.source_name)
+          const sourceStat = lstatSync(sourcePath)
+          assert(sourceStat.isFile() && !sourceStat.isSymbolicLink(), `package legal source must be a regular file: ${id}/${file.source_name}`)
+          cpSync(sourcePath, join(targetDirectory, file.source_name))
+        }
       }
       const lockEntry = lock.get(id)
+      const legalFiles = packageFiles.map((file) => {
+        const path = `legal/licenses/rust/${id}/${file.source_name}`
+        return legalFileRecord(root, path, file.source_name, file.kind)
+      })
       return {
         id,
         crate: item.name,
@@ -413,11 +504,10 @@ export function generateRustManifest(root) {
         source: lockEntry?.source ?? item.source,
         repository: item.repository,
         crates_io_checksum: lockEntry?.checksum ?? null,
-        license_texts: files.map((file) => {
-          const path = `legal/licenses/rust/${id}/${file}`
-          return { path, sha256: sha256(readFileSync(join(root, path))) }
-        }),
-        license_evidence: files.length > 0 ? 'PACKAGE_LICENSE_FILE' : 'PACKAGE_METADATA_ONLY',
+        legal_files: legalFiles,
+        license_texts: legacyLicenseTexts(legalFiles),
+        license_evidence: { kind: legalFiles.length > 0 ? 'PACKAGE_LEGAL_FILES' : 'PACKAGE_METADATA_ONLY' },
+        notice_file_present: legalFiles.some((file) => file.kind === 'NOTICE'),
         required_notice: true
       }
     })
@@ -427,11 +517,14 @@ export function generateRustManifest(root) {
   mkdirSync(sqliteDirectory, { recursive: true })
   writeFileSync(join(sqliteDirectory, 'PUBLIC-DOMAIN.md'), SQLITE_PUBLIC_DOMAIN)
   const manifest = {
-    schema_version: 1,
+    schema_version: 2,
+    ecosystem: 'rust',
+    distribution_scope: 'release',
     target: 'aarch64-apple-darwin',
     root_package: 'rovai-core@0.0.1',
     release_package_count: dependencies.length + 1,
     third_party_crate_count: dependencies.length,
+    coverage: summarizeLegalCoverage(dependencies),
     dependencies,
     sqlite: {
       version: '3.51.1',
@@ -446,7 +539,7 @@ export function generateRustManifest(root) {
     option_ext_source: { ...OPTION_EXT_SOURCE }
   }
   writeJson(join(root, 'legal/manifests/rust-release-dependencies.json'), manifest)
-  const rustNotice = `# Rust Release Dependency Notice\n\n| Crate | Dependency | License | Checksum | License text |\n|---|---|---|---|---|\n${dependencies.map((entry) => `| \`${entry.id}\` | ${entry.dependency_class} | \`${entry.license_expression}\` | \`${entry.crates_io_checksum}\` | ${entry.license_texts.map((text) => `\`${text.path}\``).join('<br>') || entry.license_evidence} |`).join('\n')}\n`
+  const rustNotice = `# Rust Release Dependency Notice\n\n| Crate | Dependency | License | Checksum | Legal files |\n|---|---|---|---|---|\n${dependencies.map((entry) => `| \`${entry.id}\` | ${entry.dependency_class} | \`${entry.license_expression}\` | \`${entry.crates_io_checksum}\` | ${entry.legal_files.map((file) => `\`${file.path}\``).join('<br>') || evidenceKind(entry)} |`).join('\n')}\n`
   writeFileSync(join(licenseRoot, 'RELEASE_CRATES.md'), rustNotice)
   return manifest
 }
@@ -486,16 +579,129 @@ export function validateArtworkManifest(root, manifest = readJson(join(root, 'le
   return manifest
 }
 
-export function verifyManifestLicenseFiles(root, manifest) {
+function manifestPackageRoots(root, manifest) {
+  if (manifest.ecosystem === 'javascript') {
+    return new Map(javascriptDependencyEntries(root).map((entry) => [entry.id, entry.package_root]))
+  }
+  if (manifest.ecosystem === 'rust') {
+    return new Map(rustReleaseContext(root).packages.map((item) => [
+      `${item.name}@${item.version}`,
+      dirname(item.manifest_path)
+    ]))
+  }
+  return null
+}
+
+function legalOutputPrefix(manifest, dependency) {
+  if (manifest.ecosystem === 'javascript') {
+    return `legal/licenses/javascript/${licenseDirectoryName(dependency.name, dependency.version)}`
+  }
+  if (manifest.ecosystem === 'rust') return `legal/licenses/rust/${dependency.id}`
+  return null
+}
+
+function assertCuratedLicenseEvidence(dependency, ecosystem) {
+  const evidence = dependency.license_evidence
+  assert(evidence && typeof evidence === 'object', `curated license evidence must be structured: ${dependency.id}`)
+  for (const field of [
+    'method',
+    'package_id',
+    'spdx_expression',
+    'why_package_file_unavailable',
+    'curated_file_path',
+    'curated_sha256',
+    'copyright_attribution',
+    'manual_review_record'
+  ]) assert(evidence[field], `curated license evidence misses ${field}: ${dependency.id}`)
+  assert(evidence.package_id === dependency.id, `curated package identity mismatch: ${dependency.id}`)
+  assert(evidence.spdx_expression === dependency.license_expression, `curated SPDX expression mismatch: ${dependency.id}`)
+  assert(dependency.legal_files.some((file) => file.path === evidence.curated_file_path && file.sha256 === evidence.curated_sha256), `curated file metadata mismatch: ${dependency.id}`)
+  if (ecosystem === 'javascript') {
+    for (const field of ['npm_tarball_sha256', 'npm_git_head', 'upstream_license_revision']) {
+      assert(evidence[field], `curated JavaScript evidence misses ${field}: ${dependency.id}`)
+    }
+  }
+  if (ecosystem === 'rust') {
+    assert(dependency.crates_io_checksum, `curated Rust evidence misses crates.io checksum: ${dependency.id}`)
+    assert(evidence.upstream_revision || evidence.fixed_archive_sha256, `curated Rust evidence misses fixed upstream revision or archive: ${dependency.id}`)
+  }
+}
+
+export function verifyManifestLicenseFiles(root, manifest, options = {}) {
+  if (manifest.ecosystem) assert(manifest.schema_version === 2, 'dependency legal manifest schema must be version 2')
+  const packageRoots = options.packageRoots ?? manifestPackageRoots(root, manifest)
   for (const dependency of manifest.dependencies) {
     assert(dependency.license_expression, `missing license expression: ${dependency.id}`)
     assert(!/(?:unknown|unlicensed|custom|see license|noassertion)/i.test(dependency.license_expression), `unknown or custom license expression: ${dependency.id}`)
-    for (const text of dependency.license_texts) {
-      assert(!isAbsolute(text.path), `absolute legal path: ${text.path}`)
-      assert(existsSync(join(root, text.path)), `missing license text: ${text.path}`)
-      assert(sha256(readFileSync(join(root, text.path))) === text.sha256, `license digest mismatch: ${text.path}`)
+    assert(Array.isArray(dependency.legal_files), `missing legal_files array: ${dependency.id}`)
+    assert(Array.isArray(dependency.license_texts), `missing license_texts array: ${dependency.id}`)
+    const kind = evidenceKind(dependency)
+    const strictDistribution = manifest.distribution_scope === 'bundled' || manifest.distribution_scope === 'release' || dependency.bundled === true
+    assert(['PACKAGE_LEGAL_FILES', 'CURATED_LICENSE_CLARIFICATION', 'PACKAGE_METADATA_ONLY'].includes(kind), `unknown license evidence kind: ${dependency.id}`)
+    if (kind === 'PACKAGE_METADATA_ONLY') {
+      assert(manifest.ecosystem === 'javascript' && manifest.distribution_scope === 'source' && dependency.environment === 'development' && dependency.bundled === false, `metadata-only license evidence is restricted to non-distributed development dependencies: ${dependency.id}`)
+    }
+    if (strictDistribution) {
+      assert(kind !== 'PACKAGE_METADATA_ONLY', `metadata-only license evidence is forbidden for distributed dependency: ${dependency.id}`)
+      assert(dependency.legal_files.length > 0, `distributed dependency has zero legal files: ${dependency.id}`)
+    }
+    if (kind === 'PACKAGE_LEGAL_FILES') assert(dependency.legal_files.length > 0, `package legal file evidence is empty: ${dependency.id}`)
+    if (kind === 'CURATED_LICENSE_CLARIFICATION') assertCuratedLicenseEvidence(dependency, manifest.ecosystem)
+
+    const legalPaths = dependency.legal_files.map((file) => file.path)
+    assert(new Set(legalPaths).size === legalPaths.length, `duplicate legal file path: ${dependency.id}`)
+    assert(JSON.stringify(legalPaths) === JSON.stringify([...legalPaths].sort()), `legal files are not stably sorted: ${dependency.id}`)
+    for (const file of dependency.legal_files) {
+      assert(['LICENSE', 'NOTICE', 'COPYRIGHT', 'PATENT'].includes(file.kind), `unknown legal file kind: ${dependency.id}/${file.source_name}`)
+      assert(legalFileKind(file.source_name) === file.kind, `legal file kind or source basename mismatch: ${dependency.id}/${file.source_name}`)
+      assert(basename(file.path) === file.source_name, `legal file path loses source basename: ${dependency.id}/${file.source_name}`)
+      assert(!isAbsolute(file.path), `absolute legal path: ${file.path}`)
+      const absolutePath = resolve(root, file.path)
+      assert(absolutePath.startsWith(`${resolve(root)}${sep}`), `legal path escapes repository root: ${file.path}`)
+      assert(existsSync(absolutePath), `missing legal file: ${file.path}`)
+      const fileStat = lstatSync(absolutePath)
+      assert(fileStat.isFile() && !fileStat.isSymbolicLink(), `legal output must be a regular file: ${file.path}`)
+      const bytes = readFileSync(absolutePath)
+      assert(bytes.length === file.size, `legal file size mismatch: ${file.path}`)
+      assert(sha256(bytes) === file.sha256, `license digest mismatch: ${file.path}`)
+    }
+    assert(JSON.stringify(dependency.license_texts) === JSON.stringify(legacyLicenseTexts(dependency.legal_files)), `legacy license_texts does not cover every legal file: ${dependency.id}`)
+    assert(dependency.notice_file_present === dependency.legal_files.some((file) => file.kind === 'NOTICE'), `notice presence mismatch: ${dependency.id}`)
+
+    const outputPrefix = legalOutputPrefix(manifest, dependency)
+    if (outputPrefix) {
+      const expectedPaths = dependency.legal_files.map((file) => `${outputPrefix}/${file.source_name}`)
+      assert(JSON.stringify(legalPaths) === JSON.stringify(expectedPaths), `legal output path mismatch: ${dependency.id}`)
+      const outputDirectory = join(root, outputPrefix)
+      const actualOutputNames = existsSync(outputDirectory)
+        ? readdirSync(outputDirectory, { withFileTypes: true }).map((entry) => {
+            assert(entry.isFile(), `dependency legal output contains a directory or symlink: ${dependency.id}/${entry.name}`)
+            return entry.name
+          }).sort()
+        : []
+      assert(JSON.stringify(actualOutputNames) === JSON.stringify(dependency.legal_files.map((file) => file.source_name)), `tracked legal output is not represented exactly in manifest: ${dependency.id}`)
+    }
+
+    if (packageRoots) {
+      const packageRoot = packageRoots.get(dependency.id)
+      assert(packageRoot, `exact package root is unavailable: ${dependency.id}`)
+      const packageFiles = packageLegalFiles(packageRoot)
+      const packageNames = packageFiles.map((file) => file.source_name)
+      if (packageNames.length > 0) {
+        assert(kind === 'PACKAGE_LEGAL_FILES', `package legal files were replaced by non-package evidence: ${dependency.id}`)
+        assert(JSON.stringify(packageNames) === JSON.stringify(dependency.legal_files.map((file) => file.source_name)), `package legal files are not represented exactly in manifest: ${dependency.id}`)
+        for (const file of dependency.legal_files) {
+          const packagePath = join(packageRoot, file.source_name)
+          const packageStat = lstatSync(packagePath)
+          assert(packageStat.isFile() && !packageStat.isSymbolicLink(), `package legal source is not a regular file: ${dependency.id}/${file.source_name}`)
+          assert(sha256(readFileSync(packagePath)) === file.sha256, `package legal source differs from tracked output: ${dependency.id}/${file.source_name}`)
+        }
+      } else {
+        assert(kind !== 'PACKAGE_LEGAL_FILES', `package legal file evidence has no package source files: ${dependency.id}`)
+      }
     }
   }
+  if (manifest.coverage) assert(JSON.stringify(manifest.coverage) === JSON.stringify(summarizeLegalCoverage(manifest.dependencies)), 'manifest legal coverage summary is stale')
 }
 
 export function validateSkillLineage(skill, notice) {
@@ -651,13 +857,16 @@ export function verifySource(root = process.cwd()) {
   assert(jsSource.development_instances === 345, 'expected 345 JavaScript development-only dependency instances')
   assert(jsBinary.package_instances === 144, 'expected 144 bundled JavaScript package instances')
   verifyManifestLicenseFiles(root, jsSource)
+  verifyManifestLicenseFiles(root, jsBinary)
   const sourceIds = jsSource.dependencies.map((entry) => entry.id)
   const binaryIds = jsBinary.dependencies.map((entry) => entry.id)
   assert(new Set(sourceIds).size === sourceIds.length && JSON.stringify(sourceIds) === JSON.stringify([...sourceIds].sort((left, right) => left.localeCompare(right))), 'JavaScript source manifest must be uniquely and stably sorted')
   assert(JSON.stringify(binaryIds) === JSON.stringify(jsSource.dependencies.filter((entry) => entry.bundled).map((entry) => entry.id)), 'JavaScript binary manifest must equal the bundled source subset')
   assert(jsBinary.dependencies.every((entry) => entry.license_texts.length > 0), 'every bundled JavaScript package must include license text')
+  assert(jsBinary.coverage.metadata_only === 0 && jsBinary.coverage.zero_legal_files === 0, 'bundled JavaScript legal file coverage is incomplete')
   const scrollBar = jsBinary.dependencies.find((entry) => entry.id === 'react-remove-scroll-bar@2.3.8')
   assert(scrollBar?.license_texts.length === 1, 'react-remove-scroll-bar license text is missing')
+  assert(evidenceKind(scrollBar) === 'CURATED_LICENSE_CLARIFICATION', 'react-remove-scroll-bar curated clarification changed')
   assert(scrollBar.license_evidence?.npm_tarball_sha256 === 'ccc872d7a2dc007cbf9d755f30d56b8d80eabdbe22c44c95a709129bfdc46f01', 'react-remove-scroll-bar tarball provenance changed')
 
   const rust = readJson(join(root, 'legal/manifests/rust-release-dependencies.json'))
@@ -666,6 +875,12 @@ export function verifySource(root = process.cwd()) {
   verifyManifestLicenseFiles(root, rust)
   const rustIds = rust.dependencies.map((entry) => entry.id)
   assert(new Set(rustIds).size === rustIds.length && JSON.stringify(rustIds) === JSON.stringify([...rustIds].sort((left, right) => left.localeCompare(right))), 'Rust release manifest must be uniquely and stably sorted')
+  assert(rust.coverage.metadata_only === 0, 'Rust release manifest contains metadata-only license evidence')
+  assert(rust.coverage.zero_legal_files === 0, 'Rust release manifest contains a dependency with zero legal files')
+  const anyhow = rust.dependencies.find((entry) => entry.id === 'anyhow@1.0.103')
+  assert(anyhow?.license_expression === 'MIT OR Apache-2.0', 'anyhow 1.0.103 license expression changed')
+  assert(anyhow?.crates_io_checksum === '2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3', 'anyhow 1.0.103 crates.io checksum changed')
+  assert(JSON.stringify(anyhow.legal_files.map((file) => file.source_name)) === JSON.stringify(['LICENSE-APACHE', 'LICENSE-MIT']), 'anyhow 1.0.103 legal files are incomplete')
   assert(rust.sqlite?.version === '3.51.1' && rust.sqlite?.legal_status === 'PUBLIC_DOMAIN', 'SQLite provenance is incomplete')
   validateOptionExtCompliance(root, { rustManifest: rust })
 
@@ -760,6 +975,39 @@ export function prepareLegalPayload(root = process.cwd(), output = join(root, '.
   return { payload, files: files.length }
 }
 
+function verifyPackagedDependencyLegalFiles(payload, manifest) {
+  assert(manifest.schema_version === 2, 'packaged dependency legal manifest schema must be version 2')
+  assert(JSON.stringify(manifest.coverage) === JSON.stringify(summarizeLegalCoverage(manifest.dependencies)), 'packaged dependency legal coverage summary is stale')
+  const sourcePrefix = manifest.ecosystem === 'javascript'
+    ? 'legal/licenses/javascript/'
+    : 'legal/licenses/rust/'
+  const payloadPrefix = manifest.ecosystem === 'javascript'
+    ? 'javascript/licenses/'
+    : 'rust/licenses/'
+  for (const dependency of manifest.dependencies) {
+    const kind = evidenceKind(dependency)
+    assert(dependency.license_expression && !/(?:unknown|unlicensed|custom|see license|noassertion)/i.test(dependency.license_expression), `packaged dependency has an unknown license expression: ${dependency.id}`)
+    assert(['PACKAGE_LEGAL_FILES', 'CURATED_LICENSE_CLARIFICATION', 'PACKAGE_METADATA_ONLY'].includes(kind), `packaged dependency has invalid license evidence: ${dependency.id}`)
+    assert(kind !== 'PACKAGE_METADATA_ONLY', `packaged dependency uses metadata-only license evidence: ${dependency.id}`)
+    assert(dependency.legal_files.length > 0, `packaged dependency has zero legal files: ${dependency.id}`)
+    if (kind === 'CURATED_LICENSE_CLARIFICATION') assertCuratedLicenseEvidence(dependency, manifest.ecosystem)
+    assert(JSON.stringify(dependency.license_texts) === JSON.stringify(legacyLicenseTexts(dependency.legal_files)), `packaged legacy license_texts is incomplete: ${dependency.id}`)
+    assert(dependency.notice_file_present === dependency.legal_files.some((file) => file.kind === 'NOTICE'), `packaged notice presence mismatch: ${dependency.id}`)
+    for (const file of dependency.legal_files) {
+      assert(legalFileKind(file.source_name) === file.kind, `packaged legal file kind or basename mismatch: ${dependency.id}/${file.source_name}`)
+      assert(file.path.startsWith(sourcePrefix), `packaged dependency legal path has an unexpected prefix: ${file.path}`)
+      const payloadPath = `${payloadPrefix}${file.path.slice(sourcePrefix.length)}`
+      assert(basename(payloadPath) === file.source_name, `packaged legal path loses source basename: ${dependency.id}/${file.source_name}`)
+      const absolutePath = resolve(payload, payloadPath)
+      assert(absolutePath.startsWith(`${resolve(payload)}${sep}`), `packaged legal path escapes payload root: ${payloadPath}`)
+      assert(existsSync(absolutePath), `packaged legal payload misses ${payloadPath}`)
+      const bytes = readFileSync(absolutePath)
+      assert(bytes.length === file.size, `packaged legal file size mismatch: ${payloadPath}`)
+      assert(sha256(bytes) === file.sha256, `packaged legal file digest mismatch: ${payloadPath}`)
+    }
+  }
+}
+
 export function verifyPayload(path, { enforceReleaseGate = true } = {}) {
   const packagedApp = path.endsWith('.app') ? path : null
   const payload = packagedApp ? join(packagedApp, 'Contents/Resources/legal') : path
@@ -775,6 +1023,8 @@ export function verifyPayload(path, { enforceReleaseGate = true } = {}) {
     'javascript/licenses/react-remove-scroll-bar@2.3.8/LICENSE',
     'javascript/licenses/BUNDLED_PACKAGES.md',
     'rust/licenses/option-ext@0.2.0/LICENSE.txt',
+    'rust/licenses/anyhow@1.0.103/LICENSE-APACHE',
+    'rust/licenses/anyhow@1.0.103/LICENSE-MIT',
     'rust/licenses/RELEASE_CRATES.md',
     'rust/licenses/sqlite-3.51.1/PUBLIC-DOMAIN.md',
     'rust/sources/option-ext-0.2.0.crate',
@@ -819,7 +1069,10 @@ export function verifyPayload(path, { enforceReleaseGate = true } = {}) {
     assert(packagedDependencies.length === 144, 'packaged app.asar must contain 144 package instances')
     assert(JSON.stringify(packagedDependencies) === JSON.stringify(expectedDependencies), 'packaged app.asar dependency graph differs from the legal manifest')
   }
+  const javascriptManifest = readJson(join(payload, 'manifests/javascript-binary-dependencies.json'))
+  verifyPackagedDependencyLegalFiles(payload, javascriptManifest)
   const rustManifest = readJson(join(payload, 'manifests/rust-release-dependencies.json'))
+  verifyPackagedDependencyLegalFiles(payload, rustManifest)
   validateOptionExtCompliance(payload, {
     rustManifest,
     provenance: readFileSync(join(payload, 'provenance/option-ext-0.2.0.md'), 'utf8'),

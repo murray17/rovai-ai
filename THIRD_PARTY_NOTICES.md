@@ -74,6 +74,11 @@ license-file source, and SHA-256 values are in
 `legal/manifests/javascript-source-dependencies.json` and
 `legal/licenses/javascript/`.
 
+All 144 bundled instances have directly distributed legal files: 143 use the
+exact package files and one uses the curated clarification below. The collector
+retains every matched LICENSE, COPYING, NOTICE, COPYRIGHT, UNLICENSE, and
+PATENT-family regular file rather than stopping after the first license text.
+
 `react-remove-scroll-bar 2.3.8` declares MIT in its exact npm metadata and
 README but omits a license file from the tarball. Its manifest entry records
 the exact tarball SHA-256, published `gitHead`, and the later fixed upstream
@@ -84,9 +89,16 @@ notices. No unknown or custom license expression remains in the bundled set.
 
 The macOS arm64 release graph contains Rovai Core plus 119 third-party crates.
 Exact versions, direct/transitive classification, Cargo checksums,
-repositories, SPDX expressions, and available package license files are in
+repositories, SPDX expressions, and all matched package legal files are in
 `legal/manifests/rust-release-dependencies.json` and
-`legal/licenses/rust/`.
+`legal/licenses/rust/`. All 119 third-party release crates use legal files from
+their exact crates.io package roots; no release crate relies on metadata-only
+license evidence. Multi-license packages retain every packaged alternative.
+
+For example, `anyhow 1.0.103` declares `MIT OR Apache-2.0`; its exact
+`LICENSE-MIT` and `LICENSE-APACHE` files are retained under
+`legal/licenses/rust/anyhow@1.0.103/` and packaged under
+`Contents/Resources/legal/rust/licenses/anyhow@1.0.103/`.
 
 `rusqlite 0.38.0` and `libsqlite3-sys 0.36.0` are MIT-licensed Rust crates.
 The enabled `bundled` feature compiles SQLite 3.51.1. SQLite is public-domain

@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   unlinkSync,
   writeFileSync
 } from 'node:fs'
@@ -15,10 +16,14 @@ import test from 'node:test'
 import {
   generateArtworkManifest,
   inspectOptionExtArchive,
+  isLegalFileBasename,
+  legalFileKind,
   OPTION_EXT_SOURCE,
+  packageLegalFiles,
   prepareLegalPayload,
   readJson,
   sha256,
+  summarizeLegalCoverage,
   validateSkillLineage,
   validateArtworkManifest,
   validateOptionExtCompliance,
@@ -28,6 +33,120 @@ import {
 } from './legal-common.mjs'
 
 const root = resolve(import.meta.dirname, '../..')
+
+test('legal filename matcher recognizes legal families without accepting source files', () => {
+  const expected = new Map([
+    ['LICENSE', 'LICENSE'],
+    ['LICENSE.txt', 'LICENSE'],
+    ['LICENSE-MIT', 'LICENSE'],
+    ['LICENSE-APACHE', 'LICENSE'],
+    ['LICENSE-0BSD', 'LICENSE'],
+    ['LICENSE.BSD-3', 'LICENSE'],
+    ['LICENCE-MIT', 'LICENSE'],
+    ['COPYING', 'LICENSE'],
+    ['COPYING.LESSER', 'LICENSE'],
+    ['NOTICE-THIRD-PARTY', 'NOTICE'],
+    ['COPYRIGHT', 'COPYRIGHT'],
+    ['CopyrightNotice.txt', 'COPYRIGHT'],
+    ['UNLICENSE', 'LICENSE'],
+    ['PATENTS.txt', 'PATENT']
+  ])
+  for (const [sourceName, kind] of expected) {
+    assert.equal(isLegalFileBasename(sourceName), true, sourceName)
+    assert.equal(legalFileKind(sourceName), kind, sourceName)
+  }
+  for (const sourceName of [
+    'LICENSE-generator.js',
+    'noticeboard.png',
+    'copyright-check.test.ts',
+    'licenseCheck.json',
+    'README.md'
+  ]) assert.equal(isLegalFileBasename(sourceName), false, sourceName)
+})
+
+test('exact package fixture collects every regular legal file and verifies fail-closed metadata', () => {
+  const temporary = mkdtempSync(join(tmpdir(), 'rovai-legal-files-test-'))
+  const packageRoot = join(temporary, 'package')
+  const outputRoot = join(temporary, 'legal/licenses/rust/fixture@1.0.0')
+  const contents = new Map([
+    ['LICENSE-APACHE', 'Apache fixture\n'],
+    ['LICENSE-MIT', 'MIT fixture\n'],
+    ['NOTICE', 'Notice fixture\n']
+  ])
+  try {
+    mkdirSync(packageRoot, { recursive: true })
+    mkdirSync(outputRoot, { recursive: true })
+    for (const [sourceName, content] of contents) {
+      writeFileSync(join(packageRoot, sourceName), content)
+      writeFileSync(join(outputRoot, sourceName), content)
+    }
+    writeFileSync(join(packageRoot, 'README.md'), 'not legal evidence\n')
+    writeFileSync(join(packageRoot, 'LICENSE-generator.js'), 'not legal evidence\n')
+    mkdirSync(join(packageRoot, 'LICENSE'))
+    symlinkSync('README.md', join(packageRoot, 'LICENSE-SYMLINK'))
+
+    const collected = packageLegalFiles(packageRoot)
+    assert.deepEqual(collected.map((file) => file.source_name), ['LICENSE-APACHE', 'LICENSE-MIT', 'NOTICE'])
+    assert.deepEqual(packageLegalFiles(packageRoot), collected)
+
+    const legalFiles = collected.map((file) => {
+      const path = `legal/licenses/rust/fixture@1.0.0/${file.source_name}`
+      const bytes = readFileSync(join(temporary, path))
+      return { ...file, path, sha256: sha256(bytes), size: bytes.length }
+    })
+    const dependency = {
+      id: 'fixture@1.0.0',
+      crate: 'fixture',
+      version: '1.0.0',
+      release: true,
+      license_expression: 'MIT OR Apache-2.0',
+      license_evidence: { kind: 'PACKAGE_LEGAL_FILES' },
+      legal_files: legalFiles,
+      license_texts: legalFiles.map(({ path, sha256: digest }) => ({ path, sha256: digest })),
+      notice_file_present: true
+    }
+    const manifest = {
+      schema_version: 2,
+      ecosystem: 'rust',
+      distribution_scope: 'release',
+      dependencies: [dependency]
+    }
+    manifest.coverage = summarizeLegalCoverage(manifest.dependencies)
+    const packageRoots = new Map([[dependency.id, packageRoot]])
+    verifyManifestLicenseFiles(temporary, manifest, { packageRoots })
+
+    const partial = structuredClone(manifest)
+    partial.dependencies[0].legal_files = partial.dependencies[0].legal_files.slice(1)
+    partial.dependencies[0].license_texts = partial.dependencies[0].license_texts.slice(1)
+    assert.throws(() => verifyManifestLicenseFiles(temporary, partial, { packageRoots }), /represented exactly/)
+
+    const metadataOnly = structuredClone(manifest)
+    metadataOnly.dependencies[0].license_evidence = { kind: 'PACKAGE_METADATA_ONLY' }
+    metadataOnly.dependencies[0].legal_files = []
+    metadataOnly.dependencies[0].license_texts = []
+    metadataOnly.dependencies[0].notice_file_present = false
+    assert.throws(() => verifyManifestLicenseFiles(temporary, metadataOnly, { packageRoots }), /metadata-only license evidence/)
+
+    const emptyExpression = structuredClone(manifest)
+    emptyExpression.dependencies[0].license_expression = ''
+    assert.throws(() => verifyManifestLicenseFiles(temporary, emptyExpression, { packageRoots }), /missing license expression/)
+
+    const wrongBasename = structuredClone(manifest)
+    wrongBasename.dependencies[0].legal_files[0].source_name = 'LICENSE-WRONG'
+    assert.throws(() => verifyManifestLicenseFiles(temporary, wrongBasename, { packageRoots }), /source basename|loses source basename/)
+
+    writeFileSync(join(outputRoot, 'LICENSE-MIT'), 'tampered\n')
+    assert.throws(() => verifyManifestLicenseFiles(temporary, manifest, { packageRoots }), /size mismatch|digest mismatch/)
+    writeFileSync(join(outputRoot, 'LICENSE-MIT'), contents.get('LICENSE-MIT'))
+    unlinkSync(join(outputRoot, 'LICENSE-APACHE'))
+    assert.throws(() => verifyManifestLicenseFiles(temporary, manifest, { packageRoots }), /missing legal file/)
+    writeFileSync(join(outputRoot, 'LICENSE-APACHE'), contents.get('LICENSE-APACHE'))
+    unlinkSync(join(outputRoot, 'NOTICE'))
+    assert.throws(() => verifyManifestLicenseFiles(temporary, manifest, { packageRoots }), /missing legal file/)
+  } finally {
+    rmSync(temporary, { recursive: true, force: true })
+  }
+})
 
 test('project artwork manifest covers tracked, embedded, duplicate, and design assets', () => {
   const committed = readJson(join(root, 'legal/manifests/project-artwork.json'))
@@ -55,6 +174,21 @@ test('source provenance gate covers Skills, runtime logos, schemas, and dependen
   assert.equal(result.javascript_source_instances, 494)
   assert.equal(result.javascript_binary_instances, 144)
   assert.equal(result.rust_third_party_crates, 119)
+})
+
+test('anyhow 1.0.103 retains both upstream licenses in source and binary metadata', () => {
+  const manifest = readJson(join(root, 'legal/manifests/rust-release-dependencies.json'))
+  const anyhow = manifest.dependencies.find((entry) => entry.id === 'anyhow@1.0.103')
+  assert.ok(anyhow)
+  assert.equal(anyhow.license_expression, 'MIT OR Apache-2.0')
+  assert.equal(anyhow.crates_io_checksum, '2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3')
+  assert.equal(anyhow.license_evidence.kind, 'PACKAGE_LEGAL_FILES')
+  assert.deepEqual(anyhow.legal_files.map((file) => file.source_name), ['LICENSE-APACHE', 'LICENSE-MIT'])
+  for (const file of anyhow.legal_files) {
+    const bytes = readFileSync(join(root, file.path))
+    assert.equal(bytes.length, file.size)
+    assert.equal(sha256(bytes), file.sha256)
+  }
 })
 
 test('exact option-ext source archive is fixed, complete, and metadata-correct', () => {
@@ -175,6 +309,8 @@ test('legal payload generation is deterministic and missing files fail closed', 
       'rust/sources/option-ext-0.2.0.crate',
       'rust/sources/README.md',
       'rust/licenses/option-ext@0.2.0/LICENSE.txt',
+      'rust/licenses/anyhow@1.0.103/LICENSE-APACHE',
+      'rust/licenses/anyhow@1.0.103/LICENSE-MIT',
       'provenance/option-ext-0.2.0.md'
     ]) assert.ok(existsSync(join(first, path)), `legal payload misses ${path}`)
 

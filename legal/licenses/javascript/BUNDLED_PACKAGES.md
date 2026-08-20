@@ -134,7 +134,7 @@
 | `style-to-object@1.0.14` | transitive | production | `MIT` | `legal/licenses/javascript/style-to-object@1.0.14/LICENSE` |
 | `trim-lines@3.0.1` | transitive | production | `MIT` | `legal/licenses/javascript/trim-lines@3.0.1/license` |
 | `trough@2.2.0` | transitive | production | `MIT` | `legal/licenses/javascript/trough@2.2.0/license` |
-| `tslib@2.8.1` | transitive | production | `0BSD` | `legal/licenses/javascript/tslib@2.8.1/LICENSE.txt` |
+| `tslib@2.8.1` | transitive | production | `0BSD` | `legal/licenses/javascript/tslib@2.8.1/CopyrightNotice.txt`<br>`legal/licenses/javascript/tslib@2.8.1/LICENSE.txt` |
 | `unified@11.0.5` | direct | production | `MIT` | `legal/licenses/javascript/unified@11.0.5/license` |
 | `unist-util-is@6.0.1` | transitive | production | `MIT` | `legal/licenses/javascript/unist-util-is@6.0.1/license` |
 | `unist-util-position@5.0.0` | transitive | production | `MIT` | `legal/licenses/javascript/unist-util-position@5.0.0/license` |

@@ -201,7 +201,7 @@
 | `electron-vite@5.0.0` | direct | development | `MIT` | `legal/licenses/javascript/electron-vite@5.0.0/LICENSE` |
 | `electron-winstaller@5.4.0` | transitive | development | `MIT` | `legal/licenses/javascript/electron-winstaller@5.4.0/LICENSE` |
 | `electron@43.1.1` | direct | development | `MIT` | `legal/licenses/javascript/electron@43.1.1/LICENSE` |
-| `emoji-regex@8.0.0` | transitive | development | `MIT` | PACKAGE_METADATA_ONLY |
+| `emoji-regex@8.0.0` | transitive | development | `MIT` | `legal/licenses/javascript/emoji-regex@8.0.0/LICENSE-MIT.txt` |
 | `end-of-stream@1.4.5` | transitive | development | `MIT` | `legal/licenses/javascript/end-of-stream@1.4.5/LICENSE` |
 | `env-paths@2.2.1` | transitive | development | `MIT` | `legal/licenses/javascript/env-paths@2.2.1/license` |
 | `env-paths@3.0.0` | transitive | development | `MIT` | `legal/licenses/javascript/env-paths@3.0.0/license` |
@@ -280,7 +280,7 @@
 | `jiti@2.7.0` | transitive | development | `MIT` | `legal/licenses/javascript/jiti@2.7.0/LICENSE` |
 | `js-tokens@4.0.0` | transitive | development | `MIT` | `legal/licenses/javascript/js-tokens@4.0.0/LICENSE` |
 | `js-yaml@4.3.0` | transitive | development | `MIT` | `legal/licenses/javascript/js-yaml@4.3.0/LICENSE` |
-| `jsesc@3.1.0` | transitive | development | `MIT` | PACKAGE_METADATA_ONLY |
+| `jsesc@3.1.0` | transitive | development | `MIT` | `legal/licenses/javascript/jsesc@3.1.0/LICENSE-MIT.txt` |
 | `json-buffer@3.0.1` | transitive | development | `MIT` | `legal/licenses/javascript/json-buffer@3.0.1/LICENSE` |
 | `json-schema-traverse@1.0.0` | transitive | development | `MIT` | `legal/licenses/javascript/json-schema-traverse@1.0.0/LICENSE` |
 | `json-stringify-safe@5.0.1` | transitive | development | `ISC` | `legal/licenses/javascript/json-stringify-safe@5.0.1/LICENSE` |
@@ -444,7 +444,7 @@
 | `tar@7.5.20` | transitive | development | `BlueOak-1.0.0` | `legal/licenses/javascript/tar@7.5.20/LICENSE.md` |
 | `temp-file@3.4.0` | transitive | development | `MIT` | PACKAGE_METADATA_ONLY |
 | `temp@0.9.4` | transitive | development | `MIT` | `legal/licenses/javascript/temp@0.9.4/LICENSE` |
-| `tiny-async-pool@1.3.0` | transitive | development | `MIT` | PACKAGE_METADATA_ONLY |
+| `tiny-async-pool@1.3.0` | transitive | development | `MIT` | `legal/licenses/javascript/tiny-async-pool@1.3.0/LICENSE-MIT` |
 | `tinybench@2.9.0` | transitive | development | `MIT` | `legal/licenses/javascript/tinybench@2.9.0/LICENSE` |
 | `tinyexec@1.2.4` | transitive | development | `MIT` | `legal/licenses/javascript/tinyexec@1.2.4/LICENSE` |
 | `tinyglobby@0.2.17` | transitive | development | `MIT` | `legal/licenses/javascript/tinyglobby@0.2.17/LICENSE` |
@@ -454,7 +454,7 @@
 | `trim-lines@3.0.1` | transitive | production | `MIT` | `legal/licenses/javascript/trim-lines@3.0.1/license` |
 | `trough@2.2.0` | transitive | production | `MIT` | `legal/licenses/javascript/trough@2.2.0/license` |
 | `truncate-utf8-bytes@1.0.2` | transitive | development | `WTFPL` | PACKAGE_METADATA_ONLY |
-| `tslib@2.8.1` | transitive | production | `0BSD` | `legal/licenses/javascript/tslib@2.8.1/LICENSE.txt` |
+| `tslib@2.8.1` | transitive | production | `0BSD` | `legal/licenses/javascript/tslib@2.8.1/CopyrightNotice.txt`<br>`legal/licenses/javascript/tslib@2.8.1/LICENSE.txt` |
 | `type-fest@0.13.1` | transitive | development | `(MIT OR CC0-1.0)` | `legal/licenses/javascript/type-fest@0.13.1/license` |
 | `typescript@6.0.3` | direct | development | `Apache-2.0` | `legal/licenses/javascript/typescript@6.0.3/LICENSE.txt` |
 | `undici-types@7.18.2` | transitive | development | `MIT` | `legal/licenses/javascript/undici-types@7.18.2/LICENSE` |

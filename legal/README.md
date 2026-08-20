@@ -10,6 +10,11 @@ manifests and provenance records. A successful integrity check confirms that
 the expected files were packaged without alteration; it is not a legal review
 or an approval to release.
 
+Dependency manifest schema version 2 records every matched package legal file
+with its original basename, legal-file kind, byte size, and SHA-256. The source
+gate compares these records with the exact installed package roots, while the
+payload gate verifies the corresponding files outside `app.asar`.
+
 For the MPL-covered `option-ext 0.2.0` component, use these directly readable
 payload routes:
 

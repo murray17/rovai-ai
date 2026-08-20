@@ -47,11 +47,13 @@ pnpm legal:generate
 pnpm legal:check:source
 ```
 
-`legal:generate` 从 `pnpm-lock.yaml`、安装包许可证文件、`Cargo.lock` 和 macOS arm64 release
-graph 生成稳定排序的 JavaScript/Rust/素材 manifest。生成结果属于审查输入，不应在不看 diff 的情况下提交。
+`legal:generate` 从 `pnpm-lock.yaml`、安装包中的全部匹配 legal files、`Cargo.lock` 和 macOS arm64 release
+graph 生成稳定排序的 JavaScript/Rust/素材 manifest。dependency manifest 保留每个上游 basename、
+license/notice/copyright/patent 分类、字节数与 SHA-256；生成结果属于审查输入，不应在不看 diff 的情况下提交。
 `legal:check:source` 校验 artwork/嵌入图片哈希、13 个 Skill NOTICE、Runtime Logo 表、Codex
-schema 归一化摘要、精确依赖版本与许可证文本；未知来源、未知许可证、缺失 NOTICE 或
-`REVIEW_REQUIRED` 都会失败。
+schema 归一化摘要、精确依赖版本与许可证文本，并把 manifest 与准确 package root 的匹配文件逐一比较；
+bundled JavaScript 或 release Rust 依赖使用 metadata-only evidence、遗漏一个匹配文件、basename/大小/摘要漂移、
+未知来源、未知许可证、缺失 NOTICE 或 `REVIEW_REQUIRED` 都会失败。
 
 打包前运行：
 
