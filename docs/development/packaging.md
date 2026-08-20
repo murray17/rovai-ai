@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-08-15
+last_updated: 2026-08-20
 ---
 
 # macOS 构建、签名与打包
@@ -24,15 +24,63 @@ pnpm core:build
 pnpm build:desktop
 ```
 
-生成可直接运行的 `.app`：
+生成可直接运行、仅供本地工程验收的 unsigned/ad-hoc `.app`：
 
 ```bash
-pnpm package:mac
+pnpm package:mac:unsigned
 ```
+
+该命令准备并验证外置 legal payload、执行 source provenance gate、构建 Core/CLI/Renderer，
+然后只以 `--integrity-only` 验证生成的 `.app`。它不把本地工程验收等同于公开二进制发布批准。
+
+`pnpm package:mac` 在构建前执行完整 binary release gate。当前
+`option-ext 0.2.0` 的 MPL-2.0 复核状态是 `FACTS_COLLECTED_REVIEW_PENDING`，所以该命令会在
+进入构建和签名之前失败；这项失败是发布保护，不代表 unsigned directory package 构建失败。
+
+### 法律来源门与外置 payload
+
+依赖、素材、Schema 或 Skill 来源发生变化时，先在 frozen install 上重建并审核 tracked 清单：
+
+```bash
+pnpm legal:generate
+pnpm legal:check:source
+```
+
+`legal:generate` 从 `pnpm-lock.yaml`、安装包许可证文件、`Cargo.lock` 和 macOS arm64 release
+graph 生成稳定排序的 JavaScript/Rust/素材 manifest。生成结果属于审查输入，不应在不看 diff 的情况下提交。
+`legal:check:source` 校验 artwork/嵌入图片哈希、13 个 Skill NOTICE、Runtime Logo 表、Codex
+schema 归一化摘要、精确依赖版本与许可证文本；未知来源、未知许可证、缺失 NOTICE 或
+`REVIEW_REQUIRED` 都会失败。
+
+打包前运行：
+
+```bash
+pnpm legal:prepare
+```
+
+该命令删除并重建 ignored 的 `.legal-payload/`，从 Electron `43.1.1` 的准确平台归档复制原样
+`LICENSE` 与 `LICENSES.chromium.html`，先用包内 `checksums.json` 验证归档 SHA-256，再生成无
+时间戳、无绝对路径、稳定排序的 `manifest.json`。Electron Builder 将它复制到：
+
+```text
+dist/mac-arm64/Rovai-ai.app/Contents/Resources/legal/
+```
+
+该目录位于 `app.asar` 外，可直接读取。工程完整性检查与公开发布门必须区分：
+
+```bash
+pnpm legal:check:package -- --integrity-only dist/mac-arm64/Rovai-ai.app
+pnpm legal:check:package -- dist/mac-arm64/Rovai-ai.app
+```
+
+第一条验证文件覆盖、稳定 manifest、大小与 SHA-256，供当前 unsigned 验收使用。第二条还要求
+所有 binary legal review 状态获批；当前会因 `option-ext` 复核未完成而 fail-closed。
+`dist:mac` 和两个正式 release 脚本在构建/签名前执行完整 binary preflight，未获批时不会进入签名或
+notarization 流程。
 
 ### Electron 下载与受限网络
 
-`package:mac` 在完成 Rust 和 Electron Vite 构建后，`electron-builder` 仍可能访问
+`legal:prepare` 和 `package:mac:unsigned` 需要准确 Electron 归档；随后 `electron-builder` 仍可能访问
 `https://github.com/electron/electron/releases/` 获取 Electron arm64 归档或校验信息。macOS 的默认归档
 缓存位于 `~/Library/Caches/electron/`，但“ZIP 已缓存”不保证 `electron-builder` 不再联网读取校验信息。
 
@@ -52,12 +100,13 @@ EXPECTED_ELECTRON_SHA="$(node -p "require('./node_modules/electron/checksums.jso
 ACTUAL_ELECTRON_SHA="$(shasum -a 256 "$ELECTRON_ARCHIVE" | awk '{print $1}')"
 test "$ACTUAL_ELECTRON_SHA" = "$EXPECTED_ELECTRON_SHA" || { echo "Electron archive checksum mismatch" >&2; false; }
 
+pnpm legal:prepare
 pnpm build
 CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder \
   --mac dir --arm64 --config.electronDist="$ELECTRON_ARCHIVE"
 ```
 
-如果同一轮 `pnpm package:mac` 已明确完成前置 `pnpm build`、只在 Electron 下载阶段失败，恢复时跳过上面
+如果同一轮 `pnpm package:mac:unsigned` 已明确完成前置构建、只在 Electron 下载阶段失败，恢复时跳过上面
 的 `pnpm build`，直接执行最后一条 `electron-builder` 命令，避免重复 Release 编译。生成 DMG 时把
 `--mac dir` 改为 `--mac dmg`。缓存缺失或 checksum 不匹配时必须恢复可信网络后使用标准命令，不得把
 未验证归档传给 `electronDist`。
@@ -68,7 +117,7 @@ CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder \
 dist/mac-arm64/Rovai-ai.app
 ```
 
-生成 DMG：
+生成 DMG（要求完整 binary release gate 已通过）：
 
 ```bash
 pnpm dist:mac
@@ -120,6 +169,15 @@ Ready。
 探测，不是 App 启动或 Camp 创建的全局硬门。
 
 ## 产物检查
+
+先验证法律文件位于 `app.asar` 外且 manifest 完整：
+
+```bash
+find "dist/mac-arm64/Rovai-ai.app/Contents/Resources/legal" -type f
+pnpm legal:check:package -- --integrity-only dist/mac-arm64/Rovai-ai.app
+```
+
+默认不带 `--integrity-only` 的命令是公开二进制发布门，不能为了获得绿色结果而跳过或弱化待复核项。
 
 确认架构和内置 Core/CLI：
 
