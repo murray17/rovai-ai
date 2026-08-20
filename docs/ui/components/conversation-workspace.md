@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Camp 会话工作区
@@ -344,7 +344,8 @@ Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不�
 图片单击继续打开会话内大图预览；图片 Authority preview 失败时，卡片退化为“使用系统应用打开”。普通
 文件单击交给系统默认应用，目录单击在 Finder / 文件资源管理器中打开。Timeline 卡片右键菜单提供同一
 主动作和“在 Finder / 文件资源管理器中显示”；菜单支持键盘循环、Escape 关闭、collision handling 与关闭后
-焦点回到真实卡片。执行中单卡防重复提交；失败显示固定的无路径提示。高风险文件由 Desktop Main 使用原生
+焦点回到真实卡片。执行中单卡防重复提交；目标 parent 不可枚举、target 消失或 native 请求失败时均显示固定
+的无路径提示，不把 best-effort Shell dispatch 当作文件管理器已确认选择。高风险文件由 Desktop Main 使用原生
 确认，不在 Renderer 判断。Composer Prepared Attachment 保持既有预览/移除交互，不复用 Timeline open API。
 精确安全与结果合同见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)。
 

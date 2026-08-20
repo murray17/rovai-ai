@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.20
 authority: implementation-and-acceptance-status
 status: implemented
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # v1.20 会话附件系统打开实施计划
@@ -21,6 +21,10 @@ last_updated: 2026-08-20
 - [x] open target 产生 Core-owned `normal | confirm` 风险结论，覆盖可执行、脚本、安装包和平台程序容器；
 - [x] Desktop Main 校验 IPC identity，执行风险确认与 `shell.openPath` / `shell.showItemInFolder`；所有返回 Renderer
   的失败都使用稳定无路径错误码；
+- [x] Unix Camp root 保持 `0100`，精确 Attachment container 使用不可写 `0500`；旧 container 在完整 open-target
+  校验和 per-Camp admission 内收敛，Finder 可枚举目标但不能删除、改名或写入；
+- [x] Desktop Main 在 reveal 前验证 parent 可枚举且 target 仍存在，不把 Electron best-effort `void` 调用未抛错
+  解释为文件管理器已确认选择；
 - [x] 已发布图片 Authority preview 不再依赖 Runtime projection state，且 preview/open 的文件系统校验都在
   全局数据库 mutex 外执行。
 
@@ -34,8 +38,8 @@ last_updated: 2026-08-20
 ## 4. 验证
 
 - [x] Rust 定向测试覆盖 Camp scope、Published-only、Runtime state 解耦、receipt mismatch 与风险分类；
-- [x] TypeScript/Vitest 覆盖 Main closed target、风险取消、无路径错误、Timeline 可操作状态与平台文案；
-- [ ] fmt、Clippy、typecheck、Desktop build、文档门禁、全量前端测试和 Impeccable detector 已执行；Rust PR
+- [x] TypeScript/Vitest 覆盖 Main closed target、风险取消、reveal preflight、无路径错误、Timeline 可操作状态与平台文案；
+- [x] fmt、Clippy、typecheck、Desktop build、文档门禁、全量前端测试和 Impeccable detector 已执行；Rust PR
   suite 仅剩当前 `main` 已存在的 Runtime compatibility register 摘要失配，功能相关范围与其余 295 个 fast
   library tests、CLI、slow suite 单独验证；
 - [ ] 在隔离 App fixture 中验证普通文件、图片、目录、高风险确认、失败状态与双主题键盘交互。
