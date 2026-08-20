@@ -33,9 +33,10 @@ pnpm package:mac:unsigned
 该命令准备并验证外置 legal payload、执行 source provenance gate、构建 Core/CLI/Renderer，
 然后只以 `--integrity-only` 验证生成的 `.app`。它不把本地工程验收等同于公开二进制发布批准。
 
-`pnpm package:mac` 在构建前执行完整 binary release gate。当前
-`option-ext 0.2.0` 的 MPL-2.0 复核状态是 `FACTS_COLLECTED_REVIEW_PENDING`，所以该命令会在
-进入构建和签名之前失败；这项失败是发布保护，不代表 unsigned directory package 构建失败。
+`pnpm package:mac` 在构建前执行完整 binary release gate。`option-ext 0.2.0` 采用经项目所有者
+确认的保守 MPL-2.0 方案：准确且未修改的 crates.io 源码归档、完整 MPL 文本、来源记录和源码取得
+说明同时进入公开仓库与 App 外置 legal payload。门禁会验证归档哈希、内容、Cargo 元数据和通知路径，
+任一事实漂移都会在进入构建和签名前失败。
 
 ### 法律来源门与外置 payload
 
@@ -74,7 +75,7 @@ pnpm legal:check:package -- dist/mac-arm64/Rovai-ai.app
 ```
 
 第一条验证文件覆盖、稳定 manifest、大小与 SHA-256，供当前 unsigned 验收使用。第二条还要求
-所有 binary legal review 状态获批；当前会因 `option-ext` 复核未完成而 fail-closed。
+所有 binary legal review 状态获批，并核验 `option-ext` 精确源码归档、MPL 文本、来源记录与接收者说明。
 `dist:mac` 和两个正式 release 脚本在构建/签名前执行完整 binary preflight，未获批时不会进入签名或
 notarization 流程。
 

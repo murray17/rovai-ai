@@ -59,7 +59,15 @@ export const EXPECTED_CODEX_SCHEMA = {
   normalized_aggregate_sha256: 'ccb435118d3dfae2cfe0dff56e4955398edfc5c54351985a45e8de256c34e3bb'
 }
 
-export const OPTION_EXT_STATUS = 'FACTS_COLLECTED_REVIEW_PENDING'
+export const OPTION_EXT_STATUS = 'APPROVED_COMPLIANCE_PLAN'
+
+export const OPTION_EXT_SOURCE = Object.freeze({
+  path: 'legal/sources/rust/option-ext-0.2.0.crate',
+  sha256: '04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d',
+  format: 'crates.io .crate source archive',
+  modified: false,
+  license: 'MPL-2.0'
+})
 
 const REACT_REMOVE_SCROLL_BAR_LICENSE = `MIT License
 
@@ -434,7 +442,8 @@ export function generateRustManifest(root) {
       statement_path: 'legal/licenses/rust/sqlite-3.51.1/PUBLIC-DOMAIN.md',
       statement_sha256: sha256(readFileSync(join(sqliteDirectory, 'PUBLIC-DOMAIN.md')))
     },
-    option_ext_review_status: OPTION_EXT_STATUS
+    option_ext_review_status: OPTION_EXT_STATUS,
+    option_ext_source: { ...OPTION_EXT_SOURCE }
   }
   writeJson(join(root, 'legal/manifests/rust-release-dependencies.json'), manifest)
   const rustNotice = `# Rust Release Dependency Notice\n\n| Crate | Dependency | License | Checksum | License text |\n|---|---|---|---|---|\n${dependencies.map((entry) => `| \`${entry.id}\` | ${entry.dependency_class} | \`${entry.license_expression}\` | \`${entry.crates_io_checksum}\` | ${entry.license_texts.map((text) => `\`${text.path}\``).join('<br>') || entry.license_evidence} |`).join('\n')}\n`
@@ -496,6 +505,103 @@ export function validateSkillLineage(skill, notice) {
   }
 }
 
+function cargoPackageMetadata(content, label) {
+  const field = (name) => content.match(new RegExp(`^${name}\\s*=\\s*"([^"]+)"`, 'm'))?.[1]
+  const metadata = {
+    name: field('name'),
+    version: field('version'),
+    license: field('license'),
+    repository: field('repository')
+  }
+  assert(Object.values(metadata).every(Boolean), `option-ext archive ${label} metadata is incomplete`)
+  return metadata
+}
+
+export function inspectOptionExtArchive(archivePath, expectedSha256 = OPTION_EXT_SOURCE.sha256) {
+  assert(existsSync(archivePath), `option-ext source archive is missing: ${OPTION_EXT_SOURCE.path}`)
+  assert(statSync(archivePath).isFile(), 'option-ext source archive must be a regular file')
+  assert(basename(archivePath) === 'option-ext-0.2.0.crate', 'option-ext source archive filename or version changed')
+  const bytes = readFileSync(archivePath)
+  assert(sha256(bytes) === expectedSha256, 'option-ext source archive digest mismatch')
+
+  const entries = run('tar', ['-tzf', archivePath]).split('\n').filter(Boolean)
+  assert(entries.length > 0, 'option-ext source archive is empty')
+  assert(entries.every((entry) => entry.startsWith('option-ext-0.2.0/')), 'option-ext source archive has an unexpected root')
+  for (const required of [
+    'option-ext-0.2.0/Cargo.toml',
+    'option-ext-0.2.0/Cargo.toml.orig',
+    'option-ext-0.2.0/LICENSE.txt'
+  ]) {
+    assert(entries.includes(required), `option-ext source archive misses ${required}`)
+  }
+  assert(entries.some((entry) => entry.startsWith('option-ext-0.2.0/src/') && !entry.endsWith('/')), 'option-ext source archive misses source files')
+
+  const expectedMetadata = {
+    name: 'option-ext',
+    version: '0.2.0',
+    license: 'MPL-2.0',
+    repository: 'https://github.com/soc/option-ext.git'
+  }
+  for (const manifest of ['Cargo.toml', 'Cargo.toml.orig']) {
+    const content = run('tar', ['-xOzf', archivePath, `option-ext-0.2.0/${manifest}`])
+    assert(JSON.stringify(cargoPackageMetadata(content, manifest)) === JSON.stringify(expectedMetadata), `option-ext archive ${manifest} metadata changed`)
+  }
+  const license = run('tar', ['-xOzf', archivePath, 'option-ext-0.2.0/LICENSE.txt'])
+  assert(license.includes('Mozilla Public License Version 2.0'), 'option-ext archive LICENSE.txt is not MPL-2.0')
+  return { sha256: expectedSha256, entries, metadata: expectedMetadata }
+}
+
+export function validateOptionExtCompliance(root, options = {}) {
+  const rust = options.rustManifest ?? readJson(join(root, 'legal/manifests/rust-release-dependencies.json'))
+  const provenance = options.provenance ?? readFileSync(join(root, 'legal/provenance/option-ext-0.2.0.md'), 'utf8')
+  const notice = options.thirdPartyNotice ?? readFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8')
+  const sourceReadme = options.sourceReadme ?? readFileSync(join(root, 'legal/sources/rust/README.md'), 'utf8')
+  const archivePath = options.archivePath ?? join(root, OPTION_EXT_SOURCE.path)
+  const licensePath = options.licensePath ?? join(root, 'legal/licenses/rust/option-ext@0.2.0/LICENSE.txt')
+
+  assert(rust.option_ext_review_status === OPTION_EXT_STATUS, `option-ext review status must be ${OPTION_EXT_STATUS}`)
+  assert(JSON.stringify(rust.option_ext_source) === JSON.stringify(OPTION_EXT_SOURCE), 'option-ext source manifest metadata changed')
+  const optionExt = rust.dependencies.find((entry) => entry.id === 'option-ext@0.2.0')
+  assert(optionExt?.license_expression === 'MPL-2.0', 'option-ext MPL-2.0 entry is missing')
+  assert(optionExt?.crates_io_checksum === OPTION_EXT_SOURCE.sha256, 'option-ext checksum changed')
+
+  if (options.requireTracked !== false) {
+    const tracked = spawnSync('git', ['ls-files', '--error-unmatch', '--', OPTION_EXT_SOURCE.path], {
+      cwd: root,
+      encoding: 'utf8'
+    })
+    assert(tracked.status === 0 && tracked.stdout.trim() === OPTION_EXT_SOURCE.path, 'option-ext source archive is not tracked by Git')
+  }
+  inspectOptionExtArchive(archivePath)
+
+  assert(existsSync(licensePath), 'option-ext MPL-2.0 license text is missing')
+  assert(readFileSync(licensePath, 'utf8').includes('Mozilla Public License Version 2.0'), 'option-ext packaged license text is not MPL-2.0')
+  assert(provenance.includes('| Review status | `APPROVED_COMPLIANCE_PLAN` |'), 'option-ext provenance review status is not approved')
+  assert(provenance.includes('| Rovai modifications | none |'), 'option-ext provenance does not record the unmodified component')
+  assert(provenance.includes(OPTION_EXT_SOURCE.path), 'option-ext provenance misses the repository source path')
+
+  const packagedSourcePath = 'Contents/Resources/legal/rust/sources/option-ext-0.2.0.crate'
+  const packagedLicensePath = 'Contents/Resources/legal/rust/licenses/option-ext@0.2.0/LICENSE.txt'
+  for (const [label, content] of [['THIRD_PARTY_NOTICES', notice], ['source README', sourceReadme]]) {
+    assert(content.includes(OPTION_EXT_SOURCE.path), `${label} misses the repository source path`)
+    assert(content.includes(packagedSourcePath), `${label} misses the packaged source path`)
+    assert(content.includes(OPTION_EXT_SOURCE.sha256), `${label} misses the option-ext source checksum`)
+  }
+  assert(notice.includes(packagedLicensePath), 'THIRD_PARTY_NOTICES misses the packaged MPL license path')
+  assert(/copy, inspect, (?:extract, )?and modify/i.test(notice), 'THIRD_PARTY_NOTICES does not explain recipient source access')
+
+  const boundaryText = `${provenance}\n${notice}\n${sourceReadme}`
+  for (const prohibited of [
+    /option-ext is MIT/i,
+    /all Rovai source is MPL/i,
+    /all binary contents are relicensed under MPL/i,
+    /external counsel approved/i
+  ]) {
+    assert(!prohibited.test(boundaryText), `option-ext license-boundary claim is prohibited: ${prohibited}`)
+  }
+  return { status: OPTION_EXT_STATUS, source: { ...OPTION_EXT_SOURCE } }
+}
+
 export function verifySource(root = process.cwd()) {
   const required = [
     'LICENSE',
@@ -503,6 +609,8 @@ export function verifySource(root = process.cwd()) {
     'legal/provenance/ai-generated-project-artwork.md',
     'legal/provenance/codex-schema.md',
     'legal/provenance/option-ext-0.2.0.md',
+    'legal/sources/rust/README.md',
+    OPTION_EXT_SOURCE.path,
     'legal/manifests/project-artwork.json',
     'legal/manifests/javascript-source-dependencies.json',
     'legal/manifests/javascript-binary-dependencies.json',
@@ -559,19 +667,17 @@ export function verifySource(root = process.cwd()) {
   const rustIds = rust.dependencies.map((entry) => entry.id)
   assert(new Set(rustIds).size === rustIds.length && JSON.stringify(rustIds) === JSON.stringify([...rustIds].sort((left, right) => left.localeCompare(right))), 'Rust release manifest must be uniquely and stably sorted')
   assert(rust.sqlite?.version === '3.51.1' && rust.sqlite?.legal_status === 'PUBLIC_DOMAIN', 'SQLite provenance is incomplete')
-  assert(rust.option_ext_review_status === OPTION_EXT_STATUS, 'option-ext review status must remain facts-collected/review-pending')
-  const optionExt = rust.dependencies.find((entry) => entry.id === 'option-ext@0.2.0')
-  assert(optionExt?.license_expression === 'MPL-2.0', 'option-ext MPL-2.0 entry is missing')
-  assert(optionExt?.crates_io_checksum === '04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d', 'option-ext checksum changed')
+  validateOptionExtCompliance(root, { rustManifest: rust })
 
   for (const path of walkFiles(join(root, 'legal'))) {
+    if (path.endsWith('.crate')) continue
     const content = readFileSync(join(root, 'legal', path), 'utf8')
     assert(!/\/Users\/[^/]+\//.test(content), `local absolute path leaked into legal/${path}`)
     assert(!/[A-Za-z]:\\Users\\[^\\]+\\/.test(content), `Windows absolute path leaked into legal/${path}`)
   }
   return {
     source_release_gate: 'PASS',
-    binary_release_gate: `BLOCKED:${OPTION_EXT_STATUS}`,
+    binary_release_gate: 'PASS',
     javascript_source_instances: jsSource.package_instances,
     javascript_binary_instances: jsBinary.package_instances,
     rust_third_party_crates: rust.third_party_crate_count
@@ -607,6 +713,7 @@ export function prepareLegalPayload(root = process.cwd(), output = join(root, '.
   copySource(root, payload, 'legal/manifests', 'manifests')
   copySource(root, payload, 'legal/licenses/javascript', 'javascript/licenses')
   copySource(root, payload, 'legal/licenses/rust', 'rust/licenses')
+  copySource(root, payload, 'legal/sources/rust', 'rust/sources')
   copySource(root, payload, 'legal/licenses/codex', 'schemas/codex/LICENSE')
   copySource(root, payload, 'legal/licenses/runtime-logos', 'assets/runtime-logos/LICENSE')
   copySource(root, payload, 'apps/desktop/src/renderer/src/assets/characters/ASSET-NOTICE.md', 'assets/characters/ASSET-NOTICE.md')
@@ -670,6 +777,8 @@ export function verifyPayload(path, { enforceReleaseGate = true } = {}) {
     'rust/licenses/option-ext@0.2.0/LICENSE.txt',
     'rust/licenses/RELEASE_CRATES.md',
     'rust/licenses/sqlite-3.51.1/PUBLIC-DOMAIN.md',
+    'rust/sources/option-ext-0.2.0.crate',
+    'rust/sources/README.md',
     'electron/LICENSE',
     'electron/LICENSES.chromium.html',
     'schemas/codex/LICENSE',
@@ -696,7 +805,9 @@ export function verifyPayload(path, { enforceReleaseGate = true } = {}) {
     const asarPackage = readdirSync(pnpmDirectory).find((name) => name.startsWith('@electron+asar@'))
     assert(asarPackage, 'installed @electron/asar is required to inspect the packaged dependency graph')
     const asar = require(join(pnpmDirectory, asarPackage, 'node_modules/@electron/asar/lib/asar.js'))
-    const packageJsonPaths = asar.listPackage(appAsar)
+    const asarPaths = asar.listPackage(appAsar)
+    assert(!asarPaths.some((item) => item === '/legal' || item.startsWith('/legal/')), 'legal payload must remain outside app.asar')
+    const packageJsonPaths = asarPaths
       .filter((item) => item.startsWith('/node_modules/') && item.endsWith('/package.json'))
       .sort()
     const packagedDependencies = packageJsonPaths.flatMap((item) => {
@@ -708,12 +819,16 @@ export function verifyPayload(path, { enforceReleaseGate = true } = {}) {
     assert(packagedDependencies.length === 144, 'packaged app.asar must contain 144 package instances')
     assert(JSON.stringify(packagedDependencies) === JSON.stringify(expectedDependencies), 'packaged app.asar dependency graph differs from the legal manifest')
   }
-  const optionRecord = readFileSync(join(payload, 'provenance/option-ext-0.2.0.md'), 'utf8')
-  if (enforceReleaseGate) {
-    assert(
-      /\| Review status \| `APPROVED_COMPLIANCE_PLAN` \|/.test(optionRecord),
-      `binary release blocked: option-ext 0.2.0 is ${OPTION_EXT_STATUS}`
-    )
-  }
+  const rustManifest = readJson(join(payload, 'manifests/rust-release-dependencies.json'))
+  validateOptionExtCompliance(payload, {
+    rustManifest,
+    provenance: readFileSync(join(payload, 'provenance/option-ext-0.2.0.md'), 'utf8'),
+    thirdPartyNotice: readFileSync(join(payload, 'THIRD_PARTY_NOTICES.md'), 'utf8'),
+    sourceReadme: readFileSync(join(payload, 'rust/sources/README.md'), 'utf8'),
+    archivePath: join(payload, 'rust/sources/option-ext-0.2.0.crate'),
+    licensePath: join(payload, 'rust/licenses/option-ext@0.2.0/LICENSE.txt'),
+    requireTracked: false
+  })
+  if (enforceReleaseGate) assert(rustManifest.option_ext_review_status === OPTION_EXT_STATUS, 'binary release blocked by option-ext compliance status')
   return { legal_path: payload, files: manifest.files.length, integrity: 'PASS' }
 }

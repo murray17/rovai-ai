@@ -2454,5 +2454,12 @@
     "statement_path": "legal/licenses/rust/sqlite-3.51.1/PUBLIC-DOMAIN.md",
     "statement_sha256": "ecb74913e8758721d640364718860c38d4288bf745f1343025e0f56991ca68aa"
   },
-  "option_ext_review_status": "FACTS_COLLECTED_REVIEW_PENDING"
+  "option_ext_review_status": "APPROVED_COMPLIANCE_PLAN",
+  "option_ext_source": {
+    "path": "legal/sources/rust/option-ext-0.2.0.crate",
+    "sha256": "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d",
+    "format": "crates.io .crate source archive",
+    "modified": false,
+    "license": "MPL-2.0"
+  }
 }

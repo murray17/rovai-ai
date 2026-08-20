@@ -8,12 +8,13 @@
 | Repository | `https://github.com/soc/option-ext.git` |
 | Dependency path | `rovai-core -> dirs 6.0.0 -> dirs-sys 0.5.0 -> option-ext 0.2.0` |
 | Rovai modifications | none |
-| Review status | `FACTS_COLLECTED_REVIEW_PENDING` |
+| Review status | `APPROVED_COMPLIANCE_PLAN` |
 
-The exact source is the crates.io `option-ext-0.2.0.crate` archive available
-from `https://crates.io/api/v1/crates/option-ext/0.2.0/download`; its SHA-256
-is the Cargo checksum above. The archive contains the full source and
-`LICENSE.txt`, whose SHA-256 is
+The exact source is the crates.io `option-ext-0.2.0.crate` archive retained at
+`legal/sources/rust/option-ext-0.2.0.crate`; its SHA-256 is the Cargo checksum
+above. The same unmodified archive is distributed to binary recipients at
+`Contents/Resources/legal/rust/sources/option-ext-0.2.0.crate`. The archive
+contains the full source, Cargo manifests, and `LICENSE.txt`, whose SHA-256 is
 `66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172`.
 
 The archive's `.cargo_vcs_info.json` names commit
@@ -24,8 +25,19 @@ the exact archive revision. The checksummed crates.io archive is the fixed
 source authority.
 
 Rovai AI builds the crate unchanged from Cargo's registry source. The full
-MPL-2.0 text is packaged at
-`legal/licenses/rust/option-ext@0.2.0/LICENSE.txt` together with this source
-record. These engineering facts do not constitute an approved compliance
-plan. The first public binary remains blocked until qualified review changes
-the status to `APPROVED_COMPLIANCE_PLAN` and records the distribution steps.
+MPL-2.0 text is retained at
+`legal/licenses/rust/option-ext@0.2.0/LICENSE.txt` and distributed at
+`Contents/Resources/legal/rust/licenses/option-ext@0.2.0/LICENSE.txt` together
+with this source record and the exact source archive.
+
+The Rovai AI project owner approved this conservative compliance plan. It
+covers `option-ext 0.2.0` only and is not a claim of external-counsel review.
+Independently authored Rovai files remain under the project's MIT License or
+their otherwise stated licenses; the combined application remains under its
+applicable component licenses. Future modifications to MPL-covered
+`option-ext` source files must be made available in Source Code Form under
+MPL-2.0 with upstream notices preserved and without additional restrictions on
+recipients' exercise of MPL rights.
+
+Official reference: [Mozilla Public License 2.0](https://www.mozilla.org/en-US/MPL/2.0/)
+and [Mozilla's MPL 2.0 FAQ](https://www.mozilla.org/en-US/MPL/2.0/FAQ/).

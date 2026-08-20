@@ -93,10 +93,22 @@ The enabled `bundled` feature compiles SQLite 3.51.1. SQLite is public-domain
 software and is not relicensed by Rovai AI under MIT; the packaged statement
 quotes the amalgamation's dedication and links the canonical SQLite record.
 
-`option-ext 0.2.0` is an unchanged transitive MPL-2.0 crate. Its exact archive,
-checksum, source path, complete MPL text, and status are recorded in
-`legal/provenance/option-ext-0.2.0.md`. Its compliance review remains
-`FACTS_COLLECTED_REVIEW_PENDING`, so the public binary release gate is blocked.
+`option-ext 0.2.0` is unchanged transitive Covered Software under MPL-2.0.
+The complete MPL text is retained at
+`legal/licenses/rust/option-ext@0.2.0/LICENSE.txt` and packaged at
+`Contents/Resources/legal/rust/licenses/option-ext@0.2.0/LICENSE.txt`. The exact
+unmodified crates.io source archive is retained at
+`legal/sources/rust/option-ext-0.2.0.crate` and packaged at
+`Contents/Resources/legal/rust/sources/option-ext-0.2.0.crate`; its SHA-256 is
+`04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d`.
+Recipients may directly copy, inspect, extract, and modify that archive subject
+to MPL-2.0. `legal/sources/rust/README.md` and the packaged
+`rust/sources/README.md` explain source availability and future-modification
+policy.
+
+Independently authored Rovai files remain under their respective licenses. The
+MPL-2.0 obligations are preserved for `option-ext` Covered Software; its
+inclusion does not relicense every file in the larger work.
 
 ## 8. Electron and Chromium
 
