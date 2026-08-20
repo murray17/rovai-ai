@@ -57,6 +57,90 @@ const ATTACHMENT_METADATA_SCHEMA_VERSION: u32 = 1;
 type CampAuthorityIngressGate = Arc<Mutex<()>>;
 type CampAuthorityIngressGateRegistry = Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>;
 static CAMP_AUTHORITY_INGRESS_GATES: OnceLock<CampAuthorityIngressGateRegistry> = OnceLock::new();
+
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub struct ComposerPrepareTestPause {
+    started: std::sync::atomic::AtomicBool,
+    released: Mutex<bool>,
+    release: std::sync::Condvar,
+}
+
+#[cfg(feature = "slow-tests")]
+impl ComposerPrepareTestPause {
+    fn new() -> Self {
+        Self {
+            started: std::sync::atomic::AtomicBool::new(false),
+            released: Mutex::new(false),
+            release: std::sync::Condvar::new(),
+        }
+    }
+
+    pub fn started(&self) -> bool {
+        self.started.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn release(&self) {
+        *lock_unpoisoned(&self.released) = true;
+        self.release.notify_all();
+    }
+}
+
+#[cfg(feature = "slow-tests")]
+type ComposerPrepareTestPauseRegistry = Mutex<HashMap<PathBuf, Arc<ComposerPrepareTestPause>>>;
+
+#[cfg(feature = "slow-tests")]
+fn composer_prepare_test_pauses() -> &'static ComposerPrepareTestPauseRegistry {
+    static PAUSES: OnceLock<ComposerPrepareTestPauseRegistry> = OnceLock::new();
+    PAUSES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "slow-tests")]
+fn composer_prepare_test_key(data_dir: &Path, camp_id: &str) -> PathBuf {
+    data_dir.join("camp-attachments").join(camp_id)
+}
+
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub fn install_composer_prepare_test_pause(
+    data_dir: &Path,
+    camp_id: &str,
+) -> Arc<ComposerPrepareTestPause> {
+    let pause = Arc::new(ComposerPrepareTestPause::new());
+    lock_unpoisoned(composer_prepare_test_pauses()).insert(
+        composer_prepare_test_key(data_dir, camp_id),
+        Arc::clone(&pause),
+    );
+    pause
+}
+
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub fn remove_composer_prepare_test_pause(data_dir: &Path, camp_id: &str) {
+    lock_unpoisoned(composer_prepare_test_pauses())
+        .remove(&composer_prepare_test_key(data_dir, camp_id));
+}
+
+#[cfg(feature = "slow-tests")]
+fn pause_composer_prepare_for_test(camp_root: &Path) {
+    let pause = lock_unpoisoned(composer_prepare_test_pauses())
+        .get(camp_root)
+        .cloned();
+    let Some(pause) = pause else {
+        return;
+    };
+    pause
+        .started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let mut released = lock_unpoisoned(&pause.released);
+    while !*released {
+        released = pause
+            .release
+            .wait(released)
+            .unwrap_or_else(|error| error.into_inner());
+    }
+}
+
 #[cfg(all(test, any(windows, feature = "slow-tests")))]
 const DIRECTORY_SNAPSHOT_FIXTURE_DIGEST: &str =
     "sha256:69c6a7b4e706d0177bdcc3b806c25daac505628a8d9f22c4976fd5c93ef87501";
@@ -191,6 +275,31 @@ pub struct DesktopAttachmentOpenCandidate {
     path: PathBuf,
 }
 
+#[derive(Debug)]
+pub struct ComposerAttachmentPreparePlan {
+    camp_id: String,
+    expected_revision: i64,
+    source_path: PathBuf,
+    display_name: String,
+    attachment_id: String,
+}
+
+#[derive(Debug)]
+pub struct PreparedComposerAttachment {
+    camp_id: String,
+    expected_revision: i64,
+    display_name: String,
+    attachment_id: String,
+    attachment_directory: PathBuf,
+    prepared: PreparedAttachment,
+}
+
+#[derive(Debug)]
+pub struct CampAttachmentCleanupPlan {
+    camp_id: String,
+    attachment_paths: Vec<PathBuf>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DesktopAttachmentOpenRisk {
@@ -272,6 +381,7 @@ impl CampAttachmentStore {
         let camp_root = self.camp_root_with_admission(camp_id, &admission)?;
         allow_directory_update(&camp_root)?;
         let mut frozen = Vec::with_capacity(requested_paths.len());
+        let mut created_directories = Vec::with_capacity(requested_paths.len());
         let freeze_result = (|| -> Result<()> {
             let mut total_bytes = 0_u64;
             for requested in requested_paths {
@@ -321,6 +431,7 @@ impl CampAttachmentStore {
                 let display_name = normalize_display_name(source_name)?;
                 let attachment_id = Uuid::new_v4().to_string();
                 let attachment_directory = camp_root.join(&attachment_id);
+                created_directories.push(attachment_directory.clone());
                 ensure_directory(&attachment_directory)?;
                 let destination = attachment_directory.join(&display_name);
                 let prepared = copy_and_inspect(&canonical_source, &destination)?;
@@ -346,10 +457,8 @@ impl CampAttachmentStore {
         })();
         let _ = restrict_discovery(&camp_root);
         if let Err(error) = freeze_result {
-            for attachment in &frozen {
-                if let Some(directory) = attachment.storage_path.parent() {
-                    cleanup_unowned_attachment(&camp_root, directory);
-                }
+            for directory in &created_directories {
+                cleanup_unowned_attachment(&camp_root, directory);
             }
             return Err(error);
         }
@@ -926,6 +1035,127 @@ impl CampAttachmentStore {
         self.load_draft(database, camp_id)
     }
 
+    pub fn plan_prepare_from_path(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        expected_revision: i64,
+        source_path: &Path,
+        requested_display_name: &str,
+    ) -> Result<ComposerAttachmentPreparePlan> {
+        CampId::parse(camp_id)?;
+        ensure_camp_exists(database, camp_id)?;
+        ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
+        validate_draft_capacity(database, camp_id, 0)?;
+        Ok(ComposerAttachmentPreparePlan {
+            camp_id: camp_id.to_string(),
+            expected_revision,
+            source_path: source_path.to_path_buf(),
+            display_name: normalize_display_name(requested_display_name)?,
+            attachment_id: Uuid::new_v4().to_string(),
+        })
+    }
+
+    pub fn prepare_from_path_filesystem(
+        &self,
+        plan: ComposerAttachmentPreparePlan,
+    ) -> Result<PreparedComposerAttachment> {
+        let gate = self.authority_ingress_gate(&plan.camp_id)?;
+        let admission = lock_unpoisoned(&gate);
+        let camp_root = self.camp_root_with_admission(&plan.camp_id, &admission)?;
+        allow_directory_update(&camp_root)?;
+        #[cfg(feature = "slow-tests")]
+        pause_composer_prepare_for_test(&camp_root);
+        let attachment_directory = camp_root.join(&plan.attachment_id);
+        let prepared = (|| -> Result<PreparedAttachment> {
+            ensure_directory(&attachment_directory)?;
+            let destination = attachment_directory.join(&plan.display_name);
+            let prepared = copy_and_inspect(&plan.source_path, &destination)?;
+            write_attachment_metadata(&attachment_directory, &prepared)?;
+            restrict_discovery(&attachment_directory)?;
+            Ok(prepared)
+        })();
+        let _ = restrict_discovery(&camp_root);
+        let prepared = match prepared {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                cleanup_unowned_attachment(&camp_root, &attachment_directory);
+                return Err(error);
+            }
+        };
+        Ok(PreparedComposerAttachment {
+            camp_id: plan.camp_id,
+            expected_revision: plan.expected_revision,
+            display_name: plan.display_name,
+            attachment_id: plan.attachment_id,
+            attachment_directory,
+            prepared,
+        })
+    }
+
+    pub fn commit_prepared_attachment(
+        &self,
+        database: &mut Database,
+        prepared: &PreparedComposerAttachment,
+    ) -> Result<()> {
+        let transaction = database.connection_mut().transaction()?;
+        ensure_draft_revision(&transaction, &prepared.camp_id, prepared.expected_revision)?;
+        validate_draft_capacity_tx(&transaction, &prepared.camp_id, prepared.prepared.byte_size)?;
+        let (now, expires_at) = draft_times();
+        transaction.execute(
+            r#"
+            INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
+            VALUES (?1, '', ?2, ?2, ?3)
+            ON CONFLICT(camp_id) DO UPDATE SET
+                revision = camp_composer_draft.revision + 1,
+                updated_at = excluded.updated_at,
+                expires_at = excluded.expires_at
+            "#,
+            params![prepared.camp_id, now, expires_at],
+        )?;
+        let ordinal: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM prepared_attachment WHERE camp_id = ?1",
+            [&prepared.camp_id],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            r#"
+            INSERT INTO prepared_attachment(
+                id, camp_id, ordinal, display_name, media_type, byte_size,
+                content_digest, storage_path, preview_kind, state,
+                last_error_code, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'ready',
+                NULL, ?10, ?10
+            )
+            "#,
+            params![
+                prepared.attachment_id,
+                prepared.camp_id,
+                ordinal,
+                prepared.display_name,
+                prepared.prepared.media_type,
+                prepared.prepared.byte_size as i64,
+                prepared.prepared.content_digest,
+                prepared.prepared.path.to_string_lossy(),
+                prepared.prepared.preview_kind,
+                now,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn cleanup_uncommitted_prepared_attachment(&self, prepared: PreparedComposerAttachment) {
+        let Ok(gate) = self.authority_ingress_gate(&prepared.camp_id) else {
+            return;
+        };
+        let _admission = lock_unpoisoned(&gate);
+        let camp_root = self.root.join(&prepared.camp_id);
+        cleanup_unowned_attachment(&camp_root, &prepared.attachment_directory);
+    }
+
+    #[cfg(test)]
     pub fn prepare_from_path(
         &self,
         database: &mut Database,
@@ -934,101 +1164,28 @@ impl CampAttachmentStore {
         source_path: &Path,
         requested_display_name: &str,
     ) -> Result<CampComposerDraftView> {
-        CampId::parse(camp_id)?;
-        ensure_camp_exists(database, camp_id)?;
-        ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
-        validate_draft_capacity(database, camp_id, 0)?;
-        let display_name = normalize_display_name(requested_display_name)?;
-        let attachment_id = Uuid::new_v4().to_string();
-        let (camp_root, attachment_directory, prepared) = {
-            let gate = self.authority_ingress_gate(camp_id)?;
-            let admission = lock_unpoisoned(&gate);
-            let camp_root = self.camp_root_with_admission(camp_id, &admission)?;
-            allow_directory_update(&camp_root)?;
-            let attachment_directory = camp_root.join(&attachment_id);
-            let prepared = (|| -> Result<PreparedAttachment> {
-                ensure_directory(&attachment_directory)?;
-                let destination = attachment_directory.join(&display_name);
-                let prepared = copy_and_inspect(source_path, &destination)?;
-                write_attachment_metadata(&attachment_directory, &prepared)?;
-                restrict_discovery(&attachment_directory)?;
-                Ok(prepared)
-            })();
-            let _ = restrict_discovery(&camp_root);
-            let prepared = match prepared {
-                Ok(prepared) => prepared,
-                Err(error) => {
-                    cleanup_unowned_attachment(&camp_root, &attachment_directory);
-                    return Err(error);
-                }
-            };
-            (camp_root, attachment_directory, prepared)
-        };
-
-        let persistence = (|| -> Result<()> {
-            let transaction = database.connection_mut().transaction()?;
-            ensure_draft_revision(&transaction, camp_id, expected_revision)?;
-            validate_draft_capacity_tx(&transaction, camp_id, prepared.byte_size)?;
-            let (now, expires_at) = draft_times();
-            transaction.execute(
-                r#"
-                INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
-                VALUES (?1, '', ?2, ?2, ?3)
-                ON CONFLICT(camp_id) DO UPDATE SET
-                    revision = camp_composer_draft.revision + 1,
-                    updated_at = excluded.updated_at,
-                    expires_at = excluded.expires_at
-                "#,
-                params![camp_id, now, expires_at],
-            )?;
-            let ordinal: i64 = transaction.query_row(
-                "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM prepared_attachment WHERE camp_id = ?1",
-                [camp_id],
-                |row| row.get(0),
-            )?;
-            transaction.execute(
-                r#"
-                INSERT INTO prepared_attachment(
-                    id, camp_id, ordinal, display_name, media_type, byte_size,
-                    content_digest, storage_path, preview_kind, state,
-                    last_error_code, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'ready',
-                    NULL, ?10, ?10
-                )
-                "#,
-                params![
-                    attachment_id,
-                    camp_id,
-                    ordinal,
-                    display_name,
-                    prepared.media_type,
-                    prepared.byte_size as i64,
-                    prepared.content_digest,
-                    prepared.path.to_string_lossy(),
-                    prepared.preview_kind,
-                    now,
-                ],
-            )?;
-            transaction.commit()?;
-            Ok(())
-        })();
-        if let Err(error) = persistence {
-            let gate = self.authority_ingress_gate(camp_id)?;
-            let _admission = lock_unpoisoned(&gate);
-            cleanup_unowned_attachment(&camp_root, &attachment_directory);
+        let plan = self.plan_prepare_from_path(
+            database,
+            camp_id,
+            expected_revision,
+            source_path,
+            requested_display_name,
+        )?;
+        let prepared = self.prepare_from_path_filesystem(plan)?;
+        if let Err(error) = self.commit_prepared_attachment(database, &prepared) {
+            self.cleanup_uncommitted_prepared_attachment(prepared);
             return Err(error);
         }
         self.load_draft(database, camp_id)
     }
 
-    pub fn remove_prepared(
+    pub fn remove_prepared_from_database(
         &self,
         database: &mut Database,
         camp_id: &str,
         expected_revision: i64,
         attachment_id: &str,
-    ) -> Result<CampComposerDraftView> {
+    ) -> Result<(CampComposerDraftView, CampAttachmentCleanupPlan)> {
         CampId::parse(camp_id)?;
         validate_component(attachment_id, "Prepared Attachment")?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
@@ -1061,42 +1218,66 @@ impl CampAttachmentStore {
             params![camp_id, now, expires_at],
         )?;
         transaction.commit()?;
-        let gate = self.authority_ingress_gate(camp_id)?;
-        let admission = lock_unpoisoned(&gate);
-        let camp_root = self.camp_root_with_admission(camp_id, &admission)?;
-        let cleanup = (|| -> Result<()> {
-            allow_directory_update(&camp_root)?;
-            let removal = remove_attachment_file_parent(Path::new(&path));
-            let restriction = restrict_discovery(&camp_root);
-            removal?;
-            restriction?;
-            Ok(())
-        })();
-        if let Err(error) = cleanup {
+        Ok((
+            self.load_draft(database, camp_id)?,
+            CampAttachmentCleanupPlan {
+                camp_id: camp_id.to_string(),
+                attachment_paths: vec![PathBuf::from(path)],
+            },
+        ))
+    }
+
+    #[cfg(test)]
+    pub fn remove_prepared(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        attachment_id: &str,
+    ) -> Result<CampComposerDraftView> {
+        let (draft, cleanup) = self.remove_prepared_from_database(
+            database,
+            camp_id,
+            expected_revision,
+            attachment_id,
+        )?;
+        if let Err(error) = self.cleanup_detached_attachments(cleanup) {
             eprintln!(
                 "Prepared Attachment {attachment_id} was removed from Draft {camp_id}, \
                  but its superseded file could not be cleaned immediately: {error:#}"
             );
         }
-        self.load_draft(database, camp_id)
+        Ok(draft)
     }
 
-    pub fn discard_draft(&self, database: &mut Database, camp_id: &str) -> Result<()> {
-        let parsed_camp_id = CampId::parse(camp_id)?;
+    pub fn discard_draft_from_database(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+    ) -> Result<CampAttachmentCleanupPlan> {
+        CampId::parse(camp_id)?;
         let paths = prepared_paths(database, camp_id)?;
         database.connection().execute(
             "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
             [camp_id],
         )?;
-        let gate = self.authority_ingress_gate(camp_id)?;
+        Ok(CampAttachmentCleanupPlan {
+            camp_id: camp_id.to_string(),
+            attachment_paths: paths.into_iter().map(PathBuf::from).collect(),
+        })
+    }
+
+    pub fn cleanup_detached_attachments(&self, plan: CampAttachmentCleanupPlan) -> Result<()> {
+        let parsed_camp_id = CampId::parse(&plan.camp_id)?;
+        let gate = self.authority_ingress_gate(&plan.camp_id)?;
         let _admission = lock_unpoisoned(&gate);
         let camp_root = self.root.join(parsed_camp_id.as_str());
-        if !paths.is_empty() && camp_root.exists() {
+        if !plan.attachment_paths.is_empty() && camp_root.exists() {
             allow_directory_update(&camp_root)?;
         }
         let removal = (|| -> Result<()> {
-            for path in paths {
-                remove_attachment_file_parent(Path::new(&path))?;
+            for path in plan.attachment_paths {
+                remove_attachment_file_parent(&path)?;
             }
             Ok(())
         })();
@@ -1107,6 +1288,11 @@ impl CampAttachmentStore {
         removal?;
         restriction?;
         Ok(())
+    }
+
+    pub fn discard_draft(&self, database: &mut Database, camp_id: &str) -> Result<()> {
+        let cleanup = self.discard_draft_from_database(database, camp_id)?;
+        self.cleanup_detached_attachments(cleanup)
     }
 
     pub fn verify_send(
@@ -3982,30 +4168,32 @@ mod windows_attachment_tests {
     }
 }
 
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub fn insert_test_camp(database: &Database, camp_id: &str) {
+    database
+        .connection()
+        .execute(
+            r#"
+        INSERT INTO camp(
+            id, title, name_origin, collaboration_mode,
+            project_binding_kind, project_path,
+            last_message_sequence, version, created_at, updated_at
+        ) VALUES (
+            ?1, 'Draft test', 'user', 'peer',
+            'quick_chat', '/quick-chat-draft-test',
+            0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+        )
+        "#,
+            [camp_id],
+        )
+        .unwrap();
+}
+
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
     use crate::camp_content::StructuredCampMessageSegment as Segment;
-
-    fn insert_test_camp(database: &Database, camp_id: &str) {
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO camp(
-                    id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path,
-                    last_message_sequence, version, created_at, updated_at
-                ) VALUES (
-                    ?1, 'Draft test', 'user', 'peer',
-                    'quick_chat', '/quick-chat-draft-test',
-                    0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
-                )
-                "#,
-                [camp_id],
-            )
-            .unwrap();
-    }
 
     fn insert_test_member(database: &Database, camp_id: &str, agent_id: &str) {
         database
@@ -4060,6 +4248,58 @@ mod slow_tests {
                 ],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn agent_freeze_aggregate_failure_cleans_every_operation_owned_directory() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-agent-freeze-aggregate-cleanup-{}",
+            Uuid::new_v4()
+        ));
+        let data_directory = fixture.join("data");
+        let workspace = fixture.join("workspace");
+        let run_tmp = fixture.join("run-tmp");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&run_tmp).unwrap();
+        for (name, bytes) in [
+            ("first.bin", MAX_ATTACHMENT_BYTES),
+            ("second.bin", MAX_ATTACHMENT_BYTES),
+            ("overflow.bin", 15 * 1024 * 1024),
+        ] {
+            File::create(workspace.join(name))
+                .unwrap()
+                .set_len(bytes)
+                .unwrap();
+        }
+
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let store = CampAttachmentStore::new(&data_directory);
+        let error = store
+            .freeze_agent_sources(
+                camp_id,
+                &[
+                    "first.bin".to_string(),
+                    "second.bin".to_string(),
+                    "overflow.bin".to_string(),
+                ],
+                &workspace,
+                &run_tmp,
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("aggregate limit"),
+            "unexpected error: {error:#}"
+        );
+
+        let camp_root = data_directory.join("camp-attachments").join(camp_id);
+        allow_directory_update(&camp_root).unwrap();
+        assert!(
+            fs::read_dir(&camp_root).unwrap().next().is_none(),
+            "a failed multi-file freeze must not retain an unowned Authority child"
+        );
+
+        make_owned_tree_removable(&data_directory).unwrap();
+        fs::remove_dir_all(fixture).unwrap();
     }
 
     #[test]

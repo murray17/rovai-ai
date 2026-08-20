@@ -819,6 +819,51 @@ struct PrepareAttachmentFromPathParams {
     display_name: String,
 }
 
+async fn prepare_composer_attachment_from_path(
+    database: &Mutex<Database>,
+    data_dir: &Path,
+    params: PrepareAttachmentFromPathParams,
+) -> Result<Value> {
+    let store = CampAttachmentStore::new(data_dir);
+    let plan = {
+        let database = database.lock().await;
+        store.plan_prepare_from_path(
+            &database,
+            params.camp_id.as_str(),
+            params.expected_revision,
+            Path::new(&params.source_path),
+            &params.display_name,
+        )?
+    };
+    let filesystem_store = store.clone();
+    let prepared =
+        tokio::task::spawn_blocking(move || filesystem_store.prepare_from_path_filesystem(plan))
+            .await
+            .context("Camp Attachment preparation task failed")??;
+
+    let commit = {
+        let mut database = database.lock().await;
+        store.commit_prepared_attachment(&mut database, &prepared)
+    };
+    if let Err(error) = commit {
+        let cleanup_store = store.clone();
+        if let Err(cleanup_error) = tokio::task::spawn_blocking(move || {
+            cleanup_store.cleanup_uncommitted_prepared_attachment(prepared)
+        })
+        .await
+        {
+            eprintln!("Uncommitted Prepared Attachment cleanup task failed: {cleanup_error}");
+        }
+        return Err(error);
+    }
+
+    let draft = {
+        let database = database.lock().await;
+        store.load_draft(&database, params.camp_id.as_str())?
+    };
+    Ok(serde_json::to_value(draft)?)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AttachmentPreviewSourceParams {
@@ -5188,37 +5233,47 @@ impl Core {
             "camp.composerDraft.removeAttachment" => {
                 let params: RemovePreparedAttachmentParams =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).remove_prepared(
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let (draft, cleanup) = {
+                    let mut database = self.database.lock().await;
+                    store.remove_prepared_from_database(
                         &mut database,
                         params.camp_id.as_str(),
                         params.expected_revision,
                         &params.attachment_id,
-                    )?,
-                )?)
+                    )?
+                };
+                let cleanup_store = store.clone();
+                if let Err(error) = tokio::task::spawn_blocking(move || {
+                    cleanup_store.cleanup_detached_attachments(cleanup)
+                })
+                .await
+                .context("Prepared Attachment cleanup task failed")?
+                {
+                    eprintln!(
+                        "Prepared Attachment {} was removed from Draft {}, but its superseded file could not be cleaned immediately: {error:#}",
+                        params.attachment_id, params.camp_id
+                    );
+                }
+                Ok(serde_json::to_value(draft)?)
             }
             "camp.composerDraft.discard" => {
                 let params: CampComposerDraftParams =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                CampAttachmentStore::new(&self.data_dir)
-                    .discard_draft(&mut database, params.camp_id.as_str())?;
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let cleanup = {
+                    let mut database = self.database.lock().await;
+                    store.discard_draft_from_database(&mut database, params.camp_id.as_str())?
+                };
+                tokio::task::spawn_blocking(move || store.cleanup_detached_attachments(cleanup))
+                    .await
+                    .context("Camp Composer Draft cleanup task failed")??;
                 Ok(json!({ "discarded": true }))
             }
             "camp.attachments.prepareFromPath" => {
                 let params: PrepareAttachmentFromPathParams =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).prepare_from_path(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                        Path::new(&params.source_path),
-                        &params.display_name,
-                    )?,
-                )?)
+                prepare_composer_attachment_from_path(&self.database, &self.data_dir, params).await
             }
             "camp.attachments.previewSource" => {
                 let params: AttachmentPreviewSourceParams =
@@ -15195,6 +15250,80 @@ fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "slow-tests")]
+    use std::fs;
+
+    #[cfg(feature = "slow-tests")]
+    #[tokio::test]
+    async fn composer_prepare_releases_database_mutex_during_authority_file_io() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-composer-database-lock-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let data_dir = fixture.join("data");
+        let source = fixture.join("source.txt");
+        fs::create_dir_all(&fixture).unwrap();
+        fs::write(&source, b"lock-free filesystem phase").unwrap();
+
+        let database = Mutex::new(Database::open(&data_dir).unwrap());
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        {
+            let database = database.lock().await;
+            rovai_core::camp_attachment::insert_test_camp(&database, camp_id);
+        }
+
+        let pause =
+            rovai_core::camp_attachment::install_composer_prepare_test_pause(&data_dir, camp_id);
+        let prepare = prepare_composer_attachment_from_path(
+            &database,
+            &data_dir,
+            PrepareAttachmentFromPathParams {
+                camp_id: CampId::parse(camp_id).unwrap(),
+                expected_revision: 0,
+                source_path: source.to_string_lossy().into_owned(),
+                display_name: "source.txt".to_string(),
+            },
+        );
+        let observe_database = async {
+            let filesystem_phase_started = tokio::time::timeout(Duration::from_secs(2), async {
+                while !pause.started() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_ok();
+            let database_was_available = if filesystem_phase_started {
+                match tokio::time::timeout(Duration::from_secs(1), database.lock()).await {
+                    Ok(database) => {
+                        drop(database);
+                        true
+                    }
+                    Err(_) => false,
+                }
+            } else {
+                false
+            };
+            pause.release();
+            database_was_available
+        };
+
+        let (prepared, database_was_available) = tokio::join!(prepare, observe_database);
+        rovai_core::camp_attachment::remove_composer_prepare_test_pause(&data_dir, camp_id);
+        assert!(
+            database_was_available,
+            "Authority gate wait and file I/O must not retain the global Database mutex"
+        );
+        assert_eq!(
+            prepared.unwrap()["attachments"].as_array().unwrap().len(),
+            1
+        );
+
+        CampAttachmentStore::new(&data_dir)
+            .remove_camp(camp_id)
+            .unwrap();
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
+    }
 
     #[test]
     fn runtime_check_activity_has_two_slots_and_one_terminal_owner() {

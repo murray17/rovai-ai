@@ -219,106 +219,145 @@ impl BuiltinToolLeaseRegistry {
         execution_epoch: i64,
         native_binding: &BuiltinToolBindingCredential,
     ) -> Result<BuiltinToolAuth> {
-        let _gate = self.invocation_gate.lock().await;
-        if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
-            bail!("Built-in Tool lease requires one current AgentRun");
-        }
-        let mut processes = self.processes.lock().await;
-        let process = processes
-            .entry(config.process_id().to_string())
-            .or_insert_with(|| RegisteredProcess {
-                process_token: config.process_token().to_string(),
-                config: config.clone(),
-                lease_generation: 0,
-                active: None,
-            });
-        if process.process_token != config.process_token()
-            || process.config.context_path() != config.context_path()
-        {
-            bail!("Built-in Tool process identity conflict");
-        }
-        if let Some(active) = &process.active {
-            if active.agent_run_id != agent_run_id || active.execution_epoch != execution_epoch {
-                bail!("Built-in Tool process is already bound to another AgentRun");
+        let (binding, retired_run_tmp) = {
+            let _gate = self.invocation_gate.lock().await;
+            if agent_run_id.trim().is_empty() || execution_epoch <= 0 {
+                bail!("Built-in Tool lease requires one current AgentRun");
             }
-            // Every Fleet acquire gets a fresh lease, even when it resumes the same
-            // Run on the same warm process. Any context copied from the prior acquire
-            // is therefore fenced by generation and token.
-            process.active = None;
-            process.config.write_context(None)?;
-        }
-        let run_tmp = process.config.reset_run_tmp()?;
-        process.lease_generation = process.lease_generation.saturating_add(1).max(1);
-        let active = ActiveLease {
-            lease_id: uuid::Uuid::new_v4().to_string(),
-            lease_generation: process.lease_generation,
-            lease_token: opaque_token(),
-            agent_run_id: agent_run_id.to_string(),
-            execution_epoch,
-            native_binding: native_binding.clone(),
-            run_tmp,
-            replay: HashMap::new(),
-            replay_order: VecDeque::new(),
+            let mut processes = self.processes.lock().await;
+            let process = processes
+                .entry(config.process_id().to_string())
+                .or_insert_with(|| RegisteredProcess {
+                    process_token: config.process_token().to_string(),
+                    config: config.clone(),
+                    lease_generation: 0,
+                    active: None,
+                });
+            if process.process_token != config.process_token()
+                || process.config.context_path() != config.context_path()
+            {
+                bail!("Built-in Tool process identity conflict");
+            }
+            if let Some(active) = &process.active {
+                if active.agent_run_id != agent_run_id || active.execution_epoch != execution_epoch
+                {
+                    bail!("Built-in Tool process is already bound to another AgentRun");
+                }
+                process.active = None;
+                process.config.write_context(None)?;
+            }
+            let (run_tmp, retired_run_tmp) = process.config.reset_run_tmp()?;
+            process.lease_generation = process.lease_generation.saturating_add(1).max(1);
+            let active = ActiveLease {
+                lease_id: uuid::Uuid::new_v4().to_string(),
+                lease_generation: process.lease_generation,
+                lease_token: opaque_token(),
+                agent_run_id: agent_run_id.to_string(),
+                execution_epoch,
+                native_binding: native_binding.clone(),
+                run_tmp,
+                replay: HashMap::new(),
+                replay_order: VecDeque::new(),
+            };
+            let auth = BuiltinToolAuth {
+                process_id: config.process_id().to_string(),
+                process_token: config.process_token().to_string(),
+                lease_id: active.lease_id.clone(),
+                lease_generation: active.lease_generation,
+                lease_token: active.lease_token.clone(),
+            };
+            let binding = process
+                .config
+                .write_context(Some(BuiltinToolLeaseContext {
+                    lease_id: active.lease_id.clone(),
+                    lease_generation: active.lease_generation,
+                    lease_token: active.lease_token.clone(),
+                }))
+                .map(|()| {
+                    process.active = Some(active);
+                    auth
+                });
+            (binding, retired_run_tmp)
         };
-        let auth = BuiltinToolAuth {
-            process_id: config.process_id().to_string(),
-            process_token: config.process_token().to_string(),
-            lease_id: active.lease_id.clone(),
-            lease_generation: active.lease_generation,
-            lease_token: active.lease_token.clone(),
-        };
-        config.write_context(Some(BuiltinToolLeaseContext {
-            lease_id: active.lease_id.clone(),
-            lease_generation: active.lease_generation,
-            lease_token: active.lease_token.clone(),
-        }))?;
-        process.active = Some(active);
-        Ok(auth)
+        cleanup_retired_run_tmps(retired_run_tmp.into_iter().collect()).await;
+        binding
     }
 
     pub(crate) async fn unbind(&self, process_id: &str, agent_run_id: &str, execution_epoch: i64) {
-        let _gate = self.invocation_gate.lock().await;
-        let mut processes = self.processes.lock().await;
-        let Some(process) = processes.get_mut(process_id) else {
-            return;
-        };
-        let matches = process.active.as_ref().is_some_and(|active| {
-            active.agent_run_id == agent_run_id && active.execution_epoch == execution_epoch
-        });
-        if matches {
+        let retired_run_tmp = {
+            let _gate = self.invocation_gate.lock().await;
+            let mut processes = self.processes.lock().await;
+            let Some(process) = processes.get_mut(process_id) else {
+                return;
+            };
+            let matches = process.active.as_ref().is_some_and(|active| {
+                active.agent_run_id == agent_run_id && active.execution_epoch == execution_epoch
+            });
+            if !matches {
+                return;
+            }
             process.active = None;
             if let Err(error) = process.config.write_context(None) {
                 eprintln!("failed to fence Built-in Tool context: {error:#}");
             }
-            if let Err(error) = process.config.clear_run_tmp() {
-                eprintln!("failed to clear Built-in Tool Run tmp: {error:#}");
+            match process.config.retire_run_tmp() {
+                Ok(retired) => retired,
+                Err(error) => {
+                    eprintln!("failed to retire Built-in Tool Run tmp: {error:#}");
+                    None
+                }
             }
-        }
+        };
+        cleanup_retired_run_tmps(retired_run_tmp.into_iter().collect()).await;
     }
 
     pub(crate) async fn unregister(&self, process_id: &str) {
-        let _gate = self.invocation_gate.lock().await;
-        if let Some(process) = self.processes.lock().await.remove(process_id) {
+        let (process, retired_run_tmp) = {
+            let _gate = self.invocation_gate.lock().await;
+            let process = self.processes.lock().await.remove(process_id);
+            let Some(process) = process else {
+                return;
+            };
             let _ = process.config.write_context(None);
-            let _ = process.config.clear_run_tmp();
-        }
+            let retired = match process.config.retire_run_tmp() {
+                Ok(retired) => retired,
+                Err(error) => {
+                    eprintln!("failed to retire Built-in Tool Run tmp: {error:#}");
+                    None
+                }
+            };
+            (process, retired)
+        };
+        // The last config owner may recursively remove its process root. Keep
+        // that Drop outside the global invocation/process guards as well.
+        drop(process);
+        cleanup_retired_run_tmps(retired_run_tmp.into_iter().collect()).await;
     }
 
     pub(crate) async fn fence_all(&self) -> usize {
-        let _gate = self.invocation_gate.lock().await;
-        let mut processes = self.processes.lock().await;
-        let mut fenced = 0;
-        for process in processes.values_mut() {
-            if process.active.take().is_some() {
-                fenced += 1;
+        let (fenced, retired_run_tmps) = {
+            let _gate = self.invocation_gate.lock().await;
+            let mut processes = self.processes.lock().await;
+            let mut fenced = 0;
+            let mut retired_run_tmps = Vec::with_capacity(processes.len());
+            for process in processes.values_mut() {
+                if process.active.take().is_some() {
+                    fenced += 1;
+                }
+                if let Err(error) = process.config.write_context(None) {
+                    eprintln!("failed to fence Built-in Tool context: {error:#}");
+                }
+                match process.config.retire_run_tmp() {
+                    Ok(Some(retired)) => retired_run_tmps.push(retired),
+                    Ok(None) => {}
+                    Err(error) => {
+                        eprintln!("failed to retire Built-in Tool Run tmp: {error:#}");
+                    }
+                }
             }
-            if let Err(error) = process.config.write_context(None) {
-                eprintln!("failed to fence Built-in Tool context: {error:#}");
-            }
-            if let Err(error) = process.config.clear_run_tmp() {
-                eprintln!("failed to clear Built-in Tool Run tmp: {error:#}");
-            }
-        }
+            (fenced, retired_run_tmps)
+        };
+        cleanup_retired_run_tmps(retired_run_tmps).await;
         fenced
     }
 
@@ -452,43 +491,89 @@ impl BuiltinToolLeaseRegistry {
 }
 
 impl BuiltinToolProcessConfig {
-    fn reset_run_tmp(&self) -> Result<PathBuf> {
-        self.clear_run_tmp()?;
-        fs::create_dir(&self.inner.run_tmp).with_context(|| {
-            format!(
-                "failed to recreate Built-in Tool Run tmp {}",
-                self.inner.run_tmp.display()
-            )
-        })?;
-        restrict_directory(&self.inner.run_tmp)?;
-        validate_exact_run_tmp_root(&self.inner.process_root, &self.inner.run_tmp)?;
-        Ok(self.inner.run_tmp.clone())
+    fn reset_run_tmp(&self) -> Result<(PathBuf, Option<PathBuf>)> {
+        let retired = self.retire_run_tmp()?;
+        let recreate = (|| -> Result<()> {
+            fs::create_dir(&self.inner.run_tmp).with_context(|| {
+                format!(
+                    "failed to recreate Built-in Tool Run tmp {}",
+                    self.inner.run_tmp.display()
+                )
+            })?;
+            restrict_directory(&self.inner.run_tmp)?;
+            validate_exact_run_tmp_root(&self.inner.process_root, &self.inner.run_tmp)?;
+            Ok(())
+        })();
+        if let Err(error) = recreate {
+            let _ = fs::remove_dir(&self.inner.run_tmp);
+            if let Some(retired) = &retired
+                && !self.inner.run_tmp.exists()
+            {
+                let _ = fs::rename(retired, &self.inner.run_tmp);
+            }
+            return Err(error);
+        }
+        Ok((self.inner.run_tmp.clone(), retired))
     }
 
-    fn clear_run_tmp(&self) -> Result<()> {
+    fn retire_run_tmp(&self) -> Result<Option<PathBuf>> {
         validate_configured_run_tmp_path(&self.inner.process_root, &self.inner.run_tmp)?;
-        let metadata = match fs::symlink_metadata(&self.inner.run_tmp) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        match fs::symlink_metadata(&self.inner.run_tmp) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            fs::remove_file(&self.inner.run_tmp).with_context(|| {
-                format!(
-                    "failed to remove unsafe Built-in Tool Run tmp {}",
-                    self.inner.run_tmp.display()
-                )
-            })?;
-        } else {
-            fs::remove_dir_all(&self.inner.run_tmp).with_context(|| {
-                format!(
-                    "failed to clear Built-in Tool Run tmp {}",
-                    self.inner.run_tmp.display()
-                )
-            })?;
         }
-        Ok(())
+        let retired = self.inner.process_root.join(format!(
+            ".run-tmp-retired-{}",
+            uuid::Uuid::new_v4().as_hyphenated()
+        ));
+        fs::rename(&self.inner.run_tmp, &retired).with_context(|| {
+            format!(
+                "failed to retire Built-in Tool Run tmp {}",
+                self.inner.run_tmp.display(),
+            )
+        })?;
+        Ok(Some(retired))
     }
+}
+
+async fn cleanup_retired_run_tmps(paths: Vec<PathBuf>) {
+    let tasks = paths
+        .into_iter()
+        .map(|path| {
+            tokio::task::spawn_blocking(move || {
+                if let Err(error) = remove_retired_run_tmp(&path) {
+                    eprintln!(
+                        "failed to remove retired Built-in Tool Run tmp {}: {error:#}",
+                        path.display()
+                    );
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    for task in tasks {
+        if let Err(error) = task.await {
+            eprintln!("retired Built-in Tool Run tmp cleanup task failed: {error}");
+        }
+    }
+}
+
+fn remove_retired_run_tmp(path: &Path) -> Result<()> {
+    #[cfg(test)]
+    pause_run_tmp_cleanup_for_test(path);
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        fs::remove_file(path)
+            .with_context(|| format!("failed to remove unsafe Run tmp {}", path.display()))?;
+    } else {
+        fs::remove_dir_all(path)
+            .with_context(|| format!("failed to remove Run tmp tree {}", path.display()))?;
+    }
+    Ok(())
 }
 
 pub(crate) fn bundled_cli_executable() -> Result<PathBuf> {
@@ -609,6 +694,63 @@ fn validate_exact_run_tmp_root(process_root: &Path, run_tmp: &Path) -> Result<()
 }
 
 #[cfg(test)]
+struct RunTmpCleanupTestPause {
+    started: std::sync::atomic::AtomicBool,
+    released: std::sync::Mutex<bool>,
+    release: std::sync::Condvar,
+}
+
+#[cfg(test)]
+impl RunTmpCleanupTestPause {
+    fn new() -> Self {
+        Self {
+            started: std::sync::atomic::AtomicBool::new(false),
+            released: std::sync::Mutex::new(false),
+            release: std::sync::Condvar::new(),
+        }
+    }
+
+    fn release(&self) {
+        *self.released.lock().unwrap() = true;
+        self.release.notify_all();
+    }
+}
+
+#[cfg(test)]
+fn run_tmp_cleanup_test_pauses()
+-> &'static std::sync::Mutex<HashMap<String, Arc<RunTmpCleanupTestPause>>> {
+    static PAUSES: OnceLock<std::sync::Mutex<HashMap<String, Arc<RunTmpCleanupTestPause>>>> =
+        OnceLock::new();
+    PAUSES.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+fn pause_run_tmp_cleanup_for_test(path: &Path) {
+    let Some(process_id) = path
+        .parent()
+        .and_then(Path::file_name)
+        .and_then(|value| value.to_str())
+    else {
+        return;
+    };
+    let pause = run_tmp_cleanup_test_pauses()
+        .lock()
+        .unwrap()
+        .get(process_id)
+        .cloned();
+    let Some(pause) = pause else {
+        return;
+    };
+    pause
+        .started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let mut released = pause.released.lock().unwrap();
+    while !*released {
+        released = pause.release.wait(released).unwrap();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -704,6 +846,87 @@ mod tests {
         );
         registry.unbind(config.process_id(), "run-2", 2).await;
         drop(config);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn run_tmp_cleanup_does_not_hold_the_global_invocation_gate() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-builtin-cleanup-lock-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let endpoint = LocalIpcEndpoint::UnixSocket {
+            path: root.join("core.sock").to_string_lossy().into_owned(),
+        };
+        let first_config =
+            BuiltinToolProcessConfig::create(&executable(), &endpoint, &root).unwrap();
+        let second_config =
+            BuiltinToolProcessConfig::create(&executable(), &endpoint, &root).unwrap();
+        let registry = Arc::new(BuiltinToolLeaseRegistry::default());
+        registry
+            .bind(&first_config, "run-1", 1, &binding())
+            .await
+            .unwrap();
+        fs::create_dir(first_config.run_tmp().join("nested")).unwrap();
+        fs::write(
+            first_config.run_tmp().join("nested/generated.txt"),
+            b"generated",
+        )
+        .unwrap();
+
+        let pause = Arc::new(RunTmpCleanupTestPause::new());
+        run_tmp_cleanup_test_pauses()
+            .lock()
+            .unwrap()
+            .insert(first_config.process_id().to_string(), Arc::clone(&pause));
+        let unbind_registry = Arc::clone(&registry);
+        let first_process_id = first_config.process_id().to_string();
+        let unbind = tokio::spawn(async move {
+            unbind_registry.unbind(&first_process_id, "run-1", 1).await;
+        });
+
+        let cleanup_started = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !pause.started.load(std::sync::atomic::Ordering::Acquire) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .is_ok();
+        let second_bind = if cleanup_started {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                registry.bind(&second_config, "run-2", 2, &binding()),
+            )
+            .await
+            {
+                Ok(Ok(auth)) => Some(auth),
+                Ok(Err(_)) | Err(_) => None,
+            }
+        } else {
+            None
+        };
+
+        pause.release();
+        unbind.await.unwrap();
+        run_tmp_cleanup_test_pauses()
+            .lock()
+            .unwrap()
+            .remove(first_config.process_id());
+        if second_bind.is_some() {
+            registry
+                .unbind(second_config.process_id(), "run-2", 2)
+                .await;
+        }
+        assert!(cleanup_started, "the retired Run tmp cleanup did not start");
+        assert!(
+            second_bind.is_some(),
+            "recursive cleanup for one Process must not block another Process lease"
+        );
+
+        drop(registry);
+        drop(first_config);
+        drop(second_config);
         let _ = fs::remove_dir_all(root);
     }
 }
