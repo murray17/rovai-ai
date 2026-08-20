@@ -6117,10 +6117,11 @@ mod slow_tests {
             .expect("light-ready Runtime must run Dispatch Preflight before execution");
         assert_eq!(blocker.code, "runtime_probe_required");
 
+        let deep_probe_at = chrono::Utc::now() - chrono::Duration::hours(2);
         let live_snapshot = AgentRuntimeAdapterRegistry::default()
             .trae_live_session_capability_snapshot(
                 None,
-                fingerprint,
+                fingerprint.clone(),
                 json!({
                     "protocolVersion": 1,
                     "agentCapabilities": {"loadSession": true}
@@ -6146,7 +6147,7 @@ mod slow_tests {
                         ]
                     }
                 }),
-                chrono::Utc::now().to_rfc3339(),
+                deep_probe_at.to_rfc3339(),
             )
             .unwrap();
         assert_eq!(live_snapshot.reported_version, None);
@@ -6156,7 +6157,7 @@ mod slow_tests {
                 &user_command(
                     "record-live-trae",
                     RecordAdapterCapabilitySnapshotCommand {
-                        installation_id,
+                        installation_id: installation_id.clone(),
                         expected_installation_version: installation.version,
                         snapshot: live_snapshot,
                         failure: None,
@@ -6172,6 +6173,25 @@ mod slow_tests {
             verified_profile.runtime_readiness.status,
             RuntimeReadinessStatus::Ready
         );
+        let explicit_model = ModelSelection::Explicit {
+            model_id: "trae-default".to_string(),
+            options: json!({}),
+        };
+        service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "configure-explicit-trae",
+                    SetMemberRuntimeConfigurationCommand {
+                        agent_id: verified_profile.agent_id.clone(),
+                        expected_version: verified_profile.version,
+                        adapter_kind: AdapterKind::TraeCnCli,
+                        model: explicit_model.clone(),
+                        permissions: binding.permissions.clone(),
+                    },
+                ),
+            )
+            .unwrap();
         let verified = resolve_frozen_runtime_binding(database.connection(), &binding)
             .unwrap()
             .unwrap();
@@ -6184,6 +6204,75 @@ mod slow_tests {
                 .unwrap()
                 .is_none(),
             "the same Runtime may dispatch only after the unified deep probe reaches ready"
+        );
+
+        let explicit_binding = ResolvedRuntimeBinding {
+            adapter_kind: AdapterKind::TraeCnCli,
+            installation_id: installation_id.clone(),
+            model: explicit_model,
+            permissions: binding.permissions.clone(),
+        };
+        let explicit_verified =
+            resolve_frozen_runtime_binding(database.connection(), &explicit_binding)
+                .unwrap()
+                .unwrap();
+        assert_eq!(explicit_verified.model.source, "explicit");
+        assert_eq!(explicit_verified.model.model_id, "trae-default");
+
+        let startup_snapshot = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::TraeCnCli,
+                Some("traecli 0.120.52".to_string()),
+                fingerprint,
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        let rediscovered_installation_id = service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::TraeCnCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "traecli".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: startup_snapshot,
+                },
+            )
+            .unwrap();
+        assert_eq!(rediscovered_installation_id, installation_id);
+
+        let rediscovered = service
+            .managed_installation(&database, AdapterKind::TraeCnCli, "default")
+            .unwrap()
+            .unwrap();
+        let retained_snapshot = rediscovered.snapshot.as_ref().unwrap();
+        assert_eq!(retained_snapshot.probe_status, "ready");
+        assert_eq!(retained_snapshot.models[0].id, "trae-default");
+        assert_eq!(
+            rediscovered.model_catalog.status,
+            RuntimeModelCatalogCacheStatus::Stale
+        );
+        assert!(rediscovered.model_catalog.is_serviceable());
+        let retained_profile = service
+            .get_profile(&database, &verified_profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            retained_profile.runtime_readiness.status,
+            RuntimeReadinessStatus::Ready
+        );
+        let explicit_after_startup =
+            resolve_frozen_runtime_binding(database.connection(), &explicit_binding)
+                .unwrap()
+                .expect("same-identity startup discovery must preserve explicit TRAE binding");
+        assert_eq!(explicit_after_startup.model.source, "explicit");
+        assert_eq!(explicit_after_startup.model.model_id, "trae-default");
+        assert!(
+            service
+                .runtime_dispatch_blocker(&database, &explicit_after_startup)
+                .unwrap()
+                .is_none()
         );
 
         drop(database);

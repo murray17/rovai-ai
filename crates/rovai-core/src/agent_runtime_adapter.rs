@@ -675,8 +675,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::AntigravityApp => antigravity_permission_options(),
             AdapterKind::TraeCnCli => trae_static_permission_options(),
         };
-        let permission_schema_digest =
-            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
         Ok(AdapterCapabilitySnapshot {
             reported_version,
             executable_fingerprint: Some(executable_fingerprint),
@@ -1360,7 +1359,7 @@ fn acp_capability_snapshot(
         Vec::new()
     };
     let permission_schema_digest =
-        canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        adapter_permission_schema_digest(adapter_kind, &permission_options)?;
     let native_session_compatibility_key = if ready {
         Some(if adapter_kind == AdapterKind::TraeCnCli {
             let fingerprint = observation
@@ -1396,6 +1395,20 @@ fn acp_capability_snapshot(
         last_error: observation.last_error,
         native_session_compatibility_key,
     })
+}
+
+fn adapter_permission_schema_digest(
+    adapter_kind: AdapterKind,
+    permission_options: &[PermissionOptionDescriptor],
+) -> Result<String> {
+    // TRAE Session labels and advertised modes are dynamic evidence. Configuration drift is
+    // fenced by the Adapter-owned schema that light discovery can reproduce across restarts.
+    let schema = if adapter_kind == AdapterKind::TraeCnCli {
+        serde_json::to_value(trae_static_permission_options())?
+    } else {
+        serde_json::to_value(permission_options)?
+    };
+    canonical_json_digest(&schema)
 }
 
 fn append_additive_mcp_axes(capabilities: &mut Vec<String>, same_name_policy: McpSameNamePolicy) {
