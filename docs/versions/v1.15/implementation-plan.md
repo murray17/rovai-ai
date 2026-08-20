@@ -75,6 +75,19 @@ last_updated: 2026-08-20
 - [ ] 完成 Forced Colors/High Contrast、keyboard-only、NVDA、中文 IME、DPI/zoom/Snap/multi-monitor 验收；
 - [ ] 用 Windows Interaction Delta HTML 作为差异清单，不以原型替代现有 macOS 视觉真源。
 
+## Checkpoint 3A：本机安装级执行台位置偏好
+
+- [x] 确认全局粒度、唯一按钮写入口、独立 Inspector visibility、Main-owned 持久化与旧偏好默认底部，
+  记录 [V1.15-D05](decisions.md#v1-15-d05)并建立 [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)；
+- [ ] 将 General Preferences 推进到 schema 3，加入 `executionConsolePlacement` 与串行原子 setter；v1/v2
+  读取保留其他可识别字段并补 `bottom`，不增加 Core/SQLite Migration 或 downgrade reader；
+- [ ] 在首个 Camp workspace 挂载前取得权威偏好，把 placement 从 CampWorkspace 瞬时 state 提升到 App/Main
+  控制；写成功后才移动同一 Drawer DOM，pending 防重复，失败保持旧 snapshot 并原位重试；
+- [ ] 保持 placement 与 Inspector visibility 独立：普通切 Camp/恢复不强制显示或临时回退，显式移动与
+  Task/停止结果/世界地图精确导航仍显示 Inspector、激活“执行”并定位目标；
+- [ ] 增加 General Preferences migration/store/API 单测、Renderer 状态与失败单测，并扩展 packaged App
+  `accept:runtime-activity-ui` 覆盖跨 Camp、一级页面、重启、hidden 组合及首屏无闪跳。
+
 ## Checkpoint 4：打包、升级与发布安全
 
 - [ ] 完成 target-isolated resources、x64 per-user NSIS、三个 PE 与 longPathAware manifest；
@@ -98,7 +111,7 @@ last_updated: 2026-08-20
 - [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
-- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
+- [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
 - [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
 - [Camp Published Attachment View architecture](../../architecture/camp-published-attachment-view.md)
 - [Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)

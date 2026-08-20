@@ -400,5 +400,12 @@ last_updated: 2026-08-20
 - Conversation Header 的 Inspector 显隐是 Renderer 本地偏好，不产生领域命令。Stop 是时间线中的 CampTurn 终态投影；Copy 属于具体消息内容，Shared top bar 不取代页面自己的标题和动作。
 - 执行过程以 Agent 为稳定聚合单位：同一 Camp 中一个 Agent 的 Run chronology 形成一个过程入口，状态必须由证据和 Run authority 归约，不能按最后一条文本或动画猜测。
 - 普通 Camp Inspector 只有聚焦上下文和已定义的执行/详情入口；Approval 使用唯一 surface，不能在多个面板复制可操作控件或产生竞争决策。
-- Agent execution console 在一个已挂载 Camp workspace 内只有一个 Renderer-owned placement，默认底部，可由用户移入 Inspector；移动必须复用同一已挂载 DOM，保留 selection、disclosure、局部加载和嵌套阅读位置，不复制 console、不改变 Run 状态，也不持久化为跨 workspace 领域偏好。
+- Agent execution console 在一个已挂载 Camp workspace 内只有一个 Renderer-owned surface；其 `bottom | inspector`
+  placement 是 Main-owned 的本机安装级展示偏好，最后一次成功的显式位置选择跨 Camp、页面切换和应用重启
+  生效，但不进入 Camp/Core/SQLite 或云同步。旧偏好没有该字段时只补 `bottom`，不从历史 workspace、
+  Inspector 显隐或窗口尺寸推断；权威偏好在 Camp 挂载前解析，写失败时保持旧位置和旧 snapshot。
+- Placement 与 Inspector visibility 独立：右侧位置可随用户隐藏的 Inspector 一起不可见，普通 Camp 切换或
+  后台事件不得强制显示 Inspector 或把执行台临时搬回底部；显式“移到右侧”和既有精确执行导航仍会显示并
+  激活“执行”。移动必须复用同一已挂载 DOM，保留 selection、disclosure、局部加载和嵌套阅读位置，不复制
+  console、不改变 Run 状态。
 - Tool 全文不属于 Camp open 默认 DOM；截断 Evidence/Managed Blob 只在用户展开精确 Canonical Tool 行后读取，并只提取公开结果字段。读取成功后允许完整结果在当前 Drawer 会话内挂载于有最大高度的内部滚动 region，但不得暴露 Envelope 或建立 standalone raw Evidence surface。

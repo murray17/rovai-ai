@@ -26,6 +26,10 @@ last_updated: 2026-08-20
 > Published Attachment 通过实例隔离、Camp-shared View 供当前 Camp Runtime 枚举和只读访问。新输入使用
 > Formatter 21、Manifest 20、Run Facts v2、schema 54 与 Migration 99；Run/Agent Session projection 方案均撤回。
 >
+> 执行台位置的本机安装级全局偏好已完成设计确认并进入 [V1.15-D05](decisions.md#v1-15-d05)与
+> [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)；生产代码、自动测试与
+> packaged App 验收尚未实施，不能把文档状态当作交付完成。
+>
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 
 ## 版本目标
@@ -54,6 +58,8 @@ Platform。历史 v1.05 只保留当时设计过程和未实施快照，不作�
   Authenticode 与真实 Windows 10/11 acceptance；
 - 执行台在底部与 Inspector 间移动同一 DOM，统一四轨 Tool 行、九类 SVG、精简队员入口和
   展开后完整 Tool 结果的内部滚动/键盘语义；
+- 执行台最后一次成功的显式位置选择成为 Main-owned 本机安装级偏好，跨 Camp、页面切换和应用重启，
+  旧偏好缺失字段时只补默认底部，并与 Inspector 显隐独立；
 - 十个 Adapter 逐一取得 digest-bound Windows evidence；未完成者保持 `not_qualified`。
 
 ## 数据迁移
@@ -87,6 +93,10 @@ delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行�
 随后从 `message_attachment` 回填 Camp Published Attachment View，绝不投影 `prepared_attachment`，并推进到
 `v1.15 / projection schema 54`。新写入只允许 Formatter 21 / Manifest 20 / Run Facts v2 pairing。
 
+执行台位置不产生 Core 数据库 Migration。Main-owned General Preferences 自身推进到 schema 3；旧 v1/v2
+文件在读取时保留可识别字段并补 `executionConsolePlacement=bottom`，不从历史 Camp 或 Renderer 瞬时状态
+回填，也不提供 downgrade reader。
+
 ## 验收边界
 
 - macOS workspace、Core tests、Desktop 与既有文档门禁保持通过；
@@ -97,6 +107,8 @@ delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行�
   由真实 client OS 验收；Windows Server CI 不替代这些证据；
 - 每个 `qualified` Runtime 独立覆盖 discovery、identity、authentication、first run、continuation、Built-in Tool、
   approval、cancel、terminal、process cleanup 与 planned shutdown；
+- 执行台位置覆盖旧偏好默认、跨 Camp/一级页面/重启、原子写失败不移动、Inspector hidden 组合和首个
+  Camp meaningful paint 无 bottom→inspector 闪跳；
 - Electron EXE、`rovai-core.exe`、`rovai.exe` 和 installer 分别验证架构、manifest、hash、签名与时间戳后才可发布。
 
 ## 明确不做
@@ -112,13 +124,13 @@ delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.14 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.15。 |
-| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果与稳定执行台 DOM；[V1.15-D03](decisions.md#v1-15-d03)记录自身公屏输出不再作为同一 Agent 的 recent 未读候选；[V1.15-D04](decisions.md#v1-15-d04)记录 Camp-shared Published Attachment View，并拒绝 Run/Session projection 与 Authority-root 暴露。 |
-| Contracts | 已更新 | [Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)、[Camp Attachment v2](../../contracts/camp-attachment-v2.md)、[ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)、[Run Facts v2](../../contracts/run-facts-v2.md)、[Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)、[Accepted Input Recovery v2](../../contracts/accepted-input-recovery-v2.md)、[Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)与[Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)成为当前入口。 |
-| Architecture | 已更新 | [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)拥有 Authority/View、publication gate、generation、恢复与生命周期；基础不变量、Runtime/Recovery 与 Windows Platform 路由同一边界。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止与完整运行 chronology；底部/Inspector 移动同一 Drawer DOM，Tool 行固定对齐，队员入口去除可见状态文案，完整结果在有最大高度的 region 中内部滚动。 |
+| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果与稳定执行台 DOM；[V1.15-D03](decisions.md#v1-15-d03)记录自身公屏输出不再作为同一 Agent 的 recent 未读候选；[V1.15-D04](decisions.md#v1-15-d04)记录 Camp-shared Published Attachment View；[V1.15-D05](decisions.md#v1-15-d05)记录 Main-owned 本机安装级执行台位置偏好。 |
+| Contracts | 已更新 | [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)成为执行台当前入口；[Camp Published Attachment View v1](../../contracts/camp-published-attachment-view-v1.md)、[Camp Attachment v2](../../contracts/camp-attachment-v2.md)、[ContextManifest Evidence v20](../../contracts/context-manifest-evidence-v20.md)、[Run Facts v2](../../contracts/run-facts-v2.md)、[Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)、[Accepted Input Recovery v2](../../contracts/accepted-input-recovery-v2.md)、[Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)与[Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)继续拥有其各自当前边界。 |
+| Architecture | 已更新 | [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)继续拥有 Authority/View、publication gate、generation、恢复与生命周期；[产品/执行表面不变量](../../architecture/foundational-invariants.md#product-execution-surface)增加 Main-owned 全局 placement、旧偏好默认及独立 Inspector visibility。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止、完整 chronology、唯一 Drawer DOM 与完整 Tool 结果，并增加跨 Camp/重启的位置偏好、写失败及 Inspector hidden 组合。 |
 | Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
 | Runtime compatibility | 已更新 | 所有 Adapter 当前 attachment visibility 均记录为 `generation_fenced_v1`；没有 TRAE live-append 正向 Probe，Windows 行继续保持 `not_qualified`。 |
-| Documentation routing | 已更新 | Context 术语、文档导航、Architecture/Contract 索引、决定导航、版本概览和实施计划均路由到 Camp Published Attachment View 与 Manifest 20/Run Facts v2 当前入口。 |
+| Documentation routing | 已更新 | 文档导航、Architecture/Contract 索引、决定导航、UI 验收、版本概览和实施计划路由到 Run Process Detail Surface v14；既有 Camp Published Attachment View 与 Manifest 20/Run Facts v2 路由继续有效。 |
 | Root README | 确认无需更新 | Windows 尚未完成真实验收或发布，根 README 不提前声明常青 Windows 支持。 |
 
 ## References
@@ -141,7 +153,7 @@ delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行�
 - [Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)
 - [Runtime Launch and Verification v10](../../contracts/runtime-launch-and-verification-v10.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
-- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
+- [Run Process Detail Surface v14](../../contracts/run-process-detail-surface-v14.md)
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)

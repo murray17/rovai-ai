@@ -184,7 +184,7 @@ pnpm accept:member-lifecycle-ui
 
 ### Agent 执行过程门禁
 
-Renderer 的权威行为见 [Run Process Detail Surface v13](../contracts/run-process-detail-surface-v13.md) 与
+Renderer 的权威行为见 [Run Process Detail Surface v14](../contracts/run-process-detail-surface-v14.md) 与
 [当前 UI 详规：Camp 执行过程](../ui/components/conversation-workspace.md#camp-执行过程)。修改 AgentRun 分组、执行台、Drawer、
 Task Related execution、停止结果或 Inspector 页签后，至少运行：
 
@@ -216,6 +216,13 @@ pnpm accept:runtime-activity-ui
   resize separator。点击“移回底部”恢复横向 Run Pulse、底部 Drawer、原基础 Tab、selected Agent/
   focused Run 和底部高度偏好；移动前后必须是同一个 Drawer 与结果 DOM，并按比例保留 Drawer/结果
   阅读位置、disclosure 和加载状态；任一时刻不存在第二条过程时间线或重复入口；
+- 全新或旧版 General Preferences 没有位置字段时从底部开始；显式移到右侧后，切换 Camp、进入其他
+  一级页面再返回和完整应用重启都继续由 Inspector 承载，再显式移回底部后同一矩阵继续由底部承载；
+  保存中重复点击被拒绝，注入偏好原子写失败后执行台和旧 snapshot 均保持原位并显示可重试错误，恢复
+  Inspector 偏好时首个 Camp meaningful paint 不出现 bottom→inspector 闪跳；
+- placement=inspector 与 Inspector hidden 可以同时成立：普通切 Camp、应用恢复和后台事件不强制显示
+  Inspector，也不临时回退到底部；Header 恢复后返回“执行”上下文，用户显式“移到右侧”与 Task/
+  停止结果/世界地图等精确导航仍显示 Inspector、激活“执行”并定位目标；
 - Context Delivery/Approval/Activity/Audit Tab、旧 route/state 不得返回；“队员”读取真实
   CampMember/AgentProfile，并用既有 Core 命令切换一个符合 presence/leave 约束的 Default Lead；
   Task/停止结果/世界地图入口在当前 placement 按 Agent 打开过程，顶栏不存在执行入口；
