@@ -28,7 +28,7 @@ returns the exact reset root only for the matching active process token, lease I
 The Host environment keeps the stable path because a reusable process cannot receive a replacement environment variable
 after spawn. Every Adapter MUST also pass that exact path through its native workspace/additional-directory admission;
 passing only `ROVAI_RUN_TMP` in the environment is insufficient. The parent process root is never admitted. Runtime launch
-compatibility is defined by [Runtime Launch and Verification v13](runtime-launch-and-verification-v13.md).
+compatibility is defined by [Runtime Launch and Verification v15](runtime-launch-and-verification-v15.md).
 
 Send `body` is optional/default empty and `files` default empty. Domain admission accepts non-whitespace body or at least
 one file and rejects both empty. Direct `rovai send --file <path>` is canonical. Exact help teaches attachment-only input
@@ -40,5 +40,5 @@ new invocation; historical receipts replay without translation.
 - [Built-in Tool Transport v18](builtin-tool-transport-v18.md)
 - [Camp Message Send v12](camp-message-send-v12.md)
 - [Camp Attachment v4](camp-attachment-v4.md)
-- [Runtime Launch and Verification v13](runtime-launch-and-verification-v13.md)
+- [Runtime Launch and Verification v15](runtime-launch-and-verification-v15.md)
 - [V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)

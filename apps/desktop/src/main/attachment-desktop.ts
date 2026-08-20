@@ -61,12 +61,18 @@ export async function openDesktopAttachmentTarget(
   }
 }
 
-export function revealDesktopAttachmentTarget(
+export async function revealDesktopAttachmentTarget(
   target: DesktopAttachmentTarget,
-  revealPath: (path: string) => void
-): AttachmentRevealResult {
+  actions: {
+    canReveal(path: string): Promise<boolean>
+    revealPath(path: string): void
+  }
+): Promise<AttachmentRevealResult> {
   try {
-    revealPath(target.path)
+    if (!(await actions.canReveal(target.path))) {
+      return { revealed: false, error: 'reveal_failed' }
+    }
+    actions.revealPath(target.path)
     return { revealed: true, error: null }
   } catch {
     return { revealed: false, error: 'reveal_failed' }

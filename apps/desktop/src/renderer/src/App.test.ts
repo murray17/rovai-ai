@@ -3572,6 +3572,61 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
   })
 
+  it('shows the latest Claude API retry while the AgentRun is still running', () => {
+    const retryEvents = [1, 2].map((attempt) => liveRuntimeEventFromCore({
+      method: 'runtime.diagnostic',
+      params: {
+        agentRunId: 'run-claude-retrying',
+        payload: {
+          diagnosticId: 'claude-api-retry',
+          code: 'runtime_api_retrying',
+          status: 'retrying',
+          attempt,
+          maxAttempts: 10,
+          retryAfterSeconds: attempt === 1 ? 0 : 4,
+          rawDetail: 'api_key=private-key'
+        }
+      }
+    }, `retry-${attempt}`)).filter((event) => event !== null)
+    const progress = buildLiveExecutionProgress(retryEvents, 'run-claude-retrying')
+    expect(progress.items).toEqual([{
+      key: 'diagnostic:claude-api-retry',
+      kind: 'diagnostic',
+      diagnostic: {
+        id: 'claude-api-retry',
+        code: 'runtime_api_retrying',
+        status: 'retrying',
+        attempt: 2,
+        maxAttempts: 10,
+        retryAfterSeconds: 4
+      }
+    }])
+
+    const run: AgentRunView = {
+      id: 'run-claude-retrying', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
+      responsibilityGeneration: 0, purpose: '检查 API', completionRole: 'required',
+      status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-20T15:50:27Z', startedAt: '2026-08-20T15:50:28Z',
+      endedAt: null, updatedAt: '2026-08-20T15:50:29Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(markup).toContain('class="runtime-retry-notice"')
+    expect(markup).toContain('Claude Code API 暂时不可用')
+    expect(markup).toContain('将在 4 秒后重试（第 2/10 次）')
+    expect(markup).toContain('本次执行尚未结束，可继续等待或停止执行。')
+    expect(markup).toContain('等待 Claude Code 自动重试（2/10）')
+    expect(markup).not.toContain('private-key')
+  })
+
   it('keeps the complete Tool chronology after more than twelve operations', () => {
     const progress = buildLiveExecutionProgress(Array.from({ length: 15 }, (_, index) => ({
       id: `tool-evidence-${index + 1}`,

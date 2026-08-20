@@ -106,6 +106,7 @@ pub fn classify_evidence(
                 | "agent.text.delta"
                 | "runtime.plan"
                 | "runtime.plan.delta"
+                | "runtime.diagnostic"
         );
     let (activity_domain, semantic_kind, runtime_classification_is_structured) =
         runtime_activity_mapping::classify_with_structure(item_type, kind, payload);
@@ -331,6 +332,27 @@ mod tests {
         assert_eq!(facts.activity_domain, "file");
         assert_eq!(facts.semantic_kind.as_deref(), Some("file.read"));
         assert_eq!(facts.presentation_hint.as_deref(), Some("随便一个标题"));
+    }
+
+    #[test]
+    fn runtime_diagnostics_do_not_become_tool_activity() {
+        let facts = classify_evidence(
+            "run-1",
+            1,
+            "evidence-1",
+            "runtime.diagnostic",
+            "step",
+            "updated",
+            &json!({
+                "diagnosticId": "claude-api-retry",
+                "code": "runtime_api_retrying",
+                "status": "retrying",
+                "attempt": 1,
+                "maxAttempts": 10
+            }),
+        );
+        assert!(!facts.is_activity);
+        assert!(new_projection(facts, "evidence-1", 1).is_none());
     }
 
     #[test]

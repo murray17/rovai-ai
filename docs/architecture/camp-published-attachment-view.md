@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: camp-published-attachment-view-composition
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Camp Published Attachment View
@@ -33,6 +33,12 @@ Attachment ID；Core 只从同 Camp 的 `message_attachment` 解析精确 Author
 和完整树 identity 后，把一次性的 path 与风险结论只交给 Desktop Main。Main 独占原生确认与系统 Shell；
 Renderer 不接收 path 或原始系统错误。`pending | recovery_required | failed` 只表达 Runtime/队员可读性，不阻止
 仍然完整的 Authority 图片预览、系统打开或显示所在位置。
+
+Unix Authority Camp root 保持 `0100`，只允许 Core 通过已知不透明 identity 穿越；精确 Attachment container
+使用不可写的 `0500`，payload 文件/目录继续使用 `0400/0500`。因此 Finder 可以枚举已授权的单个 container，
+但不能删除、改名或创建内容，也不能枚举同 Camp 的兄弟 Attachment ID。Desktop open-target 校验在同一
+per-Camp ingress admission 内把历史 `0100` container 按需收敛为 `0500`。Main 在调用 best-effort native
+reveal 前必须先确认 parent 可枚举且 target 仍存在；预检失败不得把 `void` Shell 调用伪装成成功。
 
 ## 组件职责
 
@@ -145,7 +151,7 @@ directory allowlist evidence。存在不受控 ambient filesystem access 时，�
 - [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
 - [Camp Attachment v5](../contracts/camp-attachment-v5.md)
 - [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
-- [Runtime Launch and Verification v13](../contracts/runtime-launch-and-verification-v13.md)
+- [Runtime Launch and Verification v15](../contracts/runtime-launch-and-verification-v15.md)
 - [V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)
 - [V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)
 - [V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)

@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # Runtime Activity Mapping Registry
@@ -19,7 +19,7 @@ last_updated: 2026-08-19
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；实际 Probe 已证明稳定 `toolCallId`、结构化 permission request 与 started→terminal lifecycle；Terminal content 只作 display anchor | 受控 fixture 与固定 `printf` smoke 断言已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；当前安装真实 command-output smoke 通过，静态版本按 v0.87 边界保持 `null` |
-| `claude-code-cli` | Claude Code | Claude stream-json | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration，无 delta 时只用 success `result` fallback | partial + complete message 去重、started→terminal、空输出 Bash 可展开、narration/fallback 与私有输入/thinking/错误字段不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration 与 Session continuation smoke 通过 |
+| `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal、空输出 Bash、narration/fallback、stdout 未结束前 structured retry diagnostic 与 provider error/UUID/Session/raw stderr 不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation 与实际 `system/api_retry` 429 重试流已实证；Rovai safe diagnostic UI 回归通过 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json lifecycle/output 与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
@@ -114,6 +114,14 @@ provider metadata 不公开。公开 `text_delta` 以 message/block-scoped item 
 fallback。`thinking_delta`、失败 result 和 provider metadata 不进入公开 Evidence；最终 Camp Message、
 Usage 与 Session 校验维持独立边界。
 
+Claude Code 2.1.220 在 `--print --output-format stream-json` 中以 session-bound
+`type=system/subtype=api_retry` 报告 attempt、`max_retries` 与 `retry_delay_ms`。Adapter 在完整 NDJSON 事件到达、
+stdout 尚未结束时立即发出 `runtime.diagnostic`：稳定 `diagnosticId`、`runtime_api_retrying`、`retrying`、
+attempt/max 与整数等待秒数。provider error/status、事件 UUID、Session ID 和未知字段均不公开；字段缺失、
+计数越界或 Session 不匹配 fail closed。v14 的有界 stderr 固定 grammar 只作为兼容 fallback。该事件是
+non-terminal Evidence，不能变成 Canonical Activity，也不能推进 Run outcome；Renderer 按 diagnostic ID
+只展示最新 attempt，并在任何终态后移除 live retry notice。
+
 ### Antigravity
 
 Capability snapshot 明确包含 `output.stream_json` 时，Adapter 消费公开 NDJSON `init`、`step_update`、
@@ -131,6 +139,8 @@ Capability snapshot 明确包含 `output.stream_json` 时，Adapter 消费公开
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
 - title、命令字符串、provider 和 Runtime 名称永远不决定 domain 或 identity；Codex 命令字符串只允许按上述
   Renderer 边界生成完整脱敏的 presentation。
+- `runtime.diagnostic` 是 non-activity 状态证据；它不能因为 `kind=step`、Runtime 名称或展示文案而伪造成
+  Tool operation，也不能替代可靠 terminal outcome。
 
 ## Runtime-specific transport notes
 

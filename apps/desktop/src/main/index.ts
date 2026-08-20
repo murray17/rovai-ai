@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
+import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
@@ -799,7 +799,16 @@ ipcMain.handle(
   async (_event, campId: unknown, attachmentId: unknown) => {
     const target = await resolveDesktopAttachmentTarget(campId, attachmentId)
     if (!target) return { revealed: false, error: 'target_unavailable' as const }
-    return revealDesktopAttachmentTarget(target, (path) => shell.showItemInFolder(path))
+    return revealDesktopAttachmentTarget(target, {
+      async canReveal(path) {
+        await readdir(dirname(path))
+        await lstat(path)
+        return true
+      },
+      revealPath(path) {
+        shell.showItemInFolder(path)
+      }
+    })
   }
 )
 
