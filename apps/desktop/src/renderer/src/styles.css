@@ -2649,6 +2649,7 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 @keyframes attachment-spin { to { transform: rotate(360deg); } }
 .conversation-drop-layer { position: relative; z-index: 12; display: grid; min-width: 0; min-height: 0; grid-column: 1; grid-row: 1 / span 2; margin: 10px; place-items: center; border: 1.5px dashed color-mix(in srgb, var(--brand) 80%, var(--line-strong)); border-radius: 10px; background: color-mix(in srgb, var(--brand-soft) 54%, transparent); pointer-events: none; animation: conversation-drop-enter 120ms ease-out; }
 .conversation-drop-callout { display: grid; width: 308px; min-height: 92px; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 12px; padding: 14px 16px; transform: translateY(-34px); border: 1px solid var(--line-strong); border-radius: 10px; background: var(--surface-raised); box-shadow: var(--shadow-float); }
+.conversation-drop-layer.has-bottom-execution-drawer .conversation-drop-callout { transform: translateY(calc(-34px - min(176px, 20vh))); }
 .conversation-drop-glyph { display: grid; width: 48px; height: 48px; place-items: center; border: 1px solid color-mix(in srgb, var(--brand) 38%, var(--line)); border-radius: 9px; color: var(--brand); background: var(--brand-soft); }
 .conversation-drop-glyph svg { width: 31px; height: 31px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
 .conversation-drop-glyph .paper { fill: var(--surface-raised); }

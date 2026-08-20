@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -1303,10 +1303,32 @@ async function seedFixture() {
       END;
     `)
   }
+  await seedEmptyAttachmentViewRoots(runtimeRoot, [
+    campId,
+    composerLayoutCampId,
+    ambientEncounterCampId
+  ])
 
   for (const [index, entry] of runtimes.entries()) {
     if (entry.runLevelOnly) continue
     await seedActivity(entry, index)
+  }
+}
+
+async function seedEmptyAttachmentViewRoots(runtimeRoot, campIds) {
+  const campsRoot = join(runtimeRoot, 'camps')
+  await chmod(campsRoot, 0o300)
+  try {
+    for (const exactCampId of campIds) {
+      const campRoot = join(campsRoot, exactCampId)
+      const attachmentRoot = join(campRoot, 'attachments')
+      await mkdir(campRoot, { mode: 0o700 })
+      await mkdir(attachmentRoot, { mode: 0o700 })
+      await chmod(attachmentRoot, 0o500)
+      await chmod(campRoot, 0o100)
+    }
+  } finally {
+    await chmod(campsRoot, 0o100)
   }
 }
 
@@ -2244,11 +2266,14 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
   })()`)
   assert(drawerOpened, 'The Agent execution console was missing from the drop-zone fixture')
   await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer'))`)
-  const blockedDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await wait(180)
-  assert(!await evaluate(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`),
-    'An open Execution Drawer did not close the underlying drop target')
-  await dispatchFileDrag(cdp, 'dragCancel', blockedDrag)
+  const visibleDrawerDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
+  await waitForConversationDropLayerPaint(cdp)
+  const visibleDrawerPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
+  assertConversationDropPresentation(visibleDrawerPresentation, 'open Execution Drawer', 308)
+  const visibleDrawerCapture = join(capturesDirectory, 'conversation-drop-zone-open-drawer.png')
+  await capture(cdp, visibleDrawerCapture)
+  await dispatchFileDrag(cdp, 'dragCancel', visibleDrawerDrag)
+  await waitForExpression(cdp, `!document.querySelector('.conversation-drop-layer')`)
 
   await evaluate(cdp,
     `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
@@ -2257,7 +2282,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     return activeTab?.textContent?.includes('执行')
       && document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'
   })()`)
-  await mouseClickSelector(cdp, '.activity-tabs > .tabs-list [role="tab"]:first-child')
+  await mouseClickSelector(cdp, '.activity-tabs > .tabs-list [role="tab"]:nth-child(2)')
   await waitForExpression(cdp, `(() => {
     const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
     return activeTab?.textContent?.includes('任务')
@@ -2275,7 +2300,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     verified: {
       fullConversationColumnHitTarget: true,
       inspectorAndMenusUnchanged: true,
-      executionConsolePresentAndDrawerBlocksDrop: true,
+      executionConsolePresentAndDrawerAllowsDrop: true,
       hiddenInspectorDrawerDoesNotBlockDrop: true,
       explicitDirectoryReadModel: true,
       directoryPreparedThroughRealElectronDrag: true,
@@ -2286,14 +2311,16 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     presentation: {
       day: dayPresentation,
       night: nightPresentation,
-      compact: compactPresentation
+      compact: compactPresentation,
+      visibleDrawer: visibleDrawerPresentation
     },
     attachment: directoryAttachment,
     captures: {
       dayDragging: dayDraggingCapture,
       ready: readyCapture,
       nightDragging: nightDraggingCapture,
-      compactDragging: compactDraggingCapture
+      compactDragging: compactDraggingCapture,
+      visibleDrawer: visibleDrawerCapture
     }
   }
 }

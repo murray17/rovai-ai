@@ -441,17 +441,13 @@ export function executionPlacementSaveFailureMessage(
     : '未能保存，仍在右侧。'
 }
 
-export function attachmentDropIsBlocked(
-  executionDrawerPresent: boolean,
-  mentionPopoverPresent: boolean,
-  executionPlacement: ExecutionConsolePlacement,
-  inspectorVisible: boolean,
-  inspectorSurfaceTab: CampInspectorSurfaceTab
-): boolean {
-  return mentionPopoverPresent || (
-    executionDrawerPresent
-    && executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab)
-  )
+export function attachmentDropIsBlocked({
+  mentionPopoverPresent
+}: {
+  executionDrawerPresent: boolean
+  mentionPopoverPresent: boolean
+}): boolean {
+  return mentionPopoverPresent
 }
 
 export function agentRunTerminalNote(
@@ -2935,13 +2931,10 @@ export function CampWorkspace({
     }, 1_200)
   }
 
-  const attachmentDropBlocked = attachmentDropIsBlocked(
-    Boolean(executionDrawerProcess),
-    Boolean(mentionPopover),
-    executionPlacement,
-    inspectorVisible,
-    inspectorSurfaceTab
-  )
+  const attachmentDropBlocked = attachmentDropIsBlocked({
+    executionDrawerPresent: Boolean(executionDrawerProcess),
+    mentionPopoverPresent: Boolean(mentionPopover)
+  })
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -4172,7 +4165,14 @@ export function CampWorkspace({
           </form>
         </div>
         {attachmentDragState && (
-          <div className="conversation-drop-layer" aria-hidden="true">
+          <div
+            className={`conversation-drop-layer ${
+              executionDrawerProcess && executionPlacement === 'bottom'
+                ? 'has-bottom-execution-drawer'
+                : ''
+            }`.trim()}
+            aria-hidden="true"
+          >
             <div className="conversation-drop-callout">
               <span className="conversation-drop-glyph">
                 <svg viewBox="0 0 36 36">

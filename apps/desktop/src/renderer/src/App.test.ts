@@ -511,6 +511,21 @@ describe('task event projections', () => {
       .toBe(false)
   })
 
+  it('keeps file drag feedback available while the execution drawer is visible', () => {
+    expect(attachmentDropIsBlocked({
+      executionDrawerPresent: true,
+      mentionPopoverPresent: false
+    })).toBe(false)
+    expect(attachmentDropIsBlocked({
+      executionDrawerPresent: false,
+      mentionPopoverPresent: true
+    })).toBe(true)
+    expect(attachmentDropIsBlocked({
+      executionDrawerPresent: true,
+      mentionPopoverPresent: true
+    })).toBe(true)
+  })
+
   it('renders controlled shutdown as an assertive non-cancellable dialog with honest unknown copy', () => {
     const markup = renderToStaticMarkup(createElement(ControlledShutdownOverlay))
     expect(markup).toContain('role="dialog"')
@@ -2400,12 +2415,6 @@ describe('task event projections', () => {
     expect(executionPlacementChangeShouldStart('bottom', 'bottom', false)).toBe(false)
     expect(executionPlacementSaveFailureMessage('bottom')).toBe('未能保存，仍在底部。')
     expect(executionPlacementSaveFailureMessage('inspector')).toBe('未能保存，仍在右侧。')
-    expect(attachmentDropIsBlocked(true, false, 'bottom', false, 'tasks')).toBe(true)
-    expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'execution')).toBe(true)
-    expect(attachmentDropIsBlocked(true, false, 'inspector', true, 'tasks')).toBe(false)
-    expect(attachmentDropIsBlocked(true, false, 'inspector', false, 'execution')).toBe(false)
-    expect(attachmentDropIsBlocked(false, true, 'inspector', true, 'tasks')).toBe(true)
-    expect(attachmentDropIsBlocked(false, false, 'bottom', true, 'tasks')).toBe(false)
     expect(executionDrawerIsNearBottom(648, 1_000, 320)).toBe(true)
     expect(executionDrawerIsNearBottom(647, 1_000, 320)).toBe(false)
     expect(executionDrawerHeightBounds(600, 54, 920)).toEqual({ min: 160, max: 434 })
