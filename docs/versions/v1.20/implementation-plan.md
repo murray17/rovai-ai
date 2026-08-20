@@ -42,6 +42,8 @@ last_updated: 2026-08-21
 - [x] fmt、Clippy、typecheck、Desktop build、文档门禁、全量前端测试和 Impeccable detector 已执行；Rust PR
   suite 仅剩当前 `main` 已存在的 Runtime compatibility register 摘要失配，功能相关范围与其余 295 个 fast
   library tests、CLI、slow suite 单独验证；
+- [x] 提交 `75930b1e` 的 macOS arm64 App 已通过深度验签、架构、Core/CLI UUID 一致性和全新隔离
+  `userData` 的 packaged onboarding/Camp/Draft/重启/双主题验收，并完成本机 Applications 安装；
 - [ ] 在隔离 App fixture 中验证普通文件、图片、目录、高风险确认、失败状态与双主题键盘交互。
 
 ## 5. Claude Code 运行中 API 重试维护修复
