@@ -4,14 +4,14 @@ version: v1.16
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: complete
 model_context_change: false
 last_updated: 2026-08-20
 ---
 
 # Rovai-ai v1.16：Camp 纯附件消息
 
-> 当前状态：设计、Core、Desktop、Timeline 与回归门禁已完成，等待主线同步和 macOS 日常安装交接。
+> 当前状态：设计、实现、回归门禁、主线同步与 macOS 日常安装交接均已完成。
 >
 > 前置版本：[v1.15 Windows x64 产品实现与资格闭环](../v1.15/README.md)。v1.15 已按其未完成
 > Windows 验收事实冻结为 historical；其已实施的 macOS、Runtime Attachment View、Context receipt 与

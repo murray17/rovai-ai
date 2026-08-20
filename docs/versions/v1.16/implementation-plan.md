@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.16
 authority: implementation-and-acceptance-status
-status: in_progress
+status: complete
 last_updated: 2026-08-20
 ---
 
@@ -32,8 +32,8 @@ last_updated: 2026-08-20
 
 - [x] Core 定向、slow integration、Renderer 与 Context 回归通过；
 - [x] Rust fmt、Clippy、PR suite、TypeScript、Vitest、Desktop build 与文档门禁通过；
-- [ ] 从最新 main 复验并 fast-forward push；
-- [ ] 完成 macOS arm64 打包、签名/架构校验和 `/Applications` 非终止安装交接。
+- [x] 从最新 main 复验并 fast-forward push；
+- [x] 完成 macOS arm64 打包、签名/架构校验和 `/Applications` 非终止安装交接。
 
 ## References
 
