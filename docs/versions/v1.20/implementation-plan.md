@@ -66,7 +66,8 @@ last_updated: 2026-08-21
   继续使用现有 fallback；
 - [x] Rust/Renderer 定向 fixture 覆盖 Claude terminal 自包含、TRAE command allowlist、稀疏 terminal、exit 7、
   复合命令与详情；
-- [ ] 完成全量门禁、打包、本机 Applications 替换与真实 Claude/TRAE post-fix 展示复验。
+- [x] 完成全量门禁、打包、本机 Applications 替换与受控 Runtime Activity 成品验收。
+- [ ] 使用真实 Claude/TRAE 再跑 post-fix 八命令展示复验。
 
 ## References
 
