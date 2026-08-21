@@ -98,10 +98,6 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 
 <br>
 
-地图把同一个 Camp 中的探索、审阅、审批、交接、交付与记忆，
-变成旅程中的不同地点。它不是另一套任务系统，只是换一个角度观察
-队伍正停留在哪里、准备走向哪里。
-
 <p align="center">
   <a href="docs/assets/readme/camp-map.png">
     <img
@@ -110,6 +106,15 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
       width="900"
     >
   </a>
+</p>
+
+<p align="center">
+  <sub>
+    世界地图最初只是一个偶然的灵感：既然这是一场共同历险，
+    也许队伍也应该拥有一张真正可以行走的地图。
+    于是，探索林地、审阅塔、星火工坊和记忆馆逐渐出现在了地图中。
+    未来，这里也许会出现更多有趣的地图互动，以及一些让队员在任务之外一起放松的小游戏。
+  </sub>
 </p>
 
 </details>
@@ -220,48 +225,23 @@ pnpm dev
 名字、形象、职责、关系和协作记忆，决定这名队员是谁；<br>
 Agent Runtime 则决定他通过什么工具与模型参与任务。
 
-同一个 Codex 可以成为负责落地的工匠，也可以成为不断寻找反例的质疑者。
+同一个 Codex 可以成为负责落地的工匠，也可以成为不断寻找反例的质疑者。<br>
 同一个 Claude Code，也可以根据队伍需要承担军师、记录者或审查者。
 
-| Agent Runtime | 官方安装 | Rovai Adapter | External MCP | Skill 接入 | 上下文、System Prompt 与压缩 |
-|---|---|---|---|---|---|
-| **Claude Code** | [安装指南](https://code.claude.com/docs/en/installation) | 专用 Claude Code Print Adapter | **兼容追加**；保留 Runtime 原生 MCP，本次 Run 的 Rovai 同名定义优先 | `.claude/skills`，已验证 | 以原生方式追加 Rovai Context Charter；支持续会话；没有结构化证据时不从模型文本推断压缩完成 |
-| **Codex CLI** | [Codex CLI 文档](https://developers.openai.com/codex/cli/) | 专用 Codex App Server v2 Adapter | **兼容追加**；同名时保留 Codex 原生配置，跳过 Rovai 同名项 | `.codex/skills`，已验证 | 以原生方式追加 Rovai Context Charter；模型与推理强度按 Turn 选择；压缩和恢复以 App Server 与对应版本的实测证据为准 |
-| **OpenCode** | [官方文档](https://opencode.ai/docs/) | **通用 ACP v1 Adapter** | **兼容追加**；保留原生 MCP，本次 Run 的 Rovai 同名定义优先 | `.opencode/skills` 与 `.claude/skills`，已验证 | Rovai 上下文进入首个 Prompt payload；仅在 Runtime 广告相应能力时使用 load / resume；不猜测压缩状态 |
-| **GitHub Copilot CLI** | [安装指南](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | **通用 ACP v1 Adapter** | **兼容追加**；保留原生 MCP，本次 Run 的 Rovai 同名定义优先 | `.github/skills` 与 `.claude/skills`，已验证 | Rovai 上下文进入首个 Prompt payload；恢复与压缩按 Runtime 广告和版本证据处理 |
-| **Antigravity** | [官方安装指南](https://www.antigravity.google/docs/cli-getting-started) | 专用 Antigravity Companion CLI Adapter | 不投影 Rovai External MCP；不修改 Antigravity 的原生全局配置 | `.agent/skills`，已验证 | 通过非交互 CLI Run 传入任务上下文；支持续会话；不宣称未观测到的结构化压缩完成信号 |
-| **Kiro CLI** | [CLI 文档](https://kiro.dev/docs/cli/) | **通用 ACP v1 Adapter** | **兼容追加**；保留原生 MCP，通过本次 Run 的 Agent 配置追加 Rovai MCP | `.kiro/skills`，已验证 | Rovai 上下文进入首个 Prompt payload；load、resume 与压缩按 Kiro ACP 的实际能力处理 |
-| **Qoder CLI** | [安装指南](https://docs.qoder.com/cli/installation) | **通用 ACP v1 Adapter** | **兼容追加**；保留原生 MCP，本次 Run 的 Rovai 同名定义优先 | `.qoder/skills`，已验证 | Rovai 上下文进入首个 Prompt payload；恢复与压缩按 Runtime 实测处理 |
-| **CodeBuddy** | [安装指南](https://www.codebuddy.ai/docs/cli/installation) | **通用 ACP v1 Adapter** | **兼容追加**；保留原生 MCP，本次 Run 的 Rovai 同名定义优先 | `.codebuddy/skills`，已验证 | Rovai 上下文进入首个 Prompt payload；恢复与压缩按 Runtime 实测处理 |
-| **Qwen Code** | [快速开始](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | **通用 ACP v1 Adapter** | **兼容追加**；保留原生 MCP，本次 Run 的 Rovai 同名定义优先 | `.qwen/skills`，已验证 | Rovai 上下文进入首个 Prompt payload；恢复与压缩按 Runtime 实测处理 |
-| **TRAE CLI CN** | [TRAE 官网](https://www.trae.cn/) | **通用 ACP v1 Adapter** | **兼容追加**；保留原生 MCP，本次 Run 的 Rovai 同名定义优先 | `.trae/skills`，已验证；可接收 Runtime 异步发布的 Skill / Command 目录 | Rovai 上下文进入首个 Prompt payload；已验证 Skill 目录刷新边界；尚未观测到可靠的结构化压缩完成信号，因此不从回复文本推断 |
+| Agent Runtime | MCP 支持 | Skill 支持 | 队员身份保持 |
+|---|---|---|---|
+| [**Claude Code**](https://code.claude.com/docs/en/installation) | 兼容追加 | 兼容追加 | 原生方式支持 |
+| [**Codex CLI**](https://developers.openai.com/codex/cli/) | 兼容追加 | 兼容追加 | 原生方式支持 |
+| [**OpenCode**](https://opencode.ai/docs/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [**GitHub Copilot CLI**](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [**Antigravity**](https://www.antigravity.google/docs/cli-getting-started) | 支持 Runtime 原生 MCP | 兼容追加 | 基于 Runtime 能力 |
+| [**Kiro CLI**](https://kiro.dev/docs/cli/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [**Qoder CLI**](https://docs.qoder.com/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [**CodeBuddy**](https://www.codebuddy.ai/docs/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [**Qwen Code**](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [**TRAE CLI CN**](https://www.trae.cn/) | 兼容追加 | 兼容追加 | 基于 Runtime 能力 |
 
-#### MCP 接入边界
-
-表格中的 MCP 指用户配置的 **External MCP**。
-
-Rovai 不用 MCP 替换 Agent Runtime 的原生能力。对支持的 Adapter，External MCP
-以单次 Run 的方式追加，并保留 Runtime 自己的配置；同名冲突按表格中的规则处理。
-
-Rovai 自己的内置操作也不通过 MCP 冒充 Runtime 原生工具。它们由 bundled
-`rovai` CLI 经私有本地 IPC 调用 Rovai Core，与用户的 External MCP 保持独立。
-
-#### System Prompt 与压缩边界
-
-不同 Runtime 暴露上下文、恢复和压缩能力的方式不同。
-
-Rovai 不用一份粗暴的通用 System Prompt 覆盖所有 Runtime，而是通过各 Adapter
-支持的原生追加或首个 Prompt payload，把队员身份、Camp 背景和执行合同交给 Runtime。
-
-同样，Rovai 不会因为模型回复了“压缩完成”就把会话标记为已压缩。只有 Runtime
-提供了足够稳定的结构化证据时，相关状态才会进入兼容性结论。
-
-你不需要同时安装全部 Runtime。只需安装准备使用的 Agent，并按照对应产品的
-官方流程完成登录或认证。
-
-详细版本、能力与实测边界见：
-
-[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)
+具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
 
 ---
 
