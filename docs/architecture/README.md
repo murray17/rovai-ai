@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # 长期系统架构
@@ -33,5 +33,6 @@ last_updated: 2026-08-20
 | [当前基础架构不变量](foundational-invariants.md) | Core、Camp、身份、协作、Runtime、Context、Memory、Skill、Evidence、Qualification 与 Renderer 的跨主题当前规范内核 |
 | [Skill Projection Reconciliation](skill-projection-reconciliation.md) | Skill Library desired state、bundled bootstrap 快速路径、root access ledger、事件驱动 dirty、当前 Run 完整校验 preflight、start-time SkillExposureSnapshot 与无历史目录扫描边界 |
 | [Structured Current Input Skill Links](structured-current-input-skill-links.md) | Picker SkillMention、per-Run send snapshot、start-time desired state、verified Exposure、只读 Resolver、`CURRENT_INPUT.skills` 与 unchanged Adapter transport |
+| [User Automation](user-automation.md) | 一个 `rovai` binary 下隔离的 Agent/User transport、Main-owned 本机 IPC、封闭 dispatch、Camp navigation、CLI-owned Diagnostic Trial、双 cursor 与安全导出边界 |
 | [Windows Desktop Platform](windows-desktop-platform.md) | Windows x64 host envelope、平台 seam、原子 Job 启动、Transport v14、私有 local storage、native frame、NSIS 与真实 Windows 验收组合 |
 <!-- architecture-index:end -->

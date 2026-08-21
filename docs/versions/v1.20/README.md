@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.20
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: implemented
@@ -11,7 +11,7 @@ last_updated: 2026-08-21
 
 # Rovai-ai v1.20：会话附件系统打开
 
-> 当前状态：设计与实现已完成，仓库自动化验收除一项既有 Runtime compatibility register 摘要失配外
+> 冻结状态：设计与实现已完成，仓库自动化验收除一项既有 Runtime compatibility register 摘要失配外
 > 已通过；提交 `75930b1e` 的 macOS arm64 包已通过签名、架构、Sidecar UUID 与隔离 App 基础验收并完成本机
 > 安装，附件动作的完整隔离交互矩阵仍待后续执行。
 >

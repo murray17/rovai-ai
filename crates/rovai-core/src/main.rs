@@ -636,6 +636,12 @@ struct ExecutionEvidenceListParams {
     limit: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentRunDiagnosticParams {
+    agent_run_id: String,
+}
+
 fn default_execution_evidence_page_limit() -> i64 {
     500
 }
@@ -5474,6 +5480,14 @@ impl Core {
                     params.after_global_sequence,
                     params.limit.unwrap_or(500),
                 )?)?)
+            }
+            "agentRuns.diagnostic.get" => {
+                let params: AgentRunDiagnosticParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.agent_run_diagnostic(&mut database, &params.agent_run_id)?,
+                )?)
             }
             "diagnostics.check" => Ok(serde_json::to_value(self.diagnostics_report().await)?),
             "monitoring.snapshot" => {

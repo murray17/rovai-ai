@@ -35,6 +35,9 @@ use serde_json::{Map, Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
 
+#[path = "rovai/app_cli.rs"]
+mod app_cli;
+
 const CORE_TIMEOUT: Duration = Duration::from_secs(30);
 const CORE_ATTEMPTS: usize = 3;
 const COMPACTION_HOOK_TIMEOUT: Duration = Duration::from_millis(500);
@@ -62,6 +65,9 @@ fn main() -> ExitCode {
 
 async fn run() -> Result<u8> {
     let args = env::args().skip(1).collect::<Vec<_>>();
+    if args.first().is_some_and(|arg| arg == "app") {
+        return app_cli::run(&args[1..]).await;
+    }
     if args.first().is_some_and(|arg| arg == "__compaction-hook") {
         // Runtime hooks are enhancement-only. Malformed input, unavailable
         // Core, and uncertain acknowledgements must never block compaction or
@@ -1401,7 +1407,7 @@ enum BuiltinToolIpcFailure {
 
 fn print_root_help() {
     println!(
-        "Rovai Agent CLI\n\nOperations:\n  rovai send\n  rovai gather\n  rovai member create\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry. Each operation supports direct flags, JSON stdin/heredoc, or --input-file <path>."
+        "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai gather\n  rovai member create\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.\n\nUser Automation:\n  rovai app --help\n\nAgent operations keep their process-private transport. `rovai app` uses the running Desktop App's separate User Automation transport."
     );
 }
 

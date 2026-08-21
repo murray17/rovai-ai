@@ -1,8 +1,8 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.20
-last_updated: 2026-08-20
+current_version: v1.21
+last_updated: 2026-08-21
 ---
 
 # Rovai-ai 版本记录
@@ -171,4 +171,5 @@ last_updated: 2026-08-20
 | v1.17 | `historical` | Agent 文件发送、语义先提交的统一附件发布与 Runtime 可用性投影 | [v1.17/README.md](v1.17/README.md) |
 | v1.18 | `historical` | Codex 执行台真实命令预览、敏感参数脱敏与完整命令/输出详情 | [v1.18/README.md](v1.18/README.md) |
 | v1.19 | `historical` | Agent 文件入口 lease 隔离、同 Camp Authority 串行化与纯附件发送 | [v1.19/README.md](v1.19/README.md) |
-| v1.20 | `current` | 会话附件的 Authority 校验、系统默认打开与所在位置显示 | [v1.20/README.md](v1.20/README.md) |
+| v1.20 | `historical` | 会话附件的 Authority 校验、系统默认打开与所在位置显示 | [v1.20/README.md](v1.20/README.md) |
+| v1.21 | `current` | 普通用户自动化入口与 Runtime Diagnostic Trial V1 | [v1.21/README.md](v1.21/README.md) |
