@@ -808,6 +808,7 @@ struct ClaudeCodeStreamState {
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
     tool_inputs: HashMap<String, Value>,
+    api_retry_attempts: HashSet<(u64, u64)>,
 }
 
 async fn capture_claude_stream<R>(
@@ -923,6 +924,36 @@ fn normalize_claude_runtime_events(
 ) -> Result<Vec<ClaudeCodeRuntimeEvent>> {
     let mut normalized = Vec::new();
     match event.get("type").and_then(Value::as_str) {
+        Some("system") if event.get("subtype").and_then(Value::as_str) == Some("api_retry") => {
+            validate_claude_stream_session(event, expected_session_id)?;
+            let Some(attempt) = event.get("attempt").and_then(Value::as_u64) else {
+                return Ok(normalized);
+            };
+            let Some(max_attempts) = event.get("max_retries").and_then(Value::as_u64) else {
+                return Ok(normalized);
+            };
+            let Some(retry_delay_ms) = event.get("retry_delay_ms").and_then(Value::as_u64) else {
+                return Ok(normalized);
+            };
+            if attempt == 0
+                || max_attempts == 0
+                || attempt > max_attempts
+                || !state.api_retry_attempts.insert((attempt, max_attempts))
+            {
+                return Ok(normalized);
+            }
+            normalized.push(ClaudeCodeRuntimeEvent {
+                event_type: "runtime.diagnostic",
+                payload: serde_json::json!({
+                    "diagnosticId": "claude-api-retry",
+                    "code": "runtime_api_retrying",
+                    "status": "retrying",
+                    "attempt": attempt,
+                    "maxAttempts": max_attempts,
+                    "retryAfterSeconds": retry_delay_ms / 1_000,
+                }),
+            });
+        }
         Some("system") if event.get("subtype").and_then(Value::as_str) == Some("init") => {
             validate_claude_stream_session(event, expected_session_id)?;
             let model_id = event
@@ -1654,6 +1685,55 @@ mod tests {
         let captured = capture.await.unwrap().unwrap();
         assert_eq!(captured.bytes, status);
         assert_eq!(captured.total_bytes, status.len());
+    }
+
+    #[tokio::test]
+    async fn structured_api_retry_is_emitted_before_the_claude_stream_ends() {
+        let session_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let (mut writer, reader) = tokio::io::duplex(2_048);
+        let (runtime_event_sender, mut runtime_event_receiver) = mpsc::unbounded_channel();
+        let capture = tokio::spawn(capture_claude_stream(
+            reader,
+            session_id.to_string(),
+            "claude-code:run-1:1".to_string(),
+            None,
+            Some(runtime_event_sender),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        let retry = serde_json::json!({
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 2,
+            "max_retries": 10,
+            "retry_delay_ms": 1_124,
+            "error_status": 429,
+            "error": "rate_limit",
+            "session_id": session_id,
+            "uuid": "private-provider-identity"
+        });
+        writer
+            .write_all(format!("{retry}\n").as_bytes())
+            .await
+            .unwrap();
+
+        let event = tokio::time::timeout(Duration::from_secs(1), runtime_event_receiver.recv())
+            .await
+            .expect("structured retry must be projected while stdout remains open")
+            .expect("retry status channel should remain open");
+        assert_eq!(event.event_type, "runtime.diagnostic");
+        assert_eq!(event.payload["diagnosticId"], "claude-api-retry");
+        assert_eq!(event.payload["code"], "runtime_api_retrying");
+        assert_eq!(event.payload["status"], "retrying");
+        assert_eq!(event.payload["attempt"], 2);
+        assert_eq!(event.payload["maxAttempts"], 10);
+        assert_eq!(event.payload["retryAfterSeconds"], 1);
+        assert!(event.payload.get("error_status").is_none());
+        assert!(event.payload.get("error").is_none());
+        assert!(event.payload.get("session_id").is_none());
+        assert!(event.payload.get("uuid").is_none());
+
+        writer.shutdown().await.unwrap();
+        capture.await.unwrap().unwrap();
     }
 
     #[test]

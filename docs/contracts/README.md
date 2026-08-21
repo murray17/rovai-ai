@@ -43,7 +43,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [Runtime Launch and Verification v14（当前）](runtime-launch-and-verification-v14.md) | v13 启动与 Run tmp 边界不变；Claude Code 可把严格白名单的运行中 API retry 状态即时投影为安全诊断，不公开 raw stderr |
+| [Runtime Launch and Verification v15（当前）](runtime-launch-and-verification-v15.md) | v14 lifecycle 与 payload 不变；Claude Code stream-json 的 session-bound `system/api_retry` 成为权威 live source，stderr grammar 保持兼容 fallback |
+| [Runtime Launch and Verification v14（历史）](runtime-launch-and-verification-v14.md) | v13 启动与 Run tmp 边界不变；Claude Code 可把严格白名单的运行中 API retry 状态即时投影为安全诊断，不公开 raw stderr |
 | [Runtime Launch and Verification v13（历史）](runtime-launch-and-verification-v13.md) | v12 View/Ready 边界不变；所有正式 Runtime 显式获得当前 lease 已重置的 exact writable Run tmp root |
 | [Runtime Launch and Verification v12（历史）](runtime-launch-and-verification-v12.md) | v11 exact-root/receipt 不变；View contract 3 要求 resolved publication；TRAE 使用统一 Machine Ready，并允许 Idle Session metadata |
 | [Runtime Launch and Verification v11（历史）](runtime-launch-and-verification-v11.md) | v10 exact-root/generation fence 不变；View contract 2 分离冻结语义 receipt 与当前物理 Runtime authorization |

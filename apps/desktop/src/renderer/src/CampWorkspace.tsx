@@ -1174,6 +1174,7 @@ export function CampWorkspace({
     status: 'loading' | 'ready' | 'error'
   }>({ skills: [], groups: [], status: 'loading' })
   const composerEditorRef = useRef<HTMLDivElement>(null)
+  const pendingStarterPromptFocusRef = useRef<string | null>(null)
   const composerFileInputRef = useRef<HTMLInputElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
   const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
@@ -3089,20 +3090,31 @@ export function CampWorkspace({
   }
 
   const chooseStarterPrompt = (prompt: string, announceDraft = false): void => {
+    pendingStarterPromptFocusRef.current = prompt
     changeMessage([{ kind: 'text', text: prompt }])
     if (announceDraft) setStarterNotice('已填入输入框，可修改后发送')
-    window.requestAnimationFrame(() => {
-      const editor = composerEditorRef.current
-      if (!editor) return
-      editor.focus()
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.selectNodeContents(editor)
-      range.collapse(false)
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-    })
   }
+
+  useLayoutEffect(() => {
+    const pendingPrompt = pendingStarterPromptFocusRef.current
+    if (
+      pendingPrompt === null
+      || messageContent.length !== 1
+      || messageContent[0].kind !== 'text'
+      || messageContent[0].text !== pendingPrompt
+    ) return
+
+    const editor = composerEditorRef.current
+    if (!editor) return
+    pendingStarterPromptFocusRef.current = null
+    editor.focus()
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }, [messageContent])
 
   const selectInspectorTab = (tab: CampInspectorTab): void => {
     if (controlledInspectorTab === undefined) setLocalInspectorTab(tab)

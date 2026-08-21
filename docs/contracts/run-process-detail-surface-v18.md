@@ -59,6 +59,6 @@ Day/Night、底部/Inspector、200% zoom 与 Forced Colors 下保持可读，不
 ## References
 
 - [Run Process Detail Surface v17](run-process-detail-surface-v17.md)
-- [Runtime Launch and Verification v14](runtime-launch-and-verification-v14.md)
+- [Runtime Launch and Verification v15](runtime-launch-and-verification-v15.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)
 - [Runtime Activity Mapping Registry](../runtime-activity/registry.md)

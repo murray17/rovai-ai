@@ -53,8 +53,9 @@ ContextManifest、Run Facts、Built-in Tool 或模型输入字节。Camp Attachm
 - Unix Authority Camp root 保持 `0100`，精确 Attachment container 以 `0500` 允许 Finder 枚举但禁止删除、
   改名和写入；历史 `0100` container 在完整校验后按需收敛，Main reveal 先验证 parent 可枚举与 target 存在；
 - Timeline 已实现图片预览、普通文件/目录系统打开、右键菜单、`Shift+F10` / Context Menu 键、忙碌与 Toast；
-- Claude Code 已实现进程退出前的严格 retry grammar 识别、最小公开 diagnostic、持久 Evidence 与当前 Run
-  attention notice；raw stderr、provider body 与凭证不进入公开投影；
+- Claude Code 已实现 stdout 未结束前的 session-bound `system/api_retry` 识别，并保留严格 stderr fallback、
+  最小公开 diagnostic、持久 Evidence 与当前 Run attention notice；provider error/UUID/Session、raw stderr 与
+  凭证不进入公开投影；
 - 定向 Rust、TypeScript、Vitest、fmt、Clippy、Desktop build、文档与全量前端测试通过。Rust PR suite 的
   功能无关唯一失败是当前 `main` 已存在的 `runtime-compatibility.md` 摘要与
   `MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION` 常量不一致；本版不擅自吸收另一分支上的独立修复；
@@ -75,12 +76,12 @@ ContextManifest、Run Facts、Built-in Tool 或模型输入字节。Camp Attachm
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.19 按完成事实冻结；本概览、实施计划与索引建立唯一 current v1.20。 |
 | Decisions | 已更新 | [V1.20-D01](decisions.md#v1-20-d01)记录 Authority open target 与 Main-owned Shell 边界。 |
-| Contracts | 已更新 | Camp Attachment v5 冻结 open target；Runtime Launch v14 与 Run Process Detail v18 冻结安全 live retry diagnostic。 |
+| Contracts | 已更新 | Camp Attachment v5 冻结 open target；Runtime Launch v15 与 Run Process Detail v18 冻结 structured live retry diagnostic。 |
 | Architecture | 已更新 | Attachment Architecture 同步 Authority 用户打开；基础不变量补充 non-terminal Runtime diagnostic 权威。 |
 | UI | 已更新 | Camp 会话工作区定义 Timeline 附件动作，并增加当前 Run 的 Claude API retry notice 与终态收敛。 |
 | Runtime Activity | 已更新 | Registry 增加 Claude Code 严格 stderr retry grammar、最小 Evidence 与 non-activity 规则。 |
 | Runtime compatibility | 确认无需更新 | 不改变 Runtime 目录准入、已验证版本或功能资格。 |
-| Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航切换到 Camp Attachment v5、Runtime Launch v14 与 Run Process Detail v18。 |
+| Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航切换到 Camp Attachment v5、Runtime Launch v15 与 Run Process Detail v18。 |
 | Root README | 确认无需更新 | 不改变项目定位、平台范围、安装入口或常青能力列表。 |
 
 ## References
@@ -88,7 +89,7 @@ ContextManifest、Run Facts、Built-in Tool 或模型输入字节。Camp Attachm
 - [v1.20 实施与验收计划](implementation-plan.md)
 - [v1.20 决策记录](decisions.md)
 - [Camp Attachment v5](../../contracts/camp-attachment-v5.md)
-- [Runtime Launch and Verification v14](../../contracts/runtime-launch-and-verification-v14.md)
+- [Runtime Launch and Verification v15](../../contracts/runtime-launch-and-verification-v15.md)
 - [Run Process Detail Surface v18](../../contracts/run-process-detail-surface-v18.md)
 - [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
