@@ -250,16 +250,20 @@ function zeroSendPrompt(marker) {
 
 function suppressionPrompt(adapterKind, progressMarker, privateFinalMarker) {
   const sendCommand = process.platform === 'win32'
-    ? adapterKind === 'trae-cn-cli'
-      // TRAE 0.120.52 rejects PowerShell and cmd `for` before ACP permission
-      // projection. The qualification workspace path is deliberately space-free.
+    ? ['qwen-code', 'trae-cn-cli'].includes(adapterKind)
+      // Qwen and TRAE reliably expose direct cmd execution, while nested
+      // PowerShell quoting can be treated as optional prose or rejected before
+      // ACP permission projection. The qualification path is space-free.
       ? `cmd.exe /d /s /c %ROVAI_AGENT_CLI% send --body ${progressMarker}`
-      : `powershell.exe -NoProfile -Command "& $env:ROVAI_AGENT_CLI send --body '${progressMarker}'"`
+      // ACP Bash implementations must not expand PowerShell's `$env` before
+      // powershell.exe receives it. The marker is generated from a closed
+      // alphanumeric adapter slug and is safe inside the inner double quotes.
+      : `powershell.exe -NoProfile -Command '& $env:ROVAI_AGENT_CLI send --body "${progressMarker}"'`
     : `"$ROVAI_AGENT_CLI" send --body ${shellQuote(progressMarker)}`
   return [
     'Publish one progress update to the current Camp, then report completion to me.',
     'The local Rovai Built-in CLI path is available in ROVAI_AGENT_CLI and its current-Run lease is available in ROVAI_CLI_CONTEXT.',
-    'Use your native terminal/shell tool exactly once to run this command. Do not answer before the tool completes:',
+    'You must use your native terminal/shell tool exactly once to run this command. Do not simulate, skip, or answer before the tool completes:',
     sendCommand,
     'Do not call any other rovai command and do not send a second message.',
     `After that command succeeds, reply with exactly ${privateFinalMarker} and no other text. Do not publish that completion token.`

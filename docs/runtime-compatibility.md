@@ -134,7 +134,7 @@ digest-bound evidence 尚未形成，因此上表的 admission 与 evidence revi
 | `claude-code-cli` | `2.1.86` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash` |
 | `antigravity-app` | `1.1.17` | 已完成 AGY 账号授权；Runtime default |
 | `kiro-cli` | `2.19.0` | 本机账号态；Runtime default |
-| `qoder-cli` | `1.1.27` | DeepSeek API key；`deepseek-v4-flash` |
+| `qoder-cli` | `1.1.27`（随后更新至 `1.1.28`） | 已登录 Qoder 账号；验收矩阵使用账号 catalog `deepseek/deepseek-v4-flash-pg` |
 | `codebuddy-cli` | `2.137.1` | 官方 `CODEBUDDY_API_KEY`/`CODEBUDDY_BASE_URL` ACP 路径；`custom-local:deepseek-v4-flash` |
 | `qwen-code` | `0.21.14` | DeepSeek API key；仅保留 `deepseek-v4-flash` Provider/model |
 | `trae-cn-cli` | `0.120.52` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash`，关闭 thinking |
@@ -169,6 +169,36 @@ delete-sharing handle 时，旧 Windows delete-on-close 语义只标记对象、
 Windows 10 POSIX disposition 立即 unlink，并只在平台/文件系统不支持时退回 legacy delete-on-close；回归同时保留
 打开的 `SKILL.md` handle、撤销投影，并验证目录项与 observation 均已消失。修正后的 Qwen→TRAE 同进程边界、
 TRAE 独立 Built-in 和十 Runtime Skill 矩阵均通过。
+
+同一轮 Windows Built-in 还修正了 native `rovai.exe --input-file` 的路径边界：Git Bash 继续使用 POSIX
+`RUN_TMP` 做重定向，但传给 native CLI 和 `jq.exe` 的文件参数必须显式转换为 Win32 path；CodeBuddy 会设置
+`MSYS2_ARG_CONV_EXCL=*`，不能依赖 MSYS 隐式 argv 转换。修正后 CodeBuddy 的 15 项 direct flags/stdin/
+input-file、successor exact read、stale conflict、lease fence 与 Native Session continuation 全部通过。Windows
+Missing-Send fixture 同时把 PowerShell `$env:ROVAI_AGENT_CLI` 隔离在 Bash 不展开的单引号 payload 中；Qwen/TRAE
+使用直接 `cmd.exe` 投递，并明确禁止模拟/跳过 Tool。十 Runtime 的 zero-send、accepted-send suppression 和七个
+ACP tool→final 场景由此完成聚合复核。
+
+#### 2026-08-21 用户 Provider 切换后的补充复核
+
+上述完整 Windows 矩阵完成后，用户因 DeepSeek 余额接近耗尽，要求把可使用 OpenAI-compatible endpoint 的
+日常 Runtime 切到新 Provider，并提供 Groq 与 Gemini 两组独立凭据。凭据只保存在用户环境、Runtime 用户配置和
+桌面私密备忘，不进入仓库或验收输出。补充实测结论如下，它们不追溯改写上方已经完成的 Flash 矩阵证据：
+
+| Runtime / Provider | 补充实测 | 当前边界 |
+| --- | --- | --- |
+| Groq `qwen/qwen3.6-27b` | 直接 Chat Completions 成功 | 当前账号 TPM 上限 8,000；OpenCode Agent 请求实际要求 16,844–24,776 tokens，不能承担真实 Runtime |
+| OpenCode / native Gemini `gemini-3.7-flash` | 单次真实 Agent turn 成功 | Gemini free tier 在 Skills 高频矩阵达到 20 requests 窗口上限；点测成功不冒充全矩阵 |
+| CodeBuddy / Google OpenAI-compatible Gemini | 普通 turn 与一次真实 `Read` Tool→final 均成功；请求模型为 `custom-local:gemini-3.7-flash` | 当前可作为日常替代；仍受用户 Google quota 管理 |
+| Qwen Code / native Gemini provider | 普通 turn 与一次真实 `read_file` Tool→final 均成功 | 使用 Qwen 原生 Google SDK；OpenAI-compatible 路径不是必要条件 |
+| Qoder `1.1.28` BYOK | custom model 可进入 catalog，但 Groq/Google 两种配置都在 Qoder 服务端返回 `Failed to generate custom pool` | 内置 `Qwen3.8-Max` 随后返回 Qoder credit usage limit；当前在线复跑为外部额度/Provider 阻塞 |
+| TRAE / Google OpenAI-compatible Gemini | 首轮模型响应成功，Tool 后续因 adapter 未回传 Gemini 3 `thought_signature` 返回 400 | 改选内置 `Qwen3.8-Max` 后又返回个人 quota limit；不静默回退 DeepSeek |
+
+完成上述补充点测后，用户明确授权继续使用 DeepSeek。本机 OpenCode、CodeBuddy、Qwen 与 TRAE 已恢复
+`deepseek-v4-flash`，仍不使用 DK V4 Pro；Gemini/Groq 凭据与调用方式只作为桌面备用。Qoder `1.1.28` 又以官方
+`deepseek` BYOK provider 和同一 Flash model 复测，custom model 能进入 catalog，但服务端仍返回同一
+`Failed to generate custom pool`；账号内置模型同时受 credit limit 阻断，因此 Qoder 当前仍是外部 Provider/额度
+阻塞。Claude 的 Anthropic-only transport 不伪装成 OpenAI-compatible endpoint。后续若要把新 Provider 结果提升
+为完整发布证据，必须在相应账号额度恢复后重新执行原矩阵，而不是复用本次点测。
 
 ### Camp Published Attachment View visibility 基线
 

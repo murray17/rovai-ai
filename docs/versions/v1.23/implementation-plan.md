@@ -31,7 +31,12 @@ last_updated: 2026-08-21
 - [x] 合并前完成真实 ACP、Approval、Built-in CLI、Missing-Send、MCP Projection 与适用 Skill smoke；
 - [x] 修正 CodeBuddy 官方 API-key ACP、显式 custom model、Idle `usage_update`/private command metadata；
 - [x] 修正 warm Runtime 文件 handle 下的 Windows Skill 投影即时 unlink，并完成 Qwen→TRAE 边界回归；
+- [x] 修正 CodeBuddy 环境下 native `--input-file` Win32 path、resume evidence path 与 Missing-Send
+  PowerShell/cmd Tool 投递；
 - [x] 在最新 `main` 合并结果上重新执行十 Runtime 全矩阵；
+- [x] 按用户要求验证 Groq/Gemini 替代线路并记录真实边界：OpenCode/CodeBuddy/Qwen 点测通过，Groq TPM、Gemini
+  free-tier request window、Qoder/TRAE Provider/账号 quota 阻止替代线路的高频全矩阵；用户授权继续 DeepSeek 后
+  恢复的路径固定为 `deepseek-v4-flash`，不回退 DK V4 Pro；
 - [ ] 为每个 Adapter 分别形成 Windows 10/11 immutable digest-bound qualification evidence。
 
 ## 4. 发布与清理

@@ -1225,7 +1225,7 @@ STEP=task_create
 task_create_status=1
 for task_create_attempt in 1 2 3; do
   set +e
-  task_create="$("$CLI" task create --input-file "$RUN_TMP/task-create.json")"
+  task_create="$("$CLI" task create --input-file "$RUN_TMP_NATIVE/task-create.json")"
   task_create_status=$?
   set -e
   if [ "$task_create_status" -eq 0 ]; then
@@ -1311,12 +1311,12 @@ cat > "$RUN_TMP/camp-read-default.json" <<'ROVAI_JSON'
 ${JSON.stringify({ campId: input.campId, direction: 'after', limit: 5 })}
 ROVAI_JSON
 STEP=camp_read_default_input_file
-camp_read_default_input_file="$("$CLI" camp read --input-file "$RUN_TMP/camp-read-default.json")"
+camp_read_default_input_file="$("$CLI" camp read --input-file "$RUN_TMP_NATIVE/camp-read-default.json")"
 assert_success "$camp_read_default_input_file" 'camp.read'
 printf '%s\n' "$camp_read_default_input_file" | "$JQ" -e '.mode == "timeline" and .direction == "after"' >/dev/null
 STEP=camp_read
 ${campRead('$message_id')} > "$RUN_TMP/camp-read.json"
-camp_read="$("$CLI" camp read --input-file "$RUN_TMP/camp-read.json")"
+camp_read="$("$CLI" camp read --input-file "$RUN_TMP_NATIVE/camp-read.json")"
 assert_success "$camp_read" 'camp.read'
 printf '%s\n' "$camp_read" | "$JQ" -e --arg campId ${shellQuote(input.campId)} --arg messageId "$message_id" '.campId == $campId and .items[0].messageId == $messageId' >/dev/null
 
@@ -1378,7 +1378,7 @@ cat > "$RUN_TMP/public-send.json" <<'ROVAI_JSON'
 ${publicSend}
 ROVAI_JSON
 STEP=camp_message_send
-public_send="$("$CLI" send --input-file "$RUN_TMP/public-send.json")"
+public_send="$("$CLI" send --input-file "$RUN_TMP_NATIVE/public-send.json")"
 assert_success "$public_send" 'camp.message.send'
 printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
   (keys | sort) == ["agentAddressingMode", "deliveryIds", "effectiveRecipients", "messageId"]
@@ -1434,7 +1434,7 @@ cat > "$RUN_TMP/memory-write.json" <<'ROVAI_JSON'
 ${memoryWrite}
 ROVAI_JSON
 STEP=memory_write
-memory_write="$("$CLI" memory write --input-file "$RUN_TMP/memory-write.json")"
+memory_write="$("$CLI" memory write --input-file "$RUN_TMP_NATIVE/memory-write.json")"
 assert_success "$memory_write" 'memory.write'
 printf '%s\n' "$memory_write" | "$JQ" -e '.outcome == "effective"' >/dev/null
 memory_id="$(printf '%s\n' "$memory_write" | "$JQ" -er '.memoryId')"
@@ -1478,7 +1478,7 @@ cat > "$RUN_TMP/hearth.json" <<'ROVAI_JSON'
 ${hearth}
 ROVAI_JSON
 STEP=memory_write_hearth
-hearth_result="$("$CLI" memory write --input-file "$RUN_TMP/hearth.json")"
+hearth_result="$("$CLI" memory write --input-file "$RUN_TMP_NATIVE/hearth.json")"
 assert_success "$hearth_result" 'memory.write'
 printf '%s\n' "$hearth_result" | "$JQ" -e '
   (keys | sort) == ["outcome", "reviewItemId"]
@@ -1502,7 +1502,9 @@ function resumeVerificationScript(input) {
 set -euo pipefail
 ${shellLeasePrelude(false)}
 JQ="$(command -v jq)"
-SEND_EVIDENCE=${shellQuote(shellPath(input.sendEvidencePath))}
+  SEND_EVIDENCE=${shellQuote(process.platform === 'win32'
+    ? input.sendEvidencePath.replace(/^\\\\\?\\/, '')
+    : input.sendEvidencePath)}
 printf '%s\n' "$CONTEXT" > ${shellQuote(shellPath(input.resumeContextPathFile))}
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
 printf '%s\n' "$camp_list" | jq -e '((has("contractVersion") | not) and (.camps | type) == "array")' >/dev/null
@@ -1578,9 +1580,20 @@ function shellLeasePrelude(includeRunTmp) {
   if (process.platform === 'win32') {
     lines.push('CLI="$(cygpath -u "$CLI")"')
     lines.push('CONTEXT_FILE="$(cygpath -u "$CONTEXT")"')
-    if (includeRunTmp) lines.push('RUN_TMP="$(cygpath -u "$RUN_TMP")"')
+    if (includeRunTmp) {
+      lines.push('RUN_TMP="$(cygpath -u "$RUN_TMP")"')
+      // Git Bash needs the POSIX path for redirection, while the native
+      // rovai.exe must receive a Win32 --input-file path. CodeBuddy exports
+      // MSYS2_ARG_CONV_EXCL=*, so relying on implicit MSYS argv conversion
+      // makes every input-file operation fail after the first flag-only step.
+      lines.push('RUN_TMP_NATIVE="$(cygpath -w "$RUN_TMP")"')
+    }
+    // Every executable used below (rovai.exe and jq.exe) is native Windows.
+    // Pass the explicit Win32 paths above without ambient MSYS rewriting.
+    lines.push("export MSYS2_ARG_CONV_EXCL='*'")
   } else {
     lines.push('CONTEXT_FILE="$CONTEXT"')
+    if (includeRunTmp) lines.push('RUN_TMP_NATIVE="$RUN_TMP"')
   }
   return lines.join('\n')
 }

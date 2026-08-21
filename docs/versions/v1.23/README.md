@@ -39,6 +39,8 @@ build、NSIS、隔离安装、planned shutdown 和十个 Runtime 的真实本机
 - 修正 Kiro `2.19.0` 的精确私有 Idle lifecycle notification 与 Windows Skill 共享投影转直接副本的恢复 lineage；
 - 修正 warm Runtime 持有 Skill 文件 handle 时 Windows legacy delete-on-close 未立即解除目录项的问题，使用精确
   opened handle 的 POSIX disposition，并保留不支持平台的兼容 fallback；
+- 修正 Git Bash 与 native `rovai.exe`/`jq.exe` 在 `MSYS2_ARG_CONV_EXCL=*` 下的 `--input-file` Win32 path
+  边界，以及 Missing-Send 中 Bash/PowerShell `$env:` quoting 和 Qwen/TRAE 直接 `cmd.exe` Tool 投递；
 - 在真实 packaged Desktop 中完成 Windows 正常退出、Job descendant cleanup、durable shutdown fence 与重启恢复。
 
 ## 数据与 Context 兼容性
@@ -56,6 +58,9 @@ Camp Attachment View、User Automation 或 Built-in Transport wire shape。Windo
   digest-bound evidence；本版不伪造 evidence revision；
 - unsigned NSIS 和本机 installer lifecycle 只证明安装实现，不能替代 Authenticode、timestamp 或 SmartScreen；
 - 用户 API key 不回显、不写仓库；临时失败 Fixture 在完成取证后删除。
+- 完整 Flash 矩阵后的用户 Provider 切换只按实际证据记录：Groq TPM、Gemini free-tier request window、Qoder/TRAE
+  账号 quota 与 Gemini thought-signature 差异均不被解释为 Windows 实现失败，也不被点测成功掩盖；用户随后
+  授权恢复的日常 DeepSeek 路径仍只使用 `deepseek-v4-flash`。
 
 ## 跨版本文档影响
 
