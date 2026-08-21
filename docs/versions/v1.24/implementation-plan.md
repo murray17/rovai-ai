@@ -14,7 +14,8 @@ last_updated: 2026-08-21
 - [x] 接受 [V1.24-D01](decisions.md#v1-24-d01) 与 Runtime Launch and Verification v18；
 - [x] 同步 Runtime Architecture、基础不变量、Contract/Decision/Documentation routing；
 - [x] 把 Windows 分支合入 `origin/main@217a46d4`，合并上游 v1.24 与 Windows v1.24 文档而不覆盖任一范围；
-- [ ] 在该最终合并结果上完成全部代码、文档、Windows package 与真实 Runtime 复跑。
+- [x] 在该最终合并结果上完成全部代码/文档门禁、Windows package 与七 ACP Runtime 复跑；其余重复 Runtime
+  矩阵按用户指令停止，沿用上一 main 基线的最近完整证据。
 
 ## 2. Runtime Check Manager
 
@@ -31,7 +32,7 @@ last_updated: 2026-08-21
 - [x] 合并前完成 clean install/start/same-version upgrade/uninstall/data-preserve；
 - [x] 合并前以真实 Claude Runtime 完成 packaged planned shutdown、7-descendant Job cleanup 与重启恢复；
 - [x] 把外置 legal payload 生成、复制与完整性门禁接入 Windows unpacked/NSIS 命令；
-- [ ] 在 `origin/main@217a46d4` 合并结果上重跑 build、NSIS、verifier、legal、installer lifecycle 与 planned shutdown；
+- [x] 在 `origin/main@217a46d4` 合并结果上重跑 build、NSIS、verifier、legal、installer lifecycle 与 planned shutdown；
 - [ ] 在 Windows 11 client OS 重跑并保存发布证据；
 - [ ] 完成 Authenticode、RFC 3161 timestamp、release signer/hash allowlist 与 SmartScreen 证据。
 
@@ -43,7 +44,9 @@ last_updated: 2026-08-21
 - [x] 修正 CodeBuddy API-key ACP、显式 custom model、Idle metadata 与 Windows path；
 - [x] 修正 Kiro lifecycle/Skill lineage、warm Runtime handle unlink、Missing-Send PowerShell/cmd Tool 投递；
 - [x] Qoder 使用官方 DeepSeek BYOK Flash 条目，直连、ACP、Built-in、Missing-Send、MCP 与 Skill 通过；
-- [ ] 在最终合并结果上重跑七 ACP 和九个当前可调用 Runtime 的 Built-in、Missing-Send、MCP、Skill 与专项恢复；
+- [x] 在最终合并结果上重跑七 ACP，完整覆盖回复、固定命令输出、allow/deny 与原生会话延续；
+- [x] 根据用户停止重复测试的指令，不再重跑九个当前可调用 Runtime 的 Built-in、Missing-Send、MCP、Skill
+  与专项恢复；保留上一 main 基线的最近完整通过证据，不把本项写成最新基线复跑通过；
 - [ ] Antigravity `1.1.17` 账号恢复可用 Flash quota 后重跑最终在线矩阵；当前认证成功但返回
   `429 RESOURCE_EXHAUSTED`，备用 Gemini API key 不改变账号 Code Assist quota 路由；
 - [x] 记录 Groq TPM、Gemini free-tier request window、Qoder/TRAE Provider/账号 quota 等替代线路真实边界；
@@ -54,7 +57,10 @@ last_updated: 2026-08-21
 - [x] 正式 Release 对所有缺证据 Windows Runtime 保持 `runtime_platform_not_qualified`；
 - [x] 删除既有复跑产生的临时登录 helper、失败 Fixture 和 sidecar backup，保留非敏感验收报告；
 - [x] 不回显扫描确认用户 API key 未进入 Git diff 或 tracked files；
-- [ ] 最终复跑后再次执行 secret scan、临时文件清理与 `main` 新提交检查；
+- [x] 最终 secret scan 确认三个用户密钥均未进入 Git diff/tracked files；再次 fetch 后
+  `origin/main` 仍为 `217a46d4`，本地不落后；
+- [ ] 删除本次中止产生的一个 Built-in 与两个 planned-shutdown 隔离临时目录；精确路径已验证在系统 Temp，
+  但本机安全策略拒绝递归删除，未使用跨 shell 或绕过策略的危险命令；
 - [ ] Antigravity quota、Windows 11、签名与 immutable evidence 全部闭环后才把整版状态更新为 implemented；
   按用户最终指令不执行关机。
 

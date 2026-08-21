@@ -12,9 +12,10 @@ last_updated: 2026-08-21
 # Rovai-ai v1.24：Runtime Probe v18 与 Windows x64 本机闭环
 
 > 当前状态：`origin/main@217a46d4` 已交付 Runtime Probe 完整 identity 边界、Superseded 有界自动恢复及
-> macOS 非终止安装交接；Windows 分支已合入该最新基线，最终全量门禁与本机安装、Runtime 复跑正在执行。
-> Windows 10 上此前的 native/NSIS/legal、安装生命周期、planned shutdown、七 ACP 与九个当前可调用 Runtime
-> 矩阵均已通过。Antigravity `1.1.17` 登录有效，但 Flash 账号额度返回 `429 RESOURCE_EXHAUSTED`；Windows 11、
+> macOS 非终止安装交接；Windows 分支已合入该最新基线，并完成全量代码/文档门禁、native/NSIS/legal、
+> 安装生命周期、planned shutdown 和七 ACP Runtime 复跑。其余九 Runtime Built-in/Missing-Send/MCP/Skill
+> 矩阵已在上一 main 基线通过，按用户停止重复测试的指令不再消耗 Provider 额度。Antigravity `1.1.17`
+> 登录有效，但 Flash 账号额度返回 `429 RESOURCE_EXHAUSTED`；Windows 11、
 > Authenticode/RFC 3161、SmartScreen 与逐 Runtime immutable evidence 尚未完成，因此不得宣称 Windows 已发布。
 >
 > 前置版本：[v1.23 按需 Built-in CLI Help 与 Charter 精简](../v1.23/README.md)已按完成事实冻结为
@@ -73,10 +74,11 @@ v20 wire shape；本机 Runtime 配置与 API key 只留在用户目录和用户
 
 - 上游实现提交 `7f67ddde` 的 Runtime Probe v18 回归、macOS arm64 package/legal/signature、隔离 onboarding、
   User Automation status 与受控退出均已通过；新包已非终止方式安装到 `/Applications/Rovai AI.app`；
-- Windows 10 Pro 22H2 x64 build `19045.6466` 上，合并前及上一 main 基线的 Rust/TypeScript/Node/文档门禁、
-  native/NSIS/legal、installer lifecycle、Release verifier 与 planned shutdown 已通过；
-- 七个 ACP Runtime 与九个当前可调用 Runtime 的 Built-in v20、Missing-Send、MCP、Skill 已通过；Antigravity
-  静默认证成功，但模型服务仍由账号 Code Assist quota 阻断，备用 Gemini API key 不改变该路由。
+- Windows 10 Pro 22H2 x64 build `19045.6466` 上，`origin/main@217a46d4` 合并结果的 Rust/TypeScript/Node/文档、
+  native/NSIS/legal、installer lifecycle、Release verifier 与真实 Claude planned shutdown 已通过；
+- 最新合并结果的七个 ACP Runtime 已完成无工具回复、命令输出、allow/deny 与会话延续；上一 main 基线的九个
+  可调用 Runtime Built-in v20、Missing-Send、MCP、Skill 仍为最近完整矩阵，用户明确停止本次重复矩阵；
+- Antigravity 静默认证成功，但模型服务仍由账号 Code Assist quota 阻断，备用 Gemini API key 不改变该路由。
 
 ## 验收边界
 
