@@ -3,7 +3,7 @@ document_type: architecture
 architecture: skill-projection-reconciliation
 authority: skill-projection-access-and-reconciliation-boundaries
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-21
 ---
 
 # Skill Projection Reconciliation Architecture
@@ -132,10 +132,24 @@ digest。若未来 bundle 需要其他 mode，Windows bootstrap 必须先随新�
 | Project 移除 | 写 `removed`；active Run 时保留 cleanup pending | 无 active Run 可做一次 best-effort managed cleanup；之后停止 |
 | Project 恢复/重新选择 | 写 `active + dirty` | 等下一次 Run preflight |
 | Settings/Diagnostics 普通读取 | 读取 stored observation/root state | 不访问 |
-| 用户显式修复 | 读取仍 active 的当前 Camp/active Run requirements | 可逐 root 审计并 reconcile；removed roots 排除 |
+| 用户显式修复 | 读取仍 active 的当前 Camp/active Run requirements | 可逐 root 审计并 reconcile；可退役已登记的旧 `.lumen` 断链；removed roots 排除 |
 
 Core 的 AgentRun scheduler 不包含 Skill interval，也不持有 Skill filesystem watcher。其他私有
 subsystem 的 interval（例如 App `userData` 下的 MCP projection cleanup）不能被视为 Skill root access。
+
+### 旧 `.lumen` link 退役边界
+
+旧 `.lumen` Revision 不再作为 projection link 的兼容目标。只有用户显式调用 `skills.reconcile` 时，
+Reconciler 才可在逐 entry reconcile 前删除一个同时满足以下条件的入口：
+
+1. DB Observation 已登记同一 execution root、delivery group、Skill 和精确 `entry_path`；
+2. 当前入口自身是 symlink，且目标因不存在而不可解析；
+3. 目标没有 `.` / `..` 绕行，并严格为 `$HOME/.lumen/skills/revisions/<UUID>/<UUID>`；
+4. 当前 root 仍 active，并来自显式修复的 known-root requirements。
+
+删除后仍由普通 desired/undesired reconcile 决定重新发布或移除 Observation。AgentRun preflight、terminal
+reconcile、Project cleanup 与普通读取继续采用 preserve policy；普通文件、目录、可解析外部链接、其他断链和
+未被 Observation 证明的入口仍视为 project-owned，不能删除或覆盖。
 
 ## AgentRun Preflight
 

@@ -330,7 +330,7 @@ function DiagnosticIssue({
   disabled: boolean
   onAction(): void
 }): React.JSX.Element {
-  const copy = issueCopy(check)
+  const copy = diagnosticIssueCopy(check)
   return (
     <article className="diagnostics-issue">
       <span className="diagnostics-issue-mark" aria-label="需要处理"><DiagnosticStatusIcon status="attention" /></span>
@@ -440,7 +440,14 @@ function DiagnosticGlyph({ name }: { name: 'shield' | 'close' | 'refresh' | 'che
 }
 
 export function diagnosticActionForCheck(check: DiagnosticCheck): DiagnosticAction | null {
-  if (check.id === 'skill-projections' && check.status === 'attention') return { kind: 'repair_skill', label: '重新同步 Skill' }
+  if (check.id === 'skill-projections' && check.status === 'attention') {
+    return {
+      kind: 'repair_skill',
+      label: hasIssueCode(check, 'broken_or_unavailable_symlink')
+        ? '清理旧链接并重新同步'
+        : '重新同步 Skill'
+    }
+  }
   if (check.id === 'mcp-config' && check.code === 'mcp_config_permissions_too_broad') return { kind: 'repair_mcp', label: '修复文件权限' }
   if (check.id === 'mcp-config' && check.status === 'attention') return { kind: 'open_mcp', label: '前往 MCP 设置' }
   if (check.subjectKind === 'runtime' && check.subjectId && check.status === 'attention') return { kind: 'open_runtime', label: '前往 Agent 运行时', runtimeKind: check.subjectId as AdapterKind }
@@ -461,7 +468,12 @@ export function diagnosticChecksForFilter(
   return checks.filter((check) => filter === 'all' || check.status === filter)
 }
 
-function issueCopy(check: DiagnosticCheck): { title: string; reason: string; impact: string } {
+export function diagnosticIssueCopy(check: DiagnosticCheck): { title: string; reason: string; impact: string } {
+  if (check.id === 'skill-projections' && hasOnlyIssueCode(check, 'broken_or_unavailable_symlink')) return {
+    title: 'Skill 投影包含旧的断开链接',
+    reason: `${factValue(check, 'issueCount') ?? '部分'} 个受管入口仍指向已经移除的旧 Skill Revision。`,
+    impact: '影响之后启动的 AgentRun；修复只清理已识别的旧 .lumen 断链，其他项目内容不会被覆盖。'
+  }
   if (check.id === 'skill-projections') return {
     title: 'Skill 投影需要重新同步',
     reason: `${factValue(check, 'issueCount') ?? '部分'} 个受管投影与当前 Library Revision 不一致。`,
@@ -526,6 +538,22 @@ function groupLabel(group: DiagnosticGroup): string {
 
 function factValue(check: DiagnosticCheck, key: string): string | null {
   return check.facts.find((fact) => fact.key === key)?.value ?? null
+}
+
+function issueCodes(check: DiagnosticCheck): string[] {
+  return (factValue(check, 'issueCodes') ?? '')
+    .split(',')
+    .map((code) => code.trim())
+    .filter(Boolean)
+}
+
+function hasIssueCode(check: DiagnosticCheck, code: string): boolean {
+  return issueCodes(check).includes(code)
+}
+
+function hasOnlyIssueCode(check: DiagnosticCheck, code: string): boolean {
+  const codes = issueCodes(check)
+  return codes.length === 1 && codes[0] === code
 }
 
 function factLabel(key: string): string {

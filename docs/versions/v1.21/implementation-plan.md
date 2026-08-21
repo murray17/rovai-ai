@@ -59,6 +59,17 @@ last_updated: 2026-08-21
   `/Applications/Rovai AI.backup-before-55dc5aa0.app`；安装前日常进程仍存活且未热升级，用户退出后从规范路径
   重启即可生效；`~/.local/bin/rovai` 已指向安装包内 CLI 并通过 version/help 验证。
 
+## 6. 当前版本维护修复
+
+- [x] Git Diagnostics 只以共享 Runtime 搜索环境解析出的绝对 executable 启动 Managed Process；
+- [x] 显式 Skill repair 退役 Observation 已证明的旧 `.lumen` missing symlink，自动 reconcile 继续 preserve；
+- [x] Renderer 依据 `broken_or_unavailable_symlink` 展示具体原因、影响边界和动作；
+- [x] 修复显式隔离 `HOME` 下 Desktop/Core Runtime Files Root 派生分歧；
+- [x] 完整前端、文档、TypeScript、strict Clippy、CLI 20 项与 slow suite 272 项通过；fast lib 298/299，
+  唯一失败仍为既有 Runtime compatibility register digest 基线；
+- [x] macOS arm64 package 深度验签、架构检查和隔离 Diagnostics UI 成品验收通过；
+- [ ] 推送 main，并原子替换日常 Applications 安装。
+
 ## References
 
 - [v1.21 版本概览](README.md)

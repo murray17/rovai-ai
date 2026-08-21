@@ -2311,13 +2311,19 @@ impl Core {
 
     async fn diagnostics_report(&self) -> DiagnosticsReport {
         let checked_at = chrono::Utc::now().to_rfc3339();
-        let git_health = serde_json::to_value(health::git_health().await).unwrap_or_else(|_| {
-            json!({
-                "installed": false,
-                "version": null,
-                "detail": "git health serialization failed"
-            })
-        });
+        let git_path = self
+            .runtime_search_environment
+            .read()
+            .await
+            .resolve_command_path("git");
+        let git_health =
+            serde_json::to_value(health::git_health(git_path).await).unwrap_or_else(|_| {
+                json!({
+                    "installed": false,
+                    "version": null,
+                    "detail": "git health serialization failed"
+                })
+            });
         let runtime_health = self.runtime_health_payload().await;
 
         let mut checks = vec![
@@ -5597,7 +5603,12 @@ impl Core {
                 self.open_runtime_model_catalog(params.runtime_kind).await
             }
             "health.check" => {
-                let git = health::git_health().await;
+                let git_path = self
+                    .runtime_search_environment
+                    .read()
+                    .await
+                    .resolve_command_path("git");
+                let git = health::git_health(git_path).await;
                 let database = self.database.lock().await;
                 let mut payload = json!({
                     "core": {

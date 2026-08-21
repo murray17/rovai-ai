@@ -72,6 +72,18 @@ Managed Process 只增加 macOS credential tree deny，不改变 Runtime 输入�
   `/Applications/Rovai AI.backup-before-55dc5aa0.app`，原日常 App/Core 进程未被终止，用户级 PATH 继续使用
   `~/.local/bin/rovai`。
 
+## 当前版本维护修复（2026-08-21）
+
+- Diagnostics 的 Git 检查改为复用 `RuntimeSearchEnvironment`，解析首个可执行文件的绝对路径后再进入
+  Managed Process，消除“系统 Git 可用但界面报告 PATH 不可用”的误报；
+- 用户显式 `skills.reconcile` 可清理 Observation 已证明、目标不存在且严格指向旧
+  `$HOME/.lumen/skills/revisions/<UUID>/<UUID>` 的 symlink，再按当前 Library 状态投影；自动 preflight、
+  terminal reconcile、普通文件/目录、其他外部链接和未登记入口仍保持不动；
+- Diagnostics 对这类问题显示“Skill 投影包含旧的断开链接”和“清理旧链接并重新同步”，不再把原因模糊描述为
+  与当前 Revision 不一致。
+- macOS Desktop 派生 Runtime Files Root 时与子 Core 共享同一非空 `HOME`，修复隔离验收或其他显式 Home
+  启动中 Main/Core root admission 不一致导致的 Core 启动失败。
+
 ## 明确不做
 
 - 不提供 generic Core invoke、远程自动化、独立 daemon、自动启动 Desktop 或共享 credential；
