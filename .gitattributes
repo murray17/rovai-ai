@@ -6,3 +6,6 @@
 *.icns binary
 *.jpg binary
 *.png binary
+
+/legal/licenses/** -text -whitespace
+*.crate binary

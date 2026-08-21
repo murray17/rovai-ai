@@ -424,7 +424,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 19,
+    contractVersion: 20,
     ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -469,9 +469,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v19')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v20')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v19: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v20: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -1061,7 +1061,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v19 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v20 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -1128,11 +1128,11 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v19 ipc-v2'
+"$CLI" --version | grep -q 'contract-v20 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
-printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run an Agent operation's exact `--help` for its closed inputs.")}
+printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.")}
 send_help="$("$CLI" send --help)"
 printf '%s\n' "$send_help" | grep -Fq -- '--public-only'
 printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'

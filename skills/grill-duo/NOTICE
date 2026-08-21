@@ -1,0 +1,17 @@
+grill-duo is a Rovai-specific translated and adapted rewrite of material from:
+https://github.com/mattpocock/skills
+
+Pinned upstream revision:
+84fdeffd12f2ee307994d1eb6feb48173b6e0502
+
+Pinned upstream paths:
+- skills/productivity/grill-me/SKILL.md
+- skills/productivity/grilling/SKILL.md
+
+The local Skill retains the upstream concepts of a persistent, one-question-at-a-time interview,
+explicit recommendations, and confirmation before implementation. Rovai AI rewrites the text for
+Camp-native fixed-partner review, public A2A delivery, Core-owned routing, and event-driven turns;
+it is not byte-identical vendoring.
+
+The upstream material is licensed under the MIT License in LICENSE. Rovai-specific additions are
+distributed under the repository's applicable project terms.

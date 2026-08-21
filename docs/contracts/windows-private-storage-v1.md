@@ -3,7 +3,7 @@ document_type: contract
 contract: windows-private-storage-v1
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-18
+last_updated: 2026-08-21
 ---
 
 # Windows Private Storage v1
@@ -56,7 +56,7 @@ windows_storage.path_outside_tested_envelope
 
 ## 3. Private object creation
 
-Named Pipe security is owned by current [Built-in Tool Transport v17](builtin-tool-transport-v17.md), which inherits the
+Named Pipe security is owned by current [Built-in Tool Transport v20](builtin-tool-transport-v20.md), which inherits the
 v14 creation-time security boundary. Filesystem objects use the same general rule through native
 creation APIs:
 

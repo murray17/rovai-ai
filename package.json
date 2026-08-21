@@ -41,7 +41,7 @@
     "build:macos:x64": "pnpm core:build:macos:x64 && pnpm build:desktop",
     "build:windows:x64": "pnpm core:build:windows:x64 && pnpm build:desktop",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm docs:test && pnpm docs:check && pnpm skills:test && pnpm skills:check && vitest run && node --test scripts/lib/check-rust-staged.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/planned-shutdown-app-quit.test.mjs scripts/lib/sidecar-targets.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs",
+    "test": "pnpm docs:test && pnpm docs:check && pnpm skills:test && pnpm skills:check && pnpm legal:test && vitest run && node --test scripts/lib/check-rust-staged.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/planned-shutdown-app-quit.test.mjs scripts/lib/sidecar-targets.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs",
     "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
     "smoke:member-config": "pnpm core:build:debug && node scripts/smoke-member-config.mjs",
     "smoke:intake": "pnpm core:build:debug && node scripts/smoke-intake.mjs",
@@ -103,13 +103,20 @@
     "smoke:missing-send-recovery": "pnpm core:build:debug && node scripts/smoke-missing-send-recovery.mjs",
     "experiment:p1:copilot-native-turn": "node scripts/experiment-copilot-native-turn-reconciliation.mjs",
     "test:p1:copilot-native-turn-evidence": "node --test scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs",
-    "package:mac": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=-",
-    "dist:mac": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 -c.mac.identity=-",
-    "dist:mac:release:arm64": "pnpm build:macos:arm64 && electron-builder --mac dmg --arm64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
-    "dist:mac:release:x64": "pnpm build:macos:x64 && electron-builder --mac dmg --x64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
-    "package:windows:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs dir && node scripts/verify-windows-release.mjs --unpacked-only",
-    "dist:windows:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs",
-    "dist:windows:release:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs --require-signed",
+    "legal:generate": "node scripts/generate-legal-manifests.mjs",
+    "legal:prepare": "node scripts/prepare-legal-payload.mjs",
+    "legal:check:source": "node scripts/verify-source-provenance.mjs",
+    "legal:check:binary": "node scripts/verify-source-provenance.mjs --binary-release",
+    "legal:check:package": "node scripts/verify-legal-payload.mjs",
+    "legal:test": "node --test scripts/lib/legal-remediation.test.mjs",
+    "package:mac:unsigned": "pnpm legal:prepare && pnpm legal:check:source && pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=- && pnpm legal:check:package -- --integrity-only dist/mac-arm64/Rovai-ai.app",
+    "package:mac": "pnpm legal:prepare && pnpm legal:check:source && pnpm legal:check:binary && pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=- && pnpm legal:check:package -- dist/mac-arm64/Rovai-ai.app",
+    "dist:mac": "pnpm legal:prepare && pnpm legal:check:source && pnpm legal:check:binary && pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 -c.mac.identity=- && pnpm legal:check:package -- dist/mac-arm64/Rovai-ai.app",
+    "dist:mac:release:arm64": "pnpm legal:prepare && pnpm legal:check:source && pnpm legal:check:binary && pnpm build:macos:arm64 && electron-builder --mac dmg --arm64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true && pnpm legal:check:package -- dist/mac-arm64/Rovai-ai.app",
+    "dist:mac:release:x64": "pnpm legal:prepare && pnpm legal:check:source && pnpm legal:check:binary && pnpm build:macos:x64 && electron-builder --mac dmg --x64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true && pnpm legal:check:package -- dist/mac/Rovai-ai.app",
+    "package:windows:x64": "pnpm legal:prepare && pnpm legal:check:source && pnpm build:windows:x64 && node scripts/package-windows.mjs dir && node scripts/verify-windows-release.mjs --unpacked-only && pnpm legal:check:package -- --integrity-only dist/win-unpacked/resources/legal",
+    "dist:windows:x64": "pnpm legal:prepare && pnpm legal:check:source && pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs && pnpm legal:check:package -- --integrity-only dist/win-unpacked/resources/legal",
+    "dist:windows:release:x64": "pnpm legal:prepare && pnpm legal:check:source && pnpm legal:check:binary && pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs --require-signed && pnpm legal:check:package -- dist/win-unpacked/resources/legal",
     "verify:windows": "node scripts/verify-windows-release.mjs"
   },
   "dependencies": {
@@ -154,6 +161,10 @@
     "mac": {
       "icon": "build/icon.png",
       "extraResources": [
+        {
+          "from": ".legal-payload",
+          "to": "legal"
+        },
         {
           "from": "resources/bin/macos-${arch}/rovai-core",
           "to": "bin/rovai-core"
@@ -200,6 +211,10 @@
         "rfc3161TimeStampServer": "http://timestamp.digicert.com"
       },
       "extraResources": [
+        {
+          "from": ".legal-payload",
+          "to": "legal"
+        },
         {
           "from": "resources/bin/windows-x64/rovai-core.exe",
           "to": "bin/rovai-core.exe"

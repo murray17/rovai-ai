@@ -35,8 +35,9 @@ pnpm accept:planned-shutdown
 pnpm accept:windows:installer
 ```
 
-`package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer 并验证
-App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与隔离 Core health。`accept:windows:installer`
+`package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer。两条命令都先
+生成并校验外置 legal payload，再验证 App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract、
+隔离 Core health 与包内法律文件完整性。`accept:windows:installer`
 执行 per-user clean install、已安装 App Onboarding、同版本 upgrade、默认卸载和数据保留，并把报告与截图写入
 `dist/windows-installation-acceptance/`。`accept:planned-shutdown` 默认使用 `dist/win-unpacked/Rovai-ai.exe`，
 在隔离 `userData` 中验证真实 Runtime 运行期间的受控退出、子进程回收和重启恢复。正式签名构建使用
@@ -63,7 +64,7 @@ manifest 与 verifier 版本，不能与正式签名发布混用，也不能用 
 
 ## 安装、升级与卸载
 
-- clean install：新用户安装、启动、Core ready、v19 Built-in roundtrip 与现有 Onboarding gate 通过；
+- clean install：新用户安装、启动、Core ready、v20 Built-in roundtrip 与现有 Onboarding gate 通过；
 - upgrade：先要求正在运行的 App 正常关闭，等待 Planned Shutdown 完成，再替换被锁定的 sidecar；新旧 Core 不并行；
 - downgrade：检测 schema incompatibility 后在启动前阻断，显示当前/目标版本和安全下一步；
 - uninstall：默认保留 `%LOCALAPPDATA%\Rovai AI` 数据；删除数据是未默认选中的显式选项，并二次确认精确范围；

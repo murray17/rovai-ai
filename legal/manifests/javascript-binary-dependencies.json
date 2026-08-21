@@ -1,0 +1,4369 @@
+{
+  "schema_version": 2,
+  "ecosystem": "javascript",
+  "distribution_scope": "bundled",
+  "package_format": "electron-builder app.asar",
+  "package_instances": 144,
+  "prune_exclusions": [
+    "@types/react-dom@19.2.3",
+    "@types/react@19.2.17",
+    "csstype@3.2.3",
+    "has-flag@4.0.0",
+    "supports-color@7.2.0"
+  ],
+  "coverage": {
+    "package_instances": 144,
+    "with_package_legal_files": 143,
+    "with_curated_clarification": 1,
+    "metadata_only": 0,
+    "zero_legal_files": 0,
+    "with_notice": 0,
+    "with_notice_copyright_or_patent": 1,
+    "with_multiple_license_files": 0,
+    "legal_file_count": 145
+  },
+  "dependencies": [
+    {
+      "id": "@floating-ui/core@1.8.0",
+      "name": "@floating-ui/core",
+      "version": "1.8.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "atomiks",
+      "homepage": "https://floating-ui.com",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@floating-ui+core@1.8.0/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce",
+          "size": 1089
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@floating-ui+core@1.8.0/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@floating-ui/dom@1.8.0",
+      "name": "@floating-ui/dom",
+      "version": "1.8.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "atomiks",
+      "homepage": "https://floating-ui.com",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@floating-ui+dom@1.8.0/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce",
+          "size": 1089
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@floating-ui+dom@1.8.0/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@floating-ui/react-dom@2.1.9",
+      "name": "@floating-ui/react-dom",
+      "version": "2.1.9",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "atomiks",
+      "homepage": "https://floating-ui.com/docs/react-dom",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@floating-ui+react-dom@2.1.9/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce",
+          "size": 1089
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@floating-ui+react-dom@2.1.9/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@floating-ui/utils@0.2.12",
+      "name": "@floating-ui/utils",
+      "version": "0.2.12",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "atomiks",
+      "homepage": "https://floating-ui.com",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@floating-ui+utils@0.2.12/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce",
+          "size": 1089
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@floating-ui+utils@0.2.12/LICENSE",
+          "sha256": "0e4c9a9b6c71019cbbea3bdc20b01223110a9035700f9c960c8fcbf78c2325ce"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/primitive@1.1.5",
+      "name": "@radix-ui/primitive",
+      "version": "1.1.5",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+primitive@1.1.5/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+primitive@1.1.5/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-arrow@1.1.11",
+      "name": "@radix-ui/react-arrow",
+      "version": "1.1.11",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-arrow@1.1.11/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-arrow@1.1.11/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-collection@1.1.12",
+      "name": "@radix-ui/react-collection",
+      "version": "1.1.12",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-collection@1.1.12/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-collection@1.1.12/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-compose-refs@1.1.3",
+      "name": "@radix-ui/react-compose-refs",
+      "version": "1.1.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-compose-refs@1.1.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-compose-refs@1.1.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-context@1.2.0",
+      "name": "@radix-ui/react-context",
+      "version": "1.2.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-context@1.2.0/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-context@1.2.0/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-dialog@1.1.19",
+      "name": "@radix-ui/react-dialog",
+      "version": "1.1.19",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-dialog@1.1.19/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-dialog@1.1.19/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-direction@1.1.2",
+      "name": "@radix-ui/react-direction",
+      "version": "1.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-direction@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-direction@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-dismissable-layer@1.1.15",
+      "name": "@radix-ui/react-dismissable-layer",
+      "version": "1.1.15",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-dismissable-layer@1.1.15/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-dismissable-layer@1.1.15/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-dropdown-menu@2.1.20",
+      "name": "@radix-ui/react-dropdown-menu",
+      "version": "2.1.20",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-dropdown-menu@2.1.20/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-dropdown-menu@2.1.20/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-focus-guards@1.1.4",
+      "name": "@radix-ui/react-focus-guards",
+      "version": "1.1.4",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-focus-guards@1.1.4/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-focus-guards@1.1.4/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-focus-scope@1.1.12",
+      "name": "@radix-ui/react-focus-scope",
+      "version": "1.1.12",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-focus-scope@1.1.12/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-focus-scope@1.1.12/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-id@1.1.2",
+      "name": "@radix-ui/react-id",
+      "version": "1.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-id@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-id@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-menu@2.1.20",
+      "name": "@radix-ui/react-menu",
+      "version": "2.1.20",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-menu@2.1.20/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-menu@2.1.20/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-popper@1.3.3",
+      "name": "@radix-ui/react-popper",
+      "version": "1.3.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-popper@1.3.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-popper@1.3.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-portal@1.1.13",
+      "name": "@radix-ui/react-portal",
+      "version": "1.1.13",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-portal@1.1.13/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-portal@1.1.13/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-presence@1.1.7",
+      "name": "@radix-ui/react-presence",
+      "version": "1.1.7",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-presence@1.1.7/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-presence@1.1.7/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-primitive@2.1.7",
+      "name": "@radix-ui/react-primitive",
+      "version": "2.1.7",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-primitive@2.1.7/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-primitive@2.1.7/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-roving-focus@1.1.15",
+      "name": "@radix-ui/react-roving-focus",
+      "version": "1.1.15",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-roving-focus@1.1.15/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-roving-focus@1.1.15/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-slot@1.3.0",
+      "name": "@radix-ui/react-slot",
+      "version": "1.3.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-slot@1.3.0/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-slot@1.3.0/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-tabs@1.1.17",
+      "name": "@radix-ui/react-tabs",
+      "version": "1.1.17",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-tabs@1.1.17/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-tabs@1.1.17/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-use-callback-ref@1.1.2",
+      "name": "@radix-ui/react-use-callback-ref",
+      "version": "1.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-use-callback-ref@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-use-callback-ref@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-use-controllable-state@1.2.3",
+      "name": "@radix-ui/react-use-controllable-state",
+      "version": "1.2.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-use-controllable-state@1.2.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-use-controllable-state@1.2.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-use-effect-event@0.0.3",
+      "name": "@radix-ui/react-use-effect-event",
+      "version": "0.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-use-effect-event@0.0.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-use-effect-event@0.0.3/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-use-is-hydrated@0.1.1",
+      "name": "@radix-ui/react-use-is-hydrated",
+      "version": "0.1.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-use-is-hydrated@0.1.1/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-use-is-hydrated@0.1.1/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-use-layout-effect@1.1.2",
+      "name": "@radix-ui/react-use-layout-effect",
+      "version": "1.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-use-layout-effect@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-use-layout-effect@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-use-rect@1.1.2",
+      "name": "@radix-ui/react-use-rect",
+      "version": "1.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-use-rect@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-use-rect@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/react-use-size@1.1.2",
+      "name": "@radix-ui/react-use-size",
+      "version": "1.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+react-use-size@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+react-use-size@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@radix-ui/rect@1.1.2",
+      "name": "@radix-ui/rect",
+      "version": "1.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://radix-ui.com/primitives",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@radix-ui+rect@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "size": 1063
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@radix-ui+rect@1.1.2/LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/debug@4.1.13",
+      "name": "@types/debug",
+      "version": "4.1.13",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/debug",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+debug@4.1.13/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+debug@4.1.13/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/estree-jsx@1.0.5",
+      "name": "@types/estree-jsx",
+      "version": "1.0.5",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree-jsx",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+estree-jsx@1.0.5/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+estree-jsx@1.0.5/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/estree@1.0.9",
+      "name": "@types/estree",
+      "version": "1.0.9",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/estree",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+estree@1.0.9/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+estree@1.0.9/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/hast@3.0.5",
+      "name": "@types/hast",
+      "version": "3.0.5",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/hast",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+hast@3.0.5/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+hast@3.0.5/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/mdast@4.0.4",
+      "name": "@types/mdast",
+      "version": "4.0.4",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/mdast",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+mdast@4.0.4/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+mdast@4.0.4/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/ms@2.1.0",
+      "name": "@types/ms",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/ms",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+ms@2.1.0/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+ms@2.1.0/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/unist@2.0.11",
+      "name": "@types/unist",
+      "version": "2.0.11",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/unist",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+unist@2.0.11/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+unist@2.0.11/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@types/unist@3.0.3",
+      "name": "@types/unist",
+      "version": "3.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/unist",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@types+unist@3.0.3/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "size": 1141
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@types+unist@3.0.3/LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "@ungap/structured-clone@1.3.3",
+      "name": "@ungap/structured-clone",
+      "version": "1.3.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "ISC",
+      "author": "Andrea Giammarchi",
+      "homepage": "https://github.com/ungap/structured-clone#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/@ungap+structured-clone@1.3.3/LICENSE",
+          "sha256": "dc6d4961d8b6ee747231582ae9c53ce1d66bf76bc9f5a28f554c0e97210953bf",
+          "size": 765
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/@ungap+structured-clone@1.3.3/LICENSE",
+          "sha256": "dc6d4961d8b6ee747231582ae9c53ce1d66bf76bc9f5a28f554c0e97210953bf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "aria-hidden@1.2.6",
+      "name": "aria-hidden",
+      "version": "1.2.6",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Anton Korzunov",
+      "homepage": "https://github.com/theKashey/aria-hidden#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/aria-hidden@1.2.6/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9",
+          "size": 1071
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/aria-hidden@1.2.6/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "bail@2.0.2",
+      "name": "bail",
+      "version": "2.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/bail#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/bail@2.0.2/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/bail@2.0.2/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "ccount@2.0.1",
+      "name": "ccount",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/ccount#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/ccount@2.0.1/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/ccount@2.0.1/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "character-entities-html4@2.1.0",
+      "name": "character-entities-html4",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/character-entities-html4#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/character-entities-html4@2.1.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/character-entities-html4@2.1.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "character-entities-legacy@3.0.0",
+      "name": "character-entities-legacy",
+      "version": "3.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/character-entities-legacy#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/character-entities-legacy@3.0.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/character-entities-legacy@3.0.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "character-entities@2.0.2",
+      "name": "character-entities",
+      "version": "2.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/character-entities#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/character-entities@2.0.2/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/character-entities@2.0.2/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "character-reference-invalid@2.0.1",
+      "name": "character-reference-invalid",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/character-reference-invalid#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/character-reference-invalid@2.0.1/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/character-reference-invalid@2.0.1/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "comma-separated-tokens@2.0.3",
+      "name": "comma-separated-tokens",
+      "version": "2.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/comma-separated-tokens#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/comma-separated-tokens@2.0.3/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/comma-separated-tokens@2.0.3/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "debug@4.4.3",
+      "name": "debug",
+      "version": "4.4.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Josh Junon",
+      "homepage": "https://github.com/debug-js/debug#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/debug@4.4.3/LICENSE",
+          "sha256": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95",
+          "size": 1139
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/debug@4.4.3/LICENSE",
+          "sha256": "3a61c6c96caf5c1d9b623fb9b04c822b783dfcb78aa7e49c76a3f643e6ed7f95"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "decode-named-character-reference@1.3.0",
+      "name": "decode-named-character-reference",
+      "version": "1.3.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/decode-named-character-reference#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/decode-named-character-reference@1.3.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/decode-named-character-reference@1.3.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "dequal@2.0.3",
+      "name": "dequal",
+      "version": "2.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Luke Edwards",
+      "homepage": "https://github.com/lukeed/dequal#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/dequal@2.0.3/license",
+          "sha256": "306fa513e39b23a6e8747520de761809d206b99800ef41907b530226574c59ae",
+          "size": 1114
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/dequal@2.0.3/license",
+          "sha256": "306fa513e39b23a6e8747520de761809d206b99800ef41907b530226574c59ae"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "detect-node-es@1.1.0",
+      "name": "detect-node-es",
+      "version": "1.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Ilya Kantor",
+      "homepage": "https://github.com/thekashey/detect-node",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/detect-node-es@1.1.0/LICENSE",
+          "sha256": "54b32293ea560d22cd9b62af9b2cda1a030d910a48c6601d227c5ff2338d95f8",
+          "size": 1068
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/detect-node-es@1.1.0/LICENSE",
+          "sha256": "54b32293ea560d22cd9b62af9b2cda1a030d910a48c6601d227c5ff2338d95f8"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "devlop@1.1.0",
+      "name": "devlop",
+      "version": "1.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/devlop#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/devlop@1.1.0/license",
+          "sha256": "6f296a5eccc1dc96714bb94ebaa9cac25b0a1467d74cc5263ac4d0646ab01f62",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/devlop@1.1.0/license",
+          "sha256": "6f296a5eccc1dc96714bb94ebaa9cac25b0a1467d74cc5263ac4d0646ab01f62"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "escape-string-regexp@5.0.0",
+      "name": "escape-string-regexp",
+      "version": "5.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/sindresorhus/escape-string-regexp#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/escape-string-regexp@5.0.0/license",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
+          "size": 1117
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/escape-string-regexp@5.0.0/license",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "estree-util-is-identifier-name@3.0.0",
+      "name": "estree-util-is-identifier-name",
+      "version": "3.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/estree-util-is-identifier-name#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/estree-util-is-identifier-name@3.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/estree-util-is-identifier-name@3.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "extend@3.0.2",
+      "name": "extend",
+      "version": "3.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Stefan Thomas",
+      "homepage": "https://github.com/justmoon/node-extend#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/extend@3.0.2/LICENSE",
+          "sha256": "97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c",
+          "size": 1081
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/extend@3.0.2/LICENSE",
+          "sha256": "97af7428f93afbab9bf79cd09254da1357161794f4255eb1b4599f04dd2d2e7c"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "get-nonce@1.0.1",
+      "name": "get-nonce",
+      "version": "1.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Anton Korzunov",
+      "homepage": "https://github.com/theKashey/get-nonce",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/get-nonce@1.0.1/LICENSE",
+          "sha256": "acf3b087b348d2f2e731b9d4131af185aad694c1204ce14a46909483fd42da05",
+          "size": 1071
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/get-nonce@1.0.1/LICENSE",
+          "sha256": "acf3b087b348d2f2e731b9d4131af185aad694c1204ce14a46909483fd42da05"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "hast-util-to-jsx-runtime@2.3.6",
+      "name": "hast-util-to-jsx-runtime",
+      "version": "2.3.6",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/hast-util-to-jsx-runtime#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/hast-util-to-jsx-runtime@2.3.6/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/hast-util-to-jsx-runtime@2.3.6/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "hast-util-whitespace@3.0.0",
+      "name": "hast-util-whitespace",
+      "version": "3.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/hast-util-whitespace#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/hast-util-whitespace@3.0.0/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/hast-util-whitespace@3.0.0/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "html-url-attributes@3.0.1",
+      "name": "html-url-attributes",
+      "version": "3.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/rehypejs/rehype-minify/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/html-url-attributes@3.0.1/license",
+          "sha256": "e18cf5173e928f808f0cd208097fee8fbec9d28fc0255213938e4c559e29ff58",
+          "size": 1070
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/html-url-attributes@3.0.1/license",
+          "sha256": "e18cf5173e928f808f0cd208097fee8fbec9d28fc0255213938e4c559e29ff58"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "inline-style-parser@0.2.7",
+      "name": "inline-style-parser",
+      "version": "0.2.7",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/remarkablemark/inline-style-parser#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/inline-style-parser@0.2.7/LICENSE",
+          "sha256": "395c95f20598da653ff1eb1cb9d74947c7fac689697147f1d192fd0242a0e635",
+          "size": 1098
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/inline-style-parser@0.2.7/LICENSE",
+          "sha256": "395c95f20598da653ff1eb1cb9d74947c7fac689697147f1d192fd0242a0e635"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "is-alphabetical@2.0.1",
+      "name": "is-alphabetical",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/is-alphabetical#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/is-alphabetical@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/is-alphabetical@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "is-alphanumerical@2.0.1",
+      "name": "is-alphanumerical",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/is-alphanumerical#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/is-alphanumerical@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/is-alphanumerical@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "is-decimal@2.0.1",
+      "name": "is-decimal",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/is-decimal#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/is-decimal@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/is-decimal@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "is-hexadecimal@2.0.1",
+      "name": "is-hexadecimal",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/is-hexadecimal#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/is-hexadecimal@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/is-hexadecimal@2.0.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "is-plain-obj@4.1.0",
+      "name": "is-plain-obj",
+      "version": "4.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Sindre Sorhus",
+      "homepage": "https://github.com/sindresorhus/is-plain-obj#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/is-plain-obj@4.1.0/license",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3",
+          "size": 1117
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/is-plain-obj@4.1.0/license",
+          "sha256": "5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "longest-streak@3.1.0",
+      "name": "longest-streak",
+      "version": "3.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/longest-streak#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/longest-streak@3.1.0/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10",
+          "size": 1106
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/longest-streak@3.1.0/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "markdown-table@3.0.4",
+      "name": "markdown-table",
+      "version": "3.0.4",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/markdown-table#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/markdown-table@3.0.4/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/markdown-table@3.0.4/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-find-and-replace@3.0.2",
+      "name": "mdast-util-find-and-replace",
+      "version": "3.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-find-and-replace#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-find-and-replace@3.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-find-and-replace@3.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-from-markdown@2.0.3",
+      "name": "mdast-util-from-markdown",
+      "version": "2.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-from-markdown#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-from-markdown@2.0.3/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-from-markdown@2.0.3/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-gfm-autolink-literal@2.0.1",
+      "name": "mdast-util-gfm-autolink-literal",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-gfm-autolink-literal#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-gfm-autolink-literal@2.0.1/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-gfm-autolink-literal@2.0.1/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-gfm-footnote@2.1.0",
+      "name": "mdast-util-gfm-footnote",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-gfm-footnote#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-gfm-footnote@2.1.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-gfm-footnote@2.1.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-gfm-strikethrough@2.0.0",
+      "name": "mdast-util-gfm-strikethrough",
+      "version": "2.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-gfm-strikethrough#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-gfm-strikethrough@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-gfm-strikethrough@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-gfm-table@2.0.0",
+      "name": "mdast-util-gfm-table",
+      "version": "2.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-gfm-table#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-gfm-table@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-gfm-table@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-gfm-task-list-item@2.0.0",
+      "name": "mdast-util-gfm-task-list-item",
+      "version": "2.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-gfm-task-list-item#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-gfm-task-list-item@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-gfm-task-list-item@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-gfm@3.1.0",
+      "name": "mdast-util-gfm",
+      "version": "3.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-gfm#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-gfm@3.1.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-gfm@3.1.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-mdx-expression@2.0.1",
+      "name": "mdast-util-mdx-expression",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-mdx-expression#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-mdx-expression@2.0.1/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-mdx-expression@2.0.1/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-mdx-jsx@3.2.0",
+      "name": "mdast-util-mdx-jsx",
+      "version": "3.2.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-mdx-jsx#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-mdx-jsx@3.2.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-mdx-jsx@3.2.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-mdxjs-esm@2.0.1",
+      "name": "mdast-util-mdxjs-esm",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-mdxjs-esm#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-mdxjs-esm@2.0.1/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-mdxjs-esm@2.0.1/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-phrasing@4.1.0",
+      "name": "mdast-util-phrasing",
+      "version": "4.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Victor Felder",
+      "homepage": "https://github.com/syntax-tree/mdast-util-phrasing#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-phrasing@4.1.0/license",
+          "sha256": "b6d1a4e1831b177acc96f22a817d4f0f4c18419355badc3125754445fc69e3a7",
+          "size": 1150
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-phrasing@4.1.0/license",
+          "sha256": "b6d1a4e1831b177acc96f22a817d4f0f4c18419355badc3125754445fc69e3a7"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-to-hast@13.2.1",
+      "name": "mdast-util-to-hast",
+      "version": "13.2.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-to-hast#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-to-hast@13.2.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-to-hast@13.2.1/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-to-markdown@2.1.2",
+      "name": "mdast-util-to-markdown",
+      "version": "2.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-to-markdown#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-to-markdown@2.1.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-to-markdown@2.1.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "mdast-util-to-string@4.0.0",
+      "name": "mdast-util-to-string",
+      "version": "4.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/mdast-util-to-string#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/mdast-util-to-string@4.0.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/mdast-util-to-string@4.0.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-core-commonmark@2.0.3",
+      "name": "micromark-core-commonmark",
+      "version": "2.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-core-commonmark@2.0.3/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-core-commonmark@2.0.3/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-extension-gfm-autolink-literal@2.1.0",
+      "name": "micromark-extension-gfm-autolink-literal",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark-extension-gfm-autolink-literal#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-extension-gfm-autolink-literal@2.1.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-extension-gfm-autolink-literal@2.1.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-extension-gfm-footnote@2.1.0",
+      "name": "micromark-extension-gfm-footnote",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark-extension-gfm-footnote#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-extension-gfm-footnote@2.1.0/license",
+          "sha256": "807a88522a850092aece49486207c17c313c4d5708ac276524840fe1caa0b0fa",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-extension-gfm-footnote@2.1.0/license",
+          "sha256": "807a88522a850092aece49486207c17c313c4d5708ac276524840fe1caa0b0fa"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-extension-gfm-strikethrough@2.1.0",
+      "name": "micromark-extension-gfm-strikethrough",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark-extension-gfm-strikethrough#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-extension-gfm-strikethrough@2.1.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-extension-gfm-strikethrough@2.1.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-extension-gfm-table@2.1.1",
+      "name": "micromark-extension-gfm-table",
+      "version": "2.1.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark-extension-gfm-table#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-extension-gfm-table@2.1.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-extension-gfm-table@2.1.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-extension-gfm-tagfilter@2.0.0",
+      "name": "micromark-extension-gfm-tagfilter",
+      "version": "2.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark-extension-gfm-tagfilter#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-extension-gfm-tagfilter@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-extension-gfm-tagfilter@2.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-extension-gfm-task-list-item@2.1.0",
+      "name": "micromark-extension-gfm-task-list-item",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark-extension-gfm-task-list-item#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-extension-gfm-task-list-item@2.1.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-extension-gfm-task-list-item@2.1.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-extension-gfm@3.0.0",
+      "name": "micromark-extension-gfm",
+      "version": "3.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark-extension-gfm#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-extension-gfm@3.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-extension-gfm@3.0.0/license",
+          "sha256": "536804b3adbff17dbbb9ed0d2bf9655b78f07640278581e37e3d7475282d5e61"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-factory-destination@2.0.1",
+      "name": "micromark-factory-destination",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-factory-destination@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-factory-destination@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-factory-label@2.0.1",
+      "name": "micromark-factory-label",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-factory-label@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-factory-label@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-factory-space@2.0.1",
+      "name": "micromark-factory-space",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-factory-space@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-factory-space@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-factory-title@2.0.1",
+      "name": "micromark-factory-title",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-factory-title@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-factory-title@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-factory-whitespace@2.0.1",
+      "name": "micromark-factory-whitespace",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-factory-whitespace@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-factory-whitespace@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-character@2.1.1",
+      "name": "micromark-util-character",
+      "version": "2.1.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-character@2.1.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-character@2.1.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-chunked@2.0.1",
+      "name": "micromark-util-chunked",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-chunked@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-chunked@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-classify-character@2.0.1",
+      "name": "micromark-util-classify-character",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-classify-character@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-classify-character@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-combine-extensions@2.0.1",
+      "name": "micromark-util-combine-extensions",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-combine-extensions@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-combine-extensions@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-decode-numeric-character-reference@2.0.2",
+      "name": "micromark-util-decode-numeric-character-reference",
+      "version": "2.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-decode-numeric-character-reference@2.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-decode-numeric-character-reference@2.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-decode-string@2.0.1",
+      "name": "micromark-util-decode-string",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-decode-string@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-decode-string@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-encode@2.0.1",
+      "name": "micromark-util-encode",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-encode@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-encode@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-html-tag-name@2.0.1",
+      "name": "micromark-util-html-tag-name",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-html-tag-name@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-html-tag-name@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-normalize-identifier@2.0.1",
+      "name": "micromark-util-normalize-identifier",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-normalize-identifier@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-normalize-identifier@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-resolve-all@2.0.1",
+      "name": "micromark-util-resolve-all",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-resolve-all@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-resolve-all@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-sanitize-uri@2.0.1",
+      "name": "micromark-util-sanitize-uri",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-sanitize-uri@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-sanitize-uri@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-subtokenize@2.1.0",
+      "name": "micromark-util-subtokenize",
+      "version": "2.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-subtokenize@2.1.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-subtokenize@2.1.0/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-symbol@2.0.1",
+      "name": "micromark-util-symbol",
+      "version": "2.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-symbol@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-symbol@2.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark-util-types@2.0.2",
+      "name": "micromark-util-types",
+      "version": "2.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark-util-types@2.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark-util-types@2.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "micromark@4.0.2",
+      "name": "micromark",
+      "version": "4.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/micromark/micromark/tree/main#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/micromark@4.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/micromark@4.0.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "ms@2.1.3",
+      "name": "ms",
+      "version": "2.1.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://github.com/vercel/ms#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license.md",
+          "path": "legal/licenses/javascript/ms@2.1.3/license.md",
+          "sha256": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801",
+          "size": 1079
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/ms@2.1.3/license.md",
+          "sha256": "1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "parse-entities@4.0.2",
+      "name": "parse-entities",
+      "version": "4.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/parse-entities#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/parse-entities@4.0.2/license",
+          "sha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b",
+          "size": 1101
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/parse-entities@4.0.2/license",
+          "sha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "property-information@7.2.0",
+      "name": "property-information",
+      "version": "7.2.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/property-information#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/property-information@7.2.0/license",
+          "sha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b",
+          "size": 1101
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/property-information@7.2.0/license",
+          "sha256": "5d0698266086f217bb11ea0499d33453e401fe479fb9126ad04e625e63d3557b"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "react-dom@19.2.7",
+      "name": "react-dom",
+      "version": "19.2.7",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://react.dev/",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/react-dom@19.2.7/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+          "size": 1088
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/react-dom@19.2.7/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "react-markdown@10.1.0",
+      "name": "react-markdown",
+      "version": "10.1.0",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Espen Hovlandsdal",
+      "homepage": "https://github.com/remarkjs/react-markdown#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/react-markdown@10.1.0/license",
+          "sha256": "f6196c64e144f9a6fa9154c3a80bc8b89615a9567934b83a8951879f06ba2aef",
+          "size": 1079
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/react-markdown@10.1.0/license",
+          "sha256": "f6196c64e144f9a6fa9154c3a80bc8b89615a9567934b83a8951879f06ba2aef"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "react-remove-scroll-bar@2.3.8",
+      "name": "react-remove-scroll-bar",
+      "version": "2.3.8",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Anton Korzunov",
+      "homepage": "https://github.com/theKashey/react-remove-scroll-bar#readme",
+      "license_evidence": {
+        "kind": "CURATED_LICENSE_CLARIFICATION",
+        "method": "EXACT_PACKAGE_METADATA_AND_PINNED_UPSTREAM_LICENSE",
+        "package_id": "react-remove-scroll-bar@2.3.8",
+        "spdx_expression": "MIT",
+        "npm_tarball_sha256": "ccc872d7a2dc007cbf9d755f30d56b8d80eabdbe22c44c95a709129bfdc46f01",
+        "npm_git_head": "b3b1287aad81def2e2ae707274b74531b61ddbaf",
+        "upstream_license_revision": "7301c160fda44cb8cf2b9fdfde61efad35736196",
+        "why_package_file_unavailable": "The exact npm package tarball contains no license or notice file.",
+        "curated_file_path": "legal/licenses/javascript/react-remove-scroll-bar@2.3.8/LICENSE",
+        "curated_sha256": "a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84",
+        "copyright_attribution": "Copyright (c) 2025 Anton Korzunov <thekashey@gmail.com>",
+        "manual_review_record": "TASK_08_RETAIN_EXISTING_CURATED_MIT_SCHEME"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/react-remove-scroll-bar@2.3.8/LICENSE",
+          "sha256": "a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84",
+          "size": 1093
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/react-remove-scroll-bar@2.3.8/LICENSE",
+          "sha256": "a79aae0c0f21990d9d963bb3c5a79cdcea9a46f8523ba55c58d7fe776b6ebc84"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "react-remove-scroll@2.7.2",
+      "name": "react-remove-scroll",
+      "version": "2.7.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Anton Korzunov",
+      "homepage": "https://github.com/theKashey/react-remove-scroll#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/react-remove-scroll@2.7.2/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9",
+          "size": 1071
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/react-remove-scroll@2.7.2/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "react-style-singleton@2.2.3",
+      "name": "react-style-singleton",
+      "version": "2.2.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Anton Korzunov",
+      "homepage": "https://github.com/theKashey/react-style-singleton#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/react-style-singleton@2.2.3/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9",
+          "size": 1071
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/react-style-singleton@2.2.3/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "react@19.2.7",
+      "name": "react",
+      "version": "19.2.7",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://react.dev/",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/react@19.2.7/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+          "size": 1088
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/react@19.2.7/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "remark-gfm@4.0.1",
+      "name": "remark-gfm",
+      "version": "4.0.1",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/remarkjs/remark-gfm#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/remark-gfm@4.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/remark-gfm@4.0.1/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "remark-parse@11.0.0",
+      "name": "remark-parse",
+      "version": "11.0.0",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://remark.js.org",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/remark-parse@11.0.0/license",
+          "sha256": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/remark-parse@11.0.0/license",
+          "sha256": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "remark-rehype@11.1.2",
+      "name": "remark-rehype",
+      "version": "11.1.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/remarkjs/remark-rehype#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/remark-rehype@11.1.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/remark-rehype@11.1.2/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "remark-stringify@11.0.0",
+      "name": "remark-stringify",
+      "version": "11.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://remark.js.org",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/remark-stringify@11.0.0/license",
+          "sha256": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/remark-stringify@11.0.0/license",
+          "sha256": "413654b0a78b98661dce96d2aff2e4d075603d220b8483e28b1aa010ccc138b4"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "scheduler@0.27.0",
+      "name": "scheduler",
+      "version": "0.27.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": null,
+      "homepage": "https://react.dev/",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/scheduler@0.27.0/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93",
+          "size": 1088
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/scheduler@0.27.0/LICENSE",
+          "sha256": "da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "space-separated-tokens@2.0.2",
+      "name": "space-separated-tokens",
+      "version": "2.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/space-separated-tokens#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/space-separated-tokens@2.0.2/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/space-separated-tokens@2.0.2/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "stringify-entities@4.0.4",
+      "name": "stringify-entities",
+      "version": "4.0.4",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/stringify-entities#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/stringify-entities@4.0.4/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10",
+          "size": 1106
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/stringify-entities@4.0.4/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "style-to-js@1.1.21",
+      "name": "style-to-js",
+      "version": "1.1.21",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Mark",
+      "homepage": "https://github.com/remarkablemark/style-to-js#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/style-to-js@1.1.21/LICENSE",
+          "sha256": "bbb380e5c1a717079378d6ea4d33c8a5a81655d4612b749f882e34e46712aab5",
+          "size": 1110
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/style-to-js@1.1.21/LICENSE",
+          "sha256": "bbb380e5c1a717079378d6ea4d33c8a5a81655d4612b749f882e34e46712aab5"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "style-to-object@1.0.14",
+      "name": "style-to-object",
+      "version": "1.0.14",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Mark",
+      "homepage": "https://github.com/remarkablemark/style-to-object#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/style-to-object@1.0.14/LICENSE",
+          "sha256": "896c9fd6b5fc48ac31800b9d29a6e3ffcb0c2d534ed077ebfa5c2fa388cc38b7",
+          "size": 1110
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/style-to-object@1.0.14/LICENSE",
+          "sha256": "896c9fd6b5fc48ac31800b9d29a6e3ffcb0c2d534ed077ebfa5c2fa388cc38b7"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "trim-lines@3.0.1",
+      "name": "trim-lines",
+      "version": "3.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/trim-lines#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/trim-lines@3.0.1/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10",
+          "size": 1106
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/trim-lines@3.0.1/license",
+          "sha256": "9f084fac69d8cf1e6ce983ba5a3499c7695ed74a26ec625c38f0fd19fddd5e10"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "trough@2.2.0",
+      "name": "trough",
+      "version": "2.2.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/trough#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/trough@2.2.0/license",
+          "sha256": "6c03fd41cfd7c92d8aa8a2fa521b94b2683f059123281dcf921ddea9216b6254",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/trough@2.2.0/license",
+          "sha256": "6c03fd41cfd7c92d8aa8a2fa521b94b2683f059123281dcf921ddea9216b6254"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "tslib@2.8.1",
+      "name": "tslib",
+      "version": "2.8.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "0BSD",
+      "author": "Microsoft Corp.",
+      "homepage": "https://www.typescriptlang.org/",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "COPYRIGHT",
+          "source_name": "CopyrightNotice.txt",
+          "path": "legal/licenses/javascript/tslib@2.8.1/CopyrightNotice.txt",
+          "sha256": "da16ddb65f8ca390998fb99223d0112498b56b45784d00afd77ff8ce1ac4de8b",
+          "size": 822
+        },
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE.txt",
+          "path": "legal/licenses/javascript/tslib@2.8.1/LICENSE.txt",
+          "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751",
+          "size": 655
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/tslib@2.8.1/CopyrightNotice.txt",
+          "sha256": "da16ddb65f8ca390998fb99223d0112498b56b45784d00afd77ff8ce1ac4de8b"
+        },
+        {
+          "path": "legal/licenses/javascript/tslib@2.8.1/LICENSE.txt",
+          "sha256": "210b19e543130388c68654b7497e967119ce17145f66ab7d85688fbd70f08751"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "unified@11.0.5",
+      "name": "unified",
+      "version": "11.0.5",
+      "dependency_class": "direct",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://unifiedjs.com",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/unified@11.0.5/license",
+          "sha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/unified@11.0.5/license",
+          "sha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "unist-util-is@6.0.1",
+      "name": "unist-util-is",
+      "version": "6.0.1",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/unist-util-is#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/unist-util-is@6.0.1/license",
+          "sha256": "82974dbf2639d13edab95c32ed9cb6c0867ede272cd2e07ce47ce8548fe55c05",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/unist-util-is@6.0.1/license",
+          "sha256": "82974dbf2639d13edab95c32ed9cb6c0867ede272cd2e07ce47ce8548fe55c05"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "unist-util-position@5.0.0",
+      "name": "unist-util-position",
+      "version": "5.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/unist-util-position#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/unist-util-position@5.0.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/unist-util-position@5.0.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "unist-util-stringify-position@4.0.0",
+      "name": "unist-util-stringify-position",
+      "version": "4.0.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/unist-util-stringify-position#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/unist-util-stringify-position@4.0.0/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/unist-util-stringify-position@4.0.0/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "unist-util-visit-parents@6.0.2",
+      "name": "unist-util-visit-parents",
+      "version": "6.0.2",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/unist-util-visit-parents#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/unist-util-visit-parents@6.0.2/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/unist-util-visit-parents@6.0.2/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "unist-util-visit@5.1.0",
+      "name": "unist-util-visit",
+      "version": "5.1.0",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/syntax-tree/unist-util-visit#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/unist-util-visit@5.1.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/unist-util-visit@5.1.0/license",
+          "sha256": "63cb98b3f6abfb3c3592c16f88253c1bdc834087bf52671e8ce5609e4eb693cf"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "use-callback-ref@1.3.3",
+      "name": "use-callback-ref",
+      "version": "1.3.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "theKashey",
+      "homepage": "https://github.com/theKashey/use-callback-ref#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/use-callback-ref@1.3.3/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9",
+          "size": 1071
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/use-callback-ref@1.3.3/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "use-sidecar@1.1.3",
+      "name": "use-sidecar",
+      "version": "1.1.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "theKashey",
+      "homepage": "https://github.com/theKashey/use-sidecar",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "LICENSE",
+          "path": "legal/licenses/javascript/use-sidecar@1.1.3/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9",
+          "size": 1071
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/use-sidecar@1.1.3/LICENSE",
+          "sha256": "30f0cfddf483d1128e3610205020f2041a6c5e837aa999e0aa82e5576187d4a9"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "vfile-message@4.0.3",
+      "name": "vfile-message",
+      "version": "4.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/vfile/vfile-message#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/vfile-message@4.0.3/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb",
+          "size": 1094
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/vfile-message@4.0.3/license",
+          "sha256": "dd1081884a92952802f4803110a6bb543acea9a814c786d58605b4c1219b5ebb"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "vfile@6.0.3",
+      "name": "vfile",
+      "version": "6.0.3",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/vfile/vfile#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/vfile@6.0.3/license",
+          "sha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/vfile@6.0.3/license",
+          "sha256": "05811400116ed61f1a7693b78fe8ca6598c155a12f3978e609db4df648a4cb3d"
+        }
+      ],
+      "notice_file_present": false
+    },
+    {
+      "id": "zwitch@2.0.4",
+      "name": "zwitch",
+      "version": "2.0.4",
+      "dependency_class": "transitive",
+      "environment": "production",
+      "bundled": true,
+      "license_expression": "MIT",
+      "author": "Titus Wormer",
+      "homepage": "https://github.com/wooorm/zwitch#readme",
+      "license_evidence": {
+        "kind": "PACKAGE_LEGAL_FILES"
+      },
+      "legal_files": [
+        {
+          "kind": "LICENSE",
+          "source_name": "license",
+          "path": "legal/licenses/javascript/zwitch@2.0.4/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d",
+          "size": 1099
+        }
+      ],
+      "license_texts": [
+        {
+          "path": "legal/licenses/javascript/zwitch@2.0.4/license",
+          "sha256": "ca4662cb5d1b738fbe5350c0d5485ba11773b4b7208974082ae6e129a52d631d"
+        }
+      ],
+      "notice_file_present": false
+    }
+  ]
+}

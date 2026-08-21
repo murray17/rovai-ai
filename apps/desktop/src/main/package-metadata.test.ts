@@ -18,13 +18,18 @@ describe('desktop package metadata', () => {
     expect(packageMetadata.scripts.dev).not.toContain('native:build:macos')
     expect(packageMetadata.scripts['build:desktop']).not.toContain('native:build:macos')
     expect(packageMetadata.build.mac.extraResources.map(({ to }: { to: string }) => to)).toEqual([
+      'legal',
       'bin/rovai-core',
       'bin/rovai'
     ])
   })
 
-  it('packages only sidecars staged for the selected target', () => {
+  it('packages deterministic legal files and sidecars staged for the selected target', () => {
     expect(packageMetadata.build.mac.extraResources).toEqual([
+      {
+        from: '.legal-payload',
+        to: 'legal'
+      },
       {
         from: 'resources/bin/macos-${arch}/rovai-core',
         to: 'bin/rovai-core'
@@ -45,6 +50,11 @@ describe('desktop package metadata', () => {
       }
     ])
     expect(packageMetadata.build).not.toHaveProperty('extraResources')
+    expect(packageMetadata.scripts['package:mac:unsigned']).toContain('pnpm legal:prepare')
+    expect(packageMetadata.scripts['package:mac:unsigned']).toContain('--integrity-only')
+    expect(packageMetadata.scripts['dist:mac:release:arm64']).toContain(
+      'pnpm legal:check:binary'
+    )
     expect(packageMetadata.scripts['dist:mac:release:arm64']).toContain(
       'pnpm build:macos:arm64'
     )

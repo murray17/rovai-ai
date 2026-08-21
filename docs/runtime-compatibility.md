@@ -115,7 +115,7 @@ Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。下表是证据缺�
 
 公共 Named Pipe、Job Object 或三类 execution-shape 测试只能证明平台基础设施。任一行提升为 `qualified` 前，
 必须独立覆盖 discovery、executable identity、authentication、first run、Session continuation、Built-in Tool
-v14、Approval、cancellation、final boundary、process cleanup 与 planned shutdown；证据 revision 必须不可变且
+v20、Approval、cancellation、final boundary、process cleanup 与 planned shutdown；证据 revision 必须不可变且
 digest-bound。
 
 ### 2026-08-21 Windows 10 22H2 本机实施复核
@@ -141,7 +141,7 @@ digest-bound evidence 尚未形成，因此上表的 admission 与 evidence revi
 
 本机验证包含 Rust PR test profile、Rust fmt/Clippy、TypeScript/Vitest/Node tests、Windows x64 unpacked/NSIS
 构建与 PE/manifest 验证、clean install/start/upgrade/uninstall/data-preserve，以及七个适用 Runtime 的真实 ACP/
-Approval、十个 Runtime 的 Built-in CLI v19 与 Missing-Send Recovery、九个适用 Runtime 的 MCP Projection、十个
+Approval、十个 Runtime 的 Built-in CLI v20 与 Missing-Send Recovery、九个适用 Runtime 的 MCP Projection、十个
 Runtime 的原生 Skill Projection 矩阵；TRAE 使用当前权威的 `.trae/skills` managed delivery，并另行通过冷恢复。
 OpenCode、Qoder、CodeBuddy、Qwen 与 TRAE 的相应模型证据均为 Flash，不使用 DK V4 Pro。开发态 packaged Desktop
 以 Claude `2.1.86` 完成真实 planned shutdown：Runtime 在 8162ms 自然退出、7 个后代进程被 Job 回收、协议 v2

@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: camp-identity-boundaries
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Camp Identity Architecture
@@ -65,6 +65,6 @@ Run、Turn、Delivery 与 Gather。
 - [Camp Identity v1](../contracts/camp-identity-v1.md)
 - [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
 - [Camp History Retrieval v4](../contracts/camp-history-v4.md)
-- [Built-in Tool Transport v19](../contracts/builtin-tool-transport-v19.md)
+- [Built-in Tool Transport v20](../contracts/builtin-tool-transport-v20.md)
 - [AgentRun Recovery](agent-run-recovery.md)
 - [Built-in Tool Runtime](builtin-tool-runtime.md)
