@@ -47,16 +47,17 @@ use rovai_core::{
         AdapterInstallationView, AdapterKind, AdapterProbeAttempt, AgentProfileService,
         ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
         CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
-        InstallationClass, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
-        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeModelCatalogCacheStatus,
-        RuntimeReadinessStatus, SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
-        SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
-        UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        InstallationClass, InstallationSource, ManagedProbeFailure,
+        RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
+        RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus, SetAgentProfileAvatarCommand,
+        SetMemberPresenceCommand, SetMemberRuntimeConfigurationCommand,
+        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
-        executable_fingerprint as fingerprint_executable, verify_executable_integrity,
+        executable_fingerprint as fingerprint_executable, observe_executable_file_identity,
+        verify_executable_integrity,
     },
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
@@ -1007,6 +1008,91 @@ struct RuntimeDeepProbeResult {
 
 const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
 const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
+const RUNTIME_PROBE_UPDATE_RETRY_DELAY: Duration = Duration::from_millis(300);
+const RUNTIME_PROBE_MAX_EXECUTIONS: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeCheckOutcome {
+    Ready,
+    StableFailure,
+    Superseded,
+}
+
+impl RuntimeCheckOutcome {
+    fn is_ready(self) -> bool {
+        self == Self::Ready
+    }
+
+    fn public_status(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::StableFailure => "stable_failure",
+            Self::Superseded => "deferred",
+        }
+    }
+}
+
+#[derive(Default)]
+struct RuntimeCheckExecutionDeferrals {
+    runtime_kinds: BTreeSet<AdapterKind>,
+}
+
+impl RuntimeCheckExecutionDeferrals {
+    fn should_defer(&mut self, runtime_kind: AdapterKind, trigger: RuntimeCheckTrigger) -> bool {
+        if trigger == RuntimeCheckTrigger::Execution {
+            self.runtime_kinds.contains(&runtime_kind)
+        } else {
+            self.runtime_kinds.remove(&runtime_kind);
+            false
+        }
+    }
+
+    fn record(
+        &mut self,
+        runtime_kind: AdapterKind,
+        trigger: RuntimeCheckTrigger,
+        outcome: &std::result::Result<RuntimeCheckOutcome, String>,
+    ) {
+        if trigger == RuntimeCheckTrigger::Execution
+            && outcome.as_ref() == Ok(&RuntimeCheckOutcome::Superseded)
+        {
+            self.runtime_kinds.insert(runtime_kind);
+        }
+    }
+}
+
+enum IdentityCheckedProbe<T> {
+    Stable(std::result::Result<T, anyhow::Error>),
+    Superseded,
+}
+
+async fn run_identity_checked_probe<T>(
+    executable_path: &Path,
+    probe: impl Future<Output = Result<T>>,
+) -> IdentityCheckedProbe<T> {
+    let before = observe_executable_file_identity(executable_path).ok();
+    let result = probe.await;
+    let superseded = before.as_ref().is_some_and(|before| {
+        observe_executable_file_identity(executable_path)
+            .map(|after| after != *before)
+            .unwrap_or(true)
+    });
+    if superseded {
+        IdentityCheckedProbe::Superseded
+    } else {
+        IdentityCheckedProbe::Stable(result)
+    }
+}
+
+fn runtime_probe_update_retry_at(
+    now: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+) -> Option<tokio::time::Instant> {
+    (now < deadline).then_some(std::cmp::min(
+        now + RUNTIME_PROBE_UPDATE_RETRY_DELAY,
+        deadline,
+    ))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum RuntimeCheckTrigger {
@@ -1028,7 +1114,7 @@ struct RuntimeCheckRequest {
     purpose: RuntimeLaunchPurpose,
     trigger: RuntimeCheckTrigger,
     acknowledged: oneshot::Sender<bool>,
-    completion: Option<oneshot::Sender<std::result::Result<bool, String>>>,
+    completion: Option<oneshot::Sender<std::result::Result<RuntimeCheckOutcome, String>>>,
 }
 
 struct RuntimeCheckAttempt {
@@ -1038,13 +1124,13 @@ struct RuntimeCheckAttempt {
     trigger: RuntimeCheckTrigger,
     started_at: tokio::time::Instant,
     deadline: tokio::time::Instant,
-    waiters: Vec<oneshot::Sender<std::result::Result<bool, String>>>,
+    waiters: Vec<oneshot::Sender<std::result::Result<RuntimeCheckOutcome, String>>>,
 }
 
 struct RuntimeCheckWorkerResult {
     attempt_id: String,
     runtime_kind: AdapterKind,
-    result: std::result::Result<bool, String>,
+    result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 }
 
@@ -1973,6 +2059,51 @@ impl Core {
         Ok(())
     }
 
+    async fn commit_rebound_runtime_candidate(
+        &self,
+        kind: AdapterKind,
+        executable_path: &Path,
+        executable_fingerprint: &str,
+        source: InstallationSource,
+        search_generation: u64,
+    ) -> Result<()> {
+        let observed_at = chrono::Utc::now().to_rfc3339();
+        let snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
+            kind,
+            None,
+            executable_fingerprint.to_string(),
+            observed_at.clone(),
+        )?;
+        {
+            let mut database = self.database.lock().await;
+            AgentProfileService::default().commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: kind,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: kind.command_name().to_string(),
+                    source,
+                    auth_scope: "default".to_string(),
+                    snapshot,
+                },
+            )?;
+        }
+        self.runtime_product_diagnostics.write().await.remove(&kind);
+        self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
+            runtime_kind: kind,
+            discovery_status: RuntimeDiscoveryStatus::Found,
+            executable_path: Some(executable_path.to_string_lossy().to_string()),
+            source: Some(source),
+            reported_version: None,
+            executable_fingerprint: Some(executable_fingerprint.to_string()),
+            search_generation,
+            observed_at,
+            diagnostic_code: None,
+        })
+        .await;
+        Ok(())
+    }
+
     async fn runtime_probe_identity_is_current(
         &self,
         kind: AdapterKind,
@@ -2056,7 +2187,7 @@ impl Core {
             RuntimeModelCatalogCacheStatus::Expired
             | RuntimeModelCatalogCacheStatus::Unavailable
             | RuntimeModelCatalogCacheStatus::Invalidated => {
-                if self
+                match self
                     .await_runtime_check(
                         kind,
                         RuntimeLaunchPurpose::AvailabilityCheck,
@@ -2064,9 +2195,9 @@ impl Core {
                     )
                     .await?
                 {
-                    "completed"
-                } else {
-                    "failed"
+                    RuntimeCheckOutcome::Ready => "completed",
+                    RuntimeCheckOutcome::StableFailure => "failed",
+                    RuntimeCheckOutcome::Superseded => "deferred",
                 }
             }
         };
@@ -2195,7 +2326,7 @@ impl Core {
         kind: AdapterKind,
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
-    ) -> Result<bool> {
+    ) -> Result<RuntimeCheckOutcome> {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
         }
@@ -2559,8 +2690,8 @@ impl Core {
         &self,
         kind: rovai_core::agent_profile::AdapterKind,
         purpose: RuntimeLaunchPurpose,
-    ) -> Result<bool> {
-        self.runtime_product_diagnostics.write().await.remove(&kind);
+        deadline: tokio::time::Instant,
+    ) -> Result<RuntimeCheckOutcome> {
         let (existing, search) = {
             let database = self.database.lock().await;
             (
@@ -2630,10 +2761,10 @@ impl Core {
                         .insert(kind, diagnostic);
                 }
             }
-            return Ok(false);
+            return Ok(RuntimeCheckOutcome::StableFailure);
         }
 
-        for (path, source) in candidates {
+        'candidate: for (path, source) in candidates {
             if !is_executable_file(&path) {
                 note_product_runtime_diagnostic(
                     &mut unresolved_diagnostic,
@@ -2671,8 +2802,8 @@ impl Core {
                 }
                 continue;
             }
-            let canonical = canonical_runtime_path(&path);
-            let candidate_fingerprint = match fingerprint_executable(&canonical) {
+            let mut canonical = canonical_runtime_path(&path);
+            let mut candidate_fingerprint = match fingerprint_executable(&canonical) {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
                     eprintln!(
@@ -2713,12 +2844,23 @@ impl Core {
                 }
             };
             let targets_current_installation = existing_canonical_path.as_ref() == Some(&canonical);
-            let identity_changed = targets_current_installation
+            let mut identity_changed = targets_current_installation
                 && existing
                     .as_ref()
                     .and_then(|installation| installation.snapshot.as_ref())
                     .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
-                    .is_some_and(|previous| previous != candidate_fingerprint);
+                    != Some(candidate_fingerprint.as_str());
+            if identity_changed {
+                self.commit_rebound_runtime_candidate(
+                    kind,
+                    &canonical,
+                    &candidate_fingerprint,
+                    source,
+                    search.generation(),
+                )
+                .await?;
+                identity_changed = false;
+            }
             let mut lightweight = RuntimeDiscoveryObservation {
                 runtime_kind: kind,
                 discovery_status: RuntimeDiscoveryStatus::Found,
@@ -2773,52 +2915,185 @@ impl Core {
                 );
                 continue;
             }
-            let deep_probe = match with_runtime_search_environment(
-                &search,
-                self.deep_probe_candidate(kind, &canonical, purpose),
-            )
-            .await
-            {
-                Ok(deep_probe) => deep_probe,
-                Err(error) => {
-                    eprintln!(
-                        "Runtime deep probe construction failed for {} at {}: {error:#}",
-                        kind.as_str(),
-                        canonical.display()
-                    );
-                    let failure_class = if identity_changed {
-                        "identity_changed"
-                    } else {
-                        "transient"
-                    };
-                    let diagnostic_code = if !targets_current_installation {
-                        "runtime_alternate_candidate_probe_failed"
-                    } else if identity_changed {
-                        "runtime_identity_changed"
-                    } else {
-                        "runtime_probe_transient_failure"
-                    };
-                    let mut database = self.database.lock().await;
-                    AgentProfileService::default().record_managed_probe_failure(
-                        &mut database,
-                        ManagedProbeFailure {
-                            adapter_kind: kind,
-                            auth_scope: "default",
-                            candidate_path: &canonical.to_string_lossy(),
-                            fingerprint: Some(&candidate_fingerprint),
-                            source: Some(source),
+            let mut probe_execution_count = 0;
+            let deep_probe = loop {
+                probe_execution_count += 1;
+                let checked = run_identity_checked_probe(
+                    &canonical,
+                    with_runtime_search_environment(
+                        &search,
+                        self.deep_probe_candidate(kind, &canonical, purpose),
+                    ),
+                )
+                .await;
+                let checked = match checked {
+                    IdentityCheckedProbe::Stable(Ok(deep_probe))
+                        if deep_probe
+                            .snapshot
+                            .executable_fingerprint
+                            .as_deref()
+                            .is_some_and(|fingerprint| fingerprint != candidate_fingerprint) =>
+                    {
+                        IdentityCheckedProbe::Superseded
+                    }
+                    other => other,
+                };
+                match checked {
+                    IdentityCheckedProbe::Stable(Ok(deep_probe)) => break deep_probe,
+                    IdentityCheckedProbe::Stable(Err(error)) => {
+                        eprintln!(
+                            "Runtime deep probe construction failed for {} at {}: {error:#}",
+                            kind.as_str(),
+                            canonical.display()
+                        );
+                        let failure_class = if identity_changed {
+                            "identity_changed"
+                        } else {
+                            "transient"
+                        };
+                        let diagnostic_code = if !targets_current_installation {
+                            "runtime_alternate_candidate_probe_failed"
+                        } else if identity_changed {
+                            "runtime_identity_changed"
+                        } else {
+                            "runtime_probe_transient_failure"
+                        };
+                        let mut database = self.database.lock().await;
+                        AgentProfileService::default().record_managed_probe_failure(
+                            &mut database,
+                            ManagedProbeFailure {
+                                adapter_kind: kind,
+                                auth_scope: "default",
+                                candidate_path: &canonical.to_string_lossy(),
+                                fingerprint: Some(&candidate_fingerprint),
+                                source: Some(source),
+                                failure_class,
+                                diagnostic_code,
+                                failure: None,
+                            },
+                        )?;
+                        note_product_runtime_diagnostic(
+                            &mut unresolved_diagnostic,
                             failure_class,
                             diagnostic_code,
-                            failure: None,
-                        },
-                    )?;
-                    note_product_runtime_diagnostic(
-                        &mut unresolved_diagnostic,
-                        failure_class,
-                        diagnostic_code,
-                        None,
-                    );
-                    continue;
+                            None,
+                        );
+                        continue 'candidate;
+                    }
+                    IdentityCheckedProbe::Superseded => {
+                        eprintln!(
+                            "runtime_probe_superseded_by_runtime_update runtime_kind={} path={} probe_execution={probe_execution_count}",
+                            kind.as_str(),
+                            canonical.display(),
+                        );
+                        if probe_execution_count >= RUNTIME_PROBE_MAX_EXECUTIONS {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        }
+                        let now = tokio::time::Instant::now();
+                        let Some(retry_at) = runtime_probe_update_retry_at(now, deadline) else {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        };
+                        tokio::time::sleep_until(retry_at).await;
+                        if tokio::time::Instant::now() >= deadline {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        }
+                        if self.runtime_search_environment.read().await.generation()
+                            != search.generation()
+                        {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        }
+                        if !is_executable_file(&path) {
+                            let rebound_path = canonical_runtime_path(&path);
+                            let mut database = self.database.lock().await;
+                            AgentProfileService::default().record_managed_probe_failure(
+                                &mut database,
+                                ManagedProbeFailure {
+                                    adapter_kind: kind,
+                                    auth_scope: "default",
+                                    candidate_path: &rebound_path.to_string_lossy(),
+                                    fingerprint: None,
+                                    source: Some(source),
+                                    failure_class: "path_missing",
+                                    diagnostic_code: "runtime_path_missing",
+                                    failure: availability_environment_failure(
+                                        kind,
+                                        "runtime_executable_unavailable",
+                                        "Runtime 可执行文件不可用",
+                                    )
+                                    .as_ref(),
+                                },
+                            )?;
+                            note_product_runtime_diagnostic(
+                                &mut unresolved_diagnostic,
+                                "path_missing",
+                                "runtime_path_missing",
+                                availability_environment_failure(
+                                    kind,
+                                    "runtime_executable_unavailable",
+                                    "Runtime 可执行文件不可用",
+                                ),
+                            );
+                            continue 'candidate;
+                        }
+                        canonical = canonical_runtime_path(&path);
+                        candidate_fingerprint = match fingerprint_executable(&canonical) {
+                            Ok(fingerprint) => fingerprint,
+                            Err(error) => {
+                                eprintln!(
+                                    "Runtime rebound fingerprint failed for {} at {}: {error:#}",
+                                    kind.as_str(),
+                                    canonical.display()
+                                );
+                                let mut database = self.database.lock().await;
+                                AgentProfileService::default().record_managed_probe_failure(
+                                    &mut database,
+                                    ManagedProbeFailure {
+                                        adapter_kind: kind,
+                                        auth_scope: "default",
+                                        candidate_path: &canonical.to_string_lossy(),
+                                        fingerprint: None,
+                                        source: Some(source),
+                                        failure_class: "transient",
+                                        diagnostic_code: "runtime_fingerprint_failed",
+                                        failure: availability_environment_failure(
+                                            kind,
+                                            "runtime_executable_unavailable",
+                                            "无法读取 Runtime 可执行文件",
+                                        )
+                                        .as_ref(),
+                                    },
+                                )?;
+                                note_product_runtime_diagnostic(
+                                    &mut unresolved_diagnostic,
+                                    "transient",
+                                    "runtime_fingerprint_failed",
+                                    availability_environment_failure(
+                                        kind,
+                                        "runtime_executable_unavailable",
+                                        "无法读取 Runtime 可执行文件",
+                                    ),
+                                );
+                                continue 'candidate;
+                            }
+                        };
+                        identity_changed = targets_current_installation
+                            && existing
+                                .as_ref()
+                                .and_then(|installation| installation.snapshot.as_ref())
+                                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
+                                != Some(candidate_fingerprint.as_str());
+                        if targets_current_installation {
+                            self.commit_rebound_runtime_candidate(
+                                kind,
+                                &canonical,
+                                &candidate_fingerprint,
+                                source,
+                                search.generation(),
+                            )
+                            .await?;
+                            identity_changed = false;
+                        }
+                    }
                 }
             };
             let RuntimeDeepProbeResult { snapshot, failure } = deep_probe;
@@ -2831,7 +3106,7 @@ impl Core {
                 )
                 .await
             {
-                return Ok(false);
+                return Ok(RuntimeCheckOutcome::Superseded);
             }
             if snapshot.probe_status == "ready" {
                 let executable_path = canonical.to_string_lossy().to_string();
@@ -2861,7 +3136,7 @@ impl Core {
                 })
                 .await;
                 self.runtime_product_diagnostics.write().await.remove(&kind);
-                return Ok(true);
+                return Ok(RuntimeCheckOutcome::Ready);
             }
             let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
                 _ if !targets_current_installation => {
@@ -2907,7 +3182,7 @@ impl Core {
                 .await
                 .insert(kind, diagnostic);
         }
-        Ok(false)
+        Ok(RuntimeCheckOutcome::StableFailure)
     }
 
     async fn recover_pending_execution_intents(&self) {
@@ -5605,7 +5880,7 @@ impl Core {
             "runtime.product.check" => {
                 let params: CheckProductRuntimeParams =
                     serde_json::from_value(request.params.clone())?;
-                let ready = self
+                let outcome = self
                     .await_runtime_check(
                         params.runtime_kind,
                         RuntimeLaunchPurpose::AvailabilityCheck,
@@ -5615,7 +5890,9 @@ impl Core {
                 Ok(json!({
                     "scheduled": true,
                     "completed": true,
-                    "ready": ready,
+                    "ready": outcome.is_ready(),
+                    "outcome": outcome.public_status(),
+                    "status": outcome.public_status(),
                     "runtimeKind": params.runtime_kind,
                 }))
             }
@@ -6003,7 +6280,7 @@ impl Core {
         if installation.installation_class
             == rovai_core::agent_profile::InstallationClass::ManagedDefault
         {
-            let ready = self
+            let outcome = self
                 .await_runtime_check(
                     installation.adapter_kind,
                     RuntimeLaunchPurpose::InstallationRefresh,
@@ -6011,9 +6288,11 @@ impl Core {
                 )
                 .await?;
             return Ok(json!({
-                "status": if ready { "applied" } else { "rejected" },
-                "code": if ready {
+                "status": if outcome.is_ready() { "applied" } else { "rejected" },
+                "code": if outcome.is_ready() {
                     "adapter_installation.snapshot_recorded"
+                } else if outcome == RuntimeCheckOutcome::Superseded {
+                    "adapter_installation.refresh_deferred"
                 } else {
                     "adapter_installation.probe_unavailable"
                 },
@@ -6124,6 +6403,9 @@ impl Core {
         {
             Ok((_runtime, effective_version)) => candidate.version = effective_version,
             Err(failure) => {
+                if failure.code == "runtime_check_deferred" {
+                    return;
+                }
                 if let Some(effective_version) = failure.effective_version {
                     candidate.version = effective_version;
                 }
@@ -7918,14 +8200,24 @@ impl Core {
             .invalidate_adapter(frozen_runtime.adapter_kind)
             .await;
         let refresh = match installation.installation_class {
-            InstallationClass::ManagedDefault => self
+            InstallationClass::ManagedDefault => match self
                 .await_runtime_check(
                     frozen_runtime.adapter_kind,
                     RuntimeLaunchPurpose::DispatchPreflight,
                     RuntimeCheckTrigger::Execution,
                 )
                 .await
-                .map(|_| ()),
+            {
+                Ok(RuntimeCheckOutcome::Ready | RuntimeCheckOutcome::StableFailure) => Ok(()),
+                Ok(RuntimeCheckOutcome::Superseded) => {
+                    return Err(RuntimeDispatchFailure {
+                        code: "runtime_check_deferred".to_string(),
+                        error: anyhow::anyhow!("Runtime update superseded the dispatch preflight"),
+                        effective_version: None,
+                    });
+                }
+                Err(error) => Err(error),
+            },
             InstallationClass::Custom => {
                 let search = self.runtime_search_environment.read().await.clone();
                 let deep_probe = with_runtime_search_environment(
@@ -14496,10 +14788,18 @@ async fn process_runtime_check_manager(
     let mut checks: tokio::task::JoinSet<RuntimeCheckWorkerResult> = tokio::task::JoinSet::new();
     let mut active: HashMap<tokio::task::Id, RuntimeCheckAttempt> = HashMap::new();
     let mut pending: Vec<RuntimeCheckAttempt> = Vec::new();
+    let mut execution_deferrals = RuntimeCheckExecutionDeferrals::default();
     loop {
         tokio::select! {
             request = requests.recv() => {
                 let Some(request) = request else { break };
+                if execution_deferrals.should_defer(request.runtime_kind, request.trigger) {
+                    if let Some(completion) = request.completion {
+                        let _ = completion.send(Ok(RuntimeCheckOutcome::Superseded));
+                    }
+                    let _ = request.acknowledged.send(false);
+                    continue;
+                }
                 if let Some(existing) = pending
                     .iter_mut()
                     .find(|attempt| attempt.runtime_kind == request.runtime_kind)
@@ -14518,6 +14818,9 @@ async fn process_runtime_check_manager(
                     .values_mut()
                     .find(|attempt| attempt.runtime_kind == request.runtime_kind)
                 {
+                    if request.trigger > existing.trigger {
+                        existing.trigger = request.trigger;
+                    }
                     if let Some(completion) = request.completion {
                         existing.waiters.push(completion);
                     }
@@ -14576,6 +14879,11 @@ async fn process_runtime_check_manager(
                                 )
                                 .await;
                             } else {
+                                execution_deferrals.record(
+                                    attempt.runtime_kind,
+                                    attempt.trigger,
+                                    &worker.result,
+                                );
                                 finalize_runtime_check(
                                     &core,
                                     attempt,
@@ -14641,11 +14949,15 @@ async fn process_runtime_check_manager(
             let abort_handle = checks.spawn(async move {
                 let (result, finalization) = match tokio::time::timeout_at(
                     worker_deadline,
-                    check_core.run_product_runtime_resolution(worker_kind, worker_purpose),
+                    check_core.run_product_runtime_resolution(
+                        worker_kind,
+                        worker_purpose,
+                        worker_deadline,
+                    ),
                 )
                 .await
                 {
-                    Ok(Ok(ready)) => (Ok(ready), RuntimeCheckFinalization::Product),
+                    Ok(Ok(outcome)) => (Ok(outcome), RuntimeCheckFinalization::Product),
                     Ok(Err(error)) => (
                         Err(format!("runtime_check_failed: {error:#}")),
                         RuntimeCheckFinalization::Product,
@@ -14696,7 +15008,7 @@ async fn process_runtime_check_manager(
 async fn finalize_runtime_check(
     core: &Core,
     attempt: RuntimeCheckAttempt,
-    result: std::result::Result<bool, String>,
+    result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 ) {
     let owns_terminal = {
@@ -14754,7 +15066,9 @@ async fn finalize_runtime_check(
         }),
     );
 
-    if result.as_ref().is_ok_and(|ready| *ready)
+    if result
+        .as_ref()
+        .is_ok_and(|outcome| *outcome == RuntimeCheckOutcome::Ready)
         && let Err(error) = core
             .pump_runtime_ready_recipients(attempt.runtime_kind)
             .await
@@ -15492,6 +15806,121 @@ mod tests {
             "attempt-new",
         ));
         assert!(activity.is_empty());
+        assert!(RuntimeCheckOutcome::Ready.is_ready());
+        assert_eq!(
+            RuntimeCheckOutcome::StableFailure.public_status(),
+            "stable_failure"
+        );
+        assert_eq!(RuntimeCheckOutcome::Superseded.public_status(), "deferred");
+    }
+
+    #[test]
+    fn superseded_execution_is_deferred_until_an_explicit_refresh_trigger() {
+        let runtime_kind = AdapterKind::QwenCode;
+        let mut deferrals = RuntimeCheckExecutionDeferrals::default();
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+
+        deferrals.record(
+            runtime_kind,
+            RuntimeCheckTrigger::Execution,
+            &Ok(RuntimeCheckOutcome::Superseded),
+        );
+        assert!(deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+        assert!(deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::CatalogOpen));
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+
+        deferrals.record(
+            runtime_kind,
+            RuntimeCheckTrigger::UserCheck,
+            &Ok(RuntimeCheckOutcome::Superseded),
+        );
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn identity_checked_probe_discards_updated_results_and_keeps_stable_errors() {
+        use std::os::unix::fs::PermissionsExt;
+
+        fn write_executable(path: &Path, body: &[u8]) {
+            std::fs::write(path, body).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-runtime-probe-identity-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join("fake-runtime");
+        write_executable(&executable, b"#!/bin/sh\nexit 0\n");
+
+        let replacement = directory.join("replacement");
+        let replaced = run_identity_checked_probe(&executable, async {
+            write_executable(&replacement, b"#!/bin/sh\nexit 1\n");
+            std::fs::rename(&replacement, &executable).unwrap();
+            Ok::<_, anyhow::Error>("obsolete-success")
+        })
+        .await;
+        assert!(matches!(replaced, IdentityCheckedProbe::Superseded));
+
+        let updater_holds_stdout = run_identity_checked_probe(&executable, async {
+            write_executable(&replacement, b"#!/bin/sh\nexit 2\n");
+            std::fs::rename(&replacement, &executable).unwrap();
+            Err::<(), _>(anyhow::anyhow!("runtime_probe_stdout_cleanup_timed_out"))
+        })
+        .await;
+        assert!(matches!(
+            updater_holds_stdout,
+            IdentityCheckedProbe::Superseded
+        ));
+
+        let stable_cleanup_timeout = run_identity_checked_probe(&executable, async {
+            Err::<(), _>(anyhow::anyhow!("runtime_probe_stderr_cleanup_timed_out"))
+        })
+        .await;
+        assert!(matches!(
+            stable_cleanup_timeout,
+            IdentityCheckedProbe::Stable(Err(_))
+        ));
+
+        let unverifiable_after = run_identity_checked_probe(&executable, async {
+            std::fs::remove_file(&executable).unwrap();
+            Err::<(), _>(anyhow::anyhow!("probe_failed_while_runtime_updated"))
+        })
+        .await;
+        assert!(matches!(
+            unverifiable_after,
+            IdentityCheckedProbe::Superseded
+        ));
+
+        let missing_before = directory.join("missing-runtime");
+        let existing_behavior = run_identity_checked_probe(&missing_before, async {
+            Err::<(), _>(anyhow::anyhow!("runtime_path_missing"))
+        })
+        .await;
+        assert!(matches!(
+            existing_behavior,
+            IdentityCheckedProbe::Stable(Err(_))
+        ));
+        assert_eq!(RUNTIME_PROBE_MAX_EXECUTIONS, 2);
+
+        let now = tokio::time::Instant::now();
+        let short_deadline = now + Duration::from_millis(100);
+        assert_eq!(
+            runtime_probe_update_retry_at(now, short_deadline),
+            Some(short_deadline)
+        );
+        let full_deadline = now + Duration::from_secs(1);
+        assert_eq!(
+            runtime_probe_update_retry_at(now, full_deadline),
+            Some(now + RUNTIME_PROBE_UPDATE_RETRY_DELAY)
+        );
+        assert_eq!(runtime_probe_update_retry_at(full_deadline, now), None);
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]

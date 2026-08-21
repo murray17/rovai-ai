@@ -153,7 +153,7 @@ directory allowlist evidence。存在不受控 ambient filesystem access 时，�
 - [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
 - [Camp Attachment v5](../contracts/camp-attachment-v5.md)
 - [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
-- [Runtime Launch and Verification v16](../contracts/runtime-launch-and-verification-v16.md)
+- [Runtime Launch and Verification v17](../contracts/runtime-launch-and-verification-v17.md)
 - [V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)
 - [V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)
 - [V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)

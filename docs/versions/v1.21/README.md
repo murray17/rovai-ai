@@ -16,6 +16,8 @@ last_updated: 2026-08-21
 > 不是调试后门；Runtime Diagnostic Trial V1 是 CLI-owned 的诊断闭环，不构成 Benchmark 或正式资格。
 >
 > 前置版本：[v1.20 会话附件系统打开](../v1.20/README.md)已按完成事实冻结为 historical。
+>
+> 后续版本：[v1.22 Runtime Probe 更新容错](../v1.22/README.md)。
 
 ## 版本目标
 

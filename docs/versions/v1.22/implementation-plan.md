@@ -6,44 +6,50 @@ status: implemented
 last_updated: 2026-08-21
 ---
 
-# v1.22 Windows x64 本机实现与 Runtime 复核计划
+# v1.22 Runtime Probe 更新容错实施与验收计划
 
-## 1. 最新 `main` 集成
+## 1. 版本与长期权威
 
-- [x] 在可恢复的 `codex/windows-x64-adaptation` 分支保存 Windows 改动；
-- [x] 获取并合入 `origin/main` 的 v1.16—v1.21 共 59 个提交，不使用 reset/stash 覆盖本地工作；
-- [x] 按当前 Attachment View、Runtime Files Root、Built-in Transport 与 ACP metadata 语义解决重叠；
-- [x] 合并后通过 Rust fmt/Clippy、TypeScript、Node/Vitest、Rust PR、文档和 diff 门禁。
+- [x] 冻结 v1.21，建立唯一 current v1.22；
+- [x] 记录 bounded Probe supersession、一次重新绑定与 LKG/Ready 分离决定；
+- [x] 建立 Runtime Launch and Verification v17，并同步 Architecture、基础不变量和文档路由；
+- [x] 明确不增加 Migration、完整 identity lease、数据库 CAS、Adapter 特判或模型上下文 revision。
 
-## 2. Windows build、package 与 installation
+## 2. Runtime Check Manager
 
-- [x] 合并前完成 Rust PR profile、前端/Node tests、native x64 unpacked/NSIS build 和 release verifier；
-- [x] 合并前完成 clean install/start/same-version upgrade/uninstall/data-preserve；
-- [x] 合并前以真实 Claude Runtime 完成 packaged planned shutdown、7-descendant Job cleanup 与重启恢复；
-- [x] 在最新 `main` 合并结果上重新执行 build、NSIS、verifier、installer lifecycle 和 planned shutdown；
-- [ ] 在 Windows 11 client OS 重跑并保存发布证据；
-- [ ] 完成 Authenticode、RFC 3161 timestamp、release signer/hash allowlist 与 SmartScreen 证据。
+- [x] 完整 Deep Probe 前后复核 executable file identity，覆盖成功、直接错误和 cleanup timeout；
+- [x] 首次 Superseded 在原 attempt/deadline 内重新绑定 path/fingerprint 并最多重试一次；
+- [x] 统一内部 `Ready | StableFailure | Superseded` outcome，Superseded 不写 failure/diagnostic/attempt；
+- [x] Catalog/User Check 投影 deferred，Execution 保持 blocked 且不结算 Runtime failure。
 
-## 3. 十 Runtime 本机矩阵
+## 3. Snapshot 与模型目录
 
-- [x] 安装/探测 Codex、OpenCode、Copilot、Claude、Antigravity、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE；
-- [x] 完成账号登录或 API-key 配置；DeepSeek 路径固定为 `deepseek-v4-flash`；
-- [x] 合并前完成真实 ACP、Approval、Built-in CLI、Missing-Send、MCP Projection 与适用 Skill smoke；
-- [x] 修正 CodeBuddy 官方 API-key ACP、显式 custom model、Idle `usage_update`/private command metadata；
-- [x] 修正 warm Runtime 文件 handle 下的 Windows Skill 投影即时 unlink，并完成 Qwen→TRAE 边界回归；
-- [x] 在最新 `main` 合并结果上重新执行十 Runtime 全矩阵；
-- [ ] 为每个 Adapter 分别形成 Windows 10/11 immutable digest-bound qualification evidence。
+- [x] fingerprint 变化时提交当前静态 snapshot，立即撤销旧 Ready/capability/auth/permission evidence；
+- [x] 仅保留最后成功 models 与原 `lastSuccessfulProbeAt`，在原 24 小时窗口内投影 stale LKG；
+- [x] expired 不再服务 LKG，当前 fingerprint 未 Ready 时 Scheduler 继续要求 Dispatch Preflight；
+- [x] 公开 `lastProbeAttempt` 过滤旧 fingerprint，历史 attempt 不删除。
 
-## 4. 发布与清理
+## 4. 回归与交付
 
-- [x] 正式 Release 对所有缺证据 Windows Runtime 保持 `runtime_platform_not_qualified`；
-- [x] 删除临时登录 helper、失败 Fixture 和已恢复的 sidecar backup，保留非敏感验收报告；
-- [x] 以不回显内容的扫描确认用户 API key 未进入 Git diff 或 tracked files；验收报告与诊断只保留非敏感事实；
-- [x] 全量复跑通过后将本版状态更新为 implemented；按用户最终指令不执行关机。
+- [x] 覆盖一次更新后成功、一次更新后稳定失败、更新持有 stdout、稳定 cleanup timeout 与两次更新；
+- [x] 覆盖旧 Ready/LKG 分离、TTL 不延长和旧 fingerprint attempt 过滤；
+- [x] 运行 Rust fmt、Clippy、定向/slow 测试、TypeScript/Vitest 与文档门禁；相关新增与受影响测试通过；
+- [x] 记录实现提交 `e2187f02` 并将其同步到 `origin/main`；
+- [ ] 执行并记录 App 打包/安装事实；未执行的交付不得标记完成。
+
+## 5. 验证结论
+
+- `cargo clippy --workspace --all-targets -- -D warnings`、Core/AgentProfile 定向回归、20 个 CLI 测试、
+  273 个 slow 测试、TypeScript typecheck、71 个 Vitest 文件/485 个测试和 `pnpm test` 的其余门禁通过；
+- 全量 lib 的既有 Runtime compatibility frozen digest 断言仍失败；本版未修改该寄存器或
+  `docs/runtime-compatibility.md`；
+- 全量 `rovai-core` binary 的 5 个 ACP fixture 仍因缺少 Built-in Tool Run tmp 失败；已在未修改的
+  `origin/main` 基线提交复现，v1.22 新增和受影响测试均通过；
+- 真实 Runtime smoke 和 App 打包/安装不在本轮已执行事实中；实现提交 `e2187f02` 已同步到
+  `origin/main`。
 
 ## References
 
 - [v1.22 版本概览](README.md)
-- [Windows packaging guide](../../development/packaging-windows.md)
-- [Runtime 兼容性清单](../../runtime-compatibility.md)
+- [V1.22-D01](decisions.md#v1-22-d01)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)

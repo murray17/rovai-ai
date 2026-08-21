@@ -10,11 +10,29 @@ import {
   MemberModelParameters,
   MemberRuntimeParameters,
   draftFromDefaults,
+  modelCatalogStatusCopy,
   runtimeDraftForMember,
   runtimeEditorInstallation
 } from './MemberRuntimeParameters'
 
 describe('member runtime parameters', () => {
+  it('presents a superseded refresh as a temporary Runtime update, not a failure', () => {
+    const cache = runtimeInstallation('copilot-cli').modelCatalog
+
+    expect(modelCatalogStatusCopy(cache, {
+      loading: false,
+      refreshFailed: false,
+      servingCachedModels: true,
+      refreshStatus: 'deferred'
+    })).toBe('运行环境正在更新，继续显示上次成功结果')
+    expect(modelCatalogStatusCopy(cache, {
+      loading: false,
+      refreshFailed: false,
+      servingCachedModels: false,
+      refreshStatus: 'deferred'
+    })).toBe('运行环境正在更新，稍后重新获取')
+  })
+
   it('keeps onboarding limited to model fields while permissions come from adapter defaults', () => {
     const installation = runtimeInstallation('codex-cli')
     const markup = renderToStaticMarkup(createElement(MemberModelParameters, {
