@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.23
 authority: implementation-and-acceptance-status
-status: in_progress
+status: implemented
 last_updated: 2026-08-21
 ---
 
@@ -29,7 +29,22 @@ last_updated: 2026-08-21
 - [x] 更新 Charter、Binding digest、transport 与 smoke golden，并断言所有被替换旧句不存在；
 - [x] 运行 Rust PR gate、Clippy、文档和 Desktop build；
 - [x] 构建 macOS App，验证签名、架构、内置 `rovai --help` 与 `rovai app --help`；
-- [ ] 隔离验收后安装到规范路径，提交并 fast-forward push 到 `main`。
+- [x] 隔离验收后安装到规范路径，提交并 fast-forward push 到 `main`。
+
+## 4. 验证结论
+
+- `pnpm test` 通过：71 个 Vitest 文件 / 485 项测试，以及 189 项 Node 测试全部通过；TypeScript typecheck、
+  `cargo fmt --all --check`、workspace Clippy、Desktop production build 和三类文档门禁通过；
+- Rust CLI 20 项、slow suite 273 项全部通过；全量 lib 与 staged route 均为 298 项通过、1 项既有
+  `runtime-compatibility.md` frozen digest 基线失败，和 v1.20/v1.22 已记录结果一致，本版不吸收独立修复；
+- `pnpm package:mac` 成功；App、Core、CLI 深度/独立验签通过，三枚二进制均为 arm64，包内 CLI 报告
+  `contract-v20 ipc-v2`；根 `--help` 与 `app --help` 各验证一次并保持确认合同；
+- 打包 App 使用一次性隔离 `userData` 启动，`rovai app status --json` 返回 `appRunning=true`、
+  `authorized=true`、Automation contract 1，随后受控退出且 Core shutdown 完成；
+- 产物已安装到 `/Applications/Rovai AI.app`，安装版 User Automation 再次连通，并确认 App/Core 进程均从
+  规范安装路径运行；旧 v19 App 备份保留在
+  `/Applications/Rovai AI.backup-v1.22-before-v1.23-20260821-195957.app`；
+- 实现提交 `3b8902fa` 已 fast-forward 同步到 `origin/main`。
 
 ## References
 

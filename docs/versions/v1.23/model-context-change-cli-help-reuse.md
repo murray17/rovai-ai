@@ -7,6 +7,8 @@ confirmation_status: confirmed
 confirmed_revision: 3
 confirmed_by: murray17
 confirmed_at: 2026-08-21T11:39:42Z
+implementation_status: implemented
+implementation_commit: 3b8902fa067630c394b3a177595f726534f3e8fd
 authority: confirmed-model-input-change-statement
 implementation_baseline: ef2eab5d12efaf181dc12bc3a6ec593cbdc6752a
 last_updated: 2026-08-21
@@ -249,6 +251,14 @@ revision 并使旧确认失效。
 - `pnpm docs:test`、`pnpm docs:check` 与真实 base 的 `docs:check:ci`；
 - `pnpm build:desktop`、`pnpm package:mac`、codesign/file/UUID 检查；
 - 非终止安装交接后，从规范安装路径重新验证内置 CLI；当前承载会话的旧进程不重启。
+
+## 实施结果
+
+实现提交 `3b8902fa` 严格采用 revision 3 的完整替换后 Charter，没有改变根 CLI help、operation catalog、
+Send v12、User Automation 或数据合同。Transport/CLI v20、`builtin_cli.transport.v20` 与内部
+`sessionCharterRevision: 2` 已由 snapshot、digest 和打包产物共同验证；隔离与安装版
+`rovai app status` 均成功连通 Automation contract 1。完整命令与已知基线失败记录见
+[实施与验收计划](implementation-plan.md#4-验证结论)。
 
 ## References
 

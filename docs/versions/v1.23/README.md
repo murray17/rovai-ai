@@ -4,7 +4,7 @@ version: v1.23
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: implemented
 model_context_change: true
 last_updated: 2026-08-21
 ---
@@ -12,7 +12,7 @@ last_updated: 2026-08-21
 # Rovai-ai v1.23：按需 Built-in CLI Help 与 Charter 精简
 
 > 当前状态：[模型上下文变更 revision 3](model-context-change-cli-help-reuse.md) 已按最新 `origin/main`
-> 由开发者二次确认，进入实现、回归、App 打包安装与 `main` 交付。
+> 由开发者二次确认并完成实现、回归、App 打包安装与 `main` 交付；实现提交为 `3b8902fa`。
 >
 > 前置版本：[v1.22 Runtime Probe 更新容错](../v1.22/README.md)已按完成事实冻结为 historical；其
 > Runtime Probe supersession 与 stale LKG 边界继续作为本版基线。
@@ -38,6 +38,20 @@ invocation 所需 syntax 不清楚时查看精确 operation help，并尽量复�
   schema 58 与 Migration 103 保持不变；
 - 通过 Charter/root-help snapshot、Binding digest 负向测试、Rust 回归、打包 App 内置 CLI 与
   `rovai app` User Automation 验证交付。
+
+## 实施结果
+
+- Session Charter 已按确认文本替换四处 passage；根 CLI help bytes、十五项 operation、Send v12、数据合同和
+  User Automation contract 均保持不变；
+- Built-in Tool Transport/CLI 与 capability 已原子提升到 v20，Native Binding contract 已加入内部
+  `sessionCharterRevision: 2`，旧 Binding 不会承载新 Charter；
+- 文档、TypeScript、Vitest/Node、Rust CLI/slow、fmt、Clippy、Desktop build 与打包门禁通过；全量 lib 的
+  298 项通过，唯一失败仍是当前 `main` 已记录的 Runtime compatibility frozen digest 基线不一致，本版未越界
+  修改该登记；
+- macOS arm64 App 已通过签名、架构与包内 CLI/Core 检查，隔离 App 的真实 `rovai app status` 验证
+  `authorized=true`；产物已安装到 `/Applications/Rovai AI.app` 并从该规范路径启动；
+- 安装前 v19 App 保留在
+  `/Applications/Rovai AI.backup-v1.22-before-v1.23-20260821-195957.app`，日常 `userData` 未替换。
 
 ## 明确不做
 
