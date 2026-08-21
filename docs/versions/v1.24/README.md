@@ -11,7 +11,8 @@ last_updated: 2026-08-21
 
 # Rovai-ai v1.24：Runtime Probe 完整边界与自动恢复
 
-> 当前状态：实现与回归已完成，正在同步最新 `main` 并执行 App 打包安装。
+> 当前状态：实现提交 `7f67ddde` 已同步到 `origin/main`，全量回归、App 打包、隔离验收和非终止安装交接
+> 已完成；新包位于 `/Applications/Rovai AI.app`，当前承载会话的旧进程将在用户稍后退出后才切换。
 >
 > 前置版本：[v1.23 按需 Built-in CLI Help 与 Charter 精简](../v1.23/README.md)已按完成事实冻结为
 > historical；其 Built-in Transport v20、Session Charter revision 2 与安装事实继续作为本版基线。
@@ -40,6 +41,20 @@ last_updated: 2026-08-21
 - 不增加逐子命令 SHA、完整 Probe Identity Lease、数据库 CAS、文件锁、更新锁或 binary 副本；
 - 不增加无限重试，不延长 cleanup timeout，不增加 AGY 或其他 Runtime 专用分支；
 - 不修改 Adapter `health.rs`、正常 AgentRun 执行链、数据库 Schema、模型上下文或 Renderer wire。
+
+## 交付结果
+
+- Rust lib 299 项、Core binary 118 项、CLI 20 项、slow suite 273 项和两条 manager-level fake Runtime 测试
+  全部通过；4 条真实 Runtime smoke 按既有规则保持手工 ignored；
+- `cargo fmt`、workspace/slow-feature Clippy、TypeScript、71 个 Vitest 文件/485 项、189 项 Node 测试以及
+  文档、Skill、legal 门禁通过；
+- `pnpm package:mac` 完成 arm64 release 构建、ad-hoc 签名和 732 个 legal payload 文件校验；App、Core 与
+  CLI 的签名、架构和包内 help 已复验；
+- 打包 App 使用一次性隔离 `userData` 完成 onboarding 全流程；独立隔离实例的 `rovai app status --json`
+  返回 `appRunning=true`、`authorized=true`、Automation contract 1，随后受控退出；
+- 新包已原子换入 `/Applications/Rovai AI.app`；上一版保留在
+  `/Applications/Rovai AI.backup-v1.23-before-v1.24-20260821-2132.app`，日常 `userData` 未修改，承载当前
+  会话的旧 App/Core 进程未被终止或误报为热升级。
 
 ## 跨版本文档影响
 

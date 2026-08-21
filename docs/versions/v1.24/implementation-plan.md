@@ -27,15 +27,23 @@ last_updated: 2026-08-21
 - [x] manager-level fake Runtime + SQLite 覆盖 version 自替换后的 Ready commit 与新 fingerprint failure；
 - [x] 单元回归覆盖冷却前抑制、到期放行、后续持续放行与显式触发提前清除；
 - [x] Rust fmt、workspace/slow-feature Clippy、定向 manager 测试、CLI/slow、TypeScript/Vitest 和文档门禁通过；
-- [ ] 提交并 fast-forward push 到 `main`；
-- [ ] 构建、验签、隔离验收并安装 macOS App；未执行事实不得标记完成。
+- [x] 实现提交 `7f67ddde` 已 fast-forward push 到 `main`；
+- [x] 构建、验签、隔离验收并以非终止交接方式安装 macOS App。
 
 ## 4. 验证结论
 
 - 评审前的 manager-level 红测可复现外层 version gate：第一次替换直接形成 StableFailure，且 failure 绑定旧
   fingerprint；删除 gate 后 Ready 与 StableFailure 场景均只执行两次 version，并绑定新 fingerprint；
-- v1.24 新增与受影响的 Runtime Check 测试、CLI/slow、fmt、Clippy、TypeScript/Vitest 和文档门禁通过；
-- App 打包、隔离验收、安装路径与最终提交将在完成后回填。
+- Rust lib 299 项、Core binary 118 项、CLI 20 项、slow suite 273 项、manager-level fake Runtime 测试、
+  fmt、workspace/slow-feature Clippy、TypeScript、71 个 Vitest 文件/485 项、189 项 Node 测试和文档门禁通过；
+  4 条真实 Runtime smoke 按既有规则保持手工 ignored；
+- `pnpm package:mac` 通过 source/binary/package legal gate，App/Core/CLI 签名有效且均为 arm64；包内
+  `rovai --help` 与 `rovai app --help` 保持 Transport v20 / User Automation v1 分层；
+- 打包 App 使用一次性隔离 `userData` 完成 onboarding 全流程；另一个隔离实例的 User Automation status
+  返回 `appRunning=true`、`authorized=true`、contract 1，并在验收后完成受控 Core shutdown；
+- 新包已安装到 `/Applications/Rovai AI.app`，上一版保留在
+  `/Applications/Rovai AI.backup-v1.23-before-v1.24-20260821-2132.app`；当前会话的旧 App/Core 仍存活，
+  日常 `userData` 未修改，新版本在用户稍后退出并从规范路径重新打开后生效。
 
 ## References
 
