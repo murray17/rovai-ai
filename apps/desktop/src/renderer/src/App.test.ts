@@ -2630,11 +2630,55 @@ describe('task event projections', () => {
     const inspectorTabListEnd = inspectorMarkup.indexOf('</div>', inspectorTabListStart)
     const inspectorTabList = inspectorMarkup.slice(inspectorTabListStart, inspectorTabListEnd)
     expect(inspectorTabList.indexOf('>执行 <small>'))
-      .toBeLessThan(inspectorTabList.indexOf('>队员 <small>'))
-    expect(inspectorTabList.indexOf('>队员 <small>'))
       .toBeLessThan(inspectorTabList.indexOf('>任务 <small>'))
+    expect(inspectorTabList.indexOf('>任务 <small>'))
+      .toBeLessThan(inspectorTabList.indexOf('>队员 <small>'))
     expect(inspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-execution/)
     expect(inspectorMarkup).toContain('data-placement="inspector"')
+
+    const terminalInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot: {
+        ...groupedSnapshot,
+        agentRuns: groupedSnapshot.agentRuns.map((run) => ({
+          ...run,
+          status: 'succeeded' as const,
+          endedAt: run.endedAt ?? '2026-07-28T05:31:00Z'
+        }))
+      },
+      projectName: 'Rovai',
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined,
+      executionPlacement: 'inspector',
+      inspectorVisible: true
+    }))
+    expect(terminalInspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-execution/)
+
+    const ordinaryInspectorMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: 'Rovai',
+      agents: [profile],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined,
+      inspectorVisible: true
+    }))
+    const ordinaryTabListStart = ordinaryInspectorMarkup.indexOf('class="tabs-list sticky-tabs"')
+    const ordinaryTabListEnd = ordinaryInspectorMarkup.indexOf('</div>', ordinaryTabListStart)
+    const ordinaryTabList = ordinaryInspectorMarkup.slice(ordinaryTabListStart, ordinaryTabListEnd)
+    expect(ordinaryTabList).not.toContain('>执行 <small>')
+    expect(ordinaryTabList.indexOf('>任务 <small>'))
+      .toBeLessThan(ordinaryTabList.indexOf('>队员 <small>'))
+    expect(ordinaryInspectorMarkup).toMatch(/role="tab" aria-selected="true"[^>]*trigger-tasks/)
 
     const groupedEvidenceMarkup = renderToStaticMarkup(createElement(CampWorkspace, {
       snapshot: {

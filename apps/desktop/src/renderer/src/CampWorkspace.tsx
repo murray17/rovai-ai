@@ -1243,7 +1243,7 @@ export function CampWorkspace({
     detail: string | null
   } | null>(null)
   const [executionInspectorActive, setExecutionInspectorActive] = useState(
-    executionPlacement === 'inspector' && workspaceEntryRunningRun !== null
+    executionPlacement === 'inspector'
   )
   const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(
     workspaceEntryRunningRun?.agentId ?? null
@@ -1447,7 +1447,11 @@ export function CampWorkspace({
       sequence: request.sequence + 1,
       moveDomFocus: false
     }))
-    setExecutionInspectorActive(executionPlacement === 'inspector' && runningRun !== null)
+    if (executionPlacement !== 'inspector') {
+      setExecutionInspectorActive(false)
+    } else if (runningRun) {
+      setExecutionInspectorActive(true)
+    }
     executionDrawerTriggerRef.current = null
     executionDrawerReturnAgentIdRef.current = null
     if (runningRun && executionPlacement === 'inspector') {
@@ -1485,7 +1489,7 @@ export function CampWorkspace({
       moveDomFocus: false
     }))
     setSubmittedExecutionRequest(null)
-    setExecutionInspectorActive(executionPlacement === 'inspector' && runningRun !== null)
+    setExecutionInspectorActive(executionPlacement === 'inspector')
     executionDrawerTriggerRef.current = null
     executionDrawerReturnAgentIdRef.current = null
     if (runningRun && executionPlacement === 'inspector') {
@@ -3806,8 +3810,8 @@ export function CampWorkspace({
               {executionPlacement === 'inspector' && (
                 <Tabs.Trigger value="execution">执行 <small>{executionProcesses.length}</small></Tabs.Trigger>
               )}
-              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
               <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
             </Tabs.List>
             <Tabs.Content value="execution" forceMount className="execution-sidecar-panel">
               {executionPlacement === 'inspector' && (
