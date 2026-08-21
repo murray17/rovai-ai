@@ -14,6 +14,8 @@ pub const DURABLE_TASK_CONTRACT_VERSION: u32 = 3;
 use crate::{
     agent_profile::{FrozenAgentRuntimeConfig, resolve_frozen_runtime},
     camp_attachment::consume_prepared_attachments,
+    camp_attachment_publication::CampAttachmentPublicationCoordinator,
+    camp_attachment_view::commit_publication_in_message_transaction,
     camp_content::{
         StructuredCampMessageContent, StructuredCampMessageSegment, canonical_content_digest,
         has_all_members_mention, member_mention_ids, normalize_content, render_plain_text,
@@ -1972,6 +1974,15 @@ impl CollaborationService {
         database: &mut Database,
         envelope: &CommandEnvelope<SendUserCampDraftCommand>,
     ) -> Result<CommandExecution> {
+        self.send_user_camp_draft_with_publication(database, envelope, None)
+    }
+
+    pub fn send_user_camp_draft_with_publication(
+        &self,
+        database: &mut Database,
+        envelope: &CommandEnvelope<SendUserCampDraftCommand>,
+        attachment_publication_operation_id: Option<&str>,
+    ) -> Result<CommandExecution> {
         Self::validate_send_message_input(&envelope.payload)?;
         let camp_message_id = Uuid::new_v4().to_string();
         let camp_turn_id = envelope
@@ -2118,6 +2129,8 @@ impl CollaborationService {
                     body: &submission.body,
                     structured_content: &submission.structured_content,
                     prepared_attachment_ids: &submission.prepared_attachment_ids,
+                    legacy_attachment_publication_operation_id: attachment_publication_operation_id,
+                    draft_revision: envelope.payload.draft_revision,
                     address_mode: submission.address.mode(),
                     reply_to_camp_message_id: submission.reply_to_camp_message_id.as_deref(),
                     resolution: &resolution,
@@ -2375,10 +2388,23 @@ fn load_structured_draft_submission(
         );
     }
     let body = render_plain_text(&content, |agent_id| member_names.get(agent_id).cloned())?;
-    if body.trim().is_empty() {
+    let prepared_attachment_ids = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id
+            FROM prepared_attachment
+            WHERE camp_id = ?1 AND state = 'ready'
+            ORDER BY ordinal, id
+            "#,
+        )?;
+        statement
+            .query_map([camp_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    if body.trim().is_empty() && prepared_attachment_ids.is_empty() {
         return Ok(Err(rejected(
             "camp_message.empty_body",
-            "Camp message body must not be empty",
+            "Camp message must contain text or at least one ready attachment",
         )));
     }
     let generated_camp_name =
@@ -2392,19 +2418,6 @@ fn load_structured_draft_submission(
         CampMessageAddress::Explicit {
             agent_ids: mentioned_agent_ids,
         }
-    };
-    let prepared_attachment_ids = {
-        let mut statement = transaction.prepare(
-            r#"
-            SELECT id
-            FROM prepared_attachment
-            WHERE camp_id = ?1 AND state = 'ready'
-            ORDER BY ordinal, id
-            "#,
-        )?;
-        statement
-            .query_map([camp_id], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
     };
     Ok(Ok(CampMessageSubmission {
         body,
@@ -2423,6 +2436,8 @@ struct QueueCampMessageInput<'a> {
     body: &'a str,
     structured_content: &'a [StructuredCampMessageSegment],
     prepared_attachment_ids: &'a [String],
+    legacy_attachment_publication_operation_id: Option<&'a str>,
+    draft_revision: i64,
     address_mode: &'a str,
     reply_to_camp_message_id: Option<&'a str>,
     resolution: &'a AddressResolution,
@@ -2577,6 +2592,18 @@ fn queue_camp_message_and_runs(
             input.now,
         ],
     )?;
+    let attachment_publication = if input.legacy_attachment_publication_operation_id.is_none() {
+        CampAttachmentPublicationCoordinator.commit_composer_intent(
+            transaction,
+            input.camp_id,
+            input.camp_message_id,
+            input.command_id,
+            input.draft_revision,
+            input.prepared_attachment_ids,
+        )?
+    } else {
+        None
+    };
     consume_prepared_attachments(
         transaction,
         input.camp_id,
@@ -2584,6 +2611,20 @@ fn queue_camp_message_and_runs(
         input.prepared_attachment_ids,
         input.now,
     )?;
+    if let Some(operation_id) = input.legacy_attachment_publication_operation_id {
+        commit_publication_in_message_transaction(
+            transaction,
+            Some(operation_id),
+            input.camp_id,
+            input.prepared_attachment_ids,
+        )?;
+    } else if let Some(publication) = attachment_publication.as_ref() {
+        CampAttachmentPublicationCoordinator.bind_message_attachments(
+            transaction,
+            input.camp_message_id,
+            publication,
+        )?;
+    }
     index_camp_message(
         transaction,
         input.camp_message_id,
@@ -4526,6 +4567,7 @@ mod slow_tests {
             AdapterKind, AgentProfileService, RemoveMemberCommand, configure_test_runtime,
         },
         camp_attachment::CampAttachmentStore,
+        camp_attachment_view::CampAttachmentViewStore,
         camp_content::StructuredCampMessageSegment as Segment,
         command::CommandResultStatus,
         current_input_skill::parse_skill_selection_snapshot,
@@ -6339,18 +6381,96 @@ mod slow_tests {
     }
 
     #[test]
-    fn camp_message_atomically_consumes_the_complete_attachment_draft() {
+    fn empty_camp_message_requires_at_least_one_ready_attachment() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
+        let store = CampAttachmentStore::new(&directory);
+
+        let rejected_empty = service
+            .send_test_camp_message(
+                &mut database,
+                &user_envelope(
+                    "empty-draft-without-attachment",
+                    Some(&camp_id),
+                    TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: String::new(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(rejected_empty.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected_empty.result.code, "camp_message.empty_body");
+        assert_eq!(
+            rejected_empty.result.payload["message"],
+            "Camp message must contain text or at least one ready attachment"
+        );
+        let empty = store.load_draft(&database, &camp_id).unwrap();
+
+        let source = directory.join("not-ready.txt");
+        std::fs::write(&source, b"not ready").unwrap();
+        let not_ready = store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                empty.revision,
+                &source,
+                "not-ready.txt",
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE prepared_attachment SET state = 'error', last_error_code = 'injected_not_ready' WHERE id = ?1",
+                [&not_ready.attachments[0].id],
+            )
+            .unwrap();
+        let rejected_not_ready = service
+            .send_user_camp_draft(
+                &mut database,
+                &user_envelope(
+                    "empty-draft-with-non-ready-attachment",
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: not_ready.revision,
+                        execution: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(
+            rejected_not_ready.result.status,
+            CommandResultStatus::Rejected
+        );
+        assert_eq!(rejected_not_ready.result.code, "camp_message.empty_body");
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "message_attachment"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 1);
+        assert_eq!(row_count(&database, "prepared_attachment"), 1);
+
+        store.remove_camp(&camp_id).unwrap();
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn attachment_only_camp_message_atomically_consumes_the_complete_draft() {
         let (mut database, directory) = test_database();
         let service = CollaborationService::default();
         let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
         let source = directory.join("用户原始文件.txt");
         std::fs::write(&source, b"public camp attachment").unwrap();
         let store = CampAttachmentStore::new(&directory);
-        let saved = store
-            .save_body(&mut database, &camp_id, "请阅读附件。")
-            .unwrap();
         let draft = store
-            .prepare_from_path(&mut database, &camp_id, saved.revision, &source, "说明.txt")
+            .prepare_from_path(&mut database, &camp_id, 0, &source, "说明.txt")
             .unwrap();
         let attachment_ids = draft
             .attachments
@@ -6361,28 +6481,63 @@ mod slow_tests {
             .verify_send(&database, &camp_id, &attachment_ids)
             .unwrap();
 
+        let view_store = CampAttachmentViewStore::for_test(&database).unwrap();
+        let command_id = Uuid::new_v4().to_string();
+        let publication = view_store
+            .stage_publication(&mut database, &store, &camp_id, &command_id, draft.revision)
+            .unwrap()
+            .expect("attachment publication should stage a View entry");
+        view_store
+            .gate_publication(&mut database, &publication)
+            .unwrap();
+        view_store
+            .promote_publication(&mut database, &publication)
+            .unwrap();
+
         let result = service
-            .send_test_camp_message(
+            .send_user_camp_draft_with_publication(
                 &mut database,
                 &user_envelope(
-                    "send-message-with-attachment",
+                    &command_id,
                     Some(&camp_id),
-                    TestCampMessageCommand {
+                    SendUserCampDraftCommand {
                         camp_id: camp_id.clone(),
-                        draft_revision: None,
-                        body: "请阅读附件。".to_string(),
-                        prepared_attachment_ids: attachment_ids.clone(),
-                        address: TestCampMessageAddress::Default,
-                        reply_to_camp_message_id: None,
-                        execution: None,
+                        draft_revision: draft.revision,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "Camp attachment-only message".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
                     },
                 ),
+                Some(&publication.operation_id),
             )
             .unwrap();
-        assert_eq!(result.result.status, CommandResultStatus::Applied);
+        view_store
+            .complete_publication(&mut database, &publication.operation_id)
+            .unwrap();
+        assert_eq!(result.result.status, CommandResultStatus::Accepted);
         assert_eq!(row_count(&database, "camp_composer_draft"), 0);
         assert_eq!(row_count(&database, "prepared_attachment"), 0);
+        assert_eq!(row_count(&database, "camp_message"), 1);
         assert_eq!(row_count(&database, "message_attachment"), 1);
+        assert_eq!(row_count(&database, "agent_run"), 1);
+        let (body, content_json): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT body, structured_content_json FROM camp_message",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(body, "");
+        assert_eq!(content_json, "[]");
+        let purpose: String = database
+            .connection()
+            .query_row("SELECT purpose FROM agent_run", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(purpose, "Camp attachment-only message");
         let (stored_id, stored_path, stored_digest): (String, String, String) = database
             .connection()
             .query_row(
@@ -6398,7 +6553,111 @@ mod slow_tests {
         );
         assert!(stored_digest.starts_with("sha256:"));
 
+        view_store
+            .remove_camp_view(&mut database, &camp_id)
+            .unwrap();
         store.remove_camp(&camp_id).unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(
+            view_store.root().join("camps"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        drop(view_store);
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn attachment_consumption_failure_rolls_back_message_turn_and_agent_run() {
+        let (mut database, directory) = test_database();
+        let service = CollaborationService::default();
+        let camp_id = create_camp_with_members(&service, &mut database, &directory, &["agent_2"]);
+        let source = directory.join("rollback.txt");
+        std::fs::write(&source, b"must remain private").unwrap();
+        let store = CampAttachmentStore::new(&directory);
+        let draft = store
+            .prepare_from_path(&mut database, &camp_id, 0, &source, "rollback.txt")
+            .unwrap();
+        let view_store = CampAttachmentViewStore::for_test(&database).unwrap();
+        let command_id = Uuid::new_v4().to_string();
+        let publication = view_store
+            .stage_publication(&mut database, &store, &camp_id, &command_id, draft.revision)
+            .unwrap()
+            .expect("attachment publication should stage a View entry");
+        view_store
+            .gate_publication(&mut database, &publication)
+            .unwrap();
+        view_store
+            .promote_publication(&mut database, &publication)
+            .unwrap();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                CREATE TRIGGER reject_test_message_attachment
+                BEFORE INSERT ON message_attachment
+                BEGIN
+                    SELECT RAISE(ABORT, 'injected attachment consumption failure');
+                END;
+                "#,
+            )
+            .unwrap();
+
+        let error = service
+            .send_user_camp_draft_with_publication(
+                &mut database,
+                &user_envelope(
+                    &command_id,
+                    Some(&camp_id),
+                    SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: draft.revision,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "Camp attachment-only message".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                ),
+                Some(&publication.operation_id),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("injected attachment consumption failure")
+        );
+        assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "message_attachment"), 0);
+        assert_eq!(row_count(&database, "camp_turn"), 0);
+        assert_eq!(row_count(&database, "agent_run"), 0);
+        assert_eq!(row_count(&database, "camp_composer_draft"), 1);
+        assert_eq!(row_count(&database, "prepared_attachment"), 1);
+
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER reject_test_message_attachment;")
+            .unwrap();
+        view_store
+            .rollback_publication(
+                &mut database,
+                &publication.operation_id,
+                "injected_test_failure",
+            )
+            .unwrap();
+        view_store
+            .remove_camp_view(&mut database, &camp_id)
+            .unwrap();
+        store.remove_camp(&camp_id).unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(
+            view_store.root().join("camps"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
+        drop(view_store);
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }

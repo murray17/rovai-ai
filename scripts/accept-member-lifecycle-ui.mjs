@@ -512,7 +512,7 @@ try {
     runtimeSettingsState.rowCount === 11
       && runtimeSettingsState.labels.includes('Codex CLI')
       && runtimeSettingsState.labels.includes('Antigravity')
-      && runtimeSettingsState.labels.includes('TRAE CLI（中国企业版）')
+      && runtimeSettingsState.labels.includes('TRAE CLI')
       && runtimeSettingsState.labels.includes('DeepSeek Harness')
       && runtimeSettingsState.pendingCount === 1
       && runtimeSettingsState.pendingActionsDisabled

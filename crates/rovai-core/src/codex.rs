@@ -20,6 +20,9 @@ use rovai_core::{
         AgentRuntimeAdapterRegistry, McpProjectionCapability, SkillDiscoveryCapability,
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
+    camp_attachment_view::{
+        CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION, CampAttachmentRuntimeAuthorization,
+    },
     command::canonical_json_digest,
     managed_process::{
         ManagedChildStderr, ManagedChildStdin, ManagedChildStdout, ManagedProcess,
@@ -618,6 +621,11 @@ impl CodexRuntime {
         cwd: &Path,
         options: CodexAgentThreadOptions<'_>,
     ) -> Result<String> {
+        let run_tmp = self
+            .host
+            .builtin_tool_process_config()
+            .context("Codex Runtime has no Built-in Tool Run tmp")?
+            .run_tmp();
         self.start_or_resume_thread_with_config(
             cwd,
             options.existing_thread_id,
@@ -631,13 +639,11 @@ impl CodexRuntime {
                 } else {
                     Some(codex_mcp_session_config(options.external_mcp_servers)?)
                 },
-                runtime_workspace_roots: Some(vec![
-                    cwd.to_string_lossy().into_owned(),
-                    options
-                        .attachment_access_root
-                        .to_string_lossy()
-                        .into_owned(),
-                ]),
+                runtime_workspace_roots: Some(agent_runtime_workspace_roots(
+                    cwd,
+                    options.attachment_access_root,
+                    run_tmp,
+                )),
                 ephemeral: false,
             },
         )
@@ -897,6 +903,17 @@ impl CodexRuntime {
     async fn send(&self, message: Value) -> Result<()> {
         self.host.send(message).await
     }
+}
+
+fn agent_runtime_workspace_roots(
+    execution_root: &Path,
+    attachment_access_root: &Path,
+    run_tmp: &Path,
+) -> Vec<String> {
+    [execution_root, attachment_access_root, run_tmp]
+        .into_iter()
+        .map(|root| root.to_string_lossy().into_owned())
+        .collect()
 }
 
 fn runtime_model_id_from_thread_response(response: &Value) -> Option<String> {
@@ -1293,20 +1310,25 @@ impl CodexCliRuntimeAdapter {
 pub(crate) fn runtime_compatibility_digest(
     frozen_runtime: &FrozenAgentRuntimeConfig,
     cwd: &Path,
-    attachment_access_root: &Path,
+    attachment_authorization: &CampAttachmentRuntimeAuthorization,
 ) -> Result<String> {
     let cwd = cwd
         .canonicalize()
         .with_context(|| format!("failed to resolve execution root {}", cwd.display()))?;
     canonical_json_digest(&json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "adapterKind": frozen_runtime.adapter_kind,
         "runtimeConfigDigest": frozen_runtime.config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
         "executionRoot": cwd,
         "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
-        "attachmentAccessRoot": attachment_access_root,
+        "campAttachmentViewContractVersion": CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION,
+        "campAttachmentRoot": attachment_authorization.attachment_root,
+        "campAttachmentVisibilityMode": attachment_authorization.visibility_mode.as_str(),
+        "campAttachmentGeneration": attachment_authorization
+            .visibility_mode
+            .compatibility_generation(attachment_authorization.generation),
     }))
 }
 
@@ -1898,6 +1920,22 @@ mod tests {
         assert_eq!(resume_method, "thread/resume");
         assert_eq!(resume["threadId"], "thread-existing");
         assert_eq!(resume["developerInstructions"], "bootstrap-latest");
+    }
+
+    #[test]
+    fn agent_workspace_roots_include_execution_attachment_and_run_tmp() {
+        assert_eq!(
+            agent_runtime_workspace_roots(
+                Path::new("/tmp/rovai-workspace"),
+                Path::new("/tmp/rovai-attachments"),
+                Path::new("/tmp/rovai-run-tmp"),
+            ),
+            vec![
+                "/tmp/rovai-workspace".to_string(),
+                "/tmp/rovai-attachments".to_string(),
+                "/tmp/rovai-run-tmp".to_string(),
+            ]
+        );
     }
 
     #[test]

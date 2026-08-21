@@ -220,10 +220,11 @@ pub enum SkillDeliveryGroupKey {
     Qoder,
     Codebuddy,
     Qwen,
+    Trae,
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::Codex,
         Self::Opencode,
         Self::Copilot,
@@ -233,6 +234,7 @@ impl SkillDeliveryGroupKey {
         Self::Qoder,
         Self::Codebuddy,
         Self::Qwen,
+        Self::Trae,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -246,6 +248,7 @@ impl SkillDeliveryGroupKey {
             Self::Qoder => "qoder",
             Self::Codebuddy => "codebuddy",
             Self::Qwen => "qwen",
+            Self::Trae => "trae",
         }
     }
 
@@ -260,6 +263,7 @@ impl SkillDeliveryGroupKey {
             Self::Qoder => Path::new(".qoder/skills"),
             Self::Codebuddy => Path::new(".codebuddy/skills"),
             Self::Qwen => Path::new(".qwen/skills"),
+            Self::Trae => Path::new(".trae/skills"),
         }
     }
 }
@@ -278,6 +282,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "qoder" => Ok(Self::Qoder),
             "codebuddy" => Ok(Self::Codebuddy),
             "qwen" => Ok(Self::Qwen),
+            "trae" => Ok(Self::Trae),
             _ => anyhow::bail!("unsupported Skill delivery group: {value}"),
         }
     }
@@ -595,9 +600,10 @@ impl AgentRuntimeAdapterRegistry {
                 [SkillDeliveryGroupKey::Qwen],
                 SkillDiscoveryVerification::Verified,
             ),
-            AdapterKind::TraeCnCli => {
-                native_skill_discovery([], SkillDiscoveryVerification::DocumentationOnly)
-            }
+            AdapterKind::TraeCnCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Trae],
+                SkillDiscoveryVerification::Verified,
+            ),
         }
     }
 
@@ -675,8 +681,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::AntigravityApp => antigravity_permission_options(),
             AdapterKind::TraeCnCli => trae_static_permission_options(),
         };
-        let permission_schema_digest =
-            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
         Ok(AdapterCapabilitySnapshot {
             reported_version,
             executable_fingerprint: Some(executable_fingerprint),
@@ -720,7 +725,22 @@ impl AgentRuntimeAdapterRegistry {
         session_result: Value,
         observed_at: String,
     ) -> Result<AdapterCapabilitySnapshot> {
-        let mut capabilities = Vec::new();
+        let mut capabilities = trae_machine_ready_capabilities(
+            reported_version.as_deref(),
+            Some(&executable_fingerprint),
+            &initialize_result,
+            &session_result,
+        );
+        let missing = trae_machine_ready_requirements()
+            .into_iter()
+            .filter(|required| !capabilities.contains(required))
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            anyhow::bail!(
+                "TRAE machine Ready evidence is incomplete: {}",
+                missing.join(", ")
+            );
+        }
         if initialize_result
             .pointer("/agentCapabilities/loadSession")
             .and_then(Value::as_bool)
@@ -733,32 +753,6 @@ impl AgentRuntimeAdapterRegistry {
             .is_some_and(Value::is_object)
         {
             capabilities.push("session.resume".to_string());
-        }
-        if session_result
-            .get("configOptions")
-            .and_then(Value::as_array)
-            .is_some_and(|options| {
-                options.iter().any(|option| {
-                    option.get("id").and_then(Value::as_str) == Some("model")
-                        && option
-                            .get("options")
-                            .and_then(Value::as_array)
-                            .is_some_and(|values| !values.is_empty())
-                })
-            })
-        {
-            capabilities.push("model.dynamic_catalog".to_string());
-        }
-        if session_result
-            .pointer("/modes/availableModes")
-            .and_then(Value::as_array)
-            .is_some_and(|modes| {
-                modes
-                    .iter()
-                    .any(|mode| mode.get("id").and_then(Value::as_str) == Some("default"))
-            })
-        {
-            capabilities.push("permission.mode_catalog".to_string());
         }
         self.acp_capability_snapshot(AcpProbeObservation {
             adapter_kind: AdapterKind::TraeCnCli,
@@ -1281,6 +1275,157 @@ impl AntigravityAppAdapterPolicy {
     }
 }
 
+pub fn trae_machine_ready_requirements() -> Vec<String> {
+    [
+        "runtime.version",
+        "executable.fingerprint",
+        "acp.initialize",
+        "session.new",
+        "model.dynamic_catalog",
+        "permission.mode_catalog",
+        "session.config_shape",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+pub fn trae_machine_ready_capabilities(
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
+    initialize_result: &Value,
+    session_result: &Value,
+) -> Vec<String> {
+    let mut capabilities = Vec::new();
+    if reported_version.is_some_and(|value| !value.trim().is_empty()) {
+        capabilities.push("runtime.version".to_string());
+    }
+    if executable_fingerprint.is_some_and(|value| !value.trim().is_empty()) {
+        capabilities.push("executable.fingerprint".to_string());
+    }
+    if initialize_result
+        .get("protocolVersion")
+        .and_then(Value::as_u64)
+        == Some(1)
+    {
+        capabilities.push("acp.initialize".to_string());
+    }
+    if session_result
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        capabilities.push("session.new".to_string());
+    }
+
+    let model_catalog = acp_model_catalog_from_session(session_result).ok();
+    if model_catalog
+        .as_ref()
+        .is_some_and(|models| !models.is_empty())
+    {
+        capabilities.push("model.dynamic_catalog".to_string());
+    }
+    let permission_catalog = trae_permission_options(session_result).ok();
+    if permission_catalog
+        .as_ref()
+        .is_some_and(|options| !options.is_empty())
+    {
+        capabilities.push("permission.mode_catalog".to_string());
+    }
+
+    let model_config = session_result
+        .get("configOptions")
+        .and_then(Value::as_array)
+        .and_then(|options| {
+            options
+                .iter()
+                .find(|option| option.get("id").and_then(Value::as_str) == Some("model"))
+        });
+    let current_model = model_config
+        .and_then(|option| option.get("currentValue"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    let model_config_is_coherent = current_model.is_some_and(|current_model| {
+        model_config
+            .and_then(|option| option.get("options"))
+            .and_then(Value::as_array)
+            .is_some_and(|options| {
+                options.iter().any(|option| {
+                    option
+                        .get("value")
+                        .or_else(|| option.get("modelId"))
+                        .or_else(|| option.get("id"))
+                        .and_then(Value::as_str)
+                        == Some(current_model)
+                })
+            })
+    });
+    let current_mode = session_result
+        .pointer("/modes/currentModeId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty());
+    let mode_config_is_coherent = current_mode.is_some_and(|current_mode| {
+        session_result
+            .pointer("/modes/availableModes")
+            .and_then(Value::as_array)
+            .is_some_and(|modes| {
+                modes
+                    .iter()
+                    .any(|mode| mode.get("id").and_then(Value::as_str) == Some(current_mode))
+            })
+    });
+    if model_config_is_coherent && mode_config_is_coherent {
+        capabilities.push("session.config_shape".to_string());
+    }
+    capabilities
+}
+
+pub fn validate_machine_ready_snapshot(
+    adapter_kind: AdapterKind,
+    snapshot: &AdapterCapabilitySnapshot,
+) -> Result<()> {
+    if adapter_kind != AdapterKind::TraeCnCli || snapshot.probe_status != "ready" {
+        return Ok(());
+    }
+    validate_trae_machine_ready_evidence(
+        snapshot.reported_version.as_deref(),
+        snapshot.executable_fingerprint.as_deref(),
+        &snapshot.capabilities,
+    )?;
+    if snapshot.authentication_status != "authenticated"
+        || snapshot.models.is_empty()
+        || snapshot.permission_options.is_empty()
+    {
+        anyhow::bail!("TRAE ready snapshot does not satisfy the machine Ready contract");
+    }
+    Ok(())
+}
+
+pub fn validate_trae_machine_ready_evidence(
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
+    capabilities: &[String],
+) -> Result<()> {
+    let missing = trae_machine_ready_requirements()
+        .into_iter()
+        .filter(|required| !capabilities.contains(required))
+        .collect::<Vec<_>>();
+    if !missing.is_empty()
+        || reported_version.is_none_or(|value| value.trim().is_empty())
+        || executable_fingerprint.is_none_or(|value| value.trim().is_empty())
+    {
+        anyhow::bail!(
+            "TRAE machine Ready evidence is incomplete{}",
+            if missing.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", missing.join(", "))
+            }
+        );
+    }
+    Ok(())
+}
+
 fn acp_capability_snapshot(
     observation: AcpProbeObservation,
     permission_options: Vec<PermissionOptionDescriptor>,
@@ -1363,7 +1508,7 @@ fn acp_capability_snapshot(
         Vec::new()
     };
     let permission_schema_digest =
-        canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        adapter_permission_schema_digest(adapter_kind, &permission_options)?;
     let native_session_compatibility_key = if ready {
         Some(if adapter_kind == AdapterKind::TraeCnCli {
             let fingerprint = observation
@@ -1399,6 +1544,20 @@ fn acp_capability_snapshot(
         last_error: observation.last_error,
         native_session_compatibility_key,
     })
+}
+
+fn adapter_permission_schema_digest(
+    adapter_kind: AdapterKind,
+    permission_options: &[PermissionOptionDescriptor],
+) -> Result<String> {
+    // TRAE Session labels and advertised modes are dynamic evidence. Configuration drift is
+    // fenced by the Adapter-owned schema that light discovery can reproduce across restarts.
+    let schema = if adapter_kind == AdapterKind::TraeCnCli {
+        serde_json::to_value(trae_static_permission_options())?
+    } else {
+        serde_json::to_value(permission_options)?
+    };
+    canonical_json_digest(&schema)
 }
 
 fn append_additive_mcp_axes(capabilities: &mut Vec<String>, same_name_policy: McpSameNamePolicy) {
@@ -1683,7 +1842,7 @@ fn trae_permission_options(session_result: &Value) -> Result<Vec<PermissionOptio
     Ok(vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
-        description: "TRAE CLI CN's native permission mode reported by the current ACP Session. Rovai does not enable --yolo by default.".to_string(),
+        description: "TRAE CLI's native permission mode reported by the current ACP Session. Rovai does not enable --yolo by default.".to_string(),
         value_type: "enum".to_string(),
         choices,
         recommended_value: json!("default"),
@@ -1695,12 +1854,12 @@ fn trae_permission_options(session_result: &Value) -> Result<Vec<PermissionOptio
     }])
 }
 
-fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor> {
+pub(crate) fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor> {
     vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
         description:
-            "TRAE CLI CN 的轻检启动权限模式；完整模式目录会在显式检查或首次真实任务建立 ACP Session 后刷新。"
+            "TRAE CLI 的轻检启动权限模式；完整模式目录会在显式检查或首次真实任务建立 ACP Session 后刷新。"
                 .to_string(),
         value_type: "enum".to_string(),
         choices: vec![
@@ -2807,6 +2966,41 @@ mod tests {
     }
 
     #[test]
+    fn persisted_trae_ready_rejects_the_legacy_weak_contract() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let mut snapshot = registry
+            .trae_live_session_capability_snapshot(
+                Some("traecli 0.120.52".to_string()),
+                "sha256:trae-ready".to_string(),
+                json!({"protocolVersion": 1, "agentCapabilities": {}}),
+                json!({
+                    "sessionId": "session-ready",
+                    "configOptions": [{
+                        "id": "model",
+                        "currentValue": "GLM-5.2",
+                        "options": [{"value": "GLM-5.2", "name": "GLM-5.2"}]
+                    }],
+                    "modes": {
+                        "currentModeId": "default",
+                        "availableModes": [{"id": "default", "name": "Default"}]
+                    }
+                }),
+                "2026-08-20T00:00:00Z".to_string(),
+            )
+            .expect("complete TRAE Machine Ready evidence should build a snapshot");
+        validate_machine_ready_snapshot(AdapterKind::TraeCnCli, &snapshot)
+            .expect("complete TRAE Machine Ready snapshot should validate");
+
+        snapshot
+            .capabilities
+            .retain(|capability| capability != "session.config_shape");
+        assert!(
+            validate_machine_ready_snapshot(AdapterKind::TraeCnCli, &snapshot).is_err(),
+            "legacy weak TRAE ready must not suppress DispatchPreflight"
+        );
+    }
+
+    #[test]
     fn adapters_declare_their_skill_delivery_groups() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let cases: &[(
@@ -2867,8 +3061,8 @@ mod tests {
             ),
             (
                 AdapterKind::TraeCnCli,
-                &[],
-                SkillDiscoveryVerification::DocumentationOnly,
+                &[SkillDeliveryGroupKey::Trae],
+                SkillDiscoveryVerification::Verified,
             ),
         ];
         assert_eq!(cases.len(), AdapterKind::ALL.len());

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import type {
   AgentProfile,
   CampCreationPreflight,
@@ -73,6 +74,7 @@ export function NewConversationDialog({
   const nameLength = Array.from(normalizedName).length
   const nameError = nameLength > 80 ? '对话名称最多 80 个字符。' : null
   const lead = selectedMembers.find((member) => member.agentId === leadId) ?? null
+  const leadProfile = lead ? profileById.get(lead.agentId) : undefined
 
   useEffect(() => {
     if (!open) return
@@ -87,7 +89,6 @@ export function NewConversationDialog({
     setName('')
     setMemberError(null)
     setSubmitError(null)
-    requestAnimationFrame(() => projectTriggerRef.current?.focus())
   }, [initialSelectionPlan, initialWorkspace, open])
 
   const pendingGitInspectionPath = workspace && !hasGitObservation(workspace)
@@ -110,6 +111,10 @@ export function NewConversationDialog({
     })
     return () => { cancelled = true }
   }, [open, workspace])
+
+  useEffect(() => {
+    if (open && optionalOpen) nameInputRef.current?.focus()
+  }, [open, optionalOpen])
 
   const toggleMember = (agentId: string): void => {
     if (busy) return
@@ -185,6 +190,10 @@ export function NewConversationDialog({
         <Dialog.Content
           className="new-camp-dialog"
           aria-describedby="new-camp-dialog-description"
+          onOpenAutoFocus={(event) => {
+            event.preventDefault()
+            projectTriggerRef.current?.focus()
+          }}
           onCloseAutoFocus={(event) => {
             event.preventDefault()
             returnFocusElement?.focus()
@@ -195,7 +204,12 @@ export function NewConversationDialog({
         >
           <form className="new-camp-dialog-layout" onSubmit={(event) => void submit(event)}>
             <header className="new-camp-dialog-header">
-              <div>
+              <span className="new-camp-dialog-header-icon" aria-hidden="true">
+                <svg viewBox="0 0 20 20">
+                  <path d="M10 3v14M3 10h14" />
+                </svg>
+              </span>
+              <div className="new-camp-dialog-header-copy">
                 <span className="new-camp-eyebrow"><i />NEW CAMP</span>
                 <Dialog.Title>创建新对话</Dialog.Title>
                 <Dialog.Description id="new-camp-dialog-description">
@@ -286,7 +300,7 @@ export function NewConversationDialog({
                   step="02"
                   title="队员与负责人"
                   suffix={`已选 ${selectedMembers.length} / ${preflight.presentMembers.length}`}
-                  detail="默认选择全部在队的队员；Agent 运行时状态不影响结构选择。"
+                  detail="默认选择全部在队的队员；结构选择不会改变队员的长期配置。"
                 />
                 {preflight.presentMembers.length === 0
                   ? (
@@ -348,19 +362,81 @@ export function NewConversationDialog({
                           )}
                         </div>
                         {memberError && <p className="new-camp-field-error" role="alert">{memberError}</p>}
-                        <label className="new-camp-lead-field">
+                        <div className="new-camp-lead-field">
                           <span>负责人</span>
-                          <span className="new-camp-select-shell">
-                            <select value={leadId} disabled={busy} onChange={(event) => setLeadId(event.target.value)}>
-                              {selectedMembers.map((member) => (
-                                <option key={member.agentId} value={member.agentId}>
-                                  {member.displayName} · {readinessLabel(member.runtimeReadiness)}
-                                </option>
-                              ))}
-                            </select>
-                            <DropdownChevron />
-                          </span>
-                        </label>
+                          <DropdownMenu.Root>
+                            <DropdownMenu.Trigger asChild>
+                              <button
+                                className="new-camp-lead-trigger"
+                                type="button"
+                                disabled={busy || !lead}
+                                aria-label={lead
+                                  ? `当前负责人：${lead.displayName}，${readinessLabel(lead.runtimeReadiness)}；选择负责人`
+                                  : '选择负责人'}
+                              >
+                                {lead && (
+                                  <MemberAvatar
+                                    agentId={lead.agentId}
+                                    avatarRef={leadProfile?.avatarRef ?? null}
+                                    displayName={lead.displayName}
+                                    size="list"
+                                    decorative
+                                  />
+                                )}
+                                <span className="new-camp-lead-copy">
+                                  <strong>{lead?.displayName ?? '未设置'}</strong>
+                                  <small>{leadProfile?.teamRole || '队员'}</small>
+                                </span>
+                                {lead && <RuntimeReadiness status={lead.runtimeReadiness} />}
+                                <DropdownChevron />
+                              </button>
+                            </DropdownMenu.Trigger>
+                            <DropdownMenu.Portal>
+                              <DropdownMenu.Content
+                                className="new-camp-lead-menu"
+                                align="start"
+                                sideOffset={6}
+                                collisionPadding={12}
+                                aria-label="选择负责人"
+                                loop
+                              >
+                                <DropdownMenu.Label className="new-camp-lead-menu-label">
+                                  从已选队员中选择
+                                </DropdownMenu.Label>
+                                <DropdownMenu.RadioGroup value={leadId} onValueChange={setLeadId}>
+                                  {selectedMembers.map((member) => {
+                                    const profile = profileById.get(member.agentId)
+                                    return (
+                                      <DropdownMenu.RadioItem
+                                        className="new-camp-lead-option"
+                                        value={member.agentId}
+                                        key={member.agentId}
+                                        disabled={busy}
+                                        aria-label={`${member.displayName}，${readinessLabel(member.runtimeReadiness)}`}
+                                      >
+                                        <MemberAvatar
+                                          agentId={member.agentId}
+                                          avatarRef={profile?.avatarRef ?? null}
+                                          displayName={member.displayName}
+                                          size="list"
+                                          decorative
+                                        />
+                                        <span className="new-camp-lead-copy">
+                                          <strong>{member.displayName}</strong>
+                                          <small>{profile?.teamRole || '队员'}</small>
+                                        </span>
+                                        <RuntimeReadiness status={member.runtimeReadiness} />
+                                        <span className="new-camp-lead-check" aria-hidden="true">
+                                          <DropdownMenu.ItemIndicator>✓</DropdownMenu.ItemIndicator>
+                                        </span>
+                                      </DropdownMenu.RadioItem>
+                                    )
+                                  })}
+                                </DropdownMenu.RadioGroup>
+                              </DropdownMenu.Content>
+                            </DropdownMenu.Portal>
+                          </DropdownMenu.Root>
+                        </div>
                       </>
                     )}
               </section>
@@ -374,12 +450,14 @@ export function NewConversationDialog({
                     aria-controls="new-camp-optional-panel"
                     disabled={busy}
                     onClick={() => {
-                      const opening = !optionalOpen
-                      setOptionalOpen(opening)
-                      if (opening) requestAnimationFrame(() => nameInputRef.current?.focus())
+                      setOptionalOpen((current) => !current)
                     }}
                   >
-                    <span aria-hidden="true">☷</span>
+                    <span className="new-camp-optional-icon" aria-hidden="true">
+                      <svg viewBox="0 0 18 18">
+                        <path d="M4 4.5h2M8 4.5h6M4 9h2M8 9h6M4 13.5h2M8 13.5h6" />
+                      </svg>
+                    </span>
                     <span><strong>可选配置</strong><small>补充对话名称，不影响上面的结构配置。</small></span>
                     <em>{normalizedName || '未设置'}</em>
                     <DropdownChevron />
@@ -399,7 +477,7 @@ export function NewConversationDialog({
                           aria-invalid={Boolean(nameError)}
                           aria-describedby={nameError ? 'new-camp-name-error' : 'new-camp-name-hint'}
                           onChange={(event) => setName(limitDraftNameInput(event.target.value))}
-                          placeholder="输入名称…"
+                          placeholder="输入名称..."
                           autoComplete="off"
                         />
                         {name.length > 0 && (
@@ -505,13 +583,13 @@ function readinessLabel(status: CampCreationPreflight['presentMembers'][number][
     ? '可用'
     : status === 'installed_unverified'
       ? '不可用，待检查'
-    : status === 'runtime_not_configured'
-      ? '未配置 Agent 运行时'
-      : '不可用'
+      : status === 'runtime_not_configured'
+        ? '未配置'
+        : '不可用'
 }
 
 function runtimeDetail(profile: AgentProfile | undefined): string {
-  if (!profile?.runtimeConfiguration) return '尚未选择 Agent 运行时'
+  if (!profile?.runtimeConfiguration) return '尚未完成运行配置'
   return `${profile.runtimeConfiguration.adapterKind} · ${readinessLabel(profile.runtimeReadiness.status)}`
 }
 

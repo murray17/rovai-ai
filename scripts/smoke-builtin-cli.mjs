@@ -4,6 +4,10 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
+import {
+  coreDataDirectoryArguments,
+  removeEphemeralRuntimeCampFilesRoot
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const coreExecutable = resolve(
@@ -436,6 +440,7 @@ try {
 } finally {
   if (core) await core.stop()
   if (!keepFixture) {
+    await removeEphemeralRuntimeCampFilesRoot(dataDir)
     await makeAttachmentTreeRemovable(dataDir)
     await rm(fixtureRoot, { recursive: true, force: true })
   }
@@ -1517,7 +1522,7 @@ function shellContextPrivacyAssertion() {
 
 function startCore(dataDirectory) {
   const child = spawn(coreExecutable, [
-    '--data-dir', dataDirectory,
+    ...coreDataDirectoryArguments(dataDirectory),
     '--skill-library-root', skillLibraryRoot
   ], {
     cwd: root,

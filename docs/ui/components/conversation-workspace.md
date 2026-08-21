@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # Camp 会话工作区
@@ -14,7 +14,7 @@ viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v6](../../contracts/camp-open-projection-v6.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -180,10 +180,17 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 该 Agent 的独立 Run stage、状态、收件人与证据；这只是 Renderer grouping，不创建 Process
 领域对象，也不合并 AgentRun。
 
-执行台默认位于时间线底部：横向队员过程入口下方打开可调高度详情。用户可通过具名操作把同一执行台
-移到现有 Inspector；此时底部入口与详情完全移除，Inspector 临时增加“执行”第三 Tab，并自动显示、
+首次安装或旧偏好没有位置字段时，执行台位于时间线底部：横向队员过程入口下方打开可调高度详情。
+“移到右侧 / 移回底部”是唯一位置偏好写入口；最后一次成功的显式选择作为本机安装级偏好跨 Camp、
+页面切换和应用重启生效，不新增 Settings 默认项。提交中控件不可重复触发；写成功后才移动，失败时
+保持原位置并在控件附近提供可重试错误。Camp workspace 必须在偏好解析后以正确位置挂载，不得先显示
+底部再跳到右侧。
+
+移到现有 Inspector 时，底部入口与详情完全移除，Inspector 临时增加首个“执行”Tab，并自动显示、
 激活该 Tab。右侧使用既有 310px / compact 260px 宽度，不新增可拖宽 Sidecar。移回底部后恢复用户
-切换前最后使用的“任务 / 队员”基础 Tab；新 Camp workspace 和应用重开仍从底部开始。
+切换前最后使用的“队员 / 任务”基础 Tab。位置偏好只拥有承载位置，不跨 Camp 保存 Agent/Run selection、
+Drawer 开合、Tool 全文或滚动位置，也不根据窗口宽度自动改变。重新进入 Camp 时可以从当前权威 snapshot
+推导最新 running Run；这是新的瞬时 selection，不是恢复旧 Drawer 状态，也不改写位置偏好。
 
 两个位置共享当前 Agent 与精确 Run selection、Evidence load 和状态投影，不允许同时存在两套过程列表
 或详情。位置切换通过稳定 host 移动同一个已挂载 Drawer DOM，保留 disclosure、加载状态、
@@ -197,7 +204,11 @@ Drawer/结果阅读位置与 DOM identity，不得条件卸载后重建。底部
 发送成功且未在查看 non-terminal Run 时，按 Core 有序回执打开首个 Run 的精确 stage，但不夺走
 Composer 焦点。若用户正在可见的“任务”Tab 新建任务，Renderer 消费本次自动聚焦请求但不切走表单，
 离开表单后也不补跳；仅浏览任务、编辑既有任务或查看队员仍按回执自动打开执行。右侧不可见的旧 Run
-selection 不算“正在查看 non-terminal Run”。后台 A2A、Runtime 事件、重载与恢复不得自动打开、切换或抢焦点。
+selection 不算“正在查看 non-terminal Run”。从其他 Camp、一级页面或应用启动/恢复进入当前 Camp 时，若
+权威 snapshot 含 running Run，则自动选择 `createdAt + id` 最新者并展开；右侧 placement 同时显示 Inspector、
+激活首个“执行”Tab，底部 placement 直接展开 Drawer，均不移动 DOM 键盘焦点。没有 running Run 时不自动
+打开；`queued`、`waiting`、`recovery_blocked` 与 terminal 均不具备资格。用户已经停留在同一 workspace 时，
+后台 A2A、Runtime 事件、refresh 或后续状态变化不得自动打开、切换或抢焦点。
 
 聚焦 live Run 且用户停留详情底部时可跟随最新输出；手动上滚后暂停，回到底部恢复。该跟随
 不能滚动公共消息时间线。Drawer 空间不足时收缩、滚动或变为摘要，不能遮住 Approval Dock、
@@ -213,24 +224,29 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
 静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
 
-Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Shell 活动只有通用标题、同时公开 Evidence
-含命令文本时，Renderer 可以只提炼可审阅的可执行文件名与有界子命令，例如 `rovai camp read` 或
-`pnpm test`。紧随已展示命令或子命令的精确 `--help` 可以原样保留，使帮助查询区别于实际执行；
-不得扫描后续 token 猜测帮助语义。其他参数、正文、路径和环境值不得进入标题，无法安全提炼时继续使用
-中性回退。该提炼只改变展示，
-不得参与 Activity 分类、identity 或 lifecycle 合并。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
+Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Codex `commandExecution` 只有在结构化
+`commandActions` 全部证明 read/list/search 时继续显示“读取 / 列出 / 搜索 / 检索项目文件”等中文语义；
+除此以外，Codex、Claude Code、TRAE 与其他 ACP Shell 行只要同一公开 payload 有 command，就使用完整脱敏
+预览：去掉外层 Shell `-c/-lc` 包装，保留参数、Node inline/heredoc 代码开头、全部子命令及
+`&&`、`||`、`|`、`;`、`&`。已知 token、password、
+Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题值不做固定字符截断，由名称轨在真实
+宽度内单行视觉省略；完整脱敏值仍可通过 `title` 与辅助技术读取。没有公开 command 的 Runtime 继续使用
+各自现有 toolName/title/有界 fallback。命令展示只改变 presentation，不得参与 identity 或 lifecycle 合并；
+ACP 仅由 Adapter 白名单的 command shape 在原生 kind 缺失时证明 execute。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
 16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。类型图标是 Shell、File、Git、
 Network、Permission、Runtime、Plan、Tool 和 Unknown 九类统一 16px 单色线性 SVG，不代表状态。
 Tool 行尾状态仍只使用 7px 小点：运行蓝色、等待审批橙色、成功绿色、失败或停止红色，仅记录为中性色。
 普通 Tool 行不再重复显示“已完成”文字；状态仍须通过 `aria-label` 与 `title` 可读取。
 
-Tool disclosure 展开后在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
+Shell command Tool disclosure 展开后先显示完整脱敏“命令”，再显示存在时的完整公开“输出”，两者不得
+互相替代；Claude/ACP terminal Evidence 自带 command，不依赖 Renderer 回看 started event。其他 Tool
+disclosure 继续在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
 直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)。
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
@@ -240,7 +256,15 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)。
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
+
+当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
+notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
+停止执行”。同一 diagnostic 只显示最新 attempt，底部“正在处理”同步改为等待 Claude Code 自动重试。
+该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
+下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
+凭证、用户名或绝对路径。精确合同见
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -268,7 +292,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)。
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
 
 ## Camp Composer
 
@@ -277,6 +301,13 @@ Composer 与消息轨道共享中心轴但拥有独立宽度；`.composer-box` �
 附件、Skill 候选、Mention、reply intent 和 continuation intent 都使用同一 Core-owned Draft；任何浮层
 都不能建立第二份草稿真源。回复条位于附件队列之上、正文编辑器之内，并与 Composer 共用开放工作面，
 不创建 focus trap。鼠标点击 Composer 任意位置都不增加编辑器内层描边；键盘进入仍保留局部焦点提示。
+
+Composer 为空时根据当前用户可见的 Camp 会话/任务时间线选择输入提示：没有有效历史时显示
+“集结队伍，写下这次冒险的目标…”；已有历史时显示
+“和队伍继续前行：补充线索、调整方向或布置新任务…”。有效历史包括 user/agent 公共消息、Task 卡和
+用户可见的停止结果；初始化 system 消息、已隐藏的 `a2a_event` / `task_event`、原始 Domain Event 与其他
+内部记录不参与判断。该提示只由既有投影派生，不新增持久或 Renderer 状态，也不改变发送、任务、附件、
+回复、延续或路由行为。
 
 ### Skill 快速选择
 
@@ -309,8 +340,24 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 ### Composer 附件
 
 文件和目录都进入当前 Draft。preparing/error 附件阻止发送；目录保存为一个只读快照附件，原文件
-不移动。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v1](../../contracts/camp-attachment-v1.md)。
+不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
+视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
+占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
+快照限制见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)，发送边界见
+[Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
+
+Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
+“正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”。该状态只描述队员
+Runtime View，不禁用用户对仍完整 Authority Attachment 的预览、打开或显示所在位置。状态使用既有
+Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
+
+图片单击继续打开会话内大图预览；图片 Authority preview 失败时，卡片退化为“使用系统应用打开”。普通
+文件单击交给系统默认应用，目录单击在 Finder / 文件资源管理器中打开。Timeline 卡片右键菜单提供同一
+主动作和“在 Finder / 文件资源管理器中显示”；菜单支持键盘循环、Escape 关闭、collision handling 与关闭后
+焦点回到真实卡片。执行中单卡防重复提交；目标 parent 不可枚举、target 消失或 native 请求失败时均显示固定
+的无路径提示，不把 best-effort Shell dispatch 当作文件管理器已确认选择。高风险文件由 Desktop Main 使用原生
+确认，不在 Renderer 判断。Composer Prepared Attachment 保持既有预览/移除交互，不复用 Timeline open API。
+精确安全与结果合同见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)。
 
 ## 空 Camp 欢迎状态
 
@@ -319,17 +366,22 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 
 ## Camp 右侧详情栏（Inspector）
 
-默认底部执行台时，ordinary Inspector 只有“任务 / 队员”。Task 提供列表与详情责任层；队员读取当前 CampMember 与
-AgentProfile，并通过既有 versioned Core 命令提供唯一 Default Lead 选择器。ContextManifest 与
+默认底部执行台时，ordinary Inspector 只有“队员 / 任务”。队员读取当前 CampMember 与 AgentProfile，
+并通过既有 versioned Core 命令提供唯一 Default Lead 选择器；Task 提供列表与详情责任层。ContextManifest 与
 Runtime Input Delivery Evidence 继续存在于 Core/Snapshot，但不进入普通 Inspector；审批只在
 Approval Dock 决定。
 
-仅当用户把执行台移到右侧时，Inspector 增加条件式“执行”第三 Tab；它承载同一 Agent 过程详情，
+仅当用户把执行台移到右侧时，Inspector 增加条件式首个“执行”Tab；右侧 Tab 的 DOM、视觉与键盘顺序为
+“执行 / 队员 / 任务”。它承载同一 Agent 过程详情，
 不是新的 Activity/Audit timeline，也不改变 Task、队员、Default Lead 或 Approval 边界。移回底部后
 该 Tab 从 DOM 和键盘顺序中消失。
 
 Inspector 可从 Camp 顶栏完整隐藏/恢复，常规宽 310px，`1040–1179px` 为 260px。隐藏不会改变
-当前页签、Draft、选择或消息滚动位置。
+当前页签、Draft、选择或消息滚动位置。Inspector visibility 与执行台 placement 独立持久：当偏好位置
+为右侧而 Inspector 被隐藏时，执行台仍归右侧并随 Inspector 不可见，Header 恢复后返回保留的“执行”
+上下文；进入不含 running Run 的 Camp 或已挂载 workspace 的后台事件不强制显示 Inspector，也不把执行台
+临时搬回底部。进入含 running Run 的 Camp、用户显式“移到右侧”和既有精确执行导航会显示 Inspector、
+激活首个“执行”Tab，并定位目标。
 
 ## Camp 顶栏与关闭等待面
 

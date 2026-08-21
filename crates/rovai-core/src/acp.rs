@@ -25,6 +25,9 @@ use rovai_core::{
         write_kiro_additive_agent_config,
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
+    camp_attachment_view::{
+        CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION, CampAttachmentRuntimeAuthorization,
+    },
     command::canonical_json_digest,
     compaction::{CompactionDetectorPolicy, CompactionObserverLease},
     managed_process::{
@@ -202,6 +205,7 @@ enum AcpSessionPhase {
         replay_event_count: u64,
         replay_byte_count: u64,
         started_at: Instant,
+        last_event_at: Option<Instant>,
     },
     Ready,
     PromptActive(AcpActivePrompt),
@@ -217,6 +221,7 @@ impl AcpSessionPhase {
             replay_event_count: 0,
             replay_byte_count: 0,
             started_at: Instant::now(),
+            last_event_at: None,
         }
     }
 }
@@ -248,16 +253,54 @@ enum AcpSessionMessageRoute {
         active_prompt: AcpActivePrompt,
         sequence: u64,
     },
+    SessionMetadata,
     ReplayQuarantined,
-    IdleMetadata,
     Quarantined(String),
     ReplayRejected(String),
     Missing,
 }
 
+fn is_session_catalog_update(message: &Value) -> bool {
+    message.get("id").is_none()
+        && message.get("method").and_then(Value::as_str) == Some("session/update")
+        && matches!(
+            message
+                .pointer("/params/update/sessionUpdate")
+                .and_then(Value::as_str),
+            Some(
+                "available_commands_update"
+                    | "config_option_update"
+                    | "current_mode_update"
+                    | "session_info_update"
+            )
+        )
+}
+
+fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Value) -> bool {
+    message.get("id").is_none()
+        && matches!(
+            (adapter_kind, message.get("method").and_then(Value::as_str)),
+            (AdapterKind::KiroCli, Some("_kiro.dev/compaction/status"))
+                | (AdapterKind::CodebuddyCli, Some("_codebuddy.ai/command"))
+        )
+}
+
+fn is_idle_session_metadata(adapter_kind: AdapterKind, message: &Value) -> bool {
+    is_session_catalog_update(message)
+        || is_known_session_lifecycle_extension(adapter_kind, message)
+        || (message.get("id").is_none()
+            && message.get("method").and_then(Value::as_str) == Some("session/update")
+            && message
+                .pointer("/params/update/sessionUpdate")
+                .and_then(Value::as_str)
+                == Some("usage_update"))
+}
+
 const ACP_HISTORY_RESTORE_MAX_EVENTS: u64 = 4_096;
 const ACP_HISTORY_RESTORE_MAX_BYTES: u64 = 8 * 1024 * 1024;
 const ACP_HISTORY_RESTORE_TIMEOUT: Duration = Duration::from_secs(30);
+const ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE: Duration = Duration::from_secs(2);
+const ACP_HISTORY_RESTORE_QUIET_PERIOD: Duration = Duration::from_millis(100);
 
 fn replay_budget_violation(
     event_count: u64,
@@ -400,6 +443,9 @@ impl AcpHost {
             private_runtime_dir,
             private_config_root.as_deref(),
             attachment_access_root,
+            builtin_tools
+                .as_ref()
+                .map(BuiltinToolProcessConfig::run_tmp),
         )
         .context("failed to configure ACP Runtime command")?;
         let detector_config_root = if compaction_detector_policy
@@ -571,14 +617,8 @@ impl AcpHost {
                             .map(str::to_string);
                         let route = match session_id.as_deref() {
                             Some(session_id) => {
-                                host.route_session_message(
-                                    session_id,
-                                    line.len(),
-                                    message.get("method").and_then(Value::as_str),
-                                    message.get("id").is_none(),
-                                    Self::session_update_kind(&message),
-                                )
-                                .await
+                                host.route_session_message(session_id, &message, line.len())
+                                    .await
                             }
                             None => AcpSessionMessageRoute::Missing,
                         };
@@ -602,6 +642,13 @@ impl AcpHost {
                                     message,
                                 ));
                             }
+                            AcpSessionMessageRoute::SessionMetadata => {
+                                let session_id = session_id
+                                    .as_deref()
+                                    .expect("Session metadata route has Session ID");
+                                host.forward_compaction_observation(session_id, &message)
+                                    .await;
+                            }
                             AcpSessionMessageRoute::ReplayQuarantined => {
                                 if message.get("id").is_some() {
                                     let id = message.get("id").cloned().unwrap_or(Value::Null);
@@ -617,7 +664,6 @@ impl AcpHost {
                                         .await;
                                 }
                             }
-                            AcpSessionMessageRoute::IdleMetadata => {}
                             AcpSessionMessageRoute::Quarantined(reason) => {
                                 host.send_host_diagnostic(format!(
                                     "ACP Session message was quarantined: {reason}"
@@ -817,25 +863,57 @@ impl AcpHost {
         Ok(())
     }
 
-    async fn mark_session_ready(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
-        let mut routes = self.routes.write().await;
-        let route = routes
-            .get_mut(session_id)
-            .context("ACP Session has no loading route")?;
-        if &route.owner != owner || !matches!(route.phase, AcpSessionPhase::LoadingReplay { .. }) {
-            bail!("ACP Session loading route failed Host/Run fencing");
+    async fn settle_loading_replay(&self, session_id: &str, owner: &AcpRuntimeOwner) -> Result<()> {
+        let response_received_at = Instant::now();
+        loop {
+            let wait_for = {
+                let mut routes = self.routes.write().await;
+                let route = routes
+                    .get_mut(session_id)
+                    .context("ACP Session has no loading route")?;
+                if &route.owner != owner {
+                    bail!("ACP Session loading route failed Host/Run fencing");
+                }
+                let AcpSessionPhase::LoadingReplay {
+                    started_at,
+                    last_event_at,
+                    ..
+                } = &route.phase
+                else {
+                    bail!("ACP Session loading route failed Host/Run fencing");
+                };
+                let grace_remaining = ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE
+                    .saturating_sub(response_received_at.elapsed());
+                let quiet_remaining = last_event_at.map_or(Duration::ZERO, |last_event_at| {
+                    ACP_HISTORY_RESTORE_QUIET_PERIOD.saturating_sub(last_event_at.elapsed())
+                });
+                let required_wait = grace_remaining.max(quiet_remaining);
+                if required_wait.is_zero() {
+                    route.phase = AcpSessionPhase::Ready;
+                    return Ok(());
+                }
+                let timeout_remaining =
+                    ACP_HISTORY_RESTORE_TIMEOUT.saturating_sub(started_at.elapsed());
+                if timeout_remaining.is_zero() {
+                    let reason =
+                        "ACP History Restore did not settle before its deadline".to_string();
+                    route.phase = AcpSessionPhase::ProtocolViolated {
+                        reason: reason.clone(),
+                    };
+                    self.protocol_violated.store(true, Ordering::Release);
+                    bail!(reason);
+                }
+                required_wait.min(timeout_remaining)
+            };
+            tokio::time::sleep(wait_for).await;
         }
-        route.phase = AcpSessionPhase::Ready;
-        Ok(())
     }
 
     async fn route_session_message(
         &self,
         session_id: &str,
+        message: &Value,
         message_bytes: usize,
-        message_method: Option<&str>,
-        message_is_notification: bool,
-        session_update_kind: Option<&str>,
     ) -> AcpSessionMessageRoute {
         let mut routes = self.routes.write().await;
         let Some(route) = routes.get_mut(session_id) else {
@@ -843,6 +921,11 @@ impl AcpHost {
         };
         match &mut route.phase {
             AcpSessionPhase::PromptActive(active_prompt) => {
+                if is_session_catalog_update(message)
+                    || is_known_session_lifecycle_extension(self.adapter_kind, message)
+                {
+                    return AcpSessionMessageRoute::SessionMetadata;
+                }
                 route.sequence = route.sequence.saturating_add(1);
                 AcpSessionMessageRoute::Forward {
                     owner: route.owner.clone(),
@@ -854,6 +937,7 @@ impl AcpHost {
                 replay_event_count,
                 replay_byte_count,
                 started_at,
+                last_event_at,
             } => {
                 let event_count = replay_event_count.saturating_add(1);
                 let byte_count = replay_byte_count
@@ -870,26 +954,14 @@ impl AcpHost {
                 }
                 *replay_event_count = event_count;
                 *replay_byte_count = byte_count;
+                *last_event_at = Some(Instant::now());
                 AcpSessionMessageRoute::ReplayQuarantined
             }
             AcpSessionPhase::Ready => {
-                if Self::idle_session_message(
-                    self.adapter_kind,
-                    message_method,
-                    message_is_notification,
-                    session_update_kind,
-                ) {
-                    return AcpSessionMessageRoute::IdleMetadata;
+                if is_idle_session_metadata(self.adapter_kind, message) {
+                    return AcpSessionMessageRoute::SessionMetadata;
                 }
-                let reason = match session_update_kind {
-                    Some(kind) => {
-                        format!("session-scoped {kind} update arrived without an active prompt")
-                    }
-                    None => format!(
-                        "session-scoped {} message arrived without an active prompt",
-                        message_method.unwrap_or("unknown")
-                    ),
-                };
+                let reason = "session-scoped message arrived without an active prompt".to_string();
                 route.phase = AcpSessionPhase::ProtocolViolated {
                     reason: reason.clone(),
                 };
@@ -897,23 +969,10 @@ impl AcpHost {
                 AcpSessionMessageRoute::Quarantined(reason)
             }
             AcpSessionPhase::PromptCompleted(_) => {
-                if Self::idle_session_message(
-                    self.adapter_kind,
-                    message_method,
-                    message_is_notification,
-                    session_update_kind,
-                ) {
-                    return AcpSessionMessageRoute::IdleMetadata;
+                if is_idle_session_metadata(self.adapter_kind, message) {
+                    return AcpSessionMessageRoute::SessionMetadata;
                 }
-                let reason = match session_update_kind {
-                    Some(kind) => {
-                        format!("session-scoped {kind} update arrived after prompt completion")
-                    }
-                    None => format!(
-                        "session-scoped {} message arrived after prompt completion",
-                        message_method.unwrap_or("unknown")
-                    ),
-                };
+                let reason = "session-scoped message arrived after prompt completion".to_string();
                 route.phase = AcpSessionPhase::ProtocolViolated {
                     reason: reason.clone(),
                 };
@@ -924,53 +983,6 @@ impl AcpHost {
                 AcpSessionMessageRoute::Quarantined(reason.clone())
             }
         }
-    }
-
-    fn session_update_kind(message: &Value) -> Option<&str> {
-        if message.get("method").and_then(Value::as_str) != Some("session/update") {
-            return None;
-        }
-        message
-            .pointer("/params/update/sessionUpdate")
-            .and_then(Value::as_str)
-    }
-
-    fn idle_session_update_kind(adapter_kind: AdapterKind, kind: &str) -> bool {
-        matches!(
-            kind,
-            "available_commands_update"
-                | "current_mode_update"
-                | "config_option_update"
-                | "session_info_update"
-        )
-            // CodeBuddy CLI 2.137.1 emits a session-scoped private usage
-            // notification after Session/model setup and before the first
-            // prompt. It carries accounting metadata only, so admitting it
-            // while idle must not open the same exception for other adapters.
-            || (adapter_kind == AdapterKind::CodebuddyCli && kind == "usage_update")
-    }
-
-    fn idle_session_message(
-        adapter_kind: AdapterKind,
-        method: Option<&str>,
-        message_is_notification: bool,
-        session_update_kind: Option<&str>,
-    ) -> bool {
-        session_update_kind
-            .is_some_and(|kind| Self::idle_session_update_kind(adapter_kind, kind))
-            // CodeBuddy's private command notifications may be emitted during
-            // Session setup before a prompt exists. Keep the exception scoped
-            // to notifications from CodeBuddy's own namespace; requests and
-            // other adapters still fail closed.
-            || (adapter_kind == AdapterKind::CodebuddyCli
-                && message_is_notification
-                && method.is_some_and(|value| value.starts_with("_codebuddy.ai/")))
-            // Kiro documents its `_kiro.dev/` extension notifications as
-            // optional enhancements which ACP clients may safely ignore. Only
-            // notifications are admitted here; extension requests still fail
-            // closed unless a prompt owns the Session route.
-            || (message_is_notification
-                && method.is_some_and(|value| value.starts_with("_kiro.dev/")))
     }
 
     async fn has_loading_replay(&self) -> bool {
@@ -1628,10 +1640,13 @@ impl AcpRuntime {
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
         let cwd = acp_protocol_path(&self.execution_root);
-        let additional_directories = session_additional_directories(
-            self.host.adapter_kind,
-            self.attachment_access_root.as_deref(),
-        );
+        let run_tmp = self
+            .host
+            .builtin_tool_process_config()
+            .context("ACP Runtime has no Built-in Tool Run tmp")?
+            .run_tmp();
+        let additional_directories =
+            session_additional_directories(self.attachment_access_root.as_deref(), Some(run_tmp))?;
         let mcp_servers = if !matches!(
             self.host.adapter_kind,
             AdapterKind::CopilotCli
@@ -1790,7 +1805,7 @@ impl AcpRuntime {
         }
         if prebound_session {
             self.host
-                .mark_session_ready(&session_id, &self.owner)
+                .settle_loading_replay(&session_id, &self.owner)
                 .await?;
         } else {
             self.host
@@ -1981,6 +1996,8 @@ impl AcpRuntime {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
             observed.native_kind =
                 Some(effective_action_kind(reported_kind, &raw_input).to_string());
+        } else if public_acp_shell_command(update.get("rawInput")).is_some() {
+            observed.native_kind = Some("execute".to_string());
         }
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
             observed.raw_input = Some(raw_input.clone());
@@ -2006,23 +2023,7 @@ impl AcpRuntime {
         let Some(mut completion) = completed_action(params)? else {
             return Ok(None);
         };
-        if let Some(native_kind) = observed.native_kind {
-            completion.native_kind = native_kind;
-        }
-        if let Some(observation_digest) = observed.observation_digest {
-            completion.observation_digest = observation_digest;
-        }
-        completion.effect_disposition = acp_effect_disposition(
-            matches!(completion.outcome, ActionResultOutcome::Succeeded),
-            &completion.native_kind,
-        )
-        .to_string();
-        if let Some(result_data) = completion.result_data.as_object_mut() {
-            result_data.insert(
-                "kind".to_string(),
-                Value::String(completion.native_kind.clone()),
-            );
-        }
+        completion = reconcile_completed_action(update, observed, completion)?;
         Ok(Some(completion))
     }
 
@@ -2429,7 +2430,7 @@ pub(crate) fn runtime_compatibility_digest(
     permission_semantics: PermissionSemantics,
     external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     mcp_projection_digest: &str,
-    attachment_access_root: &Path,
+    attachment_authorization: &CampAttachmentRuntimeAuthorization,
 ) -> Result<String> {
     let execution_root = PathBuf::from(&workspace.execution_root)
         .canonicalize()
@@ -2451,7 +2452,7 @@ pub(crate) fn runtime_compatibility_digest(
     let mcp_projection_compatibility_digest =
         (!excludes_run_local_digests).then_some(mcp_projection_digest);
     canonical_json_digest(&json!({
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "adapterKind": frozen_runtime.adapter_kind,
         "runtimeConfigDigest": runtime_config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
@@ -2462,7 +2463,12 @@ pub(crate) fn runtime_compatibility_digest(
         "builtinToolCatalogDigest": builtin_tool_catalog_digest()?,
         "externalMcpServers": external_mcp_servers,
         "mcpProjectionDigest": mcp_projection_compatibility_digest,
-        "attachmentAccessRoot": attachment_access_root,
+        "campAttachmentViewContractVersion": CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION,
+        "campAttachmentRoot": attachment_authorization.attachment_root,
+        "campAttachmentVisibilityMode": attachment_authorization.visibility_mode.as_str(),
+        "campAttachmentGeneration": attachment_authorization
+            .visibility_mode
+            .compatibility_generation(attachment_authorization.generation),
     }))
 }
 
@@ -2539,6 +2545,7 @@ fn configure_runtime_command(
     private_runtime_dir: &Path,
     private_config_root: Option<&Path>,
     attachment_access_root: Option<&Path>,
+    run_tmp: Option<&Path>,
 ) -> Result<Option<EphemeralMcpConfigFile>> {
     let values = runtime
         .permissions
@@ -2587,6 +2594,9 @@ fn configure_runtime_command(
                     && workspace.access == "read_only");
             health::configure_acp_command(command, runtime.adapter_kind, allow_all);
             if let Some(root) = attachment_access_root {
+                command.arg("--add-dir").arg(root);
+            }
+            if let Some(root) = run_tmp {
                 command.arg("--add-dir").arg(root);
             }
             if isolated {
@@ -2680,7 +2690,7 @@ fn configure_runtime_command(
             let configured = values
                 .get("permission_mode")
                 .and_then(Value::as_str)
-                .context("TRAE CLI CN Runtime requires permission_mode")?;
+                .context("TRAE CLI requires permission_mode")?;
             health::configure_acp_command(command, runtime.adapter_kind, false);
             let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && workspace.access == "read_only";
@@ -3058,22 +3068,17 @@ fn launchable_acp_adapter(kind: AdapterKind) -> bool {
 }
 
 fn session_additional_directories(
-    adapter_kind: AdapterKind,
     attachment_access_root: Option<&Path>,
-) -> Vec<String> {
-    // Camp attachment roots intentionally have execute-only permissions so a
-    // Runtime can open frozen opaque child paths without enumerating other Camp
-    // attachments. Qoder 1.1.14 recursively lstat's every ACP additional root
-    // during session/new and rejects that secure directory shape. The prompt
-    // still carries each exact attachment path, and Rovai's ACP filesystem host
-    // enforces that the path remains beneath this root.
-    if adapter_kind == AdapterKind::QoderCli {
-        return Vec::new();
-    }
-    attachment_access_root
-        .iter()
-        .map(|root| acp_protocol_path(root))
-        .collect()
+    run_tmp: Option<&Path>,
+) -> Result<Vec<String>> {
+    let attachment_root = attachment_access_root.context(
+        "camp_attachment_view_runtime_unsupported: ACP Session has no exact Camp attachment root",
+    )?;
+    let run_tmp = run_tmp.context("ACP Session has no exact Built-in Tool Run tmp root")?;
+    Ok(vec![
+        acp_protocol_path(attachment_root),
+        acp_protocol_path(run_tmp),
+    ])
 }
 
 fn acp_protocol_path(path: &Path) -> String {
@@ -3319,6 +3324,10 @@ fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a s
         return reported_kind;
     }
 
+    if public_acp_shell_command(Some(raw_input)).is_some() {
+        return "execute";
+    }
+
     // OpenCode's ACP bridge currently reports an external-directory permission
     // request as `other`, even when the request belongs to a file-edit tool call.
     // The stable file target remains present in rawInput. Classify that narrow
@@ -3484,6 +3493,7 @@ pub fn legacy_approval_result(request: &Value, approved: bool) -> Result<Value> 
 pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
+    pub public_command: Option<String>,
     pub observation_digest: String,
     pub outcome: ActionResultOutcome,
     pub result_code: String,
@@ -3501,11 +3511,11 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         }
         _ => return Ok(None),
     };
-    let status = update
+    let reported_status = update
         .get("status")
         .and_then(Value::as_str)
         .unwrap_or("in_progress");
-    if !matches!(status, "completed" | "failed") {
+    if !matches!(reported_status, "completed" | "failed") {
         return Ok(None);
     }
     let native_item_id = update
@@ -3513,7 +3523,8 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .and_then(Value::as_str)
         .context("ACP tool_call_update has no toolCallId")?
         .to_string();
-    let succeeded = status == "completed";
+    let raw_input = update.get("rawInput");
+    let public_command = public_acp_shell_command(raw_input);
     let raw_input_digest = update
         .get("rawInput")
         .map(canonical_json_digest)
@@ -3522,11 +3533,14 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .get("rawOutput")
         .map(canonical_json_digest)
         .transpose()?;
-    let native_kind = update
+    let reported_kind = update
         .get("kind")
         .and_then(Value::as_str)
-        .unwrap_or("other")
-        .to_string();
+        .unwrap_or("other");
+    let native_kind =
+        effective_action_kind(reported_kind, raw_input.unwrap_or(&Value::Null)).to_string();
+    let status = effective_acp_tool_status(update, &native_kind);
+    let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
         "nativeItemId": &native_item_id,
         "nativeKind": &native_kind,
@@ -3537,6 +3551,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
     Ok(Some(CompletedAcpAction {
         native_item_id: native_item_id.clone(),
         native_kind,
+        public_command,
         observation_digest,
         outcome: if succeeded {
             ActionResultOutcome::Succeeded
@@ -3572,6 +3587,58 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
     }))
 }
 
+fn reconcile_completed_action(
+    update: &Value,
+    observed: ObservedToolMetadata,
+    mut completion: CompletedAcpAction,
+) -> Result<CompletedAcpAction> {
+    let observed_raw_input_digest = observed
+        .raw_input
+        .as_ref()
+        .map(canonical_json_digest)
+        .transpose()?;
+    if completion.public_command.is_none() {
+        completion.public_command = public_acp_shell_command(observed.raw_input.as_ref());
+    }
+    if let Some(native_kind) = observed.native_kind {
+        completion.native_kind = native_kind;
+    }
+    if completion.native_kind == "other" && completion.public_command.is_some() {
+        completion.native_kind = "execute".to_string();
+    }
+    if let Some(observation_digest) = observed.observation_digest {
+        completion.observation_digest = observation_digest;
+    }
+    let effective_status = effective_acp_tool_status(update, &completion.native_kind);
+    completion.outcome = if effective_status == "completed" {
+        ActionResultOutcome::Succeeded
+    } else {
+        ActionResultOutcome::Failed
+    };
+    completion.result_code = format!("acp_tool_{effective_status}");
+    completion.effect_disposition = acp_effect_disposition(
+        matches!(completion.outcome, ActionResultOutcome::Succeeded),
+        &completion.native_kind,
+    )
+    .to_string();
+    if let Some(result_data) = completion.result_data.as_object_mut() {
+        result_data.insert(
+            "kind".to_string(),
+            Value::String(completion.native_kind.clone()),
+        );
+        result_data.insert("status".to_string(), Value::String(effective_status));
+        if result_data.get("rawInputDigest").is_none_or(Value::is_null)
+            && let Some(raw_input_digest) = observed_raw_input_digest
+        {
+            result_data.insert(
+                "rawInputDigest".to_string(),
+                Value::String(raw_input_digest),
+            );
+        }
+    }
+    Ok(completion)
+}
+
 fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     if succeeded {
         "complete"
@@ -3586,6 +3653,48 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     } else {
         "none"
     }
+}
+
+pub fn public_acp_shell_command(raw_input: Option<&Value>) -> Option<String> {
+    raw_input?
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())
+        .map(str::to_string)
+}
+
+pub fn public_acp_tool_kind(update: &Value) -> Option<String> {
+    update
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .map(str::to_string)
+        .or_else(|| public_acp_shell_command(update.get("rawInput")).map(|_| "execute".to_string()))
+}
+
+pub fn effective_acp_tool_status(update: &Value, native_kind: &str) -> String {
+    let reported = update
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("in_progress");
+    if reported == "completed"
+        && native_kind == "execute"
+        && acp_tool_exit_code(update).is_some_and(|exit_code| exit_code != 0)
+    {
+        "failed".to_string()
+    } else {
+        reported.to_string()
+    }
+}
+
+fn acp_tool_exit_code(update: &Value) -> Option<i64> {
+    ["exitCode", "exit_code"].into_iter().find_map(|field| {
+        update
+            .get(field)
+            .or_else(|| update.get("rawOutput")?.get(field))
+            .and_then(Value::as_i64)
+    })
 }
 
 pub fn is_potential_side_effect(kind: &str) -> bool {
@@ -3667,36 +3776,26 @@ mod route_policy_tests {
     use super::*;
 
     #[test]
-    fn codebuddy_idle_usage_is_metadata_without_weakening_other_adapters() {
-        assert!(AcpHost::idle_session_update_kind(
+    fn codebuddy_private_command_notification_is_narrow_idle_metadata() {
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "_codebuddy.ai/command",
+            "params": { "sessionId": "session-codebuddy" }
+        });
+        assert!(is_known_session_lifecycle_extension(
             AdapterKind::CodebuddyCli,
-            "usage_update"
+            &notification
         ));
-        assert!(!AcpHost::idle_session_update_kind(
+        assert!(!is_known_session_lifecycle_extension(
             AdapterKind::TraeCnCli,
-            "usage_update"
+            &notification
         ));
-        assert!(AcpHost::idle_session_update_kind(
-            AdapterKind::TraeCnCli,
-            "available_commands_update"
-        ));
-        assert!(AcpHost::idle_session_message(
+
+        let mut request = notification;
+        request["id"] = json!(1);
+        assert!(!is_known_session_lifecycle_extension(
             AdapterKind::CodebuddyCli,
-            Some("_codebuddy.ai/command"),
-            true,
-            None
-        ));
-        assert!(!AcpHost::idle_session_message(
-            AdapterKind::CodebuddyCli,
-            Some("_codebuddy.ai/command"),
-            false,
-            None
-        ));
-        assert!(!AcpHost::idle_session_message(
-            AdapterKind::TraeCnCli,
-            Some("_codebuddy.ai/command"),
-            true,
-            None
+            &request
         ));
     }
 }
@@ -3713,6 +3812,12 @@ mod tests {
         let mut permissions = std::fs::metadata(path).unwrap().permissions();
         permissions.set_mode(0o755);
         std::fs::set_permissions(path, permissions).unwrap();
+    }
+
+    fn exact_attachment_root(root: &Path) -> PathBuf {
+        let attachment_root = root.join("attachments");
+        std::fs::create_dir_all(&attachment_root).unwrap();
+        attachment_root
     }
 
     fn frozen_trae_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
@@ -3789,6 +3894,7 @@ mod tests {
                 &BTreeMap::new(),
                 &root,
                 Some(&root),
+                None,
                 None,
             )
             .unwrap();
@@ -3881,7 +3987,7 @@ while IFS= read -r ignored; do :; done
             "sha256:compatibility".to_string(),
             "sha256:mcp".to_string(),
             root.clone(),
-            None,
+            Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
         );
         let session_id = runtime
@@ -3905,6 +4011,114 @@ while IFS= read -r ignored; do :; done
         assert_eq!(invocations.lines().count(), 1);
         assert_eq!(invocations.trim(), "acp serve --permission-mode default");
         assert!(!invocations.contains("--version"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn idle_session_metadata_stays_out_of_prompt_output_and_preserves_the_session() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-idle-session-metadata-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("traecli");
+        let emit_metadata = root.join("emit-metadata");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-idle-metadata","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}},"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}}]}}}}}}'
+while [ ! -f '{}' ]; do sleep 0.01; done
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-idle-metadata","update":{{"sessionUpdate":"available_commands_update","availableCommands":[{{"name":"audit-skill","description":"must stay out of prompt output"}}]}}}}}}'
+IFS= read -r barrier || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{}}}}'
+IFS= read -r prompt || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-idle-metadata","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"current"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-idle-metadata","update":{{"sessionUpdate":"config_option_update","configOptions":[{{"id":"model","currentValue":"trae-default","options":[]}}]}}}}}}'
+IFS= read -r terminal_barrier || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":5,"result":{{}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                emit_metadata.display()
+            ),
+        );
+
+        let frozen = frozen_trae_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            None,
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-idle-metadata".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "runtime_managed".to_string(),
+        );
+
+        let session_id = runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        std::fs::write(&emit_metadata, b"ready").unwrap();
+        host.rpc("audit/barrier", json!({})).await.unwrap();
+
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
+        assert!(receiver.try_recv().is_err());
+        let prompt_id = runtime
+            .start_prompt("delivery-after-metadata", "continue")
+            .await
+            .unwrap();
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AcpIncoming::Message {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence: 1,
+                message,
+                ..
+            }) if native_session_id == session_id
+                && native_prompt_id == prompt_id
+                && delivery_id == "delivery-after-metadata"
+                && message.pointer("/params/update/content/text").and_then(Value::as_str)
+                    == Some("current")
+        ));
+        receive_through_prompt_completion(&mut receiver).await;
+        host.rpc("audit/terminal-barrier", json!({})).await.unwrap();
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
+        assert!(receiver.try_recv().is_err());
+
+        host.shutdown().await;
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -3953,7 +4167,7 @@ while IFS= read -r ignored; do :; done
             "sha256:compatibility".to_string(),
             "sha256:mcp".to_string(),
             root.clone(),
-            None,
+            Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
         );
 
@@ -3995,12 +4209,13 @@ printf '%s\n' "$initialize" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
 IFS= read -r resume || exit 1
 printf '%s\n' "$resume" >> '{}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"historical"}}}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"tool_call","toolCallId":"historical-tool","kind":"execute","title":"historical"}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"usage_update","used":999}}}}}}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":90,"method":"session/request_permission","params":{{"sessionId":"session-old","toolCall":{{"toolCallId":"historical-tool"}},"options":[]}}}}'
 IFS= read -r quarantined_permission || exit 1
 printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}'
+sleep 0.2
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"historical"}}}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"tool_call","toolCallId":"historical-tool","kind":"execute","title":"historical"}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"usage_update","used":999}}}}}}'
 IFS= read -r prompt || exit 1
 printf '%s\n' "$prompt" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-old","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"current"}}}}}}}}'
@@ -4040,7 +4255,7 @@ while IFS= read -r ignored; do :; done
             "sha256:compatibility".to_string(),
             "sha256:mcp".to_string(),
             root.clone(),
-            None,
+            Some(exact_attachment_root(&root)),
             "runtime_managed".to_string(),
         );
         let session_id = runtime
@@ -4059,41 +4274,6 @@ while IFS= read -r ignored; do :; done
             .unwrap();
         assert_eq!(session_id, "session-old");
         assert!(receiver.try_recv().is_err());
-        let idle_metadata = json!({
-            "jsonrpc": "2.0",
-            "method": "session/update",
-            "params": {
-                "sessionId": "session-old",
-                "update": {
-                    "sessionUpdate": "available_commands_update",
-                    "availableCommands": []
-                }
-            }
-        });
-        assert!(matches!(
-            host.route_session_message(
-                "session-old",
-                serde_json::to_vec(&idle_metadata).unwrap().len(),
-                Some("session/update"),
-                true,
-                AcpHost::session_update_kind(&idle_metadata),
-            )
-            .await,
-            AcpSessionMessageRoute::IdleMetadata
-        ));
-        assert!(!host.protocol_violated.load(Ordering::Acquire));
-        assert!(matches!(
-            host.route_session_message(
-                "session-old",
-                64,
-                Some("_kiro.dev/commands/available"),
-                true,
-                None,
-            )
-            .await,
-            AcpSessionMessageRoute::IdleMetadata
-        ));
-        assert!(!host.protocol_violated.load(Ordering::Acquire));
 
         let prompt_id = runtime
             .start_prompt("delivery-current", "continue")
@@ -4200,7 +4380,7 @@ while IFS= read -r ignored; do :; done
                 "sha256:compatibility".to_string(),
                 "sha256:mcp".to_string(),
                 root.clone(),
-                None,
+                Some(exact_attachment_root(&root)),
                 "runtime_managed".to_string(),
             );
             let error = runtime
@@ -4556,12 +4736,27 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn qoder_does_not_receive_the_execute_only_camp_attachment_root() {
+    fn every_acp_session_receives_exact_attachment_and_run_tmp_roots() {
         let root = Path::new("/tmp/rovai-camp-attachments/camp-id");
-        assert!(session_additional_directories(AdapterKind::QoderCli, Some(root)).is_empty());
+        let run_tmp = Path::new("/tmp/rovai-process/run-tmp");
         assert_eq!(
-            session_additional_directories(AdapterKind::CodebuddyCli, Some(root)),
-            vec![root.to_string_lossy().into_owned()]
+            session_additional_directories(Some(root), Some(run_tmp)).unwrap(),
+            vec![
+                root.to_string_lossy().into_owned(),
+                run_tmp.to_string_lossy().into_owned(),
+            ]
+        );
+        assert!(
+            session_additional_directories(None, Some(run_tmp))
+                .unwrap_err()
+                .to_string()
+                .contains("camp_attachment_view_runtime_unsupported")
+        );
+        assert!(
+            session_additional_directories(Some(root), None)
+                .unwrap_err()
+                .to_string()
+                .contains("Built-in Tool Run tmp")
         );
     }
 
@@ -4662,6 +4857,15 @@ while IFS= read -r ignored; do :; done
             std::env::temp_dir().join(format!("rovai-trae-compatibility-{}", uuid::Uuid::new_v4()));
         let attachments = root.join("attachments");
         std::fs::create_dir_all(&attachments).unwrap();
+        let attachment_authorization = CampAttachmentRuntimeAuthorization {
+            camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
+            attachment_root: attachments,
+            root_identity_digest: "sha256:root".to_string(),
+            generation: 1,
+            catalog_digest: "sha256:catalog".to_string(),
+            visibility_mode:
+                rovai_core::camp_attachment_view::CampAttachmentVisibilityMode::GenerationFencedV1,
+        };
         let executable = root.join("traecli");
         make_executable(&executable, "#!/bin/sh\nexit 0\n");
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
@@ -4672,7 +4876,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:mcp",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
 
@@ -4687,7 +4891,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:mcp",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_eq!(ready, first);
@@ -4698,7 +4902,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:another-run-local-mcp-projection",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_eq!(run_local_mcp_projection, first);
@@ -4717,7 +4921,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &changed_servers,
             "sha256:another-run-local-mcp-projection",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_ne!(changed_mcp, first);
@@ -4729,7 +4933,7 @@ while IFS= read -r ignored; do :; done
             PermissionSemantics::RuntimeManagedV2,
             &BTreeMap::new(),
             "sha256:mcp",
-            &attachments,
+            &attachment_authorization,
         )
         .unwrap();
         assert_ne!(changed_host, first);
@@ -4926,7 +5130,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn completed_action_persists_digests_instead_of_raw_tool_payloads() {
+    fn completed_action_keeps_only_public_command_and_persists_raw_payload_digests() {
         let completion = completed_action(&json!({
             "update": {
                 "sessionUpdate": "tool_call_update",
@@ -4935,7 +5139,10 @@ while IFS= read -r ignored; do :; done
                 "kind": "execute",
                 "title": "Run command",
                 "rawInput": {"command": "echo TOP_SECRET_INPUT"},
-                "rawOutput": {"stdout": "TOP_SECRET_OUTPUT"}
+                "rawOutput": {
+                    "stdout": "TOP_SECRET_OUTPUT",
+                    "exitCode": 7
+                }
             }
         }))
         .expect("completion should normalize")
@@ -4948,7 +5155,55 @@ while IFS= read -r ignored; do :; done
         assert!(completion.result_data["rawInputDigest"].is_string());
         assert!(completion.result_data["rawOutputDigest"].is_string());
         assert_eq!(completion.native_kind, "execute");
+        assert_eq!(
+            completion.public_command.as_deref(),
+            Some("echo TOP_SECRET_INPUT")
+        );
+        assert!(matches!(completion.outcome, ActionResultOutcome::Failed));
+        assert_eq!(completion.result_data["status"], "failed");
         assert!(!completion.observation_digest.is_empty());
+
+        let sparse_update = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-sparse",
+            "status": "completed",
+            "rawOutput": {"stdout": "failed output", "exitCode": 7}
+        });
+        let sparse = completed_action(&json!({"update": sparse_update.clone()}))
+            .expect("sparse completion should normalize")
+            .expect("sparse terminal update should create a result");
+        let observed_raw_input = json!({
+            "command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
+            "credential": "SPARSE_PRIVATE_FIELD"
+        });
+        let observed_raw_input_digest = canonical_json_digest(&observed_raw_input).unwrap();
+        let reconciled = reconcile_completed_action(
+            &sparse_update,
+            ObservedToolMetadata {
+                native_kind: Some("execute".to_string()),
+                observation_digest: Some("observed-digest".to_string()),
+                raw_input: Some(observed_raw_input),
+                locations: None,
+            },
+            sparse,
+        )
+        .expect("active Prompt observation should enrich a sparse terminal update");
+        assert_eq!(reconciled.native_kind, "execute");
+        assert_eq!(
+            reconciled.public_command.as_deref(),
+            Some("printf 'SPARSE_TERMINAL_COMMAND\\n'")
+        );
+        assert_eq!(reconciled.result_data["status"], "failed");
+        assert_eq!(
+            reconciled.result_data["rawInputDigest"],
+            observed_raw_input_digest
+        );
+        assert!(
+            !reconciled
+                .result_data
+                .to_string()
+                .contains("SPARSE_PRIVATE_FIELD")
+        );
     }
 
     #[test]

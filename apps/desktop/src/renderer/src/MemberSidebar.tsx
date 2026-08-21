@@ -467,7 +467,7 @@ function adapterLabel(kind: AdapterKind): string {
     'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
-    'trae-cn-cli': 'TRAE CLI（中国企业版）',
+    'trae-cn-cli': 'TRAE CLI',
     'antigravity-app': 'Antigravity'
   })[kind]
 }

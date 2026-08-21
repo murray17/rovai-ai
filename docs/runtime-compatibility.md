@@ -25,6 +25,74 @@ Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code 与 TRAE CLI CN
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
+### 2026-08-20 TRAE `0.120.52` asynchronous catalog、Skill 与 Ready 复核
+
+本轮直接启动 build commit `6756e52a9238b6d493928e55b05127957dbfefb4`（build date
+`2026-08-12T01:31:30Z`）的 `traecli acp serve`。基线中 `session/new` response 在进程启动后约
+1215 ms 到达；标准 `session/update` 的 `available_commands_update` 在约 1727 ms 到达，即 response 后
+约 512 ms。`availableCommands[]` 每项 shape 为 `{name, description, input: {hint}}`，共 17 项：Runtime 内建
+Slash Commands 为 `agent-new`、`init`、`loop`、`compact`，其余 13 项来自当时用户环境已加载的 Skills：
+`code-review`、`codebase-design`、`documentation-lookup`、`domain-modeling`、`feishu-docs`、`grill-me`、
+`grill-with-docs`、`grilling`、`handoff`、`improve-codebase-architecture`、`mac-performance-doctor`、`officecli`、
+`setup-matt-pocock-skills`。
+因此“`session/new` 返回值没有 Skill 字段”不能作为 TRAE 不提供 Skill 的证据。
+
+旧 ACP Host 会把该合法 Idle Session notification 归为“session-scoped message arrived without an active
+prompt”，将 Session 标记为 `ProtocolViolated`。当前 Host 已把 `available_commands_update`、config/mode/
+session-info catalog、Idle usage metadata 和已知 lifecycle extension 分流为 Session metadata：不进入 Prompt
+output，不因没有 Active Prompt 违规。Runtime advertisement evidence 为 `Verified`，安全路由实现为
+`Implemented`；Rovai 尚未把异步 update 维护为按 Host + Native Session ID + generation fencing 的权威 catalog
+snapshot，产品 catalog consumption 为 `NotImplemented`，首条 update 前也没有可消费的 `Pending/Unknown`
+状态。
+
+当前 Host 对未知标准 method/`sessionUpdate` variant 仍 fail closed；它也会把结构合法的未知 ACP `_...`
+custom notification 标记为 `ProtocolViolated`，尚未按 ACP extensibility 规则私有忽略，并且尚未对未知
+`_...` request 返回 `-32601`。这是基线 `2e8ddc3539470770a6f1942c93344cd236f5768f` 的已确认 parser/路由缺口，
+Rovai implementation 为 `NotImplemented`，不能写成 Runtime 不提供能力。`session/load` response 后另有有界
+settling/quiet window，迟到 replay 不会污染下一 Prompt。
+
+Skill 三层能力的当前证据如下：
+
+| 能力/路径 | 状态 | 实测边界 |
+| --- | --- | --- |
+| Rovai managed 项目 `.trae/skills` | `Verified` | 唯一 Skill 在新 Session catalog 出现，精确 `/skill` 调用返回唯一 marker；作为唯一 TRAE delivery group |
+| Runtime 项目 `.agents/skills` | `Verified`（Runtime discovery/load） | catalog 出现且精确调用通过；不是 Rovai-owned TRAE 投影路径 |
+| Runtime 项目 `.traecli/skills` | `Verified`（Runtime discovery/load） | catalog 出现且精确调用通过；未见公开文档，不作为 Rovai-owned 路径 |
+| Runtime 项目 `.coco/skills` | `NotObserved` | 唯一 Skill 未出现在 catalog |
+| Runtime 用户 `~/.trae/skills`、`~/.trae-cn/skills`、`~/.traecli/skills`、`~/.agents/skills` | `Verified`（discovery/advertisement）；调用 `Unverified` | 隔离 HOME 均出现唯一 catalog entry；调用环境因 model catalog 为空而在 Prompt 前失败，未据此宣称 load/invocation pass |
+| Runtime 用户 `~/.coco/skills` | `NotObserved` | 唯一 Skill 未出现在 catalog |
+
+项目 `.trae/skills` 的同名 `documentation-lookup` 覆盖用户 `~/.agents/skills` 版本，advertisement 与实际响应
+都来自项目 marker。扫描发生在 `session/new` / `session/load`：warm Host 的新 Session 能看到刚加入的 Skill，
+既有 Idle Session 在 5 秒窗口内没有动态 refresh，cold Host `session/load` 能看到。Rovai 不修改用户全局
+目录，并且不把 Runtime 的多路径兼容扫描合并成 managed delivery Verified。Runtime discovery/load evidence
+为 `Verified`，Rovai `.trae/skills` managed delivery 为 `Implemented`。
+
+同一源码基线已经把 `PreparedSkillExposure.digest` 写入 ContextManifest，但 Native Session 新建判断仍只核对
+Binding identity/generation 与 Session ID，ACP Host compatibility digest 也没有纳入 Skill exposure。由于 TRAE
+既有 Idle Session 不 live refresh，这意味着 Skill exposure 改变后禁止直接复用旧 Native Session 的产品
+门禁仍为 `NotImplemented`；该缺口不要求一律停止 warm Host，新 Session 或已验证会重扫的 `session/load`
+即可保留 Host 复用。
+
+TRAE Machine Ready 现由 Availability Check 与 Dispatch Preflight 共用同一合同：非空 version、当前
+executable identity/fingerprint、ACP v1 initialize、成功 `session/new` 与非空 Session ID、非空动态模型目录、
+非空 permission/mode 目录，以及 current model/mode 均存在于相应 options 的 Session config shape。两条路径
+都不发送 model Prompt、system marker、文件写入/拒绝、sleep/cancel、Tool 副作用或
+`session/set_config_option`。这些行为继续作为 Adapter/version/platform 独立资格证据；旧弱 TRAE `ready`
+snapshot 会被降级并重新验证。
+
+ACP v1 的 `session/load` 必须 replay history，而 `session/resume` 恢复时不返回旧消息。当前通用 ACP Host 却把
+`Resume` 与 `HistoryRestore` 都绑定为 `LoadingReplay`，并在 response 后执行同一 settling/quiet window；
+`session/resume` 独立路由为 `NotImplemented`。这项源码缺口属于共享 ACP Host，不是 TRAE Runtime 的私有行为，
+也没有据此改写 TRAE 已完成的 `session/load` 实测结论。
+
+Compaction 仍为 `CompactionDetectorPolicy::Disabled`。`compact` 虽在 advertised commands 中，手动
+`/compact` 只产生普通 Session updates 与 assistant 文本 `Compaction Completed`；把自动阈值设为 `0.01` 后
+发生的重复自动压缩也没有标准 `compaction_update`、TRAE 私有 started/completed method、稳定 occurrence ID
+或去重 key。上游文档存在 `pre_compact` / `post_compact` Hook，但项目 Hook 及控制 Hook 在 `acp serve` 下都
+未触发。当前结论是 Runtime structured completion signal evidence `NotObserved`、Rovai detector
+implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史长度和模型正文均不参与推断。
+
 ### Windows x64 平台准入基线
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
@@ -72,17 +140,30 @@ digest-bound evidence 尚未形成，因此上表的 admission 与 evidence revi
 | `trae-cn-cli` | `0.120.52` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash`，关闭 thinking |
 
 本机验证包含 Rust PR test profile、TypeScript/Vitest/Node tests、Windows x64 unpacked/NSIS 构建与 PE/manifest
-验证、clean install/start/upgrade/uninstall/data-preserve，以及十个 Runtime 的真实 ACP、Built-in CLI v17、
-Missing-Send Recovery 与 MCP Projection 矩阵。原生 Skill Projection 对支持该入口的九个 Runtime 通过；TRAE
-仍按既有边界不声明 Rovai Skill 路径。开发态 packaged Desktop 以 Claude `2.1.86` 完成真实 planned shutdown：
+验证、clean install/start/upgrade/uninstall/data-preserve，以及十个 Runtime 的真实 ACP、Built-in CLI v19、
+Missing-Send Recovery、MCP Projection 与原生 Skill Projection 矩阵；TRAE 使用当前权威的 `.trae/skills`
+managed delivery。开发态 packaged Desktop 以 Claude `2.1.86` 完成真实 planned shutdown：
 Runtime 自然退出、7 个后代进程被 Job 回收、协议 v2 收敛、重启后 fenced Run 恢复为 cancelled，Release sidecar
 随后恢复并重新通过 verifier。
 
 CodeBuddy `2.137.1` 还暴露了两项版本差异：Session/model setup 后会在首个 Prompt 前发送私有
-`usage_update` 与 `_codebuddy.ai/command` notification。Core 只对 `codebuddy-cli` 的这两类空闲元数据放行，
-其他 Adapter、extension request 与未知 session-scoped message 继续 fail closed。修正后 CodeBuddy 的 ACP
+`usage_update` 与 `_codebuddy.ai/command` notification。当前通用 ACP 路由已把合法 Idle `usage_update` 作为
+Session metadata；本轮只把精确的 CodeBuddy 私有 command notification 加入已知 lifecycle extension。
+其他 Adapter 的该私有 method、extension request 与未知 session-scoped message 继续 fail closed。修正后 CodeBuddy 的 ACP
 completion/continuation、allow-once/deny、15 项 Built-in operation、Missing-Send（49 个结构化 ACP tool event）、
 MCP Projection 与 `.codebuddy/skills` 全部以 Flash 模型通过。
+
+### Camp Published Attachment View visibility 基线
+
+当前十个 Adapter 在所有已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把
+旧 generation 的 Host/Binding 视为不兼容，并在 mutation gate 内停止或 fence；下一次 dispatch 仍只授权同一
+Camp 的精确 `attachments` root。该实现选择是保守 fallback，不是 Runtime snapshot 行为的实测结论。
+
+截至 2026-08-20，没有运行或保存符合 Camp Attachment View Probe v1 的 TRAE 正向 `live_append_visible`
+证据；既有 TRAE warm Host、Session reuse、HistoryRestore、MCP 或普通文件工具 Probe 都没有验证“同一
+IdleWarm Host/Session 在两个可靠 terminal 之间观察由正式 publication gate 原子追加的 file + directory”。
+因此 TRAE 不启用 `live_append_v1`，compatibility generation 不能为 null。其他 Adapter 同样没有被旧证据
+隐式升级。完整条件见 [Runtime Launch and Verification v13](contracts/runtime-launch-and-verification-v13.md)。
 
 ### 2026-08-17 OpenCode Usage 与 Codex Cost Projection
 
@@ -158,7 +239,7 @@ Adapter 允许且无副作用的有界版本/身份命令；只有命令成功�
 ### 2026-08-17 TRAE 启动轻检与用户授权检查复核
 
 v1.03 按 [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)调整当前产品边界，
-不改写上方 v0.87 的历史理由。本机 `/Users/murray.xue/.local/share/trae-cli/trae-cli --version` 在一秒内成功
+不改写上方 v0.87 的历史理由。本机 `$HOME/.local/share/trae-cli/trae-cli --version` 在一秒内成功
 返回 `trae-cli version 0.120.52`、build commit `6756e52a9238b6d493928e55b05127957dbfefb4`；启动与 rescan
 因此可以建立 `light_ready`，其含义仍只是 executable 可选择和尝试。
 
@@ -217,7 +298,7 @@ HistoryRestore、New；load 前 route 为 `LoadingReplay`，成功 response 后�
 assistant/tool/permission/usage/server request 全部静默隔离，并受 4096 event、8 MiB、30 秒限制。
 workspace、模型、权限、Host config 或 executable fingerprint 不兼容时不尝试 load；错误 ID、协议异常或
 超限持久记录 continuity lost、停止 Host、轮换 Binding 并建立新 Session。当前规范入口为
-[Runtime Launch and Verification v9](contracts/runtime-launch-and-verification-v9.md)。
+[Runtime Launch and Verification v13](contracts/runtime-launch-and-verification-v13.md)。
 
 隔离 Core smoke `pnpm smoke:trae-cold-resume` 进一步通过：首个 Host 的工具读取随机私密 marker 后删除
 源文件并重启 Core；新 Host 使用同一 Native Session ID 恢复 marker，Host ID 明确变化，恢复 Run 投影的
@@ -234,9 +315,9 @@ Action/Approval 均为 0。恢复后的新文件工具与 Approval 成功，运�
 `ready`。旧 `installed_unverified` 只可读取，不再进入 onboarding、配置或执行。真实 TRAE acceptance/smoke
 继续串行，第三方密钥/状态文件竞争由测试调度解决。
 
-本次没有改变上方 `0.120.52` 的真实协议、模型、权限、Session continuation、MCP 或 terminal 兼容证据，也
-没有据此宣称运行了新一轮真实 TRAE smoke。统一 launch-policy、fake ACP Health/Dispatch 与持久化回归测试
-拥有当前产品行为；当前规范入口为 [Runtime Launch and Verification v9](contracts/runtime-launch-and-verification-v9.md)
+上面的 2026-08-20 定向复核新增了 asynchronous metadata、Skill discovery/invocation、Compaction 与统一
+Machine Ready 证据，但没有冒充重新运行完整 Built-in CLI/MCP/Approval 矩阵。统一 launch-policy、fake ACP
+Health/Dispatch 与持久化回归测试拥有当前产品行为；当前规范入口为 [Runtime Launch and Verification v13](contracts/runtime-launch-and-verification-v13.md)
 和 [Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)。
 
 ### 2026-08-17 Runtime command output 协议修正
@@ -422,7 +503,7 @@ terminal decision 和 `finalCampMessageId`，不以 Renderer 或 stdout 文本�
 | Qwen Code | `0.21.5` / `deepseek-v4-flash(openai)` | pass | pass | pass / pass（3 tool events） | pass |
 
 最终统一报告与六份 ACP 协议 fixture 位于
-`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-12/acceptance/missing-send-recovery-v059/final-all-nine/`。
+`<local-output>/Rovai-ai-comparison-2026-08-12/acceptance/missing-send-recovery-v059/final-all-nine/`。
 Copilot 默认 `claude-sonnet-5` 的 zero-send 路径通过，但该模型三次拒绝从 Camp 输入执行 shell，因此
 不把其模型拒绝冒充 suppression pass；最终统一矩阵为 Copilot Adapter 显式选择同一真实 Runtime
 model catalog 中的 `gpt-5.6-sol`，报告记录了实际选择。该模型行为观察不改变 Core 的全 send 抑制
@@ -497,9 +578,10 @@ detector readiness 提升为 Runtime admission 条件。
 | Qoder | `1.1.14` | 真实 `/compact` 触发 `PostCompact(manual)` | completed；隔离 `--settings` Hook | pass |
 | CodeBuddy | `2.133.1` | 强制真实 emergency auto compaction 完成后触发 `SessionStart(source=compact)` | completed；隔离 `--plugin-dir` Plugin Hook | best-effort pass；CLI additional settings 未进入 Hook registry。该版本 pre-message compaction 实测绕过 `PreCompact`、`PostCompact` 和 `SessionStart(compact)`，因此存在已记录的 detector coverage gap，不使用 token heuristic 补猜 |
 | Qwen Code | `0.21.5` | 真实 `/compress` 完成并触发 `PostCompact(manual)` | completed；私有 `QWEN_HOME` user-scope Hook | pass；HookRegistry 不读取 system Hook，trigger matcher 为 exact match，配置 `*` 后由 relay 校验 trigger |
+| TRAE CLI CN | `0.120.52` | advertised `/compact`、手动与自动阈值场景均已运行；只见普通 update/assistant completion text | `Disabled`；无 detector transport | Runtime signal evidence `NotObserved`；ACP 无结构化 qualified lifecycle edge、occurrence ID 或去重 key，project/control Hook 在 `acp serve` 下未触发；不是 `Unsupported` |
 
 Claude Code 与 Codex CLI 的 Bootstrap 位于普通 compaction 不触及的 instruction layer，不建立
-detector。Antigravity v0.48 policy 为 `disabled`，因为尚无合格 compaction lifecycle event；Rovai 不
+detector。Antigravity v0.48 与 TRAE 当前 policy 为 `disabled`，因为尚无合格 compaction lifecycle event；Rovai 不
 使用 token 数或 context telemetry 猜测 compaction。detector 建立失败、短暂中断或恢复都不改变九个
 Runtime 的 Built-in CLI 兼容性结论。完整时序与持久边界见
 [Native Session Bootstrap Redelivery](architecture/native-session-bootstrap-redelivery.md)。

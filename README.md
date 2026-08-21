@@ -22,6 +22,20 @@ Rovai-ai 是一个本地优先的多 Agent 研发工作空间。桌面应用组�
 [Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
 设置页中明确标为“待支持”的预告不属于可执行 Runtime 目录，也不能被队员选择或启动。
 
+## 终端自动化（macOS）
+
+安装包内的 `rovai app` 是普通用户可在终端使用的正式本机自动化入口，不是调试接口。它控制当前已经运行的
+Rovai Desktop；App 未运行时返回 `app_not_running`，不会在后台自动启动。
+
+```bash
+/Applications/Rovai\ AI.app/Contents/Resources/bin/rovai app --help
+```
+
+希望直接输入 `rovai` 时，可将这个包内 binary 链接到 `PATH` 中的目录（例如 `~/.local/bin/rovai`）。
+`rovai app ...` 与供 Agent Runtime
+调用的既有 `rovai ...` 使用彼此隔离的本机 transport 和 credential。完整命令、安全和 Trial 导出边界见
+[User Automation v1](docs/contracts/user-automation-v1.md)。
+
 ## 文档
 
 - [文档导航、权威边界与 AI 读取规则](docs/README.md)

@@ -14,6 +14,10 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import {
+  coreDataDirectoryArguments,
+  removeEphemeralRuntimeCampFilesRoot
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-'))
@@ -34,7 +38,8 @@ const requestedAdapters = adapterSelection === 'all'
       'kiro-cli',
       'qoder-cli',
       'codebuddy-cli',
-      'qwen-code'
+      'qwen-code',
+      'trae-cn-cli'
     ]
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
@@ -46,7 +51,8 @@ const supportedAdapters = new Set([
   'kiro-cli',
   'qoder-cli',
   'codebuddy-cli',
-  'qwen-code'
+  'qwen-code',
+  'trae-cn-cli'
 ])
 const allDeliveryGroups = [
   'antigravity',
@@ -57,7 +63,8 @@ const allDeliveryGroups = [
   'kiro',
   'opencode',
   'qoder',
-  'qwen'
+  'qwen',
+  'trae'
 ]
 let core = null
 
@@ -326,6 +333,7 @@ try {
   }, null, 2))
 } finally {
   if (core) await core.stop()
+  await removeEphemeralRuntimeCampFilesRoot(dataDir)
   await rm(fixtureRoot, { recursive: true, force: true })
 }
 
@@ -547,8 +555,7 @@ function startCore() {
     ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
     : join(root, 'target', 'debug', 'rovai-core')
   const child = spawn(coreExecutable, [
-    '--data-dir',
-    dataDir,
+    ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root',
     libraryRoot
   ], {
@@ -604,6 +611,7 @@ function groupRoot(groupKey) {
   if (groupKey === 'qoder') return '.qoder/skills'
   if (groupKey === 'codebuddy') return '.codebuddy/skills'
   if (groupKey === 'qwen') return '.qwen/skills'
+  if (groupKey === 'trae') return '.trae/skills'
   throw new Error(`Unknown Skill delivery group: ${groupKey}`)
 }
 
@@ -617,6 +625,7 @@ function deliveryGroup(adapterKind) {
   if (adapterKind === 'qoder-cli') return 'qoder'
   if (adapterKind === 'codebuddy-cli') return 'codebuddy'
   if (adapterKind === 'qwen-code') return 'qwen'
+  if (adapterKind === 'trae-cn-cli') return 'trae'
   throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
 }
 

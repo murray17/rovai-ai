@@ -4,7 +4,7 @@ authority: renderer-ui-routing
 status: accepted
 design_direction: porcelain-day-steel-night
 target_version: cross-version
-last_updated: 2026-08-18
+last_updated: 2026-08-21
 ---
 
 # Rovai AI UI 规范
@@ -41,6 +41,10 @@ Porcelain Day 与 Steel Night 是同一 Rovai AI 视觉世界的两套生产主�
 
 平台文档只拥有 native frame、快捷键/文案、系统主题、文件系统反馈和平台准入等展示差异，不创建第二套
 产品结构。HTML 是对规范的交互评审载体，不是生产组件或领域状态真源。
+
+普通用户通过 `rovai app camp open` 请求导航时，Desktop Main 必须先验证 Camp，再复用现有 window 恢复与
+Camp activation 路径；Renderer 不接收 automation credential、socket、任意 route 或本地路径，也不建立第二套
+视觉 surface。字段和错误由 [User Automation v1](../contracts/user-automation-v1.md)拥有。
 
 ## 页面局部 Brief
 

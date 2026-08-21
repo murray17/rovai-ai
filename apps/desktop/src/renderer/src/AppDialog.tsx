@@ -6,6 +6,7 @@ export type AppDialogTone = 'brand' | 'danger' | 'attention' | 'info' | 'neutral
 export type AppDialogIconName =
   | 'bolt'
   | 'brain'
+  | 'clock'
   | 'download'
   | 'folder'
   | 'image'
@@ -171,6 +172,8 @@ function glyphPaths(name: AppDialogIconName): React.JSX.Element {
       return <path d="m11.5 2.5-6 8h4l-1 7 6-8h-4Z" />
     case 'brain':
       return <><path d="M8 4.5A3 3 0 0 0 3.8 8a3.2 3.2 0 0 0 .8 5.7A3 3 0 0 0 10 16V4.8A2.8 2.8 0 0 0 8 4.5Z" /><path d="M12 4.5A3 3 0 0 1 16.2 8a3.2 3.2 0 0 1-.8 5.7A3 3 0 0 1 10 16" /><path d="M6.5 9.5c1.1 0 1.9.6 2.2 1.6M13.5 9.5c-1.1 0-1.9.6-2.2 1.6" /></>
+    case 'clock':
+      return <><circle cx="10" cy="10" r="7.5" /><path d="M10 5.5v4.8l3 1.8" /></>
     case 'download':
       return <><path d="M10 2.5v10M6.5 9l3.5 3.5L13.5 9" /><path d="M3 16.5h14" /></>
     case 'folder':

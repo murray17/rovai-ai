@@ -1,8 +1,8 @@
 ---
 document_type: version-decisions
 version: v1.15
-lifecycle: current
-last_updated: 2026-08-19
+lifecycle: historical
+last_updated: 2026-08-20
 ---
 
 # v1.15 决策记录
@@ -49,7 +49,7 @@ Main Window Session 内已接收的运行事件全部保留。terminal Evidence�
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Camp Open Read Path](../../architecture/camp-open-read-path.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
-- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
 
 <a id="v1-15-d02"></a>
 
@@ -90,6 +90,219 @@ Drawer，使已展开状态和阅读位置丢失。
 
 ### 当前权威影响
 
-- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
 - [Product/Renderer 基础不变量](../../architecture/foundational-invariants.md#product-execution-surface)
+
+<a id="v1-15-d03"></a>
+
+## V1.15-D03：自身公屏输出不作为同一 Agent 的 recent 未读候选
+
+### 背景
+
+CampMessage 是所有成员共享、持久且可检索的公共事实；此前 recent selector 只按 Camp、sequence boundary、
+trigger 与 tombstone 选择，所以 Agent 通过 `rovai send` 发布的上一轮输出会在下一 AgentRun 重新进入自己的
+`SHARED_CONVERSATION.recentMessages`。更新的自身消息还能占用 15 条名额并把用户或其他 Agent 消息挤出。
+Renderer 隐藏无法修复模型输入，发布后删除消息又会破坏公共事实和其他成员可见性。
+
+### 决定
+
+Profile v4 在 recent `LIMIT` 和 whole-history omission aggregate 前排除
+`author_type = agent AND author_id = currentAgentId`。过滤只属于当前 recipient Agent 的模型 recent
+projection：消息继续持久化并对用户、其他 Agent、Timeline、History/Search 与 Renderer 可见；当前 trigger
+继续通过完整 `CURRENT_INPUT` 交付；自身消息仍可作为理解 eligible message 所需的 reference ancestor。
+
+该选择推进 ContextManifest 至 v19，并以 Migration 98 对 Profile v3 的 Binding、冻结 context 与恢复 Evidence
+执行 clean break，避免旧选择语义在重试或恢复中与新 reader 混用。
+
+### 后果
+
+- 自身输出不再占 recent top-15 或制造 whole-history omission，较早 eligible 消息可以回填；
+- accepted public boundary 仍跨过自身消息 sequence，避免后续重新注入；
+- direct materialization 与 A2A preflight 必须使用同一 recipient Agent ID、selector 和 omission predicate；
+- schema 52 store 升到 schema 53 时，非终态执行稳定关闭并清除旧 Session/Binding/Evidence；CampMessage 和其他
+  业务事实保留；
+- Profile v3/Manifest v18 没有 compatibility reader、dual write 或 downgrade reader。
+
+### 被拒绝方案
+
+- 在 Renderer 隐藏自身消息：只改变人类展示，模型输入和候选名额仍错误；
+- 发布后删除或标记自身 CampMessage：会破坏公共时间线、其他成员理解、History/Search 与引用链；
+- 在 `LIMIT 15` 后过滤：自身消息仍会占名额，无法保证返回 15 条 eligible 消息；
+- 把自身消息从 reference closure 一并隐藏：会切断其他 eligible 消息的必要因果祖先；
+- 只按 `source_agent_run_id` 过滤：旧消息或非 Run 来源的自身发布仍会漏入，作者 identity 才是稳定边界。
+
+### 当前权威影响
+
+- [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
+- [有界公共上下文与引用闭包](../../architecture/foundational-invariants.md#context-public-history)
+- [Public A2A Message Delivery](../../architecture/public-a2a-message-delivery.md)
+
+<a id="v1-15-d04"></a>
+
+## V1.15-D04：Published Attachment 采用 Camp 共享 Runtime View
+
+### 背景
+
+权威附件位于 Core 私有 data directory；把其路径写入模型输入并不能保证 TRAE 等沙箱化 Runtime 可以读取。
+最初考虑为每个 AgentRun 或 Agent Session 建立最小投影，但这会把文件授权错误地绑定到“附件进入当前
+Context”：Agent B 无法主动查看 Agent A 已经发布到同一 Camp 的文件，稳定 Session 还要承担不断变化的
+授权根和副本生命周期。直接放开 Authority 根则会把 Draft、Core metadata 和同根其他 Camp 一并推入
+Runtime 信任边界。
+
+### 决定
+
+保留 `<data_dir>/camp-attachments/` 为唯一 Authority；Prepared Attachment 始终 Core-private。附件随
+CampMessage 事务成功成为 `message_attachment` 时，转为整个 Camp 共享的 Published Attachment，并通过
+实例隔离、按 Camp 稳定的派生 Runtime View 供该 Camp 全体 Agent 枚举和只读访问。Runtime 只接收当前 Camp
+精确 `attachments` 根；Context 是否显式引用某个附件只决定模型输入，不决定 Camp 内读取权。
+
+发布使用 Runtime 不可达 staging、全组校验、journal、per-Camp mutation gate 与原子 promote；新 Context
+统一解析 View path，并推进 Formatter 21、Manifest 20 和 Run Facts v2。所有 Adapter 在没有真实增量可见性
+正向 Probe 前使用 generation-fenced Host compatibility。Migration 99 保留 Authority 与历史 Evidence，按
+accepted-input 事实终结旧非终态 Formatter 20 执行，再从 `message_attachment` 回填 View。
+
+### 后果
+
+- 同一 Camp 的 Agent 可以主动发现此前任何成员发布的附件，不要求附件再次进入当前 Prompt；Draft、其他
+  Camp、Core metadata 和 View 的实例父目录仍不在授权范围；
+- 每个 Published Attachment 只有一个 Camp 级 Runtime 副本，路径在 Camp 生命周期内稳定；View 可删除、
+  重建并随 Camp 删除，但不能反向成为业务权威；
+- 发布与整次 Runtime Run 通过读写 gate 串行化；当前 generation-fenced 模式会在新增附件时 fence 旧 Host，
+  而不是为每个 Run 创建新目录；
+- `0500/0400` 和 protected DACL 只提供防误写与最小暴露加固；同 UID/SID 的跨 Camp 强隔离仍取决于 Adapter
+  sandbox 或 exact-directory allowlist 的真实证据；
+- 历史 Authority path、ContextManifest、模型输入 Blob、摘要、Managed Blob 和 `contentDigest` 不改写。
+
+### 被拒绝方案
+
+- 为每个 AgentRun 复制获准附件：把 Camp 协作文件降为 Prompt-scoped capability，并产生重复副本和恢复路径；
+- 为每个 Agent Session 累积授权目录：仍按单 Agent 历史划分共享事实，且 Session/compaction/rebuild 使授权难以收敛；
+- 把 Authority Camp 根直接交给 Runtime：会暴露 Draft 和 Core-private metadata，并让派生访问问题污染权威布局；
+- 授权实例 root、`camps` parent 或全局 Home root：扩大到其他 Camp/实例，破坏精确业务授权；
+- 使用 symlink/hardlink：把 Authority 节点和 Runtime 可见节点的身份、权限与删除边界耦合；
+- 假设 TRAE Warm Host 自动看到新增目录：没有 Adapter×platform×binary 正向 Probe，不能据此取消 generation fence。
+
+### 当前权威影响
+
+- [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
+- [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
+- [Run Facts v2](../../contracts/run-facts-v2.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
+- [Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)
+- [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)
+
+<a id="v1-15-d05"></a>
+
+## V1.15-D05：执行台位置采用本机安装级全局偏好
+
+### 背景
+
+ADR-0190 把 `bottom | inspector` 定义为每个 mounted Camp Workspace 的 Renderer 瞬时状态，并明确不
+持久化。该边界避免了最初实现引入 Core 状态，但也使用户在切换 Camp、进入其他页面或重启应用后反复
+执行同一布局操作。执行台位置表达的是个人工作台布局，而不是任何 Camp、AgentRun 或协作事实；按 Camp
+分别保存会把一个全局阅读习惯错误地绑定到业务对象。
+
+现有 Inspector visibility 已是独立的本机展示偏好，Main 也已有原子、串行写入的 General Preferences。
+因此真正的取舍不是“是否把位置写进 Camp”，而是让直接操纵的结果成为稳定的本机偏好，还是继续把用户
+选择限制在一次组件挂载期。
+
+### 决定
+
+执行台最后一次成功的显式位置选择成为 Main-owned 的本机安装级全局偏好，跨 Camp、页面切换和应用重启
+生效。现有“移到右侧 / 移回底部”按钮是唯一写入口；Settings 不增加第二个“默认位置”。Main 写入成功并
+返回权威 snapshot 后，Renderer 才移动同一个已挂载 Drawer；写入失败保持旧位置并原位提供重试。
+
+Placement 与 Inspector visibility 独立成立。用户隐藏 Inspector 时，右侧执行台随 Inspector 不可见；进入
+不含 running Run 的 Camp 和已挂载 workspace 中的后台事件不推翻隐藏选择，也不偷偷把执行台搬到底部。
+进入权威 snapshot 含 running Run 的 Camp 是精确执行导航，会显示 Inspector、激活首个“执行”Tab，并选择
+最新 running Run；用户显式移到右侧或使用其他既有精确执行导航时同样显示 Inspector、激活“执行”。
+Camp workspace 在权威偏好到位后才挂载，避免恢复时先显示底部再跳到右侧。
+
+旧 General Preferences 没有位置字段时只补 `bottom`，并保留可识别的其他偏好。不从历史 Camp、旧
+Renderer 瞬时状态、Inspector 显隐或窗口尺寸推断位置，不提供旧版本 downgrade reader。本决定局部替代
+[ADR-0190](../v0.84/decisions.md#adr-0190) 的 mounted-workspace 生命周期和“不持久化”条款；其单一执行台、
+两种承载位置、焦点、唯一 DOM 与不改变 Run 事实等其余边界继续有效。
+
+### 后果
+
+- 一次成功的位置选择会影响以后所有 Camp，用户不再逐 Camp 重复操作；
+- General Preferences schema、Main/Preload API、启动投影和 Renderer ownership 需要同步推进，但 Core、
+  SQLite、Camp Snapshot、Runtime 与云同步语义不变；
+- Inspector hidden 与右侧 placement 可以同时存在，Header 显隐控件必须保持可发现、可键盘到达；
+- 重新进入带 running Run 的 Camp 会从当前权威 snapshot 建立瞬时 selection 并显示执行台，但不持久化旧
+  Agent/Run selection，也不把键盘焦点移入 Drawer；
+- 自动验收必须覆盖旧偏好默认、跨 Camp/页面/重启、写失败不移动、首屏无闪跳以及 hidden 组合；
+- Agent/Run selection、Drawer 开合、已读 Tool 全文和滚动位置仍是 workspace/Drawer 局部状态，不随全局
+  placement 跨 Camp 持久化。
+
+### 被拒绝方案
+
+- 只在当前 Main Window Session 跨 Camp 保留：应用重启后仍要求重复设置，不能形成稳定偏好；
+- 按 Camp 分别持久化：把个人布局误建模为 Camp 事实，并正面保留逐 Camp 配置负担；
+- 在 Settings 增加“默认位置”，位置按钮只作临时覆盖：制造“当前”和“默认”两个概念及竞争写入口；
+- 仅写 Renderer localStorage：与现有 Main-owned General Preferences 分裂加载、失败和迁移生命周期；
+- Inspector hidden 时无差别自动显示或回退底部：前者会让没有 running Run 的普通导航推翻用户显式隐藏，
+  后者让偏好位置与实际位置静默分叉；只为进入 running Camp 的精确执行上下文保留显示例外。
+
+### 当前权威影响
+
+- [产品/Renderer 基础不变量](../../architecture/foundational-invariants.md#product-execution-surface)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
+- [Camp 会话工作区](../../ui/components/conversation-workspace.md)
+- [桌面 UI 验收](../../development/ui-acceptance.md#agent-执行过程门禁)
+
+<a id="v1-15-d06"></a>
+
+## V1.15-D06：冻结 Context 只绑定附件语义，不绑定可重建 View 的物理身份
+
+### 背景
+
+D04 建立的 Camp-shared Runtime View 是可删除、可重建的派生数据，但 Manifest 20 receipt 同时冻结了绝对
+published root、root/Entry filesystem identity、publication operation 和 physical generation。controlled rebuild
+即使保持 Authority bytes、`contentDigest` 和 Runtime 可见路径完全相同，也会生成新的 inode/file identity、
+operation 与 generation，从而使历史 Context 被错误判为不兼容。与此同时，大目录 staging 在全局 Database
+mutex 下执行递归 copy/digest/fsync，会阻塞无关状态推进，并放大 generation gate 的等待成本。
+
+### 决定
+
+ContextManifest 21 使用 View Receipt v2，只冻结 Camp ID、稳定相对 payload path、attachment kind/count/bytes/
+`contentDigest` 和 append-only semantic catalog revision/digest。root/Entry identity、publication operation、
+physical generation 与 physical catalog digest 继续用于本机完整性、Host compatibility 和 Runtime Auth Receipt，
+但不再决定历史 Context 语义有效性。
+
+View 持久化显式分离 semantic catalog revision 和 physical generation。controlled rebuild 必须逐项证明稳定
+语义不变，只更新物理轴。publication staging 同时拆为“短 DB CopyPlan/journal → 无 DB mutex copy/fsync →
+短 DB CAS”，最终 Camp mutation gate、55 秒 busy 和 generation-fenced 产品规则保持不变。
+
+### 后果
+
+- 相同 Authority bytes、相同 `contentDigest` 和稳定相对路径的 View 重建后，历史 Manifest 21 仍可恢复；
+- 当前 dispatch 仍必须重新验证本机物理 View，生成新的 Auth Receipt，并由 generation fence 阻止旧 Host 复用；
+- append 保持旧 semantic receipt 为合法 ancestor，删除、替换、digest/kind/count/path 漂移继续 fail closed；
+- Migration 100 诚实终结旧非终态 Manifest 20/Receipt v1 执行，保留历史 Evidence，并为现有 View 回填
+  semantic catalog；
+- 大附件复制不再长期占用 Core 全局 Database mutex，但 Draft/CopyPlan 漂移仍由短 CAS 拒绝且不部分发送；
+- Runtime 活跃期间禁止带附件 publication 是明确保留的产品限制，不在本决定中改为 live append。
+
+### 被拒绝方案
+
+- 让 controlled rebuild 复用 inode、operation 或 generation：文件系统不保证物理身份可复现，也会把派生目录
+  错误提升为历史业务权威；
+- 恢复时忽略整个 receipt：会失去对附件删除、替换、语义 path 和 catalog 非 append-only 漂移的验证；
+- 改写历史 Manifest/receipt 为新物理身份：破坏冻结证据、Managed Blob digest 与 accepted delivery 审计；
+- 取消 generation fence 或允许运行中发布：没有 TRAE live-append 正向 Probe，且产品明确选择运行期禁止新增数据；
+- 只缩短 SQLite transaction、不释放外层 Database mutex：文件复制仍会阻塞所有共享数据库操作。
+
+### 当前权威影响
+
+- [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
+- [Runtime 与 Context 基础不变量](../../architecture/foundational-invariants.md#runtime-recovery-shutdown)

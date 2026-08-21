@@ -3,13 +3,13 @@ document_type: architecture
 architecture: camp-composer-draft
 authority: camp-composer-draft-and-user-send-boundaries
 status: accepted
-last_updated: 2026-08-14
+last_updated: 2026-08-20
 ---
 
 # Camp Composer Draft 架构
 
 Camp Composer Draft 是用户下一条 Camp 消息的唯一持久编辑真源。字段、命令和错误见
-[Camp Composer Draft v2](../contracts/camp-composer-draft-v2.md)；长期取舍见
+[Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)；长期取舍见
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)、
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)与
 [Composer Draft 不变量](foundational-invariants.md#camp-composer)与
@@ -49,6 +49,24 @@ exact Draft send
 
 `startReply` 是显式用户命令，因此可以在一个 mutation 中同时写引用和可见 Mention。普通 Draft load、
 send、timeline projection、reply relation 或历史作者都不能自行增加收件人。
+
+## Sendability and publication flow
+
+```text
+exact Draft send
+  -> render body
+  -> load exact ordered ready Prepared Attachment IDs
+     -> non-empty body OR at least one ready attachment
+        -> continue with reply / continuation / recipient validation
+        -> semantic commit consumes Draft and creates pending publication
+     -> empty body AND no ready attachment
+        -> reject camp_message.empty_body and preserve the Draft
+
+attachment-only accepted
+  -> persist body="" + structured_content_json="[]"
+  -> keep message_attachment / publication / CampTurn / AgentRun in the same transaction
+  -> persistent writer intent keeps AgentRun queued until projection resolves
+```
 
 ## Continuation flow
 
@@ -94,12 +112,15 @@ message回看更早记录。动态空白候选可以因失效被抑制；已经�
 - 未解决 requirement、失效 continuation 或任一失效 Mention 都不能通过 Default Lead fallback 转成 accepted；
 - 取消引用不删除 Mention，删除 Mention也不自动取消引用；
 - continuation send 必须先物化 Structured Mention，不能只写 recipient snapshot 或伪造 reply；
+- 用户发送 payload 由非空 rendered body 或至少一个 ready Prepared Attachment 构成；preparing/error 不满足，
+  纯附件 accepted 时不得生成占位正文；
 - parent quote 不是私密 thread、Task、Delivery 或 Agent caller-return edge；
-- Pending Camp 没有可回复的稳定消息；reply-only Draft 不改变 Pending activation 的首条非空正文要求。
+- Pending Camp 没有可回复的稳定消息；reply-only Draft 不构成可发送 payload，首条 accepted 正文或纯附件消息才激活 Camp。
 
 ## References
 
-- [Camp Composer Draft v2](../contracts/camp-composer-draft-v2.md)
-- [Camp Attachment v1](../contracts/camp-attachment-v1.md)
+- [Camp Composer Draft v4](../contracts/camp-composer-draft-v4.md)
+- [Camp Attachment v5](../contracts/camp-attachment-v5.md)
+- [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
 - [Public A2A Message 与 Message Delivery](public-a2a-message-delivery.md)
 - [Camp 会话工作区](../ui/components/conversation-workspace.md)

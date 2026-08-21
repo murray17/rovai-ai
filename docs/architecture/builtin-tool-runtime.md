@@ -3,17 +3,17 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v17](../contracts/builtin-tool-transport-v17.md)、
+[Built-in Tool Transport v19](../contracts/builtin-tool-transport-v19.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
-[Camp Message Send v10](../contracts/camp-message-send-v10.md)、
+[Camp Message Send v12](../contracts/camp-message-send-v12.md)、
 [Gather v3](../contracts/gather-v3.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
 [Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v16 及更早 Transport 只保留
@@ -36,8 +36,8 @@ Runtime Input Delivery Evidence 与 Profile/Formatter/Manifest 权责见
 omission 的 bounded aggregate 边界见
 [公共上下文不变量](foundational-invariants.md#context-public-history)和
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)、
-[ContextManifest Evidence v18](../contracts/context-manifest-evidence-v18.md)及
-[Run Facts v1](../contracts/run-facts-v1.md)。Task authority 与
+[ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)及
+[Run Facts v2](../contracts/run-facts-v2.md)。Task authority 与
 self-active awareness 见
 [ContextManifest 与 Run Facts 不变量](foundational-invariants.md#context-manifest-run-facts)；真实空集合
 的显式 clearing snapshot 见
@@ -166,9 +166,20 @@ Send exact help 公开 line-leading display-name alias：它必须是 logical li
 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
-当前 v17 contract/CLI command version、`builtin_cli.transport.v17` capability 与 IPC protocol 2 必须同时进入
-Binding compatibility 和 digest。Camp History 使用 v4；Session Charter bytes、Formatter 20 与
-ContextManifest 18 保持不变。v17 Context 不做 endpoint 猜测并 fail closed。
+当前 v19 contract/CLI command version、`builtin_cli.transport.v19` capability 与 IPC protocol 2 必须同时进入
+Binding compatibility 和 digest。Camp History 使用 v4；Session Charter bytes 保持不变，动态 Context 使用
+Formatter 21 / ContextManifest 21。v19 Context 不做 endpoint 猜测并 fail closed。
+
+`ROVAI_RUN_TMP` 是 Runtime Host 启动时继承的稳定精确路径，不是 process root、Camp workspace 或附件存储。
+每次新 lease 在 active context 写入前 fail-closed 清空并重建该目录；unbind/fence 只做 best-effort 清理，后继
+bind 必须再次成功重置。Codex `runtimeWorkspaceRoots`、Claude/Antigravity `--add-dir`、ACP
+`additionalDirectories` 与 Copilot Host 参数都显式加入这一 exact root，不加入其父目录。Runtime 只能把当前
+lease 生成的临时输出交给 `--file`，authentication 与 freeze 继续绑定 process、lease generation、Run、epoch
+和 exact Run tmp identity。
+
+Send v12 的 `body` 缺省为空字符串，`files` 缺省为空数组；领域服务要求 trim 后正文非空或至少一个文件。
+因此 `rovai send --file <path>` 是完整命令，不生成占位正文。Schema/default 只负责 transport shape，跨字段
+payload 门禁仍在 Domain Service。
 
 `member.create` 只接受 attested active、direct user-triggered AgentRun。Agent 依照 `member-studio` 展示完整
 名牌并取得用户确认，可选地把当前 Run 中 Core 可读的 PNG/JPEG 路径交给 CLI；Core 在领域提交前完成
@@ -236,6 +247,12 @@ Lease → AgentRun + executionEpoch + NativeBinding
       → resolve_sender_identity()
       → authenticated current Camp
 ```
+
+带 `files` 的 Send 将一次 invocation 分成短授权、锁外 Authority freeze、短重授权/commit 三段。第一段只做
+request replay 与 exact lease/run/epoch/run-tmp 认证；随后释放全局 invocation guard 和 Database mutex，在
+blocking work 中执行 no-follow copy/hash/fsync；最后重取 guard/Database 并验证同一身份后提交统一 publication
+aggregate。重放不重新读源，身份漂移只清理本 operation 尚未拥有的 Authority 节点。该分段是 Send adapter 的
+内部实现，不扩大 generic Router interface，也不把路径或 projection 状态加入 Agent output。
 
 推导。首次调用将它写入内部 `CampMessageSendCommand.camp_id`；持久 Replay 读取已记录的
 `camp_id + source AgentRun + executionEpoch`，不重新使用当前活跃身份。Camp History service 为
@@ -370,7 +387,7 @@ Session Charter 只说明：
 - Core 在每次 invocation 重做授权，任何模型可见 ID/fact 都不是 authorization token；
 - Dynamic Context 可能截断或省略：`SHARED_CONVERSATION.campId` 适用于全部投影消息，截断消息只以
   Unicode-scalar `nextBodyOffset` 对齐 `camp.read item.bodyOffset`；遗漏 sequence envelope 可有空洞且
-  不可执行；公共 A2A 继续遵循 Profile v3 的 bounded reference closure 与 self-active Task selection；
+  不可执行；公共 A2A 继续遵循 Profile v4 的 bounded reference closure、self-authored recent filter 与 self-active Task selection；
 - `RUN_FACTS` 字段化表达冻结 Task reference、Session continuity、external effect、Gather member 与
   delegation budget；命令特定教学不回填 Charter。
 
@@ -455,13 +472,13 @@ AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break �
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
 
-Context Formatter v20 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
+Context Formatter v21 的 `COLLABORATION_STATE` schema v2 只描述 peers。Core 从 stable current
 CampMembers 中排除 `snapshot.agent_id`；away 和 leave-requested 关系保留到正式 `left`。每个 peer
 只含 Agent ID、Name、Team Role 和 Professional Responsibilities；Default Lead 只以
 `defaultLeadAgentId` 和派生的 `selfIsDefaultLead` 表达。调用资格仍在 BuiltinToolRouter/Domain
 Service admission 时按当前 membership、Presence、Runtime、Capability、quota 与 fence 重判。
 
-Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v18 无论本轮是否
+Core 先构建完整 v2 projection，再计算 `collaboration_state_digest`。ContextManifest v20 无论本轮是否
 渲染 section 都冻结该完整 digest，并以 `collaborationStateIncluded` 单独记录 inclusion。只有 Runtime
 Input accepted ACK 才把 `conversation.native_collaboration_state_digest` 推进到 Delivery 冻结的完整
 digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 self identity 编辑和其他不改变
@@ -469,15 +486,15 @@ digest；failure、`delivery_unknown` 和未 accepted 输入不推进。因此 s
 
 ### Self Active Task Projection
 
-Profile v3 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
-八项。Formatter v20 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
+Profile v4 对目标 Agent 当前 Camp 中自己负责的 active Task 按 `updatedAt DESC, taskId DESC` 选择最多
+八项。Formatter v21 在 `COLLABORATION_STATE` 后、`SHARED_CONVERSATION` 前独立输出 compact
 `SELF_ACTIVE_TASKS`，每项只有 `taskId/title/status`。真实 candidate 空集合必须输出
 `{"tasks":[]}`，以覆盖同一 Native Session 的旧责任认知；只有候选存在但 Runtime payload budget
 将所有 Task entry 淘汰时才省略整个 section。Default Lead 不获得其他成员 Task 的隐式 projection。
 公共历史先为 Runtime budget 让位，随后从 Task tail 移除，并以 aggregate `omittedCount` 说明
 selection/budget omission。
 
-ContextManifest v18 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
+ContextManifest v20 冻结 inclusion、有序 `taskId/version/updatedAt` references、optional omission count
 与 exact projection digest；真实空集合为 `included:true`、空 refs 与 empty projection digest，预算
 全量淘汰为 `included:false`、空 refs 与 positive omission count。A2A preflight 和 direct
 materialization 使用同一 selector。该 Evidence 不创建 freshness watermark、delta 或 ACK，恢复只
@@ -486,7 +503,7 @@ Task 并由 Core 重授权。
 
 ### Shared Conversation 与 Run Facts
 
-Formatter v20 按 `COLLABORATION_STATE? → SELF_ACTIVE_TASKS? → SHARED_CONVERSATION? → RUN_FACTS? →
+Formatter v21 按 `COLLABORATION_STATE? → SELF_ACTIVE_TASKS? → SHARED_CONVERSATION? → RUN_FACTS →
 A2A_GUIDANCE? → CURRENT_INPUT` 输出，`CURRENT_INPUT` 始终完整且最后。只有 ordinary A2A
 `public_a2a/dispatch/forward|return` 注入固定 edge-specific guidance；direct、Gather Completion 与 capture
 不注入。Shared Conversation 顶层 `campId` 必须等于冻结
@@ -496,16 +513,18 @@ Run Camp，origin/reference/recent 三类消息不得跨 Camp。单消息保留 
 
 同一 Structured `CurrentUserMention(local_user)` 在 Human/FTS 投影为 `@你`，在 Agent Current Input、Shared
 Conversation、reference closure、Camp History 和 Gather v3 投影为 `@Principal`；content digest 不变，Agent
-offset/digest 只在 `agent_v1` 空间计算。ContextManifest v18 冻结该 audience、真实 Camp/source refs、完整
+offset/digest 只在 `agent_v1` 空间计算。Recent selector 在 top-15 前排除目标 Agent 自己发布的消息，且
+whole-history omission 使用同一 eligible set；自身消息仍可作为必要 reference ancestor。ContextManifest v20 冻结该 audience、真实 Camp/source refs、完整
 body length、truncation/offset、source/projected digests、A2A guidance closed evidence、attachment identity/digest
-和 omission evidence。Run Facts v1 无事实时整段省略，单项缺失时省略
-字段；Manifest 独立保存 typed refs、exact compact JSON text 与 digest。Gather fallback 只承认当前 target
+和 omission evidence。所有 attachment path 由 PublishedAttachmentPathResolver 解析到当前 Camp View；Manifest
+另存完整 catalog/root/generation receipt。Run Facts v2 的 mandatory `campResources` 始终公开当前 Camp exact
+read-only enumerable root，其余单项缺失时省略字段；Manifest 独立保存 typed refs、exact compact JSON text 与 digest。Gather fallback 只承认当前 target
 Run/active retry generation 在无 captured return 时的 successful Runtime final output；delegation budget 中
 的 captured-return `false` 不代表其他 admission 已获授权。
 
 Direct user Current Input 可按 [Current Input Skill Links v1](../contracts/current-input-skill-links-v1.md)增加
 optional sibling `skills[{name,path}]`。Picker identity、per-Run send snapshot、start-time desired state 与
-verified Exposure 由 Core resolver 组合；正文和附件不变，零 entry 省略字段。ContextManifest v18 保存
+verified Exposure 由 Core resolver 组合；正文和附件不变，零 entry 省略字段。ContextManifest v20 保存
 完整 included/omitted resolution 与 exact bytes；Runtime Adapter 仍只发送既有完整 payload，不解释 Skill
 或创建 Provider-specific input item。
 
@@ -584,5 +603,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v17 command、projection、replay、
+- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v19 command、projection、replay、
   fence 和 negative-path 验收：对应平台版本不得完成。未准入 Windows Runtime 不进入 AgentRun。

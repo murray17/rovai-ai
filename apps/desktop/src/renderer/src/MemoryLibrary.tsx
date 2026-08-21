@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type {
   AcceptHearthReviewItemCommand,
   AgentProfile,
   CreateMemoryCommand,
   HearthReviewItem,
+  MemoryCapacity,
   MemoryDirection,
   MemoryKind,
   MemoryLibraryView,
@@ -16,9 +17,25 @@ import {
   AppDialogBody,
   AppDialogContent,
   AppDialogFooter,
+  AppDialogGlyph,
   AppDialogHeader
 } from './AppDialog'
 import { MemberAvatar } from './MemberAvatar'
+import {
+  addLocalCalendarDays,
+  createReviewScheduleDraft,
+  formatReviewPresetDate,
+  localTimeZoneName,
+  nextLocalMinute,
+  parseLocalDateTimeValue,
+  reviewScheduleMatchesValue,
+  reviewSchedulePresetModes,
+  selectedReviewScheduleDate,
+  toLocalDateTimeValue,
+  validateReviewScheduleDraft,
+  type ReviewScheduleDraft,
+  type ReviewScheduleMode
+} from './memory-review-schedule'
 import { localizeExecutionEngineTerms } from './product-copy'
 
 type GovernanceFilter = 'all' | 'agent' | 'review' | 'stopped'
@@ -44,6 +61,19 @@ interface MemorySnapshot {
   reviewItems: HearthReviewItem[]
 }
 
+type ReviewScheduleAction = 'save' | 'clear'
+type ReviewScheduleBusyAction = ReviewScheduleAction | 'refresh'
+
+interface ReviewScheduleEditor extends ReviewScheduleDraft {
+  phase: 'ready' | 'authority-unknown' | 'applied-refresh-failed'
+  appliedAction: ReviewScheduleAction | null
+  attemptedAction: ReviewScheduleAction | null
+  notice: {
+    tone: 'error' | 'info'
+    message: string
+  } | null
+}
+
 const initialDraft: Draft = {
   scope: 'hearth',
   kind: 'preference',
@@ -64,7 +94,7 @@ const scopeTabs: Array<[MemoryScopeKind, string]> = [
 const governanceTabs: Array<[GovernanceFilter, string]> = [
   ['all', '全部'],
   ['agent', '队员形成'],
-  ['review', '建议复核'],
+  ['review', '待复核'],
   ['stopped', '已停止沿用']
 ]
 
@@ -97,9 +127,18 @@ export function MemoryLibrary({
   const [editor, setEditor] = useState<Editor>(null)
   const [draft, setDraft] = useState<Draft>(initialDraft)
   const [forgetTarget, setForgetTarget] = useState<MemoryRecord | null>(null)
+  const [reviewScheduleEditor, setReviewScheduleEditor] = useState<ReviewScheduleEditor | null>(null)
+  const [reviewScheduleBusyAction, setReviewScheduleBusyAction] = useState<ReviewScheduleBusyAction | null>(null)
+  const reviewScheduleTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<string | null>(null)
+
+  const loadMemoryLibrary = useCallback(async (): Promise<MemoryLibraryView> => {
+    const nextLibrary = await window.rovai.request<MemoryLibraryView>('memory.list')
+    setLibrary(nextLibrary)
+    return nextLibrary
+  }, [])
 
   const load = useCallback(async (): Promise<MemorySnapshot> => {
     const [nextLibrary, nextReviewItems] = await Promise.all([
@@ -363,20 +402,171 @@ export function MemoryLibrary({
     setForgetTarget(null)
   })
 
-  const scheduleReview = (memory: MemoryRecord): Promise<void> => {
-    const value = window.prompt('输入 RFC 3339 复核时间；留空表示清除复核提醒。', memory.reviewAfter ?? '')
-    if (value === null) return Promise.resolve()
-    return run(`review-${memory.id}`, async () => {
+  const openReviewSchedule = (memory: MemoryRecord, trigger: HTMLButtonElement): void => {
+    reviewScheduleTriggerRef.current = trigger
+    setReviewScheduleEditor({
+      ...createReviewScheduleDraft(memory),
+      phase: 'ready',
+      appliedAction: null,
+      attemptedAction: null,
+      notice: null
+    })
+  }
+
+  const submitReviewSchedule = async (action: ReviewScheduleAction): Promise<void> => {
+    const current = reviewScheduleEditor
+    if (!current || reviewScheduleBusyAction !== null) return
+
+    let desiredReviewAfter: string | null = null
+    if (action === 'save') {
+      const validation = validateReviewScheduleDraft(current)
+      if (!validation.selectedDate || validation.code !== null) {
+        setReviewScheduleEditor((editorState) => editorState && {
+          ...editorState,
+          notice: validation.code === 'unchanged'
+            ? editorState.notice
+            : { tone: 'error', message: validation.message ?? '请选择有效的下次复核时间。' }
+        })
+        return
+      }
+      desiredReviewAfter = validation.selectedDate.toISOString()
+    }
+
+    setReviewScheduleBusyAction(action)
+    setBusy(`review-${current.memory.id}`)
+    setReviewScheduleEditor((editorState) => editorState && {
+      ...editorState,
+      attemptedAction: action,
+      notice: null
+    })
+
+    try {
       const result = await window.rovai.request<StoredCommandResult>('memory.review.schedule', {
         commandId: crypto.randomUUID(),
         command: {
-          memoryId: memory.id,
-          expectedVersion: memory.version,
-          reviewAfter: value.trim() || null
+          memoryId: current.memory.id,
+          expectedVersion: current.memory.version,
+          reviewAfter: desiredReviewAfter
         }
       })
       assertApplied(result)
-    })
+
+      try {
+        await loadMemoryLibrary()
+      } catch (refreshError) {
+        const completion = action === 'clear' ? '复核提醒已清除' : '下次复核已设置'
+        setReviewScheduleEditor((editorState) => editorState && {
+          ...editorState,
+          phase: 'applied-refresh-failed',
+          appliedAction: action,
+          attemptedAction: null,
+          notice: {
+            tone: 'error',
+            message: `${completion}，但列表刷新失败：${errorMessage(refreshError)}。请只重试刷新，不要重复提交设置。`
+          }
+        })
+        return
+      }
+
+      setReviewScheduleEditor(null)
+      setFeedback(action === 'clear' ? '复核提醒已清除' : '下次复核已设置')
+    } catch (nextError) {
+      if (nextError instanceof CommandRejectedError && isMemoryConflict(nextError.code)) {
+        try {
+          const nextLibrary = await loadMemoryLibrary()
+          const latest = nextLibrary.memories.find((memory) => memory.id === current.memory.id)
+          if (!latest) {
+            setReviewScheduleEditor((editorState) => editorState && {
+              ...editorState,
+              phase: 'authority-unknown',
+              appliedAction: null,
+              attemptedAction: action,
+              notice: {
+                tone: 'error',
+                message: '记忆版本已变化，但最新列表中找不到这条记忆。当前选择仍保留；请重新获取最新状态后再决定。'
+              }
+            })
+            return
+          }
+
+          const selectedDate = desiredReviewAfter ? new Date(desiredReviewAfter) : null
+          const desiredAlreadyApplied = reviewScheduleMatchesValue(selectedDate, latest.reviewAfter)
+          setReviewScheduleEditor((editorState) => editorState && {
+            ...editorState,
+            memory: latest,
+            phase: 'ready',
+            appliedAction: null,
+            attemptedAction: null,
+            notice: reviewScheduleConflictNotice(latest, desiredAlreadyApplied, action)
+          })
+        } catch (refreshError) {
+          setReviewScheduleEditor((editorState) => editorState && {
+            ...editorState,
+            phase: 'authority-unknown',
+            appliedAction: null,
+            attemptedAction: action,
+            notice: {
+              tone: 'error',
+              message: `记忆版本已变化，但无法刷新最新状态：${errorMessage(refreshError)}。当前选择仍保留；请先重新获取最新状态，不要在版本未知时重试提交。`
+            }
+          })
+        }
+      } else {
+        setReviewScheduleEditor((editorState) => editorState && {
+          ...editorState,
+          phase: 'ready',
+          appliedAction: null,
+          attemptedAction: null,
+          notice: {
+            tone: 'error',
+            message: `设置未完成：${errorMessage(nextError)}。当前选择已保留，请核对后重试。`
+          }
+        })
+      }
+    } finally {
+      setReviewScheduleBusyAction(null)
+      setBusy(null)
+    }
+  }
+
+  const retryReviewScheduleRefresh = async (): Promise<void> => {
+    const current = reviewScheduleEditor
+    if (!current || reviewScheduleBusyAction !== null || current.phase === 'ready') return
+    setReviewScheduleBusyAction('refresh')
+    setBusy(`review-refresh-${current.memory.id}`)
+    try {
+      const nextLibrary = await loadMemoryLibrary()
+      if (current.phase === 'applied-refresh-failed') {
+        setReviewScheduleEditor(null)
+        setFeedback(current.appliedAction === 'clear' ? '复核提醒已清除' : '下次复核已设置')
+        return
+      }
+
+      const latest = nextLibrary.memories.find((memory) => memory.id === current.memory.id)
+      if (!latest) throw new Error('最新列表中找不到这条记忆。')
+      const attemptedAction = current.attemptedAction ?? 'save'
+      const selectedDate = attemptedAction === 'clear' ? null : selectedReviewScheduleDate(current)
+      const desiredAlreadyApplied = reviewScheduleMatchesValue(selectedDate, latest.reviewAfter)
+      setReviewScheduleEditor((editorState) => editorState && {
+        ...editorState,
+        memory: latest,
+        phase: 'ready',
+        appliedAction: null,
+        attemptedAction: null,
+        notice: reviewScheduleConflictNotice(latest, desiredAlreadyApplied, attemptedAction)
+      })
+    } catch (refreshError) {
+      setReviewScheduleEditor((editorState) => editorState && {
+        ...editorState,
+        notice: {
+          tone: 'error',
+          message: `${editorState.phase === 'applied-refresh-failed' ? '设置已经生效，但' : ''}仍无法刷新最新状态：${errorMessage(refreshError)}。请稍后只重试刷新。`
+        }
+      })
+    } finally {
+      setReviewScheduleBusyAction(null)
+      setBusy(null)
+    }
   }
 
   const exportMemory = (): Promise<void> => run('export', async () => {
@@ -412,7 +602,7 @@ export function MemoryLibrary({
         <div><strong>{loading ? '—' : activeCount}</strong><span>正在沿用</span></div>
         <div className={pending.length > 0 ? 'attention' : ''}><strong>{loading ? '—' : pending.length}</strong><span>待审核</span></div>
         <div><strong>{loading ? '—' : agentCount}</strong><span>队员形成</span></div>
-        <div><strong>{loading ? '—' : reviewCount}</strong><span>建议复核</span></div>
+        <div><strong>{loading ? '—' : reviewCount}</strong><span>待复核</span></div>
       </div>
 
       {pending.length > 0 && (
@@ -466,7 +656,7 @@ export function MemoryLibrary({
         </label>
       </div>
 
-      <CapacityStrip library={library} scope={scope} />
+      <CapacityStrip library={library} scope={scope} agents={agents} />
 
       <div className="memory-workbench">
         <div className="memory-catalog">
@@ -490,7 +680,7 @@ export function MemoryLibrary({
           agents={agents}
           busy={busy}
           onRevise={openRevise}
-          onReview={scheduleReview}
+          onReview={openReviewSchedule}
           onRetire={(memory) => lifecycle('memory.retire', memory)}
           onReactivate={(memory) => lifecycle('memory.reactivate', memory)}
           onForget={setForgetTarget}
@@ -507,6 +697,23 @@ export function MemoryLibrary({
         onAccept={acceptReview}
         onEdit={openReviewEdit}
         onReject={rejectReview}
+      />
+
+      <ReviewScheduleDialog
+        editor={reviewScheduleEditor}
+        busyAction={reviewScheduleBusyAction}
+        onChange={(nextEditor) => setReviewScheduleEditor(nextEditor)}
+        onClose={() => {
+          if (reviewScheduleBusyAction === null) setReviewScheduleEditor(null)
+        }}
+        onSubmit={submitReviewSchedule}
+        onRetryRefresh={retryReviewScheduleRefresh}
+        onRestoreFocus={() => {
+          const trigger = reviewScheduleTriggerRef.current
+          const fallback = document.querySelector<HTMLButtonElement>('.memory-catalog-item.selected')
+          if (trigger?.isConnected) trigger.focus()
+          else fallback?.focus()
+        }}
       />
 
       <MemoryEditorDialog editor={editor} draft={draft} agents={agents} busy={busy !== null} onDraft={setDraft} onClose={() => setEditor(null)} onSubmit={submitEditor} />
@@ -533,19 +740,60 @@ export function MemoryLibrary({
   )
 }
 
-function CapacityStrip({ library, scope }: { library: MemoryLibraryView | null; scope: MemoryScopeKind }): React.JSX.Element | null {
+export function CapacityStrip({
+  library,
+  scope,
+  agents
+}: {
+  library: MemoryLibraryView | null
+  scope: MemoryScopeKind
+  agents: AgentProfile[]
+}): React.JSX.Element | null {
   const capacities = library?.capacities.filter((capacity) => capacity.scope === scope) ?? []
   if (capacities.length === 0) return null
   return (
-    <div className="memory-capacity-strip" aria-label="当前范围容量">
-      {capacities.slice(0, 6).map((capacity) => (
-        <span key={capacity.scopeKey}>
-          <strong>{capacity.activeCount}/{capacity.maxCount}</strong> 总量
-          <small>{capacity.agentOriginCount}/{capacity.agentOriginMaxCount} 队员形成</small>
-        </span>
+    <ul className="memory-capacity-strip" aria-label="当前范围容量，可横向滚动查看全部" tabIndex={0}>
+      {capacities.map((capacity) => (
+        <li key={capacity.scopeKey} className="memory-capacity-item">
+          <span className="memory-capacity-name">{memoryCapacityLabel(capacity, agents)}</span>
+          <span className="memory-capacity-metrics">
+            <span><strong>{capacity.activeCount}/{capacity.maxCount}</strong><small>总量</small></span>
+            <span><strong>{capacity.agentOriginCount}/{capacity.agentOriginMaxCount}</strong><small>队员形成</small></span>
+          </span>
+        </li>
       ))}
-    </div>
+    </ul>
   )
+}
+
+export function memoryCapacityLabel(capacity: MemoryCapacity, agents: AgentProfile[]): string {
+  const companionPrefix = 'companion:'
+  const relationshipPrefix = 'relationship:'
+  const applicablePrefix = 'relationship-applicable:'
+
+  if (capacity.scopeKey === 'hearth') return '共同记忆'
+  if (capacity.scopeKey.startsWith(companionPrefix)) {
+    return agentName(capacity.scopeKey.slice(companionPrefix.length), agents)
+  }
+  if (capacity.scopeKey.startsWith(applicablePrefix)) {
+    return `适用于 ${agentName(capacity.scopeKey.slice(applicablePrefix.length), agents)}`
+  }
+  if (capacity.scopeKey.startsWith(relationshipPrefix)) {
+    for (let first = 0; first < agents.length; first += 1) {
+      for (let second = first + 1; second < agents.length; second += 1) {
+        const left = agents[first]
+        const right = agents[second]
+        if (capacity.scopeKey === `${relationshipPrefix}${left.agentId}:${right.agentId}`
+          || capacity.scopeKey === `${relationshipPrefix}${right.agentId}:${left.agentId}`) {
+          return `${left.displayName} × ${right.displayName}`
+        }
+      }
+    }
+    const agentIds = capacity.scopeKey.slice(relationshipPrefix.length).split(':')
+    if (agentIds.length === 2) return agentIds.map((id) => agentName(id, agents)).join(' × ')
+    return '队员组合'
+  }
+  return scopeLabel(capacity.scope)
 }
 
 function MemoryDetail({
@@ -564,7 +812,7 @@ function MemoryDetail({
   agents: AgentProfile[]
   busy: string | null
   onRevise(memory: MemoryRecord): void
-  onReview(memory: MemoryRecord): Promise<void>
+  onReview(memory: MemoryRecord, trigger: HTMLButtonElement): void
   onRetire(memory: MemoryRecord): Promise<void>
   onReactivate(memory: MemoryRecord): Promise<void>
   onForget(memory: MemoryRecord): void
@@ -596,7 +844,7 @@ function MemoryDetail({
         <dl>
           <div><dt>形成来源</dt><dd>{originLabel(memory.creationOrigin)}</dd></div>
           <div><dt>Retrieval Keys</dt><dd>{memory.currentRetrievalKeys.join('、') || '—'}</dd></div>
-          <div><dt>建议复核</dt><dd>{memory.reviewAfter ? formatTime(memory.reviewAfter) : '未设置'}</dd></div>
+          <div><dt>下次复核</dt><dd>{memory.reviewAfter ? formatTime(memory.reviewAfter) : '未设置'}</dd></div>
           <div><dt>当前版本</dt><dd>v{memory.version} · {shortId(memory.currentRevisionId)}</dd></div>
         </dl>
       </section>
@@ -616,13 +864,294 @@ function MemoryDetail({
       <div className="memory-detail-actions">
         {memory.lifecycle === 'active' && <>
           <button className="quiet-button" type="button" onClick={() => onRevise(memory)} disabled={busy !== null}>修订</button>
-          <button className="quiet-button" type="button" onClick={() => void onReview(memory)} disabled={busy !== null}>设置复核时间</button>
+          <button className="quiet-button" type="button" onClick={(event) => onReview(memory, event.currentTarget)} disabled={busy !== null}>设置下次复核</button>
           <button className="quiet-button" type="button" onClick={() => void onRetire(memory)} disabled={busy !== null}>停止沿用</button>
         </>}
         {memory.lifecycle === 'retired' && memory.outgoingSuccessorIds.length === 0 && <button className="primary-button" type="button" onClick={() => void onReactivate(memory)} disabled={busy !== null}>重新沿用</button>}
         {memory.lifecycle !== 'forgotten' && <button className="danger-button" type="button" onClick={() => onForget(memory)} disabled={busy !== null}>永久遗忘</button>}
       </div>
     </aside>
+  )
+}
+
+function ReviewScheduleDialog({
+  editor,
+  busyAction,
+  onChange,
+  onClose,
+  onSubmit,
+  onRetryRefresh,
+  onRestoreFocus
+}: {
+  editor: ReviewScheduleEditor | null
+  busyAction: ReviewScheduleBusyAction | null
+  onChange(editor: ReviewScheduleEditor): void
+  onClose(): void
+  onSubmit(action: ReviewScheduleAction): Promise<void>
+  onRetryRefresh(): Promise<void>
+  onRestoreFocus(): void
+}): React.JSX.Element {
+  const lastEditor = useRef<ReviewScheduleEditor | null>(null)
+  const customInputRef = useRef<HTMLInputElement>(null)
+  const choiceGroupRef = useRef<HTMLDivElement>(null)
+  if (editor) lastEditor.current = editor
+  const renderedEditor = editor ?? lastEditor.current
+
+  if (!renderedEditor) return <></>
+
+  const busy = busyAction !== null
+  const openedAt = new Date(renderedEditor.openedAt)
+  const referenceDate = Number.isNaN(openedAt.getTime()) ? new Date() : openedAt
+  const validation = validateReviewScheduleDraft(renderedEditor)
+  const customDate = parseLocalDateTimeValue(renderedEditor.localDateTime)
+  const memoryAvailable = renderedEditor.memory.lifecycle === 'active'
+  const controlsDisabled = busy || renderedEditor.phase !== 'ready' || !memoryAvailable
+  const saveDisabled = controlsDisabled || validation.code !== null || !validation.selectedDate
+  const hasReminder = renderedEditor.memory.reviewAfter !== null
+  const validationId = 'memory-review-schedule-validation'
+  const noticeId = 'memory-review-schedule-notice'
+  const timezoneId = 'memory-review-schedule-timezone'
+  const radioModes: ReviewScheduleMode[] = [...reviewSchedulePresetModes, 'custom']
+
+  const changeEditor = (changes: Partial<ReviewScheduleEditor>): void => {
+    if (!editor || controlsDisabled) return
+    onChange({ ...editor, ...changes })
+  }
+
+  const selectMode = (mode: ReviewScheduleMode, focusCustom = false): void => {
+    changeEditor({ mode })
+    if (focusCustom) window.requestAnimationFrame(() => customInputRef.current?.focus())
+  }
+
+  const handleRadioKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    mode: ReviewScheduleMode
+  ): void => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const currentIndex = radioModes.indexOf(mode)
+    const nextIndex = event.key === 'Home'
+      ? 0
+      : event.key === 'End'
+        ? radioModes.length - 1
+        : event.key === 'ArrowLeft' || event.key === 'ArrowUp'
+          ? (currentIndex - 1 + radioModes.length) % radioModes.length
+          : (currentIndex + 1) % radioModes.length
+    const nextMode = radioModes[nextIndex]
+    selectMode(nextMode)
+    window.requestAnimationFrame(() => {
+      choiceGroupRef.current
+        ?.querySelector<HTMLElement>(`[data-review-schedule-mode="${nextMode}"]`)
+        ?.focus()
+    })
+  }
+
+  const lifecycleMessage = renderedEditor.memory.lifecycle === 'forgotten'
+    ? '这条记忆已被永久遗忘，不能再设置复核提醒。请关闭弹窗查看最新列表。'
+    : renderedEditor.memory.lifecycle === 'retired'
+      ? '这条记忆已停止沿用，不能设置复核提醒。请关闭弹窗，重新沿用后再设置。'
+      : null
+
+  return (
+    <Dialog.Root
+      open={editor !== null}
+      onOpenChange={(open) => {
+        if (!open && !busy) onClose()
+      }}
+    >
+      <Dialog.Portal>
+        <Dialog.Overlay className="dialog-overlay app-dialog-overlay" />
+        <AppDialogContent
+          className="memory-review-schedule-dialog"
+          aria-busy={busy}
+          onEscapeKeyDown={(event) => {
+            if (busy) event.preventDefault()
+          }}
+          onPointerDownOutside={(event) => {
+            if (busy) event.preventDefault()
+          }}
+          onInteractOutside={(event) => {
+            if (busy) event.preventDefault()
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            onRestoreFocus()
+          }}
+        >
+          <AppDialogHeader
+            title="设置下次复核"
+            description="选择一个未来时间。到期后，这条记忆会进入“待复核”，但仍会继续沿用。"
+            icon="clock"
+            closeLabel="关闭设置下次复核弹窗"
+            closeDisabled={busy}
+          />
+          <form className="app-dialog-form" onSubmit={(event) => {
+            event.preventDefault()
+            void onSubmit('save')
+          }}>
+            <AppDialogBody>
+              <div className="memory-review-schedule-heading">
+                <strong>选择下次复核</strong>
+                <span>快捷日期按当前设备的本地日历计算。</span>
+              </div>
+
+              <div
+                ref={choiceGroupRef}
+                className="memory-review-schedule-choice-group"
+                role="radiogroup"
+                aria-label="下次复核选项"
+                aria-describedby={`${validationId}${renderedEditor.notice || lifecycleMessage ? ` ${noticeId}` : ''}`}
+              >
+                <div className="memory-review-schedule-options">
+                  {reviewSchedulePresetModes.map((mode) => {
+                    const date = addLocalCalendarDays(referenceDate, Number(mode))
+                    const selected = renderedEditor.mode === mode
+                    return (
+                      <button
+                        key={mode}
+                        className="memory-review-schedule-option"
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        tabIndex={selected ? 0 : -1}
+                        data-review-schedule-mode={mode}
+                        data-dialog-autofocus={selected ? '' : undefined}
+                        disabled={controlsDisabled}
+                        onClick={() => selectMode(mode)}
+                        onKeyDown={(event) => handleRadioKeyDown(event, mode)}
+                      >
+                        <strong>{mode} 天后</strong>
+                        <small>{formatReviewPresetDate(date, referenceDate)}</small>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <button
+                  className="memory-review-schedule-custom-trigger"
+                  type="button"
+                  role="radio"
+                  aria-checked={renderedEditor.mode === 'custom'}
+                  tabIndex={renderedEditor.mode === 'custom' ? 0 : -1}
+                  data-review-schedule-mode="custom"
+                  data-dialog-autofocus={renderedEditor.mode === 'custom' ? '' : undefined}
+                  disabled={controlsDisabled}
+                  onClick={() => selectMode('custom', true)}
+                  onKeyDown={(event) => handleRadioKeyDown(event, 'custom')}
+                >
+                  <span>
+                    <strong>自定义时间</strong>
+                    <small>{renderedEditor.mode === 'custom' && customDate
+                      ? formatTime(customDate.toISOString())
+                      : '选择日期和时间'}</small>
+                  </span>
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.5v3M15 3.5v3M3 8h14" /><rect x="3" y="5" width="14" height="12" rx="2" /></svg>
+                </button>
+              </div>
+
+              {renderedEditor.mode === 'custom' && (
+                <div className="memory-review-schedule-custom-field">
+                  <div>
+                    <label htmlFor="memory-review-schedule-time">下次复核时间</label>
+                    <small id={timezoneId}>当前设备时区 · {localTimeZoneName()}</small>
+                  </div>
+                  <input
+                    ref={customInputRef}
+                    id="memory-review-schedule-time"
+                    type="datetime-local"
+                    value={renderedEditor.localDateTime}
+                    min={toLocalDateTimeValue(nextLocalMinute())}
+                    disabled={controlsDisabled}
+                    aria-invalid={validation.invalid || undefined}
+                    aria-describedby={`${timezoneId} ${validationId}${renderedEditor.notice || lifecycleMessage ? ` ${noticeId}` : ''}`}
+                    onChange={(event) => changeEditor({
+                      mode: 'custom',
+                      localDateTime: event.target.value
+                    })}
+                  />
+                </div>
+              )}
+
+              <div
+                id={validationId}
+                className={`memory-review-schedule-validation${validation.invalid ? ' is-error' : ''}`}
+                role={validation.invalid ? 'alert' : 'status'}
+              >
+                {validation.message}
+              </div>
+
+              {(renderedEditor.notice || lifecycleMessage) && (
+                <div
+                  id={noticeId}
+                  className={`memory-review-schedule-alert ${renderedEditor.notice?.tone === 'info' && !lifecycleMessage ? 'is-info' : 'is-error'}`}
+                  role={renderedEditor.notice?.tone === 'info' && !lifecycleMessage ? 'status' : 'alert'}
+                >
+                  <AppDialogGlyph name={renderedEditor.notice?.tone === 'info' && !lifecycleMessage ? 'info' : 'warning'} />
+                  <div>
+                    <strong>{renderedEditor.phase === 'applied-refresh-failed'
+                      ? '设置已生效，列表尚未刷新'
+                      : lifecycleMessage
+                        ? '无法设置复核提醒'
+                        : renderedEditor.notice?.tone === 'info'
+                          ? '已刷新权威状态'
+                          : '操作未完成'}</strong>
+                    <p>{lifecycleMessage ?? renderedEditor.notice?.message}</p>
+                    {renderedEditor.phase !== 'ready' && (
+                      <button
+                        className="quiet-button compact"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => void onRetryRefresh()}
+                      >
+                        {busyAction === 'refresh'
+                          ? '正在刷新…'
+                          : renderedEditor.phase === 'applied-refresh-failed'
+                            ? '只重试刷新'
+                            : '重新获取最新状态'}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="memory-review-schedule-note">
+                <AppDialogGlyph name="info" />
+                <div>
+                  <strong>到期后仍会继续沿用</strong>
+                  <p>保存只更新复核提醒，不会修改记忆正文、沿用状态或适用范围。</p>
+                </div>
+              </div>
+            </AppDialogBody>
+            <AppDialogFooter
+              leading={(
+                <div className="memory-review-schedule-footer-leading">
+                  {hasReminder && (
+                    <button
+                      className="quiet-button compact"
+                      type="button"
+                      disabled={controlsDisabled}
+                      onClick={() => void onSubmit('clear')}
+                    >
+                      {busyAction === 'clear' ? '正在清除…' : '清除提醒'}
+                    </button>
+                  )}
+                  <span>时间精确到分钟，且必须晚于当前时间。</span>
+                </div>
+              )}
+            >
+              <Dialog.Close asChild>
+                <button className="quiet-button" type="button" disabled={busy}>
+                  {renderedEditor.phase === 'applied-refresh-failed' ? '关闭' : '取消'}
+                </button>
+              </Dialog.Close>
+              <button className="primary-button" type="submit" disabled={saveDisabled}>
+                {busyAction === 'save' ? '正在保存…' : '保存设置'}
+              </button>
+            </AppDialogFooter>
+          </form>
+        </AppDialogContent>
+      </Dialog.Portal>
+    </Dialog.Root>
   )
 }
 
@@ -784,6 +1313,37 @@ function KindBadge({ kind }: { kind: MemoryKind | null }): React.JSX.Element {
 function OriginBadge({ origin }: { origin: MemoryRecord['creationOrigin'] }): React.JSX.Element | null {
   if (!origin) return null
   return <span className={`memory-authority ${origin === 'agent' ? 'agent-origin' : 'user-origin'}`}>{originLabel(origin)}</span>
+}
+
+function reviewScheduleConflictNotice(
+  memory: MemoryRecord,
+  desiredAlreadyApplied: boolean,
+  action: ReviewScheduleAction
+): NonNullable<ReviewScheduleEditor['notice']> {
+  if (memory.lifecycle === 'forgotten') {
+    return {
+      tone: 'error',
+      message: '这条记忆已被永久遗忘，不能再设置复核提醒。当前选择仍保留，请关闭弹窗查看最新列表。'
+    }
+  }
+  if (memory.lifecycle === 'retired') {
+    return {
+      tone: 'error',
+      message: '这条记忆已停止沿用，不能设置复核提醒。当前选择仍保留，请关闭弹窗或重新沿用后再设置。'
+    }
+  }
+  if (desiredAlreadyApplied) {
+    return {
+      tone: 'info',
+      message: action === 'clear'
+        ? '复核提醒已经由另一项操作清除，无需再次提交。'
+        : '下次复核已经是你选择的时间，无需重复保存。'
+    }
+  }
+  return {
+    tone: 'info',
+    message: '记忆版本已变化。已刷新到最新版本并保留当前选择，请核对后再次保存。'
+  }
 }
 
 class CommandRejectedError extends Error {

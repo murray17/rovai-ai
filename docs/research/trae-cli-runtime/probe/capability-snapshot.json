@@ -27,9 +27,34 @@
       "id": "model",
       "type": "select",
       "currentValue": "GLM-5.2",
-      "availableValueCount": 16
+      "availableValueCount": 19
     },
-    "modes": ["default", "bypass_permissions", "plan"]
+    "modes": ["default", "bypass_permissions", "plan"],
+    "asyncMetadata": {
+      "boundedObservation": true,
+      "sessionNewResponseAtMs": 1215,
+      "availableCommandsUpdateAtMs": 1727,
+      "delayAfterSessionNewMs": 512,
+      "availableCommandCount": 17,
+      "entryShape": ["name", "description", "input.hint"],
+      "builtinSlashCommands": ["agent-new", "init", "loop", "compact"],
+      "skillBackedCommandCount": 13,
+      "skillBackedCommands": [
+        "code-review",
+        "codebase-design",
+        "documentation-lookup",
+        "domain-modeling",
+        "feishu-docs",
+        "grill-me",
+        "grill-with-docs",
+        "grilling",
+        "handoff",
+        "improve-codebase-architecture",
+        "mac-performance-doctor",
+        "officecli",
+        "setup-matt-pocock-skills"
+      ]
+    }
   },
   "verifiedBehavior": {
     "promptTerminalStopReasons": ["end_turn", "cancelled"],
@@ -42,7 +67,39 @@
     "nativeAppendMarkerObserved": true,
     "additiveMcpPerSession": true,
     "mcpAbsentFromUnconfiguredSiblingSession": true,
-    "jsonRpcOnlyStdout": true
+    "jsonRpcOnlyStdout": true,
+    "managedProjectSkillPath": ".trae/skills",
+    "managedProjectSkillAdvertised": true,
+    "managedProjectSkillInvoked": true,
+    "projectSkillOverridesUserSkill": true,
+    "skillScanAtSessionNew": true,
+    "skillScanAtSessionLoad": true,
+    "existingIdleSessionDynamicSkillRefreshObserved": false
+  },
+  "skillDiscovery": {
+    "project": {
+      ".trae/skills": "verified_advertised_and_invoked",
+      ".agents/skills": "verified_advertised_and_invoked_runtime_only",
+      ".traecli/skills": "verified_advertised_and_invoked_runtime_only",
+      ".coco/skills": "not_observed"
+    },
+    "user": {
+      "~/.trae/skills": "verified_advertised_invocation_unverified",
+      "~/.trae-cn/skills": "verified_advertised_invocation_unverified",
+      "~/.traecli/skills": "verified_advertised_invocation_unverified",
+      "~/.agents/skills": "verified_advertised_invocation_unverified",
+      "~/.coco/skills": "not_observed"
+    }
+  },
+  "compaction": {
+    "advertisedCommand": "compact",
+    "manualAttempted": true,
+    "automaticThresholdAttempted": true,
+    "structuredCompletedSignal": "not_observed",
+    "runtimeOccurrenceId": "not_observed",
+    "projectHooksUnderAcpServe": "not_observed",
+    "detectorPolicy": "disabled",
+    "capabilityStatus": "unverified_not_observed"
   },
   "rovaiPolicy": {
     "publicOutputMode": "explicit_send_only",
@@ -50,9 +107,10 @@
     "nativeSystemPromptCapability": "observed",
     "charterCorrectnessDependsOnNativeSystemPrompt": false,
     "missingSendRecovery": "if_no_accepted_send",
-    "hostWarmReuse": "disabled",
+    "hostWarmReuse": "enabled_when_compatible",
     "externalMcpProjection": "additive_per_run",
-    "skillDiscovery": "documentation_only_empty",
+    "runtimeAdvertisedCommands": "observed_session_metadata",
+    "managedSkillDelivery": "verified_project_dot_trae_skills",
     "defaultPermissionMode": "default",
     "defaultYolo": false
   }

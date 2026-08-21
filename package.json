@@ -6,7 +6,7 @@
   "type": "module",
   "description": "A local-first workspace for durable agent teams.",
   "author": "murray17",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "packageManager": "pnpm@11.20.0",
   "main": "out/main/index.js",
   "engines": {
@@ -80,6 +80,7 @@
     "smoke:mcp-projection": "pnpm core:build:debug && node scripts/smoke-mcp-projection.mjs",
     "smoke:memory": "pnpm core:build:debug && node scripts/smoke-memory.mjs",
     "smoke:memory-runtime": "pnpm core:build:debug && node scripts/smoke-memory-runtime.mjs",
+    "diagnose:memory-camp": "pnpm core:build:debug && node scripts/diagnose-memory-camp-matrix.mjs",
     "accept:memory-ui": "node scripts/accept-memory-ui.mjs",
     "accept:member-avatar-ui": "node scripts/accept-member-avatar-ui.mjs",
     "accept:member-lifecycle-ui": "node scripts/accept-member-lifecycle-ui.mjs",

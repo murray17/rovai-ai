@@ -11,6 +11,13 @@ const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.m
 
 use crate::{
     agent_profile::{AdapterKind, validate_stored_member_identity},
+    camp_attachment_view::{
+        CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION, CampAttachmentViewReceiptV2,
+        CampAttachmentVisibilityMode, RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
+        load_camp_attachment_view_receipt, resolve_published_attachment_path,
+        resolve_published_attachment_root, runtime_attachment_auth_receipt,
+        validate_append_only_view_receipt,
+    },
     camp_content::{
         AGENT_MESSAGE_PROJECTION_AUDIENCE, StructuredCampMessageContent, mentions_current_user,
         normalize_content, render_agent_plain_text,
@@ -22,7 +29,7 @@ use crate::{
         pending_redelivery_revision,
     },
     context_contract::{
-        AGENT_RUN_CONTEXT_FORMATTER_VERSION, BOOTSTRAP_FORMATTER_VERSION,
+        AGENT_RUN_CONTEXT_FORMATTER_VERSION, BOOTSTRAP_FORMATTER_VERSION, CONTEXT_MANIFEST_VERSION,
         NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION,
     },
     context_delivery::{
@@ -211,6 +218,7 @@ struct RuntimeInputDeliveryOptions<'a> {
     proposed_binding_id: Option<&'a str>,
     bootstrap_redelivery_revision: Option<i64>,
     bootstrap_evidence_id: Option<&'a str>,
+    runtime_payload_digest: Option<&'a str>,
 }
 
 #[derive(Debug)]
@@ -667,6 +675,14 @@ impl ContextService {
         };
         let self_active_tasks_projection =
             self_active_task_projection(&self_active_tasks, self_active_task_omitted_count);
+        let referenced_attachment_ids =
+            final_referenced_attachment_ids(&attachment_refs, &shared_conversation);
+        let (camp_attachment_view_receipt, camp_attachment_view_receipt_digest) =
+            load_camp_attachment_view_receipt(
+                database.connection(),
+                &snapshot.camp_id,
+                referenced_attachment_ids,
+            )?;
         let self_active_task_evidence = self_active_task_evidence(
             &self_active_tasks,
             self_active_task_omitted_count,
@@ -819,6 +835,10 @@ impl ContextService {
                 self_active_task_evidence_json, self_active_task_evidence_digest,
                 message_projection_audience,
                 a2a_guidance_evidence_json, a2a_guidance_evidence_digest,
+                context_manifest_version, run_facts_schema_version,
+                camp_attachment_view_receipt_version,
+                camp_attachment_view_receipt_json,
+                camp_attachment_view_receipt_digest,
                 formatter_version,
                 rendered_payload_blob_id, rendered_payload_digest, created_at
             ) VALUES (
@@ -826,7 +846,8 @@ impl ContextService {
                 ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
                 ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
                 ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40,
-                ?41, ?42, ?43, ?44, ?45, ?46
+                ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50,
+                ?51
             )
             "#,
             params![
@@ -875,6 +896,11 @@ impl ContextService {
                 AGENT_MESSAGE_PROJECTION_AUDIENCE,
                 serde_json::to_string(&a2a_guidance.evidence)?,
                 a2a_guidance.evidence_digest,
+                CONTEXT_MANIFEST_VERSION,
+                2_i64,
+                CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION,
+                serde_json::to_string(&camp_attachment_view_receipt)?,
+                camp_attachment_view_receipt_digest,
                 CONTEXT_FORMATTER_VERSION,
                 blob.id,
                 payload_digest,
@@ -940,6 +966,7 @@ impl ContextService {
                     "selfActiveTaskEvidenceDigest": canonical_json_digest(&serde_json::to_value(&self_active_task_evidence)?)?,
                     "messageProjectionAudience": AGENT_MESSAGE_PROJECTION_AUDIENCE,
                     "a2aGuidanceEvidenceDigest": a2a_guidance.evidence_digest,
+                    "campAttachmentViewReceiptDigest": camp_attachment_view_receipt_digest,
                     "dynamicPayloadDigest": payload_digest,
                 }),
             )?;
@@ -1151,6 +1178,14 @@ impl ContextService {
         };
         let self_active_tasks_projection =
             self_active_task_projection(&self_active_tasks, self_active_task_omitted_count);
+        let referenced_attachment_ids =
+            final_referenced_attachment_ids(&attachment_refs, &shared_conversation);
+        let (camp_attachment_view_receipt, camp_attachment_view_receipt_digest) =
+            load_camp_attachment_view_receipt(
+                transaction,
+                &snapshot.camp_id,
+                referenced_attachment_ids,
+            )?;
         let self_active_task_evidence = self_active_task_evidence(
             &self_active_tasks,
             self_active_task_omitted_count,
@@ -1256,6 +1291,11 @@ impl ContextService {
             "messageProjectionAudience": AGENT_MESSAGE_PROJECTION_AUDIENCE,
             "a2aGuidanceEvidence": a2a_guidance.evidence.clone(),
             "a2aGuidanceEvidenceDigest": a2a_guidance.evidence_digest.clone(),
+            "contextManifestVersion": CONTEXT_MANIFEST_VERSION,
+            "runFactsSchemaVersion": 2,
+            "campAttachmentViewReceiptVersion": CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION,
+            "campAttachmentViewReceipt": camp_attachment_view_receipt,
+            "campAttachmentViewReceiptDigest": camp_attachment_view_receipt_digest,
         });
         let digest = sha256_text(&payload);
         Ok(FrozenDeliveryContext {
@@ -1289,6 +1329,7 @@ impl ContextService {
             &frozen.a2a_guidance_evidence_digest,
             &frozen.rendered_payload,
         )?;
+        validate_frozen_view_receipt(transaction, &snapshot, frozen)?;
         validate_frozen_current_input_source(transaction, &snapshot, frozen)
     }
 
@@ -1315,6 +1356,7 @@ impl ContextService {
         execution_epoch: i64,
         context: &PreparedContext,
     ) -> Result<RuntimeInputDelivery> {
+        let runtime_payload_digest = sha256_text(&context.runtime_payload);
         self.prepare_input_delivery_inner(
             database,
             agent_run_id,
@@ -1323,7 +1365,32 @@ impl ContextService {
             RuntimeInputDeliveryOptions {
                 bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
                 bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
+                runtime_payload_digest: Some(&runtime_payload_digest),
                 ..RuntimeInputDeliveryOptions::default()
+            },
+        )
+    }
+
+    pub fn prepare_input_delivery_for_binding_context(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+        execution_epoch: i64,
+        context: &PreparedContext,
+        proposed_binding_id: &str,
+    ) -> Result<RuntimeInputDelivery> {
+        Uuid::parse_str(proposed_binding_id).context("Native Binding ID must be a UUID")?;
+        let runtime_payload_digest = sha256_text(&context.runtime_payload);
+        self.prepare_input_delivery_inner(
+            database,
+            agent_run_id,
+            execution_epoch,
+            &context.manifest_id,
+            RuntimeInputDeliveryOptions {
+                proposed_binding_id: Some(proposed_binding_id),
+                bootstrap_redelivery_revision: context.bootstrap_redelivery_revision,
+                bootstrap_evidence_id: Some(&context.bootstrap_evidence_id),
+                runtime_payload_digest: Some(&runtime_payload_digest),
             },
         )
     }
@@ -1361,6 +1428,7 @@ impl ContextService {
             proposed_binding_id,
             bootstrap_redelivery_revision,
             bootstrap_evidence_id,
+            runtime_payload_digest,
         } = options;
         let transaction = database.connection_mut().transaction()?;
         if let Some(mut existing) = load_delivery(&transaction, agent_run_id, execution_epoch)? {
@@ -1375,19 +1443,97 @@ impl ContextService {
                 );
             }
             if existing.status == "not_accepted" {
+                let delivery_evidence = transaction.query_row(
+                    r#"
+                    SELECT delivery.context_manifest_id,
+                           delivery.dynamic_payload_digest,
+                           manifest.camp_attachment_view_receipt_json,
+                           manifest.camp_attachment_view_receipt_digest
+                    FROM runtime_input_delivery AS delivery
+                    JOIN context_manifest AS manifest
+                      ON manifest.id = delivery.context_manifest_id
+                    WHERE delivery.id = ?1
+                    "#,
+                    [&existing.id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
+                    },
+                )?;
+                if delivery_evidence.0 != manifest_id {
+                    anyhow::bail!("Runtime Input Delivery belongs to another ContextManifest");
+                }
+                let manifest_view_receipt_digest = delivery_evidence
+                    .3
+                    .as_deref()
+                    .context("ContextManifest has no Camp Attachment View receipt")?;
+                validate_manifest_view_receipt(
+                    &transaction,
+                    &target.camp_id,
+                    delivery_evidence.2.as_deref(),
+                    manifest_view_receipt_digest,
+                )?;
+                let (attachment_auth, attachment_auth_digest) = runtime_attachment_auth_receipt(
+                    &transaction,
+                    &target.camp_id,
+                    manifest_view_receipt_digest,
+                    CampAttachmentVisibilityMode::GenerationFencedV1,
+                )?;
+                let runtime_payload_digest =
+                    runtime_payload_digest.unwrap_or(delivery_evidence.1.as_str());
+                let runtime_request_digest = canonical_json_digest(&json!({
+                    "schemaVersion": 1,
+                    "agentRunId": agent_run_id,
+                    "executionEpoch": execution_epoch,
+                    "contextManifestId": manifest_id,
+                    "nativeBindingId": target.native_binding_id,
+                    "nativeBindingGeneration": target.native_binding_generation,
+                    "dynamicPayloadDigest": delivery_evidence.1,
+                    "runtimePayloadDigest": runtime_payload_digest,
+                    "bootstrapRedeliveryRevision": bootstrap_redelivery_revision,
+                    "runtimeAttachmentAuthReceiptDigest": attachment_auth_digest,
+                }))?;
                 let now = chrono::Utc::now().to_rfc3339();
                 transaction.execute(
                     r#"
                     UPDATE runtime_input_delivery
                     SET status = 'prepared', native_input_id = NULL,
                         accepted_at = NULL, resolved_at = NULL,
-                        last_error = NULL, prepared_at = ?2, updated_at = ?2
+                        last_error = NULL, prepared_at = ?2, updated_at = ?2,
+                        bootstrap_redelivery_present = ?3,
+                        bootstrap_redelivery_revision = ?4,
+                        bootstrap_redelivery_evidence_id = ?5,
+                        bootstrap_redelivery_envelope_version = ?6,
+                        bootstrap_redelivery_formatter_version = ?7,
+                        runtime_attachment_auth_receipt_version = ?8,
+                        runtime_attachment_auth_receipt_json = ?9,
+                        runtime_attachment_auth_receipt_digest = ?10,
+                        runtime_request_digest = ?11
                     WHERE id = ?1 AND status = 'not_accepted'
                     "#,
-                    params![existing.id, now],
+                    params![
+                        existing.id,
+                        now,
+                        i64::from(bootstrap_redelivery_revision.is_some()),
+                        bootstrap_redelivery_revision,
+                        bootstrap_redelivery_revision.and(bootstrap_evidence_id),
+                        bootstrap_redelivery_revision
+                            .map(|_| BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION),
+                        bootstrap_redelivery_revision
+                            .map(|_| BOOTSTRAP_REDELIVERY_FORMATTER_VERSION),
+                        RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
+                        serde_json::to_string(&attachment_auth)?,
+                        attachment_auth_digest,
+                        runtime_request_digest,
+                    ],
                 )?;
                 existing.status = "prepared".to_string();
                 existing.native_input_id = None;
+                existing.bootstrap_redelivery_revision = bootstrap_redelivery_revision;
             }
             transaction.commit()?;
             return Ok(existing);
@@ -1409,7 +1555,11 @@ impl ContextService {
                        agent_run.status, agent_run.execution_epoch,
                        camp_turn.camp_id,
                        context_manifest.collaboration_state_digest,
-                       context_manifest.collaboration_state_included
+                       context_manifest.collaboration_state_included,
+                       context_manifest.context_manifest_version,
+                       context_manifest.formatter_version,
+                       context_manifest.camp_attachment_view_receipt_json,
+                       context_manifest.camp_attachment_view_receipt_digest
                 FROM context_manifest
                 JOIN agent_run ON agent_run.id = context_manifest.agent_run_id
                 JOIN conversation ON conversation.id = agent_run.conversation_id
@@ -1429,6 +1579,10 @@ impl ContextService {
                         row.get::<_, String>(7)?,
                         row.get::<_, String>(8)?,
                         row.get::<_, bool>(9)?,
+                        row.get::<_, i64>(10)?,
+                        row.get::<_, i64>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
                     ))
                 },
             )
@@ -1452,6 +1606,39 @@ impl ContextService {
         if row.5 != "running" || row.6 != execution_epoch {
             anyhow::bail!("AgentRun or Native Binding changed before input delivery");
         }
+        if row.10 != CONTEXT_MANIFEST_VERSION || row.11 != CONTEXT_FORMATTER_VERSION {
+            anyhow::bail!("Legacy ContextManifest cannot be dispatched");
+        }
+        let manifest_view_receipt_digest = row
+            .13
+            .as_deref()
+            .context("ContextManifest has no Camp Attachment View receipt")?;
+        validate_manifest_view_receipt(
+            &transaction,
+            &row.7,
+            row.12.as_deref(),
+            manifest_view_receipt_digest,
+        )?;
+        let (runtime_attachment_auth_receipt, runtime_attachment_auth_receipt_digest) =
+            runtime_attachment_auth_receipt(
+                &transaction,
+                &row.7,
+                manifest_view_receipt_digest,
+                CampAttachmentVisibilityMode::GenerationFencedV1,
+            )?;
+        let runtime_payload_digest = runtime_payload_digest.unwrap_or(row.0.as_str());
+        let runtime_request_digest = canonical_json_digest(&json!({
+            "schemaVersion": 1,
+            "agentRunId": agent_run_id,
+            "executionEpoch": execution_epoch,
+            "contextManifestId": manifest_id,
+            "nativeBindingId": binding_id,
+            "nativeBindingGeneration": binding_generation,
+            "dynamicPayloadDigest": row.0,
+            "runtimePayloadDigest": runtime_payload_digest,
+            "bootstrapRedeliveryRevision": bootstrap_redelivery_revision,
+            "runtimeAttachmentAuthReceiptDigest": runtime_attachment_auth_receipt_digest,
+        }))?;
         let delivery_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
         transaction.execute(
@@ -1464,10 +1651,14 @@ impl ContextService {
                 bootstrap_redelivery_present, bootstrap_redelivery_revision,
                 bootstrap_redelivery_evidence_id,
                 bootstrap_redelivery_envelope_version,
-                bootstrap_redelivery_formatter_version
+                bootstrap_redelivery_formatter_version,
+                runtime_attachment_auth_receipt_version,
+                runtime_attachment_auth_receipt_json,
+                runtime_attachment_auth_receipt_digest,
+                runtime_request_digest
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'prepared', ?9, ?9,
-                ?10, ?11, ?12, ?13, ?14
+                ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18
             )
             "#,
             params![
@@ -1485,6 +1676,10 @@ impl ContextService {
                 bootstrap_redelivery_revision.and(bootstrap_evidence_id),
                 bootstrap_redelivery_revision.map(|_| BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION),
                 bootstrap_redelivery_revision.map(|_| BOOTSTRAP_REDELIVERY_FORMATTER_VERSION),
+                RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
+                serde_json::to_string(&runtime_attachment_auth_receipt)?,
+                runtime_attachment_auth_receipt_digest,
+                runtime_request_digest,
             ],
         )?;
         append_raw_event(
@@ -1502,6 +1697,8 @@ impl ContextService {
                 "bootstrapRedeliveryRevision": bootstrap_redelivery_revision,
                 "collaborationStateDigest": row.8,
                 "collaborationStateIncluded": row.9,
+                "runtimeAttachmentAuthReceiptDigest": runtime_attachment_auth_receipt_digest,
+                "runtimeRequestDigest": runtime_request_digest,
             }),
         )?;
         transaction.commit()?;
@@ -1747,6 +1944,27 @@ impl ContextService {
         transaction.commit()?;
         Ok(())
     }
+}
+
+fn validate_manifest_view_receipt(
+    connection: &rusqlite::Connection,
+    camp_id: &str,
+    receipt_json: Option<&str>,
+    expected_digest: &str,
+) -> Result<()> {
+    let receipt_json =
+        receipt_json.context("ContextManifest has no Camp Attachment View receipt")?;
+    let receipt_value: Value = serde_json::from_str(receipt_json)
+        .context("ContextManifest Camp Attachment View receipt is invalid")?;
+    if canonical_json_digest(&receipt_value)? != expected_digest {
+        anyhow::bail!("ContextManifest Camp Attachment View receipt digest is invalid");
+    }
+    let receipt: CampAttachmentViewReceiptV2 = serde_json::from_value(receipt_value)
+        .context("ContextManifest Camp Attachment View receipt is invalid")?;
+    if receipt.camp_id != camp_id {
+        anyhow::bail!("ContextManifest Camp Attachment View receipt belongs to another Camp");
+    }
+    validate_append_only_view_receipt(connection, &receipt)
 }
 
 #[derive(Debug)]
@@ -2672,8 +2890,19 @@ struct DelegationFact {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct CampResourcesFact {
+    camp_id: String,
+    published_attachment_root: String,
+    access: &'static str,
+    scope: &'static str,
+    mutability: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct RunFacts {
     schema_version: i64,
+    camp_resources: CampResourcesFact,
     #[serde(skip_serializing_if = "Option::is_none")]
     task_context: Option<TaskContextFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2684,19 +2913,6 @@ struct RunFacts {
     gather: Option<GatherFact>,
     #[serde(skip_serializing_if = "Option::is_none")]
     delegation: Option<DelegationFact>,
-}
-
-impl RunFacts {
-    fn empty() -> Self {
-        Self {
-            schema_version: 1,
-            task_context: None,
-            session_continuity: None,
-            external_effect: None,
-            gather: None,
-            delegation: None,
-        }
-    }
 }
 
 fn build_collaboration_state(
@@ -2738,7 +2954,23 @@ fn build_run_facts<R: ContextReadConnection>(
     requires_new_native_session: bool,
     a2a_run_count: i64,
 ) -> Result<RunFacts> {
-    let mut facts = RunFacts::empty();
+    let published_attachment_root =
+        resolve_published_attachment_root(database.context_connection(), &snapshot.camp_id)?;
+    let mut facts = RunFacts {
+        schema_version: 2,
+        camp_resources: CampResourcesFact {
+            camp_id: snapshot.camp_id.clone(),
+            published_attachment_root,
+            access: "enumerate_and_read",
+            scope: "current_camp",
+            mutability: "read_only",
+        },
+        task_context: None,
+        session_continuity: None,
+        external_effect: None,
+        gather: None,
+        delegation: None,
+    };
     let is_gather_member_run = if snapshot.invocation_kind == "a2a" {
         match snapshot.trigger_message_delivery_id.as_deref() {
             Some(delivery_id) => database.context_connection().query_row(
@@ -3091,6 +3323,32 @@ impl SharedConversation {
     }
 }
 
+fn final_referenced_attachment_ids(
+    current: &[CampAttachmentRef],
+    shared: &SharedConversation,
+) -> Vec<String> {
+    let mut ids = current
+        .iter()
+        .map(|attachment| attachment.attachment_id.clone())
+        .chain(
+            shared
+                .originating_public_user_message
+                .iter()
+                .chain(shared.reference_closure.iter().map(|entry| &entry.message))
+                .chain(shared.recent_messages.iter())
+                .flat_map(|message| {
+                    message
+                        .attachments
+                        .iter()
+                        .map(|attachment| attachment.attachment_id.clone())
+                }),
+        )
+        .collect::<Vec<_>>();
+    ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+    ids.dedup();
+    ids
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SharedMessageAttachmentEvidence {
@@ -3185,7 +3443,10 @@ impl RenderedRunFacts {
 }
 
 fn render_run_facts(run_facts: &RunFacts) -> Result<RenderedRunFacts> {
-    let mut references = Vec::new();
+    let mut references = vec![RunFactRef {
+        fact: "camp_resources",
+        task_id: None,
+    }];
     if let Some(task_context) = run_facts.task_context.as_ref() {
         references.push(RunFactRef {
             fact: "task_context",
@@ -3431,8 +3692,12 @@ fn load_recent_public_messages<R: ContextReadConnection>(
           AND camp_message.sequence <= ?3
           AND camp_message.tombstoned_at IS NULL
           AND (?4 IS NULL OR camp_message.id <> ?4)
+          AND NOT (
+              camp_message.author_type = 'agent'
+              AND camp_message.author_id = ?5
+          )
         ORDER BY camp_message.sequence DESC
-        LIMIT ?5
+        LIMIT ?6
         "#,
     )?;
     let mut rows = statement
@@ -3442,6 +3707,7 @@ fn load_recent_public_messages<R: ContextReadConnection>(
                 after_sequence,
                 through_sequence,
                 snapshot.trigger_camp_message_id,
+                snapshot.agent_id,
                 profile.max_public_messages as i64,
             ],
             |row| {
@@ -3515,23 +3781,39 @@ fn project_shared_message<R: ContextReadConnection>(
     )?;
     let mut attachment_statement = database.context_connection().prepare(
         r#"
-        SELECT id, display_name, media_type, storage_path, content_digest
+        SELECT id, display_name, media_type, content_digest
         FROM message_attachment
         WHERE camp_message_id = ?1
         ORDER BY created_at, id
         "#,
     )?;
-    let attachments = attachment_statement
+    let attachment_rows = attachment_statement
         .query_map([&message_id], |row| {
-            Ok(SharedMessageAttachment {
-                attachment_id: row.get(0)?,
-                name: row.get(1)?,
-                media_type: row.get(2)?,
-                path: row.get(3)?,
-                content_digest: row.get(4)?,
-            })
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(attachment_statement);
+    let attachments = attachment_rows
+        .into_iter()
+        .map(|(attachment_id, name, media_type, content_digest)| {
+            Ok(SharedMessageAttachment {
+                path: resolve_published_attachment_path(
+                    database.context_connection(),
+                    &camp_id,
+                    &attachment_id,
+                )?,
+                attachment_id,
+                name,
+                media_type,
+                content_digest,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let prefix = body_prefix(&body, profile.max_message_body_chars);
     Ok(SharedMessage {
         camp_id,
@@ -3764,9 +4046,10 @@ fn omitted_public_messages<R: ContextReadConnection>(
         WHERE camp_id = ?1 AND sequence > ?2 AND sequence <= ?3
           AND tombstoned_at IS NULL
           AND (?4 IS NULL OR id <> ?4)
+          AND NOT (author_type = 'agent' AND author_id = ?5)
           AND NOT EXISTS (
               SELECT 1
-              FROM json_each(?5) AS excluded
+              FROM json_each(?6) AS excluded
               WHERE excluded.value = camp_message.id
           )
         "#,
@@ -3775,6 +4058,7 @@ fn omitted_public_messages<R: ContextReadConnection>(
                 after_sequence,
                 snapshot.camp_message_boundary_sequence,
                 snapshot.trigger_camp_message_id,
+                snapshot.agent_id,
                 excluded_message_ids_json,
             ],
             |row| {
@@ -4406,7 +4690,7 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
 ) -> Result<Vec<CampAttachmentRef>> {
     let mut statement = database.context_connection().prepare(
         r#"
-        SELECT id, storage_path, content_digest
+        SELECT id, camp_id, content_digest
         FROM message_attachment
         WHERE (
             ?1 IS NOT NULL AND camp_message_id = ?1
@@ -4414,22 +4698,35 @@ fn load_current_attachment_refs<R: ContextReadConnection>(
         ORDER BY position, id
         "#,
     )?;
-    statement
+    let rows = statement
         .query_map(
             params![
                 current_input.source_camp_message_id,
                 current_input.source_conversation_message_id,
             ],
             |row| {
-                Ok(CampAttachmentRef {
-                    attachment_id: row.get(0)?,
-                    path: row.get(1)?,
-                    content_digest: row.get(2)?,
-                })
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
             },
         )?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(Into::into)
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    drop(statement);
+    rows.into_iter()
+        .map(|(attachment_id, camp_id, content_digest)| {
+            Ok(CampAttachmentRef {
+                path: resolve_published_attachment_path(
+                    database.context_connection(),
+                    &camp_id,
+                    &attachment_id,
+                )?,
+                attachment_id,
+                content_digest,
+            })
+        })
+        .collect()
 }
 
 fn count_a2a_runs<R: ContextReadConnection>(database: &R, camp_turn_id: &str) -> Result<i64> {
@@ -5085,6 +5382,7 @@ fn load_frozen_delivery_context(
         &frozen.a2a_guidance_evidence_digest,
         &frozen.rendered_payload,
     )?;
+    validate_frozen_view_receipt(database, snapshot, &frozen)?;
     validate_frozen_current_input_source(database, snapshot, &frozen)?;
     Ok(Some(frozen))
 }
@@ -5147,6 +5445,39 @@ fn validate_frozen_current_input_source<R: ContextReadConnection>(
         anyhow::bail!("Message Delivery frozen Current Input source is inconsistent");
     }
     Ok(())
+}
+
+fn validate_frozen_view_receipt<R: ContextReadConnection>(
+    database: &R,
+    snapshot: &RunSnapshot,
+    frozen: &FrozenDeliveryContext,
+) -> Result<()> {
+    let selection = frozen
+        .manifest_selection
+        .as_object()
+        .context("Frozen Delivery Context has no manifest selection")?;
+    if selection.get("contextManifestVersion") != Some(&json!(CONTEXT_MANIFEST_VERSION))
+        || selection.get("runFactsSchemaVersion") != Some(&json!(2))
+        || selection.get("campAttachmentViewReceiptVersion")
+            != Some(&json!(CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION))
+    {
+        anyhow::bail!("Frozen Delivery Context uses an obsolete Attachment View contract");
+    }
+    let receipt_value = selection
+        .get("campAttachmentViewReceipt")
+        .context("Frozen Delivery Context has no Camp Attachment View receipt")?;
+    let receipt: CampAttachmentViewReceiptV2 = serde_json::from_value(receipt_value.clone())
+        .context("Frozen Delivery Context Camp Attachment View receipt is invalid")?;
+    let expected_digest = selection
+        .get("campAttachmentViewReceiptDigest")
+        .and_then(Value::as_str)
+        .context("Frozen Delivery Context has no Camp Attachment View receipt digest")?;
+    if canonical_json_digest(receipt_value)? != expected_digest
+        || receipt.camp_id != snapshot.camp_id
+    {
+        anyhow::bail!("Frozen Delivery Context Camp Attachment View receipt digest is invalid");
+    }
+    validate_append_only_view_receipt(database.context_connection(), &receipt)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5305,6 +5636,27 @@ fn materialize_frozen_delivery_context(
             .context("Frozen Delivery Context Self Active Task evidence is invalid")?;
     let self_active_task_evidence_digest =
         canonical_json_digest(&serde_json::to_value(&self_active_task_evidence)?)?;
+    let context_manifest_version = required("contextManifestVersion")?
+        .as_i64()
+        .context("Frozen Delivery Context manifest version is invalid")?;
+    let run_facts_schema_version = required("runFactsSchemaVersion")?
+        .as_i64()
+        .context("Frozen Delivery Context Run Facts schema version is invalid")?;
+    let camp_attachment_view_receipt_version = required("campAttachmentViewReceiptVersion")?
+        .as_i64()
+        .context("Frozen Delivery Context View receipt version is invalid")?;
+    let camp_attachment_view_receipt_json = json_text("campAttachmentViewReceipt")?;
+    let camp_attachment_view_receipt_digest = required("campAttachmentViewReceiptDigest")?
+        .as_str()
+        .context("Frozen Delivery Context View receipt digest is invalid")?;
+    if context_manifest_version != CONTEXT_MANIFEST_VERSION
+        || run_facts_schema_version != 2
+        || camp_attachment_view_receipt_version != CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION
+        || canonical_json_digest(required("campAttachmentViewReceipt")?)?
+            != camp_attachment_view_receipt_digest
+    {
+        anyhow::bail!("Frozen Delivery Context View evidence is inconsistent");
+    }
 
     let manifest_id = Uuid::new_v4().to_string();
     let created_at = chrono::Utc::now().to_rfc3339();
@@ -5351,6 +5703,10 @@ fn materialize_frozen_delivery_context(
             self_active_task_evidence_json, self_active_task_evidence_digest,
             message_projection_audience,
             a2a_guidance_evidence_json, a2a_guidance_evidence_digest,
+            context_manifest_version, run_facts_schema_version,
+            camp_attachment_view_receipt_version,
+            camp_attachment_view_receipt_json,
+            camp_attachment_view_receipt_digest,
             formatter_version,
             rendered_payload_blob_id, rendered_payload_digest, created_at
         ) VALUES (
@@ -5358,7 +5714,8 @@ fn materialize_frozen_delivery_context(
             ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
             ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30,
             ?31, ?32, ?33, ?34, ?35, ?36, ?37, ?38, ?39, ?40,
-            ?41, ?42, ?43, ?44, ?45, ?46
+            ?41, ?42, ?43, ?44, ?45, ?46, ?47, ?48, ?49, ?50,
+            ?51
         )
         "#,
         params![
@@ -5404,6 +5761,11 @@ fn materialize_frozen_delivery_context(
             frozen.message_projection_audience,
             serde_json::to_string(&frozen.a2a_guidance_evidence)?,
             frozen.a2a_guidance_evidence_digest,
+            context_manifest_version,
+            run_facts_schema_version,
+            camp_attachment_view_receipt_version,
+            camp_attachment_view_receipt_json,
+            camp_attachment_view_receipt_digest,
             CONTEXT_FORMATTER_VERSION,
             blob.id,
             payload_digest,
@@ -5451,6 +5813,7 @@ fn materialize_frozen_delivery_context(
             "selfActiveTaskEvidenceDigest": self_active_task_evidence_digest,
             "messageProjectionAudience": frozen.message_projection_audience,
             "a2aGuidanceEvidenceDigest": frozen.a2a_guidance_evidence_digest,
+            "campAttachmentViewReceiptDigest": camp_attachment_view_receipt_digest,
             "dynamicPayloadDigest": payload_digest,
             "frozenByMessageDelivery": true,
         }),
@@ -5799,6 +6162,10 @@ mod slow_tests {
         },
         agent_runtime_adapter::SkillDeliveryGroupKey,
         camp_attachment::{CampAttachmentStore, consume_prepared_attachments},
+        camp_attachment_view::{
+            CampAttachmentViewStore, commit_publication_in_message_transaction,
+            resolve_published_attachment_path,
+        },
         camp_content::{StructuredCampMessageSegment, canonical_content_digest},
         camp_history::{
             CampHistoryService, CampListInput, CampReadInput, CampSearchInput, HistorySearchInput,
@@ -5817,7 +6184,7 @@ mod slow_tests {
             pending_redelivery_revision, reconcile_detector_policies,
             submit_compaction_observation,
         },
-        context_delivery::CONTEXT_DELIVERY_PROFILE_V3,
+        context_delivery::CONTEXT_DELIVERY_PROFILE_V4,
         current_input_skill::{
             CurrentInputSkillResolution, SkillSelectionEntry, SkillSelectionSnapshot,
         },
@@ -5838,6 +6205,27 @@ mod slow_tests {
             TeamToolInvocationError, TeamToolService,
         },
     };
+
+    fn test_run_facts() -> RunFacts {
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        RunFacts {
+            schema_version: 2,
+            camp_resources: CampResourcesFact {
+                camp_id: camp_id.to_string(),
+                published_attachment_root: format!(
+                    "/tmp/runtime-files/camps/{camp_id}/attachments"
+                ),
+                access: "enumerate_and_read",
+                scope: "current_camp",
+                mutability: "read_only",
+            },
+            task_context: None,
+            session_continuity: None,
+            external_effect: None,
+            gather: None,
+            delegation: None,
+        }
+    }
 
     struct Fixture {
         directory: std::path::PathBuf,
@@ -6378,7 +6766,9 @@ mod slow_tests {
                         public_only: false,
                         mention_user: false,
                         task_id: None,
+                        files: Vec::new(),
                     },
+                    frozen_files: Vec::new(),
                 },
                 &run_id,
                 execution_epoch,
@@ -7601,6 +7991,8 @@ mod slow_tests {
             .query_row("SELECT COUNT(*) FROM camp_message", [], |row| row.get(0))
             .unwrap();
 
+        crate::db::downgrade_current_schema_to_v98_source_for_test(fixture.database.connection());
+
         fixture
             .database
             .connection()
@@ -7710,6 +8102,8 @@ mod slow_tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.99', projection_schema_version = 47
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 98;
+                DELETE FROM schema_migration WHERE version = 97;
                 DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
                 DELETE FROM schema_migration WHERE version = 94;
@@ -7770,7 +8164,7 @@ mod slow_tests {
             .unwrap();
         assert!(manifest_schema.contains("run_fact_payload_json"));
         assert!(!manifest_schema.contains("run_notice_"));
-        assert!(manifest_schema.contains("formatter_version = 20"));
+        assert!(manifest_schema.contains("formatter_version IN (20, 21)"));
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         let contract: (String, i64, i64) = reopened
@@ -7785,7 +8179,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.13".to_string(), 51, 1));
+        assert_eq!(contract, ("v1.17".to_string(), 58, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -8954,7 +9348,7 @@ mod slow_tests {
     }
 
     #[test]
-    fn manifest_is_immutable_and_reuses_stable_camp_attachment_paths() {
+    fn attachment_only_current_input_is_empty_and_reuses_stable_camp_attachment_paths() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let camp_message_id: String = fixture
@@ -8964,6 +9358,23 @@ mod slow_tests {
                 "SELECT id FROM camp_message WHERE camp_id = ?1 AND sequence = 1",
                 [&fixture.camp_id],
                 |row| row.get(0),
+            )
+            .unwrap();
+        let empty_content = StructuredCampMessageContent::new();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_message
+                SET body = '', structured_content_json = ?2, content_digest = ?3
+                WHERE id = ?1
+                "#,
+                params![
+                    camp_message_id,
+                    serde_json::to_string(&empty_content).unwrap(),
+                    canonical_content_digest(&empty_content).unwrap(),
+                ],
             )
             .unwrap();
         let private_attachment_body = "ATTACHMENT_BODY_MUST_NOT_ENTER_PROMPT";
@@ -8979,16 +9390,44 @@ mod slow_tests {
             )
             .unwrap();
         let attachment_id = draft.attachments[0].id.clone();
+        let view_store = CampAttachmentViewStore::for_test(&fixture.database).unwrap();
+        let publication_command_id = Uuid::new_v4().to_string();
+        let publication = view_store
+            .stage_publication(
+                &mut fixture.database,
+                &CampAttachmentStore::new(&fixture.directory),
+                &fixture.camp_id,
+                &publication_command_id,
+                draft.revision,
+            )
+            .unwrap()
+            .expect("attachment publication should stage a View entry");
+        view_store
+            .gate_publication(&mut fixture.database, &publication)
+            .unwrap();
+        view_store
+            .promote_publication(&mut fixture.database, &publication)
+            .unwrap();
         let transaction = fixture.database.connection_mut().transaction().unwrap();
         consume_prepared_attachments(
             &transaction,
             &fixture.camp_id,
             &camp_message_id,
-            &[attachment_id],
+            std::slice::from_ref(&attachment_id),
             &chrono::Utc::now().to_rfc3339(),
         )
         .unwrap();
+        commit_publication_in_message_transaction(
+            &transaction,
+            Some(&publication.operation_id),
+            &fixture.camp_id,
+            std::slice::from_ref(&attachment_id),
+        )
+        .unwrap();
         transaction.commit().unwrap();
+        view_store
+            .complete_publication(&mut fixture.database, &publication.operation_id)
+            .unwrap();
         let service = ContextService;
         let first = service
             .materialize(
@@ -9007,18 +9446,19 @@ mod slow_tests {
         };
         assert_eq!(first.expected_binding_generation, 1);
         assert!(first.requires_new_native_session);
-        assert_eq!(first.rendered_payload.matches("第一条公开问题").count(), 1);
+        assert!(!first.rendered_payload.contains("第一条公开问题"));
         assert!(!first.rendered_payload.contains("[SESSION_CHARTER]"));
         assert!(!first.rendered_payload.contains("[TURN_ENVELOPE]"));
         assert!(!first.rendered_payload.contains("sourceInboxMessageId"));
         assert!(!first.rendered_payload.contains("replyToMessageId"));
         assert!(first.rendered_payload.contains("requirements.txt"));
-        assert!(first.rendered_payload.contains("camp-attachments"));
+        assert!(first.rendered_payload.contains("runtime-files"));
+        assert!(!first.rendered_payload.contains("camp-attachments"));
         assert!(!first.rendered_payload.contains("sourceConversationId"));
         assert!(!first.rendered_payload.contains("contentDigest"));
         assert!(!first.rendered_payload.contains("managed-blob://"));
         assert!(!first.rendered_payload.contains(private_attachment_body));
-        let stable_path: String = fixture
+        let authority_path: String = fixture
             .database
             .connection()
             .query_row(
@@ -9027,6 +9467,25 @@ mod slow_tests {
                 |row| row.get(0),
             )
             .unwrap();
+        let stable_path = resolve_published_attachment_path(
+            fixture.database.connection(),
+            &fixture.camp_id,
+            &attachment_id,
+        )
+        .unwrap();
+        let current_input_json = first
+            .rendered_payload
+            .split_once("[CURRENT_INPUT]\n")
+            .and_then(|(_, suffix)| suffix.split_once("\n[/CURRENT_INPUT]"))
+            .map(|(payload, _)| payload)
+            .expect("CURRENT_INPUT must be present");
+        let current_input: Value = serde_json::from_str(current_input_json).unwrap();
+        assert_eq!(current_input["message"], "");
+        assert_eq!(current_input["attachments"], json!([stable_path.clone()]));
+        assert_eq!(
+            std::fs::read_to_string(&authority_path).unwrap(),
+            private_attachment_body
+        );
         assert_eq!(
             std::fs::read_to_string(&stable_path).unwrap(),
             private_attachment_body
@@ -9051,9 +9510,11 @@ mod slow_tests {
             )
             .unwrap();
         assert!(attachment_refs_json.contains(&attachment_content_digest));
+        assert!(attachment_refs_json.contains(&stable_path));
+        assert!(!attachment_refs_json.contains(&authority_path));
         assert!(!attachment_refs_json.contains(&camp_message_id));
         assert!(
-            std::fs::metadata(&stable_path)
+            std::fs::metadata(&authority_path)
                 .unwrap()
                 .permissions()
                 .readonly()
@@ -9079,7 +9540,7 @@ mod slow_tests {
         assert_eq!(
             std::fs::read_to_string(&stable_path).unwrap(),
             private_attachment_body,
-            "recovery must reuse the exact authoritative Camp Attachment Path"
+            "recovery must reuse the exact Camp Published Attachment View path"
         );
         let count: i64 = fixture
             .database
@@ -9138,6 +9599,15 @@ mod slow_tests {
         CampAttachmentStore::new(&fixture.directory)
             .remove_camp(&fixture.camp_id)
             .unwrap();
+        view_store
+            .remove_camp_view(&mut fixture.database, &fixture.camp_id)
+            .unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(
+            view_store.root().join("camps"),
+            std::os::unix::fs::PermissionsExt::from_mode(0o700),
+        )
+        .unwrap();
         fixture.cleanup();
     }
 
@@ -9301,7 +9771,7 @@ mod slow_tests {
                 )
                 .unwrap();
         }
-        let body = "B".repeat(7_850);
+        let body = "B".repeat(7_500);
         budget_fixture
             .database
             .connection()
@@ -11721,7 +12191,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(manifest.0, 0);
-        assert_eq!(manifest.1, 3);
+        assert_eq!(manifest.1, 4);
         assert_eq!(manifest.2.len(), 64);
         assert_eq!((manifest.3, manifest.4, manifest.5), (5, 2, 6));
         fixture.cleanup();
@@ -12151,7 +12621,7 @@ mod slow_tests {
                 .iter()
                 .map(|message| message["body"].as_str().unwrap().chars().count())
                 .sum::<usize>(),
-            CONTEXT_DELIVERY_PROFILE_V3.max_public_history_chars
+            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars
         );
         assert_eq!(shared["omittedMessages"]["count"], 3);
         assert_eq!(shared["omittedMessages"]["sequenceStart"], 2);
@@ -12160,9 +12630,9 @@ mod slow_tests {
     }
 
     #[test]
-    fn public_history_budget_is_shared_and_profile_v3_bounded() {
+    fn public_history_budget_is_shared_and_profile_v4_bounded() {
         fn message(id: &str) -> SharedMessage {
-            let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V3.max_message_body_chars);
+            let body = "界".repeat(CONTEXT_DELIVERY_PROFILE_V4.max_message_body_chars);
             SharedMessage {
                 camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
                 message_id: id.to_string(),
@@ -12198,7 +12668,7 @@ mod slow_tests {
             &mut originating_public_user_message,
             &mut reference_closure,
             &mut omission_entries,
-            CONTEXT_DELIVERY_PROFILE_V3.max_public_history_chars,
+            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars,
         );
 
         assert_eq!(recent_messages.len(), 8);
@@ -12216,7 +12686,7 @@ mod slow_tests {
                     .iter()
                     .map(|entry| unicode_scalar_count(&entry.message.body))
                     .sum::<usize>(),
-            CONTEXT_DELIVERY_PROFILE_V3.max_public_history_chars
+            CONTEXT_DELIVERY_PROFILE_V4.max_public_history_chars
         );
         assert_eq!(omission_entries.len(), 7);
         assert!(omission_entries.iter().all(|entry| {
@@ -12353,7 +12823,7 @@ mod slow_tests {
         let origin = load_originating_public_user_message(
             &fixture.database,
             &snapshot,
-            CONTEXT_DELIVERY_PROFILE_V3,
+            CONTEXT_DELIVERY_PROFILE_V4,
             None,
         )
         .unwrap()
@@ -12375,7 +12845,7 @@ mod slow_tests {
             load_originating_public_user_message(
                 &fixture.database,
                 &snapshot,
-                CONTEXT_DELIVERY_PROFILE_V3,
+                CONTEXT_DELIVERY_PROFILE_V4,
                 None,
             )
             .unwrap()
@@ -12393,7 +12863,7 @@ mod slow_tests {
         let error = load_originating_public_user_message(
             &fixture.database,
             &snapshot,
-            CONTEXT_DELIVERY_PROFILE_V3,
+            CONTEXT_DELIVERY_PROFILE_V4,
             None,
         )
         .unwrap_err();
@@ -12465,7 +12935,7 @@ mod slow_tests {
                 .as_str()
                 .is_some_and(|digest| digest.starts_with("sha256:"))
         );
-        assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V3.max_message_body_chars);
+        assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V4.max_message_body_chars);
         assert!(!context.rendered_payload.contains("[SHARED_CONVERSATION]"));
         fixture.cleanup();
     }
@@ -12538,24 +13008,28 @@ mod slow_tests {
                 "laterChangesRetargetRun": false,
             })
         );
-        let mut facts = RunFacts::empty();
+        let mut facts = test_run_facts();
         facts.task_context = Some(task_fact);
         let rendered = render_run_facts(&facts).unwrap();
         assert_eq!(
             serde_json::to_value(rendered.references).unwrap(),
-            json!([{"fact":"task_context","taskId":"task-1"}])
+            json!([
+                {"fact":"camp_resources"},
+                {"fact":"task_context","taskId":"task-1"}
+            ])
         );
         assert_eq!(
             rendered.payload_json,
-            "{\"schemaVersion\":1,\"taskContext\":{\"taskId\":\"task-1\",\"referenceMode\":\"frozen\",\"laterChangesRetargetRun\":false}}"
+            "{\"schemaVersion\":2,\"campResources\":{\"campId\":\"rvcamp_01h47kvsy5fk1shh6w1g60eecf\",\"publishedAttachmentRoot\":\"/tmp/runtime-files/camps/rvcamp_01h47kvsy5fk1shh6w1g60eecf/attachments\",\"access\":\"enumerate_and_read\",\"scope\":\"current_camp\",\"mutability\":\"read_only\"},\"taskContext\":{\"taskId\":\"task-1\",\"referenceMode\":\"frozen\",\"laterChangesRetargetRun\":false}}"
         );
         assert_eq!(rendered.digest, sha256_text(&rendered.payload_json));
     }
 
     #[test]
-    fn run_facts_v1_is_structured_and_omits_absent_or_non_gather_fields() {
+    fn run_facts_v2_always_includes_camp_resources_and_omits_other_absent_fields() {
         let facts = RunFacts {
-            schema_version: 1,
+            schema_version: 2,
+            camp_resources: test_run_facts().camp_resources,
             task_context: Some(TaskContextFact {
                 task_id: "task-1".to_string(),
                 reference_mode: "frozen",
@@ -12590,7 +13064,14 @@ mod slow_tests {
         assert_eq!(
             serde_json::from_str::<Value>(&rendered.payload_json).unwrap(),
             json!({
-                "schemaVersion": 1,
+                "schemaVersion": 2,
+                "campResources": {
+                    "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+                    "publishedAttachmentRoot": "/tmp/runtime-files/camps/rvcamp_01h47kvsy5fk1shh6w1g60eecf/attachments",
+                    "access": "enumerate_and_read",
+                    "scope": "current_camp",
+                    "mutability": "read_only",
+                },
                 "taskContext": {
                     "taskId": "task-1",
                     "referenceMode": "frozen",
@@ -12622,16 +13103,16 @@ mod slow_tests {
                 },
             })
         );
-        assert_eq!(rendered.references.len(), 5);
+        assert_eq!(rendered.references.len(), 6);
 
         let non_gather_budget = RunFacts {
-            schema_version: 1,
+            schema_version: 2,
             delegation: Some(DelegationFact {
                 new_a2a_dispatch_allowed: false,
                 new_a2a_target_contact_allowed: false,
                 captured_gather_return_blocked_by_delegation_budget: None,
             }),
-            ..RunFacts::empty()
+            ..test_run_facts()
         };
         let non_gather_value = serde_json::to_value(&non_gather_budget).unwrap();
         assert!(
@@ -12640,9 +13121,13 @@ mod slow_tests {
                 .is_none()
         );
 
-        let empty = render_run_facts(&RunFacts::empty()).unwrap();
-        assert!(empty.is_empty());
-        assert_eq!(empty.payload_json, "{\"schemaVersion\":1}");
+        let camp_resources_only = render_run_facts(&test_run_facts()).unwrap();
+        assert!(!camp_resources_only.is_empty());
+        assert!(
+            camp_resources_only
+                .payload_json
+                .contains("\"schemaVersion\":2")
+        );
         let shared_conversation = SharedConversation {
             camp_id: "rvcamp_01h47kvsy5fk1shh6w1g60eecf".to_string(),
             originating_public_user_message: None,
@@ -12655,17 +13140,17 @@ mod slow_tests {
             collaboration_state: None,
             self_active_tasks: None,
             shared_conversation: &shared_conversation,
-            run_facts: &empty,
+            run_facts: &camp_resources_only,
             a2a_guidance: None,
             current_input: &json!({"source":{"type":"user"},"body":"work"}),
         })
         .unwrap();
-        assert!(!payload.contains("[RUN_FACTS]"));
+        assert!(payload.contains("[RUN_FACTS]"));
         assert!(payload.ends_with("[/CURRENT_INPUT]\n\n"));
     }
 
     #[test]
-    fn current_binding_generation_self_output_is_available_in_the_raw_window() {
+    fn current_binding_generation_self_output_is_filtered_from_the_raw_window() {
         let mut fixture = fixture();
         let store = ManagedBlobStore::new(&fixture.directory);
         let ContextMaterialization::Ready(first_context) = ContextService
@@ -12752,14 +13237,158 @@ mod slow_tests {
         assert!(
             shared
                 .iter()
-                .any(|message| message.body == current_generation_output),
-            "same-binding explicitly sent output remains an ordinary public CampMessage"
+                .all(|message| message.body != current_generation_output),
+            "same-Agent public output must not be re-injected as recent history"
         );
+        let persisted_output_count: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1 AND body = ?2",
+                params![&fixture.camp_id, current_generation_output],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(persisted_output_count, 1);
         fixture.cleanup();
     }
 
     #[test]
-    fn replacement_binding_bootstrap_includes_self_output_from_the_old_generation() {
+    fn recent_public_messages_filter_self_before_limit_and_omission_aggregation() {
+        let fixture = fixture();
+        let snapshot =
+            load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
+                .unwrap()
+                .unwrap();
+        let first_sequence: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT last_message_sequence + 1 FROM camp WHERE id = ?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for offset in 0..15_i64 {
+            let sequence = first_sequence + offset;
+            let (author_type, author_id) = match offset % 3 {
+                0 => ("user", "eligible-user"),
+                1 => ("agent", "agent_2"),
+                _ => ("system", "eligible-system"),
+            };
+            fixture
+                .database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id, body,
+                        address_mode, addressed_agent_ids_json,
+                        structured_content_json, content_digest,
+                        version, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'default', '[]',
+                              '[{"kind":"text","text":"eligible"}]',
+                              ?7, 1, ?8, ?8)
+                    "#,
+                    params![
+                        format!("eligible-recent-{offset}"),
+                        &fixture.camp_id,
+                        sequence,
+                        author_type,
+                        author_id,
+                        format!("eligible-body-{offset}"),
+                        format!("sha256:eligible-{offset}"),
+                        &now,
+                    ],
+                )
+                .unwrap();
+        }
+        for offset in 0..20_i64 {
+            let sequence = first_sequence + 15 + offset;
+            fixture
+                .database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO camp_message(
+                        id, camp_id, sequence, author_type, author_id,
+                        source_agent_run_id, body, address_mode,
+                        addressed_agent_ids_json, structured_content_json,
+                        content_digest, version, created_at, updated_at
+                    ) VALUES (?1, ?2, ?3, 'agent', ?4, ?5, ?6, 'default',
+                              '[]', '[{"kind":"text","text":"self"}]',
+                              ?7, 1, ?8, ?8)
+                    "#,
+                    params![
+                        format!("self-recent-{offset}"),
+                        &fixture.camp_id,
+                        sequence,
+                        &snapshot.agent_id,
+                        &snapshot.agent_run_id,
+                        format!("self-body-{offset}"),
+                        format!("sha256:self-{offset}"),
+                        &now,
+                    ],
+                )
+                .unwrap();
+        }
+        let boundary = first_sequence + 34;
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE camp SET last_message_sequence = ?2, version = version + 1, updated_at = ?3 WHERE id = ?1",
+                params![&fixture.camp_id, boundary, &now],
+            )
+            .unwrap();
+
+        let recent = load_recent_public_messages(
+            &fixture.database,
+            &snapshot,
+            0,
+            boundary,
+            current_context_delivery_profile().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(recent.len(), 15);
+        assert!(
+            recent
+                .iter()
+                .all(|message| message.sender_id != snapshot.agent_id)
+        );
+        assert_eq!(recent.first().unwrap().sequence, first_sequence);
+        assert_eq!(recent.last().unwrap().sequence, first_sequence + 14);
+        assert!(recent.iter().any(|message| message.sender_type == "user"));
+        assert!(
+            recent
+                .iter()
+                .any(|message| message.sender_type == "agent" && message.sender_id == "agent_2")
+        );
+        assert!(recent.iter().any(|message| {
+            message.sender_type == "system" && message.sender_id == "eligible-system"
+        }));
+
+        let included_message_ids = recent
+            .iter()
+            .map(|message| message.message_id.clone())
+            .collect::<HashSet<_>>();
+        let mut omission_entries = Vec::new();
+        let omitted = omitted_public_messages(
+            &fixture.database,
+            &snapshot,
+            0,
+            &included_message_ids,
+            &mut omission_entries,
+        )
+        .unwrap();
+        assert_eq!(omitted, None);
+        assert!(omission_entries.is_empty());
+        std::fs::remove_dir_all(fixture.directory).unwrap();
+    }
+
+    #[test]
+    fn replacement_binding_bootstrap_excludes_self_output_from_the_old_generation() {
         let mut fixture = fixture();
         let context = ContextService;
         let runtime = ExecutionRuntimeService::default();
@@ -13001,7 +13630,7 @@ mod slow_tests {
         };
         assert_eq!(replacement_context.expected_binding_generation, 2);
         assert!(
-            replacement_context
+            !replacement_context
                 .rendered_payload
                 .contains(old_generation_output)
         );

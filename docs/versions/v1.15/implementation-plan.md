@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.15
 authority: implementation-plan-and-acceptance
 status: in_progress
-last_updated: 2026-08-21
+last_updated: 2026-08-20
 ---
 
 # v1.15 Windows x64 实施与验收计划
@@ -14,9 +14,52 @@ last_updated: 2026-08-21
 - [x] 冻结产品版本 v1.14，建立唯一 current v1.15 与 Data Contract v1.15/schema 52/Migration 97；
 - [x] 保留 v1.12 AgentRun 局部停止、v1.13 实际 Runtime 模型观测、v1.14 `camp.read` Timeline 默认、
   Built-in Transport v17、Migration 96 与 Read Model schema；
+- [x] 实施已确认的自身 recent public message 过滤：Profile v4 在 top-15/omission 前按 recipient Agent ID
+  排除自身作者，Manifest v19/Migration 98 clean break 旧 Binding/Evidence，并以 schema 53 保留 CampMessage；
 - [x] 继续采用 [v1.05 Windows 决策记录](../v1.05/decisions.md)和当前 Windows Contracts，不把历史
   v1.05 状态当作实施事实；
 - [x] 完成本版所有代码后的 macOS 基线、Windows x64 交叉编译、文档全门禁和 base-aware CI 检查。
+
+## Checkpoint 0A：Camp Published Attachment Runtime View
+
+- [x] 完成并二次确认 revision 2；以 Camp 作为 Published Attachment 共享授权域，撤回 Run/Agent Session
+  projection，不暴露或迁移 Authority Attachment root；
+- [x] Desktop 显式派生实例隔离 `--runtime-camp-files-root`；Core 完成绝对路径、marker/lock、symlink/reparse、
+  overlap、ownership 与 Windows private-storage admission；
+- [x] 实现 Camp View catalog、staging/publication/cleanup journal、全组 copy/digest/identity 校验、quota、原子
+  promote、startup recovery、controlled rebuild 与 Camp cleanup；
+- [x] 使 message publication mutation gate 与整次 Runtime Run read guard 互斥；所有 Adapter 当前采用
+  `generation_fenced_v1`，并将精确 Camp root/generation 纳入 Host compatibility；
+- [x] 使用统一 Published Attachment path resolver 生成 Current/Shared/Gather refs，升级到 Formatter 21、
+  Manifest 20、Run Facts v2、View/Auth receipts，并禁止 dispatch-time Authority path 替换；
+- [x] 实现 Migration 99/schema 54：preflight 空 View root，按 delivery/action evidence 收敛旧非终态执行，
+  保留历史 Manifest/Blob/Evidence/Authority，并只从 `message_attachment` 回填；
+- [x] 覆盖 root admission、publication crash/retry、mutation concurrency、integrity rebuild、Runtime guard、
+  force delete、Migration classification/backfill、Desktop 参数及 temporary Smoke root cleanup。
+
+## Checkpoint 0B：可重建 Runtime View 的语义 Context receipt
+
+- [x] 完成并二次确认 runtime attachment semantic receipt revision 1；Formatter 21、模型 bytes、Run Facts v2
+  与 generation-fenced publication 产品规则不变，并记录 [V1.15-D06](decisions.md#v1-15-d06)；
+- [x] 将 View catalog 分为稳定 `catalogRevision/publishedCatalogRevision/semanticCatalogDigest` 与物理
+  generation/root/Entry identity/operation/catalog digest 两个轴；controlled rebuild 只更新物理轴；
+- [x] 新写入使用 Manifest 21/View Receipt v2，只冻结 Camp ID、稳定相对 payload path、attachment semantics
+  与 append-only catalog prefix；Runtime Auth Receipt v1 保留当前本机物理 evidence；
+- [x] 实现 Migration 100/schema 55：诚实终结旧非终态 Manifest 20/Receipt v1，保留历史 Manifest/Blob/Auth
+  Receipt/ACK/Evidence，并为现有 View backfill semantic catalog；
+- [x] publication staging 拆为短 DB CopyPlan/journal、无 Database mutex copy/digest/fsync、短 DB CAS；
+  Draft/CopyPlan drift 失败不产生公共消息或部分 Draft 消费；
+- [x] 覆盖 append 与 controlled rebuild 后旧 v2 receipt 可恢复、语义漂移失败、物理 Auth Receipt 更新、
+  publication copy phase 释放共享数据库锁，以及 Migration 100 source/backfill/clean-break。
+- [x] 修复 generation-fenced 并发锁序：Scheduler 先取得 Camp View read admission、再 Claim AgentRun，并把
+  owned guard 持有到完整 Run 生命周期；同一 Camp 仅允许一个非终态 publish operation，gate 前重验 Draft，
+  遗留重复 staging 回滚保留其他 operation 已提交的 Entry；Migration 101 推进到 schema 56。
+- [x] 将 admission 与 Runtime authorization 收口为每个 AgentRun 各一份：Context freeze、Host acquire、resume
+  和模型输入投递不嵌套获取 read gate；完整 View 校验采用短 DB snapshot、无 Database mutex 的 blocking scan、
+  短 DB CAS，并由 Context materialization 与 Runtime launch 复用 verified authorization。
+- [x] 将常规 publication completion 收口为完整 catalog receipt/top-level ID 复核加本 operation 新增 Entry 的
+  物理校验；历史 Entry 留给 startup/recovery、明确完整性诊断、controlled rebuild 与每次 dispatch 全量扫描，
+  并覆盖 DB mutex 释放、receipt drift CAS、新旧 Entry 校验边界回归。
 
 ## Checkpoint 1：平台、进程与私有文件系统
 
@@ -24,9 +67,7 @@ last_updated: 2026-08-21
 - [x] 建立 Runtime platform admission、native executable resolver 与集中 managed process launcher；
 - [x] 实现创建时 Job/handle list 原子启动及 owner-loss cleanup 测试；
 - [x] 实现 Core/Desktop 私有 data root、local NTFS/DACL admission 与 handle-relative Attachment；
-- [x] 补齐 MCP Library/Projection 的 protected DACL 创建、诊断修复、bounded read 与 write-through 原子发布；
-- [x] 在 Windows 10 22H2 x64 本机完成进程 ownership、DACL、reparse、long-path 与 lifecycle 自动化验收；
-- [ ] 在 Windows 11 client OS 重复对应验收并保留发布证据。
+- [ ] 在 Windows 10 22H2/11 真实环境完成进程 race、DACL、reparse、long-path 与 lifecycle 验收。
 
 ## Checkpoint 2：Skill Library 与 crash-recoverable Projection
 
@@ -35,7 +76,6 @@ last_updated: 2026-08-21
 - [x] 将 NTFS entry identity 写入 journal/observation，并在 replace/delete/recovery 前与 digest、DACL 一起验证；
 - [x] 实现持久 `agent_run + execution_epoch + root_identity` registration 和 active Run 延迟更新；
 - [x] 覆盖 publish/replace/remove、Git exclude、project-owned drift、identity drift、ambiguous recovery 与全 transition crash injection；
-- [x] 在 Windows 10 22H2 x64 本机执行 Windows Skill Library 与 Projection lifecycle/crash tests；
 - [ ] 在固定 Windows CI 执行全部 Windows Skill projection lifecycle/crash tests，并保留通过证据。
 
 ## Checkpoint 3：Transport、Renderer 与 Desktop 行为
@@ -53,34 +93,40 @@ last_updated: 2026-08-21
   重试和 outcome-indeterminate 分类，并保留 v1.14 发布的 `camp.read` Timeline 默认；
 - [x] Named Pipe 每个实例使用 session logon SID + SYSTEM protected DACL，并在创建后回读 DACL；覆盖
   first-instance、non-inheritable handle、partial byte frame、listener replenish、busy retry、malformed 与 response-loss；
-- [x] 在 Windows 10 22H2 x64 本机执行 Named Pipe v17 matrix；
 - [ ] 在固定 Windows CI 实跑 Named Pipe v17 matrix，并补齐 wrong token、stale lease、idempotent replay 与
   compaction hook 的完整端到端证据；
-- [x] 对照现有 macOS 页面实现同组件树的 frame、shortcut、copy、Explorer、路径与 Runtime availability 差异；
+- [ ] 对照现有 macOS 页面实现同组件树的 frame、shortcut、copy、Explorer、路径与 Runtime availability 差异；
 - [ ] 完成 Forced Colors/High Contrast、keyboard-only、NVDA、中文 IME、DPI/zoom/Snap/multi-monitor 验收；
-- [x] 用 Windows Interaction Delta HTML 作为差异清单，不以原型替代现有 macOS 视觉真源。
+- [ ] 用 Windows Interaction Delta HTML 作为差异清单，不以原型替代现有 macOS 视觉真源。
+
+## Checkpoint 3A：本机安装级执行台位置偏好
+
+- [x] 确认全局粒度、唯一按钮写入口、独立 Inspector visibility、Main-owned 持久化与旧偏好默认底部，
+  记录 [V1.15-D05](decisions.md#v1-15-d05)并建立 [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)；
+- [x] 将 General Preferences 推进到 schema 3，加入 `executionConsolePlacement` 与串行原子 setter；v1/v2
+  读取保留其他可识别字段并补 `bottom`，不增加 Core/SQLite Migration 或 downgrade reader；
+- [x] 在首个 Camp workspace 挂载前取得权威偏好，把 placement 从 CampWorkspace 瞬时 state 提升到 App/Main
+  控制；写成功后才移动同一 Drawer DOM，pending 防重复，失败保持旧 snapshot 并原位重试；
+- [x] 保持 placement 与 Inspector visibility 独立：进入不含 running Run 的 Camp 和已挂载 workspace 的后台
+  事件不强制显示或临时回退，显式移动与 Task/停止结果/世界地图精确导航仍显示 Inspector、激活“执行”
+  并定位目标；
+- [x] 收口 workspace 进入恢复：从其他 Camp/一级页面或应用恢复进入含 running Run 的 Camp 时选择最新
+  running Run，不抢键盘焦点；右侧显示 Inspector 并把“执行”置于首个 Tab，同一 workspace 的后台事件
+  不触发自动切换；
+- [x] 增加 General Preferences migration/store/API 单测、Renderer 状态与失败单测，并扩展 packaged App
+  `accept:runtime-activity-ui` 覆盖跨 Camp、一级页面、重启、hidden 组合及首屏无闪跳。
 
 ## Checkpoint 4：打包、升级与发布安全
 
-- [x] 完成 target-isolated resources、x64 per-user NSIS、三个 PE 与 longPathAware/PerMonitorV2 manifest；
-- [x] unpacked/installer verifier 校验架构、icon/version/manifest、hash、CLI contract 与隔离 Core ready；
-- [x] Windows 10 22H2 x64 本机 clean-user install/start/upgrade/uninstall 与默认 data 保留自动化通过；
-- [x] 卸载器提供默认未选中且二次确认的 `%LOCALAPPDATA%\Rovai AI` 显式删除选项；
-- [x] 建立固定 `windows-2022` unsigned NSIS build/verifier workflow；
-- [ ] 在远端固定 Windows CI 和 Windows 11 client OS 重跑安装生命周期并保留发布证据；
+- [ ] 完成 target-isolated resources、x64 per-user NSIS、三个 PE 与 longPathAware manifest；
+- [ ] unpacked/installer verifier 校验架构、资源、manifest、hash 与 Core ready；
+- [ ] clean-user install/start/uninstall、data 保留、显式删除和 planned-shutdown upgrade 通过；
 - [ ] 完成 Electron/Core/CLI/installer Authenticode、RFC 3161 timestamp 与 release signer/hash 验证。
 
 ## Checkpoint 5：逐 Runtime 资格与最终发布
 
-- [x] 在 Windows 10 22H2 x64 本机安装并探测十个 Adapter，使用开发态单 Adapter admission override 完成
-  真实 ACP、Built-in CLI v17、Missing-Send Recovery 与 MCP Projection 矩阵；支持原生 Skill Projection 的
-  九个 Runtime 同时完成 Skill smoke，TRAE 保持 documentation-only empty；
-- [x] CodeBuddy `2.137.1` 使用官方 API-key ACP 环境变量和 `custom-local:deepseek-v4-flash` 完成 completion、
-  continuation、Approval allow/deny、15 项 Built-in operation、49-event tool→final、MCP 与 Skill 验收；
-- [x] 以 Claude `2.1.86` 在开发态 packaged Desktop 完成 Windows planned-shutdown、Job descendant cleanup、
-  durable fence 与重启恢复；恢复正式 Release sidecar 后 verifier 重新通过；
 - [ ] 十个 Adapter 分别完成 Windows 10 22H2 与 Windows 11 的 immutable digest-bound evidence；
-- [x] 未完成 Adapter 保持 `not_qualified` 且不可 discovery/check/install/select/migrate/execute；
+- [ ] 未完成 Adapter 保持 `not_qualified` 且不可 discovery/check/install/select/migrate/execute；
 - [ ] macOS 全 Runtime、Transport、process-group、打包和 Renderer 回归通过；
 - [ ] 发布 support matrix、安装/升级/故障排查与已知限制后，才更新 Root README 并关闭 v1.15。
 
@@ -93,7 +139,15 @@ last_updated: 2026-08-21
 - [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
-- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
+- [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
+- [Camp Published Attachment View architecture](../../architecture/camp-published-attachment-view.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
+- [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
+- [Run Facts v2](../../contracts/run-facts-v2.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)

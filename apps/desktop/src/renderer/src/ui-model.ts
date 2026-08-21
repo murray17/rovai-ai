@@ -103,9 +103,19 @@ export type ExecutionStep = {
   credibility: string
 }
 
+export type RuntimeDiagnostic = {
+  id: string
+  code: 'runtime_api_retrying'
+  status: 'retrying'
+  attempt: number
+  maxAttempts: number
+  retryAfterSeconds: number
+}
+
 export type ExecutionProgressItem =
   | { key: string; kind: 'narration'; body: string }
   | { key: string; kind: 'plan'; explanation: string; plan: ExecutionPlanStep[] }
+  | { key: string; kind: 'diagnostic'; diagnostic: RuntimeDiagnostic }
   | { key: string; kind: 'tool'; step: ExecutionStep }
 
 export type LiveExecutionProgress = {
@@ -222,6 +232,7 @@ const LIVE_RUNTIME_EVENT_TYPES = new Set([
   'agent.thought.delta',
   'runtime.plan',
   'runtime.plan.delta',
+  'runtime.diagnostic',
   'runtime.action'
 ])
 
@@ -266,6 +277,7 @@ export function buildLiveExecutionProgress(
   let activeAnonymousNarrationItemId: string | null = null
   let planExplanation = ''
   let plan: ExecutionPlanStep[] = []
+  const diagnosticsById = new Map<string, RuntimeDiagnostic>()
   const steps: ExecutionStep[] = []
   const stepIndexes = new Map<string, number>()
   const itemOrder: string[] = []
@@ -348,6 +360,41 @@ export function buildLiveExecutionProgress(
       continue
     }
 
+    if (event.eventType === 'runtime.diagnostic') {
+      finishNarrationStream()
+      const diagnosticId = stringField(payload, 'diagnosticId')
+      const code = stringField(payload, 'code')
+      const status = stringField(payload, 'status')
+      const attempt = numberField(payload, 'attempt')
+      const maxAttempts = numberField(payload, 'maxAttempts')
+      const retryAfterSeconds = numberField(payload, 'retryAfterSeconds')
+      if (
+        diagnosticId
+        && code === 'runtime_api_retrying'
+        && status === 'retrying'
+        && attempt !== null
+        && maxAttempts !== null
+        && retryAfterSeconds !== null
+        && Number.isInteger(attempt)
+        && Number.isInteger(maxAttempts)
+        && Number.isInteger(retryAfterSeconds)
+        && attempt >= 1
+        && maxAttempts >= attempt
+        && retryAfterSeconds >= 0
+      ) {
+        rememberItem(`diagnostic:${diagnosticId}`)
+        diagnosticsById.set(diagnosticId, {
+          id: diagnosticId,
+          code,
+          status,
+          attempt,
+          maxAttempts,
+          retryAfterSeconds
+        })
+      }
+      continue
+    }
+
     if (event.eventType === 'activity.started' || event.eventType === 'activity.completed') {
       const item = asRecord(payload.item)
       const nativeType = stringField(item, 'type') ?? 'activity'
@@ -368,14 +415,18 @@ export function buildLiveExecutionProgress(
       const structuredOutput = rawOutput === null && item.output != null
         ? fullEvidenceValue(item.output)
         : null
-      const detail = rawOutput !== null
-        ? stripAnsi(rawOutput)
-        : structuredOutput
+      const publicOutput = rawOutput !== null ? stripAnsi(rawOutput) : structuredOutput
+      const codexCommand = nativeType === 'commandExecution' && command
+        ? shellCommandDetailText(command)
+        : null
+      const detail = codexCommand
+        ? shellCommandDetail(codexCommand, publicOutput)
+        : publicOutput
           ?? command
-        ?? fileChangeDetail(item)
-        ?? runtimeToolDetail(item, nativeType)
-        ?? nativeStatus
-        ?? ''
+          ?? fileChangeDetail(item)
+          ?? runtimeToolDetail(item, nativeType)
+          ?? nativeStatus
+          ?? ''
       upsertStep({
         id: itemId,
         title,
@@ -436,6 +487,10 @@ export function buildLiveExecutionProgress(
       const itemId = key.slice('narration:'.length)
       const body = (narrationByItem.get(itemId) ?? '').trim().slice(-4_000)
       return body ? [{ key, kind: 'narration', body }] : []
+    }
+    if (key.startsWith('diagnostic:')) {
+      const diagnostic = diagnosticsById.get(key.slice('diagnostic:'.length))
+      return diagnostic ? [{ key, kind: 'diagnostic', diagnostic }] : []
     }
     if (key.startsWith('tool:')) {
       const step = stepById.get(key.slice('tool:'.length))
@@ -594,8 +649,17 @@ function runtimeActionEvidenceText(payload: Record<string, unknown>): string | n
       return fullEvidenceValue(operationProjection.canonicalResult)
     }
   }
-  return fullEvidenceValue(payload.output)
-    ?? fullEvidenceValue(payload.input)
+  const output = fullEvidenceValue(payload.output)
+  const command = runtimeActionShellCommand(payload)
+  const commandDetail = command ? shellCommandDetailText(command) : null
+  if (commandDetail) return shellCommandDetail(commandDetail, output)
+  return output ?? fullEvidenceValue(payload.input)
+}
+
+function runtimeActionShellCommand(payload: Record<string, unknown>): string | null {
+  const kind = stringField(payload, 'kind')?.toLocaleLowerCase()
+  if (!kind || !['execute', 'command', 'terminal', 'shell'].includes(kind)) return null
+  return publicShellCommand(payload)
 }
 
 export function executionEvidenceResultText(
@@ -605,9 +669,11 @@ export function executionEvidenceResultText(
   const payload = asRecord(payloadValue)
   if (eventType === 'activity.started' || eventType === 'activity.completed') {
     const item = asRecord(payload.item)
-    const output = item.aggregatedOutput ?? item.output
-    return fullEvidenceValue(output)
-      ?? fullEvidenceValue(item.command)
+    const command = stringField(item, 'command')
+    const commandDetail = command ? shellCommandDetailText(command) : null
+    const output = fullEvidenceValue(item.aggregatedOutput ?? item.output)
+    if (commandDetail) return shellCommandDetail(commandDetail, output)
+    return output
       ?? fullEvidenceValue(item.changes)
       ?? runtimeToolDetail(item, stringField(item, 'type') ?? 'activity')
       ?? stringField(item, 'status')
@@ -669,8 +735,16 @@ export function executionActivityTitle(
     .replaceAll('Runtime 活动', '系统活动')
   const shellActivity = canonical?.activityDomain === 'shell'
   const command = shellActivity ? publicShellCommand(payload) : null
+  const codexCommand = shellActivity && codexCommandExecution(payload)
 
   if (shellActivity) {
+    if (codexCommand) {
+      if (presentationHint && codexStructuredCommandPresentation(payload)) {
+        return presentationHint
+      }
+    }
+    const commandPreview = command ? shellCommandPreview(command) : null
+    if (commandPreview) return commandPreview
     if (presentationHint && !genericShellTitle(presentationHint)) {
       return presentationHint
     }
@@ -707,6 +781,322 @@ const GENERIC_SHELL_TITLES = new Set([
 
 function genericShellTitle(title: string): boolean {
   return GENERIC_SHELL_TITLES.has(title.toLocaleLowerCase())
+}
+
+const CODEX_STRUCTURED_COMMAND_ACTIONS = new Set(['read', 'listFiles', 'search'])
+
+function codexCommandExecution(payload: unknown): boolean {
+  const item = asRecord(asRecord(payload).item)
+  return stringField(item, 'type') === 'commandExecution'
+}
+
+function codexStructuredCommandPresentation(payload: unknown): boolean {
+  const item = asRecord(asRecord(payload).item)
+  const actions = item.commandActions
+  return Array.isArray(actions)
+    && actions.length > 0
+    && actions.every((value) => {
+      const action = asRecord(value)
+      const type = stringField(action, 'type')
+      return type !== null && CODEX_STRUCTURED_COMMAND_ACTIONS.has(type)
+    })
+}
+
+const SHELL_WRAPPER_EXECUTABLES = new Set(['bash', 'dash', 'fish', 'ksh', 'sh', 'zsh'])
+const REDACTED_COMMAND_VALUE = '[已隐藏]'
+const SENSITIVE_COMMAND_NAME = /(?:^|[-_])(token|password|passwd|authorization|api[-_]?key|secret|credential)(?:[-_]|$)/iu
+const ROVAI_SEND_VALUE_FLAGS = new Set([
+  '--camp-id',
+  '--file',
+  '--format',
+  '--idempotency-key',
+  '--member',
+  '--reply-to',
+  '--task-id',
+  '--to'
+])
+
+type ShellPreviewToken = {
+  raw: string
+  value: string
+  operator: boolean
+}
+
+function shellCommandPreview(command: string): string | null {
+  return normalizePublicShellCommand(command, true)
+}
+
+function shellCommandDetailText(command: string): string | null {
+  return normalizePublicShellCommand(command, false)
+}
+
+function normalizePublicShellCommand(
+  command: string,
+  inlineNodeHeredoc: boolean
+): string | null {
+  const unwrapped = unwrapShellCommand(stripAnsi(command).trim())
+  if (!unwrapped) return null
+  const presentable = inlineNodeHeredoc ? unwrapNodeHeredoc(unwrapped) : unwrapped
+  const tokens = tokenizeShellPreview(presentable)
+  if (tokens.length === 0) return null
+  const redacted = redactShellPreviewTokens(tokens)
+  const normalized = redacted
+    .map((token) => token.raw.trim())
+    .filter(Boolean)
+    .join(' ')
+    .replace(/\s+/gu, ' ')
+    .trim()
+  if (!normalized) return null
+  return redactInlineSensitiveAssignments(normalized)
+}
+
+function unwrapShellCommand(command: string): string {
+  let current = command.trim()
+  for (let depth = 0; depth < 3; depth += 1) {
+    const tokens = tokenizeShellPreview(current)
+    if (tokens.some((token) => token.operator) || tokens.length < 3) break
+    const executable = shellExecutable(tokens[0].value)
+    if (!executable || !SHELL_WRAPPER_EXECUTABLES.has(executable)) break
+    const commandIndex = tokens.findIndex((token, index) =>
+      index > 0 && (token.value === '-c' || token.value === '-lc')
+    )
+    if (commandIndex < 0 || commandIndex + 2 !== tokens.length) break
+    current = tokens[commandIndex + 1].value.trim()
+  }
+  return current
+}
+
+function unwrapNodeHeredoc(command: string): string {
+  const match = command.match(
+    /^\s*((?:[^\s]*\/)?node(?:\s+-)?)\s*<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2[ \t]*\r?\n([\s\S]*?)\r?\n\3[ \t]*$/u
+  )
+  if (!match) return command
+  const executable = match[1].trim()
+  const script = match[4].trim()
+  return script ? `${executable} ${script}` : executable
+}
+
+function tokenizeShellPreview(command: string): ShellPreviewToken[] {
+  const tokens: ShellPreviewToken[] = []
+  let raw = ''
+  let value = ''
+  let quote: 'single' | 'double' | 'backtick' | null = null
+  let escaped = false
+  const flush = (): void => {
+    if (!raw) return
+    tokens.push({ raw, value, operator: false })
+    raw = ''
+    value = ''
+  }
+  const pushOperator = (operator: string): void => {
+    flush()
+    if (operator === ';' && (tokens.length === 0 || tokens.at(-1)?.operator)) return
+    tokens.push({ raw: operator, value: operator, operator: true })
+  }
+
+  for (let index = 0; index < command.length; index += 1) {
+    const character = command[index]
+    if (escaped) {
+      raw += character
+      value += character
+      escaped = false
+      continue
+    }
+    if (character === '\\' && quote !== 'single') {
+      raw += character
+      escaped = true
+      continue
+    }
+    if (quote === 'single') {
+      raw += character
+      if (character === "'") quote = null
+      else value += character
+      continue
+    }
+    if (quote === 'double') {
+      raw += character
+      if (character === '"') quote = null
+      else value += character
+      continue
+    }
+    if (quote === 'backtick') {
+      raw += character
+      if (character === '`') quote = null
+      else value += character
+      continue
+    }
+    if (character === "'") {
+      raw += character
+      quote = 'single'
+      continue
+    }
+    if (character === '"') {
+      raw += character
+      quote = 'double'
+      continue
+    }
+    if (character === '`') {
+      raw += character
+      quote = 'backtick'
+      continue
+    }
+    if (character === '\n' || character === '\r') {
+      pushOperator(';')
+      if (character === '\r' && command[index + 1] === '\n') index += 1
+      continue
+    }
+    if (/\s/u.test(character)) {
+      flush()
+      continue
+    }
+    if (character === ';' || character === '&' || character === '|') {
+      const doubled = command[index + 1] === character && character !== ';'
+      pushOperator(doubled ? character.repeat(2) : character)
+      if (doubled) index += 1
+      continue
+    }
+    raw += character
+    value += character
+  }
+  if (escaped) value += '\\'
+  flush()
+  if (tokens.at(-1)?.operator && tokens.at(-1)?.value === ';') tokens.pop()
+  return tokens
+}
+
+function redactShellPreviewTokens(tokens: ShellPreviewToken[]): ShellPreviewToken[] {
+  const redacted = tokens.map((token) => ({ ...token }))
+  for (let index = 0; index < redacted.length; index += 1) {
+    const token = redacted[index]
+    if (token.operator) continue
+
+    const assignmentIndex = token.value.indexOf('=')
+    if (assignmentIndex > 0) {
+      const name = token.value.slice(0, assignmentIndex).replace(/^-+/u, '')
+      if (sensitiveCommandName(name)) {
+        const prefix = token.raw.slice(0, Math.max(0, token.raw.indexOf('=')))
+        redactToken(token, `${prefix}=${REDACTED_COMMAND_VALUE}`)
+        continue
+      }
+    }
+
+    const flag = token.value.match(/^(-{1,2}[^=]+)(?:=(.*))?$/u)
+    if (flag && sensitiveCommandName(flag[1].replace(/^-+/u, ''))) {
+      if (flag[2] !== undefined) {
+        redactToken(token, `${flag[1]}=${REDACTED_COMMAND_VALUE}`)
+      } else {
+        const valueIndex = nextShellValueIndex(redacted, index + 1)
+        if (valueIndex !== null) redactToken(redacted[valueIndex], REDACTED_COMMAND_VALUE)
+      }
+      continue
+    }
+
+    if (/^authorization\s*:/iu.test(token.value)) {
+      redactToken(token, `"Authorization: ${REDACTED_COMMAND_VALUE}"`)
+      continue
+    }
+    if (/^--header=authorization\s*:/iu.test(token.value)) {
+      redactToken(token, `--header="Authorization: ${REDACTED_COMMAND_VALUE}"`)
+      continue
+    }
+    if (token.value === '-H' || token.value === '--header') {
+      const valueIndex = nextShellValueIndex(redacted, index + 1)
+      if (valueIndex !== null && /^authorization\s*:/iu.test(redacted[valueIndex].value)) {
+        redactToken(redacted[valueIndex], `"Authorization: ${REDACTED_COMMAND_VALUE}"`)
+      }
+    }
+  }
+  redactRovaiSendBodies(redacted)
+  return redacted
+}
+
+function sensitiveCommandName(name: string): boolean {
+  return SENSITIVE_COMMAND_NAME.test(name.toLocaleLowerCase())
+}
+
+function nextShellValueIndex(tokens: ShellPreviewToken[], start: number): number | null {
+  for (let index = start; index < tokens.length; index += 1) {
+    if (tokens[index].operator) return null
+    return index
+  }
+  return null
+}
+
+function redactToken(token: ShellPreviewToken, replacement: string): void {
+  token.raw = replacement
+  token.value = replacement
+}
+
+function redactRovaiSendBodies(tokens: ShellPreviewToken[]): void {
+  let segmentStart = 0
+  for (let index = 0; index <= tokens.length; index += 1) {
+    if (index < tokens.length && !tokens[index].operator) continue
+    redactRovaiSendSegment(tokens, segmentStart, index)
+    segmentStart = index + 1
+  }
+}
+
+function redactRovaiSendSegment(
+  tokens: ShellPreviewToken[],
+  start: number,
+  end: number
+): void {
+  let cursor = start
+  while (cursor < end && shellAssignment(tokens[cursor].value)) cursor += 1
+  if (cursor + 1 >= end || shellExecutable(tokens[cursor].value) !== 'rovai') return
+  if (tokens[cursor + 1].value !== 'send') return
+
+  cursor += 2
+  let positionalBodyRedacted = false
+  while (cursor < end) {
+    const token = tokens[cursor]
+    if (token.value === '--body') {
+      const valueIndex = cursor + 1 < end ? cursor + 1 : null
+      if (valueIndex !== null) redactToken(tokens[valueIndex], REDACTED_COMMAND_VALUE)
+      cursor += 2
+      continue
+    }
+    if (token.value.startsWith('--body=')) {
+      redactToken(token, `--body=${REDACTED_COMMAND_VALUE}`)
+      cursor += 1
+      continue
+    }
+    const flagName = token.value.split('=', 1)[0]
+    if (ROVAI_SEND_VALUE_FLAGS.has(flagName) && !token.value.includes('=')) {
+      cursor += 2
+      continue
+    }
+    if (token.value === '--') {
+      cursor += 1
+      continue
+    }
+    if (token.value.startsWith('-')) {
+      cursor += 1
+      continue
+    }
+    if (!positionalBodyRedacted) {
+      redactToken(token, REDACTED_COMMAND_VALUE)
+      positionalBodyRedacted = true
+    }
+    cursor += 1
+  }
+}
+
+function redactInlineSensitiveAssignments(command: string): string {
+  return command.replace(
+    /\b(token|password|passwd|authorization|api[-_]?key|secret|credential)\b(\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;}&|]+)/giu,
+    (match, name: string, separator: string, value: string) => {
+      if (value.includes(REDACTED_COMMAND_VALUE)) return match
+      const quote = value.startsWith('"') ? '"' : value.startsWith("'") ? "'" : ''
+      return `${name}${separator}${quote}${REDACTED_COMMAND_VALUE}${quote}`
+    }
+  )
+}
+
+function shellCommandDetail(command: string, output: string | null): string {
+  const sections = [`命令\n${command}`]
+  if (output !== null && output.length > 0) sections.push(`输出\n${stripAnsi(output)}`)
+  return sections.join('\n\n')
 }
 
 const COMMANDS_WITH_SUBCOMMAND = new Set([

@@ -72,7 +72,7 @@ Benchmark Node 测试与 21 条文档测试。macOS arm64 App、Core、CLI 和
 `44224b257deb79b3bd18152e6d3d4ba38a538b8cfa780d1146c11c5314f4f834`。
 
 打包侧栏验收报告输出到
-`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-11/acceptance/sidebar-project-removal-v057/`。
+`<local-output>/Rovai-ai-comparison-2026-08-11/acceptance/sidebar-project-removal-v057/`。
 它在 `1440×920` Day 与 `1040×700` reduced-motion 场景验证：Project 菜单与确认文案、取消焦点
 返回、Project/Camp pin 同步清理、Quick Chat 焦点与 Restorable Location 回退、跨 App 重启隐藏、
 恢复重显、Core Navigation/Camp Snapshot 不变，以及无横向溢出。主截图同时保留菜单与确认 Dialog。

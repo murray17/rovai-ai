@@ -1,0 +1,116 @@
+{
+  "nativeSessionBootstrap": "native_session_bootstrap_v3",
+  "bootstrapFormatterVersion": 3,
+  "agentRunContextFormatterVersion": 21,
+  "contextManifestVersion": 21,
+  "contextManifestFormatterVersion": 21,
+  "contextDeliveryProfileVersion": 4,
+  "messageProjectionAudience": "agent_v1",
+  "dynamicContextSectionOrder": ["COLLABORATION_STATE?", "SELF_ACTIVE_TASKS?", "SHARED_CONVERSATION?", "RUN_FACTS", "A2A_GUIDANCE?", "CURRENT_INPUT"],
+  "a2aGuidance": {
+    "eligibility": {"invocationKind": "a2a", "deliveryKind": "public_a2a", "dispatchDisposition": "dispatch", "edgeKinds": ["forward", "return"]},
+    "evidenceSchemaVersion": 1,
+    "omittedEvidence": {"schemaVersion": 1, "included": false},
+    "includedEvidenceFields": ["schemaVersion", "included", "variant", "payloadDigest"]
+  },
+  "collaborationState": {"schemaVersion": 2, "peerFields": ["agentId", "name", "teamRole", "professionalResponsibilities"]},
+  "selfActiveTaskProjection": {
+    "section": "SELF_ACTIVE_TASKS",
+    "fields": ["taskId", "title", "status"],
+    "maxTasks": 8,
+    "ordering": "updatedAt DESC, taskId DESC",
+    "emptyCandidateProjection": {"tasks": []},
+    "allCandidatesBudgetOmitted": "section_omitted"
+  },
+  "selfActiveTaskEvidence": {
+    "fields": ["included", "selectedTaskRefs", "omittedCount?", "projectionDigest?"]
+  },
+  "recentPublicCandidateSelection": {
+    "boundary": "previousAcceptedSequence < sequence <= currentBoundarySequence",
+    "preLimitExclusions": ["tombstone", "currentTrigger", "authorType:agent+currentAgentId"],
+    "limit": 15,
+    "selectionOrdering": "sequence DESC",
+    "projectionOrdering": "sequence ASC",
+    "selfAuthoredRecentMessages": "ineligible",
+    "selfAuthoredWholeHistoryOmission": "excluded",
+    "referenceClosure": "unchanged"
+  },
+  "currentInputSourceShapes": {
+    "user": {"type": "user"},
+    "memberCall": {"type": "member_call", "senderAgentId": "source-agent", "senderName": "Source Agent"},
+    "gatherCompletion": {
+      "schemaVersion": 3,
+      "messageProjectionAudience": "agent_v1",
+      "source": {"type": "gather_completed"},
+      "gatherId": "gather-id",
+      "commandId": "command-id",
+      "requestMessageId": "message-id",
+      "request": {
+        "messageId": "message-id",
+        "body": "Original Gather request",
+        "contentDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "projectedBodyDigest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "items": []
+    }
+  },
+  "directUserCurrentInputOptionalFields": {
+    "skills": [{"name": "review-pr", "path": "/project/.codex/skills/review-pr/SKILL.md"}],
+    "attachments": ["/Users/test/.rovai/instances/v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/runtime-files/camps/rvcamp_01h47kvsy5fk1shh6w1g60eecf/attachments/00000000-0000-4000-8000-000000000001/payload/spec.pdf"]
+  },
+  "skillSelectionSnapshot": {
+    "schemaVersion": 1,
+    "empty": {"schemaVersion": 1, "entries": []},
+    "digestFormat": "sha256_hex_unprefixed"
+  },
+  "currentInputSkillResolutionEvidence": {
+    "schemaVersion": 1,
+    "sourceDigests": ["selectionSnapshotDigest", "skillExposureDigest"],
+    "outcomes": ["included", "omitted"]
+  },
+  "gatherCompletionManifestEvidence": ["invocationKind", "gatherId", "completionDeliveryId", "requestMessageId", "requestContentDigest", "messageProjectionAudience", "requestProjectedBodyDigest", "requestBodyByteLength", "completionInputSchemaVersion", "completionInputDigest", "completionInputByteLength", "orderedItemRefs", "gatherSnapshotDigest"],
+  "sharedConversationTopLevelFields": ["campId"],
+  "sharedConversationExample": {"campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf"},
+  "modelCampMessageRequiredFields": ["messageId", "sequence", "senderType", "senderId", "body"],
+  "modelCampMessageOptionalFields": ["replyToMessageId", "attachments", "mentionsCurrentUser:true", "nextBodyOffset"],
+  "modelCampMessageRemovedFields": ["bodyLength", "bodyTruncated", "continuation", "mentionsCurrentUser:false"],
+  "historicalAttachmentFields": ["name", "mediaType", "path"],
+  "truncatedBodyContinuation": {
+    "field": "nextBodyOffset",
+    "unit": "unicode_scalar",
+    "campReadItemMapping": ["SHARED_CONVERSATION.campId", "message.messageId", "message.nextBodyOffset"]
+  },
+  "omittedMessagesFields": ["count", "sequenceStart", "sequenceEnd"],
+  "omittedMessagesRemovedFields": ["navigationHint"],
+  "contextManifestSharedMessageEvidence": ["sourceIds", "contentDigest", "mentionsCurrentUser", "projectedBodyDigest", "attachmentIdPathDigest", "selection", "truncation", "exactDynamicContextBytesDigest"],
+  "contextManifestOmissionEvidence": {
+    "wholeHistory": {"kind": "public_history", "reason": "max_public_messages", "count": 985, "sequenceStart": 16, "sequenceEnd": 1000},
+    "boundedCandidate": {"kind": "public_history", "messageIds": ["message-123"], "reason": "history_budget"}
+  },
+  "runFacts": {
+    "schemaVersion": 2,
+    "requiredFields": ["campResources"],
+    "optionalFields": ["taskContext", "sessionContinuity", "externalEffect", "gather", "delegation"],
+    "campResources": {
+      "campId": "rvcamp_01h47kvsy5fk1shh6w1g60eecf",
+      "publishedAttachmentRoot": "/Users/test/.rovai/instances/v1-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef/runtime-files/camps/rvcamp_01h47kvsy5fk1shh6w1g60eecf/attachments",
+      "access": "enumerate_and_read",
+      "scope": "current_camp",
+      "mutability": "read_only"
+    },
+    "emptyOptionalProjection": "camp_resources_only"
+  },
+  "campAttachmentViewReceipt": {
+    "schemaVersion": 2,
+    "requiredFields": ["campId", "attachmentRootRelativePath", "catalogRevision", "catalogEntryCount", "semanticCatalogDigest", "referencedEntries", "referencedEntriesDigest"],
+    "semanticEntryRequiredFields": ["attachmentId", "kind", "byteSize", "fileCount", "directoryCount", "nodeCount", "contentDigest", "rootRelativePayloadPath"],
+    "forbiddenPhysicalFields": ["publishedAttachmentRoot", "rootIdentityDigest", "minimumReadyGeneration", "entryIdentityDigest", "publishedGeneration", "publicationOperationId"]
+  },
+  "runtimeAttachmentAuthReceipt": {
+    "schemaVersion": 1,
+    "requiredFields": ["campId", "publishedAttachmentRoot", "rootIdentityDigest", "dispatchGeneration", "catalogDigestAtDispatch", "visibilityMode", "compatibilityGeneration", "manifestViewReceiptDigest"]
+  },
+  "contextManifestRunFactEvidence": ["typedFactReferences", "typedTaskReference", "exactCompactJsonBytes", "digest"],
+  "bootstrapRedeliveryEnvelopeVersion": 2,
+  "bootstrapRedeliveryFormatterVersion": 2
+}

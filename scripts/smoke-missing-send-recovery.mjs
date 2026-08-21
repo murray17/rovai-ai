@@ -7,6 +7,10 @@ import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import { validateAcpRecoveryProtocolFixture } from './lib/missing-send-recovery-protocol.mjs'
 import { querySqliteRows } from './lib/sqlite.mjs'
+import {
+  coreDataDirectoryArguments,
+  removeEphemeralRuntimeCampFilesRoot
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const coreExecutable = resolve(
@@ -198,6 +202,7 @@ for (const specification of specifications) {
   } finally {
     if (core) await core.stop()
     if (!failed && process.env.ROVAI_KEEP_MISSING_SEND_RECOVERY_FIXTURE !== '1') {
+      await removeEphemeralRuntimeCampFilesRoot(dataDir)
       await rm(fixtureRoot, { recursive: true, force: true })
     } else {
       process.stderr.write(`[missing-send-recovery] retained fixture: ${fixtureRoot}\n`)
@@ -537,7 +542,7 @@ function summarizeFacts(facts) {
 
 function startCore(dataDirectory) {
   const child = spawn(coreExecutable, [
-    '--data-dir', dataDirectory,
+    ...coreDataDirectoryArguments(dataDirectory),
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: root,

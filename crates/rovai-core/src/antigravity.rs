@@ -240,6 +240,10 @@ impl AntigravityAppRuntimeAdapter {
         let workspace_roots = canonical_antigravity_workspace_roots(
             requested_execution_root,
             request.attachment_access_root.as_deref(),
+            request
+                .builtin_tools
+                .as_ref()
+                .map(BuiltinToolProcessConfig::run_tmp),
         )
         .map_err(|error| {
             let failure = antigravity_public_failure(
@@ -802,6 +806,9 @@ fn antigravity_public_failure(
     if let Some(root) = request.attachment_access_root.as_deref() {
         sensitive_paths.push((root, "<attachment-root>"));
     }
+    if let Some(config) = request.builtin_tools.as_ref() {
+        sensitive_paths.push((config.run_tmp(), "<run-tmp>"));
+    }
     public_runtime_failure_from_output(
         rovai_core::agent_profile::AdapterKind::AntigravityApp,
         origin,
@@ -837,6 +844,7 @@ fn antigravity_failure_error(
 fn canonical_antigravity_workspace_roots(
     execution_root: &Path,
     attachment_access_root: Option<&Path>,
+    run_tmp: Option<&Path>,
 ) -> Result<Vec<PathBuf>> {
     if !execution_root.is_dir() {
         anyhow::bail!(
@@ -868,6 +876,24 @@ fn canonical_antigravity_workspace_roots(
         let attachment_access_root = antigravity_runtime_visible_path(attachment_access_root);
         if !roots.contains(&attachment_access_root) {
             roots.push(attachment_access_root);
+        }
+    }
+    if let Some(run_tmp) = run_tmp {
+        if !run_tmp.is_dir() {
+            anyhow::bail!(
+                "Antigravity Built-in Tool Run tmp is unavailable: {}",
+                run_tmp.display()
+            );
+        }
+        let run_tmp = run_tmp.canonicalize().with_context(|| {
+            format!(
+                "failed to canonicalize Antigravity Built-in Tool Run tmp {}",
+                run_tmp.display()
+            )
+        })?;
+        let run_tmp = antigravity_runtime_visible_path(run_tmp);
+        if !roots.contains(&run_tmp) {
+            roots.push(run_tmp);
         }
     }
     Ok(roots)
@@ -1466,27 +1492,32 @@ mod tests {
     }
 
     #[test]
-    fn workspace_roots_include_canonical_execution_and_attachment_directories() {
+    fn workspace_roots_include_canonical_execution_attachment_and_run_tmp_directories() {
         let root = std::env::temp_dir().join(format!(
             "rovai-antigravity-workspace-roots-test-{}",
             uuid::Uuid::new_v4()
         ));
         let workspace = root.join("workspace");
         let attachments = root.join("attachments");
+        let run_tmp = root.join("run-tmp");
         std::fs::create_dir_all(&workspace).expect("workspace should be created");
         std::fs::create_dir_all(&attachments).expect("attachments should be created");
+        std::fs::create_dir_all(&run_tmp).expect("Run tmp should be created");
 
-        let roots = canonical_antigravity_workspace_roots(&workspace, Some(&attachments))
-            .expect("both visible roots should resolve");
+        let roots =
+            canonical_antigravity_workspace_roots(&workspace, Some(&attachments), Some(&run_tmp))
+                .expect("all visible roots should resolve");
         assert_eq!(
             roots,
             vec![
                 antigravity_runtime_visible_path(workspace.canonicalize().unwrap()),
-                antigravity_runtime_visible_path(attachments.canonicalize().unwrap())
+                antigravity_runtime_visible_path(attachments.canonicalize().unwrap()),
+                antigravity_runtime_visible_path(run_tmp.canonicalize().unwrap())
             ]
         );
-        let deduplicated = canonical_antigravity_workspace_roots(&workspace, Some(&workspace))
-            .expect("identical roots should resolve");
+        let deduplicated =
+            canonical_antigravity_workspace_roots(&workspace, Some(&workspace), Some(&workspace))
+                .expect("identical roots should resolve");
         assert_eq!(
             deduplicated,
             vec![antigravity_runtime_visible_path(

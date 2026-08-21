@@ -2,9 +2,9 @@
   "nativeSessionBootstrap": "native_session_bootstrap_v3",
   "bootstrapFormatterVersion": 3,
   "agentRunContextFormatterVersion": 20,
-  "contextManifestVersion": 18,
+  "contextManifestVersion": 19,
   "contextManifestFormatterVersion": 20,
-  "contextDeliveryProfileVersion": 3,
+  "contextDeliveryProfileVersion": 4,
   "messageProjectionAudience": "agent_v1",
   "dynamicContextSectionOrder": ["COLLABORATION_STATE?", "SELF_ACTIVE_TASKS?", "SHARED_CONVERSATION?", "RUN_FACTS?", "A2A_GUIDANCE?", "CURRENT_INPUT"],
   "a2aGuidance": {
@@ -24,6 +24,16 @@
   },
   "selfActiveTaskEvidence": {
     "fields": ["included", "selectedTaskRefs", "omittedCount?", "projectionDigest?"]
+  },
+  "recentPublicCandidateSelection": {
+    "boundary": "previousAcceptedSequence < sequence <= currentBoundarySequence",
+    "preLimitExclusions": ["tombstone", "currentTrigger", "authorType:agent+currentAgentId"],
+    "limit": 15,
+    "selectionOrdering": "sequence DESC",
+    "projectionOrdering": "sequence ASC",
+    "selfAuthoredRecentMessages": "ineligible",
+    "selfAuthoredWholeHistoryOmission": "excluded",
+    "referenceClosure": "unchanged"
   },
   "currentInputSourceShapes": {
     "user": {"type": "user"},

@@ -1,12 +1,12 @@
 ---
 document_type: version-overview
 version: v1.15
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
-model_context_change: false
-last_updated: 2026-08-21
+model_context_change: true
+last_updated: 2026-08-20
 ---
 
 # Rovai-ai v1.15：Windows x64 产品实现与资格闭环
@@ -14,14 +14,36 @@ last_updated: 2026-08-21
 > 当前状态：v1.05 形成的 Windows 长期决定、Contract、Architecture 与 Interaction Delta 继续有效；本版在
 > 已发布的 v1.14 基线上实施这些约束。平台 seam、native frame、Runtime 平台准入、native executable
 > resolver、原子 Job 启动、私有 Core/Desktop data root、handle-relative Attachment、managed Skill Library、
-> crash-recoverable Skill Projection、共享异步 Named Pipe client、Windows Renderer delta、per-user NSIS、PE verifier
-> 与隔离安装验收已进入代码，并在 Windows 10 22H2 x64 本机通过。固定 Windows packaging workflow 已建立但尚无
-> 远端运行证据。2026-08-21 已在同一 Windows 10 22H2 x64 本机完成十个 Runtime 的开发态真实矩阵、
-> CodeBuddy 官方 API-key ACP/Flash 兼容修正和 Claude packaged planned-shutdown 验收；正式 Release 仍按设计阻断
-> 全部 `not_qualified` Runtime。Windows 11 client OS、不可变逐 Runtime 资格、正式签名与 SmartScreen 尚未完成，
-> 因此不得宣称 Windows 已发布。
+> crash-recoverable Skill Projection 与共享异步 Named Pipe client 已进入代码。固定 Windows CI 实跑、Windows
+> client OS 验收、逐 Runtime 资格、NSIS 与签名尚未完成，因此不得宣称 Windows 已发布。
+>
+> 模型上下文补充：[排除自身发布 recent public message 的 revision 1](model-context-change-self-authored-recent-messages.md)
+> 已由开发者二次确认并实现为 Context Delivery Profile v4、ContextManifest Evidence v19、schema 53 与
+> Migration 98；定向 Rust/Contract/文档与 workspace 回归结果记录在变更说明末尾。
+>
+> [Camp Published Attachment Runtime View revision 2](model-context-change-runtime-attachment-session-projection.md)
+> 已由开发者二次确认并实施：Authority Attachment 保持在私有 data directory，Draft 保持 Core-private，
+> Published Attachment 通过实例隔离、Camp-shared View 供当前 Camp Runtime 枚举和只读访问。新输入使用
+> Formatter 21、Manifest 20、Run Facts v2、schema 54 与 Migration 99；Run/Agent Session projection 方案均撤回。
+>
+> 执行台位置的本机安装级全局偏好已按 [V1.15-D05](decisions.md#v1-15-d05)与
+> [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)实施：General Preferences
+> schema 3、Main/IPC/Renderer 控制链路、旧偏好默认、pending/失败重试与独立 Inspector visibility 均已进入
+> 生产代码；进入含 running Run 的 Camp 会自动展开最新运行并在右侧激活首个“执行”Tab，不抢键盘焦点；
+> Renderer 自动测试和 packaged macOS App 验收脚本覆盖跨 Camp、一级页面、原子写失败与完整重启恢复。
+>
+> [Runtime attachment semantic receipt revision 1](model-context-change-runtime-attachment-semantic-receipt.md)
+> 已由开发者二次确认并实施：Formatter 21 模型 bytes 不变，Manifest 21/View Receipt v2 只冻结稳定 attachment
+> semantics；物理 root/Entry identity、operation 与 generation 继续进入本机完整性和 Runtime Auth Receipt。
+> publication copy phase 同时移出全局 Database mutex；generation fence 与运行期禁止带附件发布保持不变。
+> 后续并发加固已实现为 Migration 101/schema 56：Scheduler 在 Claim 前取得并终生持有 Camp attachment read
+> admission，Context/Runtime 共用一次无 DB 锁的完整物理 authorization，不再嵌套获取 read gate 或重复扫描；
+> publication completion 只物理校验本次新增 Entry 与完整 catalog receipt。同一 Camp 只允许一个非终态 publish
+> operation，gate 前重验 Draft，遗留重复 staging 可安全收敛。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
+>
+> 后续版本：[v1.16 Camp 纯附件消息](../v1.16/README.md)。
 
 ## 版本目标
 
@@ -41,12 +63,21 @@ Platform。历史 v1.05 只保留当时设计过程和未实施快照，不作�
 - Windows Runtime search、native EXE/validated Node shim、file identity 与平台资格矩阵保持单一 Rust 权威；
 - `%LOCALAPPDATA%` Core/User Data/Session Data/Logs/CrashDumps 使用 local NTFS admission 和创建时 protected DACL；
 - Attachment 使用 retained handle 与 handle-relative traversal，拒绝 reparse、identity drift 与非准入存储；
+- 新增 journaled Camp Published Attachment View、统一 Runtime path resolver、Camp generation fence、稳定 semantic
+  catalog/receipt、Migration 99/100 clean break/backfill 与 Migration 101 publication serialization，同时保持
+  Authority、历史 Manifest/Blob/Evidence 和 `contentDigest` 不变；附件 staging copy/digest/fsync 不持有全局
+  Database mutex；每次 dispatch 的完整 View 校验采用短 DB snapshot、无锁 filesystem scan、短 DB CAS，Context
+  与 Runtime launch 复用同一 verified authorization，publication completion 不重哈希历史 Entry；
 - Skill Library 使用 Windows logical mode；Skill Projection 使用同父目录 copy、schema 2 journal、operationId、
   NTFS entry identity、持久 Run registration、bounded sharing retry 和 crash-window recovery；
 - 完成 secured Named Pipe Built-in Transport v17、Windows Renderer Interaction Delta、NSIS、PE/manifest verifier、
   Authenticode 与真实 Windows 10/11 acceptance；
 - 执行台在底部与 Inspector 间移动同一 DOM，统一四轨 Tool 行、九类 SVG、精简队员入口和
   展开后完整 Tool 结果的内部滚动/键盘语义；
+- 执行台最后一次成功的显式位置选择成为 Main-owned 本机安装级偏好，跨 Camp、页面切换和应用重启，
+  旧偏好缺失字段时只补默认底部，并与 Inspector 显隐独立；
+- 进入含 running Run 的 Camp 时从当前 snapshot 自动展开最新运行；右侧承载按“执行 / 任务 / 队员”排列，
+  已挂载 workspace 的后台事件不触发自动切换；
 - 十个 Adapter 逐一取得 digest-bound Windows evidence；未完成者保持 `not_qualified`。
 
 ## 数据迁移
@@ -67,6 +98,38 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 或已有 Skill exposure。schema 52 无 downgrade reader；不满足精确 v1.13/schema 51 来源条件的 store 继续按
 既有 admission/quarantine 策略 fail closed。
 
+Migration 98 只接受已完整应用 Migration 97 的 `v1.15 / projection schema 52`。它将
+`context_manifest.context_delivery_profile_version` 从 3 clean break 到 4，关闭非终态 Run/Turn/Delivery/
+Gather，移除旧 frozen context、Manifest/Input/Bootstrap/compaction/resume evidence，清除 Native
+Session/Binding 与 accepted boundary，并推进到 `v1.15 / projection schema 53`。CampMessage、Camp、Task、
+Memory、Agent 与 Runtime/Library 业务事实保留；没有 Profile v3/Manifest v18 reader、dual write 或 downgrade。
+
+Migration 99 只接受已完整应用 Migration 98 的 `v1.15 / projection schema 53`，且在 SQLite mutation 前要求
+当前实例 Runtime Files Root 已通过 admission、为空并完成 Authority/quota preflight。它按 accepted input、
+delivery 与 action evidence 诚实终结所有旧非终态 Formatter 20 执行，fence 当前 Session/Binding，但逐字节保留
+历史 Manifest 19、模型输入 Blob、ACK、Execution Evidence、摘要和 Authority `storage_path/contentDigest`。
+随后从 `message_attachment` 回填 Camp Published Attachment View，绝不投影 `prepared_attachment`，并推进到
+`v1.15 / projection schema 54`。新写入只允许 Formatter 21 / Manifest 20 / Run Facts v2 pairing。
+
+执行台位置不产生 Core 数据库 Migration。Main-owned General Preferences 自身推进到 schema 3；旧 v1/v2
+文件在读取时保留可识别字段并补 `executionConsolePlacement=bottom`，不从历史 Camp 或 Renderer 瞬时状态
+回填，也不提供 downgrade reader。
+
+Migration 100 只接受已完整应用 Migration 99 的 `v1.15 / projection schema 54`。它按同一 delivery/action
+evidence 诚实终结旧非终态 Manifest 20/Receipt v1 Run、Turn、Delivery、Gather 与可恢复 execution，fence 当前
+Binding/Session，但逐字节保留历史 Manifest/模型输入 Blob/Runtime Auth Receipt/ACK/摘要/执行证据。现有空 View
+backfill 为 semantic catalog revision 0，非空 View backfill 为 revision 1；新写入只允许 Formatter 21 /
+Manifest 21 / Run Facts v2 / Receipt v2，并推进到 `v1.15 / projection schema 55`。
+
+Migration 101 只接受已完整应用 Migration 100 的 `v1.15 / projection schema 55`。它安装同一 Camp
+`publish` operation 的非终态查询索引与 insert guard，推进到 `v1.15 / projection schema 56`。它不改写
+ContextManifest、receipt、Authority、View Entry 或既有 operation；遗留重复 operation 由 startup recovery
+按已提交消息与 Entry ownership 收敛。Scheduler 同时统一为先取得 Camp attachment read admission、再 Claim
+AgentRun，并把唯一 guard 持有到 Run 生命周期终止。Context freeze、Runtime authorization、Host acquire、resume
+与模型输入投递复用该 admission；一次 dispatch 的完整物理校验在全局 Database mutex 外执行并由前后短锁 CAS
+保护，Context 与 Runtime launch 不重复校验。常规 publication completion 只校验本 operation 新增 Entry、完整
+顶层 ID 集合和 catalog receipt；startup recovery、明确诊断、controlled rebuild 与每次 dispatch 保留全量校验。
+
 ## 验收边界
 
 - macOS workspace、Core tests、Desktop 与既有文档门禁保持通过；
@@ -77,6 +140,9 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
   由真实 client OS 验收；Windows Server CI 不替代这些证据；
 - 每个 `qualified` Runtime 独立覆盖 discovery、identity、authentication、first run、continuation、Built-in Tool、
   approval、cancel、terminal、process cleanup 与 planned shutdown；
+- 执行台位置覆盖旧偏好默认、跨 Camp/一级页面/重启、原子写失败不移动、Inspector hidden 组合和首个
+  Camp meaningful paint 无 bottom→inspector 闪跳；进入含 running Run 的 Camp 自动定位最新运行且不抢焦点，
+  右侧“执行”位于首个 Tab；
 - Electron EXE、`rovai-core.exe`、`rovai.exe` 和 installer 分别验证架构、manifest、hash、签名与时间戳后才可发布。
 
 ## 明确不做
@@ -92,27 +158,38 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.14 冻结为 historical；本概览、实施计划和版本索引建立唯一 current v1.15。 |
-| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果、稳定执行台 DOM 与旧预览/复制取舍的局部替代；Windows 平台决定继续继承 v1.05。 |
-| Contracts | 已更新 | [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)把 Migration 97 目标推进到 Data Contract v1.15/schema 52；[Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)继承 AgentRun 直接停止，并定义四轨指令行、九类 SVG、精简队员入口与完整 Tool 结果；[Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)继承 activation-aware enter，并完整投影 non-terminal Evidence。 |
-| Architecture | 已更新 | [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录 Migration 97 的 v1.15 目标；[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)继续组合其他平台边界；[Camp Open Read Path](../../architecture/camp-open-read-path.md)记录 activation-aware enter、meaningful Pending 冷启动恢复与完整 non-terminal Evidence。 |
-| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止与完整运行 chronology；底部/Inspector 移动同一 Drawer DOM，Tool 行固定对齐，队员入口去除可见状态文案，完整结果在有最大高度的 region 中内部滚动。 |
+| Decisions | 已更新 | [V1.15-D01](decisions.md#v1-15-d01)记录运行中 AgentRun 优先完整 Evidence chronology；[V1.15-D02](decisions.md#v1-15-d02)记录用户显式展开后完整 Tool 结果与稳定执行台 DOM；[V1.15-D03](decisions.md#v1-15-d03)记录自身公屏输出不再作为同一 Agent 的 recent 未读候选；[V1.15-D04](decisions.md#v1-15-d04)记录 Camp-shared Published Attachment View；[V1.15-D05](decisions.md#v1-15-d05)记录 Main-owned 本机安装级执行台位置偏好；[V1.15-D06](decisions.md#v1-15-d06)分离冻结 attachment semantics 与可重建物理 View，并保留 generation fence。 |
+| Contracts | 已更新 | [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)成为执行台当前入口；[Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)、[Camp Attachment v2](../../contracts/camp-attachment-v2.md)、[ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)、[Run Facts v2](../../contracts/run-facts-v2.md)、[Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)、[Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)、[Camp Permanent Deletion v2](../../contracts/camp-permanent-deletion-v2.md)与[Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)成为当前入口。 |
+| Architecture | 已更新 | [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)拥有 Authority/View、publication gate、generation、恢复与生命周期；基础不变量、Runtime/Recovery 与 Windows Platform 路由同一边界；[产品/执行表面不变量](../../architecture/foundational-invariants.md#product-execution-surface)拥有 Main-owned 全局 placement、旧偏好默认及独立 Inspector visibility。 |
+| UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止、完整 chronology、唯一 Drawer DOM 与完整 Tool 结果，并增加跨 Camp/重启的位置偏好、进入 running Camp 的精确恢复、首个“执行”Tab、写失败及 Inspector hidden 组合。 |
 | Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
-| Runtime compatibility | 已更新 | 记录 2026-08-21 Windows 10 本机十 Runtime 开发态矩阵、版本、Flash 配置、CodeBuddy ACP 差异与 Claude planned-shutdown；这些结果不满足 Windows 11 和 immutable digest-bound 发布证据，所有 Windows 行继续保持 `not_qualified`。 |
-| Documentation routing | 已更新 | 版本指针、索引和本版 References 路由到 v1.15；Windows packaging guide 记录已实现命令、unsigned CI 与发布边界。 |
+| Runtime compatibility | 已更新 | 所有 Adapter 当前 attachment visibility 均记录为 `generation_fenced_v1`；没有 TRAE live-append 正向 Probe，Windows 行继续保持 `not_qualified`。 |
+| Documentation routing | 已更新 | 文档导航、Architecture/Contract 索引、决定导航、UI 验收、版本概览和实施计划同时路由到 Run Process Detail Surface v15、Camp Published Attachment View v2、Manifest 21 与 Run Facts v2 当前入口。 |
 | Root README | 确认无需更新 | Windows 尚未完成真实验收或发布，根 README 不提前声明常青 Windows 支持。 |
 
 ## References
 
+- [模型上下文变更 revision 1：排除自身发布的 recent public message](model-context-change-self-authored-recent-messages.md)
+- [模型上下文变更 revision 2：Camp Published Attachment Runtime View](model-context-change-runtime-attachment-session-projection.md)
+- [模型上下文变更 revision 1：Runtime attachment semantic receipt](model-context-change-runtime-attachment-semantic-receipt.md)
 - [实施与验收计划](implementation-plan.md)
 - [v1.15 决策记录](decisions.md)
+- [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
+- [Camp Published Attachment View v2](../../contracts/camp-published-attachment-view-v2.md)
+- [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
+- [Context Delivery Profile v4](../../contracts/context-delivery-profile-v4.md)
+- [ContextManifest Evidence v21](../../contracts/context-manifest-evidence-v21.md)
+- [Run Facts v2](../../contracts/run-facts-v2.md)
 - [v1.05 Windows 决策记录](../v1.05/decisions.md#历史-adr-索引)
 - [Windows Desktop Platform](../../architecture/windows-desktop-platform.md)
 - [Windows Skill Projection v1](../../contracts/windows-skill-projection-v1.md)
-- [Windows Private Storage v1](../../contracts/windows-private-storage-v1.md)
+- [Windows Private Storage v2](../../contracts/windows-private-storage-v2.md)
 - [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
 - [Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)
+- [Runtime Launch and Verification v11](../../contracts/runtime-launch-and-verification-v11.md)
+- [Accepted Input Recovery v3](../../contracts/accepted-input-recovery-v3.md)
 - [Built-in Tool Transport v17](../../contracts/builtin-tool-transport-v17.md)
-- [Run Process Detail Surface v13](../../contracts/run-process-detail-surface-v13.md)
+- [Run Process Detail Surface v15](../../contracts/run-process-detail-surface-v15.md)
 - [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)
 - [Windows Interaction Delta](../../ui/windows-interaction-delta.md)
 - [Windows packaging guide](../../development/packaging-windows.md)

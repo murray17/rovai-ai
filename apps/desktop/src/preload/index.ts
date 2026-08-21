@@ -3,6 +3,7 @@ import type {
   AppearanceSnapshot,
   CoreEvent,
   CoreMethod,
+  ExecutionConsolePlacement,
   RestorableLocation,
   SettingsSection,
   StartupLocationMode,
@@ -20,6 +21,16 @@ const api: RovaiApi = {
     const handler = (_event: Electron.IpcRendererEvent, value: CoreEvent): void => listener(value)
     ipcRenderer.on('rovai:event', handler)
     return () => ipcRenderer.removeListener('rovai:event', handler)
+  },
+  userAutomation: {
+    onOpenCamp(listener) {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        request: { campId: string }
+      ): void => listener(request)
+      ipcRenderer.on('rovai:user-automation-open-camp', handler)
+      return () => ipcRenderer.removeListener('rovai:user-automation-open-camp', handler)
+    }
   },
   appearance: {
     get() {
@@ -54,6 +65,9 @@ const api: RovaiApi = {
     },
     setLastSettingsSection(section: SettingsSection) {
       return ipcRenderer.invoke('rovai:general-preferences-set-section', section)
+    },
+    setExecutionConsolePlacement(placement: ExecutionConsolePlacement) {
+      return ipcRenderer.invoke('rovai:general-preferences-set-execution-placement', placement)
     },
     setNewConversationDefaults(defaults) {
       return ipcRenderer.invoke('rovai:general-preferences-set-new-conversation-defaults', defaults)
@@ -177,6 +191,14 @@ const api: RovaiApi = {
     },
     preview(attachmentId) {
       return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
+    }
+  },
+  attachments: {
+    open(campId, attachmentId) {
+      return ipcRenderer.invoke('rovai:attachment-open', campId, attachmentId)
+    },
+    reveal(campId, attachmentId) {
+      return ipcRenderer.invoke('rovai:attachment-reveal', campId, attachmentId)
     }
   },
   clipboard: {

@@ -75,7 +75,7 @@ last_updated: 2026-08-17
 
 ### 日常安装与 clean break
 
-- 旧 App 可恢复备份：`/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.98-pre-v0.99-20260817-180707`；
+- 旧 App 可恢复备份：`<local-backup>/Rovai AI.app.backup-v0.98-pre-v0.99-20260817-180707`；
 - 新 App 安装到 `/Applications/Rovai AI.app`，安装后 Main、Core、CLI 从该路径启动，三项 hash 与打包产物一致；
 - 安装验收与另一个已授权的数据恢复任务短暂重叠；最终由恢复任务独占 SQLite restore/WAL 收口后再做本版验收，
   未用开发 fixture 或空库覆盖恢复结果；首次 stale-WAL 尝试保留在
@@ -103,7 +103,7 @@ last_updated: 2026-08-17
   `rovai-core` = `954592b42599668a4666581f83ccc6b3081bdf9c085775b303ec9580670d9f8a`，
   `rovai` = `368bcc197e0bc7e89d315c8ce4f6bbab474a3e4fefcee1fd29fd73069d21c9f4`。
 - 旧安装版已可恢复移动到
-  `/Users/murray.xue/Downloads/Rovai AI.app.backup-v0.99-pre-private-usage-20260817-212844`；新产物安装到
+  `<local-backup>/Rovai AI.app.backup-v0.99-pre-private-usage-20260817-212844`；新产物安装到
   `/Applications/Rovai AI.app` 后三项 hash 与打包产物一致，Main、Core、Renderer 均从安装路径启动；
   日常数据库保持 contract v0.99、projection schema 47、Migration 92，`integrity_check=ok`、外键检查无行。
 

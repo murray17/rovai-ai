@@ -4,7 +4,7 @@ authority: camp-conversation-drop-zone
 status: accepted
 design_direction: porcelain-day-steel-night
 implementation_status: complete
-last_updated: 2026-08-18
+last_updated: 2026-08-20
 ---
 
 # Camp 会话区文件与文件夹拖放
@@ -16,14 +16,14 @@ Approval/Runtime Recovery Dock 和 Composer。左侧导航、右侧 Inspector、
 Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不因本功能改变。
 
 拖放只修改当前 Core-owned Draft，不发送消息、不移动宿主文件管理器中的原项目，也不改变光标、Mention/Skill
-候选或 Inspector 状态。Execution Drawer 或 Popover 打开时底层接收面关闭。
+候选或 Inspector 状态。可见 Execution Drawer 保持可读且不关闭当前消息的接收面；Popover 打开时底层接收面关闭。
 
 ## Drag feedback
 
 - 只有 `DataTransfer.types` 含 `Files` 时进入接收态。统一接收层从消息时间线顶部连续延伸到 Composer
   底部，主会话列内收 10px（窄屏 7px）显示不中断的 1.5px Steel 虚线框和低透明 Steel wash；Inspector
   与导航保持原色。
-- 原时间线、Agent 执行台与 Composer 输入内容保持可读，不 blur、不重排、不隐藏。居中浮层使用
+- 原时间线、Agent 执行台、Execution Drawer 与 Composer 输入内容保持可读，不 blur、不重排、不隐藏。居中浮层使用
   308×92px 紧凑卡，主文案固定为“松手添加到当前消息”。
 - 单个目录能由 Chromium entry 明确识别时，次文案为“文件夹将保存为只读快照，原文件不会移动”；
   其他 payload 使用“支持文件与文件夹 · 将安全复制到附件队列”，不猜测。
@@ -52,5 +52,5 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
 
 - [方向原型](../../prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
 - [设计说明](../../prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
-- [Camp Attachment v1](../../contracts/camp-attachment-v1.md)
+- [Camp Attachment v5](../../contracts/camp-attachment-v5.md)
 - [Camp 资源不变量](../../architecture/foundational-invariants.md#camp-resources)

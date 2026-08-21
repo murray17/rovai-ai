@@ -16,6 +16,8 @@ use crate::agent_identity::{
     FIRST_USER_AGENT_ORDINAL, LEGACY_BUILT_IN_AGENT_ID_MAPPINGS, LUOKE_AGENT_ID, MIANZHI_AGENT_ID,
     MUWA_AGENT_ID, QILU_AGENT_ID, format_agent_id,
 };
+#[cfg(test)]
+use crate::agent_runtime_adapter::SkillDeliveryGroupKey;
 use crate::camp_id::CampId;
 use crate::command::canonical_json_digest;
 use crate::context_index::{camp_message_content_digest, extract_context_references};
@@ -44,10 +46,24 @@ pub struct V2RecoverySummary {
 pub struct Database {
     connection: Connection,
     path: PathBuf,
+    runtime_camp_files_root: PathBuf,
+    runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.15";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 52;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.17";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 58;
+const V103_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.17";
+const V103_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 57;
+const V102_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
+const V102_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 56;
+const V101_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
+const V101_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 55;
+const V100_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
+const V100_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 54;
+const V099_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
+const V099_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 53;
+const V098_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
+const V098_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 52;
 const V097_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.13";
 const V097_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 51;
 const V096_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.10";
@@ -132,6 +148,12 @@ struct CurrentMigrationState {
     v95: bool,
     v96: bool,
     v97: bool,
+    v98: bool,
+    v99: bool,
+    v100: bool,
+    v101: bool,
+    v102: bool,
+    v103: bool,
 }
 
 impl CurrentMigrationState {
@@ -141,6 +163,213 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103;
+        }
+        if self.v103 {
+            return false;
+        }
+        if contract == V103_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V103_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102;
+        }
+        if self.v102 {
+            return false;
+        }
+        if contract == V102_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V102_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101;
+        }
+        if self.v101 {
+            return false;
+        }
+        if contract == V101_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V101_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100;
+        }
+        if self.v100 {
+            return false;
+        }
+        if contract == V100_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V100_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99;
+        }
+        if self.v99 {
+            return false;
+        }
+        if contract == V099_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V099_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98;
+        }
+        if self.v98 {
+            return false;
+        }
+        if contract == V098_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V098_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -719,7 +948,13 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 94),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 95),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 96),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 97)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 97),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 98),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 99),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 100),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 101),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 102),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 103)
         "#,
         [],
         |row| {
@@ -752,6 +987,12 @@ fn load_current_migration_state(
                 v95: row.get(25)?,
                 v96: row.get(26)?,
                 v97: row.get(27)?,
+                v98: row.get(28)?,
+                v99: row.get(29)?,
+                v100: row.get(30)?,
+                v101: row.get(31)?,
+                v102: row.get(32)?,
+                v103: row.get(33)?,
             })
         },
     )
@@ -812,6 +1053,160 @@ fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
     Ok(statement
         .query_map([], |row| row.get::<_, String>(1))?
         .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn admit_migration_action_resolution_source_v99(transaction: &Transaction<'_>) -> Result<()> {
+    let action_execution_schema: String = transaction.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'action_execution'",
+        [],
+        |row| row.get(0),
+    )?;
+    let old_resolution_constraint =
+        "resolution_source IN ('executor', 'runtime', 'reconciler', 'user')";
+    let current_resolution_constraint =
+        "resolution_source IN ('executor', 'runtime', 'reconciler', 'user', 'migration')";
+    if action_execution_schema.contains(current_resolution_constraint) {
+        return Ok(());
+    }
+    if !action_execution_schema.contains(old_resolution_constraint) {
+        anyhow::bail!("v99 found an unknown Action resolution_source constraint");
+    }
+    let dependent_action_triggers = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT name, sql FROM sqlite_master
+            WHERE type = 'trigger' AND instr(sql, 'action_execution') > 0
+            ORDER BY name
+            "#,
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let action_execution_v99 = action_execution_schema
+        .replacen(
+            "CREATE TABLE action_execution",
+            "CREATE TABLE action_execution_v99",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"action_execution\"",
+            "CREATE TABLE action_execution_v99",
+            1,
+        )
+        .replacen(old_resolution_constraint, current_resolution_constraint, 1);
+    if !action_execution_v99.contains("CREATE TABLE action_execution_v99")
+        || action_execution_v99 == action_execution_schema
+    {
+        anyhow::bail!("v99 could not admit migration Action resolution evidence");
+    }
+    transaction.execute_batch(&action_execution_v99)?;
+    let action_columns = table_columns(transaction, "action_execution")?
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    for (name, _) in &dependent_action_triggers {
+        transaction.execute_batch(&format!("DROP TRIGGER \"{}\";", name.replace('"', "\"\"")))?;
+    }
+    transaction.execute_batch(&format!(
+        r#"
+        INSERT INTO action_execution_v99({action_columns})
+        SELECT {action_columns} FROM action_execution;
+        DROP INDEX IF EXISTS action_execution_dispatch_idx;
+        DROP INDEX IF EXISTS action_execution_reconcile_idx;
+        DROP TABLE action_execution;
+        ALTER TABLE action_execution_v99 RENAME TO action_execution;
+        CREATE INDEX action_execution_dispatch_idx
+            ON action_execution(status, policy_decision, next_dispatch_at, execute_before);
+        CREATE INDEX action_execution_reconcile_idx
+            ON action_execution(status, unknown_disposition, next_reconcile_at);
+        "#,
+    ))?;
+    for (_, sql) in dependent_action_triggers {
+        transaction.execute_batch(&sql)?;
+    }
+    Ok(())
+}
+
+fn admit_migration_agent_run_terminal_evidence_v99(transaction: &Transaction<'_>) -> Result<()> {
+    let agent_run_schema: String = transaction.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+        [],
+        |row| row.get(0),
+    )?;
+    let old_source = "terminal_resolution_source = 'runtime_terminal'";
+    let current_source = "terminal_resolution_source IN ('runtime_terminal', 'migration')";
+    let old_reason = "'planned_shutdown_cancelled'\n                    )";
+    let current_reason = "'planned_shutdown_cancelled',\n                        'camp_attachment_view_v1_clean_break'\n                    )";
+    if agent_run_schema.contains(current_source) && agent_run_schema.contains(current_reason) {
+        return Ok(());
+    }
+    if !agent_run_schema.contains(old_source) || !agent_run_schema.contains(old_reason) {
+        anyhow::bail!("v99 found unknown AgentRun terminal evidence constraints");
+    }
+    let schema_objects = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT type, name, sql FROM sqlite_master
+            WHERE sql IS NOT NULL
+              AND (
+                  tbl_name = 'agent_run'
+                  OR (type = 'trigger' AND instr(sql, 'agent_run') > 0)
+              )
+              AND type IN ('index', 'trigger')
+            ORDER BY type, name
+            "#,
+        )?;
+        statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let agent_run_v99 = agent_run_schema
+        .replacen("CREATE TABLE agent_run", "CREATE TABLE agent_run_v99", 1)
+        .replacen(
+            "CREATE TABLE \"agent_run\"",
+            "CREATE TABLE agent_run_v99",
+            1,
+        )
+        .replacen(old_source, current_source, 1)
+        .replacen(old_reason, current_reason, 1);
+    if !agent_run_v99.contains("CREATE TABLE agent_run_v99") || agent_run_v99 == agent_run_schema {
+        anyhow::bail!("v99 could not admit AgentRun migration terminal evidence");
+    }
+    transaction.execute_batch(&agent_run_v99)?;
+    let columns = table_columns(transaction, "agent_run")?
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    for (object_type, name, _) in &schema_objects {
+        if object_type == "trigger" {
+            transaction
+                .execute_batch(&format!("DROP TRIGGER \"{}\";", name.replace('"', "\"\"")))?;
+        }
+    }
+    transaction.execute_batch(&format!(
+        r#"
+        INSERT INTO agent_run_v99({columns}) SELECT {columns} FROM agent_run;
+        DROP TABLE agent_run;
+        ALTER TABLE agent_run_v99 RENAME TO agent_run;
+        "#,
+    ))?;
+    for (_, name, sql) in schema_objects {
+        transaction
+            .execute_batch(&sql)
+            .with_context(|| format!("v99 failed to restore AgentRun schema object {name}"))?;
+    }
+    Ok(())
 }
 
 const AGENT_ID_REFERENCE_COLUMNS_V52: &[(&str, &str)] = &[
@@ -1101,13 +1496,79 @@ fn rename_conflicting_profiles_for_v42(
     Ok(())
 }
 
+fn register_runtime_camp_files_functions(
+    connection: &Connection,
+    root: &Path,
+    root_identity_digest: &str,
+) -> Result<()> {
+    let root = root
+        .to_str()
+        .context("Runtime Camp Files Root is not valid UTF-8")?
+        .to_string();
+    let identity = root_identity_digest.to_string();
+    connection.create_scalar_function(
+        "rovai_runtime_camp_files_root",
+        0,
+        rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |_| Ok(root.clone()),
+    )?;
+    connection.create_scalar_function(
+        "rovai_runtime_camp_files_root_identity_digest",
+        0,
+        rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+        move |_| Ok(identity.clone()),
+    )?;
+    Ok(())
+}
+
 impl Database {
     pub fn open(data_dir: &Path) -> Result<Self> {
-        Self::open_with_data_contract_enforcement(data_dir, !cfg!(test))
+        let runtime_camp_files_root = data_dir.join("runtime-files");
+        let root_identity = crate::camp_attachment_view::runtime_root_identity_digest_for_database(
+            &runtime_camp_files_root,
+        )?;
+        Self::open_with_runtime_camp_files_root_and_enforcement(
+            data_dir,
+            &runtime_camp_files_root,
+            &root_identity,
+            !cfg!(test),
+        )
     }
 
+    #[cfg(test)]
     fn open_with_data_contract_enforcement(
         data_dir: &Path,
+        enforce_data_contract: bool,
+    ) -> Result<Self> {
+        let runtime_camp_files_root = data_dir.join("runtime-files");
+        let root_identity = crate::camp_attachment_view::runtime_root_identity_digest_for_database(
+            &runtime_camp_files_root,
+        )?;
+        Self::open_with_runtime_camp_files_root_and_enforcement(
+            data_dir,
+            &runtime_camp_files_root,
+            &root_identity,
+            enforce_data_contract,
+        )
+    }
+
+    pub fn open_with_runtime_camp_files_root(
+        data_dir: &Path,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
+    ) -> Result<Self> {
+        Self::open_with_runtime_camp_files_root_and_enforcement(
+            data_dir,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+            !cfg!(test),
+        )
+    }
+
+    fn open_with_runtime_camp_files_root_and_enforcement(
+        data_dir: &Path,
+        runtime_camp_files_root: &Path,
+        runtime_camp_files_root_identity_digest: &str,
         enforce_data_contract: bool,
     ) -> Result<Self> {
         std::fs::create_dir_all(data_dir)
@@ -1141,6 +1602,11 @@ impl Database {
         let connection = Connection::open(&path)
             .with_context(|| format!("failed to open SQLite at {}", path.display()))?;
         crate::monitoring::register_monitoring_sql_functions(&connection)?;
+        register_runtime_camp_files_functions(
+            &connection,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        )?;
         let initialized_database: i64 = connection.query_row(
             r#"
             SELECT COUNT(*)
@@ -1150,7 +1616,13 @@ impl Database {
             [],
             |row| row.get(0),
         )?;
-        let mut database = Self { connection, path };
+        let mut database = Self {
+            connection,
+            path,
+            runtime_camp_files_root: runtime_camp_files_root.to_path_buf(),
+            runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
+                .to_string(),
+        };
         database.migrate(initialized_database == 0)?;
         if let Some(reason) = reset_reason {
             database.connection.execute(
@@ -1181,6 +1653,16 @@ impl Database {
         )
         .with_context(|| format!("failed to open verified SQLite clone at {}", path.display()))?;
         crate::monitoring::register_monitoring_sql_functions(&connection)?;
+        let runtime_camp_files_root = data_dir.join("runtime-files");
+        let runtime_camp_files_root_identity_digest =
+            crate::camp_attachment_view::runtime_root_identity_digest_for_database(
+                &runtime_camp_files_root,
+            )?;
+        register_runtime_camp_files_functions(
+            &connection,
+            &runtime_camp_files_root,
+            &runtime_camp_files_root_identity_digest,
+        )?;
         if !connection_has_current_data_contract(&connection)? {
             anyhow::bail!(
                 "verified test clone is not at the current data contract: {}",
@@ -1204,11 +1686,24 @@ impl Database {
                 "#,
             )?,
         }
-        Ok(Self { connection, path })
+        Ok(Self {
+            connection,
+            path,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        })
     }
 
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    pub fn runtime_camp_files_root(&self) -> &Path {
+        &self.runtime_camp_files_root
+    }
+
+    pub fn runtime_camp_files_root_identity_digest(&self) -> &str {
+        &self.runtime_camp_files_root_identity_digest
     }
 
     pub(crate) fn connection(&self) -> &Connection {
@@ -1916,6 +2411,24 @@ impl Database {
             if !self.schema_migration_applied(97)? {
                 self.migrate_windows_skill_projection_operation_v97()?;
             }
+            if !self.schema_migration_applied(98)? {
+                self.migrate_self_authored_recent_messages_v98()?;
+            }
+            if !self.schema_migration_applied(99)? {
+                self.migrate_camp_attachment_view_v99()?;
+            }
+            if !self.schema_migration_applied(100)? {
+                self.migrate_semantic_attachment_receipt_v100()?;
+            }
+            if !self.schema_migration_applied(101)? {
+                self.migrate_single_camp_publication_v101()?;
+            }
+            if !self.schema_migration_applied(102)? {
+                self.migrate_unified_attachment_publication_v102()?;
+            }
+            if !self.schema_migration_applied(103)? {
+                self.migrate_trae_skill_delivery_group_v103()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2256,6 +2769,24 @@ impl Database {
         }
         if !self.schema_migration_applied(97)? {
             self.migrate_windows_skill_projection_operation_v97()?;
+        }
+        if !self.schema_migration_applied(98)? {
+            self.migrate_self_authored_recent_messages_v98()?;
+        }
+        if !self.schema_migration_applied(99)? {
+            self.migrate_camp_attachment_view_v99()?;
+        }
+        if !self.schema_migration_applied(100)? {
+            self.migrate_semantic_attachment_receipt_v100()?;
+        }
+        if !self.schema_migration_applied(101)? {
+            self.migrate_single_camp_publication_v101()?;
+        }
+        if !self.schema_migration_applied(102)? {
+            self.migrate_unified_attachment_publication_v102()?;
+        }
+        if !self.schema_migration_applied(103)? {
+            self.migrate_trae_skill_delivery_group_v103()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -7700,7 +8231,7 @@ impl Database {
             ALTER TABLE agent_run ADD COLUMN terminal_resolution_source TEXT
                 CHECK(
                     terminal_resolution_source IS NULL
-                    OR terminal_resolution_source = 'runtime_terminal'
+                    OR terminal_resolution_source IN ('runtime_terminal', 'migration')
                 );
             ALTER TABLE agent_run ADD COLUMN terminal_reason_code TEXT
                 CHECK(
@@ -7708,7 +8239,8 @@ impl Database {
                     OR terminal_reason_code IN (
                         'planned_shutdown_completed',
                         'planned_shutdown_failed',
-                        'planned_shutdown_cancelled'
+                        'planned_shutdown_cancelled',
+                        'camp_attachment_view_v1_clean_break'
                     )
                 );
             ALTER TABLE camp_turn ADD COLUMN aggregate_reason_code TEXT
@@ -11703,6 +12235,1747 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_self_authored_recent_messages_v98(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let create_context_manifest_v98 = create_context_manifest
+                .replacen(
+                    "CREATE TABLE context_manifest",
+                    "CREATE TABLE context_manifest_v98",
+                    1,
+                )
+                .replacen(
+                    "CREATE TABLE \"context_manifest\"",
+                    "CREATE TABLE context_manifest_v98",
+                    1,
+                )
+                .replacen(
+                    "CHECK(context_delivery_profile_version = 3)",
+                    "CHECK(context_delivery_profile_version = 4)",
+                    1,
+                );
+            if create_context_manifest_v98 == create_context_manifest
+                || !create_context_manifest_v98.contains("CREATE TABLE context_manifest_v98")
+                || !create_context_manifest_v98.contains("CHECK(formatter_version = 20)")
+                || !create_context_manifest_v98
+                    .contains("CHECK(context_delivery_profile_version = 4)")
+            {
+                anyhow::bail!("v98 could not rebuild the ContextManifest v19 schema");
+            }
+
+            transaction.execute(
+                r#"
+                UPDATE gather_item
+                SET status = 'cancelled', terminal_source = 'delivery',
+                    error_code = 'context_delivery_profile_v4_required',
+                    terminal_resolution_source = 'migration',
+                    terminal_reason_code = 'self_authored_recent_messages_clean_break',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE gather_record
+                SET status = 'cancelled',
+                    cancellation_reason_code = 'context_delivery_profile_v4_required',
+                    version = version + 1, cancelled_at = ?1, updated_at = ?1
+                WHERE status IN ('collecting', 'ready', 'completing')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    context_manifest_id = NULL,
+                    failure_code = 'context_delivery_profile_v4_required',
+                    failure_detail_json = '{"reason":"self_authored_recent_messages_clean_break"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0
+                        THEN 'interrupted_before_dispatch'
+                        ELSE 'failed'
+                    END,
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    manual_intervention_required = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                        ELSE 0
+                    END,
+                    failure_code = 'context_delivery_profile_v4_required',
+                    failure_detail_json = '{"reason":"self_authored_recent_messages_clean_break"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET frozen_snapshot_json = CASE
+                        WHEN json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                        THEN json_remove(frozen_snapshot_json, '$.frozenContext')
+                        ELSE frozen_snapshot_json
+                    END,
+                    context_manifest_id = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE context_manifest_id IS NOT NULL
+                   OR json_type(frozen_snapshot_json, '$.frozenContext') IS NOT NULL
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                "UPDATE message_delivery_attempt SET context_manifest_id = NULL WHERE context_manifest_id IS NOT NULL",
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'failed', ended_at = ?1,
+                    last_error_code = 'context_delivery_profile_v4_required',
+                    public_runtime_failure_json = NULL,
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                DELETE FROM bootstrap_redelivery_requirement;
+                DELETE FROM native_session_compaction_observation;
+                DELETE FROM native_session_compaction_observer_lease;
+                DELETE FROM native_session_resume_attempt;
+                DELETE FROM runtime_input_delivery;
+                DELETE FROM context_manifest_history_camp;
+                DELETE FROM context_manifest;
+                DELETE FROM native_session_bootstrap_evidence;
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1, updated_at = ?1
+                "#,
+                [&now],
+            )?;
+
+            transaction.execute_batch(&create_context_manifest_v98)?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v98 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.15', projection_schema_version = 53,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (98, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v98 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_camp_attachment_view_v99(&mut self) -> Result<()> {
+        crate::camp_attachment_view::preflight_empty_runtime_root_for_v99(
+            &self.runtime_camp_files_root,
+        )?;
+        let published_attachments = {
+            let mut statement = self.connection.prepare(
+                r#"
+                SELECT camp_id, id, media_type, byte_size, content_digest, storage_path
+                FROM message_attachment
+                ORDER BY CAST(camp_id AS BLOB), CAST(id AS BLOB)
+                "#,
+            )?;
+            statement
+                .query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                    ))
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let data_dir = self
+            .path
+            .parent()
+            .context("v99 database path has no data directory")?;
+        let attachment_store = crate::camp_attachment::CampAttachmentStore::new(data_dir);
+        for (camp_id, attachment_id, media_type, byte_size, content_digest, storage_path) in
+            &published_attachments
+        {
+            CampId::parse(camp_id)
+                .with_context(|| format!("v99 Published Attachment has invalid Camp {camp_id}"))?;
+            Uuid::parse_str(attachment_id).with_context(|| {
+                format!("v99 Published Attachment has invalid ID {attachment_id}")
+            })?;
+            let byte_size = u64::try_from(*byte_size).with_context(|| {
+                format!("v99 Published Attachment {attachment_id} has a negative byte size")
+            })?;
+            attachment_store
+                .verify_authority_attachment_for_runtime(
+                    Path::new(storage_path),
+                    media_type,
+                    byte_size,
+                    content_digest,
+                )
+                .with_context(|| {
+                    format!(
+                        "v99 camp_attachment_view_source_invalid: Published Attachment {attachment_id} in Camp {camp_id} failed Authority preflight"
+                    )
+                })?;
+        }
+        let instance_bytes: i64 = self.connection.query_row(
+            "SELECT COALESCE(SUM(byte_size), 0) FROM message_attachment",
+            [],
+            |row| row.get(0),
+        )?;
+        if instance_bytes < 0
+            || instance_bytes as u64 > crate::camp_attachment_view::MAX_INSTANCE_VIEW_BYTES
+        {
+            anyhow::bail!(
+                "v99 camp_attachment_view_quota_exceeded: instance Published Attachments use {instance_bytes} bytes"
+            );
+        }
+        let oversized_camp = self
+            .connection
+            .query_row(
+                r#"
+                SELECT camp_id, SUM(byte_size)
+                FROM message_attachment
+                GROUP BY camp_id
+                HAVING SUM(byte_size) > ?1
+                ORDER BY camp_id LIMIT 1
+                "#,
+                [crate::camp_attachment_view::MAX_CAMP_VIEW_BYTES as i64],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        if let Some((camp_id, bytes)) = oversized_camp {
+            anyhow::bail!(
+                "v99 camp_attachment_view_quota_exceeded: Camp {camp_id} Published Attachments use {bytes} bytes"
+            );
+        }
+
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+            admit_migration_agent_run_terminal_evidence_v99(&transaction)?;
+            admit_migration_action_resolution_source_v99(&transaction)?;
+            let create_context_manifest: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_context_manifest =
+                if create_context_manifest.contains("CREATE TABLE \"context_manifest\"") {
+                    create_context_manifest.replacen(
+                        "CREATE TABLE \"context_manifest\"",
+                        "CREATE TABLE context_manifest_v99",
+                        1,
+                    )
+                } else {
+                    create_context_manifest.replacen(
+                        "CREATE TABLE context_manifest",
+                        "CREATE TABLE context_manifest_v99",
+                        1,
+                    )
+                };
+            let mut create_context_manifest_v99 = renamed_context_manifest.replacen(
+                "CHECK(formatter_version = 20)",
+                "CHECK(formatter_version IN (20, 21))",
+                1,
+            );
+            let first_table_constraint = create_context_manifest_v99
+                .find(
+                    "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+                )
+                .context("v99 could not locate the first ContextManifest table constraint")?;
+            create_context_manifest_v99.insert_str(
+                first_table_constraint,
+                r#"                    context_manifest_version INTEGER NOT NULL DEFAULT 19
+                        CHECK(context_manifest_version IN (19, 20)),
+                    run_facts_schema_version INTEGER NOT NULL DEFAULT 1
+                        CHECK(run_facts_schema_version IN (1, 2)),
+                    camp_attachment_view_receipt_version INTEGER
+                        CHECK(camp_attachment_view_receipt_version IS NULL
+                              OR camp_attachment_view_receipt_version = 1),
+                    camp_attachment_view_receipt_json TEXT
+                        CHECK(camp_attachment_view_receipt_json IS NULL
+                              OR json_valid(camp_attachment_view_receipt_json)),
+                    camp_attachment_view_receipt_digest TEXT,
+                    CHECK(
+                        (context_manifest_version = 19
+                         AND formatter_version = 20
+                         AND run_facts_schema_version = 1
+                         AND camp_attachment_view_receipt_version IS NULL
+                         AND camp_attachment_view_receipt_json IS NULL
+                         AND camp_attachment_view_receipt_digest IS NULL)
+                        OR
+                        (context_manifest_version = 20
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 1
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                    ),
+                "#,
+            );
+            if create_context_manifest_v99 == create_context_manifest
+                || !create_context_manifest_v99.contains("CREATE TABLE context_manifest_v99")
+                || !create_context_manifest_v99.contains("CHECK(formatter_version IN (20, 21))")
+                || !create_context_manifest_v99.contains("context_manifest_version")
+            {
+                anyhow::bail!("v99 could not rebuild the ContextManifest v19/v20 schema");
+            }
+            let manifest_columns = {
+                let mut statement = transaction.prepare("PRAGMA table_info(context_manifest)")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(1))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?
+            };
+            let manifest_columns = manifest_columns
+                .iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            transaction.execute(
+                r#"
+                UPDATE gather_item
+                SET status = 'cancelled', terminal_source = 'delivery',
+                    error_code = 'camp_attachment_view_v1_clean_break',
+                    terminal_resolution_source = 'migration',
+                    terminal_reason_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE gather_record
+                SET status = 'cancelled',
+                    cancellation_reason_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, cancelled_at = ?1, updated_at = ?1
+                WHERE status IN ('collecting', 'ready', 'completing')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    failure_code = 'camp_attachment_view_v1_clean_break',
+                    failure_detail_json = '{"reason":"legacy_formatter20_non_dispatchable"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0
+                        THEN 'interrupted_before_dispatch'
+                        ELSE 'failed'
+                    END,
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    manual_intervention_required = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                        ELSE manual_intervention_required
+                    END,
+                    failure_code = 'camp_attachment_view_v1_clean_break',
+                    failure_detail_json = '{"reason":"legacy_formatter20_non_dispatchable"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE runtime_input_delivery
+                SET status = 'delivery_unknown', resolved_at = NULL,
+                    last_error = 'input_delivery_outcome_unknown', updated_at = ?1
+                WHERE status = 'prepared'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_execution
+                SET status = 'unknown', unknown_disposition = 'active',
+                    effect_disposition = 'unknown', resolution_source = 'migration',
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    last_error_code = 'camp_attachment_view_v1_clean_break_after_dispatch',
+                    next_reconcile_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status = 'executing'
+                  AND dispatch_may_have_started_at IS NOT NULL
+                  AND agent_run_id IN (
+                      SELECT id FROM agent_run
+                      WHERE status IN ('queued', 'running', 'waiting')
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_attempt
+                SET outcome = 'unknown', ended_at = COALESCE(ended_at, ?1)
+                WHERE outcome IS NULL
+                  AND action_id IN (
+                      SELECT id FROM action_execution
+                      WHERE status = 'unknown'
+                        AND last_error_code = 'camp_attachment_view_v1_clean_break_after_dispatch'
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_execution
+                SET status = 'not_executed',
+                    not_executed_reason = 'camp_attachment_view_v1_clean_break',
+                    unknown_disposition = NULL,
+                    effect_disposition = 'none', ended_at = ?1,
+                    active_attempt_id = NULL, active_attempt_number = NULL,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    last_error_code = 'camp_attachment_view_v1_clean_break_before_dispatch',
+                    next_reconcile_at = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE (status = 'prepared'
+                       OR (status = 'executing' AND dispatch_may_have_started_at IS NULL))
+                  AND agent_run_id IN (
+                      SELECT id FROM agent_run
+                      WHERE status IN ('queued', 'running', 'waiting')
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_attempt
+                SET outcome = 'not_dispatched', ended_at = COALESCE(ended_at, ?1)
+                WHERE outcome IS NULL
+                  AND action_id IN (
+                      SELECT id FROM action_execution
+                      WHERE status = 'not_executed'
+                        AND not_executed_reason = 'camp_attachment_view_v1_clean_break'
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE approval
+                SET status = 'cancelled',
+                    decision_json = '{"reason":"camp_attachment_view_v1_clean_break"}',
+                    resolved_by_type = 'system',
+                    resolved_by_id = 'migration-99',
+                    resolution_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1,
+                    resolved_at = ?1, updated_at = ?1
+                WHERE status = 'pending'
+                  AND action_id IN (
+                      SELECT id FROM action_execution
+                      WHERE agent_run_id IN (
+                          SELECT id FROM agent_run
+                          WHERE status IN ('queued', 'running', 'waiting')
+                      )
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE runtime_delivery_checkpoint
+                SET status = 'safely_closed', safely_closed_at = ?1,
+                    lease_owner = NULL, lease_expires_at = NULL,
+                    last_error = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('pending', 'delivering', 'failed')
+                  AND agent_run_id IN (
+                      SELECT id FROM agent_run
+                      WHERE status IN ('queued', 'running', 'waiting')
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = CASE
+                        WHEN EXISTS(
+                            SELECT 1 FROM runtime_input_delivery AS delivery
+                            WHERE delivery.agent_run_id = agent_run.id
+                              AND delivery.status = 'accepted'
+                        ) THEN 'failed'
+                        WHEN EXISTS(
+                            SELECT 1 FROM runtime_input_delivery AS delivery
+                            WHERE delivery.agent_run_id = agent_run.id
+                              AND delivery.status = 'delivery_unknown'
+                        ) THEN 'failed'
+                        WHEN EXISTS(
+                            SELECT 1 FROM action_execution AS action
+                            WHERE action.agent_run_id = agent_run.id
+                              AND action.status = 'unknown'
+                              AND action.effect_disposition = 'unknown'
+                        ) THEN 'failed'
+                        ELSE 'cancelled'
+                    END,
+                    ended_at = ?1,
+                    last_error_code = CASE
+                        WHEN EXISTS(
+                            SELECT 1 FROM runtime_input_delivery AS delivery
+                            WHERE delivery.agent_run_id = agent_run.id
+                              AND delivery.status = 'accepted'
+                        ) THEN 'accepted_input_outcome_unknown'
+                        WHEN EXISTS(
+                            SELECT 1 FROM runtime_input_delivery AS delivery
+                            WHERE delivery.agent_run_id = agent_run.id
+                              AND delivery.status = 'delivery_unknown'
+                        ) THEN 'input_delivery_outcome_unknown'
+                        WHEN EXISTS(
+                            SELECT 1 FROM action_execution AS action
+                            WHERE action.agent_run_id = agent_run.id
+                              AND action.status = 'unknown'
+                              AND action.effect_disposition = 'unknown'
+                        ) THEN 'accepted_input_outcome_unknown'
+                        ELSE 'camp_attachment_view_v1_clean_break'
+                    END,
+                    public_runtime_failure_json = NULL,
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    terminal_resolution_source = 'migration',
+                    terminal_reason_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE native_session_compaction_observer_lease
+                SET status = 'fenced', fenced_at = COALESCE(fenced_at, ?1),
+                    fence_reason = COALESCE(fence_reason, 'camp_attachment_view_v1_clean_break'),
+                    updated_at = ?1
+                WHERE status = 'active'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1, updated_at = ?1
+                "#,
+                [&now],
+            )?;
+
+            transaction.execute_batch(&create_context_manifest_v99)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO context_manifest_v99({manifest_columns}) SELECT {manifest_columns} FROM context_manifest;"
+            ))?;
+            transaction.execute_batch(
+                r#"
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v99 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                ALTER TABLE runtime_input_delivery ADD COLUMN
+                    runtime_attachment_auth_receipt_version INTEGER
+                        CHECK(runtime_attachment_auth_receipt_version IS NULL
+                              OR runtime_attachment_auth_receipt_version = 1);
+                ALTER TABLE runtime_input_delivery ADD COLUMN
+                    runtime_attachment_auth_receipt_json TEXT
+                        CHECK(runtime_attachment_auth_receipt_json IS NULL
+                              OR json_valid(runtime_attachment_auth_receipt_json));
+                ALTER TABLE runtime_input_delivery ADD COLUMN
+                    runtime_attachment_auth_receipt_digest TEXT;
+                ALTER TABLE runtime_input_delivery ADD COLUMN
+                    runtime_request_digest TEXT;
+
+                CREATE TABLE camp_attachment_view (
+                    camp_id TEXT PRIMARY KEY,
+                    state TEXT NOT NULL CHECK(state IN (
+                        'initializing','ready','mutating','rebuilding',
+                        'integrity_failed','cleanup_pending'
+                    )),
+                    generation INTEGER NOT NULL CHECK(generation >= 0),
+                    root_relative_path TEXT NOT NULL,
+                    root_identity_digest TEXT NOT NULL,
+                    entry_count INTEGER NOT NULL CHECK(entry_count >= 0),
+                    aggregate_bytes INTEGER NOT NULL CHECK(aggregate_bytes >= 0),
+                    catalog_digest TEXT NOT NULL,
+                    active_operation_id TEXT,
+                    last_error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE camp_attachment_view_entry (
+                    camp_id TEXT NOT NULL,
+                    attachment_id TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN ('file','directory')),
+                    byte_size INTEGER NOT NULL CHECK(byte_size >= 0),
+                    file_count INTEGER NOT NULL CHECK(file_count >= 0),
+                    directory_count INTEGER NOT NULL CHECK(directory_count >= 0),
+                    node_count INTEGER NOT NULL CHECK(node_count >= 1),
+                    content_digest TEXT NOT NULL,
+                    authority_safe_leaf TEXT NOT NULL,
+                    root_relative_final_path TEXT NOT NULL,
+                    entry_identity_digest TEXT NOT NULL,
+                    published_generation INTEGER NOT NULL CHECK(published_generation >= 1),
+                    publication_operation_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(camp_id, attachment_id),
+                    UNIQUE(root_relative_final_path)
+                );
+                CREATE INDEX camp_attachment_view_entry_attachment_idx
+                    ON camp_attachment_view_entry(attachment_id, camp_id);
+
+                CREATE TABLE camp_attachment_view_operation (
+                    id TEXT PRIMARY KEY,
+                    camp_id TEXT NOT NULL,
+                    kind TEXT NOT NULL CHECK(kind IN (
+                        'publish','initial_backfill','controlled_rebuild','camp_delete_cleanup'
+                    )),
+                    status TEXT NOT NULL CHECK(status IN (
+                        'planned','copying','staged','gated','promoting','promoted',
+                        'committing','committed','completed','rolling_back',
+                        'rolled_back','recovery_required'
+                    )),
+                    command_id TEXT NOT NULL,
+                    draft_revision INTEGER,
+                    reserved_bytes INTEGER NOT NULL CHECK(reserved_bytes >= 0),
+                    cleanup_root_relative_path TEXT,
+                    cleanup_root_identity_digest TEXT,
+                    previous_view_state TEXT CHECK(previous_view_state IS NULL OR previous_view_state IN (
+                        'initializing','ready','mutating','rebuilding',
+                        'integrity_failed','cleanup_pending'
+                    )),
+                    error_code TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    completed_at TEXT,
+                    CHECK(
+                        (kind = 'camp_delete_cleanup'
+                         AND cleanup_root_relative_path IS NOT NULL
+                         AND previous_view_state IS NOT NULL)
+                        OR
+                        (kind <> 'camp_delete_cleanup'
+                         AND cleanup_root_relative_path IS NULL
+                         AND cleanup_root_identity_digest IS NULL
+                         AND previous_view_state IS NULL)
+                    )
+                );
+                CREATE UNIQUE INDEX camp_attachment_view_publish_command_unique
+                    ON camp_attachment_view_operation(command_id)
+                    WHERE kind = 'publish';
+                CREATE UNIQUE INDEX camp_attachment_view_cleanup_command_unique
+                    ON camp_attachment_view_operation(command_id)
+                    WHERE kind = 'camp_delete_cleanup';
+                CREATE INDEX camp_attachment_view_operation_recovery_idx
+                    ON camp_attachment_view_operation(status, created_at, id)
+                    WHERE status NOT IN ('completed','rolled_back');
+
+                CREATE TABLE camp_attachment_view_operation_entry (
+                    operation_id TEXT NOT NULL
+                        REFERENCES camp_attachment_view_operation(id) ON DELETE CASCADE,
+                    attachment_id TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK(state IN (
+                        'planned','copied','promoted','committed','rolled_back'
+                    )),
+                    media_type TEXT NOT NULL,
+                    expected_byte_size INTEGER NOT NULL CHECK(expected_byte_size >= 0),
+                    expected_content_digest TEXT NOT NULL,
+                    authority_storage_path TEXT NOT NULL,
+                    authority_safe_leaf TEXT,
+                    kind TEXT CHECK(kind IS NULL OR kind IN ('file','directory')),
+                    file_count INTEGER CHECK(file_count IS NULL OR file_count >= 0),
+                    directory_count INTEGER CHECK(directory_count IS NULL OR directory_count >= 0),
+                    node_count INTEGER CHECK(node_count IS NULL OR node_count >= 1),
+                    root_relative_staging_path TEXT NOT NULL,
+                    root_relative_final_path TEXT NOT NULL,
+                    staging_identity_digest TEXT,
+                    final_identity_digest TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(operation_id, attachment_id)
+                );
+
+                CREATE TRIGGER context_manifest_v20_only_insert
+                BEFORE INSERT ON context_manifest
+                WHEN NEW.context_manifest_version <> 20
+                BEGIN
+                    SELECT RAISE(ABORT, 'new ContextManifest must use v20');
+                END;
+
+                CREATE TRIGGER context_manifest_version_immutable
+                BEFORE UPDATE OF context_manifest_version, formatter_version,
+                                 run_facts_schema_version,
+                                 camp_attachment_view_receipt_version,
+                                 camp_attachment_view_receipt_json,
+                                 camp_attachment_view_receipt_digest
+                ON context_manifest
+                BEGIN
+                    SELECT RAISE(ABORT, 'ContextManifest version evidence is immutable');
+                END;
+
+                CREATE TRIGGER runtime_input_delivery_attachment_auth_insert
+                BEFORE INSERT ON runtime_input_delivery
+                WHEN NEW.runtime_attachment_auth_receipt_version IS NOT 1
+                  OR NEW.runtime_attachment_auth_receipt_json IS NULL
+                  OR NEW.runtime_attachment_auth_receipt_digest IS NULL
+                  OR NEW.runtime_request_digest IS NULL
+                BEGIN
+                    SELECT RAISE(ABORT, 'new Runtime Input Delivery requires Attachment Auth Receipt v1');
+                END;
+
+                CREATE TRIGGER camp_attachment_view_camp_insert
+                AFTER INSERT ON camp
+                BEGIN
+                    INSERT INTO camp_attachment_view(
+                        camp_id, state, generation, root_relative_path,
+                        root_identity_digest, entry_count, aggregate_bytes,
+                        catalog_digest, active_operation_id, last_error_code,
+                        created_at, updated_at
+                    ) VALUES (
+                        NEW.id, 'ready', 1, 'camps/' || NEW.id || '/attachments',
+                        rovai_runtime_camp_files_root_identity_digest(),
+                        0, 0,
+                        '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+                        NULL, NULL, datetime('now'), datetime('now')
+                    );
+                END;
+                "#,
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO camp_attachment_view(
+                    camp_id, state, generation, root_relative_path,
+                    root_identity_digest, entry_count, aggregate_bytes,
+                    catalog_digest, active_operation_id, last_error_code,
+                    created_at, updated_at
+                )
+                SELECT id, 'initializing', 0, 'camps/' || id || '/attachments',
+                       rovai_runtime_camp_files_root_identity_digest(),
+                       0, 0,
+                       '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+                       NULL, NULL, ?1, ?1
+                FROM camp
+                "#,
+                [&now],
+            )?;
+            transaction.execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.15', projection_schema_version = 54,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (99, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v99 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_semantic_attachment_receipt_v100(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = chrono::Utc::now().to_rfc3339();
+
+            let current_manifest_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_manifest_schema =
+                if current_manifest_schema.contains("CREATE TABLE \"context_manifest\"") {
+                    current_manifest_schema.replacen(
+                        "CREATE TABLE \"context_manifest\"",
+                        "CREATE TABLE context_manifest_v100",
+                        1,
+                    )
+                } else {
+                    current_manifest_schema.replacen(
+                        "CREATE TABLE context_manifest",
+                        "CREATE TABLE context_manifest_v100",
+                        1,
+                    )
+                };
+            let mut context_manifest_v100 = renamed_manifest_schema
+                .replacen(
+                    "CHECK(context_manifest_version IN (19, 20))",
+                    "CHECK(context_manifest_version IN (19, 20, 21))",
+                    1,
+                )
+                .replacen(
+                    "OR camp_attachment_view_receipt_version = 1)",
+                    "OR camp_attachment_view_receipt_version IN (1, 2))",
+                    1,
+                );
+            let pairing_start = context_manifest_v100
+                .find("                    CHECK(\n                        (context_manifest_version = 19")
+                .context("v100 could not locate the ContextManifest version pairing")?;
+            let pairing_end = context_manifest_v100[pairing_start..]
+                .find(
+                    "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+                )
+                .map(|offset| pairing_start + offset)
+                .context("v100 could not locate the ContextManifest pairing boundary")?;
+            context_manifest_v100.replace_range(
+                pairing_start..pairing_end,
+                r#"                    CHECK(
+                        (context_manifest_version = 19
+                         AND formatter_version = 20
+                         AND run_facts_schema_version = 1
+                         AND camp_attachment_view_receipt_version IS NULL
+                         AND camp_attachment_view_receipt_json IS NULL
+                         AND camp_attachment_view_receipt_digest IS NULL)
+                        OR
+                        (context_manifest_version = 20
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 1
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                        OR
+                        (context_manifest_version = 21
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 2
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                    ),
+"#,
+            );
+            if !context_manifest_v100.contains("CREATE TABLE context_manifest_v100")
+                || !context_manifest_v100
+                    .contains("CHECK(context_manifest_version IN (19, 20, 21))")
+                || !context_manifest_v100.contains("context_manifest_version = 21")
+            {
+                anyhow::bail!("v100 could not rebuild the ContextManifest v19/v20/v21 schema");
+            }
+            let manifest_columns = table_columns(&transaction, "context_manifest")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            transaction.execute(
+                r#"
+                UPDATE gather_item
+                SET status = 'cancelled', terminal_source = 'delivery',
+                    error_code = 'camp_attachment_view_v1_clean_break',
+                    terminal_resolution_source = 'migration',
+                    terminal_reason_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE gather_record
+                SET status = 'cancelled',
+                    cancellation_reason_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, cancelled_at = ?1, updated_at = ?1
+                WHERE status IN ('collecting', 'ready', 'completing')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery_attempt
+                SET status = 'failed', wait_condition = NULL,
+                    failure_code = 'camp_attachment_view_v1_clean_break',
+                    failure_detail_json = '{"reason":"physical_view_receipt_non_dispatchable"}',
+                    ended_at = ?1
+                WHERE status = 'attempting'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE message_delivery
+                SET status = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0
+                        THEN 'interrupted_before_dispatch'
+                        ELSE 'failed'
+                    END,
+                    dispatch_phase = 'terminal', wait_condition = NULL,
+                    active_dispatch_attempt_id = NULL,
+                    manual_intervention_required = CASE
+                        WHEN status = 'pending' AND dispatch_attempt_count = 0 THEN 1
+                        ELSE manual_intervention_required
+                    END,
+                    failure_code = 'camp_attachment_view_v1_clean_break',
+                    failure_detail_json = '{"reason":"physical_view_receipt_non_dispatchable"}',
+                    version = version + 1, ended_at = ?1, updated_at = ?1
+                WHERE status IN ('pending', 'running')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE runtime_input_delivery
+                SET status = 'delivery_unknown', resolved_at = NULL,
+                    last_error = 'input_delivery_outcome_unknown', updated_at = ?1
+                WHERE status = 'prepared'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_execution
+                SET status = 'unknown', unknown_disposition = 'active',
+                    effect_disposition = 'unknown', resolution_source = 'migration',
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    last_error_code = 'camp_attachment_view_v1_clean_break_after_dispatch',
+                    next_reconcile_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status = 'executing'
+                  AND dispatch_may_have_started_at IS NOT NULL
+                  AND agent_run_id IN (
+                      SELECT id FROM agent_run
+                      WHERE status IN ('queued', 'running', 'waiting')
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_attempt
+                SET outcome = 'unknown', ended_at = COALESCE(ended_at, ?1)
+                WHERE outcome IS NULL
+                  AND action_id IN (
+                      SELECT id FROM action_execution
+                      WHERE status = 'unknown'
+                        AND last_error_code = 'camp_attachment_view_v1_clean_break_after_dispatch'
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_execution
+                SET status = 'not_executed',
+                    not_executed_reason = 'camp_attachment_view_v1_clean_break',
+                    unknown_disposition = NULL,
+                    effect_disposition = 'none', ended_at = ?1,
+                    active_attempt_id = NULL, active_attempt_number = NULL,
+                    execution_lease_owner = NULL, execution_lease_expires_at = NULL,
+                    last_error_code = 'camp_attachment_view_v1_clean_break_before_dispatch',
+                    next_reconcile_at = NULL,
+                    version = version + 1, updated_at = ?1
+                WHERE (status = 'prepared'
+                       OR (status = 'executing' AND dispatch_may_have_started_at IS NULL))
+                  AND agent_run_id IN (
+                      SELECT id FROM agent_run
+                      WHERE status IN ('queued', 'running', 'waiting')
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE action_attempt
+                SET outcome = 'not_dispatched', ended_at = COALESCE(ended_at, ?1)
+                WHERE outcome IS NULL
+                  AND action_id IN (
+                      SELECT id FROM action_execution
+                      WHERE status = 'not_executed'
+                        AND not_executed_reason = 'camp_attachment_view_v1_clean_break'
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE approval
+                SET status = 'cancelled',
+                    decision_json = '{"reason":"camp_attachment_view_v1_clean_break"}',
+                    resolved_by_type = 'system', resolved_by_id = 'migration-100',
+                    resolution_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, resolved_at = ?1, updated_at = ?1
+                WHERE status = 'pending'
+                  AND action_id IN (
+                      SELECT id FROM action_execution
+                      WHERE agent_run_id IN (
+                          SELECT id FROM agent_run
+                          WHERE status IN ('queued', 'running', 'waiting')
+                      )
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE runtime_delivery_checkpoint
+                SET status = 'safely_closed', safely_closed_at = ?1,
+                    lease_owner = NULL, lease_expires_at = NULL,
+                    last_error = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('pending', 'delivering', 'failed')
+                  AND agent_run_id IN (
+                      SELECT id FROM agent_run
+                      WHERE status IN ('queued', 'running', 'waiting')
+                  )
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE agent_run
+                SET status = CASE
+                        WHEN EXISTS(
+                            SELECT 1 FROM runtime_input_delivery AS delivery
+                            WHERE delivery.agent_run_id = agent_run.id
+                              AND delivery.status IN ('accepted', 'delivery_unknown')
+                        ) OR EXISTS(
+                            SELECT 1 FROM action_execution AS action
+                            WHERE action.agent_run_id = agent_run.id
+                              AND action.status = 'unknown'
+                              AND action.effect_disposition = 'unknown'
+                        ) THEN 'failed'
+                        ELSE 'cancelled'
+                    END,
+                    ended_at = ?1,
+                    last_error_code = CASE
+                        WHEN EXISTS(
+                            SELECT 1 FROM runtime_input_delivery AS delivery
+                            WHERE delivery.agent_run_id = agent_run.id
+                              AND delivery.status = 'accepted'
+                        ) THEN 'accepted_input_outcome_unknown'
+                        WHEN EXISTS(
+                            SELECT 1 FROM runtime_input_delivery AS delivery
+                            WHERE delivery.agent_run_id = agent_run.id
+                              AND delivery.status = 'delivery_unknown'
+                        ) THEN 'input_delivery_outcome_unknown'
+                        WHEN EXISTS(
+                            SELECT 1 FROM action_execution AS action
+                            WHERE action.agent_run_id = agent_run.id
+                              AND action.status = 'unknown'
+                              AND action.effect_disposition = 'unknown'
+                        ) THEN 'accepted_input_outcome_unknown'
+                        ELSE 'camp_attachment_view_v1_clean_break'
+                    END,
+                    public_runtime_failure_json = NULL,
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    terminal_resolution_source = 'migration',
+                    terminal_reason_code = 'camp_attachment_view_v1_clean_break',
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('queued', 'running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = ?1,
+                    version = version + 1, updated_at = ?1
+                WHERE status IN ('running', 'waiting')
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE native_session_compaction_observer_lease
+                SET status = 'fenced', fenced_at = COALESCE(fenced_at, ?1),
+                    fence_reason = COALESCE(fence_reason, 'camp_attachment_view_v1_clean_break'),
+                    updated_at = ?1
+                WHERE status = 'active'
+                "#,
+                [&now],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1, updated_at = ?1
+                "#,
+                [&now],
+            )?;
+
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    catalog_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK(catalog_revision >= 0);
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    semantic_catalog_digest TEXT NOT NULL DEFAULT
+                        '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945';
+                ALTER TABLE camp_attachment_view_entry ADD COLUMN
+                    published_catalog_revision INTEGER NOT NULL DEFAULT 1
+                        CHECK(published_catalog_revision >= 1);
+                "#,
+            )?;
+            crate::camp_attachment_view::backfill_semantic_catalog_receipts_v100(&transaction)?;
+
+            transaction.execute_batch(&context_manifest_v100)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO context_manifest_v100({manifest_columns}) SELECT {manifest_columns} FROM context_manifest;"
+            ))?;
+            transaction.execute_batch(
+                r#"
+                DROP TRIGGER context_manifest_v20_only_insert;
+                DROP TRIGGER context_manifest_version_immutable;
+                DROP TRIGGER camp_attachment_view_camp_insert;
+                DROP INDEX IF EXISTS context_manifest_blob_idx;
+                DROP INDEX IF EXISTS context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v100 RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+
+                CREATE TRIGGER context_manifest_v21_only_insert
+                BEFORE INSERT ON context_manifest
+                WHEN NEW.context_manifest_version <> 21
+                BEGIN
+                    SELECT RAISE(ABORT, 'new ContextManifest must use v21');
+                END;
+
+                CREATE TRIGGER context_manifest_version_immutable
+                BEFORE UPDATE OF context_manifest_version, formatter_version,
+                                 run_facts_schema_version,
+                                 camp_attachment_view_receipt_version,
+                                 camp_attachment_view_receipt_json,
+                                 camp_attachment_view_receipt_digest
+                ON context_manifest
+                BEGIN
+                    SELECT RAISE(ABORT, 'ContextManifest version evidence is immutable');
+                END;
+
+                CREATE TRIGGER camp_attachment_view_camp_insert
+                AFTER INSERT ON camp
+                BEGIN
+                    INSERT INTO camp_attachment_view(
+                        camp_id, state, generation, root_relative_path,
+                        root_identity_digest, entry_count, aggregate_bytes,
+                        catalog_digest, catalog_revision, semantic_catalog_digest,
+                        active_operation_id, last_error_code,
+                        created_at, updated_at
+                    ) VALUES (
+                        NEW.id, 'ready', 1, 'camps/' || NEW.id || '/attachments',
+                        rovai_runtime_camp_files_root_identity_digest(),
+                        0, 0,
+                        '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+                        0,
+                        '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+                        NULL, NULL, datetime('now'), datetime('now')
+                    );
+                END;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.15', projection_schema_version = 55,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (100, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v100 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_single_camp_publication_v101(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE INDEX camp_attachment_view_open_publish_camp_idx
+                ON camp_attachment_view_operation(camp_id, status, created_at, id)
+                WHERE kind = 'publish'
+                  AND status NOT IN ('completed','rolled_back');
+
+            CREATE TRIGGER camp_attachment_view_single_open_publish_insert
+            BEFORE INSERT ON camp_attachment_view_operation
+            WHEN NEW.kind = 'publish'
+              AND NEW.status NOT IN ('completed','rolled_back')
+              AND EXISTS(
+                  SELECT 1 FROM camp_attachment_view_operation AS existing
+                  WHERE existing.camp_id = NEW.camp_id
+                    AND existing.kind = 'publish'
+                    AND existing.status NOT IN ('completed','rolled_back')
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'camp_attachment_view_busy');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.15', projection_schema_version = 56,
+                reset_reason = NULL, updated_at = datetime('now')
+            WHERE singleton = 1;
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (101, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn migrate_unified_attachment_publication_v102(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            let current_delivery_schema: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+                [],
+                |row| row.get(0),
+            )?;
+            let renamed_delivery_schema =
+                if current_delivery_schema.contains("CREATE TABLE \"message_delivery\"") {
+                    current_delivery_schema.replacen(
+                        "CREATE TABLE \"message_delivery\"",
+                        "CREATE TABLE message_delivery_v102",
+                        1,
+                    )
+                } else {
+                    current_delivery_schema.replacen(
+                        "CREATE TABLE message_delivery",
+                        "CREATE TABLE message_delivery_v102",
+                        1,
+                    )
+                };
+            let mut delivery_v102 = renamed_delivery_schema
+                .replace(
+                    "REFERENCES message_delivery(id)",
+                    "REFERENCES message_delivery_v102(id)",
+                )
+                .replacen(
+                    "'materialized', 'terminal'",
+                    "'materialized', 'projection_blocked', 'terminal'",
+                    1,
+                )
+                .replacen(
+                    "(dispatch_attempt_count = 0 AND dispatch_phase = 'never_attempted')",
+                    "(dispatch_attempt_count = 0 AND dispatch_phase IN ('never_attempted', 'projection_blocked'))\n                    OR (status = 'failed' AND dispatch_attempt_count = 0\n                        AND dispatch_phase = 'terminal'\n                        AND failure_code = 'attachment_projection_failed')",
+                    1,
+                );
+            let delivery_projection_anchor =
+                "                    target_conversation_id TEXT REFERENCES conversation(id),";
+            let projection_columns = r#"                    pre_dispatch_gate TEXT
+                        CHECK(pre_dispatch_gate IS NULL OR pre_dispatch_gate = 'attachment_projection'),
+                    projection_operation_id TEXT
+                        REFERENCES camp_attachment_view_operation(id),
+"#;
+            let projection_position = delivery_v102
+                .find(delivery_projection_anchor)
+                .context("v102 could not locate the Message Delivery projection seam")?;
+            delivery_v102.insert_str(projection_position, projection_columns);
+            if !delivery_v102.contains("CREATE TABLE message_delivery_v102")
+                || !delivery_v102.contains("'projection_blocked'")
+                || !delivery_v102.contains("pre_dispatch_gate")
+            {
+                anyhow::bail!("v102 could not rebuild the Message Delivery v5 schema");
+            }
+            let delivery_columns = table_columns(&transaction, "message_delivery")?
+                .into_iter()
+                .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+                .collect::<Vec<_>>()
+                .join(", ");
+
+            transaction.execute_batch(
+                r#"
+                ALTER TABLE message_attachment ADD COLUMN
+                    runtime_projection_state TEXT NOT NULL DEFAULT 'available'
+                    CHECK(runtime_projection_state IN (
+                        'pending','available','recovery_required','failed'
+                    ));
+                ALTER TABLE message_attachment ADD COLUMN
+                    publication_operation_id TEXT
+                        REFERENCES camp_attachment_view_operation(id);
+                ALTER TABLE message_attachment ADD COLUMN
+                    publication_semantic_revision INTEGER
+                        CHECK(publication_semantic_revision IS NULL
+                              OR publication_semantic_revision >= 1);
+
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    semantic_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK(semantic_revision >= 0);
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    resolved_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK(resolved_revision >= 0 AND resolved_revision <= semantic_revision);
+                ALTER TABLE camp_attachment_view ADD COLUMN
+                    resolution_digest TEXT NOT NULL DEFAULT
+                        '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945';
+
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    source_kind TEXT NOT NULL DEFAULT 'legacy'
+                        CHECK(source_kind IN ('legacy','composer','agent'));
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    camp_message_id TEXT REFERENCES camp_message(id);
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    semantic_revision INTEGER
+                        CHECK(semantic_revision IS NULL OR semantic_revision >= 1);
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    resolution_state TEXT NOT NULL DEFAULT 'unresolved'
+                        CHECK(resolution_state IN ('unresolved','available','failed'));
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    resolution_ledger_digest TEXT;
+                ALTER TABLE camp_attachment_view_operation ADD COLUMN
+                    terminal_failure_code TEXT;
+
+                CREATE TABLE camp_attachment_publication_resolution (
+                    camp_id TEXT NOT NULL REFERENCES camp(id) ON DELETE CASCADE,
+                    semantic_revision INTEGER NOT NULL CHECK(semantic_revision >= 1),
+                    operation_id TEXT REFERENCES camp_attachment_view_operation(id),
+                    outcome TEXT NOT NULL CHECK(outcome IN ('available','failed')),
+                    entry_digest TEXT,
+                    tombstone_digest TEXT,
+                    failure_code TEXT,
+                    resolved_at TEXT NOT NULL,
+                    PRIMARY KEY(camp_id, semantic_revision),
+                    CHECK(
+                        (outcome = 'available' AND entry_digest IS NOT NULL
+                         AND tombstone_digest IS NULL AND failure_code IS NULL)
+                        OR
+                        (outcome = 'failed' AND entry_digest IS NULL
+                         AND tombstone_digest IS NOT NULL AND failure_code IS NOT NULL)
+                    )
+                );
+                "#,
+            )?;
+
+            transaction.execute(
+                r#"
+                UPDATE camp_attachment_view
+                SET semantic_revision = catalog_revision,
+                    resolved_revision = catalog_revision,
+                    resolution_digest = semantic_catalog_digest
+                "#,
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                UPDATE camp_attachment_view_operation
+                SET resolution_state = CASE
+                        WHEN status IN ('completed','committed') THEN 'available'
+                        WHEN status = 'rolled_back' THEN 'failed'
+                        ELSE 'unresolved'
+                    END
+                "#,
+                [],
+            )?;
+            transaction.execute(
+                r#"
+                INSERT INTO camp_attachment_publication_resolution(
+                    camp_id, semantic_revision, operation_id, outcome,
+                    entry_digest, tombstone_digest, failure_code, resolved_at
+                )
+                SELECT camp_id, catalog_revision, NULL, 'available',
+                       semantic_catalog_digest, NULL, NULL, updated_at
+                FROM camp_attachment_view
+                WHERE catalog_revision > 0
+                "#,
+                [],
+            )?;
+
+            transaction.execute_batch(&delivery_v102)?;
+            transaction.execute_batch(&format!(
+                "INSERT INTO message_delivery_v102({delivery_columns}, pre_dispatch_gate, projection_operation_id) \
+                 SELECT {delivery_columns}, NULL, NULL FROM message_delivery;"
+            ))?;
+            transaction.execute_batch(
+                r#"
+                DROP TABLE message_delivery;
+                ALTER TABLE message_delivery_v102 RENAME TO message_delivery;
+
+                CREATE INDEX message_delivery_recipient_pending_idx
+                    ON message_delivery(camp_id, recipient_agent_id, queue_sequence)
+                    WHERE status = 'pending';
+                CREATE INDEX message_delivery_wait_condition_idx
+                    ON message_delivery(recipient_agent_id, wait_condition, queue_sequence)
+                    WHERE status = 'pending' AND wait_condition IS NOT NULL;
+                CREATE INDEX message_delivery_camp_turn_idx
+                    ON message_delivery(camp_turn_id, status, created_at);
+                CREATE INDEX message_delivery_message_idx
+                    ON message_delivery(message_id, recipient_canonical_position);
+                CREATE INDEX message_delivery_gather_idx
+                    ON message_delivery(gather_id, delivery_kind, status, created_at)
+                    WHERE gather_id IS NOT NULL;
+                CREATE INDEX message_delivery_gather_capture_source_idx
+                    ON message_delivery(
+                        gather_dispatch_delivery_id, source_agent_run_id,
+                        status, created_at
+                    )
+                    WHERE dispatch_disposition = 'gather_captured';
+                CREATE INDEX message_delivery_projection_gate_idx
+                    ON message_delivery(projection_operation_id, recipient_agent_id, queue_sequence)
+                    WHERE dispatch_phase = 'projection_blocked';
+
+                DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;
+                DROP INDEX IF EXISTS camp_attachment_view_open_publish_camp_idx;
+                CREATE UNIQUE INDEX camp_attachment_publication_revision_unique
+                    ON camp_attachment_view_operation(camp_id, semantic_revision)
+                    WHERE semantic_revision IS NOT NULL;
+                CREATE INDEX camp_attachment_publication_writer_intent_idx
+                    ON camp_attachment_view_operation(camp_id, semantic_revision, created_at, id)
+                    WHERE resolution_state = 'unresolved';
+                CREATE INDEX message_attachment_runtime_projection_idx
+                    ON message_attachment(camp_id, runtime_projection_state, created_at, id);
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.17', projection_schema_version = 57,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (102, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v102 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_trae_skill_delivery_group_v103(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE skill_group_assignment_v103 (
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE skill_projection_observation_v103 (
+                    execution_root TEXT NOT NULL,
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    entry_path TEXT NOT NULL,
+                    delivered_via_group_key TEXT CHECK(
+                        delivered_via_group_key IS NULL OR delivered_via_group_key IN (
+                            'codex', 'opencode', 'copilot', 'claude_compatible',
+                            'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae'
+                        )
+                    ),
+                    duplicate_visible INTEGER NOT NULL DEFAULT 0
+                        CHECK(duplicate_visible IN (0, 1)),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'ready', 'stale', 'shadowed', 'pending_removal', 'error'
+                    )),
+                    last_error_code TEXT,
+                    last_observed_at TEXT NOT NULL,
+                    operation_id TEXT CHECK(
+                        operation_id IS NULL OR length(operation_id) = 36
+                    ),
+                    entry_identity TEXT CHECK(
+                        entry_identity IS NULL OR length(entry_identity) = 49
+                    ),
+                    PRIMARY KEY(execution_root, group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+
+                INSERT INTO skill_group_assignment_v103(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                )
+                SELECT group_key, skill_id, revision_id, created_at, updated_at
+                FROM skill_group_assignment;
+
+                INSERT INTO skill_projection_observation_v103(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at, operation_id, entry_identity
+                )
+                SELECT execution_root, group_key, skill_id, revision_id, entry_path,
+                       delivered_via_group_key, duplicate_visible, state,
+                       last_error_code, last_observed_at, operation_id, entry_identity
+                FROM skill_projection_observation;
+
+                DROP TABLE skill_projection_observation;
+                DROP TABLE skill_group_assignment;
+                ALTER TABLE skill_group_assignment_v103 RENAME TO skill_group_assignment;
+                ALTER TABLE skill_projection_observation_v103
+                    RENAME TO skill_projection_observation;
+                CREATE INDEX skill_group_assignment_skill_idx
+                    ON skill_group_assignment(skill_id, group_key);
+                CREATE INDEX skill_projection_issue_idx
+                    ON skill_projection_observation(state, last_observed_at DESC);
+                CREATE UNIQUE INDEX skill_projection_operation_unique
+                    ON skill_projection_observation(operation_id)
+                    WHERE operation_id IS NOT NULL;
+
+                UPDATE skill
+                SET version = version + 1, updated_at = datetime('now')
+                WHERE current_revision_id IS NOT NULL
+                  AND lifecycle_status = 'active'
+                  AND (
+                        (origin = 'official' AND name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 9 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen'
+                              )
+                        )
+                  );
+
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                )
+                SELECT 'trae', skill.id, skill.current_revision_id,
+                       datetime('now'), datetime('now')
+                FROM skill
+                WHERE skill.current_revision_id IS NOT NULL
+                  AND skill.lifecycle_status = 'active'
+                  AND (
+                        (skill.origin = 'official' AND skill.name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 9 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen'
+                              )
+                        )
+                  );
+
+                UPDATE adapter_capability_snapshot AS snapshot
+                SET authentication_status = 'unknown',
+                    probe_status = 'light_ready',
+                    capabilities_json = '[]',
+                    protocols_json = '[]',
+                    model_catalog_json = '[]',
+                    observed_at = NULL,
+                    last_successful_probe_at = NULL,
+                    stale_at = NULL,
+                    last_error = 'trae_machine_ready_contract_changed',
+                    native_session_compatibility_key = NULL
+                WHERE snapshot.probe_status = 'ready'
+                  AND EXISTS (
+                      SELECT 1
+                      FROM adapter_installation AS installation
+                      WHERE installation.id = snapshot.installation_id
+                        AND installation.adapter_kind = 'trae-cn-cli'
+                  );
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.17', projection_schema_version = 58,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (103, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v103 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -14933,7 +17206,7 @@ impl Database {
                 result_blob_id TEXT,
                 result_digest TEXT,
                 effect_disposition TEXT CHECK(effect_disposition IN ('none', 'complete', 'partial', 'unknown')),
-                resolution_source TEXT CHECK(resolution_source IN ('executor', 'runtime', 'reconciler', 'user')),
+                resolution_source TEXT CHECK(resolution_source IN ('executor', 'runtime', 'reconciler', 'user', 'migration')),
                 resolution_evidence_refs_json TEXT NOT NULL DEFAULT '[]',
                 last_error_code TEXT,
                 next_reconcile_at TEXT,
@@ -16105,6 +18378,574 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
+    let has_v102: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 102)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v102 {
+        return;
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+
+    let current_delivery_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_delivery'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let mut source_delivery_schema = current_delivery_schema
+        .replacen(
+            "CREATE TABLE message_delivery",
+            "CREATE TABLE message_delivery_v101_source",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"message_delivery\"",
+            "CREATE TABLE message_delivery_v101_source",
+            1,
+        )
+        .replace(
+            "REFERENCES message_delivery(id)",
+            "REFERENCES message_delivery_v101_source(id)",
+        )
+        .replacen(
+            "'materialized', 'projection_blocked', 'terminal'",
+            "'materialized', 'terminal'",
+            1,
+        )
+        .replacen(
+            "(dispatch_attempt_count = 0 AND dispatch_phase IN ('never_attempted', 'projection_blocked'))\n                    OR (status = 'failed' AND dispatch_attempt_count = 0\n                        AND dispatch_phase = 'terminal'\n                        AND failure_code = 'attachment_projection_failed')",
+            "(dispatch_attempt_count = 0 AND dispatch_phase = 'never_attempted')",
+            1,
+        );
+    let projection_start = source_delivery_schema
+        .find("pre_dispatch_gate TEXT")
+        .and_then(|offset| source_delivery_schema[..offset].rfind('\n'))
+        .expect("v102 test downgrade should locate projection gate columns");
+    let projection_end = source_delivery_schema[projection_start..]
+        .find("target_conversation_id TEXT")
+        .map(|offset| projection_start + offset)
+        .expect("v102 test downgrade should locate the post-gate column");
+    let projection_end_line = source_delivery_schema[..projection_end]
+        .rfind('\n')
+        .map(|offset| offset + 1)
+        .expect("v102 test downgrade should retain post-gate indentation");
+    source_delivery_schema.replace_range(projection_start + 1..projection_end_line, "");
+    assert!(source_delivery_schema.contains("CREATE TABLE message_delivery_v101_source"));
+    assert!(!source_delivery_schema.contains("projection_blocked"));
+    assert!(!source_delivery_schema.contains("pre_dispatch_gate"));
+
+    connection.execute_batch(&source_delivery_schema).unwrap();
+    let delivery_columns = table_columns(connection, "message_delivery")
+        .unwrap()
+        .into_iter()
+        .filter(|column| {
+            !matches!(
+                column.as_str(),
+                "pre_dispatch_gate" | "projection_operation_id"
+            )
+        })
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    connection
+        .execute_batch(&format!(
+            r#"
+            INSERT INTO message_delivery_v101_source({delivery_columns})
+            SELECT {delivery_columns} FROM message_delivery;
+            DROP TABLE message_delivery;
+            ALTER TABLE message_delivery_v101_source RENAME TO message_delivery;
+
+            DROP TABLE camp_attachment_publication_resolution;
+            DROP INDEX IF EXISTS camp_attachment_publication_revision_unique;
+            DROP INDEX IF EXISTS camp_attachment_publication_writer_intent_idx;
+            DROP INDEX IF EXISTS message_attachment_runtime_projection_idx;
+
+            ALTER TABLE message_attachment DROP COLUMN publication_semantic_revision;
+            ALTER TABLE message_attachment DROP COLUMN publication_operation_id;
+            ALTER TABLE message_attachment DROP COLUMN runtime_projection_state;
+            ALTER TABLE camp_attachment_view DROP COLUMN resolution_digest;
+            ALTER TABLE camp_attachment_view DROP COLUMN resolved_revision;
+            ALTER TABLE camp_attachment_view DROP COLUMN semantic_revision;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN terminal_failure_code;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN resolution_ledger_digest;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN resolution_state;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN semantic_revision;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN camp_message_id;
+            ALTER TABLE camp_attachment_view_operation DROP COLUMN source_kind;
+
+            CREATE INDEX camp_attachment_view_open_publish_camp_idx
+                ON camp_attachment_view_operation(camp_id, status, created_at, id)
+                WHERE kind = 'publish'
+                  AND status NOT IN ('completed','rolled_back');
+            CREATE TRIGGER camp_attachment_view_single_open_publish_insert
+            BEFORE INSERT ON camp_attachment_view_operation
+            WHEN NEW.kind = 'publish'
+              AND NEW.status NOT IN ('completed','rolled_back')
+              AND EXISTS(
+                  SELECT 1 FROM camp_attachment_view_operation AS existing
+                  WHERE existing.camp_id = NEW.camp_id
+                    AND existing.kind = 'publish'
+                    AND existing.status NOT IN ('completed','rolled_back')
+              )
+            BEGIN
+                SELECT RAISE(ABORT, 'camp_attachment_view_busy');
+            END;
+
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.15', projection_schema_version = 56
+            WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 103;
+            DELETE FROM schema_migration WHERE version = 102;
+            PRAGMA foreign_keys = ON;
+            "#,
+        ))
+        .unwrap();
+}
+
+#[cfg(test)]
+fn downgrade_current_schema_to_v99_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v102_source_for_test(connection);
+    let has_v100: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 100)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v100 {
+        return;
+    }
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let current_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let renamed = current_schema
+        .replacen(
+            "CREATE TABLE context_manifest",
+            "CREATE TABLE context_manifest_v99_source",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"context_manifest\"",
+            "CREATE TABLE context_manifest_v99_source",
+            1,
+        )
+        .replacen(
+            "CHECK(context_manifest_version IN (19, 20, 21))",
+            "CHECK(context_manifest_version IN (19, 20))",
+            1,
+        )
+        .replacen(
+            "OR camp_attachment_view_receipt_version IN (1, 2))",
+            "OR camp_attachment_view_receipt_version = 1)",
+            1,
+        );
+    let pairing_start = renamed
+        .find("                    CHECK(\n                        (context_manifest_version = 19")
+        .unwrap();
+    let pairing_end = renamed[pairing_start..]
+        .find(
+            "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+        )
+        .map(|offset| pairing_start + offset)
+        .unwrap();
+    let mut v99_schema = renamed;
+    v99_schema.replace_range(
+        pairing_start..pairing_end,
+        r#"                    CHECK(
+                        (context_manifest_version = 19
+                         AND formatter_version = 20
+                         AND run_facts_schema_version = 1
+                         AND camp_attachment_view_receipt_version IS NULL
+                         AND camp_attachment_view_receipt_json IS NULL
+                         AND camp_attachment_view_receipt_digest IS NULL)
+                        OR
+                        (context_manifest_version = 20
+                         AND formatter_version = 21
+                         AND run_facts_schema_version = 2
+                         AND camp_attachment_view_receipt_version = 1
+                         AND camp_attachment_view_receipt_json IS NOT NULL
+                         AND camp_attachment_view_receipt_digest IS NOT NULL)
+                    ),
+"#,
+    );
+    connection.execute_batch(&v99_schema).unwrap();
+    let columns = table_columns(connection, "context_manifest")
+        .unwrap()
+        .into_iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    connection
+        .execute_batch(&format!(
+            r#"
+            INSERT INTO context_manifest_v99_source({columns})
+            SELECT {columns} FROM context_manifest WHERE context_manifest_version <> 21;
+            DROP TRIGGER context_manifest_v21_only_insert;
+            DROP TRIGGER IF EXISTS context_manifest_version_immutable;
+            DROP TRIGGER camp_attachment_view_camp_insert;
+            DROP INDEX context_manifest_blob_idx;
+            DROP INDEX context_manifest_bootstrap_idx;
+            DROP TABLE context_manifest;
+            ALTER TABLE context_manifest_v99_source RENAME TO context_manifest;
+            CREATE INDEX context_manifest_blob_idx
+                ON context_manifest(rendered_payload_blob_id);
+            CREATE INDEX context_manifest_bootstrap_idx
+                ON context_manifest(bootstrap_evidence_id);
+
+            CREATE TRIGGER context_manifest_v20_only_insert
+            BEFORE INSERT ON context_manifest
+            WHEN NEW.context_manifest_version <> 20
+            BEGIN
+                SELECT RAISE(ABORT, 'new ContextManifest must use v20');
+            END;
+            CREATE TRIGGER context_manifest_version_immutable
+            BEFORE UPDATE OF context_manifest_version, formatter_version,
+                             run_facts_schema_version,
+                             camp_attachment_view_receipt_version,
+                             camp_attachment_view_receipt_json,
+                             camp_attachment_view_receipt_digest
+            ON context_manifest
+            BEGIN
+                SELECT RAISE(ABORT, 'ContextManifest version evidence is immutable');
+            END;
+            CREATE TRIGGER camp_attachment_view_camp_insert
+            AFTER INSERT ON camp
+            BEGIN
+                INSERT INTO camp_attachment_view(
+                    camp_id, state, generation, root_relative_path,
+                    root_identity_digest, entry_count, aggregate_bytes,
+                    catalog_digest, active_operation_id, last_error_code,
+                    created_at, updated_at
+                ) VALUES (
+                    NEW.id, 'ready', 1, 'camps/' || NEW.id || '/attachments',
+                    rovai_runtime_camp_files_root_identity_digest(), 0, 0,
+                    '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945',
+                    NULL, NULL, datetime('now'), datetime('now')
+                );
+            END;
+
+            ALTER TABLE camp_attachment_view DROP COLUMN semantic_catalog_digest;
+            ALTER TABLE camp_attachment_view DROP COLUMN catalog_revision;
+            ALTER TABLE camp_attachment_view_entry DROP COLUMN published_catalog_revision;
+            DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;
+            DROP INDEX IF EXISTS camp_attachment_view_open_publish_camp_idx;
+            DELETE FROM schema_migration WHERE version = 101;
+            DELETE FROM schema_migration WHERE version = 100;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.15', projection_schema_version = 54
+            WHERE singleton = 1;
+            PRAGMA foreign_keys = ON;
+            "#,
+        ))
+        .unwrap();
+}
+
+#[cfg(test)]
+pub(crate) fn downgrade_current_schema_to_v98_source_for_test(connection: &Connection) {
+    let has_v100: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 100)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if has_v100 {
+        // v98 had neither semantic attachment receipts nor explicit ContextManifest
+        // versions. Preserve current v21 fixture rows long enough for the v98 table
+        // rebuild to strip those columns instead of letting the intermediate v99
+        // downgrade discard evidence that v99's schema cannot represent.
+        connection
+            .execute_batch(
+                r#"
+                DROP TRIGGER context_manifest_version_immutable;
+                UPDATE context_manifest
+                SET context_manifest_version = 20,
+                    camp_attachment_view_receipt_version = 1,
+                    camp_attachment_view_receipt_json = '{}',
+                    camp_attachment_view_receipt_digest =
+                        '0000000000000000000000000000000000000000000000000000000000000000'
+                WHERE context_manifest_version = 21;
+                "#,
+            )
+            .unwrap();
+    }
+    downgrade_current_schema_to_v99_source_for_test(connection);
+    connection
+        .execute_batch("PRAGMA foreign_keys = OFF;")
+        .unwrap();
+    let action_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'action_execution'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let current_action_constraint =
+        "resolution_source IN ('executor', 'runtime', 'reconciler', 'user', 'migration')";
+    if action_schema.contains(current_action_constraint) {
+        let dependent_action_triggers = connection
+            .prepare(
+                r#"
+                SELECT name, sql FROM sqlite_master
+                WHERE type = 'trigger' AND instr(sql, 'action_execution') > 0
+                ORDER BY name
+                "#,
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let v98_action_schema = action_schema
+            .replacen(
+                "CREATE TABLE action_execution",
+                "CREATE TABLE action_execution_v98_source",
+                1,
+            )
+            .replacen(
+                "CREATE TABLE \"action_execution\"",
+                "CREATE TABLE action_execution_v98_source",
+                1,
+            )
+            .replacen(
+                current_action_constraint,
+                "resolution_source IN ('executor', 'runtime', 'reconciler', 'user')",
+                1,
+            );
+        connection.execute_batch(&v98_action_schema).unwrap();
+        let action_columns = table_columns(connection, "action_execution")
+            .unwrap()
+            .into_iter()
+            .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        for (name, _) in &dependent_action_triggers {
+            connection
+                .execute_batch(&format!("DROP TRIGGER \"{}\";", name.replace('"', "\"\"")))
+                .unwrap();
+        }
+        connection
+            .execute_batch(&format!(
+                r#"
+                INSERT INTO action_execution_v98_source({action_columns})
+                SELECT {action_columns} FROM action_execution;
+                DROP INDEX IF EXISTS action_execution_dispatch_idx;
+                DROP INDEX IF EXISTS action_execution_reconcile_idx;
+                DROP TABLE action_execution;
+                ALTER TABLE action_execution_v98_source RENAME TO action_execution;
+                CREATE INDEX action_execution_dispatch_idx
+                    ON action_execution(status, policy_decision, next_dispatch_at, execute_before);
+                CREATE INDEX action_execution_reconcile_idx
+                    ON action_execution(status, unknown_disposition, next_reconcile_at);
+                "#,
+            ))
+            .unwrap();
+        for (_, sql) in dependent_action_triggers {
+            connection.execute_batch(&sql).unwrap();
+        }
+    }
+    let agent_run_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let current_terminal_source = "terminal_resolution_source IN ('runtime_terminal', 'migration')";
+    let current_terminal_reason = "'planned_shutdown_cancelled',\n                        'camp_attachment_view_v1_clean_break'\n                    )";
+    if agent_run_schema.contains(current_terminal_source)
+        && agent_run_schema.contains(current_terminal_reason)
+    {
+        let schema_objects = connection
+            .prepare(
+                r#"
+                SELECT type, name, sql FROM sqlite_master
+                WHERE sql IS NOT NULL
+                  AND (
+                      tbl_name = 'agent_run'
+                      OR (type = 'trigger' AND instr(sql, 'agent_run') > 0)
+                  )
+                  AND type IN ('index', 'trigger')
+                ORDER BY type, name
+                "#,
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        let v98_agent_run_schema = agent_run_schema
+            .replacen(
+                "CREATE TABLE agent_run",
+                "CREATE TABLE agent_run_v98_source",
+                1,
+            )
+            .replacen(
+                "CREATE TABLE \"agent_run\"",
+                "CREATE TABLE agent_run_v98_source",
+                1,
+            )
+            .replacen(
+                current_terminal_source,
+                "terminal_resolution_source = 'runtime_terminal'",
+                1,
+            )
+            .replacen(
+                current_terminal_reason,
+                "'planned_shutdown_cancelled'\n                    )",
+                1,
+            );
+        assert!(v98_agent_run_schema.contains("CREATE TABLE agent_run_v98_source"));
+        connection.execute_batch(&v98_agent_run_schema).unwrap();
+        let columns = table_columns(connection, "agent_run")
+            .unwrap()
+            .into_iter()
+            .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        for (object_type, name, _) in &schema_objects {
+            if object_type == "trigger" {
+                connection
+                    .execute_batch(&format!("DROP TRIGGER \"{}\";", name.replace('"', "\"\"")))
+                    .unwrap();
+            }
+        }
+        connection
+            .execute_batch(&format!(
+                r#"
+                INSERT INTO agent_run_v98_source({columns}) SELECT {columns} FROM agent_run;
+                DROP TABLE agent_run;
+                ALTER TABLE agent_run_v98_source RENAME TO agent_run;
+                "#,
+            ))
+            .unwrap();
+        for (_, _, sql) in schema_objects {
+            connection.execute_batch(&sql).unwrap();
+        }
+    }
+    let current_schema: String = connection
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let start = current_schema
+        .find("                    context_manifest_version INTEGER")
+        .expect("current ContextManifest must contain v20 evidence columns");
+    let end = current_schema[start..]
+        .find(
+            "                    CHECK(\n                        previous_accepted_public_boundary_sequence",
+        )
+        .map(|offset| start + offset)
+        .expect("current ContextManifest must contain its original table constraints");
+    let v98_schema = format!("{}{}", &current_schema[..start], &current_schema[end..])
+        .replacen(
+            "CREATE TABLE context_manifest",
+            "CREATE TABLE context_manifest_v98_source",
+            1,
+        )
+        .replacen(
+            "CREATE TABLE \"context_manifest\"",
+            "CREATE TABLE context_manifest_v98_source",
+            1,
+        )
+        .replace(
+            "CHECK(formatter_version IN (20, 21))",
+            "CHECK(formatter_version = 20)",
+        );
+    assert!(v98_schema.contains("CREATE TABLE context_manifest_v98_source"));
+    assert!(!v98_schema.contains("context_manifest_version"));
+    connection.execute_batch(&v98_schema).unwrap();
+    let retained_columns = table_columns(connection, "context_manifest")
+        .unwrap()
+        .into_iter()
+        .filter(|column| {
+            !matches!(
+                column.as_str(),
+                "context_manifest_version"
+                    | "run_facts_schema_version"
+                    | "camp_attachment_view_receipt_version"
+                    | "camp_attachment_view_receipt_json"
+                    | "camp_attachment_view_receipt_digest"
+            )
+        })
+        .collect::<Vec<_>>();
+    let destination_columns = retained_columns
+        .iter()
+        .map(|column| format!("\"{}\"", column.replace('"', "\"\"")))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let source_columns = retained_columns
+        .iter()
+        .map(|column| {
+            if column == "formatter_version" {
+                "20".to_string()
+            } else {
+                format!("\"{}\"", column.replace('"', "\"\""))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    connection
+        .execute_batch(&format!(
+            r#"
+            INSERT INTO context_manifest_v98_source({destination_columns})
+            SELECT {source_columns} FROM context_manifest;
+            DROP TRIGGER context_manifest_v20_only_insert;
+            DROP TRIGGER context_manifest_version_immutable;
+            DROP TRIGGER runtime_input_delivery_attachment_auth_insert;
+            DROP TRIGGER camp_attachment_view_camp_insert;
+            DROP INDEX context_manifest_blob_idx;
+            DROP INDEX context_manifest_bootstrap_idx;
+            DROP TABLE context_manifest;
+            ALTER TABLE context_manifest_v98_source RENAME TO context_manifest;
+            CREATE INDEX context_manifest_blob_idx
+                ON context_manifest(rendered_payload_blob_id);
+            CREATE INDEX context_manifest_bootstrap_idx
+                ON context_manifest(bootstrap_evidence_id);
+            ALTER TABLE runtime_input_delivery DROP COLUMN runtime_attachment_auth_receipt_version;
+            ALTER TABLE runtime_input_delivery DROP COLUMN runtime_attachment_auth_receipt_json;
+            ALTER TABLE runtime_input_delivery DROP COLUMN runtime_attachment_auth_receipt_digest;
+            ALTER TABLE runtime_input_delivery DROP COLUMN runtime_request_digest;
+            DROP TABLE camp_attachment_view_operation_entry;
+            DROP TABLE camp_attachment_view_operation;
+            DROP TABLE camp_attachment_view_entry;
+            DROP TABLE camp_attachment_view;
+            DELETE FROM schema_migration WHERE version = 99;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.15', projection_schema_version = 53
+            WHERE singleton = 1;
+            PRAGMA foreign_keys = ON;
+            "#
+        ))
+        .unwrap();
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -16190,6 +19031,12 @@ mod tests {
             v95: version >= 95,
             v96: version >= 96,
             v97: version >= 97,
+            v98: version >= 98,
+            v99: version >= 99,
+            v100: version >= 100,
+            v101: version >= 101,
+            v102: version >= 102,
+            v103: version >= 103,
         }
     }
 
@@ -16200,6 +19047,42 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                103,
+            ),
+            (
+                "v1.17/schema-57",
+                V103_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V103_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                102,
+            ),
+            (
+                "v1.15/schema-56",
+                V102_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V102_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                101,
+            ),
+            (
+                "v1.15/schema-55",
+                V101_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V101_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                100,
+            ),
+            (
+                "v1.15/schema-54",
+                V100_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V100_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                99,
+            ),
+            (
+                "v1.15/schema-53",
+                V099_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V099_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                98,
+            ),
+            (
+                "v1.15/schema-52",
+                V098_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V098_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 97,
             ),
             (
@@ -16348,7 +19231,7 @@ mod tests {
             );
         }
 
-        let current = migration_state_through(97);
+        let current = migration_state_through(103);
         let v092_source = migration_state_through(91);
         let mut missing_intermediate = current;
         missing_intermediate.v84 = false;
@@ -16418,7 +19301,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(97));
+        assert_eq!(state, migration_state_through(103));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -16446,6 +19329,7 @@ mod tests {
             Uuid::new_v4()
         ));
         let database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
         database
             .connection()
             .execute(
@@ -16466,6 +19350,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.10', projection_schema_version = 50
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 98;
                 DELETE FROM schema_migration WHERE version = 97;
                 DELETE FROM schema_migration WHERE version = 96;
                 PRAGMA foreign_keys = ON;
@@ -16532,6 +19417,7 @@ mod tests {
         let workspace = directory.join("workspace");
         std::fs::create_dir_all(&workspace).unwrap();
         let mut database = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v98_source_for_test(database.0.connection());
         let collaboration = crate::collaboration::CollaborationService::default();
         let camp = collaboration
             .create_camp(
@@ -16661,6 +19547,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.10', projection_schema_version = 49
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 98;
                 DELETE FROM schema_migration WHERE version = 97;
                 DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
@@ -16702,7 +19589,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(manifest_schema.contains("CHECK(formatter_version = 20)"));
+        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21))"));
         let conversation: (Option<String>, Option<String>, i64, i64) = reopened
             .connection()
             .query_row(
@@ -16748,12 +19635,1779 @@ mod tests {
     }
 
     #[test]
+    fn v98_invalidates_profile_v3_context_and_preserves_public_messages() {
+        let (mut database, source_directory) = crate::test_support::seeded_runtime_database();
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
+        let workspace = source_directory.join("v98-workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let collaboration = crate::collaboration::CollaborationService::default();
+        let camp = collaboration
+            .create_camp(
+                &mut database,
+                &crate::command::CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: crate::command::ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::CreateCampCommand::for_test(
+                        workspace.display().to_string(),
+                    ),
+                },
+            )
+            .unwrap();
+        let camp_id = camp.result.payload["campId"].as_str().unwrap().to_string();
+        let sent = collaboration
+            .send_test_camp_message(
+                &mut database,
+                &crate::command::CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: crate::command::ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: crate::collaboration::TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "Migration 98 must preserve this public message".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: crate::collaboration::TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(crate::collaboration::ExecutionRequest {
+                            task_id: None,
+                            purpose: "Exercise the Profile v4 clean break".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                },
+            )
+            .unwrap();
+        let run_id = sent.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let turn_id = sent.result.payload["campTurnId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let message_id = sent.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let (agent_id, conversation_id): (String, String) = database
+            .connection()
+            .query_row(
+                "SELECT conversation.agent_id, conversation.id FROM agent_run JOIN conversation ON conversation.id = agent_run.conversation_id WHERE agent_run.id = ?1",
+                [&run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE conversation
+                SET native_adapter_installation_id = (
+                        SELECT default_runtime_installation_id
+                        FROM agent_profile WHERE id = conversation.agent_id
+                    ),
+                    native_session_id = 'native-session-v98',
+                    native_binding_compatibility_digest = 'compatibility-v98',
+                    native_binding_id = ?2,
+                    native_binding_generation = 1,
+                    native_binding_secret_digest = 'secret-v98',
+                    last_accepted_public_boundary_sequence = 1,
+                    native_charter_digest = 'charter-v98',
+                    native_collaboration_state_digest = 'collaboration-v98',
+                    native_installation_generation = 1,
+                    native_session_compatibility_key = 'session-compatibility-v98'
+                WHERE id = ?1
+                "#,
+                params![&conversation_id, Uuid::new_v4().to_string()],
+            )
+            .unwrap();
+
+        let delivery_id = Uuid::new_v4().to_string();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO message_delivery(
+                    id, camp_id, camp_turn_id, message_id,
+                    recipient_agent_id, recipient_canonical_position,
+                    recipient_digest, message_body_digest,
+                    source_agent_run_id, edge_kind,
+                    target_parent_agent_run_id, return_to_agent_run_id,
+                    a2a_root_agent_run_id, a2a_depth,
+                    ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+                    frozen_snapshot_json, queue_sequence,
+                    status, dispatch_phase, wait_condition,
+                    dispatch_attempt_count, active_dispatch_attempt_id,
+                    scheduler_correlation_id, context_manifest_id,
+                    retry_generation, manual_intervention_required,
+                    version, created_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, 0,
+                    'sha256:recipient-v98', 'sha256:message-v98',
+                    ?6, 'forward', ?6, NULL, ?6, 1, '[]', '{}',
+                    '{"frozenContext":{"formatterVersion":20,"profileVersion":3}}',
+                    1, 'pending', 'never_attempted', NULL,
+                    0, NULL, NULL, NULL, 0, 0, 1, ?7, ?7
+                )
+                "#,
+                params![
+                    &delivery_id,
+                    &camp_id,
+                    &turn_id,
+                    &message_id,
+                    MUWA_AGENT_ID,
+                    &run_id,
+                    &now,
+                ],
+            )
+            .unwrap();
+        let gather_id = Uuid::new_v4().to_string();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO gather_record(
+                    id, camp_id, camp_turn_id, request_message_id,
+                    initiator_agent_id, initiator_agent_run_id,
+                    initiator_conversation_id, command_id, status,
+                    version, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                          'collecting', 1, ?9, ?9)
+                "#,
+                params![
+                    &gather_id,
+                    &camp_id,
+                    &turn_id,
+                    &message_id,
+                    &agent_id,
+                    &run_id,
+                    &conversation_id,
+                    Uuid::new_v4().to_string(),
+                    &now,
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO gather_item(
+                    dispatch_delivery_id, gather_id, recipient_agent_id,
+                    active_retry_generation, target_agent_run_id,
+                    status, terminal_source, fallback_summary,
+                    fallback_summary_digest, fallback_summary_original_bytes,
+                    fallback_summary_truncated, error_code,
+                    terminal_resolution_source, terminal_reason_code,
+                    version, created_at, started_at, ended_at, updated_at
+                ) VALUES (?1, ?2, ?3, 0, NULL, 'pending', NULL,
+                          NULL, NULL, NULL, 0, NULL, NULL, NULL,
+                          1, ?4, NULL, NULL, ?4)
+                "#,
+                params![&delivery_id, &gather_id, MUWA_AGENT_ID, &now],
+            )
+            .unwrap();
+        let message_count_before: i64 = database
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        let current_manifest_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let v97_manifest_schema = current_manifest_schema
+            .replacen(
+                "CREATE TABLE context_manifest",
+                "CREATE TABLE context_manifest_v97_test",
+                1,
+            )
+            .replacen(
+                "CREATE TABLE \"context_manifest\"",
+                "CREATE TABLE context_manifest_v97_test",
+                1,
+            )
+            .replace(
+                "CHECK(context_delivery_profile_version = 4)",
+                "CHECK(context_delivery_profile_version = 3)",
+            );
+        assert!(v97_manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
+        database
+            .connection()
+            .execute_batch(&v97_manifest_schema)
+            .unwrap();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP INDEX context_manifest_blob_idx;
+                DROP INDEX context_manifest_bootstrap_idx;
+                DROP TABLE context_manifest;
+                ALTER TABLE context_manifest_v97_test RENAME TO context_manifest;
+                CREATE INDEX context_manifest_blob_idx
+                    ON context_manifest(rendered_payload_blob_id);
+                CREATE INDEX context_manifest_bootstrap_idx
+                    ON context_manifest(bootstrap_evidence_id);
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.15', projection_schema_version = 52
+                WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 98;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .unwrap();
+        assert!(connection_has_admissible_data_contract(database.connection()).unwrap());
+        assert!(!connection_has_current_data_contract(database.connection()).unwrap());
+        drop(database);
+
+        let reopened = Database::open_with_data_contract_enforcement(&source_directory, true)
+            .expect("v1.15/schema-52 should migrate to Profile v4 without quarantine");
+        assert!(!source_directory.join("inactive-data-quarantine").exists());
+        let contract: (String, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 98)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            contract,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+            )
+        );
+        let manifest_schema: String = reopened
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(manifest_schema.contains("CHECK(formatter_version IN (20, 21))"));
+        assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 4)"));
+        assert!(!manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
+        let run: (String, Option<String>) = reopened
+            .connection()
+            .query_row(
+                "SELECT status, last_error_code FROM agent_run WHERE id = ?1",
+                [&run_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            run,
+            (
+                "failed".to_string(),
+                Some("context_delivery_profile_v4_required".to_string()),
+            )
+        );
+        let turn_status: String = reopened
+            .connection()
+            .query_row(
+                "SELECT status FROM camp_turn WHERE id = ?1",
+                [&turn_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(turn_status, "failed");
+        let delivery: (String, String, i64, String, Option<String>) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT status, failure_code, manual_intervention_required,
+                       frozen_snapshot_json, context_manifest_id
+                FROM message_delivery WHERE id = ?1
+                "#,
+                [&delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(delivery.0, "interrupted_before_dispatch");
+        assert_eq!(delivery.1, "context_delivery_profile_v4_required");
+        assert_eq!(delivery.2, 1);
+        assert_eq!(delivery.3, "{}");
+        assert_eq!(delivery.4, None);
+        let gather: (
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT gather_record.status, gather_record.cancellation_reason_code,
+                       gather_item.status, gather_item.error_code,
+                       gather_item.terminal_reason_code
+                FROM gather_record
+                JOIN gather_item ON gather_item.gather_id = gather_record.id
+                WHERE gather_record.id = ?1
+                "#,
+                [&gather_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(gather.0, "cancelled");
+        assert_eq!(
+            gather.1.as_deref(),
+            Some("context_delivery_profile_v4_required")
+        );
+        assert_eq!(gather.2, "cancelled");
+        assert_eq!(
+            gather.3.as_deref(),
+            Some("context_delivery_profile_v4_required")
+        );
+        assert_eq!(
+            gather.4.as_deref(),
+            Some("self_authored_recent_messages_clean_break")
+        );
+        let binding: (Option<String>, Option<String>, i64, i64) = reopened
+            .connection()
+            .query_row(
+                r#"
+                SELECT native_session_id, native_binding_id,
+                       native_binding_generation,
+                       last_accepted_public_boundary_sequence
+                FROM conversation WHERE id = ?1
+                "#,
+                [&conversation_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(binding, (None, None, 0, 0));
+        let message_count_after: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM camp_message WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(message_count_after, message_count_before);
+        for table in [
+            "bootstrap_redelivery_requirement",
+            "native_session_compaction_observation",
+            "native_session_compaction_observer_lease",
+            "native_session_resume_attempt",
+            "runtime_input_delivery",
+            "context_manifest_history_camp",
+            "context_manifest",
+            "native_session_bootstrap_evidence",
+        ] {
+            let count: i64 = reopened
+                .connection()
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, 0, "{table} should be empty after Migration 98");
+        }
+        let foreign_key_violations: i64 = reopened
+            .connection()
+            .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(foreign_key_violations, 0);
+        drop(reopened);
+
+        let reopened_again = Database::open(&source_directory).unwrap();
+        let marker_count: i64 = reopened_again
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM schema_migration WHERE version = 98",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(marker_count, 1);
+        drop(reopened_again);
+        std::fs::remove_dir_all(source_directory).unwrap();
+    }
+
+    #[test]
+    fn v100_backfills_stable_catalog_and_terminalizes_old_nonterminal_runs() {
+        use crate::{
+            camp_attachment::CampAttachmentStore,
+            camp_attachment_view::CampAttachmentViewStore,
+            collaboration::{
+                CollaborationService, CreateCampCommand, ExecutionRequest,
+                SendUserCampDraftCommand, TestCampMessageAddress, TestCampMessageCommand,
+            },
+            command::{ActorRef, CommandEnvelope},
+        };
+
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        let data_dir = database.directory().to_path_buf();
+        let workspace = data_dir.join("migration-100-workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let service = CollaborationService::default();
+        let created = service
+            .create_camp(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "migration-100".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CreateCampCommand::for_test(workspace.display().to_string()),
+                },
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let source = data_dir.join("migration-100.txt");
+        fs::write(&source, b"stable semantic attachment").unwrap();
+        let saved = attachment_store
+            .save_body(&mut database, &camp_id, "Publish before v100")
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                saved.revision,
+                &source,
+                "migration-100.txt",
+            )
+            .unwrap();
+        let view = CampAttachmentViewStore::for_test(&database).unwrap();
+        let command_id = Uuid::new_v4().to_string();
+        let publication = view
+            .stage_publication(
+                &mut database,
+                &attachment_store,
+                &camp_id,
+                &command_id,
+                draft.revision,
+            )
+            .unwrap()
+            .unwrap();
+        view.gate_publication(&mut database, &publication).unwrap();
+        view.promote_publication(&mut database, &publication)
+            .unwrap();
+        service
+            .send_user_camp_draft_with_publication(
+                &mut database,
+                &CommandEnvelope {
+                    command_id,
+                    actor: ActorRef::User {
+                        user_id: "migration-100".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendUserCampDraftCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: draft.revision,
+                        execution: None,
+                    },
+                },
+                Some(&publication.operation_id),
+            )
+            .unwrap();
+        view.complete_publication(&mut database, &publication.operation_id)
+            .unwrap();
+        let semantic_before: (i64, String) = database
+            .connection()
+            .query_row(
+                "SELECT catalog_revision, semantic_catalog_digest FROM camp_attachment_view WHERE camp_id = ?1",
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        let queued = service
+            .send_test_camp_message(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "migration-100".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "Old V1 receipt run".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: Some(ExecutionRequest {
+                            task_id: None,
+                            purpose: "Migration 100 clean break".to_string(),
+                            completion_role: "required".to_string(),
+                            budget: None,
+                        }),
+                    },
+                },
+            )
+            .unwrap();
+        let run_id = queued.result.payload["agentRunIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        downgrade_current_schema_to_v99_source_for_test(database.connection());
+        database.migrate_semantic_attachment_receipt_v100().unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            55
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT catalog_revision, semantic_catalog_digest FROM camp_attachment_view WHERE camp_id = ?1",
+                    [&camp_id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                )
+                .unwrap(),
+            semantic_before
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT published_catalog_revision FROM camp_attachment_view_entry WHERE camp_id = ?1",
+                    [&camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status || ':' || last_error_code FROM agent_run WHERE id = ?1",
+                    [&run_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "cancelled:camp_attachment_view_v1_clean_break"
+        );
+        let manifest_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'context_manifest'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(manifest_schema.contains("context_manifest_version IN (19, 20, 21)"));
+        assert!(manifest_schema.contains("camp_attachment_view_receipt_version = 2"));
+        database.migrate_single_camp_publication_v101().unwrap();
+        database
+            .migrate_unified_attachment_publication_v102()
+            .unwrap();
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+
+        view.remove_camp_view(&mut database, &camp_id).unwrap();
+        attachment_store.remove_camp(&camp_id).unwrap();
+        drop(view);
+    }
+
+    #[test]
+    fn v101_serializes_nonterminal_publish_operations_per_camp() {
+        let (mut database, _directory) = crate::test_support::seeded_runtime_database();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TRIGGER IF EXISTS camp_attachment_view_single_open_publish_insert;
+                DROP INDEX IF EXISTS camp_attachment_view_open_publish_camp_idx;
+                DELETE FROM schema_migration WHERE version = 101;
+                UPDATE rovai_data_contract
+                SET projection_schema_version = 55
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        database.migrate_single_camp_publication_v101().unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            56
+        );
+
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_attachment_view_operation(
+                    id, camp_id, kind, status, command_id, draft_revision,
+                    reserved_bytes, error_code, created_at, updated_at, completed_at
+                ) VALUES (?1, ?2, 'publish', 'copying', ?3, 1, 0, NULL, ?4, ?4, NULL)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    camp_id,
+                    Uuid::new_v4().to_string(),
+                    now
+                ],
+            )
+            .unwrap();
+        let error = database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO camp_attachment_view_operation(
+                    id, camp_id, kind, status, command_id, draft_revision,
+                    reserved_bytes, error_code, created_at, updated_at, completed_at
+                ) VALUES (?1, ?2, 'publish', 'copying', ?3, 1, 0, NULL, ?4, ?4, NULL)
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    camp_id,
+                    Uuid::new_v4().to_string(),
+                    now
+                ],
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("camp_attachment_view_busy"));
+    }
+
+    #[test]
+    fn v103_adds_trae_delivery_without_overriding_custom_skill_assignments() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v103-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO skill(
+                    id, name, origin, enabled, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES
+                    ('v103-full', 'v103-full', 'imported', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now')),
+                    ('v103-custom', 'v103-custom', 'imported', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now')),
+                    ('v103-required', 'cli-operations', 'official', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now'));
+
+                INSERT INTO skill_revision(
+                    id, skill_id, revision, name, description, source_type,
+                    source_metadata_json, content_digest, risk_summary_json,
+                    file_count, total_bytes, installed_at
+                ) VALUES
+                    ('v103-full-revision', 'v103-full', 1, 'v103-full', 'full',
+                     'local_folder', '{}', 'sha256:v103-full',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v103-custom-revision', 'v103-custom', 1, 'v103-custom', 'custom',
+                     'local_folder', '{}', 'sha256:v103-custom',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v103-required-revision', 'v103-required', 1, 'cli-operations', 'required',
+                     'bundled', '{}', 'sha256:v103-required',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now'));
+
+                UPDATE skill
+                SET current_revision_id = CASE id
+                    WHEN 'v103-full' THEN 'v103-full-revision'
+                    WHEN 'v103-custom' THEN 'v103-custom-revision'
+                    ELSE 'v103-required-revision'
+                END
+                WHERE id IN ('v103-full', 'v103-custom', 'v103-required');
+
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'v103-trae-installation', 'trae-cn-cli', '/tmp/v103-traecli', 'traecli',
+                    'managed_default', 'manual', 'default', 1,
+                    1, 'valid', 1, datetime('now'), datetime('now')
+                );
+                INSERT INTO adapter_capability_snapshot(
+                    installation_id, reported_version, executable_fingerprint,
+                    authentication_status, probe_status, permission_schema_version,
+                    permission_schema_digest, capabilities_json, protocols_json,
+                    model_catalog_json, permission_options_json, observed_at,
+                    last_attempted_at, last_successful_probe_at, stale_at, last_error,
+                    native_session_compatibility_key
+                ) VALUES (
+                    'v103-trae-installation', NULL, 'sha256:v103-trae',
+                    'authenticated', 'ready', 1,
+                    'sha256:v103-permissions',
+                    '["acp.initialize","session.new","model.dynamic_catalog","permission.mode_catalog"]',
+                    '["acp-v1"]', '[{"id":"GLM-5.2"}]', '[]', datetime('now'),
+                    datetime('now'), datetime('now'), NULL, NULL, 'legacy-trae-ready'
+                );
+
+                DELETE FROM schema_migration WHERE version = 103;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.17', projection_schema_version = 57
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for group in SkillDeliveryGroupKey::ALL
+            .into_iter()
+            .filter(|group| *group != SkillDeliveryGroupKey::Trae)
+        {
+            for (skill_id, revision_id) in [
+                ("v103-full", "v103-full-revision"),
+                ("v103-required", "v103-required-revision"),
+            ] {
+                database
+                    .connection()
+                    .execute(
+                        r#"
+                        INSERT INTO skill_group_assignment(
+                            group_key, skill_id, revision_id, created_at, updated_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?4)
+                        "#,
+                        params![group.as_str(), skill_id, revision_id, now],
+                    )
+                    .unwrap();
+            }
+        }
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                ) VALUES ('codex', 'v103-custom', 'v103-custom-revision', ?1, ?1)
+                "#,
+                [&now],
+            )
+            .unwrap();
+
+        database.migrate_trae_skill_delivery_group_v103().unwrap();
+
+        let migrated: (i64, i64, i64, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v103-full'),
+                    (SELECT version FROM skill WHERE id = 'v103-full'),
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v103-custom'),
+                    (SELECT version FROM skill WHERE id = 'v103-custom'),
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v103-required'),
+                    (SELECT version FROM skill WHERE id = 'v103-required')
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(migrated, (10, 2, 1, 1, 10, 2));
+        let downgraded_ready: (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = database
+            .connection()
+            .query_row(
+                r#"
+                    SELECT authentication_status, probe_status, capabilities_json,
+                           model_catalog_json, last_successful_probe_at,
+                           native_session_compatibility_key
+                    FROM adapter_capability_snapshot
+                    WHERE installation_id = 'v103-trae-installation'
+                    "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            downgraded_ready,
+            (
+                "unknown".to_string(),
+                "light_ready".to_string(),
+                "[]".to_string(),
+                "[]".to_string(),
+                None,
+                None,
+            )
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.17".to_string(), 58)
+        );
+        let assignment_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'skill_group_assignment'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(assignment_schema.contains("'trae'"));
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO skill_projection_observation(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at
+                ) VALUES (
+                    '/tmp/v103-root', 'trae', 'v103-full', 'v103-full-revision',
+                    '/tmp/v103-root/.trae/skills/v103-full', 'trae', 0, 'ready', NULL, ?1
+                )
+                "#,
+                [&now],
+            )
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v99_preserves_legacy_evidence_classifies_unfinished_work_and_backfills_only_published_attachments()
+     {
+        use crate::{
+            camp_attachment::CampAttachmentStore,
+            camp_attachment_view::CampAttachmentViewStore,
+            collaboration::{
+                CollaborationService, CreateCampCommand, ExecutionRequest, TestCampMessageAddress,
+                TestCampMessageCommand,
+            },
+            command::{ActorRef, CommandEnvelope},
+            context::{
+                CharterDeliveryMode, ContextMaterialization, ContextService,
+                DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest,
+            },
+            managed_blob::ManagedBlobStore,
+            runtime::{AgentRunWorkspace, ClaimAgentRunCommand, ExecutionRuntimeService},
+            team_tool::TeamToolService,
+        };
+
+        fn send_run(
+            database: &mut Database,
+            camp_id: &str,
+            agent_id: &str,
+            body: &str,
+        ) -> (String, String) {
+            let sent = CollaborationService::default()
+                .send_test_camp_message(
+                    database,
+                    &CommandEnvelope {
+                        command_id: Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "migration-99-test".to_string(),
+                        },
+                        camp_id: Some(camp_id.to_string()),
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: TestCampMessageCommand {
+                            camp_id: camp_id.to_string(),
+                            draft_revision: None,
+                            body: body.to_string(),
+                            prepared_attachment_ids: Vec::new(),
+                            address: TestCampMessageAddress::Explicit {
+                                agent_ids: vec![agent_id.to_string()],
+                            },
+                            reply_to_camp_message_id: None,
+                            execution: Some(ExecutionRequest {
+                                task_id: None,
+                                purpose: body.to_string(),
+                                completion_role: "required".to_string(),
+                                budget: None,
+                            }),
+                        },
+                    },
+                )
+                .unwrap();
+            (
+                sent.result.payload["agentRunIds"][0]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+                sent.result.payload["campMessageId"]
+                    .as_str()
+                    .unwrap()
+                    .to_string(),
+            )
+        }
+
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        let data_dir = database.directory().to_path_buf();
+        let workspace = data_dir.join("migration-99-workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let created = CollaborationService::default()
+            .create_camp(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "migration-99-test".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CreateCampCommand::for_test_with_members(
+                        workspace.display().to_string(),
+                        &["agent_1", "agent_2", "agent_3"],
+                        "agent_1",
+                    ),
+                },
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let view = CampAttachmentViewStore::for_test(&database).unwrap();
+        view.ensure_empty_camp_ready(&mut database, &camp_id)
+            .unwrap();
+
+        let (accepted_run_id, first_message_id) =
+            send_run(&mut database, &camp_id, "agent_1", "accepted legacy input");
+        let accepted_version: i64 = database
+            .connection()
+            .query_row(
+                "SELECT version FROM agent_run WHERE id = ?1",
+                [&accepted_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let claim = ExecutionRuntimeService::default()
+            .claim_agent_run(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::System {
+                        component_id: "agent-run-scheduler".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: ClaimAgentRunCommand {
+                        agent_run_id: accepted_run_id.clone(),
+                        expected_version: accepted_version,
+                        lease_owner: "migration-99-test".to_string(),
+                        lease_seconds: 60,
+                        workspace: Some(AgentRunWorkspace {
+                            execution_root: workspace.display().to_string(),
+                            access: "read_only".to_string(),
+                            isolation: "shared".to_string(),
+                        }),
+                        starting_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        let accepted_epoch = claim.result.payload["executionEpoch"].as_i64().unwrap();
+        TeamToolService::default()
+            .prepare_binding_credential(&mut database, &accepted_run_id, accepted_epoch, false)
+            .unwrap();
+        let materialized = ContextService
+            .materialize(
+                &mut database,
+                &ManagedBlobStore::new(&data_dir),
+                &MaterializeContextRequest {
+                    agent_run_id: &accepted_run_id,
+                    execution_epoch: accepted_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::NativeAppend,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap();
+        assert!(matches!(materialized, ContextMaterialization::Ready(_)));
+        let (delivery_unknown_run_id, _) = send_run(
+            &mut database,
+            &camp_id,
+            "agent_2",
+            "delivery outcome is unknown",
+        );
+        let (undispatched_run_id, _) = send_run(
+            &mut database,
+            &camp_id,
+            "agent_3",
+            "never handed to a Runtime",
+        );
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'waiting', execution_epoch = 1,
+                    started_at = COALESCE(started_at, ?2),
+                    wait_reason = 'runtime_delivery_recovery'
+                WHERE id = ?1
+                "#,
+                params![delivery_unknown_run_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let published_source = data_dir.join("migration-99-published.txt");
+        fs::write(&published_source, b"published authority bytes").unwrap();
+        let saved = attachment_store
+            .save_body(&mut database, &camp_id, "attachment migration")
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                saved.revision,
+                &published_source,
+                "published.txt",
+            )
+            .unwrap();
+        let published_attachment_id = draft.attachments[0].id.clone();
+        let private_source = data_dir.join("migration-99-private.txt");
+        fs::write(&private_source, b"draft-only authority bytes").unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                draft.revision,
+                &private_source,
+                "draft-only.txt",
+            )
+            .unwrap();
+        let private_attachment_id = draft.attachments[1].id.clone();
+        let now = chrono::Utc::now().to_rfc3339();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO message_attachment(
+                    id, camp_id, camp_message_id, conversation_message_id,
+                    position, display_name, media_type, byte_size,
+                    content_digest, storage_path, preview_kind,
+                    created_by_type, created_by_id, created_at
+                )
+                SELECT id, camp_id, ?2, NULL, 0, display_name, media_type,
+                       byte_size, content_digest, storage_path, preview_kind,
+                       'user', 'migration-99-test', ?3
+                FROM prepared_attachment WHERE id = ?1
+                "#,
+                params![published_attachment_id, first_message_id, now],
+            )
+            .unwrap();
+        let authority_paths = database
+            .connection()
+            .prepare("SELECT id, storage_path FROM prepared_attachment ORDER BY ordinal")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+
+        let manifest_id: String = database
+            .connection()
+            .query_row(
+                "SELECT id FROM context_manifest WHERE agent_run_id = ?1",
+                [&accepted_run_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        view.remove_camp_view(&mut database, &camp_id).unwrap();
+        drop(view);
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
+        let legacy_agent_run_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            legacy_agent_run_schema.contains("terminal_resolution_source = 'runtime_terminal'")
+        );
+        assert!(!legacy_agent_run_schema.contains("camp_attachment_view_v1_clean_break"));
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE conversation
+                SET native_binding_id = ?2,
+                    native_session_id = 'legacy-session-v99',
+                    native_binding_generation = 7,
+                    native_binding_compatibility_digest = 'legacy-compatibility-v99',
+                    native_binding_secret_digest = 'legacy-secret-v99'
+                WHERE id = (SELECT conversation_id FROM agent_run WHERE id = ?1)
+                "#,
+                params![accepted_run_id, Uuid::new_v4().to_string()],
+            )
+            .unwrap();
+        let legacy_manifest: (i64, String, String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT formatter_version, rendered_payload_blob_id,
+                       rendered_payload_digest, run_fact_payload_json,
+                       attachment_refs_json
+                FROM context_manifest WHERE id = ?1
+                "#,
+                [&manifest_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(legacy_manifest.0, 20);
+        let legacy_blob = ManagedBlobStore::new(&data_dir)
+            .read_bytes(&database, &legacy_manifest.1)
+            .unwrap();
+
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO runtime_input_delivery(
+                    id, agent_run_id, execution_epoch, context_manifest_id,
+                    native_binding_id, native_binding_generation,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
+                    status, native_input_id, prepared_at, accepted_at, updated_at
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, 'legacy-binding-v99', 7,
+                    1, ?5, 'accepted', 'legacy-input-v99', ?6, ?6, ?6
+                )
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    accepted_run_id,
+                    accepted_epoch,
+                    manifest_id,
+                    legacy_manifest.2,
+                    now,
+                ],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO runtime_input_delivery(
+                    id, agent_run_id, execution_epoch, context_manifest_id,
+                    native_binding_id, native_binding_generation,
+                    boundary_camp_message_sequence, dynamic_payload_digest,
+                    status, prepared_at, last_error, updated_at
+                ) VALUES (
+                    ?1, ?2, 1, ?3, 'legacy-binding-v99-unknown', 7,
+                    1, ?4, 'delivery_unknown', ?5,
+                    'transport outcome unknown', ?5
+                )
+                "#,
+                params![
+                    Uuid::new_v4().to_string(),
+                    delivery_unknown_run_id,
+                    manifest_id,
+                    legacy_manifest.2,
+                    now,
+                ],
+            )
+            .unwrap();
+
+        let prepared_action_id = Uuid::new_v4().to_string();
+        let dispatched_action_id = Uuid::new_v4().to_string();
+        for (action_id, status, dispatched_at) in [
+            (&prepared_action_id, "prepared", None),
+            (&dispatched_action_id, "executing", Some(now.as_str())),
+        ] {
+            database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO action_execution(
+                        id, agent_run_id, action_kind, action_schema_version,
+                        action_digest, digest_algorithm, canonicalization_version,
+                        canonical_input_json, input_completeness, action_summary,
+                        execution_authority, control_mode,
+                        source_agent_run_execution_epoch,
+                        policy_decision, policy_version,
+                        matched_policy_rule_ids_json, status,
+                        attempt_count, action_execution_epoch,
+                        dispatch_may_have_started_at,
+                        resolution_evidence_refs_json,
+                        version, created_at, started_at, updated_at
+                    ) VALUES (
+                        ?1, ?2, 'shell', '1', ?3, 'sha256', 'canonical-json-v1',
+                        '{}', 'complete', 'migration action',
+                        'runtime', 'intercepted', ?4,
+                        'allow', 'migration-test-v1', '[]', ?5,
+                        1, 1, ?6, '[]', 1, ?7, ?7, ?7
+                    )
+                    "#,
+                    params![
+                        action_id,
+                        accepted_run_id,
+                        format!("digest-{action_id}"),
+                        accepted_epoch,
+                        status,
+                        dispatched_at,
+                        now,
+                    ],
+                )
+                .unwrap();
+            database
+                .connection()
+                .execute(
+                    r#"
+                    INSERT INTO action_attempt(
+                        id, action_id, attempt_number, action_execution_epoch,
+                        lease_owner, dispatch_may_have_started_at,
+                        started_at, ended_at
+                    ) VALUES (?1, ?2, 1, 1, 'migration-test', ?3, ?4, NULL)
+                    "#,
+                    params![Uuid::new_v4().to_string(), action_id, dispatched_at, now],
+                )
+                .unwrap();
+        }
+
+        database.migrate_camp_attachment_view_v99().unwrap();
+        let contract: (String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 99)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v1.15".to_string(), 54, 1));
+        let migrated_agent_run_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            migrated_agent_run_schema
+                .contains("terminal_resolution_source IN ('runtime_terminal', 'migration')")
+        );
+        assert!(migrated_agent_run_schema.contains("camp_attachment_view_v1_clean_break"));
+        let run_outcomes = [
+            (&accepted_run_id, "failed", "accepted_input_outcome_unknown"),
+            (
+                &delivery_unknown_run_id,
+                "failed",
+                "input_delivery_outcome_unknown",
+            ),
+            (
+                &undispatched_run_id,
+                "cancelled",
+                "camp_attachment_view_v1_clean_break",
+            ),
+        ];
+        for (run_id, status, error_code) in run_outcomes {
+            let actual: (String, String, i64) = database
+                .connection()
+                .query_row(
+                    "SELECT status, last_error_code, manual_retry_allowed FROM agent_run WHERE id = ?1",
+                    [run_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap();
+            assert_eq!(actual, (status.to_string(), error_code.to_string(), 0));
+        }
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status FROM action_execution WHERE id = ?1",
+                    [&prepared_action_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "not_executed"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status || ':' || effect_disposition || ':' || resolution_source FROM action_execution WHERE id = ?1",
+                    [&dispatched_action_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "unknown:unknown:migration"
+        );
+        let attempt_outcomes = database
+            .connection()
+            .prepare("SELECT action_id, outcome FROM action_attempt ORDER BY action_id")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            attempt_outcomes.contains(&(prepared_action_id.clone(), "not_dispatched".to_string()))
+        );
+        assert!(attempt_outcomes.contains(&(dispatched_action_id.clone(), "unknown".to_string())));
+        let migrated_manifest: (i64, i64, String, String, String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT context_manifest_version, formatter_version,
+                       rendered_payload_blob_id, rendered_payload_digest,
+                       run_fact_payload_json, attachment_refs_json
+                FROM context_manifest WHERE id = ?1
+                "#,
+                [&manifest_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(migrated_manifest.0, 19);
+        assert_eq!(
+            migrated_manifest,
+            (
+                19,
+                legacy_manifest.0,
+                legacy_manifest.1.clone(),
+                legacy_manifest.2.clone(),
+                legacy_manifest.3.clone(),
+                legacy_manifest.4.clone(),
+            )
+        );
+        assert_eq!(
+            ManagedBlobStore::new(&data_dir)
+                .read_bytes(&database, &legacy_manifest.1)
+                .unwrap(),
+            legacy_blob
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT native_binding_generation FROM conversation WHERE id = (SELECT conversation_id FROM agent_run WHERE id = ?1)",
+                    [&accepted_run_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            7
+        );
+        for (attachment_id, expected_path) in &authority_paths {
+            assert_eq!(
+                database
+                    .connection()
+                    .query_row(
+                        "SELECT storage_path FROM prepared_attachment WHERE id = ?1",
+                        [attachment_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .unwrap(),
+                expected_path.as_str()
+            );
+        }
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT storage_path FROM message_attachment WHERE id = ?1",
+                    [&published_attachment_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            authority_paths
+                .iter()
+                .find(|(id, _)| id == &published_attachment_id)
+                .unwrap()
+                .1
+                .as_str()
+        );
+
+        database.migrate_semantic_attachment_receipt_v100().unwrap();
+        database.migrate_single_camp_publication_v101().unwrap();
+        database
+            .migrate_unified_attachment_publication_v102()
+            .unwrap();
+        let view = CampAttachmentViewStore::for_test(&database).unwrap();
+        view.reconcile(&mut database, &attachment_store).unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_attachment_view_entry WHERE camp_id = ?1",
+                    [&camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
+        );
+        assert!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM camp_attachment_view_entry WHERE attachment_id = ?1)",
+                    [&published_attachment_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap()
+        );
+        assert!(
+            !database
+                .connection()
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM camp_attachment_view_entry WHERE attachment_id = ?1)",
+                    [&private_attachment_id],
+                    |row| row.get::<_, bool>(0),
+                )
+                .unwrap()
+        );
+        view.remove_camp_view(&mut database, &camp_id).unwrap();
+        attachment_store.remove_camp(&camp_id).unwrap();
+        drop(view);
+    }
+
+    #[test]
+    fn v99_authority_preflight_failure_leaves_schema_and_evidence_untouched() {
+        use crate::{
+            camp_attachment::CampAttachmentStore,
+            collaboration::{
+                CollaborationService, CreateCampCommand, TestCampMessageAddress,
+                TestCampMessageCommand,
+            },
+            command::{ActorRef, CommandEnvelope},
+        };
+
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        let data_dir = database.directory().to_path_buf();
+        let workspace = data_dir.join("migration-99-preflight-workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let created = CollaborationService::default()
+            .create_camp(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "migration-99-preflight".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CreateCampCommand::for_test(workspace.display().to_string()),
+                },
+            )
+            .unwrap();
+        let camp_id = created.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let sent = CollaborationService::default()
+            .send_test_camp_message(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "migration-99-preflight".to_string(),
+                    },
+                    camp_id: Some(camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: TestCampMessageCommand {
+                        camp_id: camp_id.clone(),
+                        draft_revision: None,
+                        body: "published attachment authority".to_string(),
+                        prepared_attachment_ids: Vec::new(),
+                        address: TestCampMessageAddress::Default,
+                        reply_to_camp_message_id: None,
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        let message_id = sent.result.payload["campMessageId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let source = data_dir.join("migration-99-preflight.txt");
+        fs::write(&source, b"original authority bytes").unwrap();
+        let saved = attachment_store
+            .save_body(&mut database, &camp_id, "draft")
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &camp_id,
+                saved.revision,
+                &source,
+                "authority.txt",
+            )
+            .unwrap();
+        let attachment_id = draft.attachments[0].id.clone();
+        let authority_path = database
+            .connection()
+            .query_row(
+                "SELECT storage_path FROM prepared_attachment WHERE id = ?1",
+                [&attachment_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO message_attachment(
+                    id, camp_id, camp_message_id, conversation_message_id,
+                    position, display_name, media_type, byte_size,
+                    content_digest, storage_path, preview_kind,
+                    created_by_type, created_by_id, created_at
+                )
+                SELECT id, camp_id, ?2, NULL, 0, display_name, media_type,
+                       byte_size, content_digest, storage_path, preview_kind,
+                       'user', 'migration-99-preflight', ?3
+                FROM prepared_attachment WHERE id = ?1
+                "#,
+                params![attachment_id, message_id, chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
+        #[cfg(unix)]
+        fs::set_permissions(
+            &authority_path,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+        #[cfg(windows)]
+        {
+            let mut permissions = fs::metadata(&authority_path).unwrap().permissions();
+            permissions.set_readonly(false);
+            fs::set_permissions(&authority_path, permissions).unwrap();
+        }
+        fs::write(&authority_path, b"tampered authority bytes").unwrap();
+
+        let error = database
+            .migrate_camp_attachment_view_v99()
+            .expect_err("Authority drift must block Migration 99 before schema mutation");
+        assert!(format!("{error:#}").contains("camp_attachment_view_source_invalid"));
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            53
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 99",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'camp_attachment_view'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT storage_path FROM message_attachment WHERE id = ?1",
+                    [&attachment_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            authority_path
+        );
+        attachment_store.remove_camp(&camp_id).unwrap();
+    }
+
+    #[test]
+    fn v99_dirty_runtime_root_preflight_fails_before_schema_changes() {
+        let mut database = crate::test_support::seeded_runtime_database_owned();
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
+        fs::create_dir_all(database.runtime_camp_files_root()).unwrap();
+        fs::write(
+            database.runtime_camp_files_root().join("unknown-entry"),
+            b"must not be adopted",
+        )
+        .unwrap();
+
+        let error = database.migrate_camp_attachment_view_v99().unwrap_err();
+        assert!(format!("{error:#}").contains("Runtime Files Root contains unknown entry"));
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            53
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 99",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+        let agent_run_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_run'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(agent_run_schema.contains("terminal_resolution_source = 'runtime_terminal'"));
+        assert!(!agent_run_schema.contains("camp_attachment_view_v1_clean_break"));
+    }
+
+    #[test]
     fn v97_adds_windows_projection_operation_and_run_registration() {
         let directory = std::env::temp_dir().join(format!(
             "rovai-windows-skill-projection-v97-{}",
             Uuid::new_v4()
         ));
         let database = crate::test_support::fresh_schema_database_at(&directory);
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
         database
             .connection()
             .execute_batch(
@@ -16763,6 +21417,7 @@ mod tests {
                 DROP INDEX skill_projection_operation_unique;
                 ALTER TABLE skill_projection_observation DROP COLUMN operation_id;
                 ALTER TABLE skill_projection_observation DROP COLUMN entry_identity;
+                DELETE FROM schema_migration WHERE version = 98;
                 DELETE FROM schema_migration WHERE version = 97;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.13', projection_schema_version = 51
@@ -16786,7 +21441,14 @@ mod tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(state, ("v1.15".to_string(), 52, 1));
+        assert_eq!(
+            state,
+            (
+                CURRENT_DATA_CONTRACT_VERSION.to_string(),
+                CURRENT_PROJECTION_SCHEMA_VERSION,
+                1,
+            )
+        );
         assert_table_columns(
             reopened.connection(),
             "skill_projection_observation",
@@ -16972,6 +21634,7 @@ mod tests {
             Uuid::new_v4()
         ));
         let database = crate::test_support::fresh_schema_database_at(&directory);
+        downgrade_current_schema_to_v98_source_for_test(database.connection());
         database
             .connection()
             .execute_batch("PRAGMA foreign_keys = OFF;")
@@ -17030,6 +21693,7 @@ mod tests {
                 UPDATE rovai_data_contract
                 SET contract_version = 'v0.96', projection_schema_version = 45
                 WHERE singleton = 1;
+                DELETE FROM schema_migration WHERE version = 98;
                 DELETE FROM schema_migration WHERE version = 97;
                 DELETE FROM schema_migration WHERE version = 96;
                 DELETE FROM schema_migration WHERE version = 95;
@@ -21220,7 +25884,18 @@ mod tests {
                 "#,
             )
             .expect("legacy v51 fixture should be created");
-        let mut database = Database { connection, path };
+        let runtime_camp_files_root = path.parent().unwrap().join("runtime-files");
+        let runtime_camp_files_root_identity_digest =
+            crate::camp_attachment_view::runtime_root_identity_digest_for_database(
+                &runtime_camp_files_root,
+            )
+            .unwrap();
+        let mut database = Database {
+            connection,
+            path,
+            runtime_camp_files_root,
+            runtime_camp_files_root_identity_digest,
+        };
 
         database
             .migrate_agent_identity_v52()
@@ -21309,7 +25984,8 @@ mod tests {
         assert_migrations_applied(
             connection,
             &[
-                58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97,
+                58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
+                102,
             ],
         );
         assert_schema_objects(
@@ -21327,6 +26003,11 @@ mod tests {
                 "runtime_cost_reconciliation_bucket",
                 "runtime_usage_checkpoint",
                 "skill_projection_run_registration",
+                "camp_attachment_view",
+                "camp_attachment_view_entry",
+                "camp_attachment_view_operation",
+                "camp_attachment_view_operation_entry",
+                "camp_attachment_publication_resolution",
             ],
             true,
         );
@@ -21347,7 +26028,13 @@ mod tests {
         assert_schema_objects(
             connection,
             "index",
-            &["message_delivery_gather_capture_source_idx"],
+            &[
+                "message_delivery_gather_capture_source_idx",
+                "message_delivery_projection_gate_idx",
+                "camp_attachment_publication_revision_unique",
+                "camp_attachment_publication_writer_intent_idx",
+                "message_attachment_runtime_projection_idx",
+            ],
             true,
         );
 
@@ -21415,6 +26102,53 @@ mod tests {
             ],
             &[],
         );
+        assert_table_columns(
+            connection,
+            "camp_attachment_view",
+            &[
+                "catalog_revision",
+                "semantic_catalog_digest",
+                "semantic_revision",
+                "resolved_revision",
+                "resolution_digest",
+            ],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "camp_attachment_view_operation",
+            &[
+                "source_kind",
+                "camp_message_id",
+                "semantic_revision",
+                "resolution_state",
+                "resolution_ledger_digest",
+                "terminal_failure_code",
+            ],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "message_attachment",
+            &[
+                "runtime_projection_state",
+                "publication_operation_id",
+                "publication_semantic_revision",
+            ],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "message_delivery",
+            &["pre_dispatch_gate", "projection_operation_id"],
+            &[],
+        );
+        assert_table_columns(
+            connection,
+            "camp_attachment_view_entry",
+            &["published_catalog_revision"],
+            &[],
+        );
         assert_schema_objects(
             connection,
             "index",
@@ -21423,6 +26157,23 @@ mod tests {
                 "skill_projection_run_registration_root_idx",
             ],
             true,
+        );
+        assert_schema_objects(
+            connection,
+            "trigger",
+            &[
+                "context_manifest_v21_only_insert",
+                "context_manifest_version_immutable",
+                "runtime_input_delivery_attachment_auth_insert",
+                "camp_attachment_view_camp_insert",
+            ],
+            true,
+        );
+        assert_schema_objects(
+            connection,
+            "trigger",
+            &["context_manifest_v20_only_insert"],
+            false,
         );
 
         let manifest_schema: String = connection
@@ -21436,7 +26187,7 @@ mod tests {
         assert!(manifest_schema.contains("message_projection_audience TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_json TEXT NOT NULL"));
         assert!(manifest_schema.contains("a2a_guidance_evidence_digest TEXT NOT NULL"));
-        assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 3)"));
+        assert!(manifest_schema.contains("CHECK(context_delivery_profile_version = 4)"));
         assert!(manifest_schema.contains("collaboration_state_included INTEGER NOT NULL"));
         let delivery_schema: String = connection
             .query_row(

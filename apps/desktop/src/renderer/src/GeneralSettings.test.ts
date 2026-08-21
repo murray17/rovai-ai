@@ -53,9 +53,10 @@ describe('General settings', () => {
     const agents = [profile('agent-a', '洛可'), profile('agent-b', '沐瓦')]
     agents[1].runtimeReadiness.status = 'needs_attention'
     const preferences: GeneralPreferencesSnapshot = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       startupLocationMode: 'last_location',
       lastSettingsSection: 'general',
+      executionConsolePlacement: 'bottom',
       newConversationDefaults: {
         memberAgentIds: ['agent-a', 'agent-b'],
         defaultLeadAgentId: 'agent-a'

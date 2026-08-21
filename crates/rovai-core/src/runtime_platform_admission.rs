@@ -2,11 +2,12 @@ use serde::Serialize;
 
 use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 
-/// Immutable digest of the compatibility register revision that records the
-/// pre-existing macOS Product Runtime qualification baseline. New evidence
-/// must receive a new digest instead of reusing a human-readable label.
+/// Immutable digest of the current compatibility register revision. The
+/// register preserves the existing macOS qualification evidence and records
+/// the generation-fenced Attachment View fallback without claiming a new
+/// live-append Probe. Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:f9debfc9a9555ebd6a88f4a45d63bce9e4b5b437b7576f13ba856aac7ceb80a6";
+    "sha256:c60ef938c136cdc2da6f451c38eb975e2a5ed2ebae60901557fff52d0562f1c8";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

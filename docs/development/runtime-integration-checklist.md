@@ -2,7 +2,7 @@
 document_type: development-checklist
 authority: development-procedure
 status: proposed
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # Agent Runtime 接入与准入 Checklist
@@ -16,7 +16,7 @@ last_updated: 2026-08-19
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v9.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v16.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
 
@@ -39,10 +39,32 @@ last_updated: 2026-08-19
 - [ ] 空输出、stderr、非零退出、超时、格式变化和命令不存在均有明确结果。
 - [ ] 显式深检只检查用户选择的 Runtime；页面进入和成员选择不自动深检。
 - [ ] Discovery、Availability Check、Probe 和 AgentRun 使用不同 launch purpose。
+- [ ] Adapter/version/platform 的行为资格与当前机器 Runtime Ready 分开记录；行为 Smoke 不进入
+      Availability Check 或每次 Dispatch 的 Ready 前置条件。
+- [ ] Availability Check 写入 `ready` 与 Scheduler/Dispatch Preflight 接受 `ready` 使用同一证据合同和
+      同一校验函数；不得由较弱检查写入 `ready` 后跳过较强门禁。
 - [ ] stdout、stderr、临时目录和私有配置目录均有界且可清理。
 - [ ] Runtime 及其后代进程受进程组或 Job Object 管理。
 - [ ] completion、failure、cancel、Probe timeout 和 App shutdown 后无残留进程。
-- [ ] Host 复用键覆盖 executable、模型、权限、cwd、workspace access、MCP 和附件根。
+
+### 兼容性分层
+
+每个影响 Runtime 观察结果的输入都必须记录权威 value/digest 及加载阶段：`process_start`、`session_new`、
+`session_load`、`session_resume`、`per_prompt` 或 `live_watch`。加载阶段未知时使用更粗的兼容边界，不能假定
+Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为分类，不按字段名称猜测归属。
+
+- [ ] Host compatibility 覆盖进程启动时冻结的 executable identity/fingerprint、argv/env、cwd、workspace
+      access、process-level config、进程级权限、Built-in IPC、附件授权和其他 Host-scoped 输入。
+- [ ] Native Session compatibility 覆盖 `session/new`、`session/load` 或 `session/resume` 时加载的模型、mode、
+      MCP、Skill exposure、instruction/config 文件及其他 Session-scoped catalog。
+- [ ] Per-Prompt compatibility 覆盖当前 Prompt、结构化上下文、delivery/execution epoch 和其他逐输入资源；
+      每次 Prompt 前重新建立或核对，不能依赖旧 Session 快照。
+- [ ] 只有 Runtime/version/platform 的可复现证据证明 `live_watch` 后，相应资源才可不进入 Host 或 Native
+      Session compatibility。
+- [ ] ContextManifest 保存的 Skill exposure identity/digest 可以与建立当前 Native Session 时实际加载的
+      exposure 核对；只保存本次 Run 的 digest 不算完成 Session compatibility。
+- [ ] Session-scoped 资源改变且没有已验证 live refresh 时，禁止 `ReuseSameHostSession`；根据已确认能力选择
+      `session/load`、`session/new` 或重启 Host。新 Session 不等于必须停止 warm Host。
 
 ## 3. 协议、事件与 Command Output
 
@@ -56,7 +78,8 @@ last_updated: 2026-08-19
 - [ ] 命令无输出时仍保留安全的 command input，并可在 UI 中展开检查。
 - [ ] 只从明确公开字段提取 input/output，不从 Diff、私有日志或未知 metadata 猜测。
 - [ ] 未报告结构化 Tool 时，不补造 Tool、命令或文件活动。
-- [ ] Session ID 错误、缺少必要字段、非法 JSON、多 final 或未知 shape 均 fail closed。
+- [ ] Session ID 错误、缺少必要字段、非法 JSON、多 final 或未知标准协议 shape 均 fail closed；ACP 自定义
+      extension 按下方扩展规则处理。
 - [ ] ANSI、绝对路径、凭据、Prompt、文件正文和 Provider 私有字段不进入公开事件。
 
 ### ACP Runtime 额外验证
@@ -64,11 +87,63 @@ last_updated: 2026-08-19
 - [ ] `initialize.protocolVersion` 和必要 capability 均符合要求。
 - [ ] `session/new` 返回稳定且非空的 Session ID。
 - [ ] 模型、mode 和权限目录来自真实 Session 返回。
+- [ ] `session/new` response 到达后继续在明确的有界窗口内读取异步消息，并记录首条/末条消息相对
+      response 的到达时间、method、`sessionUpdate` variant、数量与字节数。
+- [ ] 标准 `available_commands_update`、config/mode/session-info catalog update、Idle usage metadata 和已知
+      Runtime lifecycle extension 可以在没有 Active Prompt 的 Session 合法到达；它们不进入 Prompt output，
+      也不把 Session 标记为 `ProtocolViolated`。
+- [ ] 方法名以 `_` 开头、结构合法、可归属当前 Host、声明为 Session-scoped 时通过 Session/epoch fencing，
+      且未突破数量/字节预算的未知自定义 notification 私有隔离或忽略：不进入 Prompt output，不生成 Action、
+      Usage、Final 或 Compaction，也不因 parser 尚未识别而把 Session 标记为 `ProtocolViolated`。
+- [ ] 方法名以 `_` 开头的未知自定义 request 返回 JSON-RPC `-32601 Method not found`，不自动毒化 Session。
+- [ ] 未知标准 method/`sessionUpdate` variant 不冒充 ACP extension；非法 JSON-RPC、错误 Session identity、
+      Host/Session/epoch fencing 失败、预算溢出、已知 Prompt output 在 Idle 到达或生命周期不变量被破坏时
+      继续 fail closed。“当前 parser 没有识别”只证明 Host 尚未分类，不证明 Runtime 没有提供能力。
 - [ ] Session 消息按 Host、Session、Prompt、delivery 和 execution epoch 隔离。
 - [ ] Prompt 完成后、旧 Run 和恢复 replay 的迟到事件不会进入当前 Run。
 - [ ] Permission request 的 option ID 可以被批准或拒绝并正确返回 Runtime。
 - [ ] cancel 返回明确终态，且取消后不会产生延迟副作用。
 - [ ] ACP 支持矩阵逐能力记录，不以“支持 ACP v1”代替行为验证。
+
+### ACP 完整消息面枚举
+
+每个阶段都必须分别保存脱敏 shape；不能只记录一次成功 Prompt：
+
+- [ ] `initialize` response 后、`session/new` 前的通知和 extension。
+- [ ] `session/new` response 后的有界异步 Session metadata/catalog。
+- [ ] 无 Active Prompt 的 Idle Session。
+- [ ] Prompt active 期间的 narration、thought、plan、tool、permission、usage、catalog 和 extension。
+- [ ] Prompt terminal response 后、下一 Prompt 前的迟到消息。
+- [ ] ACP v1 `session/load` response 前的 history replay、response 后迟到 replay 与稳定 quiet boundary。
+- [ ] ACP v1 `session/resume` response 前后的 metadata/extension；不得预设 conversation history replay。
+- [ ] `session/cancel` 后直到可靠 terminal/cleanup 的消息。
+
+每条消息必须先归入 `PromptOutput | SessionMetadata | LifecycleExtension | Replay | UnknownExtension | Unknown`，
+再决定公开、隔离、内部消费或 fail closed；“没有 Active Prompt”本身不是 metadata 违规依据。
+
+### 异步 catalog 状态
+
+- [ ] 首条 catalog update 到达前状态为 `Pending` / `Unknown`，不得提前冻结成权威空列表。
+- [ ] 每种 update 的 full replacement、partial update 或 delta 语义来自协议 schema 或当前
+      Runtime/version 的明确证据；没有证据时不合并、不猜测。
+- [ ] authoritative snapshot 按 Host identity、Native Session ID 和 Session generation 隔离；旧 Host、旧
+      Session 或旧 generation 的 update 不能覆盖当前状态。
+- [ ] 后续 update、`session/new`、`session/load`、`session/resume`、Session close 和 Host restart 均定义
+      snapshot 的替换、继承或清空规则。
+- [ ] `Runtime advertisement` 与 `Rovai product catalog consumption` 分开记录状态；安全路由并保存 wire
+      shape 不等于产品已经实现 command/Skill discovery、展示或调用。
+
+### Runtime command 与 Skill 分层
+
+- [ ] 文件投递层：分别验证受管项目级路径、用户级路径、同名优先级和 Rovai ownership/cleanup 边界。
+- [ ] Runtime 发现与加载层：用唯一名称/内容验证 cold Host、warm Host、新 Session、`session/load` 和既有
+      Idle Session 的扫描/刷新时机。
+- [ ] ACP 公开层：记录 `available_commands_update.availableCommands[]` 的 name/description/input shape，
+      分开 Runtime 内建 Slash Command 与由 Skill 转换出的 command。
+- [ ] `Runtime advertised command/Skill`、`Runtime 实际加载 Skill` 和 `Rovai managed Skill delivery` 是三个
+      独立结论；任一层 Verified 不自动升级其他层。
+- [ ] 不修改或覆盖用户现有全局 Skill；只有稳定、可清理且通过真实调用的项目级路径才能新增
+      `SkillDeliveryGroupKey`。
 
 ## 4. Session Continuation 与 Resume
 
@@ -79,11 +154,18 @@ last_updated: 2026-08-19
 - [ ] 不使用“最近 Session”、`AUTO`、模糊匹配或解析私有 Session 文件代替精确 ID。
 - [ ] Runtime 返回不同 Session ID 时 fail closed，不静默换绑。
 - [ ] Core 或 Host 重启后完成冷恢复验证。
-- [ ] History Restore replay 在当前 Prompt 前完全隔离。
-- [ ] replay 不产生公开文本、Action、Approval、Usage、Missing-Send 或副作用。
-- [ ] replay 使用有界的时间、事件数和字节数。
+- [ ] ACP v1 `session/load` 的 history replay 在 response 前发生并在当前 Prompt 前完全隔离；response 后只在
+      有界 grace/quiet boundary 内接收可证明的迟到 replay。
+- [ ] `session/load` replay 不产生公开文本、Action、Approval、Usage、Missing-Send 或副作用，并受时间、
+      事件数和字节数限制。
+- [ ] ACP v1 `session/resume` 不重放 conversation history，不进入 History Restore settling window；response
+      前后的合法 metadata/extension 按普通 Session 路由。
+- [ ] Runtime 若在 `session/resume` 下表现出非标准 replay，只作为该 Adapter/version/platform 的独立证据
+      和隔离策略记录，不升级为通用 ACP 语义。
 - [ ] 恢复失败时记录 continuity lost，停止失败 Host，再至多创建一个新 Session。
-- [ ] executable、模型、权限、cwd、workspace access 或 MCP 不兼容时禁止复用。
+- [ ] Host、Native Session 和 Per-Prompt compatibility 分别核对；任一目标层不兼容时禁止对应层复用。
+- [ ] Skill exposure 或其他 Session-scanned resource digest 改变后，旧 Native Session 不能直接复用；
+      `session/load`、`session/new` 或 Host restart 的选择必须与真实刷新证据一致。
 - [ ] Runtime 的 Session lock 和进程级配置行为已通过真实实验确认。
 - [ ] `new_only` 不得在产品文案中宣称支持 Resume。
 
@@ -135,7 +217,24 @@ last_updated: 2026-08-19
 - [ ] Eligibility 按 `Runtime × version × field` 冻结，并记录 Coverage。
 - [ ] 不持久化完整原始 Usage payload、Prompt、Output、Tool 内容或 Native ID。
 
-## 8. 必过真实 Smoke
+## 8. Compaction 信号
+
+- [ ] 先检查 Runtime advertised commands 中是否存在 `compact`、`compress` 或等价入口，并优先通过该入口
+      分别触发 manual 与 auto 场景。
+- [ ] 记录所有 ACP method、`sessionUpdate` variant、Runtime 私有 notification 与 Hook source；普通 assistant
+      文本不能充当 signal。
+- [ ] signal 必须提供至少一个明确、结构化且可稳定准入的 lifecycle edge，并把 phase 标为
+      `imminent_edge | started | completed`；同时具有明确 source、准入边界、稳定 occurrence ID 或其他可证明
+      的去重依据，才可接入 detector。
+- [ ] `imminent_edge` 允许后续 compaction 失败或取消，Bootstrap redelivery 必须保守、幂等且可重复；
+      `completed` 必须证明事件位于压缩完成之后，并处理重复发送、replay 和 Session resume。
+- [ ] Hook 必须在实际 Adapter launch 方式下可达；文档声明或普通 CLI/TUI 可达不等于 ACP Host 可达。
+- [ ] token/usage 下降、Session usage reset、恢复后历史变短、模型 summary 或正文提到压缩均不得推断
+      compaction。
+- [ ] 未观察到可靠信号时，Runtime structured-signal evidence 记为 `NotObserved`，Rovai detector implementation
+      记为 `Disabled`；只有上游明确不提供且证据充分时，Runtime evidence 才能写 `Unsupported`。
+
+## 9. 必过真实 Smoke
 
 | Case | 通过条件 |
 | --- | --- |
@@ -155,7 +254,7 @@ last_updated: 2026-08-19
 | Process cleanup | 所有退出路径都无残留进程 |
 | Usage（若支持） | 无重复累计，Token/Cache bucket 与原生事件一致 |
 
-## 9. 自动化与证据
+## 10. 自动化与证据
 
 - [ ] 为 parser、缺字段、重复事件、错误 ID 和输出边界增加确定性 Fixture。
 - [ ] 增加子进程持有 stdio 的进程树清理测试。
@@ -165,8 +264,13 @@ last_updated: 2026-08-19
 - [ ] 记录 Runtime 版本、模型、平台、fingerprint、日期和仓库 revision。
 - [ ] 一次实测不外推为其他版本、模型或账号均兼容。
 - [ ] 已知限制和未支持能力写入 [Runtime 兼容性清单](../runtime-compatibility.md)。
+- [ ] 每项 Runtime 能力证据使用且只使用一个状态：`Verified`（当前 Adapter/version/platform 有可复现行为
+      证据）、`DocumentationOnly`（只有上游文档）、`Unverified`（有候选 surface 但未完成行为证明）、
+      `NotObserved`（已按记录窗口/场景查找但未看到）、`Unsupported`（上游或结构化负证据证明不提供）。
+- [ ] 每项 Rovai 产品接入使用且只使用一个独立实现状态：`Implemented`、`Disabled`、`NotImplemented` 或
+      `Blocked`。不得用 `NotObserved / Unverified` 这类组合值，也不得以 Runtime evidence 代替产品实现状态。
 
-## 10. 硬性阻断条件
+## 11. 硬性阻断条件
 
 出现任一情况，不得标记为正式支持：
 
@@ -184,18 +288,191 @@ last_updated: 2026-08-19
 - [ ] Usage 缺少来源、scope、counter mode 或版本证据却被声明为支持。
 - [ ] Usage 重发会重复累计，或 Session cost 被误记为 Run cost。
 - [ ] 只有 `initialize` 或一次普通回复成功，没有完整行为 Smoke。
+- [ ] Availability Check 与 Dispatch Preflight 对同一 Adapter/version/fingerprint 使用不同 Ready requirements，
+      或 persisted `ready` 无法通过当前统一 Ready validator。
+- [ ] 合法 Idle Session metadata 被投影为 Prompt output、被标记为无 Prompt 泄漏或使 Session 协议违规。
+- [ ] Session-scanned resource 已改变，但旧 Native Session 仍被直接复用，或 ContextManifest exposure 与
+      Native Session 实际加载 exposure 没有可核对 identity/digest。
+- [ ] 结构合法、可归属当前 Host/Session 且在预算内的未知 ACP `_...` extension notification，仅因 parser
+      没有 handler 就使 Session 协议违规。
 
-## 11. 准入结论
+## 12. 最终汇报要求
+
+完成 Runtime 调研或接入后，必须按以下格式汇报。不得只写“支持 ACP”或“支持 Resume”。
+
+### 基本结论
 
 ```text
 Runtime:
 AdapterKind:
-Platform:
+Version / build:
+Platform / architecture:
 Admission: qualified | not_qualified | unsupported
-Evidence revision:
-Verified version/model/account:
-Supported capabilities:
-Known limitations:
-Reviewer:
-Date:
+一句话结论:
+最接近的现有 Adapter:
+```
+
+### 1. 接入形态
+
+Integration shape:
+
+- `codex_native_server`
+- `standard_acp_stdio`
+- `vendor_extended_acp`
+- `stream_json_cli`
+- `one_shot_cli`
+- `other`
+
+```text
+Exact launch command:
+Transport / protocol version:
+是否为常驻 Host:
+一个 Host 是否支持多个 Session:
+依赖的私有 method / notification:
+```
+
+必须明确说明：
+
+- 是类似 Codex 的专用原生 Server，还是通用 ACP；
+- 若为 ACP，是纯标准 ACP，还是依赖 Runtime 私有扩展。
+
+### 2. Session 生命周期
+
+| 能力 | 状态与精确语义 |
+| --- | --- |
+| `session/new` | |
+| 同 Host 复用原 Session | |
+| `session/resume` | 是否保持相同 Session ID；是否 replay |
+| `session/load` | 是否保持相同 Session ID；是否 replay |
+| Host/Core 重启后的恢复 | exact resume / history restore / new session |
+| 恢复失败策略 | fail closed / fresh session fallback |
+
+最终 Session 策略：
+
+- `warm_host`
+- `exact_resume`
+- `history_restore`
+- `new_only`
+
+不得把 `session/resume` 与 `session/load` 合并汇报。
+
+### 3. Host 与 Session 兼容性
+
+```text
+Host compatibility inputs:
+Native Session compatibility inputs:
+```
+
+分别说明以下变化后的处理方式：
+
+| 变化 | 复用原 Session | 新 Session | 重启 Host |
+| --- | --- | --- | --- |
+| Runtime version / executable | | | |
+| Model | | | |
+| Permission / mode | | | |
+| MCP | | | |
+| Skill exposure | | | |
+| cwd / workspace access | | | |
+| Attachment root | | | |
+
+同时说明每项资源在何时加载：
+
+`process_start | session_new | session_load | session_resume | per_prompt | live_watch`
+
+### 4. Ready 语义
+
+```text
+Machine Ready requirements:
+AvailabilityCheck 与 Dispatch 是否使用同一 validator:
+AvailabilityCheck 是否发送模型 Prompt:
+DispatchPreflight 是否发送模型 Prompt:
+Ready 的失效条件:
+主要启动耗时来源:
+```
+
+### 5. 核心能力
+
+每项同时填写：
+
+- Runtime evidence：`Verified | DocumentationOnly | Unverified | NotObserved | Unsupported`
+- Rovai implementation：`Implemented | Disabled | NotImplemented | Blocked`
+
+| 能力 | Runtime evidence | Rovai implementation | 边界说明 |
+| --- | --- | --- | --- |
+| Dynamic model catalog | | | |
+| Permission / mode catalog | | | |
+| Structured Tool lifecycle | | | |
+| Approval allow / deny | | | |
+| Cancellation | | | |
+| Reliable final boundary | | | |
+| External MCP | | | |
+| Rovai managed Skill | | | |
+| Runtime advertised commands | | | |
+| Compaction signal | | | |
+| Usage / Token / Cache / Cost | | | |
+
+### 6. Skill 与异步 Catalog
+
+```text
+Managed Skill 项目路径:
+其他 Runtime 扫描路径:
+Skill 扫描或刷新时机:
+既有 Idle Session 是否刷新:
+新 Session 是否刷新:
+session/load 是否刷新:
+available_commands_update 是否存在:
+首条 update 到达时间:
+update 是 full replacement 还是 delta:
+```
+
+### 7. Compaction
+
+```text
+是否确实触发过压缩:
+Manual trigger:
+Automatic trigger:
+结构化 signal:
+Signal phase: imminent_edge | started | completed | none
+Occurrence / 去重依据:
+实际启动方式下 Hook 是否可达:
+Rovai detector: BestEffort | Disabled
+```
+
+必须区分：
+
+- Runtime 是否真的发生压缩；
+- Runtime 是否公开结构化生命周期信号；
+- Rovai 是否已经实现 detector。
+
+### 8. Windows 平台边界
+
+Install form:
+
+- native `.exe`
+- npm launcher
+- `.cmd` / `.bat`
+- PowerShell script
+- WSL only
+- bundled executable
+
+```text
+实际启动的文件:
+支持的 Windows 版本:
+支持的架构:
+Native Windows 或 WSL:
+认证存储位置:
+进程树清理方式:
+已知 Windows 限制:
+```
+
+### 最终决定
+
+```text
+Qualified capabilities:
+Disabled capabilities:
+Unverified capabilities:
+Required code changes:
+Required document changes:
+Blocking issues:
+Recommended admission decision:
 ```

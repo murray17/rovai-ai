@@ -19,6 +19,8 @@ use crate::{
         ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
         AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
         TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
+        trae_static_permission_options, validate_machine_ready_snapshot,
+        validate_trae_machine_ready_evidence,
     },
     collaboration::end_camp_membership,
     command::{
@@ -142,7 +144,7 @@ impl AdapterKind {
             Self::QoderCli => "Qoder",
             Self::CodebuddyCli => "CodeBuddy",
             Self::QwenCode => "Qwen Code",
-            Self::TraeCnCli => "TRAE CLI（中国企业版）",
+            Self::TraeCnCli => "TRAE CLI",
             Self::AntigravityApp => "Antigravity",
         }
     }
@@ -1316,6 +1318,21 @@ impl AgentProfileService {
                 }),
             )));
         }
+        if runtime.adapter_kind == AdapterKind::TraeCnCli
+            && let Err(error) = validate_trae_machine_ready_evidence(
+                runtime.reported_version.as_deref(),
+                Some(&runtime.executable_fingerprint),
+                &runtime.capabilities,
+            )
+        {
+            return Ok(Some(runtime_blocker(
+                "runtime_probe_required",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "detail": error.to_string(),
+                }),
+            )));
+        }
         Ok(None)
     }
 
@@ -1427,6 +1444,7 @@ impl AgentProfileService {
         validate_installation(&verified.executable_path, &verified.auth_scope)?;
         validate_command_name(&verified.command_name)?;
         validate_snapshot(&verified.snapshot)?;
+        validate_machine_ready_snapshot(verified.adapter_kind, &verified.snapshot)?;
         if verified.snapshot.probe_status != "ready"
             || verified.snapshot.executable_fingerprint.is_none()
         {
@@ -1437,6 +1455,9 @@ impl AgentProfileService {
         }
         let executable_identity =
             observe_executable_file_identity(Path::new(&verified.executable_path)).ok();
+        if verified.adapter_kind == AdapterKind::TraeCnCli && executable_identity.is_none() {
+            anyhow::bail!("TRAE machine Ready requires the current executable identity");
+        }
 
         let transaction = database.connection_mut().transaction()?;
         let existing = transaction
@@ -1608,7 +1629,9 @@ impl AgentProfileService {
                 r#"
                 SELECT installation.id, installation.executable_path,
                        snapshot.executable_fingerprint, snapshot.probe_status,
-                       snapshot.permission_schema_digest
+                       snapshot.permission_schema_version,
+                       snapshot.permission_schema_digest,
+                       snapshot.permission_options_json
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
@@ -1623,7 +1646,9 @@ impl AgentProfileService {
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, Option<String>>(3)?,
-                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<String>>(6)?,
                     ))
                 },
             )
@@ -1636,7 +1661,16 @@ impl AgentProfileService {
             previous_fingerprint,
             identity_changed,
             preserve_existing,
-        ) = if let Some((id, path, fingerprint, probe_status, permission_schema_digest)) = existing
+            normalize_legacy_trae_schema,
+        ) = if let Some((
+            id,
+            path,
+            fingerprint,
+            probe_status,
+            permission_schema_version,
+            permission_schema_digest,
+            permission_options_json,
+        )) = existing
         {
             let identity_changed =
                 path != discovered.executable_path || fingerprint.as_deref() != next_fingerprint;
@@ -1666,14 +1700,40 @@ impl AgentProfileService {
                     now,
                 ],
             )?;
+            let schema_matches = permission_schema_digest.as_deref()
+                == Some(discovered.snapshot.permission_schema_digest.as_str());
+            let normalize_legacy_trae_schema = !schema_matches
+                && discovered.adapter_kind == AdapterKind::TraeCnCli
+                && probe_status.as_deref() == Some("ready")
+                && match (
+                    permission_schema_version,
+                    permission_schema_digest.as_deref(),
+                    permission_options_json.as_deref(),
+                ) {
+                    (Some(version), Some(digest), Some(options_json)) => {
+                        legacy_trae_permission_schema_can_normalize(
+                            version,
+                            digest,
+                            options_json,
+                            &discovered.snapshot,
+                        )?
+                    }
+                    _ => false,
+                };
             let preserve_existing = !identity_changed
-                && permission_schema_digest.as_deref()
-                    == Some(discovered.snapshot.permission_schema_digest.as_str())
+                && (schema_matches || normalize_legacy_trae_schema)
                 && (probe_status.as_deref() == Some("ready")
                     || (probe_status.as_deref() == Some("light_ready")
                         && discovered.snapshot.probe_status == "light_failed"
                         && executable_is_usable));
-            (id, path, fingerprint, identity_changed, preserve_existing)
+            (
+                id,
+                path,
+                fingerprint,
+                identity_changed,
+                preserve_existing,
+                normalize_legacy_trae_schema,
+            )
         } else {
             let id = format!("adapter-installation-{}", Uuid::new_v4());
             transaction.execute(
@@ -1697,7 +1757,7 @@ impl AgentProfileService {
                     now,
                 ],
             )?;
-            (id, String::new(), None, false, false)
+            (id, String::new(), None, false, false, false)
         };
 
         if !preserve_existing {
@@ -1705,6 +1765,18 @@ impl AgentProfileService {
                 &transaction,
                 &installation_id,
                 &discovered.snapshot,
+            )?;
+        } else if normalize_legacy_trae_schema {
+            transaction.execute(
+                r#"
+                UPDATE adapter_capability_snapshot
+                SET permission_schema_digest = ?2
+                WHERE installation_id = ?1
+                "#,
+                params![
+                    installation_id,
+                    discovered.snapshot.permission_schema_digest,
+                ],
             )?;
         }
         if let (Some(identity), Some(fingerprint)) =
@@ -2624,8 +2696,16 @@ impl AgentProfileService {
             if version != envelope.payload.expected_installation_version {
                 return Ok(version_conflict(version));
             }
+            let adapter_kind = AdapterKind::from_str(&adapter_kind)?;
+            validate_machine_ready_snapshot(adapter_kind, &envelope.payload.snapshot)?;
+            if adapter_kind == AdapterKind::TraeCnCli
+                && envelope.payload.snapshot.probe_status == "ready"
+                && executable_identity.is_none()
+            {
+                anyhow::bail!("TRAE machine Ready requires the current executable identity");
+            }
             if let Some(failure) = envelope.payload.failure.as_ref()
-                && failure.runtime_kind.as_str() != adapter_kind
+                && failure.runtime_kind != adapter_kind
             {
                 anyhow::bail!("public Runtime failure kind must match Adapter installation");
             }
@@ -4659,6 +4739,51 @@ fn validate_permission_descriptors(descriptors: &[PermissionOptionDescriptor]) -
     Ok(())
 }
 
+fn legacy_trae_permission_schema_can_normalize(
+    previous_schema_version: i64,
+    previous_schema_digest: &str,
+    previous_options_json: &str,
+    current_static_snapshot: &AdapterCapabilitySnapshot,
+) -> Result<bool> {
+    if previous_schema_version != current_static_snapshot.permission_schema_version {
+        return Ok(false);
+    }
+    let static_options = trae_static_permission_options();
+    let static_digest = canonical_json_digest(&serde_json::to_value(&static_options)?)?;
+    if current_static_snapshot.permission_schema_digest != static_digest {
+        return Ok(false);
+    }
+    let Ok(legacy_options) =
+        serde_json::from_str::<Vec<PermissionOptionDescriptor>>(previous_options_json)
+    else {
+        return Ok(false);
+    };
+    if validate_permission_descriptors(&legacy_options).is_err()
+        || canonical_json_digest(&serde_json::to_value(&legacy_options)?)? != previous_schema_digest
+        || legacy_options.len() != static_options.len()
+    {
+        return Ok(false);
+    }
+    Ok(static_options.iter().all(|expected| {
+        legacy_options.iter().any(|candidate| {
+            candidate.key == expected.key
+                && candidate.value_type == expected.value_type
+                && candidate.recommended_value == expected.recommended_value
+                && candidate.scope == expected.scope
+                && candidate.risk == expected.risk
+                && candidate.supported == expected.supported
+                && candidate.required == expected.required
+                && candidate.unsupported_reason == expected.unsupported_reason
+                && expected.choices.iter().all(|expected_choice| {
+                    candidate
+                        .choices
+                        .iter()
+                        .any(|choice| choice.value == expected_choice.value)
+                })
+        })
+    }))
+}
+
 fn profile_display_name_exists(
     transaction: &Transaction<'_>,
     display_name: &str,
@@ -6048,6 +6173,8 @@ mod slow_tests {
         let service = AgentProfileService::default();
         let executable_path = test_executable_path(&directory, "traecli");
         std::fs::write(&executable_path, b"static-trae-fixture").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
         let fingerprint = "sha256:trae-static".to_string();
         let observed_at = chrono::Utc::now().to_rfc3339();
         let static_snapshot = AgentRuntimeAdapterRegistry::default()
@@ -6133,10 +6260,11 @@ mod slow_tests {
             .expect("light-ready Runtime must run Dispatch Preflight before execution");
         assert_eq!(blocker.code, "runtime_probe_required");
 
-        let live_snapshot = AgentRuntimeAdapterRegistry::default()
+        let deep_probe_at = chrono::Utc::now() - chrono::Duration::hours(2);
+        let mut live_snapshot = AgentRuntimeAdapterRegistry::default()
             .trae_live_session_capability_snapshot(
-                None,
-                fingerprint,
+                Some("traecli 0.120.52".to_string()),
+                fingerprint.clone(),
                 json!({
                     "protocolVersion": 1,
                     "agentCapabilities": {"loadSession": true}
@@ -6162,17 +6290,26 @@ mod slow_tests {
                         ]
                     }
                 }),
-                chrono::Utc::now().to_rfc3339(),
+                deep_probe_at.to_rfc3339(),
             )
             .unwrap();
-        assert_eq!(live_snapshot.reported_version, None);
+        assert_eq!(
+            live_snapshot.reported_version.as_deref(),
+            Some("traecli 0.120.52")
+        );
+        // v1.03 deep probes digested the Session-advertised descriptors themselves. An upgrade
+        // must recognize that exact legacy format without treating it as current schema drift.
+        live_snapshot.permission_schema_digest = canonical_json_digest(
+            &serde_json::to_value(&live_snapshot.permission_options).unwrap(),
+        )
+        .unwrap();
         service
             .record_snapshot(
                 &mut database,
                 &user_command(
                     "record-live-trae",
                     RecordAdapterCapabilitySnapshotCommand {
-                        installation_id,
+                        installation_id: installation_id.clone(),
                         expected_installation_version: installation.version,
                         snapshot: live_snapshot,
                         failure: None,
@@ -6188,10 +6325,32 @@ mod slow_tests {
             verified_profile.runtime_readiness.status,
             RuntimeReadinessStatus::Ready
         );
+        let explicit_model = ModelSelection::Explicit {
+            model_id: "trae-default".to_string(),
+            options: json!({}),
+        };
+        service
+            .set_runtime(
+                &mut database,
+                &user_command(
+                    "configure-explicit-trae",
+                    SetMemberRuntimeConfigurationCommand {
+                        agent_id: verified_profile.agent_id.clone(),
+                        expected_version: verified_profile.version,
+                        adapter_kind: AdapterKind::TraeCnCli,
+                        model: explicit_model.clone(),
+                        permissions: binding.permissions.clone(),
+                    },
+                ),
+            )
+            .unwrap();
         let verified = resolve_frozen_runtime_binding(database.connection(), &binding)
             .unwrap()
             .unwrap();
-        assert_eq!(verified.reported_version, None);
+        assert_eq!(
+            verified.reported_version.as_deref(),
+            Some("traecli 0.120.52")
+        );
         assert_eq!(verified.model.source, "runtime_default");
         assert_eq!(verified.model.model_id, TRAE_RUNTIME_DEFAULT_MODEL_ID);
         assert!(
@@ -6200,6 +6359,89 @@ mod slow_tests {
                 .unwrap()
                 .is_none(),
             "the same Runtime may dispatch only after the unified deep probe reaches ready"
+        );
+        let mut legacy_weak_ready = verified.clone();
+        legacy_weak_ready
+            .capabilities
+            .retain(|capability| capability != "session.config_shape");
+        let weak_blocker = service
+            .runtime_dispatch_blocker(&database, &legacy_weak_ready)
+            .unwrap()
+            .expect("Dispatch must recheck the same TRAE machine Ready requirements");
+        assert_eq!(weak_blocker.code, "runtime_probe_required");
+
+        let explicit_binding = ResolvedRuntimeBinding {
+            adapter_kind: AdapterKind::TraeCnCli,
+            installation_id: installation_id.clone(),
+            model: explicit_model,
+            permissions: binding.permissions.clone(),
+        };
+        let explicit_verified =
+            resolve_frozen_runtime_binding(database.connection(), &explicit_binding)
+                .unwrap()
+                .unwrap();
+        assert_eq!(explicit_verified.model.source, "explicit");
+        assert_eq!(explicit_verified.model.model_id, "trae-default");
+
+        let startup_snapshot = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::TraeCnCli,
+                Some("traecli 0.120.52".to_string()),
+                fingerprint,
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        let stable_permission_schema_digest = startup_snapshot.permission_schema_digest.clone();
+        let rediscovered_installation_id = service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::TraeCnCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "traecli".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: startup_snapshot,
+                },
+            )
+            .unwrap();
+        assert_eq!(rediscovered_installation_id, installation_id);
+
+        let rediscovered = service
+            .managed_installation(&database, AdapterKind::TraeCnCli, "default")
+            .unwrap()
+            .unwrap();
+        let retained_snapshot = rediscovered.snapshot.as_ref().unwrap();
+        assert_eq!(retained_snapshot.probe_status, "ready");
+        assert_eq!(
+            retained_snapshot.permission_schema_digest, stable_permission_schema_digest,
+            "legacy TRAE Ready evidence must be normalized so later restarts remain stable"
+        );
+        assert_eq!(retained_snapshot.models[0].id, "trae-default");
+        assert_eq!(
+            rediscovered.model_catalog.status,
+            RuntimeModelCatalogCacheStatus::Stale
+        );
+        assert!(rediscovered.model_catalog.is_serviceable());
+        let retained_profile = service
+            .get_profile(&database, &verified_profile.agent_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            retained_profile.runtime_readiness.status,
+            RuntimeReadinessStatus::Ready
+        );
+        let explicit_after_startup =
+            resolve_frozen_runtime_binding(database.connection(), &explicit_binding)
+                .unwrap()
+                .expect("same-identity startup discovery must preserve explicit TRAE binding");
+        assert_eq!(explicit_after_startup.model.source, "explicit");
+        assert_eq!(explicit_after_startup.model.model_id, "trae-default");
+        assert!(
+            service
+                .runtime_dispatch_blocker(&database, &explicit_after_startup)
+                .unwrap()
+                .is_none()
         );
 
         drop(database);

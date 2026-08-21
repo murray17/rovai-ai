@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, realpath, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -6,6 +6,10 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { createServer } from 'node:net'
 import { stagedSidecarPath } from './lib/sidecar-targets.mjs'
+import {
+  coreDataDirectoryArguments,
+  runtimeCampFilesRootForDataDirectory
+} from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
@@ -48,9 +52,11 @@ const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
   return `fixture output line ${index + 1} · vehicle prepayment reconciliation`
 }).join('\n')
 const directoryAttachmentSource = join(fixtureRoot, '项目资料')
+const codexExpectedCommand = 'rovai camp read --mode timeline --direction before --limit 20'
+const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
 
 const runtimes = [
-  runtime('codex', 'codex-cli', 'Codex CLI', 'rovai camp read', {
+  runtime('codex', 'codex-cli', 'Codex CLI', codexExpectedCommand, {
     protocol: 'codex-app-server', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '执行 Shell 命令', payload: {
       item: {
@@ -74,8 +80,8 @@ const runtimes = [
   }),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
-  runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
-  runtime('claude', 'claude-code-cli', 'Claude Code', 'printf', {
+  runtime('trae', 'trae-cn-cli', 'TRAE CLI', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
+  runtime('claude', 'claude-code-cli', 'Claude Code', claudeExpectedCommand, {
     protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {
       toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
@@ -118,6 +124,20 @@ try {
     `document.querySelectorAll(${JSON.stringify(runArticleSelector)}).length`)
   assert(renderedMessageCount === runtimes.length,
     `Expected ${runtimes.length} rendered Agent messages, found ${renderedMessageCount}: ${await evaluate(app.cdp, 'document.body.innerText.slice(0, 5000)')}`)
+  const workspaceEntryExecution = await evaluate(app.cdp, `(() => ({
+    placement: document.querySelector('.execution-drawer')?.dataset.placement ?? null,
+    selectedAgentId: document.querySelector('.run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
+    drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
+  }))()`)
+  assert(workspaceEntryExecution.placement === 'bottom'
+    && workspaceEntryExecution.selectedAgentId === activeAgentId
+    && workspaceEntryExecution.focusedRunId === activeRunId
+    && !workspaceEntryExecution.drawerOwnsFocus,
+    `Entering the running Camp did not open its latest Run without stealing focus: ${JSON.stringify(workspaceEntryExecution)}`)
+  await evaluate(app.cdp,
+    `document.querySelector('.execution-drawer [aria-label="收起执行详情"]')?.click()`)
+  await waitForExpression(app.cdp, `!document.querySelector('.execution-drawer')`)
 
   if (worldMapOnly) {
     const worldMapAcceptance = await verifyCampWorldMap(app.cdp, outputDir)
@@ -333,7 +353,7 @@ try {
     `Agent dock is not attached below the conversation timeline: ${JSON.stringify(agentDock)}`)
   assert(agentDock.topRunBadgeCount === 0
     && agentDock.auditTabCount === 0
-    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+    && JSON.stringify(agentDock.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
   `Removed top Run/Audit entries or legacy Inspector tabs returned: ${JSON.stringify(agentDock)}`)
 
   await evaluate(app.cdp, `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
@@ -352,7 +372,7 @@ try {
   await waitForExpression(app.cdp,
     `document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'`)
   const executionSidecar = await collectExecutionSidecar(app.cdp)
-  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['任务', '队员', '执行'])
+  assert(JSON.stringify(executionSidecar.inspectorTabLabels) === JSON.stringify(['执行', '队员', '任务'])
     && executionSidecar.activeTab === '执行'
     && executionSidecar.bottomDockCount === 0
     && executionSidecar.sideDockCount === 1
@@ -372,6 +392,9 @@ try {
   assertFocusedRuntimeModelLayout(inspectorRuntimeModel, 'Inspector')
   const executionSidecarCapture = join(outputDir, 'runtime-activity-execution-sidecar.png')
   await capture(app.cdp, executionSidecarCapture)
+
+  const executionGlobalPlacement = await verifyGlobalExecutionPlacement(app.cdp)
+  const executionPlacementFailure = await verifyExecutionPlacementWriteFailure(app.cdp)
 
   await evaluate(app.cdp,
     `document.querySelector('.run-pulse-inspector .execution-placement-button')?.click()`)
@@ -394,7 +417,7 @@ try {
     && returnedExecutionSelection.selectedAgentId === activeAgentId
     && returnedExecutionSelection.drawerPlacement === 'bottom'
     && returnedExecutionSelection.resizeHandle
-    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['任务', '队员']),
+    && JSON.stringify(returnedExecutionSelection.inspectorTabLabels) === JSON.stringify(['队员', '任务']),
   `Execution console did not return to the production bottom surface: ${JSON.stringify({ returnedExecutionDock, returnedExecutionSelection })}`)
 
   await setTheme(app.cdp, 'night')
@@ -426,7 +449,9 @@ try {
         fixedModelRuntimeCount: runtimes.filter((entry) => entry.modelSelectionSource === 'explicit').length,
         inspectorRuntimeModel,
         nightRuntimeModel,
-        responsiveRuntimeModels
+        responsiveRuntimeModels,
+        executionGlobalPlacement,
+        executionPlacementFailure
       },
       runtimes: observed,
       captures: {
@@ -710,6 +735,9 @@ try {
   const zoomedDrawerCapture = join(outputDir, 'runtime-activity-zoom-200.png')
   await capture(app.cdp, zoomedDrawerCapture)
   const directAgentRunStop = await verifyDirectAgentRunStop(app.cdp)
+  const placementRestartResult = await verifyExecutionPlacementAcrossRestart(app)
+  app = placementRestartResult.app
+  const executionPlacementRestart = placementRestartResult.evidence
 
   const reportPath = join(outputDir, 'runtime-activity-acceptance.json')
   const report = {
@@ -736,6 +764,9 @@ try {
       messageAuthorProfileTriggers,
       agentLevelProcessDock: agentDock,
       executionSidecar,
+      executionGlobalPlacement,
+      executionPlacementFailure,
+      executionPlacementRestart,
       inspectorRuntimeModel,
       nightRuntimeModel,
       executionReturnedToBottom: returnedExecutionSelection,
@@ -874,6 +905,39 @@ async function activateControlledRun() {
 
 async function seedFixture() {
   const now = '2026-08-05T12:00:00Z'
+  const runtimeRoot = runtimeCampFilesRootForDataDirectory(dataDir)
+  const runtimeRootMarker = JSON.parse(await readFile(
+    join(runtimeRoot, '.runtime-camp-files-root.json'),
+    'utf8'
+  ))
+  assert(typeof runtimeRootMarker.rootIdentityDigest === 'string',
+    `Runtime Files Root marker did not expose its identity: ${JSON.stringify(runtimeRootMarker)}`)
+  const emptyCatalogDigest = '4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945'
+  const attachmentRootRelativePath = `camps/${campId}/attachments`
+  const publishedAttachmentRoot = join(runtimeRoot, attachmentRootRelativePath)
+  const campAttachmentViewReceipt = {
+    schemaVersion: 2,
+    campId,
+    attachmentRootRelativePath,
+    catalogRevision: 0,
+    catalogEntryCount: 0,
+    semanticCatalogDigest: emptyCatalogDigest,
+    referencedEntries: [],
+    referencedEntriesDigest: canonicalJsonDigest([])
+  }
+  const campAttachmentViewReceiptDigest = canonicalJsonDigest(campAttachmentViewReceipt)
+  const runtimeAttachmentAuthReceipt = {
+    schemaVersion: 1,
+    campId,
+    publishedAttachmentRoot,
+    rootIdentityDigest: runtimeRootMarker.rootIdentityDigest,
+    dispatchGeneration: 1,
+    catalogDigestAtDispatch: emptyCatalogDigest,
+    visibilityMode: 'generation_fenced_v1',
+    compatibilityGeneration: 1,
+    manifestViewReceiptDigest: campAttachmentViewReceiptDigest
+  }
+  const runtimeAttachmentAuthReceiptDigest = canonicalJsonDigest(runtimeAttachmentAuthReceipt)
   const recoveryBlob = await seedManagedBlob(
     Buffer.from(JSON.stringify({ fixture: 'accepted-input-recovery-blocker' })),
     now
@@ -1010,7 +1074,9 @@ async function seedFixture() {
     ${sqlNullable(delivery.failureCode)}, 1, ${sqlLiteral(now)}, ${sqlLiteral(now)}, ${sqlLiteral(now)}
   )`).join(',\n')
 
-  await runSql(databasePath, `
+  await runSql(databasePath, 'DROP TRIGGER camp_attachment_view_camp_insert;')
+  try {
+    await runSql(databasePath, `
     PRAGMA foreign_keys = ON;
     BEGIN IMMEDIATE;
     INSERT INTO managed_blob(
@@ -1051,6 +1117,23 @@ async function seedFixture() {
       ${sqlLiteral(ambientEncounterCampId)}, ${sqlLiteral(ambientEncounterCampTitle)}, 'user', 'peer', 'quick_chat',
       '', ${sqlLiteral(ambientEncounterAgentIds[0])}, 0, 1,
       ${sqlLiteral(now)}, ${sqlLiteral(now)}
+    );
+    INSERT INTO camp_attachment_view(
+      camp_id, state, generation, root_relative_path,
+      root_identity_digest, entry_count, aggregate_bytes,
+      catalog_digest, catalog_revision, semantic_catalog_digest,
+      active_operation_id, last_error_code,
+      created_at, updated_at
+    )
+    SELECT id, 'ready', 1, 'camps/' || id || '/attachments',
+           ${sqlLiteral(runtimeRootMarker.rootIdentityDigest)}, 0, 0,
+           ${sqlLiteral(emptyCatalogDigest)}, 0, ${sqlLiteral(emptyCatalogDigest)},
+           NULL, NULL, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+    FROM camp
+    WHERE id IN (
+      ${sqlLiteral(campId)},
+      ${sqlLiteral(composerLayoutCampId)},
+      ${sqlLiteral(ambientEncounterCampId)}
     );
     INSERT INTO camp_member(
       camp_id, agent_id, status, capability_overrides_json, version, joined_at
@@ -1127,7 +1210,11 @@ async function seedFixture() {
       reference_closure_refs_json, omission_entries_json,
       shared_message_evidence_json, shared_message_evidence_digest,
       run_fact_payload_json, message_projection_audience,
-      a2a_guidance_evidence_json, a2a_guidance_evidence_digest
+      a2a_guidance_evidence_json, a2a_guidance_evidence_digest,
+      context_manifest_version, run_facts_schema_version,
+      camp_attachment_view_receipt_version,
+      camp_attachment_view_receipt_json,
+      camp_attachment_view_receipt_digest
     ) VALUES (
       'fixture-copilot-manifest', ${sqlLiteral(recoveryBlockedRunId)},
       'fixture-copilot-bootstrap', 1, ${runtimes.length}, 0,
@@ -1141,25 +1228,41 @@ async function seedFixture() {
       'sha256:legacy-empty-mcp-exposure', 'fixture-mcp-projection',
       '[]', 'fixture-active-tasks',
       0, ${runtimes.length}, 0,
-      3, '{"profileVersion":3,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
+      4, '{"profileVersion":4,"maxPublicMessages":15,"maxPublicHistoryChars":24000,"maxMessageBodyChars":2000,"maxPublicReferenceChainMessages":3,"maxSelfActiveTasks":8}',
       'fixture-context-profile', NULL,
-      '[]', 20,
+      '[]', 21,
       ${sqlLiteral(recoveryBlob.id)}, ${sqlLiteral(recoveryBlob.digest)}, ${sqlLiteral(now)},
       '[]', '[]', '[]', 'fixture-shared-message-evidence', '{"schemaVersion":1}',
       'agent_v1', '{"schemaVersion":1,"included":false}',
-      '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92'
+      '8f0abde6b1c7b1bf405e1efa2a2cfe82a1bd329a64003a93c3e20c84a8c26d92',
+      21, 2, 2,
+      ${sqlLiteral(JSON.stringify(campAttachmentViewReceipt))},
+      ${sqlLiteral(campAttachmentViewReceiptDigest)}
     );
     INSERT INTO runtime_input_delivery(
       id, agent_run_id, execution_epoch, context_manifest_id,
       native_binding_id, native_binding_generation,
       boundary_camp_message_sequence, dynamic_payload_digest,
-      status, native_input_id, prepared_at, accepted_at, updated_at
+      status, native_input_id, prepared_at, accepted_at, updated_at,
+      runtime_attachment_auth_receipt_version,
+      runtime_attachment_auth_receipt_json,
+      runtime_attachment_auth_receipt_digest,
+      runtime_request_digest
     ) VALUES (
       'fixture-copilot-input', ${sqlLiteral(recoveryBlockedRunId)}, 1,
       'fixture-copilot-manifest', 'fixture-copilot-binding', 1,
       ${runtimes.length}, ${sqlLiteral(recoveryBlob.digest)},
       'accepted', 'acp-prompt-fixture-host-1',
-      ${sqlLiteral(now)}, ${sqlLiteral(now)}, ${sqlLiteral(now)}
+      ${sqlLiteral(now)}, ${sqlLiteral(now)}, ${sqlLiteral(now)},
+      1, ${sqlLiteral(JSON.stringify(runtimeAttachmentAuthReceipt))},
+      ${sqlLiteral(runtimeAttachmentAuthReceiptDigest)},
+      ${sqlLiteral(canonicalJsonDigest({
+        schemaVersion: 1,
+        agentRunId: recoveryBlockedRunId,
+        executionEpoch: 1,
+        contextManifestId: 'fixture-copilot-manifest',
+        runtimeAttachmentAuthReceiptDigest
+      }))}
     );
     INSERT INTO camp_message(
       id, camp_id, sequence, author_type, author_id, source_agent_run_id,
@@ -1182,10 +1285,52 @@ async function seedFixture() {
       AND id <> ${sqlLiteral(historicalRunId)};
     COMMIT;
   `)
+  } finally {
+    await runSql(databasePath, `
+      CREATE TRIGGER camp_attachment_view_camp_insert
+      AFTER INSERT ON camp
+      BEGIN
+        INSERT INTO camp_attachment_view(
+          camp_id, state, generation, root_relative_path,
+          root_identity_digest, entry_count, aggregate_bytes,
+          catalog_digest, active_operation_id, last_error_code,
+          created_at, updated_at
+        ) VALUES (
+          NEW.id, 'ready', 1, 'camps/' || NEW.id || '/attachments',
+          rovai_runtime_camp_files_root_identity_digest(),
+          0, 0,
+          ${sqlLiteral(emptyCatalogDigest)},
+          NULL, NULL, datetime('now'), datetime('now')
+        );
+      END;
+    `)
+  }
+  await seedEmptyAttachmentViewRoots(runtimeRoot, [
+    campId,
+    composerLayoutCampId,
+    ambientEncounterCampId
+  ])
 
   for (const [index, entry] of runtimes.entries()) {
     if (entry.runLevelOnly) continue
     await seedActivity(entry, index)
+  }
+}
+
+async function seedEmptyAttachmentViewRoots(runtimeRoot, campIds) {
+  const campsRoot = join(runtimeRoot, 'camps')
+  await chmod(campsRoot, 0o300)
+  try {
+    for (const exactCampId of campIds) {
+      const campRoot = join(campsRoot, exactCampId)
+      const attachmentRoot = join(campRoot, 'attachments')
+      await mkdir(campRoot, { mode: 0o700 })
+      await mkdir(attachmentRoot, { mode: 0o700 })
+      await chmod(attachmentRoot, 0o500)
+      await chmod(campRoot, 0o100)
+    }
+  } finally {
+    await chmod(campsRoot, 0o100)
   }
 }
 
@@ -1999,7 +2144,7 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
   await wait(150)
   const openedLongResultAtZoom = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
     if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
     return Boolean(disclosure)
   })()`)
@@ -2123,11 +2268,14 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
   })()`)
   assert(drawerOpened, 'The Agent execution console was missing from the drop-zone fixture')
   await waitForExpression(cdp, `Boolean(document.querySelector('.execution-drawer'))`)
-  const blockedDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
-  await wait(180)
-  assert(!await evaluate(cdp, `Boolean(document.querySelector('.conversation-drop-layer'))`),
-    'An open Execution Drawer did not close the underlying drop target')
-  await dispatchFileDrag(cdp, 'dragCancel', blockedDrag)
+  const visibleDrawerDrag = await beginFileDrag(cdp, sourceDirectory, '.timeline-pane')
+  await waitForConversationDropLayerPaint(cdp)
+  const visibleDrawerPresentation = await collectConversationDropPresentation(cdp, sourceDirectory)
+  assertConversationDropPresentation(visibleDrawerPresentation, 'open Execution Drawer', 308)
+  const visibleDrawerCapture = join(capturesDirectory, 'conversation-drop-zone-open-drawer.png')
+  await capture(cdp, visibleDrawerCapture)
+  await dispatchFileDrag(cdp, 'dragCancel', visibleDrawerDrag)
+  await waitForExpression(cdp, `!document.querySelector('.conversation-drop-layer')`)
 
   await evaluate(cdp,
     `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
@@ -2136,7 +2284,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     return activeTab?.textContent?.includes('执行')
       && document.querySelector('.execution-drawer')?.dataset.placement === 'inspector'
   })()`)
-  await mouseClickSelector(cdp, '.activity-tabs > .tabs-list [role="tab"]:first-child')
+  await mouseClickSelector(cdp, '.activity-tabs > .tabs-list [role="tab"]:nth-child(2)')
   await waitForExpression(cdp, `(() => {
     const activeTab = document.querySelector('.activity-tabs > .tabs-list [role="tab"][data-state="active"]')
     return activeTab?.textContent?.includes('任务')
@@ -2154,7 +2302,7 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     verified: {
       fullConversationColumnHitTarget: true,
       inspectorAndMenusUnchanged: true,
-      executionConsolePresentAndDrawerBlocksDrop: true,
+      executionConsolePresentAndDrawerAllowsDrop: true,
       hiddenInspectorDrawerDoesNotBlockDrop: true,
       explicitDirectoryReadModel: true,
       directoryPreparedThroughRealElectronDrag: true,
@@ -2165,14 +2313,16 @@ async function verifyConversationDropZone(cdp, sourceDirectory, capturesDirector
     presentation: {
       day: dayPresentation,
       night: nightPresentation,
-      compact: compactPresentation
+      compact: compactPresentation,
+      visibleDrawer: visibleDrawerPresentation
     },
     attachment: directoryAttachment,
     captures: {
       dayDragging: dayDraggingCapture,
       ready: readyCapture,
       nightDragging: nightDraggingCapture,
-      compactDragging: compactDraggingCapture
+      compactDragging: compactDraggingCapture,
+      visibleDrawer: visibleDrawerCapture
     }
   }
 }
@@ -2279,7 +2429,7 @@ function assertConversationDropPresentation(presentation, context, expectedCallo
     && presentation.layerInsideGrid
     && presentation.inspectorExcluded
     && Math.abs(presentation.calloutWidth - expectedCalloutWidth) <= 1
-    && JSON.stringify(presentation.tabs) === JSON.stringify(['任务', '队员'])
+    && JSON.stringify(presentation.tabs) === JSON.stringify(['队员', '任务'])
     && !presentation.documentOverflow
     && !presentation.sourcePathVisible,
   `${context} conversation drop presentation failed: ${JSON.stringify(presentation)}`)
@@ -2397,7 +2547,7 @@ async function verifyRecoveryBlockerResolution(cdp) {
 async function verifyCompleteToolOutput(cdp) {
   const opened = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
     const beforeText = disclosure?.querySelector('.tool-call-detail')?.textContent ?? ''
     if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
     return {
@@ -2429,6 +2579,7 @@ async function verifyCompleteToolOutput(cdp) {
       hasFirstMarker: text.includes(${JSON.stringify(longToolOutputFirstMarker)}),
       hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
       hasLastMarker: text.includes(${JSON.stringify(longToolOutputLastMarker)}),
+      startsWithCommandAndOutputSections: text.startsWith(${JSON.stringify(`命令\n${codexExpectedCommand}\n\n输出\n${longToolOutputFirstMarker}`)}),
       endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
       hasCutNotice: text.includes('…（后续内容未显示）'),
       leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
@@ -2448,8 +2599,9 @@ async function verifyCompleteToolOutput(cdp) {
   assert(presentation.hasFirstMarker
     && presentation.hasMiddleMarker
     && presentation.hasLastMarker
+    && presentation.startsWithCommandAndOutputSections
     && presentation.endsWithPublicOutput
-    && presentation.lineCount === 8_432
+    && presentation.lineCount === 8_436
     && presentation.verticalOverflow
     && !presentation.hasCutNotice
     && !presentation.leakedEnvelope,
@@ -2686,10 +2838,11 @@ async function verifyClaudeCommandDisclosure(cdp) {
   })()`)
   await waitForExpression(cdp, `(() => [...document.querySelectorAll(
     '.execution-drawer details.tool-call-disclosure .tool-call-title'
-  )].some((candidate) => candidate.textContent?.trim() === 'printf'))()`)
+  )].some((candidate) => candidate.textContent?.trim() === ${JSON.stringify(claudeExpectedCommand)}))()`)
   const presentation = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'printf')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
+        === ${JSON.stringify(claudeExpectedCommand)})
     disclosure?.querySelector('summary')?.click()
     return {
       found: Boolean(disclosure),
@@ -3656,6 +3809,214 @@ async function setTheme(cdp, preference) {
     `document.documentElement.dataset.theme === ${JSON.stringify(expectedTheme)}`)
 }
 
+async function verifyGlobalExecutionPlacement(cdp) {
+  const authority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
+  assert(authority.executionConsolePlacement === 'inspector',
+    `Moving right did not commit the authoritative preference: ${JSON.stringify(authority)}`)
+
+  await openCamp(cdp, composerLayoutCampId)
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${composerLayoutCampTitle}`)}`)
+  const acrossCamp = await evaluate(cdp, `(() => ({
+    bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
+    executionTabCount: [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+      .filter((tab) => tab.textContent?.includes('执行')).length
+  }))()`)
+  const acrossCampAuthority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
+  assert(acrossCamp.bottomDockCount === 0
+    && acrossCampAuthority.executionConsolePlacement === 'inspector',
+  `A second Camp did not inherit Inspector placement: ${JSON.stringify({ acrossCamp, acrossCampAuthority })}`)
+
+  await evaluate(cdp, `document.querySelector('.unified-sidebar button[aria-label="设置"]')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`)
+  await evaluate(cdp, `document.querySelector('.settings-sidebar-back')?.click()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${composerLayoutCampTitle}`)}`)
+  const acrossPage = await evaluate(cdp, `(() => ({
+    bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
+    executionTabCount: [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+      .filter((tab) => tab.textContent?.includes('执行')).length
+  }))()`)
+  const acrossPageAuthority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
+  assert(acrossPage.bottomDockCount === 0
+    && acrossPageAuthority.executionConsolePlacement === 'inspector',
+  `Returning from another primary page lost Inspector placement: ${JSON.stringify({ acrossPage, acrossPageAuthority })}`)
+
+  await evaluate(cdp,
+    `document.querySelector('.topbar-inspector-toggle[aria-pressed="true"]')?.click()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed')`)
+  await openCamp(cdp, campId)
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`)
+  const runningEntryReveal = await evaluate(cdp, `(() => ({
+    inspectorCollapsed: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
+    bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
+    activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+      ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
+    selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
+    drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
+  }))()`)
+  assert(!runningEntryReveal.inspectorCollapsed
+    && runningEntryReveal.bottomDockCount === 0
+    && runningEntryReveal.activeTab === '执行'
+    && runningEntryReveal.selectedAgentId === activeAgentId
+    && runningEntryReveal.focusedRunId === activeRunId
+    && !runningEntryReveal.drawerOwnsFocus,
+    `Entering a running Camp did not reveal its current Inspector Run without stealing focus: ${JSON.stringify(runningEntryReveal)}`)
+
+  await evaluate(cdp, `document.querySelector('.unified-sidebar button[aria-label="设置"]')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.settings-workbench'))`)
+  await evaluate(cdp, `document.querySelector('.settings-sidebar-back')?.click()`)
+  await waitForExpression(cdp,
+    `document.querySelector('.camp-workspace')?.getAttribute('aria-label') === ${JSON.stringify(`会话：${campTitle}`)}`)
+  const runningPageReturn = await evaluate(cdp, `(() => ({
+    activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+      ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
+    selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+    focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null,
+    drawerOwnsFocus: Boolean(document.activeElement?.closest('.execution-drawer'))
+  }))()`)
+  assert(runningPageReturn.activeTab === '执行'
+    && runningPageReturn.selectedAgentId === activeAgentId
+    && runningPageReturn.focusedRunId === activeRunId
+    && !runningPageReturn.drawerOwnsFocus,
+    `Returning from another primary page did not restore the running Run: ${JSON.stringify(runningPageReturn)}`)
+
+  return {
+    authority,
+    acrossCamp,
+    acrossCampAuthority,
+    acrossPage,
+    acrossPageAuthority,
+    runningEntryReveal,
+    runningPageReturn
+  }
+}
+
+async function verifyExecutionPlacementAcrossRestart(currentApp) {
+  await openCamp(currentApp.cdp, campId)
+  await evaluate(currentApp.cdp,
+    `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
+  await waitForExpression(currentApp.cdp, `Boolean(document.querySelector('.run-pulse-inspector'))`)
+  const beforeRestart = await evaluate(
+    currentApp.cdp,
+    'window.rovai.generalPreferences.get()',
+    true
+  )
+  assert(beforeRestart.executionConsolePlacement === 'inspector',
+    `Restart setup did not save Inspector placement: ${JSON.stringify(beforeRestart)}`)
+
+  await closeApp(currentApp)
+  const relaunchedApp = await launchApp(debugPort, 1440, 920)
+  try {
+    await openCamp(relaunchedApp.cdp, campId)
+    await waitForExpression(relaunchedApp.cdp,
+      `Boolean(document.querySelector('.camp-workspace')) && !document.querySelector('.timeline-pane > .run-pulse-bottom')`)
+    const afterRestart = await evaluate(
+      relaunchedApp.cdp,
+      'window.rovai.generalPreferences.get()',
+      true
+    )
+    const firstCampPaint = await evaluate(relaunchedApp.cdp, `(() => ({
+      bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
+      inspectorDockCount: document.querySelectorAll('.run-pulse-inspector').length,
+      executionTabCount: [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+        .filter((tab) => tab.textContent?.includes('执行')).length,
+      inspectorHidden: document.querySelector('.workspace-grid')?.classList.contains('inspector-collapsed') ?? false,
+      activeTab: document.querySelector('.activity-tabs [role="tab"][data-state="active"]')?.textContent
+        ?.replace(/\\d+/g, '').replace(/\\s+/g, ' ').trim() ?? null,
+      selectedAgentId: document.querySelector('.run-pulse-inspector .run-pulse-chip.is-selected')?.dataset.agentId ?? null,
+      focusedRunId: document.querySelector('.execution-process-stage.is-focused')?.dataset.agentRunId ?? null
+    }))()`)
+    assert(afterRestart.executionConsolePlacement === 'inspector'
+      && firstCampPaint.bottomDockCount === 0
+      && !firstCampPaint.inspectorHidden
+      && firstCampPaint.inspectorDockCount === 1
+      && firstCampPaint.executionTabCount === 1
+      && firstCampPaint.activeTab === '任务'
+      && firstCampPaint.selectedAgentId === null
+      && firstCampPaint.focusedRunId === null,
+    `Relaunch did not restore Inspector placement before Camp mount: ${JSON.stringify({ afterRestart, firstCampPaint })}`)
+
+    await evaluate(relaunchedApp.cdp, `(() => {
+      const tab = [...document.querySelectorAll('.activity-tabs [role="tab"]')]
+        .find((candidate) => candidate.textContent?.includes('执行'))
+      tab?.click()
+      return Boolean(tab)
+    })()`)
+    await waitForExpression(relaunchedApp.cdp, `Boolean(document.querySelector('.run-pulse-inspector'))`)
+    await evaluate(relaunchedApp.cdp,
+      `document.querySelector('.run-pulse-inspector .execution-placement-button')?.click()`)
+    await waitForExpression(relaunchedApp.cdp,
+      `Boolean(document.querySelector('.timeline-pane > .run-pulse-bottom'))`)
+    const restoredDefault = await evaluate(
+      relaunchedApp.cdp,
+      'window.rovai.generalPreferences.get()',
+      true
+    )
+    assert(restoredDefault.executionConsolePlacement === 'bottom',
+      `Restart acceptance could not restore the bottom preference: ${JSON.stringify(restoredDefault)}`)
+    return {
+      app: relaunchedApp,
+      evidence: { beforeRestart, afterRestart, firstCampPaint, restoredDefault }
+    }
+  } catch (error) {
+    await closeApp(relaunchedApp)
+    throw error
+  }
+}
+
+async function verifyExecutionPlacementWriteFailure(cdp) {
+  const preferencesPath = join(dataDir, 'general-preferences.json')
+  const savedPreferences = await readFile(preferencesPath)
+  await rm(preferencesPath)
+  await mkdir(preferencesPath)
+  let failedState
+  try {
+    await evaluate(cdp,
+      `document.querySelector('.run-pulse-inspector .execution-placement-button')?.click()`)
+    await waitForExpression(cdp,
+      `Boolean(document.querySelector('.run-pulse-inspector .execution-placement-feedback[role="alert"]'))`)
+    const authority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
+    const temporaryFiles = (await readdir(dataDir)).filter((name) => name.endsWith('.tmp'))
+    failedState = await evaluate(cdp, `(() => ({
+      inspectorDockCount: document.querySelectorAll('.run-pulse-inspector').length,
+      bottomDockCount: document.querySelectorAll('.timeline-pane > .run-pulse-bottom').length,
+      message: document.querySelector('.execution-placement-feedback')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
+      retryVisible: Boolean(document.querySelector('.execution-placement-feedback button'))
+    }))()`)
+    assert(authority.executionConsolePlacement === 'inspector'
+      && failedState.inspectorDockCount === 1
+      && failedState.bottomDockCount === 0
+      && failedState.message.includes('未能保存，仍在右侧。')
+      && failedState.retryVisible
+      && temporaryFiles.length === 0,
+    `Failed placement write did not retain authority and show retry in place: ${JSON.stringify({ authority, failedState, temporaryFiles })}`)
+  } finally {
+    await rm(preferencesPath, { recursive: true, force: true })
+    await writeFile(preferencesPath, savedPreferences, { mode: 0o600 })
+  }
+
+  await evaluate(cdp,
+    `document.querySelector('.execution-placement-feedback button')?.click()`)
+  await waitForExpression(cdp,
+    `Boolean(document.querySelector('.timeline-pane > .run-pulse-bottom'))`)
+  const retriedAuthority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
+  assert(retriedAuthority.executionConsolePlacement === 'bottom',
+    `Placement retry did not commit bottom authority: ${JSON.stringify(retriedAuthority)}`)
+
+  await evaluate(cdp,
+    `document.querySelector('.run-pulse-bottom .execution-placement-button')?.click()`)
+  await waitForExpression(cdp, `Boolean(document.querySelector('.run-pulse-inspector'))`)
+  const restoredAuthority = await evaluate(cdp, 'window.rovai.generalPreferences.get()', true)
+  assert(restoredAuthority.executionConsolePlacement === 'inspector',
+    `Failure acceptance did not restore Inspector setup: ${JSON.stringify(restoredAuthority)}`)
+
+  return { failedState, retriedAuthority, restoredAuthority }
+}
+
 async function launchApp(port, width, height) {
   const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
   const stderr = []
@@ -3833,7 +4194,7 @@ async function connectCdp(url) {
 
 function startCore(dataDirectory) {
   const child = spawn(stagedSidecarPath(root, 'rovai-core'), [
-    '--data-dir', dataDirectory,
+    ...coreDataDirectoryArguments(dataDirectory),
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: root,
@@ -4005,6 +4366,12 @@ function sqlNullable(value) {
 
 function deepEqual(left, right) {
   return JSON.stringify(canonicalJson(left)) === JSON.stringify(canonicalJson(right))
+}
+
+function canonicalJsonDigest(value) {
+  return createHash('sha256')
+    .update(JSON.stringify(canonicalJson(value)))
+    .digest('hex')
 }
 
 function canonicalJson(value) {

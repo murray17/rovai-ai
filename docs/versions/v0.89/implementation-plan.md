@@ -11,7 +11,7 @@ last_updated: 2026-08-16
 ## Checkpoint 0：版本与合同门
 
 - [x] 从本地最新 `main` 的 `9c3a87a824278749b08e772d0a543e7c173b3c55` 建立独立
-  `/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-wt-v0.89-gather` worktree 与
+  `<local-worktree>/rovai-ai-wt-v0.89-gather` worktree 与
   `codex/v0.89-gather` 分支；
 - [x] 冻结 complete v0.88，建立唯一 current v0.89 与九范围跨版本影响记录；
 - [x] 接受两份 ADR、五份 current Contract、Gather Architecture 与 canonical spec；

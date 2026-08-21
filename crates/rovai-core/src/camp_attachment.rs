@@ -1,8 +1,10 @@
 use std::{
+    collections::HashMap,
     ffi::OsString,
     fs::{self, File, OpenOptions},
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, MutexGuard, OnceLock, Weak},
 };
 
 #[cfg(unix)]
@@ -21,6 +23,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
+    camp_attachment_publication::AuthorityAttachment,
     camp_content::{
         StructuredCampMessageContent, StructuredCampMessageSegment, has_all_members_mention,
         member_mention_ids, normalize_content, render_current_plain_text,
@@ -51,6 +54,93 @@ const MAX_PREVIEW_EDGE: u64 = 16_384;
 const MAX_PREVIEW_PIXELS: u64 = 40_000_000;
 const ATTACHMENT_METADATA_FILE: &str = ".rovai-attachment.json";
 const ATTACHMENT_METADATA_SCHEMA_VERSION: u32 = 1;
+type CampAuthorityIngressGate = Arc<Mutex<()>>;
+type CampAuthorityIngressGateRegistry = Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>;
+static CAMP_AUTHORITY_INGRESS_GATES: OnceLock<CampAuthorityIngressGateRegistry> = OnceLock::new();
+
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub struct ComposerPrepareTestPause {
+    started: std::sync::atomic::AtomicBool,
+    released: Mutex<bool>,
+    release: std::sync::Condvar,
+}
+
+#[cfg(feature = "slow-tests")]
+impl ComposerPrepareTestPause {
+    fn new() -> Self {
+        Self {
+            started: std::sync::atomic::AtomicBool::new(false),
+            released: Mutex::new(false),
+            release: std::sync::Condvar::new(),
+        }
+    }
+
+    pub fn started(&self) -> bool {
+        self.started.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    pub fn release(&self) {
+        *lock_unpoisoned(&self.released) = true;
+        self.release.notify_all();
+    }
+}
+
+#[cfg(feature = "slow-tests")]
+type ComposerPrepareTestPauseRegistry = Mutex<HashMap<PathBuf, Arc<ComposerPrepareTestPause>>>;
+
+#[cfg(feature = "slow-tests")]
+fn composer_prepare_test_pauses() -> &'static ComposerPrepareTestPauseRegistry {
+    static PAUSES: OnceLock<ComposerPrepareTestPauseRegistry> = OnceLock::new();
+    PAUSES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(feature = "slow-tests")]
+fn composer_prepare_test_key(data_dir: &Path, camp_id: &str) -> PathBuf {
+    data_dir.join("camp-attachments").join(camp_id)
+}
+
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub fn install_composer_prepare_test_pause(
+    data_dir: &Path,
+    camp_id: &str,
+) -> Arc<ComposerPrepareTestPause> {
+    let pause = Arc::new(ComposerPrepareTestPause::new());
+    lock_unpoisoned(composer_prepare_test_pauses()).insert(
+        composer_prepare_test_key(data_dir, camp_id),
+        Arc::clone(&pause),
+    );
+    pause
+}
+
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub fn remove_composer_prepare_test_pause(data_dir: &Path, camp_id: &str) {
+    lock_unpoisoned(composer_prepare_test_pauses())
+        .remove(&composer_prepare_test_key(data_dir, camp_id));
+}
+
+#[cfg(feature = "slow-tests")]
+fn pause_composer_prepare_for_test(camp_root: &Path) {
+    let pause = lock_unpoisoned(composer_prepare_test_pauses())
+        .get(camp_root)
+        .cloned();
+    let Some(pause) = pause else {
+        return;
+    };
+    pause
+        .started
+        .store(true, std::sync::atomic::Ordering::Release);
+    let mut released = lock_unpoisoned(&pause.released);
+    while !*released {
+        released = pause
+            .release
+            .wait(released)
+            .unwrap_or_else(|error| error.into_inner());
+    }
+}
+
 #[cfg(all(test, any(windows, feature = "slow-tests")))]
 const DIRECTORY_SNAPSHOT_FIXTURE_DIGEST: &str =
     "sha256:69c6a7b4e706d0177bdcc3b806c25daac505628a8d9f22c4976fd5c93ef87501";
@@ -74,6 +164,17 @@ pub struct PreparedAttachmentView {
 pub(crate) struct ManagedAttachmentSummary {
     pub kind: String,
     pub file_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RuntimeAttachmentCopyReceipt {
+    pub authority_safe_leaf: String,
+    pub kind: String,
+    pub file_count: u64,
+    pub directory_count: u64,
+    pub node_count: u64,
+    pub byte_size: u64,
+    pub content_digest: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -152,6 +253,71 @@ pub struct AttachmentPreviewSource {
     pub byte_size: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttachmentPreviewCandidate {
+    attachment_id: String,
+    camp_id: String,
+    display_name: String,
+    media_type: String,
+    byte_size: u64,
+    content_digest: String,
+    path: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DesktopAttachmentOpenCandidate {
+    attachment_id: String,
+    camp_id: String,
+    display_name: String,
+    media_type: String,
+    byte_size: u64,
+    content_digest: String,
+    path: PathBuf,
+}
+
+#[derive(Debug)]
+pub struct ComposerAttachmentPreparePlan {
+    camp_id: String,
+    expected_revision: i64,
+    source_path: PathBuf,
+    display_name: String,
+    attachment_id: String,
+}
+
+#[derive(Debug)]
+pub struct PreparedComposerAttachment {
+    camp_id: String,
+    expected_revision: i64,
+    display_name: String,
+    attachment_id: String,
+    attachment_directory: PathBuf,
+    prepared: PreparedAttachment,
+}
+
+#[derive(Debug)]
+pub struct CampAttachmentCleanupPlan {
+    camp_id: String,
+    attachment_paths: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DesktopAttachmentOpenRisk {
+    Normal,
+    Confirm,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopAttachmentTarget {
+    pub attachment_id: String,
+    pub display_name: String,
+    pub kind: String,
+    pub media_type: String,
+    pub path: PathBuf,
+    pub open_risk: DesktopAttachmentOpenRisk,
+}
+
 #[derive(Debug, Clone)]
 pub struct CampAttachmentStore {
     root: PathBuf,
@@ -165,11 +331,155 @@ impl CampAttachmentStore {
     }
 
     pub fn camp_root(&self, camp_id: &str) -> Result<PathBuf> {
+        let gate = self.authority_ingress_gate(camp_id)?;
+        let admission = lock_unpoisoned(&gate);
+        self.camp_root_with_admission(camp_id, &admission)
+    }
+
+    fn camp_root_with_admission(
+        &self,
+        camp_id: &str,
+        _admission: &MutexGuard<'_, ()>,
+    ) -> Result<PathBuf> {
         let camp_id = CampId::parse(camp_id)?;
         let root = self.root.join(camp_id.as_str());
         ensure_directory(&root)?;
         restrict_discovery(&root)?;
         Ok(root)
+    }
+
+    fn authority_ingress_gate(&self, camp_id: &str) -> Result<CampAuthorityIngressGate> {
+        let camp_id = CampId::parse(camp_id)?;
+        let identity = self.root.join(camp_id.as_str());
+        let registry = CAMP_AUTHORITY_INGRESS_GATES.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut registry = lock_unpoisoned(registry);
+        registry.retain(|_, gate| gate.strong_count() > 0);
+        if let Some(gate) = registry.get(&identity).and_then(Weak::upgrade) {
+            return Ok(gate);
+        }
+        let gate = Arc::new(Mutex::new(()));
+        registry.insert(identity, Arc::downgrade(&gate));
+        Ok(gate)
+    }
+
+    pub fn freeze_agent_sources(
+        &self,
+        camp_id: &str,
+        requested_paths: &[String],
+        execution_workspace: &Path,
+        run_tmp: &Path,
+    ) -> Result<Vec<AuthorityAttachment>> {
+        CampId::parse(camp_id)?;
+        if requested_paths.len() > MAX_PREPARED_ATTACHMENTS {
+            anyhow::bail!("At most 10 files may be attached to one message");
+        }
+        let workspace_root = fs::canonicalize(execution_workspace)
+            .context("AgentRun execution workspace is unavailable")?;
+        let run_tmp_root = fs::canonicalize(run_tmp).context("ROVAI_RUN_TMP is unavailable")?;
+        let gate = self.authority_ingress_gate(camp_id)?;
+        let admission = lock_unpoisoned(&gate);
+        let camp_root = self.camp_root_with_admission(camp_id, &admission)?;
+        allow_directory_update(&camp_root)?;
+        let mut frozen = Vec::with_capacity(requested_paths.len());
+        let mut created_directories = Vec::with_capacity(requested_paths.len());
+        let freeze_result = (|| -> Result<()> {
+            let mut total_bytes = 0_u64;
+            for requested in requested_paths {
+                let requested = Path::new(requested);
+                let source = if requested.is_absolute() {
+                    requested.to_path_buf()
+                } else {
+                    workspace_root.join(requested)
+                };
+                if source.components().any(|component| {
+                    matches!(
+                        component,
+                        std::path::Component::ParentDir | std::path::Component::CurDir
+                    )
+                }) {
+                    anyhow::bail!("Attachment source contains an unsafe path component");
+                }
+                let canonical_source = fs::canonicalize(&source)
+                    .with_context(|| format!("Attachment source is unavailable: {requested:?}"))?;
+                let (admitted_root, checked_source) =
+                    if canonical_source.starts_with(&workspace_root) {
+                        let relative = if requested.is_absolute() {
+                            source
+                                .strip_prefix(execution_workspace)
+                                .or_else(|_| source.strip_prefix(&workspace_root))
+                                .context("Attachment source uses an unsafe workspace root alias")?
+                        } else {
+                            requested
+                        };
+                        (&workspace_root, workspace_root.join(relative))
+                    } else if canonical_source.starts_with(&run_tmp_root) {
+                        let relative = source
+                            .strip_prefix(run_tmp)
+                            .or_else(|_| source.strip_prefix(&run_tmp_root))
+                            .context("Attachment source uses an unsafe ROVAI_RUN_TMP root alias")?;
+                        (&run_tmp_root, run_tmp_root.join(relative))
+                    } else {
+                        anyhow::bail!(
+                            "Attachment source is outside the AgentRun workspace and ROVAI_RUN_TMP"
+                        );
+                    };
+                reject_symlink_path(admitted_root, &checked_source)?;
+                let source_name = canonical_source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .context("Attachment source has no UTF-8 display name")?;
+                let display_name = normalize_display_name(source_name)?;
+                let attachment_id = Uuid::new_v4().to_string();
+                let attachment_directory = camp_root.join(&attachment_id);
+                created_directories.push(attachment_directory.clone());
+                ensure_directory(&attachment_directory)?;
+                let destination = attachment_directory.join(&display_name);
+                let prepared = copy_and_inspect(&canonical_source, &destination)?;
+                total_bytes = total_bytes
+                    .checked_add(prepared.byte_size)
+                    .context("Agent attachment byte total overflow")?;
+                if total_bytes > MAX_DRAFT_ATTACHMENT_BYTES {
+                    anyhow::bail!("Attachments exceed the 64 MiB aggregate limit");
+                }
+                write_attachment_metadata(&attachment_directory, &prepared)?;
+                set_directory_read_only(&attachment_directory)?;
+                frozen.push(AuthorityAttachment {
+                    attachment_id,
+                    display_name,
+                    media_type: prepared.media_type,
+                    byte_size: prepared.byte_size,
+                    content_digest: prepared.content_digest,
+                    storage_path: prepared.path,
+                    preview_kind: prepared.preview_kind,
+                });
+            }
+            Ok(())
+        })();
+        let _ = restrict_discovery(&camp_root);
+        if let Err(error) = freeze_result {
+            for directory in &created_directories {
+                cleanup_unowned_attachment(&camp_root, directory);
+            }
+            return Err(error);
+        }
+        Ok(frozen)
+    }
+
+    pub fn cleanup_unowned_agent_sources(&self, camp_id: &str, frozen: &[AuthorityAttachment]) {
+        let Ok(gate) = self.authority_ingress_gate(camp_id) else {
+            return;
+        };
+        let admission = lock_unpoisoned(&gate);
+        let Ok(camp_root) = self.camp_root_with_admission(camp_id, &admission) else {
+            return;
+        };
+        let _ = allow_directory_update(&camp_root);
+        for attachment in frozen {
+            if let Some(directory) = attachment.storage_path.parent() {
+                cleanup_unowned_attachment(&camp_root, directory);
+            }
+        }
+        let _ = restrict_discovery(&camp_root);
     }
 
     pub fn load_draft(&self, database: &Database, camp_id: &str) -> Result<CampComposerDraftView> {
@@ -725,29 +1035,44 @@ impl CampAttachmentStore {
         self.load_draft(database, camp_id)
     }
 
-    pub fn prepare_from_path(
+    pub fn plan_prepare_from_path(
         &self,
-        database: &mut Database,
+        database: &Database,
         camp_id: &str,
         expected_revision: i64,
         source_path: &Path,
         requested_display_name: &str,
-    ) -> Result<CampComposerDraftView> {
+    ) -> Result<ComposerAttachmentPreparePlan> {
         CampId::parse(camp_id)?;
         ensure_camp_exists(database, camp_id)?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
         validate_draft_capacity(database, camp_id, 0)?;
-        let display_name = normalize_display_name(requested_display_name)?;
-        let attachment_id = Uuid::new_v4().to_string();
-        let camp_root = self.camp_root(camp_id)?;
+        Ok(ComposerAttachmentPreparePlan {
+            camp_id: camp_id.to_string(),
+            expected_revision,
+            source_path: source_path.to_path_buf(),
+            display_name: normalize_display_name(requested_display_name)?,
+            attachment_id: Uuid::new_v4().to_string(),
+        })
+    }
+
+    pub fn prepare_from_path_filesystem(
+        &self,
+        plan: ComposerAttachmentPreparePlan,
+    ) -> Result<PreparedComposerAttachment> {
+        let gate = self.authority_ingress_gate(&plan.camp_id)?;
+        let admission = lock_unpoisoned(&gate);
+        let camp_root = self.camp_root_with_admission(&plan.camp_id, &admission)?;
         allow_directory_update(&camp_root)?;
-        let attachment_directory = camp_root.join(&attachment_id);
+        #[cfg(feature = "slow-tests")]
+        pause_composer_prepare_for_test(&camp_root);
+        let attachment_directory = camp_root.join(&plan.attachment_id);
         let prepared = (|| -> Result<PreparedAttachment> {
             ensure_directory(&attachment_directory)?;
-            let destination = attachment_directory.join(&display_name);
-            let prepared = copy_and_inspect(source_path, &destination)?;
+            let destination = attachment_directory.join(&plan.display_name);
+            let prepared = copy_and_inspect(&plan.source_path, &destination)?;
             write_attachment_metadata(&attachment_directory, &prepared)?;
-            restrict_discovery(&attachment_directory)?;
+            set_directory_read_only(&attachment_directory)?;
             Ok(prepared)
         })();
         let _ = restrict_discovery(&camp_root);
@@ -758,69 +1083,109 @@ impl CampAttachmentStore {
                 return Err(error);
             }
         };
+        Ok(PreparedComposerAttachment {
+            camp_id: plan.camp_id,
+            expected_revision: plan.expected_revision,
+            display_name: plan.display_name,
+            attachment_id: plan.attachment_id,
+            attachment_directory,
+            prepared,
+        })
+    }
 
-        let persistence = (|| -> Result<()> {
-            let transaction = database.connection_mut().transaction()?;
-            ensure_draft_revision(&transaction, camp_id, expected_revision)?;
-            validate_draft_capacity_tx(&transaction, camp_id, prepared.byte_size)?;
-            let (now, expires_at) = draft_times();
-            transaction.execute(
-                r#"
-                INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
-                VALUES (?1, '', ?2, ?2, ?3)
-                ON CONFLICT(camp_id) DO UPDATE SET
-                    revision = camp_composer_draft.revision + 1,
-                    updated_at = excluded.updated_at,
-                    expires_at = excluded.expires_at
-                "#,
-                params![camp_id, now, expires_at],
-            )?;
-            let ordinal: i64 = transaction.query_row(
-                "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM prepared_attachment WHERE camp_id = ?1",
-                [camp_id],
-                |row| row.get(0),
-            )?;
-            transaction.execute(
-                r#"
-                INSERT INTO prepared_attachment(
-                    id, camp_id, ordinal, display_name, media_type, byte_size,
-                    content_digest, storage_path, preview_kind, state,
-                    last_error_code, created_at, updated_at
-                ) VALUES (
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'ready',
-                    NULL, ?10, ?10
-                )
-                "#,
-                params![
-                    attachment_id,
-                    camp_id,
-                    ordinal,
-                    display_name,
-                    prepared.media_type,
-                    prepared.byte_size as i64,
-                    prepared.content_digest,
-                    prepared.path.to_string_lossy(),
-                    prepared.preview_kind,
-                    now,
-                ],
-            )?;
-            transaction.commit()?;
-            Ok(())
-        })();
-        if let Err(error) = persistence {
-            cleanup_unowned_attachment(&camp_root, &attachment_directory);
+    pub fn commit_prepared_attachment(
+        &self,
+        database: &mut Database,
+        prepared: &PreparedComposerAttachment,
+    ) -> Result<()> {
+        let transaction = database.connection_mut().transaction()?;
+        ensure_draft_revision(&transaction, &prepared.camp_id, prepared.expected_revision)?;
+        validate_draft_capacity_tx(&transaction, &prepared.camp_id, prepared.prepared.byte_size)?;
+        let (now, expires_at) = draft_times();
+        transaction.execute(
+            r#"
+            INSERT INTO camp_composer_draft(camp_id, body, created_at, updated_at, expires_at)
+            VALUES (?1, '', ?2, ?2, ?3)
+            ON CONFLICT(camp_id) DO UPDATE SET
+                revision = camp_composer_draft.revision + 1,
+                updated_at = excluded.updated_at,
+                expires_at = excluded.expires_at
+            "#,
+            params![prepared.camp_id, now, expires_at],
+        )?;
+        let ordinal: i64 = transaction.query_row(
+            "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM prepared_attachment WHERE camp_id = ?1",
+            [&prepared.camp_id],
+            |row| row.get(0),
+        )?;
+        transaction.execute(
+            r#"
+            INSERT INTO prepared_attachment(
+                id, camp_id, ordinal, display_name, media_type, byte_size,
+                content_digest, storage_path, preview_kind, state,
+                last_error_code, created_at, updated_at
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'ready',
+                NULL, ?10, ?10
+            )
+            "#,
+            params![
+                prepared.attachment_id,
+                prepared.camp_id,
+                ordinal,
+                prepared.display_name,
+                prepared.prepared.media_type,
+                prepared.prepared.byte_size as i64,
+                prepared.prepared.content_digest,
+                prepared.prepared.path.to_string_lossy(),
+                prepared.prepared.preview_kind,
+                now,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn cleanup_uncommitted_prepared_attachment(&self, prepared: PreparedComposerAttachment) {
+        let Ok(gate) = self.authority_ingress_gate(&prepared.camp_id) else {
+            return;
+        };
+        let _admission = lock_unpoisoned(&gate);
+        let camp_root = self.root.join(&prepared.camp_id);
+        cleanup_unowned_attachment(&camp_root, &prepared.attachment_directory);
+    }
+
+    #[cfg(test)]
+    pub fn prepare_from_path(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        source_path: &Path,
+        requested_display_name: &str,
+    ) -> Result<CampComposerDraftView> {
+        let plan = self.plan_prepare_from_path(
+            database,
+            camp_id,
+            expected_revision,
+            source_path,
+            requested_display_name,
+        )?;
+        let prepared = self.prepare_from_path_filesystem(plan)?;
+        if let Err(error) = self.commit_prepared_attachment(database, &prepared) {
+            self.cleanup_uncommitted_prepared_attachment(prepared);
             return Err(error);
         }
         self.load_draft(database, camp_id)
     }
 
-    pub fn remove_prepared(
+    pub fn remove_prepared_from_database(
         &self,
         database: &mut Database,
         camp_id: &str,
         expected_revision: i64,
         attachment_id: &str,
-    ) -> Result<CampComposerDraftView> {
+    ) -> Result<(CampComposerDraftView, CampAttachmentCleanupPlan)> {
         CampId::parse(camp_id)?;
         validate_component(attachment_id, "Prepared Attachment")?;
         ensure_draft_revision(database.connection(), camp_id, expected_revision)?;
@@ -853,38 +1218,66 @@ impl CampAttachmentStore {
             params![camp_id, now, expires_at],
         )?;
         transaction.commit()?;
-        let camp_root = self.camp_root(camp_id)?;
-        let cleanup = (|| -> Result<()> {
-            allow_directory_update(&camp_root)?;
-            let removal = remove_attachment_file_parent(Path::new(&path));
-            let restriction = restrict_discovery(&camp_root);
-            removal?;
-            restriction?;
-            Ok(())
-        })();
-        if let Err(error) = cleanup {
+        Ok((
+            self.load_draft(database, camp_id)?,
+            CampAttachmentCleanupPlan {
+                camp_id: camp_id.to_string(),
+                attachment_paths: vec![PathBuf::from(path)],
+            },
+        ))
+    }
+
+    #[cfg(test)]
+    pub fn remove_prepared(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+        expected_revision: i64,
+        attachment_id: &str,
+    ) -> Result<CampComposerDraftView> {
+        let (draft, cleanup) = self.remove_prepared_from_database(
+            database,
+            camp_id,
+            expected_revision,
+            attachment_id,
+        )?;
+        if let Err(error) = self.cleanup_detached_attachments(cleanup) {
             eprintln!(
                 "Prepared Attachment {attachment_id} was removed from Draft {camp_id}, \
                  but its superseded file could not be cleaned immediately: {error:#}"
             );
         }
-        self.load_draft(database, camp_id)
+        Ok(draft)
     }
 
-    pub fn discard_draft(&self, database: &mut Database, camp_id: &str) -> Result<()> {
-        let parsed_camp_id = CampId::parse(camp_id)?;
+    pub fn discard_draft_from_database(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+    ) -> Result<CampAttachmentCleanupPlan> {
+        CampId::parse(camp_id)?;
         let paths = prepared_paths(database, camp_id)?;
         database.connection().execute(
             "DELETE FROM camp_composer_draft WHERE camp_id = ?1",
             [camp_id],
         )?;
+        Ok(CampAttachmentCleanupPlan {
+            camp_id: camp_id.to_string(),
+            attachment_paths: paths.into_iter().map(PathBuf::from).collect(),
+        })
+    }
+
+    pub fn cleanup_detached_attachments(&self, plan: CampAttachmentCleanupPlan) -> Result<()> {
+        let parsed_camp_id = CampId::parse(&plan.camp_id)?;
+        let gate = self.authority_ingress_gate(&plan.camp_id)?;
+        let _admission = lock_unpoisoned(&gate);
         let camp_root = self.root.join(parsed_camp_id.as_str());
-        if !paths.is_empty() && camp_root.exists() {
+        if !plan.attachment_paths.is_empty() && camp_root.exists() {
             allow_directory_update(&camp_root)?;
         }
         let removal = (|| -> Result<()> {
-            for path in paths {
-                remove_attachment_file_parent(Path::new(&path))?;
+            for path in plan.attachment_paths {
+                remove_attachment_file_parent(&path)?;
             }
             Ok(())
         })();
@@ -895,6 +1288,11 @@ impl CampAttachmentStore {
         removal?;
         restriction?;
         Ok(())
+    }
+
+    pub fn discard_draft(&self, database: &mut Database, camp_id: &str) -> Result<()> {
+        let cleanup = self.discard_draft_from_database(database, camp_id)?;
+        self.cleanup_detached_attachments(cleanup)
     }
 
     pub fn verify_send(
@@ -935,21 +1333,23 @@ impl CampAttachmentStore {
         Ok(())
     }
 
-    pub fn preview_source(
+    pub fn preview_candidate(
         &self,
         database: &Database,
         attachment_id: &str,
-    ) -> Result<Option<AttachmentPreviewSource>> {
-        validate_component(attachment_id, "Attachment")?;
+    ) -> Result<Option<AttachmentPreviewCandidate>> {
+        validate_managed_attachment_id(attachment_id)?;
         let row = database
             .connection()
             .query_row(
                 r#"
-                SELECT storage_path, media_type, byte_size, preview_kind
+                SELECT camp_id, display_name, storage_path, media_type, byte_size,
+                       preview_kind, content_digest
                 FROM prepared_attachment
                 WHERE id = ?1
                 UNION ALL
-                SELECT storage_path, media_type, byte_size, preview_kind
+                SELECT camp_id, display_name, storage_path, media_type, byte_size,
+                       preview_kind, content_digest
                 FROM message_attachment
                 WHERE id = ?1
                 LIMIT 1
@@ -959,36 +1359,244 @@ impl CampAttachmentStore {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((path, media_type, byte_size, preview_kind)) = row else {
+        let Some((
+            camp_id,
+            display_name,
+            path,
+            media_type,
+            byte_size,
+            preview_kind,
+            content_digest,
+        )) = row
+        else {
             return Ok(None);
         };
         if preview_kind != "image" || byte_size < 0 || byte_size as u64 > MAX_PREVIEW_BYTES {
             return Ok(None);
         }
-        let path = PathBuf::from(path);
-        validate_owned_path(&self.root, &path)?;
-        let metadata = fs::symlink_metadata(&path)?;
-        if metadata.file_type().is_symlink()
-            || !metadata.is_file()
-            || metadata.len() != byte_size as u64
-        {
-            return Ok(None);
-        }
-        Ok(Some(AttachmentPreviewSource {
-            path,
+        Ok(Some(AttachmentPreviewCandidate {
+            attachment_id: attachment_id.to_string(),
+            camp_id,
+            display_name,
             media_type,
             byte_size: byte_size as u64,
+            content_digest,
+            path: PathBuf::from(path),
         }))
+    }
+
+    pub fn verify_preview_candidate(
+        &self,
+        candidate: AttachmentPreviewCandidate,
+    ) -> Result<AttachmentPreviewSource> {
+        let camp_id = CampId::parse(&candidate.camp_id)?;
+        let gate = self.authority_ingress_gate(camp_id.as_str())?;
+        let _admission = lock_unpoisoned(&gate);
+        let normalized_name = normalize_display_name(&candidate.display_name)?;
+        if normalized_name != candidate.display_name {
+            anyhow::bail!("Attachment preview display name is not canonical");
+        }
+        let expected_path = self
+            .root
+            .join(camp_id.as_str())
+            .join(&candidate.attachment_id)
+            .join(&candidate.display_name);
+        if candidate.path != expected_path {
+            anyhow::bail!("Attachment preview path does not match its managed identity");
+        }
+        reject_symlink_path(&self.root, &candidate.path)?;
+        let verified = self.verify_authority_attachment_for_runtime(
+            &candidate.path,
+            &candidate.media_type,
+            candidate.byte_size,
+            &candidate.content_digest,
+        )?;
+        if verified.kind != "file" {
+            anyhow::bail!("Attachment preview target is not a file");
+        }
+        Ok(AttachmentPreviewSource {
+            path: candidate.path,
+            media_type: candidate.media_type,
+            byte_size: candidate.byte_size,
+        })
+    }
+
+    pub fn desktop_open_candidate(
+        &self,
+        database: &Database,
+        camp_id: &str,
+        attachment_id: &str,
+    ) -> Result<Option<DesktopAttachmentOpenCandidate>> {
+        let camp_id = CampId::parse(camp_id)?;
+        validate_managed_attachment_id(attachment_id)?;
+        let row = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT display_name, media_type, byte_size, content_digest, storage_path
+                FROM message_attachment
+                WHERE camp_id = ?1 AND id = ?2
+                "#,
+                params![camp_id.as_str(), attachment_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((display_name, media_type, byte_size, content_digest, storage_path)) = row else {
+            return Ok(None);
+        };
+        if byte_size < 0 {
+            anyhow::bail!("Published Attachment byte size is invalid");
+        }
+        Ok(Some(DesktopAttachmentOpenCandidate {
+            attachment_id: attachment_id.to_string(),
+            camp_id: camp_id.to_string(),
+            display_name,
+            media_type,
+            byte_size: byte_size as u64,
+            content_digest,
+            path: PathBuf::from(storage_path),
+        }))
+    }
+
+    pub fn verify_desktop_open_candidate(
+        &self,
+        candidate: DesktopAttachmentOpenCandidate,
+    ) -> Result<DesktopAttachmentTarget> {
+        let gate = self.authority_ingress_gate(&candidate.camp_id)?;
+        let _admission = lock_unpoisoned(&gate);
+        let normalized_name = normalize_display_name(&candidate.display_name)?;
+        if normalized_name != candidate.display_name {
+            anyhow::bail!("Published Attachment display name is not canonical");
+        }
+        let expected_path = self
+            .root
+            .join(&candidate.camp_id)
+            .join(&candidate.attachment_id)
+            .join(&candidate.display_name);
+        if candidate.path != expected_path {
+            anyhow::bail!("Published Attachment path does not match its managed identity");
+        }
+        reject_symlink_path(&self.root, &candidate.path)?;
+        let verified = self.verify_authority_attachment_for_runtime(
+            &candidate.path,
+            &candidate.media_type,
+            candidate.byte_size,
+            &candidate.content_digest,
+        )?;
+        let expected_directory = candidate.media_type == DIRECTORY_MEDIA_TYPE;
+        if (verified.kind == "directory") != expected_directory {
+            anyhow::bail!("Published Attachment kind does not match its persisted media type");
+        }
+        let open_risk = desktop_attachment_open_risk(
+            &candidate.path,
+            &candidate.display_name,
+            &candidate.media_type,
+            &verified.kind,
+        )?;
+        let attachment_directory = candidate
+            .path
+            .parent()
+            .context("Published Attachment has no managed container")?;
+        set_directory_read_only(attachment_directory)?;
+        Ok(DesktopAttachmentTarget {
+            attachment_id: candidate.attachment_id,
+            display_name: candidate.display_name,
+            kind: verified.kind,
+            media_type: candidate.media_type,
+            path: candidate.path,
+            open_risk,
+        })
+    }
+
+    pub(crate) fn copy_verified_authority_attachment_for_runtime(
+        &self,
+        storage_path: &Path,
+        media_type: &str,
+        expected_size: u64,
+        expected_digest: &str,
+        destination_payload: &Path,
+    ) -> Result<RuntimeAttachmentCopyReceipt> {
+        validate_owned_attachment(
+            &self.root,
+            storage_path,
+            media_type,
+            expected_size,
+            expected_digest,
+        )?;
+        validate_runtime_source_tree(storage_path, 0)?;
+        let authority_safe_leaf = storage_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .context("Authority Attachment has no UTF-8 safe leaf")?
+            .to_string();
+        validate_runtime_safe_leaf(&authority_safe_leaf)?;
+        ensure_directory(destination_payload)?;
+        let destination = destination_payload.join(&authority_safe_leaf);
+        let copied = copy_and_inspect(storage_path, &destination)?;
+        validate_runtime_source_tree(storage_path, 0)?;
+        if copied.byte_size != expected_size
+            || copied.content_digest != expected_digest
+            || (media_type == DIRECTORY_MEDIA_TYPE) != (copied.kind == "directory")
+        {
+            anyhow::bail!("Camp Attachment Runtime View copy did not match Authority receipt");
+        }
+        Ok(RuntimeAttachmentCopyReceipt {
+            authority_safe_leaf,
+            kind: copied.kind,
+            file_count: copied.file_count,
+            directory_count: copied.directory_count,
+            node_count: copied.node_count,
+            byte_size: copied.byte_size,
+            content_digest: copied.content_digest,
+        })
+    }
+
+    pub(crate) fn verify_authority_attachment_for_runtime(
+        &self,
+        storage_path: &Path,
+        media_type: &str,
+        expected_size: u64,
+        expected_digest: &str,
+    ) -> Result<RuntimeAttachmentCopyReceipt> {
+        validate_owned_attachment(
+            &self.root,
+            storage_path,
+            media_type,
+            expected_size,
+            expected_digest,
+        )?;
+        validate_runtime_source_tree(storage_path, 0)?;
+        let inspected = inspect_runtime_attachment_copy(storage_path)?;
+        if inspected.byte_size != expected_size
+            || inspected.content_digest != expected_digest
+            || (media_type == DIRECTORY_MEDIA_TYPE) != (inspected.kind == "directory")
+        {
+            anyhow::bail!("Authority Attachment does not match its persisted Runtime receipt");
+        }
+        Ok(inspected)
     }
 
     pub fn remove_camp(&self, camp_id: &str) -> Result<()> {
         let camp_id = CampId::parse(camp_id)?;
+        let gate = self.authority_ingress_gate(camp_id.as_str())?;
+        let _admission = lock_unpoisoned(&gate);
         let root = self.root.join(camp_id.as_str());
         if !root.exists() {
             return Ok(());
@@ -1017,6 +1625,82 @@ impl CampAttachmentStore {
         }
         Ok(camps.len())
     }
+}
+
+fn reject_symlink_path(admitted_root: &Path, requested_source: &Path) -> Result<()> {
+    let relative = requested_source
+        .strip_prefix(admitted_root)
+        .context("Attachment source escaped its admitted root")?;
+    let mut current = admitted_root.to_path_buf();
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        if fs::symlink_metadata(&current)?.file_type().is_symlink() {
+            anyhow::bail!("Attachment source path contains a symbolic link");
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn inspect_runtime_attachment_copy(path: &Path) -> Result<RuntimeAttachmentCopyReceipt> {
+    let authority_safe_leaf = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .context("Runtime Attachment copy has no UTF-8 safe leaf")?
+        .to_string();
+    validate_runtime_safe_leaf(&authority_safe_leaf)?;
+    let mut source = open_source_without_following(path)?;
+    let metadata = inspect_open_node(&source)?;
+    if metadata.kind == OpenedNodeKind::RegularFile {
+        if metadata.link_count != 1 {
+            anyhow::bail!("Runtime Attachment copy contains a hard-linked file");
+        }
+        let (byte_size, digest) = inspect_open_regular_file(&mut source)?;
+        return Ok(RuntimeAttachmentCopyReceipt {
+            authority_safe_leaf,
+            kind: "file".to_string(),
+            file_count: 1,
+            directory_count: 0,
+            node_count: 1,
+            byte_size,
+            content_digest: format!(
+                "sha256:{}",
+                digest
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+            ),
+        });
+    }
+    if metadata.kind != OpenedNodeKind::Directory {
+        anyhow::bail!("Runtime Attachment copy contains an unsupported root node");
+    }
+    let mut state = DirectorySnapshotState {
+        hasher: Sha256::new(),
+        file_count: 0,
+        directory_count: 1,
+        entry_count: 0,
+        byte_size: 0,
+    };
+    state.hasher.update(b"rovai-directory-snapshot-v1\0");
+    inspect_open_directory_snapshot(
+        &source,
+        Path::new(""),
+        0,
+        fingerprint_volume(&metadata.fingerprint),
+        &mut state,
+    )?;
+    Ok(RuntimeAttachmentCopyReceipt {
+        authority_safe_leaf,
+        kind: "directory".to_string(),
+        file_count: state.file_count,
+        directory_count: state.directory_count,
+        node_count: state
+            .file_count
+            .checked_add(state.directory_count)
+            .context("Runtime Attachment node count overflow")?,
+        byte_size: state.byte_size,
+        content_digest: format!("sha256:{:x}", state.hasher.finalize()),
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1657,6 +2341,8 @@ struct PreparedAttachment {
     path: PathBuf,
     kind: String,
     file_count: u64,
+    directory_count: u64,
+    node_count: u64,
     media_type: String,
     byte_size: u64,
     content_digest: String,
@@ -1744,6 +2430,8 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAt
         path: destination.to_path_buf(),
         kind: "file".to_string(),
         file_count: 1,
+        directory_count: 0,
+        node_count: 1,
         media_type: inspection.media_type,
         byte_size,
         content_digest: format!("sha256:{:x}", hasher.finalize()),
@@ -1756,6 +2444,7 @@ fn copy_and_inspect(source_path: &Path, destination: &Path) -> Result<PreparedAt
 struct DirectorySnapshotState {
     hasher: Sha256,
     file_count: u64,
+    directory_count: u64,
     entry_count: u64,
     byte_size: u64,
 }
@@ -1765,6 +2454,7 @@ struct DirectorySnapshotState {
 struct MetadataFingerprint {
     device: u64,
     inode: u64,
+    link_count: u64,
     size: u64,
     modified_seconds: i64,
     modified_nanoseconds: i64,
@@ -1789,11 +2479,13 @@ enum OpenedNodeKind {
 struct OpenedNodeMetadata {
     kind: OpenedNodeKind,
     fingerprint: MetadataFingerprint,
+    link_count: u64,
 }
 
 #[cfg(any(unix, windows))]
 fn copy_directory_snapshot(source: &File, destination: &Path) -> Result<PreparedAttachment> {
-    if inspect_open_node(source)?.kind != OpenedNodeKind::Directory {
+    let root_metadata = inspect_open_node(source)?;
+    if root_metadata.kind != OpenedNodeKind::Directory {
         anyhow::bail!("Attachment directory changed before snapshotting");
     }
 
@@ -1801,17 +2493,30 @@ fn copy_directory_snapshot(source: &File, destination: &Path) -> Result<Prepared
     let mut state = DirectorySnapshotState {
         hasher: Sha256::new(),
         file_count: 0,
+        directory_count: 1,
         entry_count: 0,
         byte_size: 0,
     };
     state.hasher.update(b"rovai-directory-snapshot-v1\0");
-    copy_open_directory(source, destination, Path::new(""), 0, &mut state)?;
+    copy_open_directory(
+        source,
+        destination,
+        Path::new(""),
+        0,
+        fingerprint_volume(&root_metadata.fingerprint),
+        &mut state,
+    )?;
     set_directory_read_only(destination)?;
     sync_parent(destination)?;
     Ok(PreparedAttachment {
         path: destination.to_path_buf(),
         kind: "directory".to_string(),
         file_count: state.file_count,
+        directory_count: state.directory_count,
+        node_count: state
+            .file_count
+            .checked_add(state.directory_count)
+            .context("Attachment directory node count overflow")?,
         media_type: DIRECTORY_MEDIA_TYPE.to_string(),
         byte_size: state.byte_size,
         content_digest: format!("sha256:{:x}", state.hasher.finalize()),
@@ -1825,6 +2530,7 @@ fn copy_open_directory(
     destination: &Path,
     relative_path: &Path,
     depth: usize,
+    root_volume: u64,
     state: &mut DirectorySnapshotState,
 ) -> Result<()> {
     if depth > MAX_DIRECTORY_DEPTH {
@@ -1833,6 +2539,9 @@ fn copy_open_directory(
     let before = inspect_open_node(source)?;
     if before.kind != OpenedNodeKind::Directory {
         anyhow::bail!("Attachment directory changed while it was being copied");
+    }
+    if fingerprint_volume(&before.fingerprint) != root_volume {
+        anyhow::bail!("Attachment directory contains a mount or volume escape");
     }
     hash_tree_entry(&mut state.hasher, b'D', relative_path, 0, None)?;
     let names = read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?;
@@ -1846,15 +2555,23 @@ fn copy_open_directory(
         }
         let mut child = open_child_without_following(source, name)?;
         let metadata = inspect_open_node(&child)?;
+        if fingerprint_volume(&metadata.fingerprint) != root_volume {
+            anyhow::bail!("Attachment directory contains a mount or volume escape");
+        }
         let child_relative = relative_path.join(name);
         let child_destination = destination.join(name);
         if metadata.kind == OpenedNodeKind::Directory {
+            state.directory_count = state
+                .directory_count
+                .checked_add(1)
+                .context("Attachment directory count overflow")?;
             ensure_directory(&child_destination)?;
             copy_open_directory(
                 &child,
                 &child_destination,
                 &child_relative,
                 depth + 1,
+                root_volume,
                 state,
             )?;
             set_directory_read_only(&child_destination)?;
@@ -1973,6 +2690,125 @@ fn copy_open_regular_file(source: &mut File, destination: &Path) -> Result<Copie
         byte_size,
         digest: hasher.finalize().into(),
     })
+}
+
+fn inspect_open_regular_file(source: &mut File) -> Result<(u64, [u8; 32])> {
+    let before = inspect_open_node(source)?;
+    if before.kind != OpenedNodeKind::RegularFile || before.link_count != 1 {
+        anyhow::bail!("Runtime Attachment file identity is unsafe");
+    }
+    if fingerprint_size(&before.fingerprint) > MAX_ATTACHMENT_BYTES {
+        anyhow::bail!("Runtime Attachment file exceeds the per-file limit");
+    }
+    let mut hasher = Sha256::new();
+    let mut byte_size = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = source.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        byte_size = byte_size
+            .checked_add(read as u64)
+            .context("Runtime Attachment file size overflow")?;
+        if byte_size > MAX_ATTACHMENT_BYTES {
+            anyhow::bail!("Runtime Attachment file exceeds the per-file limit");
+        }
+        hasher.update(&buffer[..read]);
+    }
+    let after = inspect_open_node(source)?;
+    if after.kind != OpenedNodeKind::RegularFile
+        || after.link_count != 1
+        || byte_size != fingerprint_size(&before.fingerprint)
+        || before.fingerprint != after.fingerprint
+    {
+        anyhow::bail!("Runtime Attachment file changed while it was inspected");
+    }
+    Ok((byte_size, hasher.finalize().into()))
+}
+
+fn inspect_open_directory_snapshot(
+    source: &File,
+    relative_path: &Path,
+    depth: usize,
+    root_volume: u64,
+    state: &mut DirectorySnapshotState,
+) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!("Runtime Attachment directory exceeds the depth limit");
+    }
+    let before = inspect_open_node(source)?;
+    if before.kind != OpenedNodeKind::Directory
+        || fingerprint_volume(&before.fingerprint) != root_volume
+    {
+        anyhow::bail!("Runtime Attachment directory identity is unsafe");
+    }
+    hash_tree_entry(&mut state.hasher, b'D', relative_path, 0, None)?;
+    let names = read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?;
+    for name in &names {
+        state.entry_count = state
+            .entry_count
+            .checked_add(1)
+            .context("Runtime Attachment directory entry count overflow")?;
+        if state.entry_count > MAX_DIRECTORY_ENTRIES {
+            anyhow::bail!("Runtime Attachment directory exceeds the entry limit");
+        }
+        let mut child = open_child_without_following(source, name)?;
+        let metadata = inspect_open_node(&child)?;
+        if fingerprint_volume(&metadata.fingerprint) != root_volume {
+            anyhow::bail!("Runtime Attachment directory contains a mount or volume escape");
+        }
+        let child_relative = relative_path.join(name);
+        if metadata.kind == OpenedNodeKind::Directory {
+            state.directory_count = state
+                .directory_count
+                .checked_add(1)
+                .context("Runtime Attachment directory count overflow")?;
+            inspect_open_directory_snapshot(
+                &child,
+                &child_relative,
+                depth + 1,
+                root_volume,
+                state,
+            )?;
+        } else if metadata.kind == OpenedNodeKind::RegularFile {
+            if metadata.link_count != 1 {
+                anyhow::bail!("Runtime Attachment directory contains a hard-linked file");
+            }
+            state.file_count = state
+                .file_count
+                .checked_add(1)
+                .context("Runtime Attachment directory file count overflow")?;
+            if state.file_count > MAX_DIRECTORY_FILES {
+                anyhow::bail!("Runtime Attachment directory exceeds the file-count limit");
+            }
+            let (byte_size, digest) = inspect_open_regular_file(&mut child)?;
+            state.byte_size = state
+                .byte_size
+                .checked_add(byte_size)
+                .context("Runtime Attachment directory size overflow")?;
+            if state.byte_size > MAX_DRAFT_ATTACHMENT_BYTES {
+                anyhow::bail!("Runtime Attachment directory exceeds the byte limit");
+            }
+            hash_tree_entry(
+                &mut state.hasher,
+                b'F',
+                &child_relative,
+                byte_size,
+                Some(&digest),
+            )?;
+        } else {
+            anyhow::bail!("Runtime Attachment directory contains an unsupported node");
+        }
+    }
+    let after = inspect_open_node(source)?;
+    if names != read_directory_names(source, MAX_DIRECTORY_ENTRIES as usize)?
+        || after.kind != OpenedNodeKind::Directory
+        || before.fingerprint != after.fingerprint
+    {
+        anyhow::bail!("Runtime Attachment directory changed while it was inspected");
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -2096,12 +2932,14 @@ fn inspect_open_node(file: &File) -> Result<OpenedNodeMetadata> {
         fingerprint: MetadataFingerprint {
             device: metadata.dev(),
             inode: metadata.ino(),
+            link_count: metadata.nlink(),
             size: metadata.size(),
             modified_seconds: metadata.mtime(),
             modified_nanoseconds: metadata.mtime_nsec(),
             changed_seconds: metadata.ctime(),
             changed_nanoseconds: metadata.ctime_nsec(),
         },
+        link_count: metadata.nlink(),
     })
 }
 
@@ -2135,7 +2973,18 @@ fn inspect_open_node(file: &File) -> Result<OpenedNodeMetadata> {
             NodeKind::Directory => OpenedNodeKind::Directory,
         },
         fingerprint: metadata.fingerprint,
+        link_count: metadata.number_of_links as u64,
     })
+}
+
+#[cfg(unix)]
+fn fingerprint_volume(fingerprint: &MetadataFingerprint) -> u64 {
+    fingerprint.device
+}
+
+#[cfg(windows)]
+fn fingerprint_volume(fingerprint: &MetadataFingerprint) -> u64 {
+    fingerprint.volume_serial_number
 }
 
 #[cfg(windows)]
@@ -2222,6 +3071,103 @@ fn inspect_prefix(prefix: &[u8], byte_size: u64) -> PrefixInspection {
         media_type: media_type.to_string(),
         preview_kind: "none".to_string(),
     }
+}
+
+fn desktop_attachment_open_risk(
+    path: &Path,
+    display_name: &str,
+    media_type: &str,
+    kind: &str,
+) -> Result<DesktopAttachmentOpenRisk> {
+    let extension = Path::new(display_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if matches!(
+        extension.as_str(),
+        "app"
+            | "pkg"
+            | "dmg"
+            | "exe"
+            | "msi"
+            | "msp"
+            | "com"
+            | "scr"
+            | "cpl"
+            | "bat"
+            | "cmd"
+            | "ps1"
+            | "psm1"
+            | "vbs"
+            | "vbe"
+            | "js"
+            | "jse"
+            | "wsf"
+            | "wsh"
+            | "hta"
+            | "reg"
+            | "lnk"
+            | "url"
+            | "webloc"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "fish"
+            | "command"
+            | "py"
+            | "pyw"
+            | "rb"
+            | "pl"
+            | "jar"
+            | "desktop"
+    ) || matches!(
+        media_type,
+        "application/x-executable"
+            | "application/x-mach-binary"
+            | "application/x-msdownload"
+            | "application/x-sh"
+            | "application/x-shellscript"
+            | "application/vnd.microsoft.portable-executable"
+            | "application/vnd.apple.installer+xml"
+    ) {
+        return Ok(DesktopAttachmentOpenRisk::Confirm);
+    }
+    if kind != "file" {
+        return Ok(DesktopAttachmentOpenRisk::Normal);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if fs::symlink_metadata(path)?.permissions().mode() & 0o111 != 0 {
+            return Ok(DesktopAttachmentOpenRisk::Confirm);
+        }
+    }
+    let mut source = open_source_without_following(path)?;
+    let mut prefix = [0_u8; 4 * 1024];
+    let read = source.read(&mut prefix)?;
+    let prefix = &prefix[..read];
+    let executable_magic = prefix.starts_with(b"#!")
+        || prefix.starts_with(b"MZ")
+        || prefix.starts_with(b"\x7fELF")
+        || matches!(
+            prefix.get(..4),
+            Some(
+                b"\xfe\xed\xfa\xce"
+                    | b"\xce\xfa\xed\xfe"
+                    | b"\xfe\xed\xfa\xcf"
+                    | b"\xcf\xfa\xed\xfe"
+                    | b"\xca\xfe\xba\xbe"
+                    | b"\xbe\xba\xfe\xca"
+                    | b"\xca\xfe\xba\xbf"
+                    | b"\xbf\xba\xfe\xca"
+            )
+        );
+    Ok(if executable_magic {
+        DesktopAttachmentOpenRisk::Confirm
+    } else {
+        DesktopAttachmentOpenRisk::Normal
+    })
 }
 
 fn image_dimensions(bytes: &[u8]) -> Option<(&'static str, u64, u64)> {
@@ -2744,6 +3690,66 @@ fn validate_component(value: &str, label: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_managed_attachment_id(value: &str) -> Result<()> {
+    let parsed = Uuid::parse_str(value).context("Attachment ID is invalid")?;
+    if parsed.hyphenated().to_string() != value {
+        anyhow::bail!("Attachment ID is not canonical");
+    }
+    Ok(())
+}
+
+fn validate_runtime_safe_leaf(value: &str) -> Result<()> {
+    if value.is_empty()
+        || value == "."
+        || value == ".."
+        || value.ends_with([' ', '.'])
+        || value
+            .chars()
+            .any(|character| matches!(character, '/' | '\\' | ':' | '\0'))
+    {
+        anyhow::bail!("Authority Attachment safe leaf is invalid for Runtime View");
+    }
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or(value)
+        .to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || stem.strip_prefix("COM").is_some_and(|suffix| {
+            matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        })
+        || stem.strip_prefix("LPT").is_some_and(|suffix| {
+            matches!(suffix, "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9")
+        });
+    if reserved {
+        anyhow::bail!("Authority Attachment safe leaf is a reserved Runtime View name");
+    }
+    Ok(())
+}
+
+fn validate_runtime_source_tree(path: &Path, depth: usize) -> Result<()> {
+    if depth > MAX_DIRECTORY_DEPTH {
+        anyhow::bail!("Camp Attachment Runtime View source exceeds the depth limit");
+    }
+    let source = open_source_without_following(path)?;
+    let metadata = inspect_open_node(&source)?;
+    if metadata.kind == OpenedNodeKind::RegularFile {
+        if metadata.link_count != 1 {
+            anyhow::bail!("Camp Attachment Runtime View source contains a hard-linked file");
+        }
+        return Ok(());
+    }
+    if metadata.kind != OpenedNodeKind::Directory {
+        anyhow::bail!("Camp Attachment Runtime View source contains an unsupported node");
+    }
+    let mut children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+    children.sort_by_key(|entry| entry.file_name());
+    for child in children {
+        validate_runtime_source_tree(&child.path(), depth + 1)?;
+    }
+    Ok(())
+}
+
 fn draft_times() -> (String, String) {
     let now = Utc::now();
     (
@@ -2757,6 +3763,12 @@ fn error_message(code: String) -> String {
         "attachment_missing" => "附件文件已不可用，请移除后重新添加。".to_string(),
         _ => "附件准备失败，请移除后重新添加。".to_string(),
     }
+}
+
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn ensure_directory(path: &Path) -> Result<()> {
@@ -2903,6 +3915,183 @@ fn sync_parent(_path: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
+mod agent_source_tests {
+    use super::*;
+
+    #[test]
+    fn authority_ingress_gate_is_shared_per_camp_and_exclusive() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-authority-ingress-gate-test-{}",
+            Uuid::new_v4()
+        ));
+        let first_store = CampAttachmentStore::new(&directory);
+        let second_store = CampAttachmentStore::new(&directory);
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let other_camp_id = "rvcamp_01m0evhykseprr56s0b940zrr3";
+
+        let first = first_store.authority_ingress_gate(camp_id).unwrap();
+        let same_camp = second_store.authority_ingress_gate(camp_id).unwrap();
+        let other_camp = second_store.authority_ingress_gate(other_camp_id).unwrap();
+        assert!(Arc::ptr_eq(&first, &same_camp));
+        assert!(!Arc::ptr_eq(&first, &other_camp));
+
+        let first_admission = lock_unpoisoned(&first);
+        assert!(same_camp.try_lock().is_err());
+        let other_admission = other_camp.try_lock().unwrap();
+        drop(other_admission);
+        drop(first_admission);
+        assert!(same_camp.try_lock().is_ok());
+    }
+
+    #[test]
+    fn agent_sources_are_frozen_only_from_the_exact_run_workspace_or_tmp() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-agent-attachment-source-test-{}",
+            Uuid::new_v4()
+        ));
+        let workspace = directory.join("workspace");
+        let run_tmp = directory.join("run-tmp");
+        let outside = directory.join("outside");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&run_tmp).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(workspace.join("workspace.txt"), b"workspace source").unwrap();
+        fs::write(run_tmp.join("generated.txt"), b"run tmp source").unwrap();
+        fs::write(outside.join("secret.txt"), b"outside source").unwrap();
+
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let store = CampAttachmentStore::new(&directory);
+        let frozen = store
+            .freeze_agent_sources(
+                camp_id,
+                &[
+                    "workspace.txt".to_string(),
+                    run_tmp.join("generated.txt").to_string_lossy().into_owned(),
+                ],
+                &workspace,
+                &run_tmp,
+            )
+            .unwrap();
+        assert_eq!(frozen.len(), 2);
+        assert_eq!(
+            fs::read(&frozen[0].storage_path).unwrap(),
+            b"workspace source"
+        );
+        assert_eq!(
+            fs::read(&frozen[1].storage_path).unwrap(),
+            b"run tmp source"
+        );
+        fs::write(workspace.join("workspace.txt"), b"changed later").unwrap();
+        assert_eq!(
+            fs::read(&frozen[0].storage_path).unwrap(),
+            b"workspace source"
+        );
+
+        assert!(
+            store
+                .freeze_agent_sources(
+                    camp_id,
+                    &["../outside/secret.txt".to_string()],
+                    &workspace,
+                    &run_tmp,
+                )
+                .is_err()
+        );
+        assert!(
+            store
+                .freeze_agent_sources(
+                    camp_id,
+                    &[outside.join("secret.txt").to_string_lossy().into_owned()],
+                    &workspace,
+                    &run_tmp,
+                )
+                .is_err()
+        );
+
+        #[cfg(unix)]
+        {
+            let linked_secret = workspace.join("linked-secret.txt");
+            std::os::unix::fs::symlink(outside.join("secret.txt"), &linked_secret).unwrap();
+            assert!(
+                store
+                    .freeze_agent_sources(
+                        camp_id,
+                        &["linked-secret.txt".to_string()],
+                        &workspace,
+                        &run_tmp,
+                    )
+                    .is_err()
+            );
+            fs::remove_file(linked_secret).unwrap();
+        }
+
+        store.cleanup_unowned_agent_sources(camp_id, &frozen);
+        make_owned_tree_removable(&directory).unwrap();
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn desktop_open_risk_classifies_installers_scripts_and_executable_magic() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-attachment-open-risk-test-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir_all(&fixture).unwrap();
+        let normal = fixture.join("notes.txt");
+        let installer = fixture.join("setup.pkg");
+        let script = fixture.join("generated-output");
+        let executable = fixture.join("binary");
+        let app = fixture.join("Review.app");
+        fs::write(&normal, b"review notes").unwrap();
+        fs::write(&installer, b"package bytes").unwrap();
+        fs::write(&script, b"#!/bin/sh\nprintf ok\n").unwrap();
+        fs::write(&executable, b"\x7fELFfixture").unwrap();
+        fs::create_dir(&app).unwrap();
+
+        for (path, name, kind, expected) in [
+            (
+                &normal,
+                "notes.txt",
+                "file",
+                DesktopAttachmentOpenRisk::Normal,
+            ),
+            (
+                &installer,
+                "setup.pkg",
+                "file",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+            (
+                &script,
+                "generated-output",
+                "file",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+            (
+                &executable,
+                "binary",
+                "file",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+            (
+                &app,
+                "Review.app",
+                "directory",
+                DesktopAttachmentOpenRisk::Confirm,
+            ),
+        ] {
+            assert_eq!(
+                desktop_attachment_open_risk(path, name, "application/octet-stream", kind).unwrap(),
+                expected,
+                "unexpected risk for {name}"
+            );
+        }
+
+        fs::remove_dir_all(fixture).unwrap();
+    }
+}
+
 #[cfg(all(test, windows))]
 mod windows_attachment_tests {
     use std::process::Command;
@@ -2981,30 +4170,32 @@ mod windows_attachment_tests {
     }
 }
 
+#[cfg(feature = "slow-tests")]
+#[doc(hidden)]
+pub fn insert_test_camp(database: &Database, camp_id: &str) {
+    database
+        .connection()
+        .execute(
+            r#"
+        INSERT INTO camp(
+            id, title, name_origin, collaboration_mode,
+            project_binding_kind, project_path,
+            last_message_sequence, version, created_at, updated_at
+        ) VALUES (
+            ?1, 'Draft test', 'user', 'peer',
+            'quick_chat', '/quick-chat-draft-test',
+            0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
+        )
+        "#,
+            [camp_id],
+        )
+        .unwrap();
+}
+
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
     use crate::camp_content::StructuredCampMessageSegment as Segment;
-
-    fn insert_test_camp(database: &Database, camp_id: &str) {
-        database
-            .connection()
-            .execute(
-                r#"
-                INSERT INTO camp(
-                    id, title, name_origin, collaboration_mode,
-                    project_binding_kind, project_path,
-                    last_message_sequence, version, created_at, updated_at
-                ) VALUES (
-                    ?1, 'Draft test', 'user', 'peer',
-                    'quick_chat', '/quick-chat-draft-test',
-                    0, 1, '2026-08-03T00:00:00Z', '2026-08-03T00:00:00Z'
-                )
-                "#,
-                [camp_id],
-            )
-            .unwrap();
-    }
 
     fn insert_test_member(database: &Database, camp_id: &str, agent_id: &str) {
         database
@@ -3059,6 +4250,197 @@ mod slow_tests {
                 ],
             )
             .unwrap();
+    }
+
+    #[test]
+    fn agent_freeze_aggregate_failure_cleans_every_operation_owned_directory() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-agent-freeze-aggregate-cleanup-{}",
+            Uuid::new_v4()
+        ));
+        let data_directory = fixture.join("data");
+        let workspace = fixture.join("workspace");
+        let run_tmp = fixture.join("run-tmp");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&run_tmp).unwrap();
+        for (name, bytes) in [
+            ("first.bin", MAX_ATTACHMENT_BYTES),
+            ("second.bin", MAX_ATTACHMENT_BYTES),
+            ("overflow.bin", 15 * 1024 * 1024),
+        ] {
+            File::create(workspace.join(name))
+                .unwrap()
+                .set_len(bytes)
+                .unwrap();
+        }
+
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let store = CampAttachmentStore::new(&data_directory);
+        let error = store
+            .freeze_agent_sources(
+                camp_id,
+                &[
+                    "first.bin".to_string(),
+                    "second.bin".to_string(),
+                    "overflow.bin".to_string(),
+                ],
+                &workspace,
+                &run_tmp,
+            )
+            .unwrap_err();
+        assert!(
+            error.to_string().contains("aggregate limit"),
+            "unexpected error: {error:#}"
+        );
+
+        let camp_root = data_directory.join("camp-attachments").join(camp_id);
+        allow_directory_update(&camp_root).unwrap();
+        assert!(
+            fs::read_dir(&camp_root).unwrap().next().is_none(),
+            "a failed multi-file freeze must not retain an unowned Authority child"
+        );
+
+        make_owned_tree_removable(&data_directory).unwrap();
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
+    #[test]
+    fn desktop_open_target_is_published_camp_scoped_and_runtime_state_independent() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-desktop-attachment-open-test-{}",
+            Uuid::new_v4()
+        ));
+        let data_directory = fixture.join("data");
+        fs::create_dir_all(&fixture).unwrap();
+        let source = fixture.join("preview.png");
+        let mut png = vec![0_u8; 24];
+        png[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+        png[16..20].copy_from_slice(&640_u32.to_be_bytes());
+        png[20..24].copy_from_slice(&480_u32.to_be_bytes());
+        fs::write(&source, &png).unwrap();
+
+        let mut database = Database::open(&data_directory).unwrap();
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        let other_camp_id = "rvcamp_01m0evhykseprr56s0b940zrr3";
+        insert_test_camp(&database, camp_id);
+        insert_test_camp(&database, other_camp_id);
+        let store = CampAttachmentStore::new(&data_directory);
+        let draft = store
+            .prepare_from_path(&mut database, camp_id, 0, &source, "preview.png")
+            .unwrap();
+        let attachment_id = draft.attachments[0].id.clone();
+
+        assert!(
+            store
+                .desktop_open_candidate(&database, camp_id, &attachment_id)
+                .unwrap()
+                .is_none(),
+            "Prepared Attachments must not be Desktop open targets"
+        );
+
+        let message_id = "message-desktop-open";
+        insert_test_message(
+            &database,
+            camp_id,
+            message_id,
+            1,
+            "user",
+            CURRENT_USER_ID,
+            "图片",
+        );
+        let transaction = database.connection_mut().transaction().unwrap();
+        consume_prepared_attachments(
+            &transaction,
+            camp_id,
+            message_id,
+            std::slice::from_ref(&attachment_id),
+            "2026-08-20T00:00:00Z",
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE message_attachment SET runtime_projection_state = 'failed' WHERE id = ?1",
+                [&attachment_id],
+            )
+            .unwrap();
+
+        assert!(
+            store
+                .desktop_open_candidate(&database, other_camp_id, &attachment_id)
+                .unwrap()
+                .is_none(),
+            "an Attachment must not authorize a different Camp"
+        );
+        let candidate = store
+            .desktop_open_candidate(&database, camp_id, &attachment_id)
+            .unwrap()
+            .unwrap();
+        let authority_path = candidate.path.clone();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let attachment_directory = authority_path.parent().unwrap();
+            let new_mode = fs::symlink_metadata(attachment_directory)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(
+                new_mode, 0o500,
+                "new managed containers must be Finder-enumerable without granting mutation"
+            );
+            fs::set_permissions(attachment_directory, fs::Permissions::from_mode(0o100)).unwrap();
+        }
+        let target = store
+            .verify_desktop_open_candidate(candidate.clone())
+            .unwrap();
+        assert_eq!(target.attachment_id, attachment_id);
+        assert_eq!(target.kind, "file");
+        assert_eq!(target.open_risk, DesktopAttachmentOpenRisk::Normal);
+        assert_eq!(target.path, authority_path);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::symlink_metadata(authority_path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(
+                mode, 0o500,
+                "Desktop authorization must upgrade a legacy traversal-only container to a Finder-enumerable read-only directory"
+            );
+        }
+        let preview_candidate = store
+            .preview_candidate(&database, &attachment_id)
+            .unwrap()
+            .unwrap();
+        store.verify_preview_candidate(preview_candidate).unwrap();
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&authority_path, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        #[cfg(windows)]
+        {
+            let mut permissions = fs::metadata(&authority_path).unwrap().permissions();
+            permissions.set_readonly(false);
+            fs::set_permissions(&authority_path, permissions).unwrap();
+        }
+        let mut changed = png.clone();
+        changed[23] ^= 1;
+        fs::write(&authority_path, changed).unwrap();
+        assert!(
+            store.verify_desktop_open_candidate(candidate).is_err(),
+            "an Authority payload that no longer matches its digest must fail closed"
+        );
+
+        store.remove_camp(camp_id).unwrap();
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
     }
 
     fn insert_test_explicit_user_message(

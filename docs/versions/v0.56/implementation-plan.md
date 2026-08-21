@@ -103,7 +103,7 @@ git diff --check
 `4595f94bfa125d171849f6d6d452cc7b1027c893a1bbb15bb13501ab0da99657`。
 
 全部 packaged-app 验收通过，证据根目录为
-`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-11/acceptance/`：其中 `final/`
+`<local-output>/Rovai-ai-comparison-2026-08-11/acceptance/`：其中 `final/`
 覆盖 Sidebar、Runtime Activity、Structured Mentions、Memory、Member Avatar、Member Lifecycle、
 Notification、Diagnostics、Task Card 与 New Conversation；`final-settings/` 补充通用、外观、
 Skill、MCP 与 Agent 运行时 clean 截图，并分别保留 Skill/MCP 浮层打开状态。七个设置分类由
@@ -112,7 +112,7 @@ Composer，在 1040×700 验证无横向溢出；Task 与 New Conversation 另�
 reduced-motion。
 
 可独立启动的对比包保存在
-`/Users/murray.xue/Downloads/Rovai-ai-comparison-2026-08-11/`：迁移前包
+`<local-output>/Rovai-ai-comparison-2026-08-11/`：迁移前包
 `Rovai-ai-old-pre-P2-8479cd810715.app` 的 `app.asar` SHA-256 为
 `8479cd81071553bcfaf60679c96dcb19965bcabedc4da8ddb1196fb134f4a1e1`；最终包为
 `Rovai-ai-final-P2-e5087fb-4595f94bfa12.app`，哈希如上。两者均通过严格签名校验。

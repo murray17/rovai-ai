@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # Runtime Catalog Boundaries
@@ -14,7 +14,7 @@ last_updated: 2026-08-19
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)。实测版本和能力只由
+[Runtime Launch and Verification v16](../contracts/runtime-launch-and-verification-v16.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -64,6 +64,32 @@ capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 统一收口 success、failure、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
 和整进程树 cleanup。
 
+### Machine Ready 与 Adapter 行为证据
+
+机器 Ready 只回答“当前 canonical executable/fingerprint 是否能用当前结构化协议建立可配置 Session”。
+Availability Check 与 Dispatch Preflight 必须共享同一 Adapter-specific requirements、evidence builder 与 persisted
+snapshot validator；任一入口写入的 `ready` 必须正好可被 Scheduler 接受。若 requirements 变化，旧 snapshot
+先降级，不能因数据库已有较弱 `ready` 而跳过 Dispatch Preflight。
+
+TRAE 的统一 Machine Ready 精确定义为：非空 version、当前 executable identity/fingerprint、ACP v1
+`initialize`、成功 `session/new` 与非空 Session ID、非空动态 model catalog、非空 permission/mode catalog，以及
+current model/mode 均存在于相应 options 的 coherent Session config shape。成功结构化 handshake 产生
+authenticated 分类；不发送模型 Prompt、system marker、文件写入/拒绝、sleep/cancel、Tool side effect 或
+`session/set_config_option`。这些行为可以形成 Adapter/version/platform qualification evidence，但不成为每台机器
+或每次 Dispatch 的 Ready 前置条件。
+
+### Runtime advertised catalog 与 managed Skill delivery
+
+ACP `available_commands_update` 属于 Session 建立后的动态 Runtime catalog；它可以在 Idle Session 合法到达，
+不得进入当前 Prompt output，也不能因“没有 Active Prompt”标记协议违规。Host 对已知 config/mode/session-info/
+usage metadata 与 lifecycle extension 使用同一 SessionMetadata 路由，未知 Idle shape 继续 fail closed。
+
+Runtime advertised command、Runtime Skill discovery/load 与 Rovai managed Skill delivery 是三套证据。TRAE
+`0.120.52` 已实测把内建 Slash Commands 和已加载 Skills 一起投影为 `availableCommands[]`；这只证明 Runtime
+catalog。Rovai 只有在唯一内容的项目 Skill 同时通过新 Session advertisement 与真实调用、且 ownership/cleanup
+边界明确时才建立 delivery group。当前 managed TRAE group 只写项目 `.trae/skills`；Runtime 兼容扫描到的
+`.agents/skills`、`.traecli/skills` 或用户目录不因此成为 Rovai-owned 投影目标。
+
 ## 模型目录缓存与执行事实
 
 模型目录是 Product Runtime Availability snapshot 的一部分，但其配置体验与执行事实分离。只有 deep probe
@@ -105,7 +131,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v9](../contracts/runtime-launch-and-verification-v9.md)。
+[Runtime Launch and Verification v16](../contracts/runtime-launch-and-verification-v16.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -149,11 +175,17 @@ digest 不是 Host 输入。不写 Runtime 用户级或 Workspace 配置，也�
 不同解析后 Server 集合不会命中同一 Host，以及 cwd、权限和 Session 绑定仍由各自 AgentRun 冻结。
 
 TRAE 的 `append_system_prompt` 已实测为独立 system message，但正式集成仍使用首包 Charter；能力存在
-不等于模型在冲突场景中可靠服从。Rovai Skill 原生投递路径和 compaction detector 仍无合格证据，
-保持空/Disabled。Missing-Send Recovery 则只在 zero-send、accepted-send suppression 与真实
-tool→final 三条专项 Smoke 通过后启用，不从“Runtime 已支持”反向推断。
+不等于模型在冲突场景中可靠服从。Rovai managed Skill 投递只拥有已验证的项目 `.trae/skills`；Runtime
+兼容扫描到的其他项目/用户路径不进入 Rovai ownership。Compaction detector 仍因可靠结构化完成信号
+`NotObserved` 而保持 `Disabled`，不是 `Unsupported`。Missing-Send Recovery 则只在 zero-send、
+accepted-send suppression 与真实 tool→final 三条专项 Smoke 通过后启用，不从“Runtime 已支持”反向推断。
 
 ## 队员最高权限默认
+
+Runtime Host compatibility 还绑定 Camp Attachment View contract 3。Scheduler 在 Camp read admission 内、Claim
+之前检查持久 publication writer intent；存在 pending/recovery operation 时 Run 保持 queued。一次 dispatch 的
+Context freeze、Runtime authorization、Host acquire/resume 和 input delivery 复用同一 admission 与 verified
+authorization，不能在公平 writer 排队后再次申请 read gate，也不能对同一 View 重复全量扫描。
 
 用户显式选择 Product Runtime 时，Core 的 `memberRuntimeDefaults` 使用该 Adapter 已验证的最高权限值；
 descriptor 的保守 `recommendedValue` 不替代队员 draft。静态 descriptor 只拥有配置/admission 语义，不升级为

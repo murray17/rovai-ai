@@ -18,6 +18,7 @@ import type {
   CoreEvent,
   DesktopStartupSnapshot,
   EventBatch,
+  ExecutionConsolePlacement,
   GeneralPreferencesSnapshot,
   HealthStatus,
   NotificationActionView,
@@ -50,6 +51,7 @@ import {
 import {
   CampWorkspace,
   QuickChatWorkspace,
+  composerHasSendablePayload,
   type CampMessageSendReceipt,
   type CampInspectorTab,
   type CampRuntimeRecovery,
@@ -447,7 +449,11 @@ export function App(): React.JSX.Element {
   const [memoryRefreshKey, setMemoryRefreshKey] = useState(0)
   const [memoryFocusId, setMemoryFocusId] = useState<string | null>(null)
   const [memoryReviewDrawerSignal, setMemoryReviewDrawerSignal] = useState(0)
-  const [campSnapshot, setCampSnapshotState] = useState<CampSurfaceSnapshot | null>(null)
+  const [campSnapshotState, setCampSnapshotState] = useState<{
+    snapshot: CampSurfaceSnapshot | null
+    entryPreview: boolean
+  }>({ snapshot: null, entryPreview: false })
+  const campSnapshot = campSnapshotState.snapshot
   const [campInspectorVisible, setCampInspectorVisible] = useState(initialCampInspectorVisibility)
   const [campInspectorTab, setCampInspectorTab] = useState<CampInspectorTab>('tasks')
   const [optimisticCampMessages, setOptimisticCampMessages] = useState<OptimisticCampMessageEntry[]>([])
@@ -529,10 +535,13 @@ export function App(): React.JSX.Element {
     notificationPresentationRef.current = createNotificationPresentationCoordinator()
   }
 
-  const setCampSnapshot = useCallback((snapshot: CampSurfaceSnapshot | null): void => {
+  const setCampSnapshot = useCallback((
+    snapshot: CampSurfaceSnapshot | null,
+    entryPreview = false
+  ): void => {
     campSnapshotRef.current = snapshot
     if (snapshot) rememberCampSnapshot(campSnapshotCache.current, snapshot)
-    setCampSnapshotState(snapshot)
+    setCampSnapshotState({ snapshot, entryPreview })
   }, [])
 
   const clearCampOpenFeedback = useCallback((): void => {
@@ -783,10 +792,6 @@ export function App(): React.JSX.Element {
     setInstallations(nextInstallations)
   }, [loadAgents])
 
-  const loadGeneralPreferences = useCallback(async (): Promise<void> => {
-    setGeneralPreferences(await window.rovai.generalPreferences.get())
-  }, [])
-
   const applyNavigationPreferences = useCallback((
     snapshot: NavigationPreferencesSnapshot
   ): void => {
@@ -823,7 +828,10 @@ export function App(): React.JSX.Element {
           `[startup] trace=${startupTraceId.current} stage=main_session_request `
           + `elapsed_ms=${(performance.now() - startupStartedAt.current).toFixed(1)}`
         )
-        const snapshot = await window.rovai.desktopSession.getStartupSnapshot()
+        const [snapshot, preferences] = await Promise.all([
+          window.rovai.desktopSession.getStartupSnapshot(),
+          window.rovai.generalPreferences.get()
+        ])
         const target = startupTargetFromSnapshot(snapshot)
         cancelPendingCampActivation()
         setActiveCampId(null)
@@ -846,6 +854,7 @@ export function App(): React.JSX.Element {
           lastMainView.current = 'compose'
           setView('compose')
         }
+        setGeneralPreferences(preferences)
         setStartupSnapshot(snapshot)
         setSettingsSection(snapshot.lastSettingsSection)
         setStartupError(null)
@@ -899,7 +908,10 @@ export function App(): React.JSX.Element {
       cachedSnapshot,
       campId
     )
-    const commitCampSurface = (snapshot: CampSurfaceSnapshot): void => {
+    const commitCampSurface = (
+      snapshot: CampSurfaceSnapshot,
+      entryPreview = false
+    ): void => {
       const snapshotProject = currentProjectForCamp(snapshot.camp)
       setCurrentProject(snapshotProject)
       persistCurrentProject(snapshotProject)
@@ -915,12 +927,12 @@ export function App(): React.JSX.Element {
         })
       }
       setActiveCampId(campId)
-      setCampSnapshot(snapshot)
+      setCampSnapshot(snapshot, entryPreview)
       lastMainView.current = 'camp'
       setView('camp')
     }
     if (previewSnapshot) {
-      commitCampSurface(previewSnapshot)
+      commitCampSurface(previewSnapshot, true)
     } else {
       campOpenFeedbackTimer.current = setTimeout(() => {
         campOpenFeedbackTimer.current = null
@@ -975,6 +987,10 @@ export function App(): React.JSX.Element {
       return false
     }
   }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
+
+  useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
+    void activateCamp(campId, { reconcileDefaultLead: false })
+  }), [activateCamp])
 
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const { snapshot } = await requestCampProjection(campId, 'open')
@@ -1098,11 +1114,6 @@ export function App(): React.JSX.Element {
     ) return
     void refreshOnboardingRuntime()
   }, [onboardingRuntimePhase, onboardingSnapshot, refreshOnboardingRuntime])
-
-  useEffect(() => {
-    if (startupStatus !== 'resolved') return
-    void loadGeneralPreferences().catch((nextError) => setError(errorMessage(nextError)))
-  }, [loadGeneralPreferences, startupStatus])
 
   useEffect(() => {
     if (
@@ -2286,7 +2297,9 @@ export function App(): React.JSX.Element {
   const sendCampMessage = async (
     draft: CampComposerDraftView
   ): Promise<CampMessageSendReceipt | void> => {
-    if (!activeCampId || draft.campId !== activeCampId || !draft.body.trim() || draft.revision < 1) return
+    const hasReadyAttachment = draft.attachments.length > 0
+    const hasSendablePayload = composerHasSendablePayload(draft.body, hasReadyAttachment)
+    if (!activeCampId || draft.campId !== activeCampId || !hasSendablePayload || draft.revision < 1) return
     const campId = activeCampId
     const commandId = crypto.randomUUID()
     const selectionGeneration = campSelectionGeneration.current
@@ -2482,6 +2495,14 @@ export function App(): React.JSX.Element {
     setCampInspectorTab(tab)
     setCampInspectorVisible(true)
   }
+
+  const changeExecutionConsolePlacement = useCallback(async (
+    placement: ExecutionConsolePlacement
+  ): Promise<ExecutionConsolePlacement> => {
+    const next = await window.rovai.generalPreferences.setExecutionConsolePlacement(placement)
+    setGeneralPreferences(next)
+    return next.executionConsolePlacement
+  }, [])
 
   const focusCampApprovals = (): void => {
     setNotificationFocus({
@@ -2713,7 +2734,7 @@ export function App(): React.JSX.Element {
           />
         )}
 
-        {!startupGateVisible && view === 'camp' && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
+        {!startupGateVisible && generalPreferences && view === 'camp' && activeCampId && visibleCampSnapshot?.camp.id === activeCampId && (
           <CampWorkspace
             key={activeCampId}
             snapshot={visibleCampSnapshot}
@@ -2747,6 +2768,9 @@ export function App(): React.JSX.Element {
             onCancelAgentRun={cancelAgentRun}
             stopping={activeCampStopping}
             onStop={() => void stopCampRuns()}
+            executionPlacement={generalPreferences.executionConsolePlacement}
+            onExecutionPlacementChange={changeExecutionConsolePlacement}
+            workspaceEntrySnapshotReady={!campSnapshotState.entryPreview}
             inspectorVisible={visibleCampSnapshot.camp.activationState === 'active' && campInspectorVisible}
             inspectorTab={campInspectorTab}
             onInspectorTabChange={setCampInspectorTab}
@@ -2758,6 +2782,7 @@ export function App(): React.JSX.Element {
             firstRunCamp={firstRunCamp}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
+            onNotify={setToast}
           />
         )}
 
@@ -3251,7 +3276,10 @@ export function optimisticCampMessage(
     sourceAgentRunId: null,
     body: draft.body,
     content: draft.content,
-    attachments: draft.attachments,
+    attachments: draft.attachments.map((attachment) => ({
+      ...attachment,
+      runtimeProjectionState: 'pending' as const
+    })),
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
     addressedAgentIds,
     replyToCampMessageId: draft.replyIntent?.replyToCampMessageId ?? null,
@@ -3281,10 +3309,14 @@ export function campMessageSendParams(
     draftRevision: draft.revision,
     execution: {
       taskId: null,
-      purpose: draft.body.trim(),
+      purpose: campMessageExecutionPurpose(draft),
       completionRole: 'required'
     }
   }
+}
+
+export function campMessageExecutionPurpose(draft: CampComposerDraftView): string {
+  return draft.body.trim() || 'Camp attachment-only message'
 }
 
 export function campCreationPreflightFromAgents(

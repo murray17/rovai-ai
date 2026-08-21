@@ -4,6 +4,7 @@ import { createInterface } from 'node:readline'
 import { access } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { runCaptured } from './qualification-common.mjs'
+import { coreDataDirectoryArguments } from './runtime-camp-files-root.mjs'
 
 export async function findCompetingRovaiProcesses() {
   const result = await runCaptured('/bin/ps', ['-axo', 'pid=,ppid=,command='], { timeoutMs: 10_000 })
@@ -59,7 +60,7 @@ export function startQualificationCore({
   const executable = resolve(coreExecutable)
   const resolvedDataDirectory = resolve(dataDirectory)
   const args = [
-    '--data-dir', resolvedDataDirectory,
+    ...coreDataDirectoryArguments(resolvedDataDirectory),
     '--skill-library-root', join(resolvedDataDirectory, 'managed-skill-library')
   ]
   const environment = { ...process.env }

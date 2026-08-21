@@ -21,10 +21,12 @@ import type {
   CampOpenMessageCoverage,
   CampOpenProjection,
   CampSnapshot,
+  ExecutionConsolePlacement,
   MessageDeliveryView,
   TaskStatus,
   TaskView,
   NavigationCampItem,
+  PreparedAttachmentView,
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
@@ -42,6 +44,7 @@ import {
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
   type LiveRuntimeEvent,
+  type RuntimeDiagnostic,
   localDayKey,
   messageClockTime,
   relativeTimeLabel,
@@ -92,16 +95,55 @@ const EXECUTION_DRAWER_MIN_TIMELINE_HEIGHT = 112
 const EXECUTION_DRAWER_KEYBOARD_STEP = 24
 const EXECUTION_DRAWER_KEYBOARD_PAGE_STEP = 80
 const CAMP_CONVERSATION_VIEW_STORAGE_KEY = 'rovai.camp-conversation-view.v1'
+
+export function composerHasSendablePayload(
+  message: string,
+  hasReadyAttachment: boolean
+): boolean {
+  return message.trim().length > 0 || hasReadyAttachment
+}
+
+export function composerSendIsDisabled(input: {
+  hasSendablePayload: boolean
+  hasUnavailableMention: boolean
+  replyRepairRequired: boolean
+  continuationRepairRequired: boolean
+  busy: boolean
+  composerSubmitting: boolean
+  routingMutating: boolean
+  composerDraftAvailable: boolean
+  preparingAttachmentCount: number
+  failedAttachmentCount: number
+}): boolean {
+  return !input.hasSendablePayload
+    || input.hasUnavailableMention
+    || input.replyRepairRequired
+    || input.continuationRepairRequired
+    || input.busy
+    || input.composerSubmitting
+    || input.routingMutating
+    || !input.composerDraftAvailable
+    || input.preparingAttachmentCount > 0
+    || input.failedAttachmentCount > 0
+}
+
 export type CampInspectorTab = 'tasks' | 'members'
 export type CampConversationView = 'conversation' | 'world'
 export interface FirstRunCampContext {
   memberAgentId: string
   memberRole: BuiltinMemberAvatarRole
 }
-type ExecutionConsolePlacement = 'bottom' | 'inspector'
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
 type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
+
+export function attachmentRevealLabel(platform: NodeJS.Platform): string {
+  return platform === 'darwin'
+    ? '在 Finder 中显示'
+    : platform === 'win32'
+      ? '在文件资源管理器中显示'
+      : '显示所在位置'
+}
 type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
 type ReplyFocusModality = 'pointer' | 'keyboard'
 type ConversationFindStatus = 'idle' | 'searching' | 'loading_target' | 'ready' | 'error'
@@ -329,6 +371,16 @@ export function preferredAgentProcessRun(runs: AgentRunView[]): AgentRunView | n
     ?? null
 }
 
+export function runningAgentRunForWorkspaceEntry(
+  runs: readonly AgentRunView[]
+): AgentRunView | null {
+  return runs
+    .filter((run) => run.status === 'running')
+    .sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id)
+    )[0] ?? null
+}
+
 export function agentExecutionProcesses(runs: AgentRunView[]): AgentExecutionProcess[] {
   const grouped = new Map<string, AgentRunView[]>()
   for (const run of runs) {
@@ -415,17 +467,29 @@ export function executionConsoleIsVisible(
     || (inspectorVisible && inspectorSurfaceTab === 'execution')
 }
 
-export function attachmentDropIsBlocked(
-  executionDrawerPresent: boolean,
-  mentionPopoverPresent: boolean,
-  executionPlacement: ExecutionConsolePlacement,
-  inspectorVisible: boolean,
-  inspectorSurfaceTab: CampInspectorSurfaceTab
+export function executionPlacementChangeShouldStart(
+  current: ExecutionConsolePlacement,
+  target: ExecutionConsolePlacement,
+  pending: boolean
 ): boolean {
-  return mentionPopoverPresent || (
-    executionDrawerPresent
-    && executionConsoleIsVisible(executionPlacement, inspectorVisible, inspectorSurfaceTab)
-  )
+  return !pending && current !== target
+}
+
+export function executionPlacementSaveFailureMessage(
+  current: ExecutionConsolePlacement
+): string {
+  return current === 'bottom'
+    ? '未能保存，仍在底部。'
+    : '未能保存，仍在右侧。'
+}
+
+export function attachmentDropIsBlocked({
+  mentionPopoverPresent
+}: {
+  executionDrawerPresent: boolean
+  mentionPopoverPresent: boolean
+}): boolean {
+  return mentionPopoverPresent
 }
 
 export function agentRunTerminalNote(
@@ -842,6 +906,14 @@ export function campConversationTimeline(
   })
 }
 
+export function campConversationHasVisibleHistory(
+  timeline: readonly CampConversationTimelineItem[]
+): boolean {
+  return timeline.some((item) =>
+    item.kind !== 'camp_message' || item.message.authorType !== 'system'
+  )
+}
+
 export function formatStopElapsed(createdAt: string, cancelRequestedAt: string): string {
   const started = new Date(createdAt).getTime()
   const stopped = new Date(cancelRequestedAt).getTime()
@@ -1029,6 +1101,9 @@ export function CampWorkspace({
   onCancelAgentRun = async () => undefined,
   stopping,
   onStop,
+  executionPlacement = 'bottom',
+  onExecutionPlacementChange = async () => undefined,
+  workspaceEntrySnapshotReady = true,
   inspectorVisible = true,
   inspectorTab: controlledInspectorTab,
   onInspectorTabChange,
@@ -1039,7 +1114,8 @@ export function CampWorkspace({
   runtimeRecovery = null,
   firstRunCamp = null,
   onConfigureRuntime,
-  onDismissRuntimeRecovery
+  onDismissRuntimeRecovery,
+  onNotify = () => undefined
 }: {
   snapshot: CampSnapshot
   openCoverage?: CampOpenProjection['coverage'] | null
@@ -1064,6 +1140,9 @@ export function CampWorkspace({
   onCancelAgentRun?(run: AgentRunView): Promise<void>
   stopping: boolean
   onStop(): void
+  executionPlacement?: ExecutionConsolePlacement
+  onExecutionPlacementChange?(placement: ExecutionConsolePlacement): Promise<ExecutionConsolePlacement | void>
+  workspaceEntrySnapshotReady?: boolean
   inspectorVisible?: boolean
   inspectorTab?: CampInspectorTab
   onInspectorTabChange?(tab: CampInspectorTab): void
@@ -1075,6 +1154,7 @@ export function CampWorkspace({
   firstRunCamp?: FirstRunCampContext | null
   onConfigureRuntime?(agentId: string): void
   onDismissRuntimeRecovery?(): void
+  onNotify?(message: string): void
 }): JSX.Element {
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
@@ -1094,6 +1174,7 @@ export function CampWorkspace({
     status: 'loading' | 'ready' | 'error'
   }>({ skills: [], groups: [], status: 'loading' })
   const composerEditorRef = useRef<HTMLDivElement>(null)
+  const pendingStarterPromptFocusRef = useRef<string | null>(null)
   const composerFileInputRef = useRef<HTMLInputElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
   const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
@@ -1164,13 +1245,28 @@ export function CampWorkspace({
   )
   const [worldMapRoutesVisible, setWorldMapRoutesVisible] = useState(false)
   const [localInspectorTab, setLocalInspectorTab] = useState<CampInspectorTab>('tasks')
-  const [executionPlacement, setExecutionPlacement] = useState<ExecutionConsolePlacement>('bottom')
-  const [executionInspectorActive, setExecutionInspectorActive] = useState(false)
-  const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(null)
-  const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(null)
+  const [workspaceEntryRunningRun] = useState<AgentRunView | null>(() =>
+    workspaceEntrySnapshotReady
+      ? runningAgentRunForWorkspaceEntry(snapshot.agentRuns)
+      : null
+  )
+  const [executionPlacementPending, setExecutionPlacementPending] = useState(false)
+  const [executionPlacementError, setExecutionPlacementError] = useState<{
+    message: string
+    detail: string | null
+  } | null>(null)
+  const [executionInspectorActive, setExecutionInspectorActive] = useState(
+    executionPlacement === 'inspector' && workspaceEntryRunningRun !== null
+  )
+  const [executionDrawerAgentId, setExecutionDrawerAgentId] = useState<string | null>(
+    workspaceEntryRunningRun?.agentId ?? null
+  )
+  const [executionDrawerFocusedRunId, setExecutionDrawerFocusedRunId] = useState<string | null>(
+    workspaceEntryRunningRun?.id ?? null
+  )
   const [executionDrawerFocusRequest, setExecutionDrawerFocusRequest] = useState<ExecutionDrawerFocusRequest>({
-    sequence: 0,
-    moveDomFocus: true
+    sequence: workspaceEntryRunningRun ? 1 : 0,
+    moveDomFocus: false
   })
   const [resolvingRecoveryBlockerId, setResolvingRecoveryBlockerId] = useState<string | null>(null)
   const [submittedExecutionRequest, setSubmittedExecutionRequest] = useState<CampMessageSendReceipt | null>(null)
@@ -1183,6 +1279,11 @@ export function CampWorkspace({
   const executionReadingPosition = useRef<ExecutionConsoleReadingPosition | null>(null)
   const pendingExecutionReadingPosition = useRef<ExecutionConsoleReadingPosition | null>(null)
   const executionReadingRestoreFrames = useRef<[number, number] | null>(null)
+  const executionPlacementRequest = useRef(false)
+  const executionPlacementMounted = useRef(true)
+  const workspaceEntrySnapshotHandled = useRef(workspaceEntrySnapshotReady)
+  const workspaceEntryInspectorHandled = useRef(false)
+  const mountedCampId = useRef(snapshot.camp.id)
   const [executionDrawerPortal] = useState<HTMLDivElement | null>(() => {
     if (typeof document === 'undefined') return null
     const portal = document.createElement('div')
@@ -1234,12 +1335,16 @@ export function CampWorkspace({
     })
     executionReadingRestoreFrames.current = [firstFrame, firstFrame]
   }, [executionDrawerPortal, executionPlacement, inspectorVisible])
-  useEffect(() => () => {
-    if (executionReadingRestoreFrames.current) {
-      window.cancelAnimationFrame(executionReadingRestoreFrames.current[0])
-      window.cancelAnimationFrame(executionReadingRestoreFrames.current[1])
+  useEffect(() => {
+    executionPlacementMounted.current = true
+    return () => {
+      executionPlacementMounted.current = false
+      if (executionReadingRestoreFrames.current) {
+        window.cancelAnimationFrame(executionReadingRestoreFrames.current[0])
+        window.cancelAnimationFrame(executionReadingRestoreFrames.current[1])
+      }
+      executionDrawerPortal?.remove()
     }
-    executionDrawerPortal?.remove()
   }, [executionDrawerPortal])
   useEffect(() => {
     executionReadingPosition.current = null
@@ -1345,15 +1450,61 @@ export function CampWorkspace({
   }
 
   useEffect(() => setMentionPopover(null), [snapshot.camp.id])
-  useEffect(() => {
-    setExecutionDrawerAgentId(null)
-    setExecutionDrawerFocusedRunId(null)
-    setSubmittedExecutionRequest(null)
-    setExecutionPlacement('bottom')
-    setExecutionInspectorActive(false)
+  useLayoutEffect(() => {
+    if (workspaceEntrySnapshotHandled.current || !workspaceEntrySnapshotReady) return
+    workspaceEntrySnapshotHandled.current = true
+    const runningRun = runningAgentRunForWorkspaceEntry(snapshot.agentRuns)
+    setExecutionDrawerAgentId(runningRun?.agentId ?? null)
+    setExecutionDrawerFocusedRunId(runningRun?.id ?? null)
+    setExecutionDrawerFocusRequest((request) => ({
+      sequence: request.sequence + 1,
+      moveDomFocus: false
+    }))
+    setExecutionInspectorActive(executionPlacement === 'inspector' && runningRun !== null)
     executionDrawerTriggerRef.current = null
     executionDrawerReturnAgentIdRef.current = null
-  }, [snapshot.camp.id])
+    if (runningRun && executionPlacement === 'inspector') {
+      onOpenInspector?.(inspectorTab)
+    }
+  }, [
+    executionPlacement,
+    inspectorTab,
+    onOpenInspector,
+    snapshot.agentRuns,
+    workspaceEntrySnapshotReady
+  ])
+  useLayoutEffect(() => {
+    if (workspaceEntryInspectorHandled.current) return
+    if (!workspaceEntrySnapshotReady) return
+    workspaceEntryInspectorHandled.current = true
+    if (workspaceEntryRunningRun && executionPlacement === 'inspector') {
+      onOpenInspector?.(inspectorTab)
+    }
+  }, [
+    executionPlacement,
+    inspectorTab,
+    onOpenInspector,
+    workspaceEntryRunningRun,
+    workspaceEntrySnapshotReady
+  ])
+  useLayoutEffect(() => {
+    if (mountedCampId.current === snapshot.camp.id) return
+    mountedCampId.current = snapshot.camp.id
+    const runningRun = runningAgentRunForWorkspaceEntry(snapshot.agentRuns)
+    setExecutionDrawerAgentId(runningRun?.agentId ?? null)
+    setExecutionDrawerFocusedRunId(runningRun?.id ?? null)
+    setExecutionDrawerFocusRequest((request) => ({
+      sequence: request.sequence + 1,
+      moveDomFocus: false
+    }))
+    setSubmittedExecutionRequest(null)
+    setExecutionInspectorActive(executionPlacement === 'inspector' && runningRun !== null)
+    executionDrawerTriggerRef.current = null
+    executionDrawerReturnAgentIdRef.current = null
+    if (runningRun && executionPlacement === 'inspector') {
+      onOpenInspector?.(inspectorTab)
+    }
+  }, [executionPlacement, inspectorTab, onOpenInspector, snapshot.agentRuns, snapshot.camp.id])
   useLayoutEffect(() => {
     if (executionDrawerAgentId !== null) return
     const trigger = executionDrawerTriggerRef.current
@@ -1443,6 +1594,7 @@ export function CampWorkspace({
       visibleCampMessages
     ]
   )
+  const isCampEmpty = !campConversationHasVisibleHistory(conversationTimeline)
   const defaultLead = snapshot.members.find((member) => member.isDefaultLead) ?? null
   const replyRepairRequired = composerDraftNeedsReplyRepair(composerDraft)
   const hasExplicitRecipient = messageContent.some((segment) =>
@@ -1458,9 +1610,10 @@ export function CampWorkspace({
     : null
   const continuationRecipientAvailable = continuationRecipient?.membershipStatus === 'active'
     && continuationRecipient.profilePresence === 'present'
+  const hasReadyAttachment = (composerDraft?.attachments.length ?? 0) > 0
+  const hasSendablePayload = composerHasSendablePayload(message, hasReadyAttachment)
   const hasLocalDraftPayload = Boolean(
-    message.trim()
-      || (composerDraft?.attachments.length ?? 0) > 0
+    hasSendablePayload
       || preparingAttachments.length > 0
   )
   const continuationRepairRequired = composerDraftNeedsContinuationRepair(
@@ -1489,6 +1642,18 @@ export function CampWorkspace({
   )
   const activeRuns = snapshot.agentRuns.filter((run) => NON_TERMINAL_RUNS.has(run.status))
   const executionBlocked = activeRuns.length > 0 || stopping
+  const composerSendDisabled = composerSendIsDisabled({
+    hasSendablePayload,
+    hasUnavailableMention,
+    replyRepairRequired,
+    continuationRepairRequired,
+    busy,
+    composerSubmitting,
+    routingMutating,
+    composerDraftAvailable: composerDraft !== null,
+    preparingAttachmentCount: preparingAttachments.length,
+    failedAttachmentCount: failedAttachments.length
+  })
   const executionDrawerProcess = executionDrawerAgentId
     ? executionProcessByAgentId.get(executionDrawerAgentId) ?? null
     : null
@@ -2656,16 +2821,7 @@ export function CampWorkspace({
   const submitMessage = async (): Promise<void> => {
     if (
       executionBlocked
-      || !message.trim()
-      || hasUnavailableMention
-      || replyRepairRequired
-      || continuationRepairRequired
-      || busy
-      || composerSubmitting
-      || routingMutating
-      || composerDraft === null
-      || preparingAttachments.length > 0
-      || failedAttachments.length > 0
+      || composerSendDisabled
     ) return
     const campId = snapshot.camp.id
     followTimelineAfterUserSend(campId)
@@ -2833,13 +2989,10 @@ export function CampWorkspace({
     }, 1_200)
   }
 
-  const attachmentDropBlocked = attachmentDropIsBlocked(
-    Boolean(executionDrawerProcess),
-    Boolean(mentionPopover),
-    executionPlacement,
-    inspectorVisible,
-    inspectorSurfaceTab
-  )
+  const attachmentDropBlocked = attachmentDropIsBlocked({
+    executionDrawerPresent: Boolean(executionDrawerProcess),
+    mentionPopoverPresent: Boolean(mentionPopover)
+  })
 
   const enterAttachmentDropSurface = (event: ReactDragEvent<HTMLElement>): void => {
     const kind = attachmentDragKind(event.dataTransfer)
@@ -2937,20 +3090,31 @@ export function CampWorkspace({
   }
 
   const chooseStarterPrompt = (prompt: string, announceDraft = false): void => {
+    pendingStarterPromptFocusRef.current = prompt
     changeMessage([{ kind: 'text', text: prompt }])
     if (announceDraft) setStarterNotice('已填入输入框，可修改后发送')
-    window.requestAnimationFrame(() => {
-      const editor = composerEditorRef.current
-      if (!editor) return
-      editor.focus()
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.selectNodeContents(editor)
-      range.collapse(false)
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-    })
   }
+
+  useLayoutEffect(() => {
+    const pendingPrompt = pendingStarterPromptFocusRef.current
+    if (
+      pendingPrompt === null
+      || messageContent.length !== 1
+      || messageContent[0].kind !== 'text'
+      || messageContent[0].text !== pendingPrompt
+    ) return
+
+    const editor = composerEditorRef.current
+    if (!editor) return
+    pendingStarterPromptFocusRef.current = null
+    editor.focus()
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }, [messageContent])
 
   const selectInspectorTab = (tab: CampInspectorTab): void => {
     if (controlledInspectorTab === undefined) setLocalInspectorTab(tab)
@@ -2983,29 +3147,52 @@ export function CampWorkspace({
     })
   }
 
+  const moveExecution = async (target: ExecutionConsolePlacement): Promise<void> => {
+    if (!executionPlacementChangeShouldStart(
+      executionPlacement,
+      target,
+      executionPlacementRequest.current
+    )) return
+    executionPlacementRequest.current = true
+    setExecutionPlacementPending(true)
+    setExecutionPlacementError(null)
+    try {
+      const confirmedPlacement = await onExecutionPlacementChange(target)
+      if (!executionPlacementMounted.current) return
+      if (confirmedPlacement && confirmedPlacement !== target) {
+        throw new Error('保存后的执行台位置与请求不一致')
+      }
+      const readingPosition = captureExecutionConsoleReadingPosition(
+        executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
+        executionReadingPosition.current
+      )
+      executionReadingPosition.current = readingPosition
+      pendingExecutionReadingPosition.current = readingPosition
+      if (target === 'inspector') {
+        setExecutionInspectorActive(true)
+        onOpenInspector?.(inspectorTab)
+      } else {
+        setExecutionInspectorActive(false)
+      }
+      focusPlacementButton(target)
+    } catch (nextError) {
+      if (!executionPlacementMounted.current) return
+      setExecutionPlacementError({
+        message: executionPlacementSaveFailureMessage(executionPlacement),
+        detail: nextError instanceof Error ? nextError.message : null
+      })
+    } finally {
+      executionPlacementRequest.current = false
+      if (executionPlacementMounted.current) setExecutionPlacementPending(false)
+    }
+  }
+
   const moveExecutionToInspector = (): void => {
-    const readingPosition = captureExecutionConsoleReadingPosition(
-      executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
-      executionReadingPosition.current
-    )
-    executionReadingPosition.current = readingPosition
-    pendingExecutionReadingPosition.current = readingPosition
-    setExecutionPlacement('inspector')
-    setExecutionInspectorActive(true)
-    onOpenInspector?.(inspectorTab)
-    focusPlacementButton('inspector')
+    void moveExecution('inspector')
   }
 
   const moveExecutionToBottom = (): void => {
-    const readingPosition = captureExecutionConsoleReadingPosition(
-      executionDrawerPortal?.querySelector<HTMLElement>('.execution-drawer') ?? null,
-      executionReadingPosition.current
-    )
-    executionReadingPosition.current = readingPosition
-    pendingExecutionReadingPosition.current = readingPosition
-    setExecutionPlacement('bottom')
-    setExecutionInspectorActive(false)
-    focusPlacementButton('bottom')
+    void moveExecution('bottom')
   }
 
   const loadEarlierMessages = async (): Promise<void> => {
@@ -3514,46 +3701,48 @@ export function CampWorkspace({
                                     onReveal={() => void revealReplyParent(replyParentId)}
                                   />
                                 )}
-                                {campMessage.authorType === 'agent'
+                                {displayBody.trim().length > 0 && (
+                                  campMessage.authorType === 'agent'
                                   && !campMessage.content?.some((segment) =>
                                     segment.kind === 'current_user_mention'
                                   )
-                                      ? (
-                                          <div className="final-copy">
-                                            <SafeMarkdown>{displayBody}</SafeMarkdown>
-                                          </div>
-                                        )
-                                      : (
-                                          <>
-                                            <div className="message-bubble">
-                                              <StructuredMessageBody
-                                                body={displayBody}
-                                                content={campMessage.content}
-                                                members={snapshot.members}
-                                                renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
-                                                onActivateMemberMention={openMemberProfilePopover}
-                                                onActivateAllMembersMention={(trigger, focusPanel) =>
-                                                  openAllMembersMentionPopover(
-                                                    'history',
-                                                    campMessage.addressedAgentIds,
-                                                    trigger,
-                                                    focusPanel
-                                                  )}
-                                              />
-                                            </div>
-                                            {campMessage.attachments.length > 0 && (
-                                              <div className="timeline-attachments" aria-label="消息附件">
-                                                {campMessage.attachments.map((attachment) => (
-                                                  <AttachmentCard
-                                                    attachment={attachment}
-                                                    key={attachment.id}
-                                                    timeline
-                                                  />
-                                                ))}
-                                              </div>
-                                            )}
-                                          </>
-                                        )}
+                                    ? (
+                                        <div className="final-copy">
+                                          <SafeMarkdown>{displayBody}</SafeMarkdown>
+                                        </div>
+                                      )
+                                    : (
+                                        <div className="message-bubble">
+                                          <StructuredMessageBody
+                                            body={displayBody}
+                                            content={campMessage.content}
+                                            members={snapshot.members}
+                                            renderLeadingCurrentUserMarkdown={campMessage.authorType === 'agent'}
+                                            onActivateMemberMention={openMemberProfilePopover}
+                                            onActivateAllMembersMention={(trigger, focusPanel) =>
+                                              openAllMembersMentionPopover(
+                                                'history',
+                                                campMessage.addressedAgentIds,
+                                                trigger,
+                                                focusPanel
+                                              )}
+                                          />
+                                        </div>
+                                      )
+                                )}
+                                {campMessage.attachments.length > 0 && (
+                                  <div className="timeline-attachments" aria-label="消息附件">
+                                    {campMessage.attachments.map((attachment) => (
+                                      <AttachmentCard
+                                        attachment={attachment}
+                                        campId={snapshot.camp.id}
+                                        key={attachment.id}
+                                        onNotify={onNotify}
+                                        timeline
+                                      />
+                                    ))}
+                                  </div>
+                                )}
                               </MessageSurface>
                               <CampMessageDeliveryFooter
                                 deliveries={campMessageDeliveries}
@@ -3602,6 +3791,8 @@ export function CampWorkspace({
               selectedAgentId={executionDrawerAgentId}
               onOpen={openExecutionProcess}
               onMovePlacement={moveExecutionToInspector}
+              placementPending={executionPlacementPending}
+              placementError={executionPlacementError}
             />
           )}
           <div
@@ -3638,12 +3829,39 @@ export function CampWorkspace({
             className="activity-tabs"
           >
             <Tabs.List className="tabs-list sticky-tabs" aria-label="会话详情">
-              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
-              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
               {executionPlacement === 'inspector' && (
                 <Tabs.Trigger value="execution">执行 <small>{executionProcesses.length}</small></Tabs.Trigger>
               )}
+              <Tabs.Trigger value="members">队员 <small>{campInspectorMembers(snapshot.members).length}</small></Tabs.Trigger>
+              <Tabs.Trigger value="tasks">任务 <small>{openCoverage?.tasks.totalCount ?? snapshot.tasks.length}</small></Tabs.Trigger>
             </Tabs.List>
+            <Tabs.Content value="execution" forceMount className="execution-sidecar-panel">
+              {executionPlacement === 'inspector' && (
+                <RunPulse
+                  placement="inspector"
+                  placementButtonRef={inspectorPlacementButtonRef}
+                  processes={executionProcesses}
+                  memberById={memberById}
+                  stopping={stopping}
+                  selectedAgentId={executionDrawerAgentId}
+                  onOpen={openExecutionProcess}
+                  onMovePlacement={moveExecutionToBottom}
+                  placementPending={executionPlacementPending}
+                  placementError={executionPlacementError}
+                />
+              )}
+              <div
+                ref={inspectorExecutionDrawerHostRef}
+                className="execution-sidecar-detail execution-drawer-host execution-drawer-host-inspector"
+              >
+                {!executionDrawerPortal && executionPlacement === 'inspector' && executionDrawer}
+                {executionPlacement === 'inspector' && !executionDrawer && (
+                    <div className="execution-sidecar-empty">
+                      选择一位队员，查看连续执行历史。
+                    </div>
+                )}
+              </div>
+            </Tabs.Content>
             <Tabs.Content value="tasks" className="tab-scroll task-panel-scroll">
               <TaskPanel
                 snapshot={snapshot}
@@ -3664,31 +3882,6 @@ export function CampWorkspace({
                 busy={busy}
                 onChangeLead={onChangeLead}
               />
-            </Tabs.Content>
-            <Tabs.Content value="execution" forceMount className="execution-sidecar-panel">
-              {executionPlacement === 'inspector' && (
-                <RunPulse
-                  placement="inspector"
-                  placementButtonRef={inspectorPlacementButtonRef}
-                  processes={executionProcesses}
-                  memberById={memberById}
-                  stopping={stopping}
-                  selectedAgentId={executionDrawerAgentId}
-                  onOpen={openExecutionProcess}
-                  onMovePlacement={moveExecutionToBottom}
-                />
-              )}
-              <div
-                ref={inspectorExecutionDrawerHostRef}
-                className="execution-sidecar-detail execution-drawer-host execution-drawer-host-inspector"
-              >
-                {!executionDrawerPortal && executionPlacement === 'inspector' && executionDrawer}
-                {executionPlacement === 'inspector' && !executionDrawer && (
-                    <div className="execution-sidecar-empty">
-                      选择一位队员，查看连续执行历史。
-                    </div>
-                )}
-              </div>
             </Tabs.Content>
           </Tabs.Root>
           <div className="inspector-meta">
@@ -3942,7 +4135,9 @@ export function CampWorkspace({
               skills={composerSkills}
               skillCatalogStatus={composerSkillCatalog.status}
               ariaLabel={`给 ${defaultLead?.displayName ?? '默认负责人'} 发消息`}
-              placeholder="继续提问、补充约束或交付下一项职责…"
+              placeholder={isCampEmpty
+                ? '集结队伍，写下这次冒险的目标…'
+                : '和队伍继续前行：补充线索、调整方向或布置新任务…'}
               disabled={busy || composerSubmitting || routingMutating}
               editorRef={composerEditorRef}
               onActivateMemberMention={(member, trigger, focusPanel) =>
@@ -4021,18 +4216,7 @@ export function CampWorkspace({
                     <button
                       className="primary-button composer-send"
                       type="submit"
-                      disabled={
-                        !message.trim()
-                        || hasUnavailableMention
-                        || replyRepairRequired
-                        || continuationRepairRequired
-                        || busy
-                        || composerSubmitting
-                        || routingMutating
-                        || composerDraft === null
-                        || preparingAttachments.length > 0
-                        || failedAttachments.length > 0
-                      }
+                      disabled={composerSendDisabled}
                     >
                       {busy || composerSubmitting ? '发送中…' : preparingAttachments.length > 0 ? '处理中…' : '发送'}
                     </button>
@@ -4043,7 +4227,14 @@ export function CampWorkspace({
           </form>
         </div>
         {attachmentDragState && (
-          <div className="conversation-drop-layer" aria-hidden="true">
+          <div
+            className={`conversation-drop-layer ${
+              executionDrawerProcess && executionPlacement === 'bottom'
+                ? 'has-bottom-execution-drawer'
+                : ''
+            }`.trim()}
+            aria-hidden="true"
+          >
             <div className="conversation-drop-callout">
               <span className="conversation-drop-glyph">
                 <svg viewBox="0 0 36 36">
@@ -4129,7 +4320,9 @@ function RunPulse({
   stopping,
   selectedAgentId,
   onOpen,
-  onMovePlacement
+  onMovePlacement,
+  placementPending,
+  placementError
 }: {
   placement: ExecutionConsolePlacement
   placementButtonRef: RefObject<HTMLButtonElement | null>
@@ -4139,6 +4332,8 @@ function RunPulse({
   selectedAgentId: string | null
   onOpen(agentId: string, trigger: HTMLButtonElement): void
   onMovePlacement(): void
+  placementPending: boolean
+  placementError: { message: string; detail: string | null } | null
 }): JSX.Element {
   const visibleProcesses = processes.slice().sort((left, right) => {
     const leftPosition = memberById.get(left.agentId)?.memberOrder ?? Number.MAX_SAFE_INTEGER
@@ -4149,10 +4344,15 @@ function RunPulse({
     process.runs.some(agentRunCountsAsExecuting)
   ).length
   if (visibleProcesses.length === 0) return <></>
-  const placementLabel = placement === 'bottom' ? '移到右侧' : '移回底部'
+  const placementLabel = placementPending
+    ? '正在保存'
+    : placement === 'bottom' ? '移到右侧' : '移回底部'
   const placementAriaLabel = placement === 'bottom'
-    ? '将执行台移到右侧检查器'
-    : '将执行台移回会话底部'
+    ? '将执行台移到右侧检查器并记住此位置'
+    : '将执行台移回会话底部并记住此位置'
+  const placementTitle = placement === 'bottom'
+    ? '移到右侧并记住此位置'
+    : '移回底部并记住此位置'
   return (
     <div className={`run-pulse run-pulse-${placement}`} aria-label="Agent 执行台">
       <div className="run-pulse-heading">
@@ -4218,17 +4418,27 @@ function RunPulse({
           )
         })}
       </ul>
-      <button
-        ref={placementButtonRef}
-        className="execution-placement-button"
-        type="button"
-        aria-label={placementAriaLabel}
-        title={placementLabel}
-        onClick={onMovePlacement}
-      >
-        <ExecutionPlacementIcon target={placement === 'bottom' ? 'inspector' : 'bottom'} />
-        <span>{placementLabel}</span>
-      </button>
+      <div className="execution-placement-control">
+        <button
+          ref={placementButtonRef}
+          className="execution-placement-button"
+          type="button"
+          aria-label={placementAriaLabel}
+          aria-busy={placementPending}
+          title={placementPending ? '正在保存执行台位置' : placementTitle}
+          disabled={placementPending}
+          onClick={onMovePlacement}
+        >
+          <ExecutionPlacementIcon target={placement === 'bottom' ? 'inspector' : 'bottom'} />
+          <span>{placementLabel}</span>
+        </button>
+        {placementError && (
+          <span className="execution-placement-feedback" role="alert" title={placementError.detail ?? undefined}>
+            <span>{placementError.message}</span>
+            <button type="button" onClick={onMovePlacement}>重试</button>
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -4649,7 +4859,7 @@ function ExecutionDrawer({
             {stopViewState === 'available' && resolvedFocusedRun && (
               <button
                 type="button"
-                className="quiet-button compact danger-text execution-run-stop-button"
+                className="quiet-button compact danger-text execution-drawer-action-button"
                 aria-label="停止当前运行"
                 onClick={() => {
                   const runId = resolvedFocusedRun.id
@@ -4667,7 +4877,7 @@ function ExecutionDrawer({
                 停止
               </button>
             )}
-            <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
+            <button type="button" className="quiet-button compact execution-drawer-action-button" onClick={onClose} aria-label="收起执行详情">收起</button>
           </div>
         </header>
         <div
@@ -6060,14 +6270,27 @@ function AttachmentFolderGlyph(): JSX.Element {
 function AttachmentCard({
   attachment,
   onRemove,
+  campId,
+  onNotify = () => undefined,
   timeline = false
 }: {
-  attachment: CampMessageAttachmentView
+  attachment: CampMessageAttachmentView | PreparedAttachmentView
   onRemove?: () => void
+  campId?: string
+  onNotify?: (message: string) => void
   timeline?: boolean
 }): JSX.Element {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [attachmentAction, setAttachmentAction] = useState<'open' | 'reveal' | null>(null)
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const [contextAnchor, setContextAnchor] = useState({ x: 0, y: 0 })
+  const attachmentButtonRef = useRef<HTMLButtonElement>(null)
+  const runtimeProjectionState = 'runtimeProjectionState' in attachment
+    ? attachment.runtimeProjectionState
+    : 'available'
+  const rendererPlatform = typeof window === 'undefined' ? 'darwin' : window.rovai.platform
   useEffect(() => {
     if (attachment.previewKind !== 'image') return
     let active = true
@@ -6093,6 +6316,55 @@ function AttachmentCard({
     }
   }, [attachment.id, attachment.previewKind])
 
+  const runAttachmentAction = async (action: 'open' | 'reveal'): Promise<void> => {
+    if (!timeline || !campId || attachmentAction) return
+    setAttachmentAction(action)
+    try {
+      if (action === 'open') {
+        const result = await window.rovai.attachments.open(campId, attachment.id)
+        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
+        else if (result.error) onNotify('无法使用系统应用打开此附件')
+      } else {
+        const result = await window.rovai.attachments.reveal(campId, attachment.id)
+        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
+        else if (result.error) {
+          onNotify(rendererPlatform === 'darwin'
+            ? '无法在 Finder 中显示此附件'
+            : rendererPlatform === 'win32'
+              ? '无法在文件资源管理器中显示此附件'
+              : '无法显示此附件所在位置')
+        }
+      }
+    } catch {
+      onNotify(action === 'open'
+        ? '无法使用系统应用打开此附件'
+        : '无法显示此附件所在位置')
+    } finally {
+      setAttachmentAction(null)
+    }
+  }
+
+  const revealLabel = attachmentRevealLabel(rendererPlatform)
+  const systemOpenLabel = attachment.kind === 'directory'
+    ? '打开文件夹'
+    : '使用系统应用打开'
+  const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null
+  const showAttachmentContextMenu = (x: number, y: number): void => {
+    setContextAnchor({ x, y })
+    setContextMenuOpen(true)
+  }
+  const showAttachmentKeyboardMenu = (): void => {
+    const bounds = attachmentButtonRef.current?.getBoundingClientRect()
+    showAttachmentContextMenu(bounds?.left ?? 8, bounds?.bottom ?? 8)
+  }
+
+  const projectionLabel = runtimeProjectionState === 'failed'
+    ? '队员读取不可用'
+    : runtimeProjectionState === 'pending'
+      || runtimeProjectionState === 'recovery_required'
+      ? '正在准备供队员读取'
+      : null
+
   const content = (
     <>
       <span className="attachment-visual" aria-hidden="true">
@@ -6105,24 +6377,113 @@ function AttachmentCard({
       <span className="attachment-copy">
         <strong title={attachment.displayName}>{attachment.displayName}</strong>
         <small>
-          {attachment.kind === 'directory'
+          {projectionLabel ?? (attachment.kind === 'directory'
             ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
-            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`}
+            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`)}
         </small>
       </span>
     </>
   )
 
   return (
-    <div className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''}`}>
-      {previewUrl
+    <div
+      className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
+      aria-label={projectionLabel ? `${attachment.displayName}：${projectionLabel}` : undefined}
+      data-context-open={contextMenuOpen ? 'true' : undefined}
+      onContextMenu={timeline && campId
+        ? (event) => {
+            event.preventDefault()
+            if (event.clientX === 0 && event.clientY === 0) showAttachmentKeyboardMenu()
+            else showAttachmentContextMenu(event.clientX, event.clientY)
+          }
+        : undefined}
+    >
+      {timeline && campId
         ? (
-            <Dialog.Root>
-              <Dialog.Trigger asChild>
-                <button className="attachment-open" type="button" aria-label={`预览附件 ${attachment.displayName}`}>
-                  {content}
-                </button>
-              </Dialog.Trigger>
+            <>
+              <button
+                className={`attachment-open ${hasImagePreview ? 'is-preview' : ''}`}
+                type="button"
+                aria-busy={attachmentAction !== null}
+                aria-label={hasImagePreview
+                  ? `预览附件 ${attachment.displayName}`
+                  : `${systemOpenLabel} ${attachment.displayName}`}
+                disabled={attachmentAction !== null}
+                onClick={() => {
+                  if (hasImagePreview) setPreviewOpen(true)
+                  else void runAttachmentAction('open')
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+                  event.preventDefault()
+                  showAttachmentKeyboardMenu()
+                }}
+                ref={attachmentButtonRef}
+              >
+                {content}
+                {attachmentAction && <i className="attachment-action-loading" aria-hidden="true" />}
+              </button>
+              <DropdownMenu.Root open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+                <DropdownMenu.Trigger asChild>
+                  <span
+                    className="attachment-context-anchor"
+                    style={{ left: contextAnchor.x, top: contextAnchor.y }}
+                  />
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="attachment-context-menu"
+                    aria-label={`附件操作：${attachment.displayName}`}
+                    align="start"
+                    side="right"
+                    sideOffset={4}
+                    collisionPadding={8}
+                    loop
+                    onCloseAutoFocus={(event) => {
+                      event.preventDefault()
+                      attachmentButtonRef.current?.focus()
+                    }}
+                  >
+                    <DropdownMenu.Label className="attachment-context-menu-label">
+                      <strong>{attachment.displayName}</strong>
+                      <small>{attachment.kind === 'directory' ? '文件夹' : attachmentTypeLabel(attachment.mediaType)}</small>
+                    </DropdownMenu.Label>
+                    <DropdownMenu.Item
+                      className="attachment-context-menu-item"
+                      disabled={attachmentAction !== null}
+                      onSelect={() => void runAttachmentAction('open')}
+                    >
+                      <AttachmentOpenGlyph kind={attachment.kind} />
+                      <span>{systemOpenLabel}</span>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className="attachment-context-menu-separator" />
+                    <DropdownMenu.Item
+                      className="attachment-context-menu-item"
+                      disabled={attachmentAction !== null}
+                      onSelect={() => void runAttachmentAction('reveal')}
+                    >
+                      <AttachmentRevealGlyph />
+                      <span>{revealLabel}</span>
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            </>
+          )
+        : hasImagePreview
+          ? (
+              <button
+                className="attachment-open is-preview"
+                type="button"
+                aria-label={`预览附件 ${attachment.displayName}`}
+                onClick={() => setPreviewOpen(true)}
+              >
+                {content}
+              </button>
+            )
+          : <div className="attachment-open">{content}</div>}
+      {hasImagePreview && (
+            <Dialog.Root open={previewOpen} onOpenChange={setPreviewOpen}>
               <Dialog.Portal>
                 <Dialog.Overlay className="attachment-lightbox-overlay" />
                 <Dialog.Content className="attachment-lightbox" aria-describedby={undefined}>
@@ -6132,8 +6493,7 @@ function AttachmentCard({
                 </Dialog.Content>
               </Dialog.Portal>
             </Dialog.Root>
-          )
-        : <div className="attachment-open">{content}</div>}
+      )}
       {onRemove && (
         <button
           className="attachment-remove"
@@ -6145,6 +6505,32 @@ function AttachmentCard({
         </button>
       )}
     </div>
+  )
+}
+
+function AttachmentOpenGlyph({ kind }: { kind: 'file' | 'directory' }): JSX.Element {
+  return kind === 'directory'
+    ? (
+        <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M2.8 5.8h4l1.5 1.7h6.9v6.7H2.8z" />
+          <path d="M2.8 7.5V4.8h4.4l1.3 1.5" />
+        </svg>
+      )
+    : (
+        <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M3.4 3.2h7.2l4 4v7.6H3.4z" />
+          <path d="M10.6 3.2v4h4M6.2 11.1h5.7M9.7 8.8l2.2 2.3-2.2 2.2" />
+        </svg>
+      )
+}
+
+function AttachmentRevealGlyph(): JSX.Element {
+  return (
+    <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
+      <path d="M2.8 5.8h4l1.5 1.7h6.9v6.7H2.8z" />
+      <circle cx="11.9" cy="11.2" r="2.1" />
+      <path d="m13.4 12.7 1.8 1.8" />
+    </svg>
   )
 }
 
@@ -6654,7 +7040,7 @@ function ToolCallRow({
   const summary = (
     <>
       <ToolCallIcon activityDomain={step.activityDomain} />
-      <span className="tool-call-title">{step.title}</span>
+      <span className="tool-call-title" title={step.title}>{step.title}</span>
       <ToolCallState status={status} />
       <span
         className={`tool-call-disclosure-slot${hasDetail ? '' : ' is-placeholder'}`}
@@ -6697,6 +7083,29 @@ function ToolCallRow({
         summaryRef={summaryRef}
       />
     </details>
+  )
+}
+
+function RuntimeRetryNotice({ diagnostic }: {
+  diagnostic: RuntimeDiagnostic
+}): JSX.Element {
+  const retryTiming = diagnostic.retryAfterSeconds === 0
+    ? '正在立即重试'
+    : `将在 ${diagnostic.retryAfterSeconds} 秒后重试`
+  return (
+    <section
+      className="runtime-retry-notice"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-label="Claude Code API 暂时不可用"
+    >
+      <strong>Claude Code API 暂时不可用</strong>
+      <p>
+        {retryTiming}（第 {diagnostic.attempt}/{diagnostic.maxAttempts} 次）。
+        本次执行尚未结束，可继续等待或停止执行。
+      </p>
+    </section>
   )
 }
 
@@ -6754,6 +7163,10 @@ export function RunExecutionDisclosure({
   const processItems = (effectiveProgress?.items ?? []).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
+  const activeRetryDiagnostic = nonTerminal
+    ? processItems.reduce<RuntimeDiagnostic | null>((latest, item) =>
+        item.kind === 'diagnostic' ? item.diagnostic : latest, null)
+    : null
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
@@ -6789,6 +7202,11 @@ export function RunExecutionDisclosure({
         </p>
       )}
       {processItems.map((item) => {
+        if (item.kind === 'diagnostic') {
+          return nonTerminal
+            ? <RuntimeRetryNotice diagnostic={item.diagnostic} key={item.key} />
+            : null
+        }
         if (item.kind === 'narration') {
           return (
             <div className={`process-copy stream-${item.kind}`} key={item.key}>
@@ -6867,7 +7285,9 @@ export function RunExecutionDisclosure({
             ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
             : run.status === 'queued'
               ? '等待开始'
-              : '正在处理'}</span>
+              : activeRetryDiagnostic
+                ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
+                : '正在处理'}</span>
         </div>
       )}
       {cancelling && nonTerminal && (
@@ -7019,7 +7439,7 @@ function runtimeAdapterLabel(kind: string): string {
     'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
-    'trae-cn-cli': 'TRAE CLI（中国企业版）',
+    'trae-cn-cli': 'TRAE CLI',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
 }

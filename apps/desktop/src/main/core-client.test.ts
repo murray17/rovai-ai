@@ -15,6 +15,7 @@ import {
   CoreClient,
   coreLaunchArguments,
   desktopSkillLibraryRoot,
+  runtimeCampFilesRoot,
   sidecarExecutableName,
   sidecarTargetKey
 } from './core-client'
@@ -49,21 +50,39 @@ describe('CoreClient planned shutdown', () => {
     )
     expect(coreLaunchArguments(
       '/tmp/rovai-accept/user-data',
+      '/tmp/rovai-accept/runtime-files',
       '/tmp/rovai-accept/user-data/managed-skill-library',
       ['/tmp/removed-project']
     )).toEqual([
       '--data-dir',
       '/tmp/rovai-accept/user-data',
+      '--runtime-camp-files-root',
+      '/tmp/rovai-accept/runtime-files',
       '--skill-library-root',
       '/tmp/rovai-accept/user-data/managed-skill-library',
       '--removed-skill-project-root',
       '/tmp/removed-project'
     ])
-    expect(coreLaunchArguments('/daily/user-data', null, [])).toEqual([
+    expect(coreLaunchArguments('/daily/user-data', '/daily/runtime-files', null, [])).toEqual([
       '--data-dir',
       '/daily/user-data',
+      '--runtime-camp-files-root',
+      '/daily/runtime-files',
       '--use-default-skill-library'
     ])
+    expect(runtimeCampFilesRoot(
+      'C:\\Rovai AI\\Core',
+      'C:\\Users\\test',
+      'win32'
+    )).toBe('C:\\Rovai AI\\Core\\runtime-files')
+    const macRoot = runtimeCampFilesRoot(
+      '/tmp/rovai-accept/user-data',
+      '/tmp/rovai-home',
+      'darwin'
+    )
+    expect(macRoot).toMatch(
+      /^\/tmp\/rovai-home\/\.rovai\/instances\/v1-[0-9a-f]{64}\/runtime-files$/
+    )
   })
 
   it.runIf(process.platform !== 'win32')(

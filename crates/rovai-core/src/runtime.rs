@@ -6448,8 +6448,15 @@ mod tests {
                     native_binding_id, native_binding_generation,
                     boundary_camp_message_sequence, dynamic_payload_digest,
                     status, native_input_id, prepared_at, accepted_at,
-                    resolved_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7, ?8, ?9, ?10, ?10, ?9)
+                    resolved_at, updated_at,
+                    runtime_attachment_auth_receipt_version,
+                    runtime_attachment_auth_receipt_json,
+                    runtime_attachment_auth_receipt_digest,
+                    runtime_request_digest
+                ) VALUES (
+                    ?1, ?2, ?3, ?4, ?5, 1, 1, ?6, ?7, ?8, ?9, ?10, ?10, ?9,
+                    1, '{"schemaVersion":1}', 'sha256:test-auth', 'sha256:test-request'
+                )
                 "#,
                 params![
                     format!("test-input-{agent_run_id}"),
