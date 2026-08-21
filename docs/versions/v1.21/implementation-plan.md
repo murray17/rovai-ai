@@ -68,7 +68,8 @@ last_updated: 2026-08-21
 - [x] 完整前端、文档、TypeScript、strict Clippy、CLI 20 项与 slow suite 272 项通过；fast lib 298/299，
   唯一失败仍为既有 Runtime compatibility register digest 基线；
 - [x] macOS arm64 package 深度验签、架构检查和隔离 Diagnostics UI 成品验收通过；
-- [ ] 推送 main，并原子替换日常 Applications 安装。
+- [x] 提交 `fe7cc952` 推送 main；原子替换日常 `/Applications/Rovai AI.app`，旧包保留为
+  `/Applications/Rovai AI.backup-before-fe7cc952.app`，并从规范路径启动新 App/Core。
 
 ## References
 

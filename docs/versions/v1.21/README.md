@@ -83,6 +83,11 @@ Managed Process 只增加 macOS credential tree deny，不改变 Runtime 输入�
   与当前 Revision 不一致。
 - macOS Desktop 派生 Runtime Files Root 时与子 Core 共享同一非空 `HOME`，修复隔离验收或其他显式 Home
   启动中 Main/Core root admission 不一致导致的 Core 启动失败。
+- 修复提交 `fe7cc952` 已推送 main；macOS arm64 成品通过隔离 Diagnostics 验收后原子安装到
+  `/Applications/Rovai AI.app`，旧包保留为 `/Applications/Rovai AI.backup-before-fe7cc952.app`，并已从
+  规范路径启动新 App/Core。包内 Core/CLI SHA-256 分别为
+  `8a154bce0cb0f1cb20bc024e5b218b5c27b593cd0614825b373e3efc991f9239` 与
+  `fae6ec35df2fd5398c52735b861988a6704a51018cedd8352932bf513bd592b4`。
 
 ## 明确不做
 
