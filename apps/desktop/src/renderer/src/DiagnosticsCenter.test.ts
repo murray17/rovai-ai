@@ -6,7 +6,8 @@ import {
   DiagnosticsCenter,
   diagnosticActionForCheck,
   diagnosticCheckDetail,
-  diagnosticChecksForFilter
+  diagnosticChecksForFilter,
+  diagnosticIssueCopy
 } from './DiagnosticsCenter'
 
 const observedAt = '2026-08-09T08:00:00Z'
@@ -45,7 +46,34 @@ describe('DiagnosticsCenter projections', () => {
       id: 'skill-projections',
       group: 'managed_content',
       status: 'attention',
-      code: 'skill_projection_issue'
+      code: 'skill_projection_issue',
+      facts: [
+        { key: 'issueCount', value: '24' },
+        { key: 'issueCodes', value: 'broken_or_unavailable_symlink' }
+      ]
+    }))).toEqual({ kind: 'repair_skill', label: '清理旧链接并重新同步' })
+
+    expect(diagnosticIssueCopy(check({
+      id: 'skill-projections',
+      group: 'managed_content',
+      status: 'attention',
+      code: 'skill_projection_issue',
+      facts: [
+        { key: 'issueCount', value: '24' },
+        { key: 'issueCodes', value: 'broken_or_unavailable_symlink' }
+      ]
+    }))).toEqual({
+      title: 'Skill 投影包含旧的断开链接',
+      reason: '24 个受管入口仍指向已经移除的旧 Skill Revision。',
+      impact: '影响之后启动的 AgentRun；修复只清理已识别的旧 .lumen 断链，其他项目内容不会被覆盖。'
+    })
+
+    expect(diagnosticActionForCheck(check({
+      id: 'skill-projections',
+      group: 'managed_content',
+      status: 'attention',
+      code: 'skill_projection_issue',
+      facts: [{ key: 'issueCount', value: '1' }]
     }))).toEqual({ kind: 'repair_skill', label: '重新同步 Skill' })
 
     expect(diagnosticActionForCheck(check({

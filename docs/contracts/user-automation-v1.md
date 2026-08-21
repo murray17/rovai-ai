@@ -12,7 +12,9 @@ last_updated: 2026-08-21
 本文冻结普通用户从终端控制正在运行的 Rovai Desktop，以及执行一次 Runtime Diagnostic Trial 的 V1
 边界。它不是调试接口，也不是 Agent Runtime 的 Built-in Tool transport。决定理由见
 [V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)和
-[V1.21-D02](../versions/v1.21/decisions.md#v1-21-d02)。
+[V1.21-D02](../versions/v1.21/decisions.md#v1-21-d02)。Runtime 隔离与原子发送的修正理由见
+[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)和
+[V1.21-D04](../versions/v1.21/decisions.md#v1-21-d04)。
 
 ## 1. 一个 binary、两条运输
 
@@ -42,6 +44,13 @@ CLI 默认只读标准 Rovai AI 应用数据目录。测试可以显式设置
 `ROVAI_APP_AUTOMATION_CONTEXT` 指向隔离实例；这不是生产远程寻址或任意 endpoint 参数。Server 对每个请求
 同时验证 `contractVersion`、`instanceId` 与 credential，限制单帧为 4 MiB，只接受一行完整 JSON，并在
 关闭时移除本实例 socket/context。credential 不进入 stdout、日志、错误 details 或 Trial bundle。
+
+`0700/0600` 只隔离其他 OS 用户，不隔离同一用户下的受管 Runtime。macOS 上，所有 Core-managed Probe、Host、
+one-shot Runtime 及其后代必须由 Managed Process 边界施加 OS 级 file read/write deny，覆盖当前实例完整
+`automation-v1` 树；sandbox 无法建立时在投递输入前 fail closed。Runtime 环境中的 `rovai --help` 不展示
+`app` namespace，直接调用 `rovai app ...` 也稳定拒绝；这只是纵深防御，安全性不能依赖可被子进程修改的环境
+变量、PATH 或 CLI 分支。普通用户自己启动的同 UID 终端进程仍可使用该 credential，这是 User Automation 的
+目标 principal。
 
 请求和响应 envelope 为：
 
@@ -94,12 +103,11 @@ Renderer Camp activation 路径导航。它不得启动未运行的 Desktop，�
 
 ## 4. Camp send 与 launch 结果
 
-自动发送复用正式 CampMessage send seam，而不是直接写表或调用 Runtime：
-
-1. Main 验证 Camp、成员资格和当前 Composer draft 为空；
-2. Main 保存只含显式目标成员 mention 与用户正文的 draft；
-3. Main 使用冻结 budget 提交正式 send；
-4. Core 创建 CampTurn/AgentRun 并拥有后续执行与终态。
+自动发送使用一次 `userAutomation.camp.send` Core command，而不是 Main 中的 get/save/send 组合、直接写表或
+调用 Runtime。该命令在一个 Domain Command transaction 中验证 Camp、显式目标成员、预算与执行准入，写入
+CampMessage，并在需要时创建 CampTurn/AgentRun。`commandId` 同时覆盖消息与 launch 的幂等结果；相同 payload
+重放返回原结果，不重复效果，不产生或消费 Composer draft。用户现有草稿及其 revision、reply、附件与接收者
+状态必须原样保留，拒绝和中途错误也不能遗留 staging draft。
 
 V1 launch 结果只有以下闭集：
 
@@ -206,6 +214,18 @@ final output 或未公开附件正文。`trial.json` 必须写明 `formalQualifi
 稳定错误至少包括 `app_not_running`、`automation_unauthorized`、`automation_invalid_input`、
 `automation_not_found`、`automation_conflict`、`automation_contract_upgrade_required`、
 `automation_settlement_incomplete` 和 `automation_internal_error`。只有 error contract 允许的 safe details 可输出。
+
+Shell 退出码闭集为：
+
+| code | 含义 |
+| --- | --- |
+| `0` | read 成功、mutation applied/accepted/dispatched，或等待到 `succeeded` |
+| `1` | 领域 mutation/launch rejected，或等待到 `failed`/`cancelled` |
+| `2` | 输入、发现、鉴权、transport、协议或合同错误，命令未得到可解释业务结果 |
+| `3` | mutation outcome 或等待 settlement 无法证明，调用方必须复核稳定 ID 后再决定恢复 |
+
+`trial run --wait` 与 `agent-run watch` 必须把最终 AgentRun `failed`/`cancelled` 映射为 `1`；settlement deadline
+后仍非终态映射为 `3`。打印 JSON 不得把失败降级为 shell success。
 
 V1 明确延后 Windows User Automation transport、App launch、成员 Runtime mutation、Camp delete、通用
 AgentRun/Evidence 浏览、input export、pending execution、正式 Benchmark/Eval、远程 automation 和 daemon。

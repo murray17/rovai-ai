@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { CoreMethod } from '@contracts'
 import {
   dispatchUserAutomation,
+  startUserAutomationOptional,
   UserAutomationError,
   UserAutomationServer
 } from './user-automation'
@@ -29,38 +30,12 @@ async function socketRequest(path: string, request: unknown): Promise<Record<str
 }
 
 describe('User Automation transport', () => {
-  it('sends through the durable Composer and maps only the closed V1 launch shape', async () => {
+  it('sends through one atomic Core operation and maps only the closed V1 launch shape', async () => {
     const calls: Array<{ method: CoreMethod; params: unknown }> = []
     const core = {
       async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
         calls.push({ method, params })
-        if (method === 'camp.composerDraft.get') {
-          return {
-            campId: 'rvcamp_test',
-            body: '',
-            content: [],
-            revision: 1,
-            attachments: [],
-            replyIntent: null,
-            continuationIntent: null,
-            updatedAt: null,
-            expiresAt: null
-          } as T
-        }
-        if (method === 'camp.composerDraft.save') {
-          return {
-            campId: 'rvcamp_test',
-            body: '@Agent task',
-            content: [],
-            revision: 2,
-            attachments: [],
-            replyIntent: null,
-            continuationIntent: null,
-            updatedAt: null,
-            expiresAt: null
-          } as T
-        }
-        if (method === 'camp.messages.send') {
+        if (method === 'userAutomation.camp.send') {
           return {
             commandResult: {
               status: 'accepted',
@@ -103,12 +78,8 @@ describe('User Automation transport', () => {
       executionBudget: { deadlineAt: '2026-08-21T10:30:00Z' },
       replayed: false
     })
-    expect(calls.map(({ method }) => method)).toEqual([
-      'camp.composerDraft.get',
-      'camp.composerDraft.save',
-      'camp.messages.send'
-    ])
-    expect(calls[2].params).toMatchObject({
+    expect(calls.map(({ method }) => method)).toEqual(['userAutomation.camp.send'])
+    expect(calls[0].params).toMatchObject({
       execution: {
         budget: {
           elapsedSeconds: 1_800,
@@ -122,13 +93,7 @@ describe('User Automation transport', () => {
   it('fails closed when Core ever returns Pending Execution', async () => {
     const core = {
       async request<T>(method: CoreMethod): Promise<T> {
-        if (method === 'camp.composerDraft.get' || method === 'camp.composerDraft.save') {
-          return {
-            campId: 'rvcamp_test', body: '', content: [], revision: 1,
-            attachments: [], replyIntent: null, continuationIntent: null,
-            updatedAt: null, expiresAt: null
-          } as T
-        }
+        expect(method).toBe('userAutomation.camp.send')
         return {
           commandResult: null,
           replayed: false,
@@ -154,61 +119,78 @@ describe('User Automation transport', () => {
     )).rejects.toBeInstanceOf(UserAutomationError)
   })
 
+  it('keeps Desktop available when the optional Automation server cannot start', async () => {
+    const unavailable = new Error('injected endpoint bind failure')
+    const diagnostics: unknown[] = []
+    const server = {
+      async start(): Promise<void> { throw unavailable },
+      async stop(): Promise<void> {}
+    }
+
+    const started = await startUserAutomationOptional(
+      () => server,
+      (error) => diagnostics.push(error)
+    )
+
+    expect(started).toBeNull()
+    expect(diagnostics).toEqual([unavailable])
+  })
+
   it.runIf(process.platform !== 'win32')(
     'binds each socket request to the published App instance and removes discovery on stop',
     async () => {
-    const root = await mkdtemp(join(tmpdir(), 'rovai-automation-'))
-    const core = {
-      async request<T>(method: CoreMethod): Promise<T> {
-        if (method === 'app.info') return { version: 'core-test' } as T
-        throw new Error(`unexpected ${method}`)
+      const root = await mkdtemp(join(tmpdir(), 'rovai-automation-'))
+      const core = {
+        async request<T>(method: CoreMethod): Promise<T> {
+          if (method === 'app.info') return { version: 'core-test' } as T
+          throw new Error(`unexpected ${method}`)
+        }
       }
-    }
-    const server = new UserAutomationServer(root, {
-      core,
-      openCamp: async (campId) => ({ campId, opened: true }),
-      appVersion: 'app-test'
-    })
-    try {
-      await server.start()
-      const context = JSON.parse(await readFile(server.contextPath, 'utf8')) as {
-        contractVersion: number
-        instanceId: string
-        credential: string
-        endpoint: { path: string }
-      }
-      const accepted = await socketRequest(context.endpoint.path, {
-        contractVersion: context.contractVersion,
-        instanceId: context.instanceId,
-        credential: context.credential,
-        requestId: 'request-1',
-        operation: 'status',
-        params: {}
+      const server = new UserAutomationServer(root, {
+        core,
+        openCamp: async (campId) => ({ campId, opened: true }),
+        appVersion: 'app-test'
       })
-      expect(accepted).toMatchObject({
-        requestId: 'request-1',
-        ok: true,
-        result: { appRunning: true, instanceId: context.instanceId }
-      })
+      try {
+        await server.start()
+        const context = JSON.parse(await readFile(server.contextPath, 'utf8')) as {
+          contractVersion: number
+          instanceId: string
+          credential: string
+          endpoint: { path: string }
+        }
+        const accepted = await socketRequest(context.endpoint.path, {
+          contractVersion: context.contractVersion,
+          instanceId: context.instanceId,
+          credential: context.credential,
+          requestId: 'request-1',
+          operation: 'status',
+          params: {}
+        })
+        expect(accepted).toMatchObject({
+          requestId: 'request-1',
+          ok: true,
+          result: { appRunning: true, instanceId: context.instanceId }
+        })
 
-      const rejected = await socketRequest(context.endpoint.path, {
-        contractVersion: context.contractVersion,
-        instanceId: 'another-instance',
-        credential: context.credential,
-        requestId: 'request-2',
-        operation: 'status',
-        params: {}
-      })
-      expect(rejected).toMatchObject({
-        requestId: 'request-2',
-        ok: false,
-        error: { code: 'automation_unauthorized' }
-      })
-    } finally {
-      await server.stop()
-      await expect(readFile(server.contextPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-      await rm(root, { recursive: true, force: true })
-    }
+        const rejected = await socketRequest(context.endpoint.path, {
+          contractVersion: context.contractVersion,
+          instanceId: 'another-instance',
+          credential: context.credential,
+          requestId: 'request-2',
+          operation: 'status',
+          params: {}
+        })
+        expect(rejected).toMatchObject({
+          requestId: 'request-2',
+          ok: false,
+          error: { code: 'automation_unauthorized' }
+        })
+      } finally {
+        await server.stop()
+        await expect(readFile(server.contextPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+        await rm(root, { recursive: true, force: true })
+      }
     }
   )
 

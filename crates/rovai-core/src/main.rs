@@ -33,6 +33,8 @@ use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
     CodexLiveModelValidationError, CodexRuntime,
 };
+#[cfg(target_os = "macos")]
+use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
@@ -87,8 +89,9 @@ use rovai_core::{
         CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
         CreateCampCommand, CreateTaskCommand, DeleteCampCommand, DiscardPendingCampCommand,
         ExecutionRequest, ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand,
-        SendUserCampDraftCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
-        TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
+        SendUserAutomationCampMessageCommand, SendUserCampDraftCommand,
+        TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery,
+        TaskStatus, UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandHandlerResult,
@@ -386,6 +389,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.product.check"
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
+            | "userAutomation.camp.send"
             | "camp.attachments.prepareFromPath"
             | "camp.attachments.previewSource"
             | "camp.attachments.desktopOpenTarget"
@@ -752,6 +756,16 @@ struct SendCampMessageParams {
     command_id: String,
     camp_id: CampId,
     draft_revision: i64,
+    execution: Option<ExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SendUserAutomationCampMessageParams {
+    command_id: String,
+    camp_id: CampId,
+    agent_id: String,
+    body: String,
     execution: Option<ExecutionRequest>,
 }
 
@@ -2319,13 +2333,19 @@ impl Core {
 
     async fn diagnostics_report(&self) -> DiagnosticsReport {
         let checked_at = chrono::Utc::now().to_rfc3339();
-        let git_health = serde_json::to_value(health::git_health().await).unwrap_or_else(|_| {
-            json!({
-                "installed": false,
-                "version": null,
-                "detail": "git health serialization failed"
-            })
-        });
+        let git_path = self
+            .runtime_search_environment
+            .read()
+            .await
+            .resolve_command_path("git");
+        let git_health =
+            serde_json::to_value(health::git_health(git_path).await).unwrap_or_else(|_| {
+                json!({
+                    "installed": false,
+                    "version": null,
+                    "detail": "git health serialization failed"
+                })
+            });
         let runtime_health = self.runtime_health_payload().await;
 
         let mut checks = vec![
@@ -5356,6 +5376,11 @@ impl Core {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
                 self.send_test_camp_message_request(params).await
             }
+            "userAutomation.camp.send" => {
+                let params: SendUserAutomationCampMessageParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.send_user_automation_camp_message_request(params).await
+            }
             "runtime.pendingExecution.cancel" => {
                 let params: CancelPendingExecutionParams =
                     serde_json::from_value(request.params.clone())?;
@@ -5600,7 +5625,12 @@ impl Core {
                 self.open_runtime_model_catalog(params.runtime_kind).await
             }
             "health.check" => {
-                let git = health::git_health().await;
+                let git_path = self
+                    .runtime_search_environment
+                    .read()
+                    .await
+                    .resolve_command_path("git");
+                let git = health::git_health(git_path).await;
                 let database = self.database.lock().await;
                 let mut payload = json!({
                     "core": {
@@ -5667,6 +5697,42 @@ impl Core {
         };
         if execution.result.status != CommandResultStatus::Rejected {
             self.request_camp_attachment_projection(params.camp_id.as_str());
+        }
+        Ok(json!({
+            "commandResult": execution.result,
+            "replayed": execution.replayed,
+            "preflight": null,
+            "pendingExecution": null,
+        }))
+    }
+
+    async fn send_user_automation_camp_message_request(
+        &self,
+        params: SendUserAutomationCampMessageParams,
+    ) -> Result<Value> {
+        let camp_id = params.camp_id.to_string();
+        let envelope = CommandEnvelope {
+            command_id: params.command_id,
+            actor: ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            camp_id: Some(camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: SendUserAutomationCampMessageCommand {
+                camp_id: camp_id.clone(),
+                agent_id: params.agent_id,
+                body: params.body,
+                execution: params.execution,
+            },
+        };
+        let execution = {
+            let mut database = self.database.lock().await;
+            CollaborationService::default()
+                .send_user_automation_camp_message(&mut database, &envelope)?
+        };
+        if execution.result.status != CommandResultStatus::Rejected {
+            self.request_camp_attachment_projection(&camp_id);
         }
         Ok(json!({
             "commandResult": execution.result,
@@ -10278,6 +10344,8 @@ async fn run_core(
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
+    #[cfg(target_os = "macos")]
+    configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
     let attachment_views = CampAttachmentViewStore::admit(
         &runtime_camp_files_root,
@@ -16592,6 +16660,7 @@ mod tests {
             "camps.reconcileDefaultLead"
         ));
         assert!(request_runs_outside_main_queue("camp.messages.send"));
+        assert!(request_runs_outside_main_queue("userAutomation.camp.send"));
         assert!(request_runs_outside_main_queue("campTurns.cancel"));
         assert!(request_runs_outside_main_queue("agentRuns.cancel"));
         assert!(request_runs_outside_main_queue(

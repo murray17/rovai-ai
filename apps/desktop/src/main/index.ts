@@ -56,6 +56,7 @@ import { windowChromeOptions } from './window-chrome'
 import {
   UserAutomationError,
   UserAutomationServer,
+  startUserAutomationOptional,
   userAutomationRoot
 } from './user-automation'
 import {
@@ -167,6 +168,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.composerDraft.removeAttachment',
   'camp.composerDraft.discard',
   'camp.messages.send',
+  'userAutomation.camp.send',
   'action.approvals.resolve',
   'notifications.inbox',
   'notifications.changesSince',
@@ -463,12 +465,15 @@ if (primaryInstance) void app.whenReady().then(async () => {
     ) ?? undefined
   })
   if (process.platform !== 'win32') {
-    userAutomation = new UserAutomationServer(
-      userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
-      { core, openCamp: openCampFromAutomation, appVersion: app.getVersion() }
+    userAutomation = await startUserAutomationOptional(
+      () => new UserAutomationServer(
+        userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
+        { core, openCamp: openCampFromAutomation, appVersion: app.getVersion() }
+      )
     )
-    await userAutomation.start()
-    console.info('[startup] stage=user_automation_ready contract_version=1')
+    if (userAutomation) {
+      console.info('[startup] stage=user_automation_ready contract_version=1')
+    }
   }
 
   app.on('activate', () => {

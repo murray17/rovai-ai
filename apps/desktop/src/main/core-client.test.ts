@@ -13,6 +13,7 @@ vi.mock('electron', () => ({
 
 import {
   CoreClient,
+  coreProcessHomeDirectory,
   coreLaunchArguments,
   desktopSkillLibraryRoot,
   runtimeCampFilesRoot,
@@ -41,6 +42,13 @@ describe('CoreClient planned shutdown', () => {
   })
 
   it('passes an isolated Skill Library root to Core', () => {
+    expect(coreProcessHomeDirectory('/Users/system', '/tmp/isolated-home', 'darwin')).toBe(
+      '/tmp/isolated-home'
+    )
+    expect(coreProcessHomeDirectory('/Users/system', '', 'darwin')).toBe('/Users/system')
+    expect(coreProcessHomeDirectory('C:\\Users\\system', 'C:\\Temp\\home', 'win32')).toBe(
+      'C:\\Users\\system'
+    )
     expect(desktopSkillLibraryRoot('/tmp/rovai-accept/user-data', true)).toBe(
       join('/tmp/rovai-accept/user-data', 'managed-skill-library')
     )

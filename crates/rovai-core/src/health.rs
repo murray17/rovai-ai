@@ -156,8 +156,17 @@ pub struct AntigravityCapabilityProbe {
     pub models: Vec<String>,
 }
 
-pub async fn git_health() -> CommandHealth {
-    command_health("git", &["--version"], None).await
+pub async fn git_health(path: Option<PathBuf>) -> CommandHealth {
+    let Some(path) = path else {
+        return CommandHealth {
+            installed: false,
+            version: None,
+            authenticated: None,
+            detail: Some("git executable was not found in the Runtime search environment".into()),
+            path: None,
+        };
+    };
+    command_health("git", &["--version"], Some(path)).await
 }
 
 pub async fn codex_runtime_probe_at(path: &Path) -> AgentRuntimeProbeResult {
@@ -2556,7 +2565,37 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use rovai_core::agent_runtime_adapter::{AcpProbeObservation, AgentRuntimeAdapterRegistry};
-    use std::{os::unix::fs::PermissionsExt, time::Instant};
+    use std::{fs, os::unix::fs::PermissionsExt, time::Instant};
+
+    #[tokio::test]
+    async fn git_health_uses_only_a_resolved_absolute_executable() {
+        let directory = env::temp_dir().join(format!("rovai-git-health-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join("git");
+        fs::write(&executable, "#!/bin/sh\nprintf 'git version fixture\\n'\n").unwrap();
+        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&executable, permissions).unwrap();
+
+        let available = git_health(Some(executable.canonicalize().unwrap())).await;
+        assert!(available.installed);
+        assert_eq!(available.version.as_deref(), Some("git version fixture"));
+        assert!(
+            available
+                .path
+                .as_deref()
+                .is_some_and(|path| path.starts_with('/'))
+        );
+
+        let missing = git_health(None).await;
+        assert!(!missing.installed);
+        assert_eq!(
+            missing.detail.as_deref(),
+            Some("git executable was not found in the Runtime search environment")
+        );
+
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn antigravity_stream_json_is_optional_and_help_gated() {

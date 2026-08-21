@@ -86,3 +86,79 @@ Run-local evidence sequence 双 cursor 观察。终态只读 AgentRun。Core 新
 - [User Automation Architecture](../../architecture/user-automation.md)
 - [Evidence 不变量](../../architecture/foundational-invariants.md#evidence-usage)
 - [Qualification/Benchmark 不变量](../../architecture/foundational-invariants.md#qualification-evidence)
+
+<a id="v1-21-d03"></a>
+
+## V1.21-D03：同一 binary 的能力隔离由 Managed Process OS policy 强制，而不是同 UID 文件权限
+
+### 背景
+
+User Automation context 的 `0700/0600` 能阻止其他 OS 用户，却不能阻止以同一用户运行的 Agent Runtime。
+Runtime 也能找到安装包内同一枚 `rovai` binary；仅靠隐藏 help、检查 Run 环境变量或从 PATH 删除入口，都会被
+绝对路径、环境清除或后代进程绕过。拆分 binary 仍不能解决同 UID credential 文件可读性。
+
+### 决定
+
+macOS Core 初始化一个实例级 protected tree，并要求所有 Managed Process purpose——Probe、Host、one-shot 及其
+后代——继承对完整 `automation-v1` tree 的 OS 级 read/write deny。无法建立 sandbox 时 Runtime launch 在输入
+投递前 fail closed。`rovai` 在受管 Run 环境隐藏并拒绝 `app` namespace，但该检查只作纵深防御；普通用户自己
+启动的终端进程仍保留 User Automation 能力。
+
+### 后果
+
+- Runtime 即使知道绝对 CLI/context 路径，也不能读取 credential 或连接 User Automation；
+- 所有 Adapter 通过一个 Managed Process seam 获得一致保护，新增 Runtime 不需要复制安全逻辑；
+- macOS sandbox facility 成为 Runtime launch 前置条件，但不是 Desktop/Core 自身的启动前置条件；
+- 用户级 Automation 仍是同 UID 本机能力，不被误写成系统级多 principal 服务。
+
+### 被拒绝方案
+
+- 只依赖 `0600`：同 UID Runtime 可读；
+- 只检查环境变量或 PATH：Runtime 可清除环境并使用绝对路径；
+- 拆分 `rovai-app` binary：改善命令外观但不保护 credential 文件；
+- 为每个 Adapter 单独加 deny：容易遗漏 Probe、后代或新 Adapter，不能形成统一 launch invariant。
+
+### 当前权威影响
+
+- [User Automation v1](../../contracts/user-automation-v1.md)
+- [User Automation Architecture](../../architecture/user-automation.md)
+- [Managed Runtime Process v1](../../contracts/managed-runtime-process-v1.md)
+- [User Automation 不变量](../../architecture/foundational-invariants.md#user-automation-trial)
+
+<a id="v1-21-d04"></a>
+
+## V1.21-D04：Automation Camp send 是一个 Core Domain Command，不借用用户 Composer
+
+### 背景
+
+由 Electron Main 依次读取草稿、保存临时 mention/body、再调用正式 send，会把一个公共 mutation 拆成三个 Core
+请求。若最后一步断连或失败，重试可能遇到残留草稿；同时 Automation 会覆盖用户正在编辑的 Composer，且一个
+`commandId` 无法原子覆盖全部效果。即便把临时草稿藏进同一数据库事务，也会让独立 Automation API 继续耦合
+Renderer Composer authority。
+
+### 决定
+
+Main 对 `camp.send` 只调用一次 `userAutomation.camp.send`。Core 使用一个 User Actor Domain Command transaction
+直接物化显式成员 mention、CampMessage、可选 CampTurn 与 AgentRun，复用正式准入、预算和 idempotency
+gateway，但不读取、创建、更新或消费 `camp_composer_draft`/prepared attachments。相同 command/payload 重放原
+结果；payload 冲突继续由 Domain Command gateway 拒绝。
+
+### 后果
+
+- CLI 的一个 mutation 对应一个可重放 receipt，不存在跨请求半完成状态；
+- Automation 与用户 Composer 可并存，成功、拒绝、错误和重放都保留草稿原样；
+- Automation V1 明确不携带 Composer attachment/reply/continuation 语义；未来需要时必须扩展自己的 command
+  contract，而不是暗中读取 Renderer state；
+- Message/Turn/Run 的正式领域规则仍只有 Core 一份。
+
+### 被拒绝方案
+
+- Main get/save/send choreography：非原子且会遗留/覆盖草稿；
+- 事务内插入 reserved staging draft 再删除：避免持久残留，但仍耦合 Composer 表、revision 与 attachment cleanup；
+- 直接由 Main 写 SQLite 或调用 Runtime：绕过领域授权、预算、幂等和执行权威。
+
+### 当前权威影响
+
+- [User Automation v1](../../contracts/user-automation-v1.md)
+- [User Automation Architecture](../../architecture/user-automation.md)
+- [User Automation 不变量](../../architecture/foundational-invariants.md#user-automation-trial)

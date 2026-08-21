@@ -172,6 +172,12 @@ enum EntryState {
     ProjectOwned(&'static str),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReconcileRepairPolicy {
+    PreserveProjectEntries,
+    RepairRetiredLumenLinks,
+}
+
 #[derive(Debug, Default)]
 pub struct SkillProjectionReconciler;
 
@@ -281,7 +287,14 @@ impl SkillProjectionReconciler {
             }
         };
         if observed != 0 && !mutation_blocked {
-            match self.reconcile_root_internal(database, library, execution_root, &[], None) {
+            match self.reconcile_root_internal(
+                database,
+                library,
+                execution_root,
+                &[],
+                None,
+                ReconcileRepairPolicy::PreserveProjectEntries,
+            ) {
                 Ok(report) => {
                     if finish_reconciliation_state(database, &report)? {
                         self.finalize_deleting_skills(database, library)?;
@@ -404,6 +417,7 @@ impl SkillProjectionReconciler {
             &execution_root,
             &required_delivery_groups,
             None,
+            ReconcileRepairPolicy::PreserveProjectEntries,
         )?;
         if finish_reconciliation_state(database, &report)? {
             self.finalize_deleting_skills(database, library)?;
@@ -499,12 +513,20 @@ impl SkillProjectionReconciler {
         let mut reports = Vec::new();
         let mut all_roots_available = true;
         for requirement in requirements {
-            match self.reconcile_root(
-                database,
-                library,
-                Path::new(&requirement.execution_root),
-                &requirement.delivery_groups,
-            ) {
+            let result = self
+                .reconcile_root_internal(
+                    database,
+                    library,
+                    Path::new(&requirement.execution_root),
+                    &requirement.delivery_groups,
+                    None,
+                    ReconcileRepairPolicy::RepairRetiredLumenLinks,
+                )
+                .and_then(|report| {
+                    finish_reconciliation_state(database, &report)?;
+                    Ok(report)
+                });
+            match result {
                 Ok(report) => reports.push(report),
                 Err(error) => {
                     all_roots_available = false;
@@ -578,6 +600,7 @@ impl SkillProjectionReconciler {
             &canonical_root,
             &delivery_groups.iter().copied().collect::<Vec<_>>(),
             Some(agent_run_id),
+            ReconcileRepairPolicy::PreserveProjectEntries,
         )?;
         let reconciliation_finished = finish_reconciliation_state(database, &report)?;
         #[cfg(windows)]
@@ -722,6 +745,7 @@ impl SkillProjectionReconciler {
             execution_root,
             required_delivery_groups,
             None,
+            ReconcileRepairPolicy::PreserveProjectEntries,
         )?;
         finish_reconciliation_state(database, &report)?;
         Ok(report)
@@ -734,6 +758,7 @@ impl SkillProjectionReconciler {
         execution_root: &Path,
         required_delivery_groups: &[SkillDeliveryGroupKey],
         ignored_agent_run_id: Option<&str>,
+        repair_policy: ReconcileRepairPolicy,
     ) -> Result<SkillProjectionReport> {
         let execution_root = execution_root.canonicalize().with_context(|| {
             format!(
@@ -797,6 +822,14 @@ impl SkillProjectionReconciler {
                         .iter()
                         .any(|assignment| assignment.group_key == group_key);
                 let entry_path = native_root.join(&skill.name);
+                repair_retired_lumen_link_if_recorded(
+                    database,
+                    &execution_root_text,
+                    group_key,
+                    skill,
+                    &entry_path,
+                    repair_policy,
+                )?;
                 let state = inspect_entry(database, library, &entry_path)?;
                 let claude_observation = if desired
                     && matches!(
@@ -1577,6 +1610,92 @@ fn reconcile_undesired_entry(
             delete_observation(database, execution_root, group_key, &skill.id)
         }
     }
+}
+
+#[cfg(unix)]
+fn repair_retired_lumen_link_if_recorded(
+    database: &Database,
+    execution_root: &str,
+    group_key: SkillDeliveryGroupKey,
+    skill: &SkillView,
+    entry_path: &Path,
+    repair_policy: ReconcileRepairPolicy,
+) -> Result<()> {
+    if repair_policy != ReconcileRepairPolicy::RepairRetiredLumenLinks {
+        return Ok(());
+    }
+    let Some(observation) = load_observation(database, execution_root, group_key, &skill.id)?
+    else {
+        return Ok(());
+    };
+    if Path::new(&observation.entry_path) != entry_path {
+        return Ok(());
+    }
+    let metadata = match fs::symlink_metadata(entry_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if !metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+    let raw_target = fs::read_link(entry_path)?;
+    let target = if raw_target.is_absolute() {
+        raw_target
+    } else {
+        entry_path
+            .parent()
+            .context("Skill projection entry has no parent")?
+            .join(raw_target)
+    };
+    if target
+        .components()
+        .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
+    {
+        return Ok(());
+    }
+    match fs::metadata(&target) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Ok(_) | Err(_) => return Ok(()),
+    }
+    let Some(home) = dirs::home_dir() else {
+        return Ok(());
+    };
+    let retired_revision_root = home.join(".lumen/skills/revisions");
+    let Ok(relative) = target.strip_prefix(&retired_revision_root) else {
+        return Ok(());
+    };
+    let components = relative
+        .components()
+        .map(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>();
+    let Some([skill_id, revision_id]) = components.as_deref() else {
+        return Ok(());
+    };
+    if Uuid::parse_str(skill_id).is_err() || Uuid::parse_str(revision_id).is_err() {
+        return Ok(());
+    }
+    fs::remove_file(entry_path).with_context(|| {
+        format!(
+            "failed to remove recorded retired .lumen Skill projection {}",
+            entry_path.display()
+        )
+    })
+}
+
+#[cfg(not(unix))]
+fn repair_retired_lumen_link_if_recorded(
+    _database: &Database,
+    _execution_root: &str,
+    _group_key: SkillDeliveryGroupKey,
+    _skill: &SkillView,
+    _entry_path: &Path,
+    _repair_policy: ReconcileRepairPolicy,
+) -> Result<()> {
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -3562,13 +3681,13 @@ mod slow_tests {
     }
 
     #[test]
-    fn explicit_reconciliation_requirements_union_active_camp_member_adapters() {
+    fn explicit_reconciliation_unions_active_adapters_and_repairs_recorded_lumen_links() {
         let root = temporary_directory("rovai-projection-known-root");
         let data = temporary_directory("rovai-projection-db");
         let library_root = temporary_directory("rovai-projection-library");
         let mut database = crate::test_support::fresh_schema_database_fast_at(&data);
         let library = SkillLibraryService::new(library_root).unwrap();
-        install_official_and_assign(
+        let skill = install_official_and_assign(
             &mut database,
             &library,
             &[
@@ -3683,6 +3802,56 @@ mod slow_tests {
                     .is_ok()
             );
         }
+
+        let codex_entry = root.join(".codex/skills/analyze-agent-codebase");
+        fs::remove_file(&codex_entry).unwrap();
+        let old_lumen_target = dirs::home_dir()
+            .unwrap()
+            .join(".lumen/skills/revisions")
+            .join(Uuid::new_v4().to_string())
+            .join(Uuid::new_v4().to_string());
+        assert!(!old_lumen_target.exists());
+        symlink(&old_lumen_target, &codex_entry).unwrap();
+
+        let automatic_report = SkillProjectionReconciler
+            .reconcile_root(
+                &mut database,
+                &library,
+                &root,
+                &[SkillDeliveryGroupKey::Codex],
+            )
+            .unwrap();
+        assert_eq!(fs::read_link(&codex_entry).unwrap(), old_lumen_target);
+        assert!(automatic_report.observations.iter().any(|observation| {
+            observation.group_key == SkillDeliveryGroupKey::Codex
+                && observation.skill_id == skill.id
+                && observation.state == "shadowed"
+                && observation.last_error_code.as_deref() == Some("broken_or_unavailable_symlink")
+        }));
+
+        SkillProjectionReconciler
+            .reconcile_known_roots(&mut database, &library)
+            .unwrap();
+        assert_eq!(
+            codex_entry.canonicalize().unwrap(),
+            library
+                .revision_content_path(&skill.id, &skill.current_revision.id)
+                .canonicalize()
+                .unwrap()
+        );
+
+        fs::remove_file(&codex_entry).unwrap();
+        let external_broken_target =
+            std::env::temp_dir().join(format!("rovai-external-broken-{}", Uuid::new_v4()));
+        symlink(&external_broken_target, &codex_entry).unwrap();
+        SkillProjectionReconciler
+            .reconcile_known_roots(&mut database, &library)
+            .unwrap();
+        assert_eq!(
+            fs::read_link(&codex_entry).unwrap(),
+            external_broken_target,
+            "explicit repair must preserve broken links outside the retired .lumen revision tree"
+        );
     }
 
     #[test]
