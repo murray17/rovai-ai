@@ -12,8 +12,10 @@ last_updated: 2026-08-21
 # Rovai-ai v1.24：Windows x64 本机实现与 Runtime 复核闭环
 
 > 当前状态：v1.05 与 v1.15 冻结的 Windows 边界已经迁入包含 v1.23 Built-in Tool Transport v20
-> 与最新法律文件门禁的 `origin/main@645994cc`。合并前的 Windows 10 22H2 x64 代码、打包、安装生命周期、
-> 计划关闭和十 Runtime 开发态矩阵均已通过；最终合并后全量复跑进行中。
+> 与最新法律文件门禁的 `origin/main@645994cc`。合并后的 Rust/TypeScript/Node/文档门禁、Windows x64
+> native/NSIS/legal payload、安装生命周期、Release verifier 与 planned shutdown 均已通过；七个 ACP Runtime
+> 和九个当前可调用 Runtime 的 Built-in v20、Missing-Send、MCP、Skill 复跑通过。Antigravity `1.1.17`
+> 已静默登录但账号对 Flash 返回 `429 RESOURCE_EXHAUSTED`，因此最终十 Runtime 在线复跑仍有这一项外部阻塞。
 > 正式 packaged Release 继续阻断所有缺少 immutable evidence 的 Windows Runtime，Windows 11、
 > Authenticode/RFC 3161 与 SmartScreen 尚未完成，因此不得宣称 Windows 已发布。
 >
@@ -37,6 +39,8 @@ NSIS、外置 legal payload、隔离安装、planned shutdown 和十个 Runtime 
 - 在隔离用户数据中完成 clean install/start/same-version upgrade/uninstall/data-preserve；
 - 安装并探测十个 Product Runtime，完成 ACP、Approval、Built-in CLI、Missing-Send、MCP Projection 与原生 Skill
   的适用矩阵；DeepSeek 路径固定使用 `deepseek-v4-flash`，不使用 DK V4 Pro；
+- Qoder `1.1.28` 使用官方向导登记的 DeepSeek BYOK Flash 条目 `deepseek/deepseek-v4-flash-pg`，真实直连、
+  ACP、Built-in、Missing-Send、MCP 与 Skill 均通过；手写重复 custom model 已移除；
 - 修正 CodeBuddy `2.137.1` 官方 API-key ACP 启动、显式 custom model 与 `_codebuddy.ai/command` Idle metadata；
 - 修正 Kiro `2.19.0` 的精确私有 Idle lifecycle notification 与 Windows Skill 共享投影转直接副本的恢复 lineage；
 - 修正 warm Runtime 持有 Skill 文件 handle 时 Windows legacy delete-on-close 未立即解除目录项的问题，使用精确
@@ -60,7 +64,7 @@ Camp Attachment View、User Automation 或 Built-in Transport v20 wire shape。W
   digest-bound evidence；本版不伪造 evidence revision；
 - unsigned NSIS 和本机 installer lifecycle 只证明安装实现，不能替代 Authenticode、timestamp 或 SmartScreen；
 - 用户 API key 不回显、不写仓库；临时失败 Fixture 在完成取证后删除；
-- 完整 Flash 矩阵后的 Provider 切换只按实际证据记录：Groq TPM、Gemini free-tier request window、Qoder/TRAE
+- 完整 Flash 矩阵后的 Provider 切换只按实际证据记录：Groq TPM、Gemini free-tier request window、Antigravity
   账号 quota 与 Gemini thought-signature 差异均不被解释为 Windows 实现失败，也不被点测成功掩盖；用户随后
   授权恢复的日常 DeepSeek 路径仍只使用 `deepseek-v4-flash`。
 

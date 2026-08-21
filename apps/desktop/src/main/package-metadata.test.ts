@@ -41,6 +41,10 @@ describe('desktop package metadata', () => {
     ])
     expect(packageMetadata.build.win.extraResources).toEqual([
       {
+        from: '.legal-payload',
+        to: 'legal'
+      },
+      {
         from: 'resources/bin/windows-x64/rovai-core.exe',
         to: 'bin/rovai-core.exe'
       },
@@ -60,6 +64,11 @@ describe('desktop package metadata', () => {
     )
     expect(packageMetadata.scripts['dist:mac:release:x64']).toContain(
       'pnpm build:macos:x64'
+    )
+    expect(packageMetadata.scripts['dist:windows:x64']).toContain('pnpm legal:prepare')
+    expect(packageMetadata.scripts['dist:windows:x64']).toContain('--integrity-only')
+    expect(packageMetadata.scripts['dist:windows:release:x64']).toContain(
+      'pnpm legal:check:binary'
     )
   })
 })

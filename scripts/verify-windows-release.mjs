@@ -227,7 +227,7 @@ try {
   const health = await core.request('health.check')
   if (health?.core?.ok !== true
       || health.core.version !== packageMetadata.version
-      || health.core.builtinToolContractVersion !== 19
+      || health.core.builtinToolContractVersion !== 20
       || health.core.builtinToolIpcProtocolVersion !== 2) {
     throw new Error(`packaged Core health is incompatible: ${JSON.stringify(health?.core)}`)
   }
@@ -269,7 +269,7 @@ try {
     packagedCoreSmoke: {
       isolatedDataRoot: true,
       healthCheck: true,
-      builtinToolContractVersion: 19,
+      builtinToolContractVersion: 20,
       builtinToolIpcProtocolVersion: 2
     }
   }

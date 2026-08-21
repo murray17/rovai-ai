@@ -131,20 +131,23 @@ digest-bound evidence 尚未形成，因此上表的 admission 与 evidence revi
 | `codex-cli` | `0.148.0` | 已登录账号；Runtime-native 模型目录 |
 | `opencode-cli` | `1.18.19` | 本机 DeepSeek Provider；`deepseek/deepseek-v4-flash` |
 | `copilot-cli` | `1.0.80` | 已登录 GitHub 账号；Runtime default |
-| `claude-code-cli` | `2.1.86` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash` |
-| `antigravity-app` | `1.1.17` | 已完成 AGY 账号授权；Runtime default |
+| `claude-code-cli` | `2.1.86` | Claude-compatible DeepSeek endpoint；`deepseek-v4-flash` |
+| `antigravity-app` | `1.1.17` | AGY 账号授权有效；最终合并后复跑时 Flash 账号 quota 返回 429 |
 | `kiro-cli` | `2.19.0` | 本机账号态；Runtime default |
 | `qoder-cli` | `1.1.27`（随后更新至 `1.1.28`） | 已登录 Qoder 账号；验收矩阵使用账号 catalog `deepseek/deepseek-v4-flash-pg` |
 | `codebuddy-cli` | `2.137.1` | 官方 `CODEBUDDY_API_KEY`/`CODEBUDDY_BASE_URL` ACP 路径；`custom-local:deepseek-v4-flash` |
 | `qwen-code` | `0.21.14` | DeepSeek API key；仅保留 `deepseek-v4-flash` Provider/model |
 | `trae-cn-cli` | `0.120.52` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash`，关闭 thinking |
 
-本机验证包含 Rust PR test profile、Rust fmt/Clippy、TypeScript/Vitest/Node tests、Windows x64 unpacked/NSIS
-构建与 PE/manifest 验证、clean install/start/upgrade/uninstall/data-preserve，以及七个适用 Runtime 的真实 ACP/
-Approval、十个 Runtime 的 Built-in CLI v20 与 Missing-Send Recovery、九个适用 Runtime 的 MCP Projection、十个
-Runtime 的原生 Skill Projection 矩阵；TRAE 使用当前权威的 `.trae/skills` managed delivery，并另行通过冷恢复。
-OpenCode、Qoder、CodeBuddy、Qwen 与 TRAE 的相应模型证据均为 Flash，不使用 DK V4 Pro。开发态 packaged Desktop
-以 Claude `2.1.86` 完成真实 planned shutdown：Runtime 在 8162ms 自然退出、7 个后代进程被 Job 回收、协议 v2
+本机验证包含 Rust PR test profile、Rust fmt/Clippy、TypeScript/Vitest/Node tests、Windows x64 unpacked/NSIS/legal
+payload 构建与 PE/manifest 验证、clean install/start/upgrade/uninstall/data-preserve。合并前十个 Runtime 的 Built-in
+CLI v20、Missing-Send 与 Skill 开发态矩阵通过；合并后七个适用 ACP Runtime 全部通过，Codex、OpenCode、Copilot、
+Claude、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE 的 Built-in v20、Missing-Send 和 Skill 复跑通过，九个适用 Runtime
+的 MCP Projection 全部通过。Antigravity `1.1.17` 在同一最终复跑中完成静默账号认证，但模型调用返回
+`429 RESOURCE_EXHAUSTED`；`GEMINI_API_KEY`/`GOOGLE_API_KEY` 不改变 AGY 的账号 Code Assist quota 路径，因此该项
+记录为外部额度 blocked，不归因于 Windows 实现。TRAE 使用当前权威的 `.trae/skills` managed delivery，并另行
+通过冷恢复。OpenCode、Qoder、CodeBuddy、Qwen 与 TRAE 的相应模型证据均为 Flash，不使用 DK V4 Pro。开发态
+packaged Desktop 以 Claude `2.1.86` 完成真实 planned shutdown：Runtime 在 8123ms 自然退出、7 个后代进程被 Job 回收、协议 v2
 收敛、重启后 fenced Run 恢复为 cancelled；Release sidecar 随后按备份 hash 恢复并重新通过 verifier。
 
 CodeBuddy `2.137.1` 还暴露了两项版本差异：Session/model setup 后会在首个 Prompt 前发送私有
@@ -190,14 +193,14 @@ ACP tool→final 场景由此完成聚合复核。
 | OpenCode / native Gemini `gemini-3.7-flash` | 单次真实 Agent turn 成功 | Gemini free tier 在 Skills 高频矩阵达到 20 requests 窗口上限；点测成功不冒充全矩阵 |
 | CodeBuddy / Google OpenAI-compatible Gemini | 普通 turn 与一次真实 `Read` Tool→final 均成功；请求模型为 `custom-local:gemini-3.7-flash` | 当前可作为日常替代；仍受用户 Google quota 管理 |
 | Qwen Code / native Gemini provider | 普通 turn 与一次真实 `read_file` Tool→final 均成功 | 使用 Qwen 原生 Google SDK；OpenAI-compatible 路径不是必要条件 |
-| Qoder `1.1.28` BYOK | custom model 可进入 catalog，但 Groq/Google 两种配置都在 Qoder 服务端返回 `Failed to generate custom pool` | 内置 `Qwen3.8-Max` 随后返回 Qoder credit usage limit；当前在线复跑为外部额度/Provider 阻塞 |
+| Qoder `1.1.28` BYOK | 手写任意 Groq/Google/custom pool 配置可进入 catalog，但服务端拒绝生成 custom pool；官方向导登记的 DeepSeek Flash BYOK `deepseek/deepseek-v4-flash-pg` 真实返回成功 | 默认已固定到官方 DeepSeek BYOK Flash；直连、ACP、Built-in v20、Missing-Send、MCP 与 Skill 均通过，不消耗 Qoder Credits |
 | TRAE / Google OpenAI-compatible Gemini | 首轮模型响应成功，Tool 后续因 adapter 未回传 Gemini 3 `thought_signature` 返回 400 | 改选内置 `Qwen3.8-Max` 后又返回个人 quota limit；不静默回退 DeepSeek |
 
 完成上述补充点测后，用户明确授权继续使用 DeepSeek。本机 OpenCode、CodeBuddy、Qwen 与 TRAE 已恢复
-`deepseek-v4-flash`，仍不使用 DK V4 Pro；Gemini/Groq 凭据与调用方式只作为桌面备用。Qoder `1.1.28` 又以官方
-`deepseek` BYOK provider 和同一 Flash model 复测，custom model 能进入 catalog，但服务端仍返回同一
-`Failed to generate custom pool`；账号内置模型同时受 credit limit 阻断，因此 Qoder 当前仍是外部 Provider/额度
-阻塞。Claude 的 Anthropic-only transport 不伪装成 OpenAI-compatible endpoint。后续若要把新 Provider 结果提升
+`deepseek-v4-flash`，仍不使用 DK V4 Pro；Gemini/Groq 凭据与调用方式只作为桌面备用。Qoder `1.1.28` 最终改用
+CLI 官方向导已经登记并验证的 DeepSeek Flash BYOK 条目 `deepseek/deepseek-v4-flash-pg`，默认直连与全部适用
+Rovai smoke 通过；此前手写的无效重复 custom model 已从用户配置移除。Claude 的 Anthropic-style transport 不
+伪装成 OpenAI-compatible endpoint。后续若要把新 Provider 结果提升
 为完整发布证据，必须在相应账号额度恢复后重新执行原矩阵，而不是复用本次点测。
 
 ### Camp Published Attachment View visibility 基线
