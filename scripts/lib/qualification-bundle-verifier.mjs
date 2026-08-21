@@ -1,6 +1,6 @@
 import { readFile, readdir, realpath, stat } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
-import { canonicalJson, digestJson, sha256 } from './qualification-common.mjs'
+import { artifactFileName, canonicalJson, digestJson, sha256 } from './qualification-common.mjs'
 import { validateEvidenceBundleManifest } from './qualification-bundle.mjs'
 import { validateCatalogedQualificationArtifact } from './qualification-schema-validation.mjs'
 import {
@@ -29,19 +29,19 @@ import {
 } from './qualification-tool-use-judge.mjs'
 
 const ROLE_LOCATORS = Object.freeze({
-  qualification_case: (id) => join('normalized-artifacts', 'qualification_case', `${id}.json`),
-  verification_catalog: (id) => join('normalized-artifacts', 'verification_catalog', `${id}.json`),
-  qualification_trial: (id) => join('normalized-artifacts', 'qualification_trial', `${id}.json`),
-  delivered_workspace_snapshot: (id) => join('normalized-artifacts', 'delivered_workspace_snapshot', `${id}.json`),
-  verifier_observation: (id) => join('normalized-artifacts', 'verifier_observation', `${id}.json`),
-  evidence_index: (id) => join('evidence-indexes', `${id}.json`),
-  collaboration_ledger: (id) => join('collaboration-ledgers', `${id}.json`),
-  tool_call_ledger: (id) => join('tool-call-ledgers', `${id}.json`),
-  workspace_mutation_ledger: (id) => join('workspace-mutation-ledgers', `${id}.json`),
-  semantic_engineering_review: (id) => join('semantic-engineering-reviews', `${id}.json`),
-  environment_manifest: (id) => join('normalized-artifacts', 'environment_manifest', `${id}.json`),
+  qualification_case: (id) => join('normalized-artifacts', 'qualification_case', artifactFileName(id)),
+  verification_catalog: (id) => join('normalized-artifacts', 'verification_catalog', artifactFileName(id)),
+  qualification_trial: (id) => join('normalized-artifacts', 'qualification_trial', artifactFileName(id)),
+  delivered_workspace_snapshot: (id) => join('normalized-artifacts', 'delivered_workspace_snapshot', artifactFileName(id)),
+  verifier_observation: (id) => join('normalized-artifacts', 'verifier_observation', artifactFileName(id)),
+  evidence_index: (id) => join('evidence-indexes', artifactFileName(id)),
+  collaboration_ledger: (id) => join('collaboration-ledgers', artifactFileName(id)),
+  tool_call_ledger: (id) => join('tool-call-ledgers', artifactFileName(id)),
+  workspace_mutation_ledger: (id) => join('workspace-mutation-ledgers', artifactFileName(id)),
+  semantic_engineering_review: (id) => join('semantic-engineering-reviews', artifactFileName(id)),
+  environment_manifest: (id) => join('normalized-artifacts', 'environment_manifest', artifactFileName(id)),
   intervention_isolation_profile: () => 'intervention-isolation-profile.json',
-  public_export: (id) => join('public-reports', `${id}.json`)
+  public_export: (id) => join('public-reports', artifactFileName(id))
 })
 
 export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
@@ -54,7 +54,7 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
   const marker = await readJson(join(root, 'BUNDLE_COMPLETE'))
   const immutableManifestPath = await containedPath(
     root,
-    join('evidence-bundle-manifests', `${manifest.artifactId}.json`)
+    join('evidence-bundle-manifests', artifactFileName(manifest.artifactId))
   )
   const immutableManifestBytes = await readFile(immutableManifestPath)
   const immutableManifest = JSON.parse(immutableManifestBytes)
@@ -79,7 +79,7 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
     if (artifact.payloadDigest !== `sha256:${digestJson(artifact.payload)}`) {
       throw new Error(`Evidence Bundle role has an invalid payload digest: ${entry.role}`)
     }
-    if (((await stat(path)).mode & 0o077) !== 0) {
+    if (process.platform !== 'win32' && ((await stat(path)).mode & 0o077) !== 0) {
       throw new Error(`Evidence Bundle role is not current-user-only: ${entry.role}`)
     }
     artifacts.set(entry.role, artifact)
@@ -124,13 +124,13 @@ export async function verifyQualificationEvidenceBundle(evidenceDirectory, {
     })
     const immutablePath = await containedPath(root, join(
       'collaboration-message-evidence',
-      `${collaborationMessageEvidence.artifactId}.json`
+      artifactFileName(collaborationMessageEvidence.artifactId)
     ))
     const immutable = await readJson(immutablePath)
     if (canonicalJson(immutable) !== canonicalJson(collaborationMessageEvidence)) {
       throw new Error('Collaboration Message Evidence current projection differs from immutable artifact')
     }
-    if (((await stat(immutablePath)).mode & 0o077) !== 0) {
+    if (process.platform !== 'win32' && ((await stat(immutablePath)).mode & 0o077) !== 0) {
       throw new Error('Collaboration Message Evidence artifact is not current-user-only')
     }
   }
@@ -333,7 +333,7 @@ async function verifyToolUseArtifacts({
       || preparedFixture.payloadDigest !== preparedReference.payloadDigest
       || preparedFixture.payloadDigest !== `sha256:${digestJson(preparedPayload)}`
       || preparedFixture.payloadDigest !== result.toolMeasurement?.preparedFixtureDigest
-      || ((await stat(preparedPath)).mode & 0o077) !== 0) {
+      || (process.platform !== 'win32' && ((await stat(preparedPath)).mode & 0o077) !== 0)) {
     throw new Error('Prepared Tool Fixture Manifest replay binding is invalid')
   }
   if (!deferSafeProjectionChecks) {
@@ -511,10 +511,10 @@ function artifactReference(artifact) {
 }
 
 async function readPrivateArtifact(root, directory, reference) {
-  const path = await containedPath(root, join(directory, `${reference.artifactId}.json`))
+  const path = await containedPath(root, join(directory, artifactFileName(reference.artifactId)))
   const artifact = await readJson(path)
   assertArtifactReference(reference, artifact, directory)
-  if (((await stat(path)).mode & 0o077) !== 0) {
+  if (process.platform !== 'win32' && ((await stat(path)).mode & 0o077) !== 0) {
     throw new Error(`Semantic Judge View artifact is not current-user-only: ${directory}`)
   }
   return artifact

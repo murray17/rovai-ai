@@ -470,23 +470,23 @@ impl RuntimeOwnerRecordStore {
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<RuntimeOwnerRecord>(&bytes).ok());
             let mut remove_record = record.is_none();
-            if let Some(record) = record {
+            if let Some(_record) = record {
                 #[cfg(unix)]
-                if record.core_generation != self.core_generation
-                    && record.pid > 1
-                    && record.pid != std::process::id()
-                    && unsafe { libc::getpgid(record.pid as i32) == record.process_group_id }
-                    && record.process_start_identity.is_some_and(|expected| {
-                        owner_process_start_identity(record.pid) == Some(expected)
+                if _record.core_generation != self.core_generation
+                    && _record.pid > 1
+                    && _record.pid != std::process::id()
+                    && unsafe { libc::getpgid(_record.pid as i32) == _record.process_group_id }
+                    && _record.process_start_identity.is_some_and(|expected| {
+                        owner_process_start_identity(_record.pid) == Some(expected)
                     })
-                    && owner_process_matches(record.pid, &record.executable_path)
+                    && owner_process_matches(_record.pid, &_record.executable_path)
                 {
                     unsafe {
-                        libc::killpg(record.process_group_id, libc::SIGKILL);
+                        libc::killpg(_record.process_group_id, libc::SIGKILL);
                     }
                 }
                 #[cfg(unix)]
-                if unsafe { libc::getpgid(record.pid as i32) == -1 } {
+                if unsafe { libc::getpgid(_record.pid as i32) == -1 } {
                     remove_record = true;
                 }
                 #[cfg(not(unix))]

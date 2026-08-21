@@ -85,6 +85,21 @@ pub(crate) fn admit_private_directory(path: &Path) -> Result<PathBuf> {
     windows::admit_private_directory(path)
 }
 
+#[cfg(windows)]
+pub(crate) fn repair_private_directory(path: &Path) -> Result<()> {
+    windows::repair_private_object(path, true)
+}
+
+#[cfg(windows)]
+pub(crate) fn repair_private_file(path: &Path) -> Result<()> {
+    windows::repair_private_object(path, false)
+}
+
+#[cfg(windows)]
+pub(crate) fn commit_private_directory_temporary(source: &Path, destination: &Path) -> Result<()> {
+    windows::commit_private_directory_temporary(source, destination)
+}
+
 /// Opens a retained private read/write file, creating it atomically when absent.
 ///
 /// This is intentionally narrower than `OpenOptions`: callers cannot request a
@@ -117,6 +132,16 @@ pub(crate) fn create_private_json<T: Serialize>(path: &Path, value: &T) -> Resul
     Ok(())
 }
 
+#[cfg(windows)]
+pub(crate) fn create_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().context("private file path has no parent")?;
+    prepare_private_directory(parent)?;
+    let mut file = create_private_new_file(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    Ok(())
+}
+
 /// Reads one admitted private JSON document with a strict byte bound.
 #[cfg(windows)]
 pub(crate) fn read_private_json<T: DeserializeOwned>(
@@ -141,6 +166,11 @@ pub(crate) fn read_private_json<T: DeserializeOwned>(
 /// publishes it atomically. Existing destinations must already satisfy the
 /// private-file admission policy before they may be replaced.
 pub(crate) fn atomic_write_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(value)?;
+    atomic_write_private_bytes(path, &bytes)
+}
+
+pub(crate) fn atomic_write_private_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("private JSON path has no parent")?;
     prepare_private_directory(parent)?;
     if path.exists() {
@@ -148,9 +178,8 @@ pub(crate) fn atomic_write_private_json<T: Serialize>(path: &Path, value: &T) ->
     }
     let temporary = parent.join(format!(".{}.tmp", Uuid::new_v4()));
     let result = (|| -> Result<()> {
-        let bytes = serde_json::to_vec_pretty(value)?;
         let mut file = create_private_new_file(&temporary)?;
-        file.write_all(&bytes)?;
+        file.write_all(bytes)?;
         file.sync_all()?;
         drop(file);
         commit_private_temporary(&temporary, path)
@@ -284,7 +313,7 @@ mod windows {
             FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
             FileAttributeTagInfo, FileIdInfo, GetDriveTypeW, GetFileInformationByHandleEx,
             GetVolumeInformationW, GetVolumePathNameW, MOVEFILE_REPLACE_EXISTING,
-            MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, READ_CONTROL,
+            MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, READ_CONTROL, WRITE_DAC,
         },
         System::WindowsProgramming::DRIVE_FIXED,
     };
@@ -543,6 +572,86 @@ mod windows {
         }
     }
 
+    pub(super) fn repair_private_object(path: &Path, directory: bool) -> Result<()> {
+        validate_native_absolute_path(path)?;
+        admit_volume(path)?;
+        let expected = if directory {
+            ExpectedObjectKind::Directory
+        } else {
+            ExpectedObjectKind::File
+        };
+        let kind = if directory {
+            PrivateObjectKind::Directory
+        } else {
+            PrivateObjectKind::File
+        };
+        let handle = open_path_for_acl_repair(path, expected)?;
+        let policy = PrivateSecurityDescriptor::new(kind)
+            .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))?;
+        policy
+            .apply_file_dacl(handle.as_raw_handle() as HANDLE)
+            .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))?;
+        verify_private_acl(&handle, kind, "repaired private storage object")
+            .map_err(|error| blocker(PRIVATE_ACL_INVALID, format!("{error:#}")))
+    }
+
+    pub(super) fn commit_private_directory_temporary(
+        source: &Path,
+        destination: &Path,
+    ) -> Result<()> {
+        validate_native_absolute_path(source)?;
+        validate_native_absolute_path(destination)?;
+        if source.parent() != destination.parent() {
+            bail!("private staging directory must share its destination parent");
+        }
+        let parent = source
+            .parent()
+            .context("private staging directory has no parent")?;
+        admit_private_directory(parent)?;
+        let source_handle = open_path(source, ExpectedObjectKind::Directory)?;
+        verify_private_acl(
+            &source_handle,
+            PrivateObjectKind::Directory,
+            "private staging directory",
+        )?;
+        if std::fs::symlink_metadata(destination).is_ok() {
+            bail!(
+                "private projection destination already exists: {}",
+                destination.display()
+            );
+        }
+        let source_identity = file_identity(&source_handle)?;
+        let source_wide = wide_path(source)?;
+        let destination_wide = wide_path(destination)?;
+        let moved = unsafe {
+            // SAFETY: both paths are NUL-terminated and source_handle permits
+            // deletion sharing. Omitting REPLACE preserves immutable targets.
+            MoveFileExW(
+                source_wide.as_ptr(),
+                destination_wide.as_ptr(),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved == 0 {
+            return Err(io::Error::last_os_error()).with_context(|| {
+                format!(
+                    "failed to publish private directory {} to {}",
+                    source.display(),
+                    destination.display()
+                )
+            });
+        }
+        let destination_handle = open_path(destination, ExpectedObjectKind::Directory)?;
+        if file_identity(&destination_handle)? != source_identity {
+            bail!("private directory identity changed while it was published");
+        }
+        verify_private_acl(
+            &destination_handle,
+            PrivateObjectKind::Directory,
+            "published private directory",
+        )
+    }
+
     fn prepare_parent(path: &Path) -> Result<()> {
         let parent = path.parent().ok_or_else(|| {
             blocker(
@@ -606,6 +715,37 @@ mod windows {
         if raw == INVALID_HANDLE_VALUE {
             return Err(io::Error::last_os_error())
                 .with_context(|| format!("failed to open storage object {}", path.display()));
+        }
+        let handle = owned_handle(raw)?;
+        clear_handle_inheritance(&handle)?;
+        inspect_handle(&handle, expected)?;
+        Ok(handle)
+    }
+
+    fn open_path_for_acl_repair(path: &Path, expected: ExpectedObjectKind) -> Result<OwnedHandle> {
+        let wide_path = wide_path(path)?;
+        let flags = FILE_FLAG_OPEN_REPARSE_POINT
+            | match expected {
+                ExpectedObjectKind::Directory => FILE_FLAG_BACKUP_SEMANTICS,
+                ExpectedObjectKind::File => FILE_ATTRIBUTE_NORMAL,
+            };
+        let raw = unsafe {
+            // SAFETY: wide_path is NUL-terminated. OPEN_EXISTING cannot create
+            // an object and OPEN_REPARSE_POINT keeps inspection on the leaf.
+            CreateFileW(
+                wide_path.as_ptr(),
+                FILE_READ_ATTRIBUTES | READ_CONTROL | WRITE_DAC,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                null(),
+                OPEN_EXISTING,
+                flags,
+                null_mut(),
+            )
+        };
+        if raw == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error()).with_context(|| {
+                format!("failed to open storage ACL for repair {}", path.display())
+            });
         }
         let handle = owned_handle(raw)?;
         clear_handle_inheritance(&handle)?;

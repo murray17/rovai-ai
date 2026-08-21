@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const dataDir = await mkdtemp(join(tmpdir(), 'rovai-memory-v3-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-memory-v3-smoke-'))
+const dataDir = join(fixtureRoot, 'data')
 let core = null
 
 try {
@@ -150,7 +151,7 @@ try {
   }, null, 2))
 } finally {
   await core?.stop()
-  await rm(dataDir, { recursive: true, force: true })
+  await rm(fixtureRoot, { recursive: true, force: true })
 }
 
 function createMemory(client, command, commandId = crypto.randomUUID()) {

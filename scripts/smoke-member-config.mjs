@@ -5,7 +5,8 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 const root = resolve(import.meta.dirname, '..')
-const dataDir = await mkdtemp(join(tmpdir(), 'rovai-member-config-smoke-'))
+const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-member-config-smoke-'))
+const dataDir = join(fixtureRoot, 'data')
 let first
 let reopened
 
@@ -74,8 +75,11 @@ try {
       permissions: { adapterKind: 'qoder-cli', schemaVersion: 1, values: {} }
     }
   })
+  const expectedUnavailableCode = process.platform === 'win32'
+    ? 'runtime_platform_not_qualified'
+    : 'runtime_configuration_unavailable'
   if (selectedRuntime.status !== 'rejected'
-      || selectedRuntime.code !== 'runtime_configuration_unavailable') {
+      || selectedRuntime.code !== expectedUnavailableCode) {
     throw new Error(`Unavailable Runtime configuration was not rejected atomically: ${JSON.stringify(selectedRuntime)}`)
   }
   const unresolvedProfile = await first.request('members.get', { agentId })
@@ -125,7 +129,7 @@ try {
 } finally {
   await first?.stop()
   await reopened?.stop()
-  await rm(dataDir, { recursive: true, force: true })
+  await rm(fixtureRoot, { recursive: true, force: true })
 }
 
 function startCore(dataDirectory) {

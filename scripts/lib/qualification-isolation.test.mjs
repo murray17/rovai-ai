@@ -97,13 +97,17 @@ test('Profile file must be private, regular and non-symlinked', async () => {
   const admitted = await loadAndAdmitInterventionIsolationProfile(profilePath, EXPECTED)
   assert.equal(admitted.status, 'admitted')
 
-  await chmod(profilePath, 0o644)
-  await assert.rejects(
-    loadAndAdmitInterventionIsolationProfile(profilePath, EXPECTED),
-    (error) => error.code === 'intervention_isolation.profile_file_not_private'
-  )
-  await chmod(profilePath, 0o600)
-  await symlink(profilePath, symlinkPath)
+  if (process.platform !== 'win32') {
+    await chmod(profilePath, 0o644)
+    await assert.rejects(
+      loadAndAdmitInterventionIsolationProfile(profilePath, EXPECTED),
+      (error) => error.code === 'intervention_isolation.profile_file_not_private'
+    )
+    await chmod(profilePath, 0o600)
+    await symlink(profilePath, symlinkPath)
+  } else {
+    await symlink(directory, symlinkPath, 'junction')
+  }
   await assert.rejects(
     loadAndAdmitInterventionIsolationProfile(symlinkPath, EXPECTED),
     (error) => error.code === 'intervention_isolation.profile_file_invalid'
@@ -135,10 +139,12 @@ test('continuity requires the same private Profile bytes and Runner identity aft
   assert.equal(lost.state, 'partial')
   assert.equal(lost.reason.code, 'intervention_isolation.profile_changed_after_dispatch')
 
-  await chmod(profilePath, 0o644)
-  const unsafe = await verifyInterventionIsolationContinuity(profilePath, initial, EXPECTED)
-  assert.equal(unsafe.state, 'partial')
-  assert.equal(unsafe.reason.code, 'intervention_isolation.profile_file_not_private')
+  if (process.platform !== 'win32') {
+    await chmod(profilePath, 0o644)
+    const unsafe = await verifyInterventionIsolationContinuity(profilePath, initial, EXPECTED)
+    assert.equal(unsafe.state, 'partial')
+    assert.equal(unsafe.reason.code, 'intervention_isolation.profile_file_not_private')
+  }
 })
 
 function validProfile() {

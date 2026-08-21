@@ -1594,7 +1594,10 @@ impl AgentProfileService {
         #[cfg(unix)]
         let executable_is_usable = std::fs::metadata(&discovered.executable_path)
             .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0);
-        #[cfg(not(unix))]
+        #[cfg(windows)]
+        let executable_is_usable =
+            observe_executable_file_identity(Path::new(&discovered.executable_path)).is_ok();
+        #[cfg(not(any(unix, windows)))]
         let executable_is_usable = false;
         let executable_identity =
             observe_executable_file_identity(Path::new(&discovered.executable_path)).ok();
@@ -4784,6 +4787,13 @@ mod slow_tests {
         crate::test_support::fresh_schema_database_fast()
     }
 
+    fn test_executable_path(directory: &Path, stem: &str) -> std::path::PathBuf {
+        #[cfg(windows)]
+        return directory.join(format!("{stem}.exe"));
+        #[cfg(not(windows))]
+        directory.join(stem)
+    }
+
     fn production_like_database() -> (Database, std::path::PathBuf) {
         crate::test_support::fresh_schema_database()
     }
@@ -4848,6 +4858,7 @@ mod slow_tests {
                 .unwrap(),
             BTreeMap::from([(AdapterKind::CodexCli, 1)])
         );
+        drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
@@ -5093,6 +5104,7 @@ mod slow_tests {
     fn expired_catalog_allows_runtime_default_but_rejects_new_explicit_selection() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
+        let executable_path = test_executable_path(&directory, "expired-catalog-codex");
         let mut snapshot = ready_codex_snapshot();
         let expired_at = (chrono::Utc::now() - chrono::Duration::hours(25)).to_rfc3339();
         snapshot.observed_at = Some(expired_at.clone());
@@ -5103,7 +5115,7 @@ mod slow_tests {
                 &mut database,
                 VerifiedManagedInstallation {
                     adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    executable_path: executable_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
@@ -5312,7 +5324,7 @@ mod slow_tests {
     fn profile_and_installation_commands_are_idempotent_and_explicit() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
-        let executable_path = directory.join("fake-codex");
+        let executable_path = test_executable_path(&directory, "fake-codex");
         std::fs::write(&executable_path, b"codex-v1").expect("fake executable should be written");
         #[cfg(unix)]
         {
@@ -5727,6 +5739,7 @@ mod slow_tests {
     fn runtime_configuration_never_falls_back_to_a_custom_installation() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
+        let executable_path = test_executable_path(&directory, "custom-codex");
         let installation = service
             .create_installation(
                 &mut database,
@@ -5734,7 +5747,7 @@ mod slow_tests {
                     "create-installation",
                     CreateAdapterInstallationCommand {
                         adapter_kind: AdapterKind::CodexCli,
-                        executable_path: "/opt/homebrew/bin/codex".to_string(),
+                        executable_path: executable_path.to_string_lossy().into_owned(),
                         command_name: "codex".to_string(),
                         source: InstallationSource::Custom,
                         auth_scope: "default".to_string(),
@@ -5784,12 +5797,13 @@ mod slow_tests {
     fn ready_runtime_configuration_is_atomic_and_uses_explicit_native_values() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
+        let executable_path = test_executable_path(&directory, "ready-codex");
         service
             .commit_verified_managed_installation(
                 &mut database,
                 VerifiedManagedInstallation {
                     adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    executable_path: executable_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
@@ -5885,6 +5899,7 @@ mod slow_tests {
     fn background_runtime_discovery_never_materializes_member_configuration() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
+        let executable_path = test_executable_path(&directory, "background-codex");
         let profile = service.get_profile(&database, "agent_2").unwrap().unwrap();
         let selected = service
             .set_runtime(
@@ -5912,7 +5927,7 @@ mod slow_tests {
                 &mut database,
                 VerifiedManagedInstallation {
                     adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    executable_path: executable_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
@@ -5938,6 +5953,7 @@ mod slow_tests {
     fn failed_probe_keeps_the_last_successful_catalog_and_marks_it_stale() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
+        let executable_path = test_executable_path(&directory, "failed-probe-codex");
         let installation = service
             .create_installation(
                 &mut database,
@@ -5945,7 +5961,7 @@ mod slow_tests {
                     "create-installation",
                     CreateAdapterInstallationCommand {
                         adapter_kind: AdapterKind::CodexCli,
-                        executable_path: "/opt/homebrew/bin/codex".to_string(),
+                        executable_path: executable_path.to_string_lossy().into_owned(),
                         command_name: "codex".to_string(),
                         source: InstallationSource::Custom,
                         auth_scope: "default".to_string(),
@@ -6030,7 +6046,7 @@ mod slow_tests {
     fn light_ready_runtime_defaults_require_uniform_dispatch_preflight() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
-        let executable_path = directory.join("traecli");
+        let executable_path = test_executable_path(&directory, "traecli");
         std::fs::write(&executable_path, b"static-trae-fixture").unwrap();
         let fingerprint = "sha256:trae-static".to_string();
         let observed_at = chrono::Utc::now().to_rfc3339();
@@ -6194,6 +6210,9 @@ mod slow_tests {
     fn verified_relocation_preserves_installation_identity_and_never_commits_a_failed_candidate() {
         let (mut database, directory) = production_like_database();
         let service = AgentProfileService::default();
+        let original_path = test_executable_path(&directory, "original-codex");
+        let rejected_path = test_executable_path(&directory, "rejected-codex");
+        let replacement_path = test_executable_path(&directory, "replacement-codex");
         let mut original_snapshot = ready_codex_snapshot();
         original_snapshot.executable_fingerprint = Some("sha256:original".to_string());
         let installation_id = service
@@ -6201,7 +6220,7 @@ mod slow_tests {
                 &mut database,
                 VerifiedManagedInstallation {
                     adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/opt/homebrew/bin/codex".to_string(),
+                    executable_path: original_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
                     source: InstallationSource::InheritedPath,
                     auth_scope: "default".to_string(),
@@ -6239,7 +6258,7 @@ mod slow_tests {
                 ManagedProbeFailure {
                     adapter_kind: AdapterKind::CodexCli,
                     auth_scope: "default",
-                    candidate_path: "/Users/test/.local/bin/codex",
+                    candidate_path: &rejected_path.to_string_lossy(),
                     fingerprint: Some("sha256:wrong-program"),
                     source: Some(InstallationSource::LoginShell),
                     failure_class: "identity_changed",
@@ -6255,7 +6274,7 @@ mod slow_tests {
         assert_eq!(rejected_candidate.id, installation_id);
         assert_eq!(
             rejected_candidate.executable_path,
-            "/opt/homebrew/bin/codex"
+            original_path.to_string_lossy()
         );
         assert_eq!(
             rejected_candidate
@@ -6303,7 +6322,7 @@ mod slow_tests {
                 &mut database,
                 VerifiedManagedInstallation {
                     adapter_kind: AdapterKind::CodexCli,
-                    executable_path: "/Users/test/.volta/bin/codex".to_string(),
+                    executable_path: replacement_path.to_string_lossy().into_owned(),
                     command_name: "codex".to_string(),
                     source: InstallationSource::KnownLocation,
                     auth_scope: "default".to_string(),
@@ -6316,7 +6335,10 @@ mod slow_tests {
             .managed_installation(&database, AdapterKind::CodexCli, "default")
             .unwrap()
             .unwrap();
-        assert_eq!(relocated.executable_path, "/Users/test/.volta/bin/codex");
+        assert_eq!(
+            relocated.executable_path,
+            replacement_path.to_string_lossy()
+        );
         assert_eq!(relocated.generation, 2);
         assert_eq!(relocated.version, 2);
         assert_eq!(relocated.path_state, "valid");
@@ -6386,8 +6408,9 @@ mod slow_tests {
     fn light_ready_runtime_is_configurable_but_requires_deep_check_before_dispatch() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
-        let executable_path = directory.join("qwen");
+        let executable_path = test_executable_path(&directory, "qwen");
         std::fs::write(&executable_path, b"static-qwen-fixture").unwrap();
+        #[cfg(unix)]
         std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .light_ready_snapshot(
@@ -6546,8 +6569,9 @@ mod slow_tests {
     fn permission_descriptor_drift_does_not_preserve_ready_or_expand_saved_kiro_profiles() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
-        let executable_path = directory.join("kiro-cli");
+        let executable_path = test_executable_path(&directory, "kiro-cli");
         std::fs::write(&executable_path, b"static-kiro-fixture").unwrap();
+        #[cfg(unix)]
         std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
 
         let mut legacy_snapshot = AgentRuntimeAdapterRegistry::default()
@@ -6734,7 +6758,7 @@ mod slow_tests {
     fn failed_light_probe_invalidates_selection_and_retains_its_diagnostic() {
         let (mut database, directory) = database();
         let service = AgentProfileService::default();
-        let executable_path = directory.join("qwen");
+        let executable_path = test_executable_path(&directory, "qwen-failed");
         std::fs::write(&executable_path, b"static-qwen-fixture").unwrap();
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .light_failed_snapshot(

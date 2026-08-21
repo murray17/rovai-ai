@@ -55,8 +55,10 @@ test('Evidence Bundle completion marker binds immutable manifest bytes with priv
       `sha256:${createHash('sha256').update(manifestBytes).digest('hex')}`
     )
     assert.equal(retained.manifestDigest, marker.manifestDigest)
-    assert.equal((await stat(join(root, retained.locator))).mode & 0o777, 0o600)
-    assert.equal((await stat(join(root, retained.completionMarkerLocator))).mode & 0o777, 0o600)
+    if (process.platform !== 'win32') {
+      assert.equal((await stat(join(root, retained.locator))).mode & 0o777, 0o600)
+      assert.equal((await stat(join(root, retained.completionMarkerLocator))).mode & 0o777, 0o600)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

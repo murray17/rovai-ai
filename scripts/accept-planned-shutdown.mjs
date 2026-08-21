@@ -6,16 +6,25 @@ import { spawn } from 'node:child_process'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
+import { requestNormalApplicationQuit } from './lib/planned-shutdown-app-quit.mjs'
+import { querySqliteRows } from './lib/sqlite.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
+const defaultAppPath = process.platform === 'win32'
+  ? join(root, 'dist', 'win-unpacked', 'Rovai-ai.exe')
+  : join(root, 'dist', 'mac-arm64', 'Rovai-ai.app')
+const appPath = resolve(process.argv[2] ?? defaultAppPath)
 const fixtureRoot = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-planned-shutdown-accept-'))
 const outputDir = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_OUTPUT_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-planned-shutdown-captures-'))
 const dataDir = join(fixtureRoot, 'user-data')
+const electronUserDataDir = process.platform === 'win32'
+  ? join(dataDir, 'Electron', 'User Data')
+  : dataDir
+const coreDataDir = process.platform === 'win32' ? join(dataDir, 'Core') : dataDir
 const projectRoot = join(fixtureRoot, 'project')
-const databasePath = join(dataDir, 'rovai.sqlite')
+const databasePath = join(coreDataDir, 'rovai.sqlite')
 const runtimeTempDir = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_RUNTIME_TMP ?? tmpdir()
 const agentId = 'agent_1'
 const runtimeKind = 'claude-code-cli'
@@ -28,9 +37,13 @@ let failed = true
 
 try {
   await mkdir(projectRoot, { recursive: true })
-  await mkdir(dataDir, { recursive: true })
   await mkdir(outputDir, { recursive: true })
-  seedCompletedOnboardingForAcceptance(dataDir)
+  if (process.platform === 'win32') {
+    await runProcess(packagedCoreExecutable(), ['--prepare-windows-data-root', dataDir])
+  } else {
+    await mkdir(dataDir, { recursive: true })
+  }
+  seedCompletedOnboardingForAcceptance(electronUserDataDir)
   await writeFile(join(projectRoot, 'README.md'), '# Planned shutdown acceptance fixture\n')
   await runProcess('git', ['init', '-b', 'main'], { cwd: projectRoot })
   await runProcess('git', ['config', 'user.name', 'Rovai-ai Planned Shutdown Acceptance'], {
@@ -265,7 +278,7 @@ try {
 }
 
 async function launchApp(port, width, height) {
-  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+  const executable = packagedAppExecutable()
   const stderr = []
   const child = spawn(executable, [
     `--remote-debugging-port=${port}`,
@@ -273,7 +286,13 @@ async function launchApp(port, width, height) {
   ], {
     cwd: root,
     stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, ROVAI_ALLOW_ISOLATED_INSTANCE: '1', TMPDIR: runtimeTempDir }
+    env: {
+      ...process.env,
+      ROVAI_ALLOW_ISOLATED_INSTANCE: '1',
+      ...(process.platform === 'win32'
+        ? { TEMP: runtimeTempDir, TMP: runtimeTempDir }
+        : { TMPDIR: runtimeTempDir })
+    }
   })
   child.stderr.on('data', (chunk) => {
     const text = String(chunk)
@@ -310,6 +329,18 @@ async function launchApp(port, width, height) {
   }
 }
 
+function packagedAppExecutable() {
+  return process.platform === 'win32'
+    ? appPath
+    : join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+}
+
+function packagedCoreExecutable() {
+  return process.platform === 'win32'
+    ? join(resolve(appPath, '..'), 'resources', 'bin', 'rovai-core.exe')
+    : join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core')
+}
+
 function parseShutdownResult(stderr) {
   const prefix = '[rovai-core] controlled shutdown result '
   for (const chunk of stderr.toReversed()) {
@@ -339,13 +370,7 @@ async function setTheme(cdp, preference) {
 }
 
 async function requestAppQuit(app) {
-  const script = [
-    'ObjC.import("AppKit")',
-    `const target = $.NSRunningApplication.runningApplicationWithProcessIdentifier(${app.child.pid})`,
-    'if (!target.js) throw new Error("Isolated packaged App is not running")',
-    'if (!target.terminate) throw new Error("macOS rejected the normal termination request")'
-  ].join('; ')
-  await runProcess('/usr/bin/osascript', ['-l', 'JavaScript', '-e', script])
+  await requestNormalApplicationQuit({ app, runProcess })
 }
 
 function trace(message) {
@@ -413,7 +438,7 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
     && overlay.labelledBy === 'controlled-shutdown-title'
     && overlay.describedBy === 'controlled-shutdown-description'
     && overlay.title === '正在停止运行并关闭 Rovai…'
-    && overlay.description.includes('Runtime 返回可靠终态')
+    && overlay.description.includes('执行引擎返回可靠终态')
     && overlay.description.includes('无法确认的执行也会停止')
     && overlay.description.includes('保留外部效果现场')
     && overlay.actionCount === 0
@@ -469,8 +494,7 @@ async function readRunFacts(agentRunId) {
 }
 
 async function runSqlJson(sql) {
-  const raw = await runProcess('/usr/bin/sqlite3', ['-json', databasePath, sql])
-  return JSON.parse(raw || '[]')
+  return querySqliteRows(databasePath, sql)
 }
 
 async function capture(cdp, path) {
@@ -580,7 +604,14 @@ async function descendantProcessIds(parentPid) {
   const queue = [parentPid]
   while (queue.length > 0) {
     const parent = queue.shift()
-    const raw = await runProcess('/usr/bin/pgrep', ['-P', String(parent)], { allowFailure: true })
+    const raw = process.platform === 'win32'
+      ? await runProcess('powershell.exe', [
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          `Get-CimInstance Win32_Process -Filter 'ParentProcessId = ${parent}' | Select-Object -ExpandProperty ProcessId`
+        ], { allowFailure: true, env: windowsPowerShellEnvironment() })
+      : await runProcess('/usr/bin/pgrep', ['-P', String(parent)], { allowFailure: true })
     const children = raw.split(/\s+/).filter(Boolean).map(Number).filter(Number.isFinite)
     for (const child of children) {
       if (discovered.includes(child)) continue
@@ -650,9 +681,9 @@ async function terminateProcessTree(child) {
   }
 }
 
-function runProcess(command, args, { cwd = root, allowFailure = false } = {}) {
+function runProcess(command, args, { cwd = root, allowFailure = false, env = process.env } = {}) {
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env })
     const stdout = []
     const stderr = []
     child.stdout.on('data', (chunk) => stdout.push(String(chunk)))
@@ -663,6 +694,14 @@ function runProcess(command, args, { cwd = root, allowFailure = false } = {}) {
       else rejectRun(new Error(`${command} exited with ${code ?? signal}: ${stderr.join('')}`))
     })
   })
+}
+
+function windowsPowerShellEnvironment() {
+  const environment = { ...process.env }
+  for (const key of Object.keys(environment)) {
+    if (key.toLowerCase() === 'psmodulepath') delete environment[key]
+  }
+  return environment
 }
 
 function sqlLiteral(value) {

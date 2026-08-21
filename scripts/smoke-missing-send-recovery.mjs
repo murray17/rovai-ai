@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
 import { validateAcpRecoveryProtocolFixture } from './lib/missing-send-recovery-protocol.mjs'
+import { querySqliteRows } from './lib/sqlite.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const coreExecutable = resolve(
@@ -118,7 +119,7 @@ for (const specification of specifications) {
     const suppressionStart = await startFollowUpRun(
       core.request,
       campId,
-      suppressionPrompt(progressMarker, privateFinalMarker),
+      suppressionPrompt(specification.adapterKind, progressMarker, privateFinalMarker),
       'Exercise accepted-send suppression with a different private final.'
     )
     await waitForTerminalRun(
@@ -242,12 +243,19 @@ function zeroSendPrompt(marker) {
   ].join(' ')
 }
 
-function suppressionPrompt(progressMarker, privateFinalMarker) {
+function suppressionPrompt(adapterKind, progressMarker, privateFinalMarker) {
+  const sendCommand = process.platform === 'win32'
+    ? adapterKind === 'trae-cn-cli'
+      // TRAE 0.120.52 rejects PowerShell and cmd `for` before ACP permission
+      // projection. The qualification workspace path is deliberately space-free.
+      ? `cmd.exe /d /s /c %ROVAI_AGENT_CLI% send --body ${progressMarker}`
+      : `powershell.exe -NoProfile -Command "& $env:ROVAI_AGENT_CLI send --body '${progressMarker}'"`
+    : `"$ROVAI_AGENT_CLI" send --body ${shellQuote(progressMarker)}`
   return [
     'Publish one progress update to the current Camp, then report completion to me.',
     'The local Rovai Built-in CLI path is available in ROVAI_AGENT_CLI and its current-Run lease is available in ROVAI_CLI_CONTEXT.',
-    'Use your native bash/shell tool to run exactly:',
-    `"$ROVAI_AGENT_CLI" send --body ${shellQuote(progressMarker)}`,
+    'Use your native terminal/shell tool exactly once to run this command. Do not answer before the tool completes:',
+    sendCommand,
     'Do not call any other rovai command and do not send a second message.',
     `After that command succeeds, reply with exactly ${privateFinalMarker} and no other text. Do not publish that completion token.`
   ].join('\n')
@@ -290,7 +298,7 @@ async function selectExplicitModel(request, agentId, adapterKind, modelId) {
       model: {
         mode: 'explicit',
         modelId,
-        options: { reasoning_effort: 'low' }
+        options: {}
       },
       permissions: profile.runtimeConfiguration.permissions
     }
@@ -594,8 +602,7 @@ function startCore(dataDirectory) {
 }
 
 async function sqliteJson(databasePath, sql) {
-  const result = await runCapture('/usr/bin/sqlite3', ['-json', databasePath, sql])
-  return result.stdout.trim() ? JSON.parse(result.stdout) : []
+  return querySqliteRows(databasePath, sql)
 }
 
 function sqlLiteral(value) {

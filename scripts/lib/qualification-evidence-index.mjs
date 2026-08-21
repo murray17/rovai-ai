@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   atomicWriteJson,
   canonicalJson,
   digestJson,
@@ -704,7 +705,7 @@ export function extractMemorySemanticResultContents(operationProjection) {
 
 export async function retainEvidenceIndexArtifact(evidenceDirectory, artifact) {
   validateEvidenceIndex(artifact)
-  const locator = join('evidence-indexes', `${artifact.artifactId}.json`)
+  const locator = join('evidence-indexes', artifactFileName(artifact.artifactId))
   await writePrivateJsonExclusive(join(evidenceDirectory, locator), artifact)
   await atomicWriteJson(join(evidenceDirectory, 'evidence-index.json'), artifact)
   return {

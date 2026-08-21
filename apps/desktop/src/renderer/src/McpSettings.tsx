@@ -26,6 +26,7 @@ import {
 import { SettingsPageHeader } from './SettingsPageHeader'
 import { MemberAvatar } from './MemberAvatar'
 import { localizeExecutionEngineTerms } from './product-copy'
+import { revealInFileManagerLabel } from './renderer-platform'
 import { identityColorToken } from './theme'
 
 type JsonEditor = {
@@ -51,7 +52,13 @@ const NEW_SERVER_JSON = `{
   }
 }`
 
-export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.Element {
+export function McpSettings({
+  agents,
+  platform = 'darwin'
+}: {
+  agents: AgentProfile[]
+  platform?: NodeJS.Platform
+}): React.JSX.Element {
   const members = useMemo(
     () => agents
       .filter((agent) => agent.presence === 'present')
@@ -338,7 +345,7 @@ export function McpSettings({ agents }: { agents: AgentProfile[] }): React.JSX.E
             <div className="mcp-source-toolbar">
               <p>展示标准 <code>mcpServers</code>；内部元数据和敏感原文不出现在预览中。</p>
               <button className="quiet-button compact" type="button" onClick={() => void revealConfig()} disabled={busy !== null}>
-                {busy === 'reveal' ? '正在打开…' : '在 Finder 中显示'}
+                {busy === 'reveal' ? '正在打开…' : revealInFileManagerLabel(platform)}
               </button>
             </div>
             <pre>{config?.publicConfigJson || '{\n  "mcpServers": {}\n}'}</pre>

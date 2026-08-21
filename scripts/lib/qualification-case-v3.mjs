@@ -481,7 +481,11 @@ async function assertPrivateV3CasePack(contract) {
     throw new Error('Case v3 private Pack must remain outside the source repository')
   }
   const rootMetadata = await lstat(root)
-  if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink() || (rootMetadata.mode & 0o777) !== 0o700) {
+  if (
+    !rootMetadata.isDirectory()
+    || rootMetadata.isSymbolicLink()
+    || (process.platform !== 'win32' && (rootMetadata.mode & 0o777) !== 0o700)
+  ) {
     throw new Error('Case v3 private Pack root must be a non-symlinked 0700 directory')
   }
   const manifest = await treeManifest(root, { excludeGit: false })
@@ -490,7 +494,7 @@ async function assertPrivateV3CasePack(contract) {
       throw new Error(`Case v3 private Pack contains unsupported entry: ${entry.path}`)
     }
     const expectedMode = entry.type === 'directory' ? 0o700 : 0o600
-    if (entry.mode !== expectedMode) {
+    if (process.platform !== 'win32' && entry.mode !== expectedMode) {
       throw new Error(`Case v3 private Pack entry has unsafe mode: ${entry.path}`)
     }
   }

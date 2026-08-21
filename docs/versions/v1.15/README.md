@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: accepted
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # Rovai-ai v1.15：Windows x64 产品实现与资格闭环
@@ -14,8 +14,12 @@ last_updated: 2026-08-19
 > 当前状态：v1.05 形成的 Windows 长期决定、Contract、Architecture 与 Interaction Delta 继续有效；本版在
 > 已发布的 v1.14 基线上实施这些约束。平台 seam、native frame、Runtime 平台准入、native executable
 > resolver、原子 Job 启动、私有 Core/Desktop data root、handle-relative Attachment、managed Skill Library、
-> crash-recoverable Skill Projection 与共享异步 Named Pipe client 已进入代码。固定 Windows CI 实跑、Windows
-> client OS 验收、逐 Runtime 资格、NSIS 与签名尚未完成，因此不得宣称 Windows 已发布。
+> crash-recoverable Skill Projection、共享异步 Named Pipe client、Windows Renderer delta、per-user NSIS、PE verifier
+> 与隔离安装验收已进入代码，并在 Windows 10 22H2 x64 本机通过。固定 Windows packaging workflow 已建立但尚无
+> 远端运行证据。2026-08-21 已在同一 Windows 10 22H2 x64 本机完成十个 Runtime 的开发态真实矩阵、
+> CodeBuddy 官方 API-key ACP/Flash 兼容修正和 Claude packaged planned-shutdown 验收；正式 Release 仍按设计阻断
+> 全部 `not_qualified` Runtime。Windows 11 client OS、不可变逐 Runtime 资格、正式签名与 SmartScreen 尚未完成，
+> 因此不得宣称 Windows 已发布。
 >
 > 前置版本：[v1.14 `camp.read` 安全 Timeline 默认](../v1.14/README.md)。v1.14 已完成并冻结为 historical。
 
@@ -93,8 +97,8 @@ Migration 97 只接受已完整应用 Migration 96 的 `v1.13 / projection schem
 | Architecture | 已更新 | [Skill Projection Reconciliation](../../architecture/skill-projection-reconciliation.md)记录 Migration 97 的 v1.15 目标；[Windows Desktop Platform](../../architecture/windows-desktop-platform.md)继续组合其他平台边界；[Camp Open Read Path](../../architecture/camp-open-read-path.md)记录 activation-aware enter、meaningful Pending 冷启动恢复与完整 non-terminal Evidence。 |
 | UI | 已更新 | [Camp 会话工作区](../../ui/components/conversation-workspace.md)保留 AgentRun 直接停止与完整运行 chronology；底部/Inspector 移动同一 Drawer DOM，Tool 行固定对齐，队员入口去除可见状态文案，完整结果在有最大高度的 region 中内部滚动。 |
 | Runtime Activity | 确认无需更新 | 平台 backend 与资格状态不改变 Canonical Runtime Activity mapping；出现新 telemetry 时再按维护指南评审。 |
-| Runtime compatibility | 确认无需更新 | 当前尚无新的真实 Windows Adapter 资格证据；所有 Windows 行继续保持 `not_qualified`。 |
-| Documentation routing | 已更新 | 版本指针、索引和本版 References 路由到 v1.15；Windows 长期任务入口保持指向当前 Contract、Architecture 与历史决定理由。 |
+| Runtime compatibility | 已更新 | 记录 2026-08-21 Windows 10 本机十 Runtime 开发态矩阵、版本、Flash 配置、CodeBuddy ACP 差异与 Claude planned-shutdown；这些结果不满足 Windows 11 和 immutable digest-bound 发布证据，所有 Windows 行继续保持 `not_qualified`。 |
+| Documentation routing | 已更新 | 版本指针、索引和本版 References 路由到 v1.15；Windows packaging guide 记录已实现命令、unsigned CI 与发布边界。 |
 | Root README | 确认无需更新 | Windows 尚未完成真实验收或发布，根 README 不提前声明常青 Windows 支持。 |
 
 ## References

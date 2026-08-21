@@ -1567,6 +1567,7 @@ describe('task event projections', () => {
   it('renders Camp-first navigation with unified menus and Quick Chat as the last visual project', () => {
     const longTitle = '围绕多 Agent 协作控制面梳理一个足够长、必须由真实侧栏宽度裁切的对话标题'
     const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      platform: 'win32',
       view: 'camp',
       state: 'ready',
       navigation: {
@@ -1612,6 +1613,8 @@ describe('task event projections', () => {
     }))
 
     expect(markup).toContain('新对话')
+    expect(markup).toContain('<kbd aria-hidden="true">Ctrl+K</kbd>')
+    expect(markup).not.toContain('⌘K')
     expect(markup).toContain('aria-label="Rovai AI"')
     expect(markup).toContain('data-brand-mark="horizon"')
     expect(markup).toContain('data-brand-layout="separated"')

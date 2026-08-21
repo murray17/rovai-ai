@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::io::Read;
 #[cfg(unix)]
 use std::{
     fs::{File, OpenOptions},
@@ -14,7 +16,7 @@ use std::{
 use anyhow::{Context, Result};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -28,8 +30,14 @@ use crate::{
     mcp::{McpConfigStore, McpServerDefinition},
 };
 
+#[cfg(windows)]
+use crate::platform::private_storage::{
+    admit_private_directory, commit_private_directory_temporary, create_private_bytes,
+    create_private_directory, open_private_read_file, prepare_private_directory,
+};
+
 const MCP_PROJECTION_SCHEMA_VERSION: u32 = 2;
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 const MAX_PROJECTION_BYTES: u64 = 2 * 1024 * 1024;
 pub const LEGACY_EMPTY_MCP_EXPOSURE_DIGEST: &str = "sha256:legacy-empty-mcp-exposure";
 pub const LEGACY_EMPTY_MCP_PROJECTION_DIGEST: &str = "sha256:legacy-empty-mcp-projection";
@@ -319,14 +327,40 @@ impl McpProjectionService {
         result
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fn publish_bytes(&self, agent_run_id: &str, execution_epoch: i64, bytes: &[u8]) -> Result<()> {
+        ensure_or_create_private_directory(&self.root)?;
+        let run_root = self.run_root(agent_run_id);
+        ensure_or_create_private_directory(&run_root)?;
+        let target = self.target_path(agent_run_id, execution_epoch);
+        if target.exists() {
+            ensure_private_directory(&target)?;
+            return Ok(());
+        }
+        let temporary = run_root.join(format!(".{execution_epoch}-{}.tmp", Uuid::new_v4()));
+        create_private_directory(&temporary)?;
+        let result = (|| -> Result<()> {
+            create_private_bytes(&temporary.join("canonical.json"), bytes)?;
+            commit_private_directory_temporary(&temporary, &target)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_dir_all(&temporary);
+            if target.exists() {
+                ensure_private_directory(&target)?;
+                return Ok(());
+            }
+        }
+        result
+    }
+
+    #[cfg(not(any(unix, windows)))]
     fn publish_bytes(
         &self,
         _agent_run_id: &str,
         _execution_epoch: i64,
         _bytes: &[u8],
     ) -> Result<()> {
-        anyhow::bail!("windows_private_storage_not_implemented")
+        anyhow::bail!("private MCP projection storage is unsupported on this platform")
     }
 
     fn load_and_validate(
@@ -803,9 +837,27 @@ fn read_private_projection_bytes(path: &Path) -> Result<(Vec<u8>, String)> {
     Ok((bytes, digest))
 }
 
-#[cfg(not(unix))]
+#[cfg(windows)]
+fn read_private_projection_bytes(path: &Path) -> Result<(Vec<u8>, String)> {
+    let mut file = open_private_read_file(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.len() > MAX_PROJECTION_BYTES {
+        anyhow::bail!("private MCP projection exceeds its regular-file size contract");
+    }
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    Read::by_ref(&mut file)
+        .take(MAX_PROJECTION_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_PROJECTION_BYTES {
+        anyhow::bail!("private MCP projection exceeds the size limit");
+    }
+    let digest = format!("sha256:{:x}", Sha256::digest(&bytes));
+    Ok((bytes, digest))
+}
+
+#[cfg(not(any(unix, windows)))]
 fn read_private_projection_bytes(_path: &Path) -> Result<(Vec<u8>, String)> {
-    anyhow::bail!("windows_private_storage_not_implemented")
+    anyhow::bail!("private MCP projection storage is unsupported on this platform")
 }
 
 #[cfg(unix)]
@@ -816,6 +868,12 @@ fn ensure_or_create_private_directory(path: &Path) -> Result<()> {
     fs::create_dir_all(path)
         .with_context(|| format!("failed to create private MCP directory {}", path.display()))?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(windows)]
+fn ensure_or_create_private_directory(path: &Path) -> Result<()> {
+    prepare_private_directory(path)?;
     Ok(())
 }
 
@@ -834,12 +892,18 @@ fn ensure_private_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(unix))]
-fn ensure_private_directory(_path: &Path) -> Result<()> {
-    anyhow::bail!("windows_private_storage_not_implemented")
+#[cfg(windows)]
+fn ensure_private_directory(path: &Path) -> Result<()> {
+    admit_private_directory(path)?;
+    Ok(())
 }
 
-#[cfg(all(test, unix))]
+#[cfg(not(any(unix, windows)))]
+fn ensure_private_directory(_path: &Path) -> Result<()> {
+    anyhow::bail!("private MCP projection storage is unsupported on this platform")
+}
+
+#[cfg(all(test, any(unix, windows)))]
 mod tests {
     use super::*;
     use crate::mcp::{
@@ -972,6 +1036,7 @@ mod tests {
                 .unwrap()
                 .contains("top-secret")
         );
+        #[cfg(unix)]
         assert_eq!(
             fs::metadata(&prepared.canonical_path)
                 .unwrap()
@@ -980,6 +1045,9 @@ mod tests {
                 & 0o777,
             0o600
         );
+        #[cfg(windows)]
+        assert!(open_private_read_file(&prepared.canonical_path).is_ok());
+        drop(database);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1025,6 +1093,7 @@ mod tests {
             panic!("expected stdio");
         };
         assert_eq!(command, "old-command");
+        drop(database);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1060,12 +1129,17 @@ mod tests {
                 &request(&codex_run_id, 1, &root, AdapterKind::CodexCli),
             )
             .unwrap();
-        let metadata = fs::metadata(&codex.canonical_path).unwrap();
-        fs::set_permissions(
-            &codex.canonical_path,
-            fs::Permissions::from_mode(metadata.permissions().mode() | 0o044),
-        )
-        .unwrap();
+        #[cfg(unix)]
+        {
+            let metadata = fs::metadata(&codex.canonical_path).unwrap();
+            fs::set_permissions(
+                &codex.canonical_path,
+                fs::Permissions::from_mode(metadata.permissions().mode() | 0o044),
+            )
+            .unwrap();
+        }
+        #[cfg(windows)]
+        fs::write(&codex.canonical_path, b"{\"tampered\":true}").unwrap();
         assert!(
             service
                 .prepare(
@@ -1075,6 +1149,7 @@ mod tests {
                 )
                 .is_err()
         );
+        drop(database);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1108,14 +1183,20 @@ mod tests {
         assert!(prepared.canonical_path.exists());
         assert_eq!(service.cleanup_terminal_and_orphaned(&database).unwrap(), 1);
         assert!(!prepared.canonical_path.exists());
+        drop(database);
         let _ = fs::remove_dir_all(root);
     }
 
     #[test]
     fn invalid_library_file_creates_an_empty_explainable_projection() {
         let (root, database, store, service) = fixture();
-        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(store.path(), "{broken").unwrap();
+        #[cfg(unix)]
+        {
+            fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+            fs::write(store.path(), "{broken").unwrap();
+        }
+        #[cfg(windows)]
+        create_private_bytes(store.path(), b"{broken").unwrap();
         let run_id = Uuid::new_v4().to_string();
         let prepared = service
             .prepare(
@@ -1135,6 +1216,7 @@ mod tests {
                 .unwrap()
                 .contains("{broken")
         );
+        drop(database);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1211,6 +1293,7 @@ mod tests {
             .unwrap();
         assert_eq!(recovered.snapshot, prepared.snapshot);
         assert_eq!(recovered.servers, prepared.servers);
+        drop(database);
         let _ = fs::remove_dir_all(root);
     }
 }

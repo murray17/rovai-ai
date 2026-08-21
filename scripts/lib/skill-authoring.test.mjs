@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -32,10 +32,14 @@ async function writeFixture(root, {
   return directory
 }
 
-test('Skill authoring validation accepts a complete self-contained bundle', async () => {
+test('Skill authoring validation accepts a complete self-contained bundle with LF or CRLF', async () => {
   const root = await mkdtemp(join(tmpdir(), 'rovai-skill-authoring-'))
   try {
     const directory = await writeFixture(root)
+    assert.deepEqual(await validateSkillDirectory(directory), [])
+    const skillFile = join(directory, 'SKILL.md')
+    const lfSource = await readFile(skillFile, 'utf8')
+    await writeFile(skillFile, lfSource.replaceAll('\n', '\r\n'))
     assert.deepEqual(await validateSkillDirectory(directory), [])
   } finally {
     await rm(root, { recursive: true, force: true })

@@ -102,7 +102,7 @@ export async function loadAndAdmitInterventionIsolationProfile(path, expected) {
   if (metadata.size < 2 || metadata.size > MAX_PROFILE_BYTES) {
     fail('intervention_isolation.profile_file_invalid', 'Isolation Profile size is outside the accepted boundary')
   }
-  if ((metadata.mode & 0o077) !== 0) {
+  if (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) {
     fail('intervention_isolation.profile_file_not_private', 'Isolation Profile must not be group/world accessible')
   }
   if (typeof process.getuid === 'function' && metadata.uid !== process.getuid()) {

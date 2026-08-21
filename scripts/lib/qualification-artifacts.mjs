@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   canonicalJson,
   digestJson,
   sha256,
@@ -119,7 +120,7 @@ export async function buildAndRetainQualificationArtifacts({
   return { artifacts: references, locators }
 
   async function addRetained(role, artifact) {
-    const locator = join('normalized-artifacts', role, `${artifact.artifactId}.json`)
+    const locator = join('normalized-artifacts', role, artifactFileName(artifact.artifactId))
     await writeImmutableOrVerify(join(evidenceDirectory, locator), artifact)
     references[role] = artifactReference(artifact)
     locators[role] = locator

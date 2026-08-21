@@ -313,8 +313,14 @@ test('Delivered Workspace Snapshot rejects symlinks that escape the retained wor
   const evidence = join(root, 'evidence')
   await mkdir(workspace)
   await mkdir(evidence)
-  await writeFile(join(root, 'outside.txt'), 'private\n')
-  await symlink(join(root, 'outside.txt'), join(workspace, 'leak.txt'))
+  const outside = join(root, 'outside')
+  await mkdir(outside)
+  await writeFile(join(outside, 'private.txt'), 'private\n')
+  await symlink(
+    outside,
+    join(workspace, 'leak'),
+    process.platform === 'win32' ? 'junction' : 'dir'
+  )
   try {
     await assert.rejects(
       captureDeliveredWorkspaceSnapshot(workspace, evidence),

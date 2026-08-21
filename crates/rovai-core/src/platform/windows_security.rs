@@ -1,18 +1,24 @@
-use std::{ffi::c_void, io, mem::size_of, ptr::null_mut};
+use std::{
+    ffi::c_void,
+    io,
+    mem::size_of,
+    ptr::{null, null_mut},
+};
 
 use anyhow::{Context, Result, bail};
 use windows_sys::Win32::{
-    Foundation::{CloseHandle, ERROR_SUCCESS, GENERIC_ALL, HANDLE, LocalFree},
+    Foundation::{CloseHandle, ERROR_SUCCESS, HANDLE, LocalFree},
     Security::{
         ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, AclSizeInformation,
         Authorization::{
             ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-            GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SE_KERNEL_OBJECT,
+            GetSecurityInfo, SDDL_REVISION_1, SE_FILE_OBJECT, SE_KERNEL_OBJECT, SetSecurityInfo,
         },
         CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION, GetAce, GetAclInformation,
-        GetSecurityDescriptorControl, GetTokenInformation, OBJECT_INHERIT_ACE,
-        OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
-        SECURITY_ATTRIBUTES, TOKEN_GROUPS, TOKEN_QUERY, TOKEN_USER, TokenLogonSid, TokenUser,
+        GetSecurityDescriptorControl, GetSecurityDescriptorDacl, GetTokenInformation,
+        OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SECURITY_ATTRIBUTES, TOKEN_GROUPS,
+        TOKEN_QUERY, TOKEN_USER, TokenLogonSid, TokenUser,
     },
     Storage::FileSystem::FILE_ALL_ACCESS,
     System::Threading::{GetCurrentProcess, OpenProcessToken},
@@ -94,6 +100,46 @@ impl PrivateSecurityDescriptor {
         }
         let security = SecurityInfo::from_file_handle(handle)?;
         security.verify_private_policy(self.kind, &self.principal_sid)
+    }
+
+    pub(crate) fn apply_file_dacl(&self, handle: HANDLE) -> Result<()> {
+        if self.kind == PrivateObjectKind::NamedPipe {
+            bail!("named-pipe descriptors cannot repair filesystem objects");
+        }
+        let mut present = 0;
+        let mut defaulted = 0;
+        let mut dacl = null_mut();
+        if unsafe {
+            // SAFETY: descriptor remains live and the three output pointers are
+            // valid for the duration of this call.
+            GetSecurityDescriptorDacl(self.descriptor, &mut present, &mut dacl, &mut defaulted)
+        } == 0
+        {
+            return Err(io::Error::last_os_error())
+                .context("failed to read the private Windows DACL");
+        }
+        if present == 0 || dacl.is_null() {
+            bail!("private Windows security descriptor has no DACL");
+        }
+        let status = unsafe {
+            // SAFETY: handle was opened with WRITE_DAC, dacl is owned by the
+            // live descriptor, and null owner/group/SACL pointers are ignored
+            // because only the protected DACL flags are requested.
+            SetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                null_mut(),
+                null_mut(),
+                dacl,
+                null(),
+            )
+        };
+        if status != ERROR_SUCCESS {
+            return Err(io::Error::from_raw_os_error(status as i32))
+                .context("failed to apply the private Windows DACL");
+        }
+        Ok(())
     }
 
     pub(crate) fn verify_named_pipe_handle(&self, handle: HANDLE) -> Result<()> {
@@ -222,10 +268,10 @@ impl SecurityInfo {
             PrivateObjectKind::Directory => (OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE) as u8,
             PrivateObjectKind::File | PrivateObjectKind::NamedPipe => 0,
         };
-        let expected_mask = match kind {
-            PrivateObjectKind::Directory | PrivateObjectKind::File => FILE_ALL_ACCESS,
-            PrivateObjectKind::NamedPipe => GENERIC_ALL,
-        };
+        // CreateNamedPipe maps generic rights in the supplied descriptor to
+        // the file-object rights exposed by the created pipe. GA therefore
+        // admits as FILE_ALL_ACCESS when the post-creation DACL is read back.
+        let expected_mask = FILE_ALL_ACCESS;
         let mut entries = Vec::with_capacity(2);
         for index in 0..acl_info.AceCount {
             let mut raw_ace: *mut c_void = null_mut();
@@ -250,7 +296,15 @@ impl SecurityInfo {
                 || ace.Header.AceFlags != expected_flags
                 || ace.Mask != expected_mask
             {
-                bail!("private object DACL contains an unexpected access entry");
+                bail!(
+                    "private object DACL contains an unexpected access entry: type={}, flags={:#04x}, mask={:#010x}; expected type={}, flags={:#04x}, mask={:#010x}",
+                    ace.Header.AceType,
+                    ace.Header.AceFlags,
+                    ace.Mask,
+                    ACCESS_ALLOWED_ACE_TYPE_VALUE,
+                    expected_flags,
+                    expected_mask
+                );
             }
             let sid = std::ptr::addr_of!(ace.SidStart).cast_mut().cast();
             entries.push(sid_to_string(sid)?);

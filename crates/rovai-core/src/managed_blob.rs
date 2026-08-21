@@ -353,6 +353,9 @@ fn hash_file(path: &Path) -> Result<(String, u64)> {
 }
 
 fn sync_parent(path: &Path) -> Result<()> {
+    #[cfg(windows)]
+    let _ = path;
+    #[cfg(not(windows))]
     if let Some(parent) = path.parent() {
         File::open(parent)?.sync_all()?;
     }

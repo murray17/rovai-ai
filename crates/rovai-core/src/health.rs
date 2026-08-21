@@ -1,6 +1,7 @@
 use std::{
     collections::BTreeSet,
     env,
+    ffi::OsString,
     path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
@@ -15,7 +16,7 @@ use rovai_core::{
     managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
         RuntimeLaunchPurpose, configure_active_runtime_command, discover_static_runtime_version,
-        runtime_launch_allowed,
+        is_executable_file, runtime_launch_allowed,
     },
     runtime_failure::{
         RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -1241,6 +1242,14 @@ async fn run_acp_probe(
         .then(|| format!("ROVAI_TRAE_NATIVE_APPEND_{}", uuid::Uuid::new_v4().simple()));
     let mut command = runtime_command(path);
     configure_acp_command(&mut command, kind, false);
+    if kind == AdapterKind::CodebuddyCli {
+        if let Ok(model) = env::var("ROVAI_CODEBUDDY_MODEL") {
+            let model = model.trim();
+            if !model.is_empty() {
+                command.arg("--model").arg(model);
+            }
+        }
+    }
     if kind == AdapterKind::TraeCnCli {
         command.args(["--permission-mode", "default"]);
         let marker = trae_native_append_marker
@@ -2416,7 +2425,15 @@ fn required_capability_names() -> Vec<String> {
 }
 
 async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> CommandHealth {
-    let executable = path.unwrap_or_else(|| PathBuf::from(command));
+    let Some(executable) = path.or_else(|| resolve_command_path(command)) else {
+        return CommandHealth {
+            installed: false,
+            version: None,
+            authenticated: None,
+            detail: Some(format!("command is unavailable: {command}")),
+            path: None,
+        };
+    };
     let mut command = runtime_command(&executable);
     command.args(args);
     match bounded_output(&mut command, Duration::from_secs(15)).await {
@@ -2450,6 +2467,41 @@ async fn command_health(command: &str, args: &[&str], path: Option<PathBuf>) -> 
             path: None,
         },
     }
+}
+
+fn resolve_command_path(command: &str) -> Option<PathBuf> {
+    let command_path = PathBuf::from(command);
+    if command_path.is_absolute() {
+        return is_executable_file(&command_path)
+            .then(|| command_path.canonicalize().unwrap_or(command_path));
+    }
+    let path = env::var_os("PATH")?;
+    for directory in env::split_paths(&path) {
+        for name in command_candidate_names(command) {
+            let candidate = directory.join(name);
+            if is_executable_file(&candidate) {
+                return Some(candidate.canonicalize().unwrap_or(candidate));
+            }
+        }
+    }
+    None
+}
+
+#[cfg(windows)]
+fn command_candidate_names(command: &str) -> Vec<OsString> {
+    let command = OsString::from(command);
+    if Path::new(&command).extension().is_some() {
+        vec![command]
+    } else {
+        let mut executable = command;
+        executable.push(".exe");
+        vec![executable]
+    }
+}
+
+#[cfg(not(windows))]
+fn command_candidate_names(command: &str) -> Vec<OsString> {
+    vec![OsString::from(command)]
 }
 
 #[cfg(test)]

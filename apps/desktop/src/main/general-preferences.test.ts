@@ -111,7 +111,9 @@ describe('general preferences', () => {
       oneClickNewConversationEnabled: false
     })
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(store.get())
-    expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') {
+      expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+    }
   })
 
   it('atomically saves defaults, latches invalidation, and never silently disables one-click creation', async () => {

@@ -87,6 +87,45 @@ try {
   }
 
   const restoredHealth = await core.request('health.check')
+  if (process.platform === 'win32'
+      && process.env.ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER !== 'codex-cli') {
+    let platformBlock = null
+    try {
+      await configureCodexRuntime(core.request, restoredHealth, ['agent_1'])
+    } catch (error) {
+      if (!String(error).includes('runtime_platform_not_qualified')) throw error
+      platformBlock = 'runtime_platform_not_qualified'
+    }
+    if (!platformBlock) {
+      throw new Error('Windows Runtime configuration did not fail closed at platform admission')
+    }
+    const deletion = await core.request('camps.delete', {
+      commandId: crypto.randomUUID(),
+      command: {
+        campId,
+        expectedVersion: restoredEmptySnapshot.camp.version
+      }
+    })
+    if (deletion.status !== 'applied' || deletion.code !== 'camp.deleted') {
+      throw new Error(`Quiescent Windows Camp could not be permanently deleted: ${JSON.stringify(deletion)}`)
+    }
+    await core.stop()
+    core = startCore(dataDir)
+    const afterDeletionRestart = await core.request('navigation.snapshot')
+    if (afterDeletionRestart.quickChat.totalCount !== 0 || afterDeletionRestart.projects.length !== 0) {
+      throw new Error(`Deleted Windows Camp or Project group returned after restart: ${JSON.stringify(afterDeletionRestart)}`)
+    }
+    console.log(JSON.stringify({
+      ok: true,
+      platform: 'windows-x64',
+      campId,
+      structuralIntake: true,
+      emptyCampRestartStable: true,
+      runtimeExecutionBlocked: platformBlock,
+      deleted: true,
+      deletionSurvivedRestart: true
+    }, null, 2))
+  } else {
   const codexInstallation = await configureCodexRuntime(core.request, restoredHealth, ['agent_1'])
   const ready = await core.request('camps.creationPreflight')
   if (!ready.admissible || ready.initialLeadAgentId !== 'agent_1') {
@@ -216,6 +255,7 @@ try {
     projectGroupRemoved: true,
     deletionSurvivedRestart: true
   }, null, 2))
+  }
 } finally {
   if (core) await core.stop()
   if (process.env.ROVAI_KEEP_SMOKE_FIXTURE === '1') {

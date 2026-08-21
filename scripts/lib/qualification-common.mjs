@@ -68,6 +68,14 @@ export function digestJson(value) {
   return sha256(canonicalJson(value))
 }
 
+export function artifactFileName(artifactId) {
+  if (typeof artifactId !== 'string' || artifactId.length === 0) {
+    throw new Error('artifactId is required for a retained artifact filename')
+  }
+  const stem = process.platform === 'win32' ? encodeURIComponent(artifactId) : artifactId
+  return `${stem}.json`
+}
+
 export function materializeJsonArtifact(value) {
   return JSON.parse(JSON.stringify(value))
 }
@@ -126,7 +134,13 @@ export async function treeManifest(root, { excludeGit = true, excludeTopLevel = 
       const absolutePath = join(directory, name)
       const relativePath = relativeDirectory ? `${relativeDirectory}/${name}` : name
       const metadata = await lstat(absolutePath)
-      const mode = metadata.mode & 0o777
+      const mode = process.platform === 'win32'
+        ? metadata.isDirectory()
+          ? 0o755
+          : metadata.isSymbolicLink()
+            ? 0o777
+            : 0o644
+        : metadata.mode & 0o777
       if (metadata.isDirectory()) {
         entries.push({ path: relativePath, type: 'directory', mode })
         await walk(absolutePath, relativePath)
@@ -353,6 +367,8 @@ export async function captureDeliveredWorkspaceSnapshot(source, evidenceDirector
   const excluded = new Set(['.git', ...MANAGED_RUNTIME_TOP_LEVEL])
   const capturedAt = new Date().toISOString()
   try {
+    const sourceManifest = await treeManifest(absoluteSource)
+    await assertNoEscapingSymlinks(absoluteSource, sourceManifest)
     await cp(absoluteSource, temporaryDestination, {
       recursive: true,
       force: false,

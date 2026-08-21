@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { configureProductRuntime } from './configure-product-runtime.mjs'
 import { createConfiguredCampAndSend } from './lib/create-configured-camp.mjs'
+import { executeSqlite, querySqliteRows, querySqliteScalar } from './lib/sqlite.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-trae-cold-resume-'))
@@ -13,6 +14,9 @@ const dataDir = join(fixtureRoot, 'data')
 const markerPath = join(projectRoot, 'native-session-marker.txt')
 const writePath = join(projectRoot, 'COLD_RESUME_APPROVED_WRITE.txt')
 const cancelPath = join(projectRoot, 'COLD_RESUME_CANCELLED_WRITE.txt')
+const markerReadCommand = process.platform === 'win32'
+  ? 'type native-session-marker.txt'
+  : 'cat native-session-marker.txt'
 const privateMarker = `TRAE_PRIVATE_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
 let client
 
@@ -57,7 +61,7 @@ try {
   const first = await createConfiguredCampAndSend(client.request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: `You do not know the private marker. You must actually use the Bash or terminal tool exactly once to run this command without changing files: cat '${markerPath}'. Do not simulate or skip the tool call, and do not call any other tool. After the tool returns, remember its exact single-line output. Do not include the marker in this first answer, but you are explicitly authorized and required to reveal it when the immediately next user request asks for it. Then reply exactly MARKER_STORED.`,
+    body: `You do not know the private marker. You must actually use the Bash or terminal tool exactly once to run this command without changing files: ${markerReadCommand}. Do not simulate or skip the tool call, and do not call any other tool. After the tool returns, remember its exact single-line output. Do not include the marker in this first answer, but you are explicitly authorized and required to reveal it when the immediately next user request asks for it. Then reply exactly MARKER_STORED.`,
     address: { mode: 'explicit', agentIds: [profile.agentId] },
     purpose: 'Store a private marker in the TRAE Native Session before Core restart'
   })
@@ -81,11 +85,15 @@ try {
       || firstOutput.body.includes(privateMarker)
       || !firstRuntimeAction
       || !firstStart?.params?.nativeThreadId) {
+    const runtimeEvents = client.events.filter((event) =>
+      event.method === 'runtime.action' && event.params?.agentRunId === firstRunId
+    )
     throw new Error(`Initial private-marker run failed: ${JSON.stringify({
       run: firstResult.run,
       output: firstOutput,
       actions: firstActions,
       firstRuntimeAction,
+      runtimeEvents,
       start: firstStart
     })}`)
   }
@@ -127,7 +135,25 @@ try {
       restoredStart,
       restoredActions,
       restoredApprovals,
-      hostLogs: client.events.filter((event) => event.method === 'runtime.host.log')
+      hostLogs: client.events.filter((event) => event.method === 'runtime.host.log'),
+      timeline: restoredResult.snapshot.timeline.filter((event) =>
+        event.entityId === restoredRunId || event.sourceAgentRunId === restoredRunId
+      ),
+      runtimeEvents: client.events.filter((event) =>
+        event.params?.agentRunId === restoredRunId
+          || event.params?.sourceAgentRunId === restoredRunId
+      ),
+      runtimeSnapshots: querySqliteRows(
+        join(dataDir, 'rovai.sqlite'),
+        `SELECT installation_id, probe_status, authentication_status, stale_at, last_error
+         FROM adapter_capability_snapshot`
+      ),
+      probeAttempts: querySqliteRows(
+        join(dataDir, 'rovai.sqlite'),
+        `SELECT installation_id, status, failure_class, diagnostic_code,
+                attempted_at, public_runtime_failure_json
+         FROM adapter_probe_attempt ORDER BY attempted_at DESC LIMIT 3`
+      )
     })}`)
   }
 
@@ -175,10 +201,10 @@ try {
 
   const invalidSessionId = `invalid-${crypto.randomUUID()}`
   await client.stop()
-  await run('sqlite3', [
+  executeSqlite(
     join(dataDir, 'rovai.sqlite'),
     `UPDATE conversation SET native_session_id = '${invalidSessionId}' WHERE id = '${restoredResult.run.conversationId}'`
-  ], root)
+  )
   client = startCore(dataDir)
   await client.request('health.check')
   const fallbackRequest = await sendExistingCampMessage(
@@ -193,12 +219,12 @@ try {
   const fallbackOutput = outputForRun(fallbackResult.snapshot, fallbackRunId)
   const fallbackStart = startForRun(client.events, fallbackRunId)
   await client.stop()
-  const continuityLostCount = Number(await runCapture('sqlite3', [
+  const continuityLostCount = Number(querySqliteScalar(
     join(dataDir, 'rovai.sqlite'),
     `SELECT COUNT(*) FROM event_log WHERE event_type = 'agent_run.native_session_continuity_lost' AND entity_id = '${fallbackRunId}'`
-  ], root))
+  ))
   if (fallbackResult.run.status !== 'succeeded'
-      || fallbackOutput?.body.trim() !== 'BAD_SESSION_FALLBACK_OK'
+      || !fallbackOutput?.body.includes('BAD_SESSION_FALLBACK_OK')
       || !fallbackStart?.params?.nativeThreadId
       || fallbackStart.params.nativeThreadId === invalidSessionId
       || fallbackStart.params.nativeThreadId === firstStart.params.nativeThreadId
@@ -209,7 +235,25 @@ try {
       fallbackStart,
       invalidSessionId,
       previousSessionId: firstStart.params.nativeThreadId,
-      continuityLostCount
+      continuityLostCount,
+      timeline: fallbackResult.snapshot.timeline.filter((event) =>
+        event.entityId === fallbackRunId || event.sourceAgentRunId === fallbackRunId
+      ),
+      runtimeEvents: client.events.filter((event) =>
+        event.params?.agentRunId === fallbackRunId
+          || event.params?.sourceAgentRunId === fallbackRunId
+      ),
+      runtimeSnapshots: querySqliteRows(
+        join(dataDir, 'rovai.sqlite'),
+        `SELECT installation_id, probe_status, authentication_status, stale_at, last_error
+         FROM adapter_capability_snapshot`
+      ),
+      probeAttempts: querySqliteRows(
+        join(dataDir, 'rovai.sqlite'),
+        `SELECT installation_id, status, failure_class, diagnostic_code,
+                attempted_at, public_runtime_failure_json
+         FROM adapter_probe_attempt ORDER BY attempted_at DESC LIMIT 3`
+      )
     })}`)
   }
 

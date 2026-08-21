@@ -157,7 +157,9 @@ describe('onboarding preferences', () => {
       memberAgentId: 'agent-1',
       quickChatCampId: CAMP_ID
     })
-    expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+    if (process.platform !== 'win32') {
+      expect((await stat(filePath)).mode & 0o777).toBe(0o600)
+    }
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(completed)
   })
 

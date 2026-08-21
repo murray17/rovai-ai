@@ -1,6 +1,7 @@
 import { isAbsolute, join, posix } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   atomicWriteJson,
   digestJson,
   sha256,
@@ -112,7 +113,7 @@ export async function retainWorkspaceMutationLedgerArtifact(
   toolCallLedger = null
 ) {
   validateWorkspaceMutationLedger(artifact, evidenceIndex, toolCallLedger)
-  const locator = join('workspace-mutation-ledgers', `${artifact.artifactId}.json`)
+  const locator = join('workspace-mutation-ledgers', artifactFileName(artifact.artifactId))
   await writePrivateJsonExclusive(join(evidenceDirectory, locator), artifact)
   await atomicWriteJson(join(evidenceDirectory, 'workspace-mutation-ledger.json'), artifact)
   const verification = artifact.payload.records.flatMap((record) => record.verificationRelations)

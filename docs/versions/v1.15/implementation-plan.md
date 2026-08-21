@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.15
 authority: implementation-plan-and-acceptance
 status: in_progress
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # v1.15 Windows x64 实施与验收计划
@@ -24,7 +24,9 @@ last_updated: 2026-08-19
 - [x] 建立 Runtime platform admission、native executable resolver 与集中 managed process launcher；
 - [x] 实现创建时 Job/handle list 原子启动及 owner-loss cleanup 测试；
 - [x] 实现 Core/Desktop 私有 data root、local NTFS/DACL admission 与 handle-relative Attachment；
-- [ ] 在 Windows 10 22H2/11 真实环境完成进程 race、DACL、reparse、long-path 与 lifecycle 验收。
+- [x] 补齐 MCP Library/Projection 的 protected DACL 创建、诊断修复、bounded read 与 write-through 原子发布；
+- [x] 在 Windows 10 22H2 x64 本机完成进程 ownership、DACL、reparse、long-path 与 lifecycle 自动化验收；
+- [ ] 在 Windows 11 client OS 重复对应验收并保留发布证据。
 
 ## Checkpoint 2：Skill Library 与 crash-recoverable Projection
 
@@ -33,6 +35,7 @@ last_updated: 2026-08-19
 - [x] 将 NTFS entry identity 写入 journal/observation，并在 replace/delete/recovery 前与 digest、DACL 一起验证；
 - [x] 实现持久 `agent_run + execution_epoch + root_identity` registration 和 active Run 延迟更新；
 - [x] 覆盖 publish/replace/remove、Git exclude、project-owned drift、identity drift、ambiguous recovery 与全 transition crash injection；
+- [x] 在 Windows 10 22H2 x64 本机执行 Windows Skill Library 与 Projection lifecycle/crash tests；
 - [ ] 在固定 Windows CI 执行全部 Windows Skill projection lifecycle/crash tests，并保留通过证据。
 
 ## Checkpoint 3：Transport、Renderer 与 Desktop 行为
@@ -50,23 +53,34 @@ last_updated: 2026-08-19
   重试和 outcome-indeterminate 分类，并保留 v1.14 发布的 `camp.read` Timeline 默认；
 - [x] Named Pipe 每个实例使用 session logon SID + SYSTEM protected DACL，并在创建后回读 DACL；覆盖
   first-instance、non-inheritable handle、partial byte frame、listener replenish、busy retry、malformed 与 response-loss；
+- [x] 在 Windows 10 22H2 x64 本机执行 Named Pipe v17 matrix；
 - [ ] 在固定 Windows CI 实跑 Named Pipe v17 matrix，并补齐 wrong token、stale lease、idempotent replay 与
   compaction hook 的完整端到端证据；
-- [ ] 对照现有 macOS 页面实现同组件树的 frame、shortcut、copy、Explorer、路径与 Runtime availability 差异；
+- [x] 对照现有 macOS 页面实现同组件树的 frame、shortcut、copy、Explorer、路径与 Runtime availability 差异；
 - [ ] 完成 Forced Colors/High Contrast、keyboard-only、NVDA、中文 IME、DPI/zoom/Snap/multi-monitor 验收；
-- [ ] 用 Windows Interaction Delta HTML 作为差异清单，不以原型替代现有 macOS 视觉真源。
+- [x] 用 Windows Interaction Delta HTML 作为差异清单，不以原型替代现有 macOS 视觉真源。
 
 ## Checkpoint 4：打包、升级与发布安全
 
-- [ ] 完成 target-isolated resources、x64 per-user NSIS、三个 PE 与 longPathAware manifest；
-- [ ] unpacked/installer verifier 校验架构、资源、manifest、hash 与 Core ready；
-- [ ] clean-user install/start/uninstall、data 保留、显式删除和 planned-shutdown upgrade 通过；
+- [x] 完成 target-isolated resources、x64 per-user NSIS、三个 PE 与 longPathAware/PerMonitorV2 manifest；
+- [x] unpacked/installer verifier 校验架构、icon/version/manifest、hash、CLI contract 与隔离 Core ready；
+- [x] Windows 10 22H2 x64 本机 clean-user install/start/upgrade/uninstall 与默认 data 保留自动化通过；
+- [x] 卸载器提供默认未选中且二次确认的 `%LOCALAPPDATA%\Rovai AI` 显式删除选项；
+- [x] 建立固定 `windows-2022` unsigned NSIS build/verifier workflow；
+- [ ] 在远端固定 Windows CI 和 Windows 11 client OS 重跑安装生命周期并保留发布证据；
 - [ ] 完成 Electron/Core/CLI/installer Authenticode、RFC 3161 timestamp 与 release signer/hash 验证。
 
 ## Checkpoint 5：逐 Runtime 资格与最终发布
 
+- [x] 在 Windows 10 22H2 x64 本机安装并探测十个 Adapter，使用开发态单 Adapter admission override 完成
+  真实 ACP、Built-in CLI v17、Missing-Send Recovery 与 MCP Projection 矩阵；支持原生 Skill Projection 的
+  九个 Runtime 同时完成 Skill smoke，TRAE 保持 documentation-only empty；
+- [x] CodeBuddy `2.137.1` 使用官方 API-key ACP 环境变量和 `custom-local:deepseek-v4-flash` 完成 completion、
+  continuation、Approval allow/deny、15 项 Built-in operation、49-event tool→final、MCP 与 Skill 验收；
+- [x] 以 Claude `2.1.86` 在开发态 packaged Desktop 完成 Windows planned-shutdown、Job descendant cleanup、
+  durable fence 与重启恢复；恢复正式 Release sidecar 后 verifier 重新通过；
 - [ ] 十个 Adapter 分别完成 Windows 10 22H2 与 Windows 11 的 immutable digest-bound evidence；
-- [ ] 未完成 Adapter 保持 `not_qualified` 且不可 discovery/check/install/select/migrate/execute；
+- [x] 未完成 Adapter 保持 `not_qualified` 且不可 discovery/check/install/select/migrate/execute；
 - [ ] macOS 全 Runtime、Transport、process-group、打包和 Renderer 回归通过；
 - [ ] 发布 support matrix、安装/升级/故障排查与已知限制后，才更新 Root README 并关闭 v1.15。
 

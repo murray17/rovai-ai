@@ -27,6 +27,11 @@ import {
   AppDialogImpactList
 } from './AppDialog'
 import { NavigationIcon, type NavigationIconName } from './NavigationIcon'
+import {
+  localDeviceLabel,
+  primaryShortcutLabel,
+  shouldHandlePrimaryShortcut
+} from './renderer-platform'
 import { allNavigationCamps } from './ui-model'
 
 export type NavigationSettingsSection = SettingsSection
@@ -186,6 +191,7 @@ export function CampNavigation({
   creatingConversation = false,
   pins = [],
   pinnedCampItems = [],
+  platform = 'darwin',
   settingsSection = 'general',
   onNewConversation,
   onMembers,
@@ -215,6 +221,7 @@ export function CampNavigation({
   creatingConversation?: boolean
   pins?: NavigationPin[]
   pinnedCampItems?: NavigationCampItem[]
+  platform?: NodeJS.Platform
   settingsSection?: NavigationSettingsSection
   onNewConversation(): void
   onMembers(): void
@@ -293,14 +300,14 @@ export function CampNavigation({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if (shouldHandlePrimaryShortcut(platform, event, 'K')) {
         event.preventDefault()
         setPaletteOpen((open) => !open)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [platform])
 
   const commitPagination = (groupKey: string, pagination: NavigationGroupPaginationState): void => {
     const next = { ...paginationByGroupRef.current, [groupKey]: pagination }
@@ -541,7 +548,7 @@ export function CampNavigation({
                   </button>
                 </nav>
                 <button className="conversation-jump" type="button" onClick={() => setPaletteOpen(true)}>
-                  <span>跳转到对话…</span><kbd aria-hidden="true">⌘K</kbd>
+                  <span>跳转到对话…</span><kbd aria-hidden="true">{primaryShortcutLabel(platform, 'K')}</kbd>
                 </button>
 
       <div className="navigation-scroll">
@@ -754,14 +761,14 @@ export function CampNavigation({
               <>
                 <AppDialogHeader
                   title={`从侧栏移除“${action.project.name}”？`}
-                  description="只移除此设备上的导航入口，并取消项目及其中对话的置顶。"
+                  description={`只移除${localDeviceLabel(platform)}上的导航入口，并取消项目及其中对话的置顶。`}
                   icon="folder"
                   kicker="可恢复"
                   closeDisabled={actionBusy}
                 />
                 <AppDialogBody>
                   <AppDialogImpactList>
-                    <AppDialogImpact icon="folder" label="会改变">项目与其中对话不再显示在此设备的侧栏，相关置顶会被取消。</AppDialogImpact>
+                    <AppDialogImpact icon="folder" label="会改变">项目与其中对话不再显示在{localDeviceLabel(platform)}的侧栏，相关置顶会被取消。</AppDialogImpact>
                     <AppDialogImpact tone="keep" icon="keep" label="继续保留">本地目录、会话、消息、运行记录、审计以及已经开始的执行。</AppDialogImpact>
                     <AppDialogImpact icon="info" label="如何恢复">之后重新选择同一工作目录，即可恢复导航入口。</AppDialogImpact>
                   </AppDialogImpactList>
@@ -922,6 +929,7 @@ function CommandPalette({
               setActiveIndex(0)
             }}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) return
               if (event.key === 'ArrowDown') {
                 event.preventDefault()
                 setActiveIndex((index) => Math.min(index + 1, Math.max(visible.length - 1, 0)))

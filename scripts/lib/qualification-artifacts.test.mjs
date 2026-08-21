@@ -127,7 +127,9 @@ test('normalized present-role artifacts are immutable and private', async () => 
     })
     assert.equal(Object.keys(built.artifacts).length, 11)
     for (const locator of Object.values(built.locators)) {
-      assert.equal((await stat(join(root, locator))).mode & 0o777, 0o600)
+      if (process.platform !== 'win32') {
+        assert.equal((await stat(join(root, locator))).mode & 0o777, 0o600)
+      }
     }
   } finally {
     await rm(root, { recursive: true, force: true })

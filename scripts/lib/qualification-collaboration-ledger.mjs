@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   atomicWriteJson,
   digestJson,
   sha256,
@@ -191,7 +192,7 @@ export function buildCollaborationLedger({
 
 export async function retainCollaborationLedgerArtifact(evidenceDirectory, artifact, evidenceIndex) {
   validateCollaborationLedger(artifact, evidenceIndex)
-  const locator = join('collaboration-ledgers', `${artifact.artifactId}.json`)
+  const locator = join('collaboration-ledgers', artifactFileName(artifact.artifactId))
   await writePrivateJsonExclusive(join(evidenceDirectory, locator), artifact)
   await atomicWriteJson(join(evidenceDirectory, 'collaboration-ledger.json'), artifact)
   return {

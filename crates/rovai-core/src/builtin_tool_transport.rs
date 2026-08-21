@@ -1019,6 +1019,7 @@ mod tests {
             serde_json::to_value(&unix).unwrap(),
             json!({"transport": "unix_socket", "path": "/tmp/rovai-builtin-7/core.sock"})
         );
+        #[cfg(unix)]
         unix.validate().unwrap();
         let windows = LocalIpcEndpoint::WindowsNamedPipe {
             name: r"\\.\pipe\rovai-ai-42-7b5db24c-4a43-4cab-9217-d982b08f7691".to_string(),
@@ -1030,6 +1031,7 @@ mod tests {
                 "name": r"\\.\pipe\rovai-ai-42-7b5db24c-4a43-4cab-9217-d982b08f7691"
             })
         );
+        #[cfg(windows)]
         windows.validate().unwrap();
         for invalid in [
             r"\\server\pipe\rovai-ai-42-7b5db24c-4a43-4cab-9217-d982b08f7691",

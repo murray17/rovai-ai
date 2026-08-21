@@ -8,6 +8,7 @@ import type {
   StoredCommandResult
 } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { revealInFileManagerLabel } from './renderer-platform'
 import { requestProductRuntimeCheck } from './runtime-check'
 
 export type DiagnosticFilter = 'all' | DiagnosticStatus
@@ -39,9 +40,11 @@ const STATUS_META: Record<DiagnosticStatus, { label: string }> = {
 }
 
 export function DiagnosticsCenter({
-  onNavigate
+  onNavigate,
+  platform = 'darwin'
 }: {
   onNavigate(section: 'mcp' | 'runtime', runtimeKind?: AdapterKind): void
+  platform?: NodeJS.Platform
 }): React.JSX.Element {
   const [report, setReport] = useState<DiagnosticsReport | null>(null)
   const [loading, setLoading] = useState(true)
@@ -240,7 +243,7 @@ export function DiagnosticsCenter({
               <span aria-hidden="true"><DiagnosticStatusIcon status={notice.tone === 'success' ? 'ok' : notice.tone === 'attention' ? 'attention' : 'unknown'} /></span>
               <div><strong>{notice.title}</strong><small>{notice.detail}</small></div>
               {notice.exportPath && (
-                <button className="quiet-button compact" type="button" onClick={() => void window.rovai.revealDiagnosticsExport(notice.exportPath!)}>在 Finder 中显示</button>
+                <button className="quiet-button compact" type="button" onClick={() => void window.rovai.revealDiagnosticsExport(notice.exportPath!)}>{revealInFileManagerLabel(platform)}</button>
               )}
               <button className="icon-button" type="button" aria-label="关闭提示" onClick={() => setNotice(null)}><DiagnosticGlyph name="close" /></button>
             </div>

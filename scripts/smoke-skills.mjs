@@ -224,17 +224,14 @@ try {
     assert(frozenCliOperations?.entryPath, `${adapterKind} ContextManifest did not freeze cli-operations: ${JSON.stringify(result.exposure)}`)
     const nativeRoot = groupRoot(frozenSkill.deliveredViaGroupKey ?? frozenSkill.groupKey)
     const entry = frozenSkill.entryPath
-    const entryStat = await lstat(entry)
-    assert(entryStat.isSymbolicLink(), `${adapterKind} Skill entry is not a managed symlink: ${entry}`)
-    assert(
-      (await realpath(entry)).startsWith(await realpath(libraryRoot)),
-      `${adapterKind} Skill entry does not resolve into the isolated managed library`
-    )
-    const cliOperationsEntryStat = await lstat(frozenCliOperations.entryPath)
-    assert(cliOperationsEntryStat.isSymbolicLink(), `${adapterKind} cli-operations entry is not a managed symlink: ${frozenCliOperations.entryPath}`)
-    assert(
-      (await realpath(frozenCliOperations.entryPath)).startsWith(await realpath(libraryRoot)),
-      `${adapterKind} cli-operations entry does not resolve into the isolated managed library`
+    const managedSkillLocation = await core.request('skills.revealLocation', { skillId: importedSkill.id })
+    const managedCliOperationsLocation = await core.request('skills.revealLocation', { skillId: cliOperationsSkill.id })
+    await assertManagedProjection(adapterKind, 'Skill', entry, managedSkillLocation.path)
+    await assertManagedProjection(
+      adapterKind,
+      'cli-operations',
+      frozenCliOperations.entryPath,
+      managedCliOperationsLocation.path
     )
     runtimeResults.push({
       adapterKind,
@@ -276,7 +273,11 @@ try {
   if (requestedAdapters.length > 0) {
     const finalResult = runtimeResults.at(-1)
     const entry = finalResult.entryPath
-    await unlink(entry)
+    if (process.platform === 'win32') {
+      await rm(entry, { recursive: true, force: true })
+    } else {
+      await unlink(entry)
+    }
     await mkdir(entry, { recursive: true })
     await writeFile(
       join(entry, 'SKILL.md'),
@@ -482,7 +483,7 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   if (taskHelpIndex < 0
       || sendHelpIndex < 0
       || taskHelpIndex >= sendHelpIndex
-      || !markdownNormalizedOutput.includes('attention=omit --to-user')
+      || !markdownNormalizedOutput.includes('attention=omit --to-principal')
       || output.includes('rovai task update --help')
       || inventedSendSyntax
       || mentionsCurrentUser) {
@@ -518,6 +519,27 @@ async function runNativeDiscoveryWithRetry(request, workspace, adapterKind, mark
     }
   }
   throw firstError
+}
+
+async function assertManagedProjection(adapterKind, label, entryPath, managedPath) {
+  const entryStat = await lstat(entryPath)
+  if (process.platform === 'win32') {
+    assert(
+      entryStat.isDirectory() && !entryStat.isSymbolicLink(),
+      `${adapterKind} ${label} entry is not a managed Windows directory copy: ${entryPath}`
+    )
+    assert(
+      await readFile(join(entryPath, 'SKILL.md'), 'utf8')
+        === await readFile(join(managedPath, 'SKILL.md'), 'utf8'),
+      `${adapterKind} ${label} Windows projection differs from the isolated managed library`
+    )
+    return
+  }
+  assert(entryStat.isSymbolicLink(), `${adapterKind} ${label} entry is not a managed symlink: ${entryPath}`)
+  assert(
+    (await realpath(entryPath)).startsWith(await realpath(libraryRoot)),
+    `${adapterKind} ${label} entry does not resolve into the isolated managed library`
+  )
 }
 
 function startCore() {

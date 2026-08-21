@@ -2627,6 +2627,7 @@ export function App(): React.JSX.Element {
   return (
     <div className="app-shell">
       <CampNavigation
+        platform={window.rovai.platform}
         view={view}
         state={startupGateVisible ? 'loading' : state}
         navigation={displayNavigation}
@@ -2784,6 +2785,7 @@ export function App(): React.JSX.Element {
 
         {!startupGateVisible && view === 'settings' && (
           <SettingsView
+            platform={window.rovai.platform}
             appearance={appearance}
             health={health}
             agents={agents}
@@ -3021,6 +3023,7 @@ export function AppHeader({
 }
 
 export function SettingsView({
+  platform = 'darwin',
   appearance,
   health,
   agents,
@@ -3034,6 +3037,7 @@ export function SettingsView({
   onReload,
   onThemeChange
 }: {
+  platform?: NodeJS.Platform
   appearance: AppearanceSnapshot
   health: HealthStatus | null
   agents: AgentProfile[]
@@ -3059,7 +3063,7 @@ export function SettingsView({
           />
         )}
         {section === 'skills' && <SkillSettings />}
-        {section === 'mcp' && <McpSettings agents={agents} />}
+        {section === 'mcp' && <McpSettings agents={agents} platform={platform} />}
         {section === 'runtime' && (
           <RuntimeInstallationsPanel health={health} installations={installations} onReload={onReload} />
         )}
@@ -3081,10 +3085,10 @@ export function SettingsView({
           <NotificationSettings />
         )}
         {section === 'monitoring' && (
-          <RuntimeMonitoring />
+          <RuntimeMonitoring platform={platform} />
         )}
         {section === 'diagnostics' && (
-          <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} />
+          <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} platform={platform} />
         )}
       </div>
     </div>

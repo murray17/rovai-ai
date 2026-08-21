@@ -466,7 +466,7 @@ mod windows_tests {
     fn test_endpoint() -> LocalIpcEndpoint {
         LocalIpcEndpoint::WindowsNamedPipe {
             name: format!(
-                r"\\.\pipe\rovai-ai-test-{}-{}",
+                r"\\.\pipe\rovai-ai-{}-{}",
                 std::process::id(),
                 uuid::Uuid::new_v4()
             ),

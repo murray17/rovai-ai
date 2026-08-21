@@ -87,7 +87,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 pnpm build:desktop
 ```
 
-真实 Runtime Smoke、完整 macOS 打包、规划中的 Windows 打包和 UI 截图验收耗时更长，且部分命令会调用上游
+真实 Runtime Smoke、完整 macOS 打包、Windows 打包/安装和 UI 截图验收耗时更长，且部分命令会调用上游
 模型。它们保持独立，不进入普通 commit 门禁；运行前先阅读对应文档。
 
 ## 按任务阅读
@@ -102,7 +102,7 @@ pnpm build:desktop
 | 编写或更新仓库 Skill、触发 `description`、正文分层、references 或界面元数据 | [Skill 编写与 description 路由规范](skill-authoring.md) |
 | 修改 Native Session Bootstrap、AgentRun Dynamic Context、模型可见 section/字段/语义或其证据与 formatter 版本 | [核心模型上下文变更治理](model-context-change-governance.md) |
 | 构建 Release Core、App、DMG，检查签名 | [macOS 构建与打包](packaging.md) |
-| 实现或验收 Windows x64 sidecar、NSIS、签名与升级 | [Windows x64 构建、打包与发布设计](packaging-windows.md) |
+| 构建或验收 Windows x64 sidecar、NSIS、签名与升级 | [Windows x64 构建、打包与发布](packaging-windows.md) |
 | 使用隔离 `userData` 运行真实 App、截图或桌面验收 | [桌面 UI 验收](ui-acceptance.md) |
 | 为 Coding Agent 安装本地 Impeccable、更新设计上下文或维护 UI 文档分类 | [Coding Agent Impeccable 与 UI 文档工作流](coding-agent-impeccable-ui-workflow.md) |
 | 处理 Core、Runtime、Git、签名、测试卡住或 Rust `target/` 膨胀 | [常见问题排查](troubleshooting.md) |
@@ -114,8 +114,8 @@ pnpm build:desktop
 ## 真源与维护边界
 
 - 命令名和命令组合：[`package.json#scripts`](../../package.json)。
-- Node 与当前 macOS 打包声明：`package.json#engines` 和 `package.json#build.mac`；Windows 声明在实现后仍以
-  `package.json` 为真源，不能从设计文档推断已经存在。
+- Node 与 macOS/Windows 打包声明：`package.json#engines`、`package.json#build.mac`、`package.json#build.win`
+  和 `package.json#build.nsis`；命令仍以 `package.json#scripts` 为真源。
 - Rust workspace 与共享构建 profile：[`Cargo.toml`](../../Cargo.toml)；当前没有最低 Rust 版本或
   `rust-toolchain.toml`，文档不得自行补造。
 - 正式 Runtime 产品目录：Core 的
@@ -141,7 +141,7 @@ pnpm build:desktop
 | `target/` | Rust Debug/Test/Release 构建结果与增量编译缓存 |
 | `resources/bin/` | 复制后供 Electron 使用的 Rust Core 与 Agent CLI |
 | `out/` | Electron Vite 构建结果 |
-| `dist/` | 当前 macOS App/DMG，以及未来由目标隔离流程生成的 Windows package 输出 |
+| `dist/` | macOS App/DMG、Windows unpacked/NSIS package、verifier 与安装验收输出 |
 
 不同 worktree 默认各自拥有这些生成目录。开发工作已完成时，应按
 [Worktree 清理流程](worktrees.md#工作收口与安全清理)删除整个 worktree；仍在开发的 worktree

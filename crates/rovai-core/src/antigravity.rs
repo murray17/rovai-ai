@@ -850,6 +850,7 @@ fn canonical_antigravity_workspace_roots(
             execution_root.display()
         )
     })?;
+    let execution_root = antigravity_runtime_visible_path(execution_root);
     let mut roots = vec![execution_root];
     if let Some(attachment_access_root) = attachment_access_root {
         if !attachment_access_root.is_dir() {
@@ -864,11 +865,26 @@ fn canonical_antigravity_workspace_roots(
                 attachment_access_root.display()
             )
         })?;
+        let attachment_access_root = antigravity_runtime_visible_path(attachment_access_root);
         if !roots.contains(&attachment_access_root) {
             roots.push(attachment_access_root);
         }
     }
     Ok(roots)
+}
+
+fn antigravity_runtime_visible_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let value = path.to_string_lossy();
+        if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = value.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path
 }
 
 #[derive(Debug)]
@@ -1465,13 +1481,18 @@ mod tests {
         assert_eq!(
             roots,
             vec![
-                workspace.canonicalize().unwrap(),
-                attachments.canonicalize().unwrap()
+                antigravity_runtime_visible_path(workspace.canonicalize().unwrap()),
+                antigravity_runtime_visible_path(attachments.canonicalize().unwrap())
             ]
         );
         let deduplicated = canonical_antigravity_workspace_roots(&workspace, Some(&workspace))
             .expect("identical roots should resolve");
-        assert_eq!(deduplicated, vec![workspace.canonicalize().unwrap()]);
+        assert_eq!(
+            deduplicated,
+            vec![antigravity_runtime_visible_path(
+                workspace.canonicalize().unwrap()
+            )]
+        );
 
         std::fs::remove_dir_all(root).expect("temporary root should be removed");
     }

@@ -2,6 +2,7 @@ import { readFile, realpath } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   atomicWriteJson,
   canonicalJson,
   digestJson,
@@ -184,7 +185,7 @@ export async function retainCollaborationMessageEvidence(evidenceDirectory, arti
   validateCollaborationMessageEvidence(artifact)
   const locator = join(
     'collaboration-message-evidence',
-    `${artifact.artifactId}.json`
+    artifactFileName(artifact.artifactId)
   )
   const immutablePath = join(evidenceDirectory, locator)
   try {

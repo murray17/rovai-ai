@@ -2958,13 +2958,10 @@ mod windows_attachment_tests {
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("secret.txt"), b"must not be copied").unwrap();
 
-        let command = format!(
-            "mklink /J \"{}\" \"{}\"",
-            junction.display(),
-            outside.display()
-        );
         let status = Command::new("cmd.exe")
-            .args(["/D", "/S", "/C", &command])
+            .args(["/D", "/C", "mklink", "/J"])
+            .arg(&junction)
+            .arg(&outside)
             .status()
             .unwrap();
         assert!(status.success(), "failed to create the junction fixture");

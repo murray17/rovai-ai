@@ -1295,7 +1295,10 @@ fn acp_capability_snapshot(
             Err(_)
                 if matches!(
                     adapter_kind,
-                    AdapterKind::QoderCli | AdapterKind::CodebuddyCli | AdapterKind::QwenCode
+                    AdapterKind::CopilotCli
+                        | AdapterKind::QoderCli
+                        | AdapterKind::CodebuddyCli
+                        | AdapterKind::QwenCode
                 ) =>
             {
                 vec![ModelDescriptor {
@@ -2517,6 +2520,30 @@ mod tests {
                 .capabilities
                 .contains(&"context.charter.first_payload".to_string())
         );
+
+        let runtime_default = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::CopilotCli,
+                reported_version: Some("1.0.80".to_string()),
+                executable_fingerprint: Some("sha256:copilot-default".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: Vec::new(),
+                initialize_result: Some(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true}
+                })),
+                session_result: Some(json!({"sessionId": "copilot-runtime-default"})),
+                attempted_at: "2026-08-21T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("Copilot ACP may delegate model choice to its runtime default");
+        assert_eq!(runtime_default.models.len(), 1);
+        assert_eq!(
+            runtime_default.models[0].id,
+            "copilot-cli://runtime-default"
+        );
+        assert!(runtime_default.models[0].is_default);
     }
 
     #[test]

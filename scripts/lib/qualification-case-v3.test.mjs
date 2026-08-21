@@ -109,15 +109,16 @@ test('Case v3 rejects legacy fields, invalid topology, weak permissions, and a s
     await assert.rejects(readCaseContract(root), /schema validation failed|items/i)
 
     await writePrivate(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
-    await chmod(manifestPath, 0o644)
-    await assert.rejects(
-      admitV3Case(await readCaseContract(root)),
-      /0600|current-user-only|permission|unsafe mode/i
-    )
-
-    await chmod(manifestPath, 0o600)
+    if (process.platform !== 'win32') {
+      await chmod(manifestPath, 0o644)
+      await assert.rejects(
+        admitV3Case(await readCaseContract(root)),
+        /0600|current-user-only|permission|unsafe mode/i
+      )
+      await chmod(manifestPath, 0o600)
+    }
     const linkedRoot = join(parent, 'linked-pack')
-    await symlink(root, linkedRoot)
+    await symlink(root, linkedRoot, process.platform === 'win32' ? 'junction' : 'dir')
     await assert.rejects(readCaseContract(linkedRoot), /must not traverse a symlink/)
   } finally {
     await rm(parent, { recursive: true, force: true })

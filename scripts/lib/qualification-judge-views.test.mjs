@@ -521,9 +521,11 @@ test('dual-view artifacts retain immutable private provenance and Suite pointer'
     const retained = await retainSemanticJudgeViewArtifacts(root, { process, outcome, suite })
     assert.equal(retained.resultReference.status, 'complete')
     assert.equal(retained.retainedViews.length, 2)
-    assert.equal((await stat(join(root, retained.retainedSuite.locator))).mode & 0o777, 0o600)
-    assert.equal((await stat(join(root, 'semantic-outcome-judge-pack.json'))).mode & 0o777, 0o600)
-    assert.equal((await stat(join(root, 'semantic-process-judge-pack.json'))).mode & 0o777, 0o600)
+    if (globalThis.process.platform !== 'win32') {
+      assert.equal((await stat(join(root, retained.retainedSuite.locator))).mode & 0o777, 0o600)
+      assert.equal((await stat(join(root, 'semantic-outcome-judge-pack.json'))).mode & 0o777, 0o600)
+      assert.equal((await stat(join(root, 'semantic-process-judge-pack.json'))).mode & 0o777, 0o600)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

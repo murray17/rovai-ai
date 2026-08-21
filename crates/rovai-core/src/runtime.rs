@@ -6060,6 +6060,7 @@ mod tests {
         assert_eq!(state.2, 2);
         assert_eq!(state.3, 7);
         assert!(state.4.is_none() && state.5.is_none() && state.6.is_none());
+        drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 

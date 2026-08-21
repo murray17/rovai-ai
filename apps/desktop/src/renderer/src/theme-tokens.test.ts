@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
-const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
+const css = readFileSync(new URL('./styles.css', import.meta.url), 'utf8').replace(/\r\n/g, '\n')
 const requiredTokens = [
   '--canvas',
   '--surface',
@@ -230,6 +230,12 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(
       /html\[data-rovai-platform="win32"\] \*,\s*html\[data-rovai-platform="win32"\] \*::before,\s*html\[data-rovai-platform="win32"\] \*::after\s*\{[^}]*-webkit-app-region: no-drag !important;/
     )
+  })
+
+  it('keeps focus, selection, and unread state visible in Windows Forced Colors', () => {
+    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*:focus-visible\s*\{[\s\S]*outline: 2px solid Highlight !important/)
+    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*\.camp-nav-row\.selected[\s\S]*outline: 2px solid Highlight/)
+    expect(css).toMatch(/@media \(forced-colors: active\)[\s\S]*\.rail-badge-dot[\s\S]*background: Highlight/)
   })
 
   it('uses solid, rule-free headers for the approved Memory, Appearance, and Reminder pages', () => {

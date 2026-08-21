@@ -1427,7 +1427,8 @@ mod tests {
             agent_profile::AdapterKind,
             command::{ActorRef, CommandEnvelope},
             skill::{
-                CommitSkillImportCommand, SetSkillEnabledCommand, SetSkillGroupAssignmentsCommand,
+                CommitSkillImportCommand, DeleteSkillCommand, SetSkillEnabledCommand,
+                SetSkillGroupAssignmentsCommand,
             },
             skill_projection::SkillProjectionReconciler,
         };
@@ -1538,6 +1539,12 @@ mod tests {
             skill
         }
 
+        fn canonical_path_text(path: &Path) -> String {
+            path_text(&path.canonicalize().unwrap())
+                .unwrap()
+                .to_string()
+        }
+
         fn operation_id(database: &Database, root: &Path, skill_id: &str) -> String {
             database
                 .connection()
@@ -1547,7 +1554,7 @@ mod tests {
                     FROM skill_projection_observation
                     WHERE execution_root = ?1 AND group_key = 'codex' AND skill_id = ?2
                     "#,
-                    params![path_text(root).unwrap(), skill_id],
+                    params![canonical_path_text(root), skill_id],
                     |row| row.get(0),
                 )
                 .unwrap()
@@ -1562,7 +1569,7 @@ mod tests {
                     FROM skill_projection_observation
                     WHERE execution_root = ?1 AND group_key = 'codex' AND skill_id = ?2
                     "#,
-                    params![path_text(root).unwrap(), skill_id],
+                    params![canonical_path_text(root), skill_id],
                     |row| row.get(0),
                 )
                 .unwrap()
@@ -1914,12 +1921,71 @@ mod tests {
             assert!(
                 super::direct_observation(
                     &database,
-                    path_text(&paths.root).unwrap(),
+                    &canonical_path_text(&paths.root),
                     SkillDeliveryGroupKey::Codex,
                     &second.id,
                 )
                 .unwrap()
                 .is_none()
+            );
+        }
+
+        #[test]
+        fn deleting_shadowed_skill_releases_observation_and_preserves_project_copy() {
+            let paths = TestPaths::new("rovai-windows-projection-delete-shadowed");
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&paths.data);
+            let library = SkillLibraryService::new(paths.library.clone()).unwrap();
+            let name = "windows-shadowed-delete";
+            write_source(&paths.source, name, "managed bytes");
+            let skill = import_skill(&mut database, &library, &paths.source, name, None);
+
+            SkillProjectionReconciler
+                .reconcile_root(
+                    &mut database,
+                    &library,
+                    &paths.root,
+                    &[SkillDeliveryGroupKey::Codex],
+                )
+                .unwrap();
+            let entry = paths.root.join(".codex/skills").join(name);
+            fs::remove_dir_all(&entry).unwrap();
+            fs::create_dir_all(&entry).unwrap();
+            fs::write(entry.join("SKILL.md"), "project-owned bytes").unwrap();
+            SkillProjectionReconciler
+                .reconcile_root(
+                    &mut database,
+                    &library,
+                    &paths.root,
+                    &[SkillDeliveryGroupKey::Codex],
+                )
+                .unwrap();
+
+            let current = library.get(&database, &skill.id).unwrap().unwrap();
+            library
+                .request_delete(
+                    &mut database,
+                    &user_envelope(DeleteSkillCommand {
+                        skill_id: skill.id.clone(),
+                        expected_version: current.version,
+                    }),
+                )
+                .unwrap();
+            SkillProjectionReconciler
+                .reconcile_root(
+                    &mut database,
+                    &library,
+                    &paths.root,
+                    &[SkillDeliveryGroupKey::Codex],
+                )
+                .unwrap();
+            SkillProjectionReconciler
+                .finalize_unprojected_deletions(&mut database, &library)
+                .unwrap();
+
+            assert!(library.get(&database, &skill.id).unwrap().is_none());
+            assert_eq!(
+                fs::read_to_string(entry.join("SKILL.md")).unwrap(),
+                "project-owned bytes"
             );
         }
 
@@ -2126,7 +2192,7 @@ mod tests {
                 .connection()
                 .query_row(
                     "SELECT dirty FROM skill_projection_root_state WHERE execution_root = ?1",
-                    [path_text(&paths.root).unwrap()],
+                    [canonical_path_text(&paths.root)],
                     |row| row.get(0),
                 )
                 .unwrap();

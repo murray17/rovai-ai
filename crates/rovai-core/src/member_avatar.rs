@@ -1,8 +1,11 @@
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{self, OpenOptions},
     io::{BufReader, Cursor, Read, Write},
     path::Path,
 };
+
+#[cfg(not(windows))]
+use std::fs::File;
 
 use anyhow::Result;
 use image::{DynamicImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader, Limits};
@@ -530,9 +533,13 @@ fn write_private_file(
 }
 
 fn sync_directory(directory: &Path) -> std::result::Result<(), MemberAvatarImportError> {
+    #[cfg(windows)]
+    let _ = directory;
+    #[cfg(not(windows))]
     File::open(directory)
         .and_then(|file| file.sync_all())
-        .map_err(|_| MemberAvatarImportError::invalid("Avatar asset could not be committed"))
+        .map_err(|_| MemberAvatarImportError::invalid("Avatar asset could not be committed"))?;
+    Ok(())
 }
 
 fn path_exists(path: &Path) -> std::result::Result<bool, MemberAvatarImportError> {

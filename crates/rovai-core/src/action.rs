@@ -3988,7 +3988,11 @@ mod tests {
             intercepted_prepare_envelope(&fixture, "action-runtime-managed", "native-outside");
         envelope.payload.input = CanonicalActionInput::ShellCommand {
             argv: vec!["pwd".to_string()],
-            cwd: "/tmp/rovai-runtime-managed-external".to_string(),
+            cwd: fixture
+                .directory
+                .join("runtime-managed-external")
+                .to_string_lossy()
+                .into_owned(),
             environment_refs: Vec::new(),
         };
 

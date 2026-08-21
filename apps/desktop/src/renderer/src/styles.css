@@ -5974,6 +5974,24 @@ button.attachment-open:hover { background: color-mix(in srgb, var(--brand) 5%, t
 }
 
 @media (forced-colors: active) {
+  :where(button, input, textarea, select, summary, [role="button"], [role="tab"]):focus-visible {
+    outline: 2px solid Highlight !important;
+    outline-offset: 2px;
+  }
+  :where(
+    .rail-button[aria-current="page"],
+    .camp-nav-row.selected,
+    .project-heading-row.current-project,
+    .command-palette-item.active,
+    [role="option"][aria-selected="true"]
+  ) {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+  :where(.status-dot, .rail-badge-dot, .unread-dot) {
+    background: Highlight;
+    border: 1px solid CanvasText;
+  }
   .run-pulse-chip.is-selected,
   .execution-process-stage.is-focused .execution-process-card,
   .execution-process-node {

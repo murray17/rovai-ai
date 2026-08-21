@@ -505,7 +505,7 @@ fn serialize_environment(
             let value = value.encode_wide().collect::<Vec<_>>();
             if key.is_empty()
                 || key.contains(&0)
-                || key.contains(&(b'=' as u16))
+                || !valid_environment_key(&key)
                 || value.contains(&0)
             {
                 bail!("managed_process.invalid_argument: invalid Windows environment entry");
@@ -536,6 +536,17 @@ fn serialize_environment(
         bail!("managed_process.invalid_argument: Windows environment block is too large");
     }
     Ok(block)
+}
+
+fn valid_environment_key(key: &[u16]) -> bool {
+    if !key.contains(&(b'=' as u16)) {
+        return true;
+    }
+    key.len() == 3
+        && key[0] == b'=' as u16
+        && ((key[1] >= b'A' as u16 && key[1] <= b'Z' as u16)
+            || (key[1] >= b'a' as u16 && key[1] <= b'z' as u16))
+        && key[2] == b':' as u16
 }
 
 fn compare_windows_names(left: &[u16], right: &[u16]) -> Ordering {
@@ -719,5 +730,24 @@ mod tests {
                 .to_string()
                 .contains("managed_process.invalid_argument")
         );
+    }
+
+    #[test]
+    fn environment_serializer_accepts_only_windows_drive_current_directory_keys() {
+        let environment = std::collections::BTreeMap::from([
+            (OsString::from("=C:"), OsString::from("C:\\Rovai")),
+            (OsString::from("Path"), OsString::from("C:\\Windows")),
+        ]);
+        let block = serialize_environment(&environment).unwrap();
+        assert_eq!(
+            String::from_utf16(&block[..block.len() - 1]).unwrap(),
+            "=C:=C:\\Rovai\0Path=C:\\Windows\0"
+        );
+
+        let invalid = std::collections::BTreeMap::from([(
+            OsString::from("ROVAI=INJECTED"),
+            OsString::from("value"),
+        )]);
+        assert!(serialize_environment(&invalid).is_err());
     }
 }

@@ -500,6 +500,9 @@ async function writePrivateFile(path: string, bytes: Uint8Array): Promise<void> 
 }
 
 async function syncDirectory(path: string): Promise<void> {
+  // Node cannot open a directory for FlushFileBuffers on Windows. The files are
+  // individually flushed above and the atomic rename still provides the commit boundary.
+  if (process.platform === 'win32') return
   const handle = await open(path, constants.O_RDONLY)
   try {
     await handle.sync()

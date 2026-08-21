@@ -87,11 +87,15 @@ describe('member avatar crop model', () => {
         height
       )
       const pixels = avatarCropToPixels(crop, width, height)
-      expect(pixels.size).toBeGreaterThan(0)
-      expect(pixels.x).toBeGreaterThanOrEqual(-1e-9)
-      expect(pixels.y).toBeGreaterThanOrEqual(-1e-9)
-      expect(pixels.x + pixels.size).toBeLessThanOrEqual(width + 1e-9)
-      expect(pixels.y + pixels.size).toBeLessThanOrEqual(height + 1e-9)
+      if (
+        pixels.size <= 0
+        || pixels.x < -1e-9
+        || pixels.y < -1e-9
+        || pixels.x + pixels.size > width + 1e-9
+        || pixels.y + pixels.size > height + 1e-9
+      ) {
+        throw new Error(`out-of-bounds crop at deterministic case ${index}`)
+      }
     }
   })
 })

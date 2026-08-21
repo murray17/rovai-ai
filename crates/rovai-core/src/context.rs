@@ -5849,6 +5849,14 @@ mod slow_tests {
         binding_credential: String,
     }
 
+    impl Fixture {
+        fn cleanup(self) {
+            let directory = self.directory.clone();
+            drop(self);
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
     #[test]
     fn current_input_skill_links_are_direct_user_siblings_with_canonical_bytes() {
         let direct = CurrentInput {
@@ -6767,7 +6775,7 @@ mod slow_tests {
                 .code,
             "camp.read_unavailable"
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -6867,7 +6875,7 @@ mod slow_tests {
             )
             .unwrap();
         assert!(late["results"].as_array().unwrap().is_empty());
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -7048,7 +7056,7 @@ mod slow_tests {
                 )
                 .is_err()
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -8942,7 +8950,7 @@ mod slow_tests {
                 .code,
             "camp.manifest_unavailable"
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -9103,7 +9111,12 @@ mod slow_tests {
             panic!("follow-up Context should project the former Current Input as history");
         };
         assert!(followup.rendered_payload.contains("requirements.txt"));
-        assert!(followup.rendered_payload.contains(&stable_path));
+        let escaped_stable_path = serde_json::to_string(&stable_path).unwrap();
+        assert!(
+            followup
+                .rendered_payload
+                .contains(escaped_stable_path.trim_matches('"'))
+        );
         assert!(
             !followup
                 .rendered_payload
@@ -9125,7 +9138,7 @@ mod slow_tests {
         CampAttachmentStore::new(&fixture.directory)
             .remove_camp(&fixture.camp_id)
             .unwrap();
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -9262,7 +9275,7 @@ mod slow_tests {
                 "projectionDigest": sha256_text(empty_task_json),
             })
         );
-        std::fs::remove_dir_all(empty_fixture.directory).unwrap();
+        empty_fixture.cleanup();
 
         let mut budget_fixture = fixture();
         let collaboration = CollaborationService::default();
@@ -9340,7 +9353,7 @@ mod slow_tests {
                 .rendered_payload
                 .contains("[SELF_ACTIVE_TASKS]")
         );
-        std::fs::remove_dir_all(budget_fixture.directory).unwrap();
+        budget_fixture.cleanup();
     }
 
     #[test]
@@ -9478,13 +9491,15 @@ mod slow_tests {
             exposure.snapshot
         );
         assert_eq!(persisted.1, exposure.digest);
-        let expected_skill_path = format!(
-            "{}/SKILL.md",
+        let expected_skill_path = std::path::Path::new(
             exposure.snapshot.skills[0]
                 .entry_path
                 .as_deref()
-                .expect("ready exposure needs an entry path")
-        );
+                .expect("ready exposure needs an entry path"),
+        )
+        .join("SKILL.md")
+        .to_string_lossy()
+        .into_owned();
         let current_input: Value = first_context
             .rendered_payload
             .split_once("[CURRENT_INPUT]\n")
@@ -9972,7 +9987,7 @@ mod slow_tests {
         );
         assert_eq!(terminal.4, 0);
         assert_eq!(terminal.5, 1, "accepted input evidence must be preserved");
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -10102,7 +10117,7 @@ mod slow_tests {
             state.4, 1,
             "budget expiry must preserve accepted input evidence"
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -10235,7 +10250,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(revisions, (2, 1));
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -10292,7 +10307,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(acknowledged_revision, 0);
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -10402,7 +10417,7 @@ mod slow_tests {
         assert_eq!(persisted.1, projection.exposure_digest);
         assert_eq!(persisted.2, projection.projection_digest);
         assert!(!persisted.0.contains("must-not-enter-sqlite"));
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     fn bind_fixture_native_session(
@@ -10546,7 +10561,7 @@ mod slow_tests {
             )
             .unwrap();
         assert_eq!(marker, prepared.camp_message_boundary_sequence);
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -10740,7 +10755,7 @@ mod slow_tests {
             pending_redelivery_revision(&fixture.database, &fixture.native_binding_id, 1).unwrap(),
             Some(1)
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -10986,7 +11001,7 @@ mod slow_tests {
             blob_count_after_identity_update,
             blob_count_before_identity_update
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -11376,7 +11391,7 @@ mod slow_tests {
             digest_after_accept.as_deref(),
             Some(third.collaboration_state_digest.as_str())
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -11452,7 +11467,7 @@ mod slow_tests {
             )
             .unwrap_err();
         assert!(format!("{error:#}").contains("personalityTraits"));
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -11494,7 +11509,7 @@ mod slow_tests {
             })
             .unwrap();
         assert_eq!(manifest_count, 0);
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -11556,7 +11571,7 @@ mod slow_tests {
         assert!(!charter.contains("Completing a Task or the current work"));
         assert!(!charter.contains("peer-coordination send"));
         assert!(!charter.contains("rovai_team"));
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -11709,7 +11724,7 @@ mod slow_tests {
         assert_eq!(manifest.1, 3);
         assert_eq!(manifest.2.len(), 64);
         assert_eq!((manifest.3, manifest.4, manifest.5), (5, 2, 6));
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -11851,7 +11866,7 @@ mod slow_tests {
             continuation["items"][0]["body"].as_str().unwrap()
         );
         assert_eq!(reconstructed, expected_complete_body);
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -12052,7 +12067,7 @@ mod slow_tests {
         let omission_entries: Value = serde_json::from_str(&omission_entries_json).unwrap();
         assert!(omission_entries[0]["count"].as_u64().unwrap() > 2_900);
         assert!(omission_entries[0].get("messageIds").is_none());
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -12141,7 +12156,7 @@ mod slow_tests {
         assert_eq!(shared["omittedMessages"]["count"], 3);
         assert_eq!(shared["omittedMessages"]["sequenceStart"], 2);
         assert_eq!(shared["omittedMessages"]["sequenceEnd"], 4);
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -12383,7 +12398,7 @@ mod slow_tests {
         )
         .unwrap_err();
         assert!(format!("{error:#}").contains("invalid root or invocation metadata"));
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -12452,7 +12467,7 @@ mod slow_tests {
         );
         assert!(body.chars().count() > CONTEXT_DELIVERY_PROFILE_V3.max_message_body_chars);
         assert!(!context.rendered_payload.contains("[SHARED_CONVERSATION]"));
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -12507,7 +12522,7 @@ mod slow_tests {
             .unwrap();
         assert_eq!(manifest_count, 0);
         assert_eq!(accepted_boundary, 0);
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -12740,7 +12755,7 @@ mod slow_tests {
                 .any(|message| message.body == current_generation_output),
             "same-binding explicitly sent output remains an ordinary public CampMessage"
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -13021,7 +13036,7 @@ mod slow_tests {
                 .rendered_payload
                 .contains("[CURRENT_INPUT]")
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]
@@ -13155,6 +13170,6 @@ mod slow_tests {
                 prepared.camp_message_boundary_sequence,
             )
         );
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 }

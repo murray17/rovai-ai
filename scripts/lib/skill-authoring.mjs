@@ -15,17 +15,18 @@ function add(errors, file, message) {
 }
 
 function parseFrontMatter(text, file, errors) {
-  if (!text.startsWith('---\n')) {
+  const normalized = text.replaceAll('\r\n', '\n')
+  if (!normalized.startsWith('---\n')) {
     add(errors, file, 'must start with YAML frontmatter')
     return null
   }
-  const end = text.indexOf('\n---\n', 4)
+  const end = normalized.indexOf('\n---\n', 4)
   if (end < 0) {
     add(errors, file, 'frontmatter must end with a standalone --- line')
     return null
   }
   try {
-    const value = YAML.parse(text.slice(4, end), { uniqueKeys: true })
+    const value = YAML.parse(normalized.slice(4, end), { uniqueKeys: true })
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       add(errors, file, 'frontmatter must be a mapping')
       return null

@@ -1,6 +1,7 @@
 import { join } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   atomicWriteJson,
   digestJson,
   sha256,
@@ -149,7 +150,7 @@ export function buildToolCallLedger({
 
 export async function retainToolCallLedgerArtifact(evidenceDirectory, artifact, evidenceIndex) {
   validateToolCallLedger(artifact, evidenceIndex)
-  const locator = join('tool-call-ledgers', `${artifact.artifactId}.json`)
+  const locator = join('tool-call-ledgers', artifactFileName(artifact.artifactId))
   await writePrivateJsonExclusive(join(evidenceDirectory, locator), artifact)
   await atomicWriteJson(join(evidenceDirectory, 'tool-call-ledger.json'), artifact)
   return {

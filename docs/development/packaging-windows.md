@@ -1,16 +1,16 @@
 ---
 document_type: development-guide
 authority: windows-desktop-build-packaging-routing
-status: accepted-design
-source_version: v1.05
-last_updated: 2026-08-18
+status: implemented-pending-release-qualification
+source_version: v1.15
+last_updated: 2026-08-19
 ---
 
-# Windows x64 构建、打包与发布设计
+# Windows x64 构建、打包与发布
 
-本文路由 Windows x64 的实现与验收边界。当前 `package.json` 尚未提供可运行的 Windows package/accept 命令，
-产品代码、NSIS 和签名流水线也尚未完成；在 [v1.05 实施计划](../versions/v1.05/implementation-plan.md)相应
-Checkpoint 关闭前，不得照抄预期命令、把 CI artifact 当正式安装包，或宣称 Windows 已发布。
+本文路由 Windows x64 的实现、命令与验收边界。v1.15 已实现 native x64 Core/CLI/Desktop、per-user NSIS、
+PE resource/manifest verifier 和隔离安装验收；unsigned 构建仍只是测试 artifact。Windows 11 client OS、逐 Runtime
+资格、正式 Authenticode/RFC 3161 签名和 SmartScreen 证据尚未完成，因此不得宣称 Windows 已发布。
 
 ## 目标与前置条件
 
@@ -18,8 +18,30 @@ Checkpoint 关闭前，不得照抄预期命令、把 CI artifact 当正式安�
 仓库锁定的 Node/pnpm/Rust 工具链与 `x86_64-pc-windows-msvc` target。Windows ARM64/x86、MSIX/Store、企业 MSI、
 系统服务、WSL Core 与 network/removable/non-NTFS workspace 不在本版。
 
-实现完成后，`package.json#scripts` 才是命令真源；新增、改名或删除 Windows build/package/accept script 时，
+`package.json#scripts` 是命令真源；新增、改名或删除 Windows build/package/accept script 时，
 必须在同一改动更新本文件、[开发索引](README.md)和当前版本实施计划。
+
+## 本机构建与验收命令
+
+以下命令必须在 native Windows x64 主机运行；它们使用目标隔离的 sidecar staging，且 acceptance 在发现已有
+Rovai 安装时 fail closed：
+
+```powershell
+pnpm build:windows:x64
+pnpm package:windows:x64
+pnpm dist:windows:x64
+pnpm verify:windows
+pnpm accept:planned-shutdown
+pnpm accept:windows:installer
+```
+
+`package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer 并验证
+App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与隔离 Core health。`accept:windows:installer`
+执行 per-user clean install、已安装 App Onboarding、同版本 upgrade、默认卸载和数据保留，并把报告与截图写入
+`dist/windows-installation-acceptance/`。`accept:planned-shutdown` 默认使用 `dist/win-unpacked/Rovai-ai.exe`，
+在隔离 `userData` 中验证真实 Runtime 运行期间的受控退出、子进程回收和重启恢复。正式签名构建使用
+`dist:windows:release:x64`，且必须提供签名材料和
+`ROVAI_WINDOWS_SIGNER_SHA256` allowlist；缺少任一发布条件时 verifier 必须失败。
 
 ## Target-isolated staging
 
@@ -60,7 +82,8 @@ timestamp 与 release-manifest hash。SmartScreen reputation 与签名有效性�
 
 ## Acceptance routing
 
-固定 Windows Server CI 证明编译、打包和自动化；正式发布另在 Windows 10 22H2 与 Windows 11 客户端环境完成 native
+固定 Windows Server CI 证明编译、打包和自动化；`.github/workflows/windows-package.yml` 使用 `windows-2022`、
+Node 26、pnpm 11.20.0、Rust 1.97.1 与 frozen lockfile 生成并上传 unsigned 证据。正式发布另在 Windows 10 22H2 与 Windows 11 客户端环境完成 native
 frame、DPI、Forced Colors/High Contrast、NVDA、中文 IME、Explorer、安装/升级/卸载和 SmartScreen 验收。逐 Runtime
 资格证据仍按 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)独立取得，三类 execution-shape
 基础设施测试不能批量放行十个 Adapter。
@@ -69,5 +92,5 @@ frame、DPI、Forced Colors/High Contrast、NVDA、中文 IME、Explorer、安�
 
 - [Windows Desktop Platform](../architecture/windows-desktop-platform.md)
 - [Windows Interaction Delta](../ui/windows-interaction-delta.md)
-- [v1.05 实施计划](../versions/v1.05/implementation-plan.md)
+- [v1.15 实施计划](../versions/v1.15/implementation-plan.md)
 - [桌面 UI 验收](ui-acceptance.md)

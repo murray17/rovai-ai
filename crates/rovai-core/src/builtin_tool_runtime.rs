@@ -105,6 +105,7 @@ impl BuiltinToolProcessConfig {
         &self.inner.process_id
     }
 
+    #[cfg(unix)]
     pub(crate) fn cli_executable(&self) -> &Path {
         &self.inner.cli_executable
     }
@@ -523,11 +524,11 @@ fn atomic_write_private_json(path: &Path, value: &impl serde::Serialize) -> Resu
     Ok(())
 }
 
-fn restrict_directory(path: &Path) -> Result<()> {
+fn restrict_directory(_path: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+        fs::set_permissions(_path, fs::Permissions::from_mode(0o700))?;
     }
     Ok(())
 }

@@ -41,9 +41,9 @@ describe('CoreClient planned shutdown', () => {
 
   it('passes an isolated Skill Library root to Core', () => {
     expect(desktopSkillLibraryRoot('/tmp/rovai-accept/user-data', true)).toBe(
-      '/tmp/rovai-accept/user-data/managed-skill-library'
+      join('/tmp/rovai-accept/user-data', 'managed-skill-library')
     )
-    expect(desktopSkillLibraryRoot('/daily/user-data', false)).toBeNull()
+    expect(desktopSkillLibraryRoot('/daily/user-data', false, 'darwin')).toBeNull()
     expect(desktopSkillLibraryRoot('C:\\Rovai AI\\Core', false, 'win32')).toBe(
       'C:\\Rovai AI\\Core\\managed-skill-library'
     )

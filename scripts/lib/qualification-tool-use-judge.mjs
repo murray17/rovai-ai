@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
+  artifactFileName,
   atomicWriteJson,
   canonicalJson,
   digestJson,
@@ -746,7 +747,7 @@ function validateCoverage(value) {
 }
 
 async function retainImmutable(evidenceDirectory, directory, artifact) {
-  const locator = join(directory, `${artifact.artifactId}.json`)
+  const locator = join(directory, artifactFileName(artifact.artifactId))
   const path = join(evidenceDirectory, locator)
   try {
     await writePrivateJsonExclusive(path, artifact)

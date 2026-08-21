@@ -2,6 +2,7 @@ import { readFile, readdir, realpath } from 'node:fs/promises'
 import { join, resolve, sep } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   atomicWriteJson,
   canonicalJson,
   digestJson,
@@ -201,7 +202,7 @@ export function buildEvidenceBundleManifest({
 
 export async function retainEvidenceBundleManifestArtifact(evidenceDirectory, artifact) {
   validateEvidenceBundleManifest(artifact)
-  const locator = join('evidence-bundle-manifests', `${artifact.artifactId}.json`)
+  const locator = join('evidence-bundle-manifests', artifactFileName(artifact.artifactId))
   const immutablePath = join(evidenceDirectory, locator)
   await writeImmutableJsonOrVerify(immutablePath, artifact)
   await atomicWriteJson(join(evidenceDirectory, 'evidence-bundle-manifest.json'), artifact)
@@ -212,7 +213,7 @@ export async function retainEvidenceBundleManifestArtifact(evidenceDirectory, ar
     manifestDigest: withSha256Prefix(sha256(await readFile(immutablePath))),
     completedAt: artifact.payload.completion.completedAt
   }
-  const markerLocator = join('bundle-completions', `${artifact.artifactId}.json`)
+  const markerLocator = join('bundle-completions', artifactFileName(artifact.artifactId))
   await writeImmutableJsonOrVerify(join(evidenceDirectory, markerLocator), marker)
   await atomicWriteJson(join(evidenceDirectory, 'BUNDLE_COMPLETE'), marker)
   return {

@@ -28,10 +28,10 @@ test('keeps Windows executables and staging isolated from macOS', () => {
   assert.equal(sidecarExecutableName('rovai-core', 'macos-arm64'), 'rovai-core')
   assert.match(
     stagedSidecarPath('/repo', 'rovai-core', 'windows-x64'),
-    /resources\/bin\/windows-x64\/rovai-core\.exe$/
+    /resources[\\/]bin[\\/]windows-x64[\\/]rovai-core\.exe$/
   )
   assert.match(
     stagedSidecarPath('/repo', 'rovai-core', 'macos-x64'),
-    /resources\/bin\/macos-x64\/rovai-core$/
+    /resources[\\/]bin[\\/]macos-x64[\\/]rovai-core$/
   )
 })

@@ -16,6 +16,9 @@ const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-builtin-cli-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const skillLibraryRoot = join(fixtureRoot, 'skill-library')
+const bashExecutable = process.platform === 'win32'
+  ? (process.env.ROVAI_BASH_BIN ?? 'C:\\Program Files\\Git\\bin\\bash.exe')
+  : '/bin/bash'
 const historyMarker = 'ROVAI_BUILTIN_HISTORY_V1'
 const historyPublicA2aMarker = 'ROVAI_BUILTIN_HISTORY_PUBLIC_A2A_V1'
 const historyAttachmentMarker = 'ROVAI_BUILTIN_HISTORY_ATTACHMENT_V1'
@@ -94,8 +97,12 @@ try {
       specification.adapterKind,
       [specification.agentId, specification.recipientProfileId]
     )
-    if (specification.adapterKind === 'codex-cli'
-        && process.env.ROVAI_BUILTIN_CLI_CODEX_MODEL) {
+    const explicitModel = specification.adapterKind === 'codex-cli'
+      ? process.env.ROVAI_BUILTIN_CLI_CODEX_MODEL?.trim()
+      : specification.adapterKind === 'codebuddy-cli'
+        ? process.env.ROVAI_BUILTIN_CLI_CODEBUDDY_MODEL?.trim()
+        : null
+    if (explicitModel) {
       for (const agentId of [
         specification.agentId,
         specification.recipientProfileId
@@ -104,7 +111,7 @@ try {
           core.request,
           agentId,
           specification.adapterKind,
-          process.env.ROVAI_BUILTIN_CLI_CODEX_MODEL
+          explicitModel
         )
       }
     }
@@ -486,7 +493,7 @@ async function selectExplicitModel(request, agentId, adapterKind, modelId) {
       model: {
         mode: 'explicit',
         modelId,
-        options: { reasoning_effort: 'low' }
+        options: adapterKind === 'codex-cli' ? { reasoning_effort: 'low' } : {}
       },
       permissions: profile.runtimeConfiguration.permissions
     }
@@ -495,7 +502,8 @@ async function selectExplicitModel(request, agentId, adapterKind, modelId) {
     throw new Error(`Explicit Runtime model was not selected: ${JSON.stringify(result)}`)
   }
   const resolved = await request('members.get', { agentId })
-  if (resolved.runtimeReadiness?.status !== 'ready') {
+  if (resolved.runtimeReadiness?.status !== 'ready'
+      || resolved.runtimeConfiguration?.model?.modelId !== modelId) {
     throw new Error(`Explicit Runtime model is not ready: ${JSON.stringify(resolved)}`)
   }
 }
@@ -545,7 +553,7 @@ async function seedHistoricalPublicA2a(coreClient, input) {
       'Run the generated historical Public A2A seed script with your native shell tool.',
       'The Runtime process already has the real ROVAI_AGENT_CLI, ROVAI_CLI_CONTEXT, and ROVAI_RUN_TMP lease environment.',
       'Do not modify or replace the script.',
-      `/bin/bash ${JSON.stringify(input.scriptPath)}`,
+      runtimeShellCommand(input.scriptPath),
       `After it exits 0, reply with exactly ${input.completionMarker}.`
     ].join('\n'),
     execution: {
@@ -655,7 +663,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
       ...confirmedMemberCard,
       'You may inspect the script if your Runtime requires that before execution; do not modify or replace it.',
       'Use your native bash/shell tool to run:',
-      `/bin/bash ${JSON.stringify(scriptPath)}`,
+      runtimeShellCommand(scriptPath),
       `If it exits 0 and prints ${marker}, reply with exactly ${marker}.`
     ].join('\n'),
     execution: {
@@ -958,14 +966,12 @@ function historyPublicationScript(input) {
   return `#!/bin/bash
 set -euo pipefail
 
-CLI="\${ROVAI_AGENT_CLI:?ROVAI_AGENT_CLI is required}"
-CONTEXT="\${ROVAI_CLI_CONTEXT:?ROVAI_CLI_CONTEXT is required}"
-RUN_TMP="\${ROVAI_RUN_TMP:?ROVAI_RUN_TMP is required}"
+${shellLeasePrelude(true)}
 JQ="$(command -v jq)"
 test -x "$CLI"
-test -f "$CONTEXT"
+test -f "$CONTEXT_FILE"
 test -d "$RUN_TMP"
-test "$(stat -f '%Lp' "$CONTEXT")" = "600"
+${shellContextPrivacyAssertion()}
 
 public_send="$("$CLI" send --to ${shellQuote(input.recipientProfileId)} --body ${shellQuote(input.marker)})"
 printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recipientProfileId)} '
@@ -974,7 +980,7 @@ printf '%s\n' "$public_send" | "$JQ" -e --arg recipient ${shellQuote(input.recip
   and .effectiveRecipients == [$recipient]
   and (.deliveryIds | length) == 1
 ' >/dev/null
-printf '%s\n' "$public_send" | "$JQ" -er '.messageId' > ${shellQuote(input.evidencePath)}
+printf '%s\n' "$public_send" | "$JQ" -er '.messageId' > ${shellQuote(shellPath(input.evidencePath))}
 printf '%s\n' ${shellQuote(input.completionMarker)}
 `
 }
@@ -1008,19 +1014,17 @@ function verificationScript(input) {
   return `#!/bin/bash
 set -euo pipefail
 
-CLI="\${ROVAI_AGENT_CLI:?ROVAI_AGENT_CLI is required}"
-CONTEXT="\${ROVAI_CLI_CONTEXT:?ROVAI_CLI_CONTEXT is required}"
-RUN_TMP="\${ROVAI_RUN_TMP:?ROVAI_RUN_TMP is required}"
+${shellLeasePrelude(true)}
 JQ="$(command -v jq)"
-DIAGNOSTIC=${shellQuote(input.diagnosticPath)}
+DIAGNOSTIC=${shellQuote(shellPath(input.diagnosticPath))}
 STEP=bootstrap
 exec 2>"$DIAGNOSTIC.stderr"
 trap 'code=$?; printf "exit=%s step=%s line=%s\n" "$code" "$STEP" "$LINENO" > "$DIAGNOSTIC"; exit "$code"' EXIT
 test -x "$CLI"
-test -f "$CONTEXT"
+test -f "$CONTEXT_FILE"
 test -d "$RUN_TMP"
-test "$(stat -f '%Lp' "$CONTEXT")" = "600"
-printf '%s\n' "$CONTEXT" > ${shellQuote(input.contextPathFile)}
+${shellContextPrivacyAssertion()}
+printf '%s\n' "$CONTEXT" > ${shellQuote(shellPath(input.contextPathFile))}
 
 assert_success() {
   local document="$1"
@@ -1120,7 +1124,7 @@ set +e
 legacy_json="$(printf '%s\n' '{"campId":"camp-legacy","body":"rejected"}' | "$CLI" send 2>"$RUN_TMP/legacy-json.err")"
 legacy_json_status=$?
 set -e
-test "$legacy_json_status" -eq 1
+test "$legacy_json_status" -eq 2
 test ! -s "$RUN_TMP/legacy-json.err"
 assert_fix_input "$legacy_json"
 
@@ -1348,7 +1352,7 @@ STEP=freeze_send_locators
   --arg stdinUserOnlyMessageId "$stdin_user_only_id" \
   --arg gatherId "$gather_id" \
   '{publicMessageId:$publicMessageId,directUserOnlyMessageId:$directUserOnlyMessageId,stdinUserOnlyMessageId:$stdinUserOnlyMessageId,gatherId:$gatherId}' \
-  > ${shellQuote(input.sendEvidencePath)}
+  > ${shellQuote(shellPath(input.sendEvidencePath))}
 
 cat > "$RUN_TMP/memory-write.json" <<'ROVAI_JSON'
 ${memoryWrite}
@@ -1420,11 +1424,10 @@ printf '%s\n' ${shellQuote(JSON.stringify({
 function resumeVerificationScript(input) {
   return `#!/bin/bash
 set -euo pipefail
-CLI="\${ROVAI_AGENT_CLI:?ROVAI_AGENT_CLI is required}"
-CONTEXT="\${ROVAI_CLI_CONTEXT:?ROVAI_CLI_CONTEXT is required}"
+${shellLeasePrelude(false)}
 JQ="$(command -v jq)"
-SEND_EVIDENCE=${shellQuote(input.sendEvidencePath)}
-printf '%s\n' "$CONTEXT" > ${shellQuote(input.resumeContextPathFile)}
+SEND_EVIDENCE=${shellQuote(shellPath(input.sendEvidencePath))}
+printf '%s\n' "$CONTEXT" > ${shellQuote(shellPath(input.resumeContextPathFile))}
 camp_list="$(printf '{}\n' | "$CLI" camp list)"
 printf '%s\n' "$camp_list" | jq -e '((has("contractVersion") | not) and (.camps | type) == "array")' >/dev/null
 
@@ -1454,13 +1457,62 @@ for key in directUserOnlyMessageId stdinUserOnlyMessageId; do
   ' >/dev/null
 done
 
-printf '%s\n' ${shellQuote(input.resumeMarker)} > ${shellQuote(input.resumeCompletionFile)}
+printf '%s\n' ${shellQuote(input.resumeMarker)} > ${shellQuote(shellPath(input.resumeCompletionFile))}
 printf '%s\n' ${shellQuote(JSON.stringify({ ok: true, marker: input.resumeMarker, newLease: true }))}
 `
 }
 
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", `'"'"'`)}'`
+}
+
+function runtimeShellCommand(scriptPath) {
+  if (process.platform === 'win32') {
+    return `${windowsCommandPath(bashExecutable)} ${JSON.stringify(scriptPath.replaceAll('\\', '/'))}`
+  }
+  return `${bashExecutable} ${JSON.stringify(scriptPath)}`
+}
+
+function windowsCommandPath(value) {
+  const command = String(value)
+    .replace(/^\\\\\?\\/, '')
+    .replace(/^([A-Za-z]):[\\/]Program Files \(x86\)[\\/]/i, '$1:/Progra~2/')
+    .replace(/^([A-Za-z]):[\\/]Program Files[\\/]/i, '$1:/Progra~1/')
+    .replaceAll('\\', '/')
+  if (/\s/.test(command)) {
+    throw new Error(`ROVAI_BASH_BIN must have a space-free Windows command path: ${command}`)
+  }
+  return command
+}
+
+function shellPath(value) {
+  if (process.platform !== 'win32') return value
+  return String(value)
+    .replace(/^\\\\\?\\/, '')
+    .replace(/^([A-Za-z]):\\/, (_, drive) => `/${drive.toLowerCase()}/`)
+    .replaceAll('\\', '/')
+}
+
+function shellLeasePrelude(includeRunTmp) {
+  const lines = [
+    'CLI="\${ROVAI_AGENT_CLI:?ROVAI_AGENT_CLI is required}"',
+    'CONTEXT="\${ROVAI_CLI_CONTEXT:?ROVAI_CLI_CONTEXT is required}"'
+  ]
+  if (includeRunTmp) lines.push('RUN_TMP="\${ROVAI_RUN_TMP:?ROVAI_RUN_TMP is required}"')
+  if (process.platform === 'win32') {
+    lines.push('CLI="$(cygpath -u "$CLI")"')
+    lines.push('CONTEXT_FILE="$(cygpath -u "$CONTEXT")"')
+    if (includeRunTmp) lines.push('RUN_TMP="$(cygpath -u "$RUN_TMP")"')
+  } else {
+    lines.push('CONTEXT_FILE="$CONTEXT"')
+  }
+  return lines.join('\n')
+}
+
+function shellContextPrivacyAssertion() {
+  return process.platform === 'win32'
+    ? ': Windows private-file DACL is verified by the Core platform acceptance suite.'
+    : 'test "$(stat -f \'%Lp\' "$CONTEXT")" = "600"'
 }
 
 function startCore(dataDirectory) {

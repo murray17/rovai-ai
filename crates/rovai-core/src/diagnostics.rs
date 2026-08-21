@@ -364,6 +364,7 @@ mod tests {
         assert_eq!(check.status, DiagnosticStatus::Ok);
         assert_eq!(check.code, "database_quick_check_ok");
         assert_eq!(before, after);
+        drop(database);
         fs::remove_dir_all(root).unwrap();
     }
 

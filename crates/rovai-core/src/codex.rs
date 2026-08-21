@@ -1001,38 +1001,52 @@ fn codex_mcp_session_config(
 fn native_mcp_server_names_from_config_read(
     response: &Value,
 ) -> Result<std::collections::BTreeSet<String>> {
-    if let Some(config) = response.get("config").and_then(Value::as_object) {
-        return Ok(config
-            .get("mcp_servers")
-            .or_else(|| config.get("mcpServers"))
-            .and_then(Value::as_object)
-            .map(|servers| servers.keys().cloned().collect())
-            .unwrap_or_default());
-    }
-    let layers = response
-        .get("layers")
-        .and_then(Value::as_array)
-        .context("Codex config/read omitted effective config and layers")?;
     let mut names = std::collections::BTreeSet::new();
-    for layer in layers {
-        if layer
-            .get("disabledReason")
-            .is_some_and(|reason| !reason.is_null())
-        {
-            continue;
+    let mut recognized_shape = false;
+    if let Some(config) = response.get("config").and_then(Value::as_object) {
+        recognized_shape = true;
+        names.extend(
+            config
+                .get("mcp_servers")
+                .or_else(|| config.get("mcpServers"))
+                .and_then(Value::as_object)
+                .into_iter()
+                .flat_map(|servers| servers.keys().cloned()),
+        );
+    }
+    if let Some(layers) = response.get("layers").and_then(Value::as_array) {
+        recognized_shape = true;
+        for layer in layers {
+            if let Some(servers) = layer
+                .get("config")
+                .and_then(Value::as_object)
+                .and_then(|config| {
+                    config
+                        .get("mcp_servers")
+                        .or_else(|| config.get("mcpServers"))
+                })
+                .and_then(Value::as_object)
+            {
+                names.extend(servers.keys().cloned());
+            }
         }
-        if let Some(servers) = layer
-            .get("config")
-            .and_then(Value::as_object)
-            .and_then(|config| {
-                config
-                    .get("mcp_servers")
-                    .or_else(|| config.get("mcpServers"))
-            })
-            .and_then(Value::as_object)
-        {
-            names.extend(servers.keys().cloned());
+    }
+    if let Some(origins) = response.get("origins").and_then(Value::as_object) {
+        recognized_shape = true;
+        for key in origins.keys() {
+            let Some(remainder) = key
+                .strip_prefix("mcp_servers.")
+                .or_else(|| key.strip_prefix("mcpServers."))
+            else {
+                continue;
+            };
+            if let Some(name) = remainder.split('.').next().filter(|name| !name.is_empty()) {
+                names.insert(name.to_string());
+            }
         }
+    }
+    if !recognized_shape {
+        anyhow::bail!("Codex config/read omitted effective config and layers");
     }
     Ok(names)
 }
@@ -1909,7 +1923,7 @@ mod tests {
     }
 
     #[test]
-    fn config_read_discovery_collects_effective_native_names_and_ignores_disabled_layers() {
+    fn config_read_discovery_collects_effective_layered_and_origin_native_names() {
         let effective = json!({
             "config": {
                 "mcp_servers": {
@@ -1928,12 +1942,40 @@ mod tests {
         let layered = json!({
             "layers": [
                 {"disabledReason": null, "config": {"mcp_servers": {"native": {}}}},
-                {"disabledReason": "disabled", "config": {"mcp_servers": {"ignored": {}}}}
+                {"disabledReason": "project trust pending", "config": {"mcp_servers": {"reserved": {}}}}
             ]
         });
         assert_eq!(
             native_mcp_server_names_from_config_read(&layered).unwrap(),
-            ["native".to_string()].into_iter().collect()
+            ["native".to_string(), "reserved".to_string()]
+                .into_iter()
+                .collect()
+        );
+
+        let effective_omits_mcp_but_layer_preserves_it = json!({
+            "config": {"model": "gpt-5.6-sol"},
+            "layers": [
+                {"disabledReason": null, "config": {"mcpServers": {"project_docs": {}}}}
+            ]
+        });
+        assert_eq!(
+            native_mcp_server_names_from_config_read(&effective_omits_mcp_but_layer_preserves_it)
+                .unwrap(),
+            ["project_docs".to_string()].into_iter().collect()
+        );
+
+        let origins_preserve_omitted_mcp = json!({
+            "config": {"model": "gpt-5.6-sol"},
+            "origins": {
+                "mcp_servers.project_docs.command": {"name": {"type": "project"}},
+                "mcpServers.remote.url": {"name": {"type": "user"}}
+            }
+        });
+        assert_eq!(
+            native_mcp_server_names_from_config_read(&origins_preserve_omitted_mcp).unwrap(),
+            ["project_docs".to_string(), "remote".to_string()]
+                .into_iter()
+                .collect()
         );
     }
 

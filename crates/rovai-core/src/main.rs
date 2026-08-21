@@ -174,7 +174,8 @@ use rovai_core::{
     runtime_discovery::{
         RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeLaunchPurpose,
         RuntimeSearchEnvironment, catalog_entries, discover_runtime_path, discover_runtime_version,
-        is_executable_file, runtime_launch_allowed, with_runtime_search_environment,
+        is_executable_file, runtime_launch_allowed, runtime_visible_path,
+        with_runtime_search_environment,
     },
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -286,7 +287,7 @@ fn runtime_blocker_is_refreshable(code: &str) -> bool {
 }
 
 fn canonical_runtime_path(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+    runtime_visible_path(path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
 }
 
 async fn run_with_cancellation_deadline<T>(
@@ -933,18 +934,41 @@ fn current_runtime_platform_admission(
     AgentRuntimeAdapterRegistry::default().current_platform_admission(runtime_kind)
 }
 
+fn windows_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
+    #[cfg(all(debug_assertions, target_os = "windows"))]
+    {
+        return std::env::var("ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER")
+            .ok()
+            .is_some_and(|candidates| {
+                candidates
+                    .split(',')
+                    .any(|candidate| candidate.trim() == runtime_kind.as_str())
+            });
+    }
+
+    #[cfg(not(all(debug_assertions, target_os = "windows")))]
+    {
+        let _ = runtime_kind;
+        false
+    }
+}
+
 fn current_platform_qualified_runtime_kinds() -> Vec<AdapterKind> {
     AdapterKind::ALL
         .into_iter()
         .filter(|kind| {
-            current_runtime_platform_admission(*kind)
-                .as_ref()
-                .is_some_and(RuntimePlatformAdmission::is_qualified)
+            windows_runtime_qualification_allows(*kind)
+                || current_runtime_platform_admission(*kind)
+                    .as_ref()
+                    .is_some_and(RuntimePlatformAdmission::is_qualified)
         })
         .collect()
 }
 
 fn current_runtime_platform_blocker(runtime_kind: AdapterKind) -> Option<CommandHandlerResult> {
+    if windows_runtime_qualification_allows(runtime_kind) {
+        return None;
+    }
     match current_runtime_platform_admission(runtime_kind) {
         Some(admission) if admission.is_qualified() => None,
         Some(admission) => Some(CommandHandlerResult::rejected(
@@ -1519,9 +1543,7 @@ impl Core {
                 {
                     let saved_path = PathBuf::from(&installation.executable_path);
                     if is_executable_file(&saved_path) {
-                        let canonical = saved_path
-                            .canonicalize()
-                            .unwrap_or_else(|_| saved_path.clone());
+                        let canonical = canonical_runtime_path(&saved_path);
                         match fingerprint_executable(&canonical) {
                             Ok(fingerprint) => {
                                 observation.discovery_status = RuntimeDiscoveryStatus::Found;
@@ -12179,9 +12201,7 @@ async fn persist_acp_prompt_completion(
     };
     let terminal_discriminator =
         canonical_json_digest(params).unwrap_or_else(|_| format!("{prompt_id}:{stop_reason}"));
-    if matches!(adapter_kind, AdapterKind::KiroCli | AdapterKind::TraeCnCli)
-        && !core.planned_shutdown.shutdown_started()
-    {
+    if !core.planned_shutdown.shutdown_started() {
         runtime_route_permit.complete_callback();
         if let Some(adapter) = core.acp_adapter(adapter_kind) {
             adapter

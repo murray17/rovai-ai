@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { spawn } from 'node:child_process'
+import { dirname, join, resolve } from 'node:path'
+import { spawn, spawnSync } from 'node:child_process'
 import { assertUserDataIsIsolated } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
@@ -10,6 +11,12 @@ const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rova
 const fixtureRoot = resolve(process.env.ROVAI_ONBOARDING_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-onboarding-ui-accept-')))
 const dataDir = assertUserDataIsIsolated(join(fixtureRoot, 'user-data'))
+const electronUserDataDir = process.platform === 'win32'
+  ? join(dataDir, 'Electron', 'User Data')
+  : dataDir
+const coreDataDir = process.platform === 'win32'
+  ? join(dataDir, 'Core')
+  : dataDir
 const outputDir = resolve(process.env.ROVAI_ONBOARDING_ACCEPT_OUTPUT_DIR
   ?? join(fixtureRoot, 'captures'))
 const firstPort = Number(process.env.ROVAI_ONBOARDING_ACCEPT_DEBUG_PORT ?? 9489)
@@ -18,7 +25,9 @@ const height = 700
 const selectedRole = 'qilu'
 const expectedStarter = '我想创建一个新的队员，请用 member-studio 帮我开始。'
 
-await mkdir(dataDir, { recursive: true })
+class ExpectedWindowsPlatformAdmissionBlock extends Error {}
+
+if (process.platform !== 'win32') await mkdir(dataDir, { recursive: true })
 await mkdir(outputDir, { recursive: true })
 
 let running = null
@@ -93,19 +102,36 @@ try {
   captures.runtimeScan = join(outputDir, '04-runtime-scan-day-1040x700.png')
   await capture(running.cdp, captures.runtimeScan)
   await waitForSelector(running.cdp, '.onboarding-runtime-list', 120_000)
-  await waitForExpression(running.cdp,
-    `Boolean(document.querySelector(
-      '.onboarding-runtime-row .status-available, .onboarding-runtime-row .status-installed_unverified'
-    ))`,
-    120_000)
   const runtimeAvailability = await evaluate(running.cdp, `
     [...document.querySelectorAll('.onboarding-runtime-row')].map((row) => ({
       label: row.querySelector('strong')?.textContent?.trim(),
       status: row.querySelector('.onboarding-runtime-state')?.textContent?.trim(),
-      className: row.querySelector('.onboarding-runtime-state')?.className
+      className: row.querySelector('.onboarding-runtime-state')?.className,
+      disabled: row.disabled
     }))`)
   captures.runtimeReadyDay = join(outputDir, '05-runtime-ready-day-1040x700.png')
   await capture(running.cdp, captures.runtimeReadyDay)
+  const usableRuntime = runtimeAvailability.some((runtime) => (
+    runtime.className?.includes('status-available')
+    || runtime.className?.includes('status-installed_unverified')
+  ))
+  if (!usableRuntime
+      && process.env.ROVAI_ONBOARDING_ALLOW_PLATFORM_BLOCKED === '1'
+      && runtimeAvailability.length > 0
+      && runtimeAvailability.every((runtime) => (
+        runtime.disabled && runtime.className?.includes('status-not_qualified')
+      ))) {
+    report.runtime = {
+      platformBlocked: true,
+      reason: 'runtime_platform_not_qualified',
+      availability: runtimeAvailability
+    }
+    throw new ExpectedWindowsPlatformAdmissionBlock(
+      'Windows Runtime platform admission correctly blocked onboarding continuation'
+    )
+  }
+  assert(usableRuntime,
+    `No usable Runtime was available for packaged acceptance: ${JSON.stringify(runtimeAvailability)}`)
   const runtimeChoice = await evaluate(running.cdp, `(() => {
     const rows = [...document.querySelectorAll('.onboarding-runtime-row')]
     const available = rows.filter((row) => row.querySelector('.status-available'))
@@ -276,7 +302,7 @@ try {
   await closeApp(running)
   running = null
 
-  const persistedOnboarding = JSON.parse(await readFile(join(dataDir, 'onboarding.json'), 'utf8'))
+  const persistedOnboarding = JSON.parse(await readFile(join(electronUserDataDir, 'onboarding.json'), 'utf8'))
   assert(persistedOnboarding.status === 'completed'
     && persistedOnboarding.quickChatCampId === completed.quickChatCampId,
   `Private onboarding file is not completed: ${JSON.stringify(persistedOnboarding)}`)
@@ -284,6 +310,16 @@ try {
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
   process.stdout.write(`${JSON.stringify({ ok: true, reportPath, ...report }, null, 2)}\n`)
 } catch (error) {
+  if (error instanceof ExpectedWindowsPlatformAdmissionBlock) {
+    const reportPath = join(outputDir, 'report.json')
+    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({
+      ok: true,
+      expectedPlatformBlock: true,
+      reportPath,
+      ...report
+    }, null, 2)}\n`)
+  } else {
   process.stderr.write(`${JSON.stringify({
     ok: false,
     error: error instanceof Error ? error.stack ?? error.message : String(error),
@@ -292,13 +328,28 @@ try {
     stderr: running?.stderr ?? []
   }, null, 2)}\n`)
   process.exitCode = 1
+  }
 } finally {
   if (running) await closeApp(running).catch(() => undefined)
 }
 
 async function launchApp(port) {
   const stderr = []
-  const child = spawn(join(appPath, 'Contents', 'MacOS', 'Rovai-ai'), [
+  const executable = process.platform === 'win32'
+    ? appPath
+    : join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+  if (process.platform === 'win32' && !existsSync(dataDir)) {
+    const preparer = join(dirname(executable), 'resources', 'bin', 'rovai-core.exe')
+    const prepared = spawnSync(preparer, ['--prepare-windows-data-root', dataDir], {
+      cwd: root,
+      encoding: 'utf8'
+    })
+    if (prepared.error) throw prepared.error
+    if (prepared.status !== 0) {
+      throw new Error(`Windows acceptance data-root preparation failed: ${prepared.stderr}`)
+    }
+  }
+  const child = spawn(executable, [
     `--remote-debugging-port=${port}`,
     `--user-data-dir=${dataDir}`
   ], {
@@ -352,7 +403,7 @@ async function closeApp(app) {
 }
 
 async function waitForCoreProcessExit(timeoutMs = 15_000) {
-  const lockPath = join(dataDir, '.rovai-core-instance.lock')
+  const lockPath = join(coreDataDir, '.rovai-core-instance.lock')
   const startedAt = Date.now()
   while (Date.now() - startedAt < timeoutMs) {
     try {
@@ -488,8 +539,9 @@ async function waitForExpression(cdp, expression, timeoutMs = 5_000) {
 }
 
 async function waitForTarget(debugPort, stderr) {
+  const timeoutMs = process.platform === 'win32' ? 45_000 : 15_000
   const startedAt = Date.now()
-  while (Date.now() - startedAt < 15_000) {
+  while (Date.now() - startedAt < timeoutMs) {
     try {
       const targets = await fetch(`http://127.0.0.1:${debugPort}/json`)
         .then((response) => response.json())

@@ -88,6 +88,12 @@ try {
   }
 
   let profile = await request('members.get', { agentId: 'agent_1' })
+  // Antigravity 1.1.16's native sandbox cannot launch run_command on Windows:
+  // the CLI either rejects the generated script as shell injection or fails
+  // while granting drive access. The product contract already defines `off`
+  // as the normal Antigravity default, so keep the real Windows qualification
+  // on that supported path while retaining the stricter macOS/Linux coverage.
+  const sandbox = process.platform === 'win32' ? 'off' : 'on'
   const permissionsConfigured = await request('members.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
@@ -100,7 +106,7 @@ try {
         schemaVersion: 1,
         values: {
           mode: 'accept-edits',
-          sandbox: 'on',
+          sandbox,
           dangerously_skip_permissions: 'on'
         }
       }
@@ -110,7 +116,8 @@ try {
     throw new Error(`Antigravity smoke permissions were rejected: ${JSON.stringify(permissionsConfigured)}`)
   }
   profile = await request('members.get', { agentId: profile.agentId })
-  if (profile.runtimeConfiguration?.permissions?.values?.dangerously_skip_permissions !== 'on') {
+  if (profile.runtimeConfiguration?.permissions?.values?.dangerously_skip_permissions !== 'on'
+      || profile.runtimeConfiguration?.permissions?.values?.sandbox !== sandbox) {
     throw new Error(`Antigravity smoke permissions drifted: ${JSON.stringify(profile.runtimeConfiguration)}`)
   }
 
@@ -251,7 +258,7 @@ async function executeCommandOutput(request, camp, agentId, events) {
     request,
     camp.id,
     agentId,
-    `Use the run_command tool exactly once to run this command without changing files: printf '%s\\n' '${marker}'. Do not call any other tool. Then immediately reply exactly ROVAI_ANTIGRAVITY_COMMAND_OUTPUT_OK.`,
+    `Use the run_command tool exactly once to run this cross-platform command without changing files: echo ${marker}. Do not call any other tool. Then immediately reply exactly ROVAI_ANTIGRAVITY_COMMAND_OUTPUT_OK.`,
     'Verify Antigravity run_command output projection'
   )
   const commandResult = sent.commandResult ?? sent

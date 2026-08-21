@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import test from 'node:test'
 import {
   acquireDevelopmentLaunchLock,
@@ -21,7 +21,7 @@ test('default development userData is deterministic per repository and outside d
     temporaryRoot: '/temporary'
   })
   assert.equal(first, second)
-  assert.match(first, /rovai-ai-development\/[^/]+\/user-data$/)
+  assert.match(first, /rovai-ai-development[\\/][^\\/]+[\\/]user-data$/)
 })
 
 test('development userData rejects daily directories and their descendants', () => {
@@ -36,7 +36,7 @@ test('development userData rejects daily directories and their descendants', () 
   )
   assert.equal(
     assertDevelopmentUserDataIsIsolated('/temporary/rovai-dev', { dailyDirectories: [dailyDirectory] }),
-    '/temporary/rovai-dev'
+    resolve('/temporary/rovai-dev')
   )
 })
 
@@ -46,7 +46,7 @@ test('every isolated channel requires an explicit path and rejects aliases of da
   const dailyDirectory = join(root, 'daily')
   const alias = join(root, 'daily-alias')
   mkdirSync(dailyDirectory)
-  symlinkSync(dailyDirectory, alias)
+  symlinkSync(dailyDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir')
 
   assert.throws(() => assertUserDataIsIsolated(), /explicit isolated userData/)
   assert.throws(
@@ -78,7 +78,9 @@ test('generic App acceptance can seed a private completed onboarding fixture', (
 
   assert.equal(snapshot.status, 'completed')
   assert.equal(snapshot.origin, 'existing_installation')
-  assert.equal(statSync(path).mode & 0o777, 0o600)
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(path).mode & 0o777, 0o600)
+  }
   assert.equal(seedCompletedOnboardingForAcceptance(userDataDirectory, {
     dailyDirectories: [dailyDirectory]
   }), path)

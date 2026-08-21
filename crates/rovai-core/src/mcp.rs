@@ -21,6 +21,12 @@ use sha2::{Digest, Sha256};
 use url::Url;
 use uuid::Uuid;
 
+#[cfg(windows)]
+use crate::platform::private_storage::{
+    atomic_write_private_bytes, create_private_bytes, open_private_read_file,
+    repair_private_directory, repair_private_file,
+};
+
 pub const MCP_SCHEMA_VERSION: u32 = 2;
 pub const PRESERVE_STORED_VALUE_MARKER: &str = "__ROVAI_PRESERVE_STORED_VALUE__";
 const READ_ONLY_MASK: &str = "********";
@@ -482,9 +488,21 @@ impl McpConfigStore {
     }
 
     pub fn repair_permissions(&self) -> Result<()> {
-        #[cfg(not(unix))]
+        #[cfg(windows)]
         {
-            anyhow::bail!("windows_private_storage_not_implemented");
+            if let Some(parent) = self.path.parent()
+                && parent.exists()
+            {
+                repair_private_directory(parent).with_context(|| {
+                    format!("failed to restrict MCP directory {}", parent.display())
+                })?;
+            }
+            if self.path.exists() {
+                repair_private_file(&self.path).with_context(|| {
+                    format!("failed to restrict MCP config {}", self.path.display())
+                })?;
+            }
+            Ok(())
         }
         #[cfg(unix)]
         {
@@ -501,6 +519,10 @@ impl McpConfigStore {
                 )?;
             }
             Ok(())
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            anyhow::bail!("private MCP storage is unsupported on this platform")
         }
     }
 
@@ -918,13 +940,13 @@ impl McpConfigStore {
                     "MCP configuration exceeds the 1 MiB limit",
                     None,
                 )),
-                permission_issue: private_permission_issue(&metadata)?,
+                permission_issue: private_permission_issue(&self.path, &metadata)?,
             });
         }
         let bytes = fs::read(&self.path)
             .with_context(|| format!("failed to read MCP config {}", self.path.display()))?;
         let digest = bytes_digest(&bytes);
-        let permission_issue = private_permission_issue(&metadata)?;
+        let permission_issue = private_permission_issue(&self.path, &metadata)?;
         let mut config = match parse_json_no_duplicates::<McpConfigFile>(&bytes) {
             Ok(config) => config,
             Err(error) => {
@@ -1043,9 +1065,19 @@ impl McpConfigStore {
         }
     }
 
-    #[cfg(not(unix))]
-    fn write_new(&self, _config: &McpConfigFile) -> Result<()> {
-        anyhow::bail!("windows_private_storage_not_implemented")
+    #[cfg(windows)]
+    fn write_new(&self, config: &McpConfigFile) -> Result<()> {
+        let bytes = canonical_bytes(config)?;
+        match create_private_bytes(&self.path, &bytes) {
+            Ok(()) => Ok(()),
+            Err(_error) if self.path.exists() => {
+                drop(open_private_read_file(&self.path)?);
+                Ok(())
+            }
+            Err(error) => Err(error).with_context(|| {
+                format!("failed to initialize MCP config {}", self.path.display())
+            }),
+        }
     }
 
     #[cfg(unix)]
@@ -1076,9 +1108,24 @@ impl McpConfigStore {
         result
     }
 
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    fn write(&self, config: &McpConfigFile) -> Result<()> {
+        atomic_write_private_bytes(&self.path, &canonical_bytes(config)?).with_context(|| {
+            format!(
+                "failed to atomically replace MCP config {}",
+                self.path.display()
+            )
+        })
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    fn write_new(&self, _config: &McpConfigFile) -> Result<()> {
+        anyhow::bail!("private MCP storage is unsupported on this platform")
+    }
+
+    #[cfg(not(any(unix, windows)))]
     fn write(&self, _config: &McpConfigFile) -> Result<()> {
-        anyhow::bail!("windows_private_storage_not_implemented")
+        anyhow::bail!("private MCP storage is unsupported on this platform")
     }
 }
 
@@ -1095,13 +1142,18 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 #[cfg(unix)]
-fn private_permission_issue(metadata: &fs::Metadata) -> Result<bool> {
+fn private_permission_issue(_path: &Path, metadata: &fs::Metadata) -> Result<bool> {
     Ok(metadata.permissions().mode() & 0o077 != 0)
 }
 
-#[cfg(not(unix))]
-fn private_permission_issue(_metadata: &fs::Metadata) -> Result<bool> {
-    anyhow::bail!("windows_private_storage_not_implemented")
+#[cfg(windows)]
+fn private_permission_issue(path: &Path, _metadata: &fs::Metadata) -> Result<bool> {
+    Ok(open_private_read_file(path).is_err())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn private_permission_issue(_path: &Path, _metadata: &fs::Metadata) -> Result<bool> {
+    anyhow::bail!("private MCP storage is unsupported on this platform")
 }
 
 fn parse_single_public_entry(
@@ -1541,7 +1593,7 @@ fn sensitive_key(key: &str) -> bool {
         .any(|part| normalized.contains(part))
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 fn canonical_bytes(config: &McpConfigFile) -> Result<Vec<u8>> {
     let mut bytes = serde_json::to_vec_pretty(config)?;
     bytes.push(b'\n');
@@ -1661,6 +1713,16 @@ mod slow_tests {
             .collect()
     }
 
+    fn write_raw_config(store: &McpConfigStore, bytes: &[u8]) {
+        #[cfg(unix)]
+        {
+            fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+            fs::write(store.path(), bytes).unwrap();
+        }
+        #[cfg(windows)]
+        create_private_bytes(store.path(), bytes).unwrap();
+    }
+
     fn stdio_json(name: &str, command: &str) -> String {
         format!(r#"{{"mcpServers":{{"{name}":{{"command":"{command}","args":["server.js"]}}}}}}"#)
     }
@@ -1711,10 +1773,13 @@ mod slow_tests {
             raw,
             "{\n  \"mcpServers\": {},\n  \"_rovai\": {\n    \"schemaVersion\": 2,\n    \"servers\": {},\n    \"assignments\": []\n  }\n}\n"
         );
+        #[cfg(unix)]
         assert_eq!(
             fs::metadata(store.path()).unwrap().permissions().mode() & 0o777,
             0o600
         );
+        #[cfg(windows)]
+        assert!(open_private_read_file(store.path()).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -1769,10 +1834,9 @@ mod slow_tests {
     #[test]
     fn pre_release_migration_removes_only_builtin_sources_and_their_assignments() {
         let (root, store) = temporary_store("builtin-clean-break");
-        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(
-            store.path(),
-            r#"{
+        write_raw_config(
+            &store,
+            br#"{
               "mcpServers": {
                 "builtin-renamed": {"command": "custom-browser"},
                 "context7": {"url": "https://user.example/mcp"},
@@ -1809,8 +1873,7 @@ mod slow_tests {
                 ]
               }
             }"#,
-        )
-        .unwrap();
+        );
 
         assert_eq!(
             store.migrate_pre_release_config().unwrap(),
@@ -1850,8 +1913,7 @@ mod slow_tests {
     #[test]
     fn invalid_pre_release_config_is_removed_before_empty_initialization() {
         let (root, store) = temporary_store("invalid-clean-break");
-        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(store.path(), b"{broken").unwrap();
+        write_raw_config(&store, b"{broken");
 
         assert_eq!(
             store.migrate_pre_release_config().unwrap(),
@@ -2114,8 +2176,7 @@ mod slow_tests {
     #[test]
     fn invalid_existing_bytes_are_preserved() {
         let (root, store) = temporary_store("invalid");
-        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
-        fs::write(store.path(), b"{broken").unwrap();
+        write_raw_config(&store, b"{broken");
         let view = store.get(&agents()).unwrap();
         assert_eq!(
             view.file_issue.as_ref().map(|issue| issue.code.as_str()),
@@ -2136,6 +2197,25 @@ mod slow_tests {
             Some("mcp.config_missing")
         );
         assert!(!store.path().exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_permission_repair_restricts_an_owned_inherited_config() {
+        let (root, store) = temporary_store("windows-permission-repair");
+        fs::create_dir_all(store.path().parent().unwrap()).unwrap();
+        fs::write(
+            store.path(),
+            canonical_bytes(&McpConfigFile::empty()).unwrap(),
+        )
+        .unwrap();
+        assert!(store.inspect(&agents()).unwrap().permission_issue);
+
+        store.repair_permissions().unwrap();
+
+        assert!(!store.inspect(&agents()).unwrap().permission_issue);
+        assert!(open_private_read_file(store.path()).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 }

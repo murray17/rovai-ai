@@ -192,13 +192,16 @@ mod tests {
 
         drop(first);
         let second = CoreDataDirLock::acquire(&directory.0).unwrap();
+        // Windows byte-range locks also reject reads through a separate file
+        // handle. Release the lease before reopening the retained diagnostic
+        // file; the persistence assertion does not require the lease itself.
+        drop(second);
         let owner: CoreDataDirOwner = serde_json::from_slice(
             &std::fs::read(directory.0.join(CORE_DATA_DIR_LOCK_FILE)).unwrap(),
         )
         .unwrap();
         assert_eq!(owner.schema_version, 1);
         assert_eq!(owner.process_id, std::process::id());
-        drop(second);
     }
 
     #[cfg(unix)]

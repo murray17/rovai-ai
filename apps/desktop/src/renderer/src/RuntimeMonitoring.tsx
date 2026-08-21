@@ -10,6 +10,7 @@ import type {
   RuntimeUsageTrendPoint
 } from '@contracts'
 import { SettingsPageHeader } from './SettingsPageHeader'
+import { revealInFileManagerLabel } from './renderer-platform'
 
 export const MONITORING_POLL_INTERVAL_MS = 12_000
 export const MONITORING_EVENT_DEBOUNCE_MS = 300
@@ -60,7 +61,11 @@ const SUMMARY_METRICS = [
   ['reasoningOutputTokens', 'Reasoning Output', 'integer']
 ] as const
 
-export function RuntimeMonitoring(): React.JSX.Element {
+export function RuntimeMonitoring({
+  platform = 'darwin'
+}: {
+  platform?: NodeJS.Platform
+} = {}): React.JSX.Element {
   const [filter, setFilter] = useState<MonitoringFilter>({ range: '24h' })
   const [snapshot, setSnapshot] = useState<RuntimeUsageSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -265,7 +270,7 @@ export function RuntimeMonitoring(): React.JSX.Element {
         {exportPath && (
           <div className="monitoring-export-notice" role="status">
             <span>导出已保存。</span>
-            <button className="quiet-button compact" type="button" onClick={() => void window.rovai.revealMonitoringExport(exportPath)}>在 Finder 中显示</button>
+            <button className="quiet-button compact" type="button" onClick={() => void window.rovai.revealMonitoringExport(exportPath)}>{revealInFileManagerLabel(platform)}</button>
           </div>
         )}
         {exportError && (

@@ -367,6 +367,12 @@ impl SkillProjectionReconciler {
         library: &SkillLibraryService,
         execution_root: &Path,
     ) -> Result<()> {
+        let execution_root = execution_root.canonicalize().with_context(|| {
+            format!(
+                "Skill projection execution root is unavailable after Run terminal: {}",
+                execution_root.display()
+            )
+        })?;
         let execution_root_text = execution_root.to_string_lossy().to_string();
         if !root_is_dirty(database, &execution_root_text)? {
             return Ok(());
@@ -377,7 +383,7 @@ impl SkillProjectionReconciler {
             return Ok(());
         }
         if cfg!(windows)
-            && projection_mutation_blocked(database, execution_root, &execution_root_text, None)?
+            && projection_mutation_blocked(database, &execution_root, &execution_root_text, None)?
         {
             return Ok(());
         }
@@ -395,7 +401,7 @@ impl SkillProjectionReconciler {
         let report = self.reconcile_root_internal(
             database,
             library,
-            execution_root,
+            &execution_root,
             &required_delivery_groups,
             None,
         )?;
@@ -1539,6 +1545,10 @@ fn reconcile_undesired_entry(
             {
                 anyhow::bail!("skill_projection_platform_not_supported")
             }
+        }
+        #[cfg(windows)]
+        EntryState::ProjectOwned(_) if skill.lifecycle_status == "deleting" => {
+            delete_observation(database, execution_root, group_key, &skill.id)
         }
         #[cfg(windows)]
         EntryState::ProjectOwned(reason)

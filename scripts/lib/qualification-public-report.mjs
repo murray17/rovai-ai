@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   QUALIFICATION_RUNNER_VERSION,
+  artifactFileName,
   atomicWriteJson,
   canonicalJson,
   digestJson,
@@ -118,7 +119,7 @@ export function buildPublicBenchmarkReport({
 
 export async function retainPublicBenchmarkReportArtifact(evidenceDirectory, artifact, evidenceIndex = null) {
   validatePublicBenchmarkReport(artifact, evidenceIndex)
-  const locator = join('public-reports', `${artifact.artifactId}.json`)
+  const locator = join('public-reports', artifactFileName(artifact.artifactId))
   await writeImmutableJsonOrVerify(join(evidenceDirectory, locator), artifact)
   await atomicWriteJson(join(evidenceDirectory, 'public-report.json'), artifact)
   return {

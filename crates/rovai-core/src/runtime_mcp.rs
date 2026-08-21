@@ -184,14 +184,14 @@ impl Drop for EphemeralMcpConfigFile {
     }
 }
 
-fn set_private_directory_permissions(directory: &Path) -> Result<()> {
+fn set_private_directory_permissions(_directory: &Path) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(directory, fs::Permissions::from_mode(0o700)).with_context(|| {
+        fs::set_permissions(_directory, fs::Permissions::from_mode(0o700)).with_context(|| {
             format!(
                 "failed to restrict external MCP directory {}",
-                directory.display()
+                _directory.display()
             )
         })?;
     }

@@ -11,6 +11,7 @@ const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const commandOutputOnly = process.env.ROVAI_ACP_COMMAND_OUTPUT_ONLY === '1'
+const keepFixture = process.env.ROVAI_KEEP_ACP_RUNTIME_FIXTURE === '1'
 let core
 let shuttingDown = false
 
@@ -90,6 +91,26 @@ try {
       token: 'ROVAI_COPILOT_ACP_OK'
     },
     {
+      adapterKind: 'kiro-cli',
+      permissionValues: { trust_all_tools: process.env.ROVAI_KIRO_TRUST_ALL_TOOLS ?? 'off' },
+      token: 'ROVAI_KIRO_ACP_OK'
+    },
+    {
+      adapterKind: 'qoder-cli',
+      permissionValues: { permission_mode: process.env.ROVAI_QODER_PERMISSION_MODE ?? 'default' },
+      token: 'ROVAI_QODER_ACP_OK'
+    },
+    {
+      adapterKind: 'codebuddy-cli',
+      permissionValues: { permission_mode: process.env.ROVAI_CODEBUDDY_PERMISSION_MODE ?? 'default' },
+      token: 'ROVAI_CODEBUDDY_ACP_OK'
+    },
+    {
+      adapterKind: 'qwen-code',
+      permissionValues: { approval_mode: process.env.ROVAI_QWEN_APPROVAL_MODE ?? 'default' },
+      token: 'ROVAI_QWEN_ACP_OK'
+    },
+    {
       adapterKind: 'trae-cn-cli',
       permissionValues: { permission_mode: process.env.ROVAI_TRAE_PERMISSION_MODE ?? 'default' },
       token: 'ROVAI_TRAE_ACP_OK'
@@ -110,13 +131,18 @@ try {
     }
 
     let profile = await request('members.get', { agentId })
+    const explicitModelId = specification.adapterKind === 'codebuddy-cli'
+      ? process.env.ROVAI_CODEBUDDY_MODEL?.trim()
+      : null
     const permissionsConfigured = await request('members.runtime.set', {
       commandId: crypto.randomUUID(),
       command: {
         agentId: profile.agentId,
         expectedVersion: profile.version,
         adapterKind: specification.adapterKind,
-        model: profile.runtimeConfiguration.model,
+        model: explicitModelId
+          ? { mode: 'explicit', modelId: explicitModelId, options: {} }
+          : profile.runtimeConfiguration.model,
         permissions: {
           adapterKind: specification.adapterKind,
           schemaVersion: installation.snapshot.permissionSchemaVersion,
@@ -131,6 +157,14 @@ try {
       })}`)
     }
     profile = await request('members.get', { agentId })
+    if (explicitModelId
+        && profile.runtimeConfiguration?.model?.modelId !== explicitModelId) {
+      throw new Error(`ACP smoke model override drifted: ${JSON.stringify({
+        adapterKind: specification.adapterKind,
+        expected: explicitModelId,
+        actual: profile.runtimeConfiguration?.model
+      })}`)
+    }
     if (JSON.stringify(profile.runtimeConfiguration?.permissions?.values)
         !== JSON.stringify(specification.permissionValues)) {
       throw new Error(`ACP smoke permissions drifted: ${JSON.stringify({
@@ -208,15 +242,15 @@ try {
       output: output.body
     })
 
-    if (['opencode-cli', 'copilot-cli', 'trae-cn-cli'].includes(specification.adapterKind)) {
+    if (specifications.some(({ adapterKind }) => adapterKind === specification.adapterKind)) {
       const commandMarker = `ROVAI_${specification.adapterKind.replaceAll('-', '_').toUpperCase()}_PRINTF_OK`
       const commandRequest = await sendExistingCampMessage(
         request,
         camp.id,
-        `Use the Bash or terminal tool exactly once to run this command without changing files: printf '%s\\n' '${commandMarker}'. Do not call any other tool. Then immediately reply exactly ACP_COMMAND_OUTPUT_OK.`,
+        `Use the Bash or terminal tool exactly once to run this cross-platform command without changing files: echo ${commandMarker}. Do not call any other tool. Then immediately reply exactly ACP_COMMAND_OUTPUT_OK.`,
         {
           taskId: null,
-          purpose: 'Verify fixed printf command output enters Runtime Evidence',
+          purpose: 'Verify fixed command output enters Runtime Evidence',
           completionRole: 'required'
         }
       )
@@ -235,22 +269,22 @@ try {
         )) {
           const option = approval.options.find((candidate) => candidate.kind === 'allow_once')
             ?? approval.options.find((candidate) => candidate.kind === 'allow_session')
-          if (!option) throw new Error(`ACP printf request has no exact allow option: ${JSON.stringify(approval)}`)
+          if (!option) throw new Error(`ACP command-output request has no exact allow option: ${JSON.stringify(approval)}`)
           const resolution = await request('action.approvals.resolve', {
             commandId: crypto.randomUUID(),
             campId: camp.id,
             approvalId: approval.id,
             expectedVersion: approval.version,
             optionId: option.optionId,
-            reason: 'ACP fixed printf output smoke test'
+            reason: 'ACP fixed command output smoke test'
           })
-          if (resolution.status === 'rejected') throw new Error(`ACP printf approval was rejected: ${JSON.stringify(resolution)}`)
+          if (resolution.status === 'rejected') throw new Error(`ACP command-output approval was rejected: ${JSON.stringify(resolution)}`)
           commandApprovals.add(approval.id)
         }
         commandRun = commandSnapshot.agentRuns.find((value) => value.id === commandRunId)
         if (commandRun?.status === 'succeeded') break
         if (commandRun?.status === 'failed' || commandRun?.status === 'cancelled') {
-          throw new Error(`${specification.adapterKind} printf AgentRun entered ${commandRun.status}: ${JSON.stringify({
+          throw new Error(`${specification.adapterKind} command-output AgentRun entered ${commandRun.status}: ${JSON.stringify({
             commandRun,
             actions: commandSnapshot.actions.filter((action) => action.agentRunId === commandRunId),
             events: events.filter((event) => event.params?.agentRunId === commandRunId).slice(-30)
@@ -258,23 +292,31 @@ try {
         }
         await new Promise((resolveWait) => setTimeout(resolveWait, 250))
       }
-      const commandOutputEvent = events.find((event) =>
-        event.method === 'runtime.action'
-          && event.params?.agentRunId === commandRunId
-          && String(event.params?.payload?.output ?? '').includes(commandMarker)
+      const commandRuntimeActions = events.filter((event) =>
+        event.method === 'runtime.action' && event.params?.agentRunId === commandRunId
       )
+      const commandOutputEvent = commandRuntimeActions.find((event) => {
+        const output = String(event.params?.payload?.output ?? '')
+        const presentation = String(event.params?.canonical?.presentationHint ?? '')
+        const markerObserved = output.includes(commandMarker) || presentation.includes(commandMarker)
+        const canonical = event.params?.canonical
+        return markerObserved && (canonical
+          ? canonical.phase === 'terminal' && canonical.outcome === 'succeeded'
+          : !/exit code [1-9]\d*/i.test(output))
+      })
       if (commandRun?.status !== 'succeeded' || !commandOutputEvent) {
-        throw new Error(`${specification.adapterKind} fixed printf output was not projected: ${JSON.stringify({
+        throw new Error(`${specification.adapterKind} fixed command output was not projected: ${JSON.stringify({
           commandRun,
           marker: commandMarker,
-          runtimeActions: events.filter((event) =>
-            event.method === 'runtime.action' && event.params?.agentRunId === commandRunId
-          )
+          runtimeActions: commandRuntimeActions
         })}`)
       }
       results.at(-1).commandOutput = {
         marker: commandMarker,
-        output: commandOutputEvent.params.payload.output,
+        output: commandOutputEvent.params.payload.output
+          ?? commandOutputEvent.params.canonical?.presentationHint,
+        outcome: commandOutputEvent.params.canonical?.outcome ?? 'observed',
+        rawOutputDigest: commandOutputEvent.params.payload.rawOutputDigest ?? null,
         approvalCount: commandApprovals.size
       }
       if (commandOutputOnly) continue
@@ -283,13 +325,28 @@ try {
       const adapterFileStem = ({
         'opencode-cli': 'OPENCODE',
         'copilot-cli': 'COPILOT',
+        'kiro-cli': 'KIRO',
+        'qoder-cli': 'QODER',
+        'codebuddy-cli': 'CODEBUDDY',
+        'qwen-code': 'QWEN',
         'trae-cn-cli': 'TRAE'
       })[specification.adapterKind]
       const writePath = join(projectRoot, `ACP_APPROVED_${adapterFileStem}.txt`)
+      if (specification.adapterKind === 'codebuddy-cli') {
+        // CodeBuddy's DeepSeek provider expresses Edit as an update-only patch.
+        // Seed an empty target so this case still verifies one mediated write;
+        // the denial case below continues to use a missing path.
+        await writeFile(writePath, '')
+      }
+      const writeInstruction = specification.adapterKind === 'codebuddy-cli'
+        ? `Use the terminal tool exactly once to run this command: powershell.exe -NoProfile -Command "Set-Content -LiteralPath '${writePath}' -Value '${writeToken}'".`
+        : specification.adapterKind === 'qwen-code'
+          ? `Use the terminal tool exactly once to run this Windows shell built-in command: echo ${writeToken}> "${writePath}".`
+          : `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline.`
       const writeRequest = await sendExistingCampMessage(
         request,
         camp.id,
-        `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`,
+        `${writeInstruction} Do not call any other tool before or after it. Then immediately reply exactly ACP_WRITE_OK.`,
         {
           taskId: null,
           purpose: 'Verify ACP permission mediation and one-time file write authorization',
@@ -347,8 +404,10 @@ try {
         if (error?.code === 'ENOENT') return null
         throw error
       })
+      const writtenMatches = written === `${writeToken}\n`
+        || (process.platform === 'win32' && written === `${writeToken}\r\n`)
       if (writeRun?.status !== 'succeeded'
-          || written !== `${writeToken}\n`
+          || !writtenMatches
           || !writeActions.some((action) => action.status === 'succeeded')
           || writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId
           || (specification.adapterKind === 'trae-cn-cli'
@@ -360,8 +419,10 @@ try {
           expectedHostInstanceId: results.at(-1).hostInstanceId,
           expectedNativeSessionId: results.at(-1).nativeSessionId,
           written,
-          hostLogs: events.filter((event) => event.method === 'runtime.host.log'),
-          events: events.filter((event) => event.params?.agentRunId === writeRunId).slice(-30)
+          hostLogs: events.filter((event) => event.method === 'runtime.host.log').slice(-30),
+          events: events.filter((event) =>
+            event.params?.agentRunId === writeRunId && event.method !== 'runtime.event'
+          ).slice(-30)
         })}`)
       }
       results.at(-1).approval = {
@@ -374,12 +435,18 @@ try {
 
       const approvalExpected = specification.permissionValues.permission === 'ask'
         || specification.permissionValues.allow_all === 'off'
+        || specification.permissionValues.trust_all_tools === 'off'
         || specification.permissionValues.permission_mode === 'default'
+        || specification.permissionValues.approval_mode === 'default'
       if (approvalExpected) {
         const deniedPath = join(projectRoot, `ACP_DENIED_${adapterFileStem}.txt`)
         const deniedBody = specification.adapterKind === 'trae-cn-cli'
           ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf 'DENIED_WRITE\\n' > '${deniedPath}'. Do not simulate or explain the tool call. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
-          : `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+          : specification.adapterKind === 'codebuddy-cli'
+            ? `Use the terminal tool exactly once to run this command: powershell.exe -NoProfile -Command "Set-Content -LiteralPath '${deniedPath}' -Value 'DENIED_WRITE'". Do not call any other tool. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+            : specification.adapterKind === 'qwen-code'
+              ? `Use the terminal tool exactly once to run this Windows shell built-in command: echo DENIED_WRITE> "${deniedPath}". Do not call any other tool. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+            : `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
         const deniedRequest = await sendExistingCampMessage(
           request,
           camp.id,
@@ -454,7 +521,7 @@ try {
     ])
     if (core.exitCode === null) core.kill('SIGTERM')
   }
-  await rm(fixtureRoot, { recursive: true, force: true })
+  if (!keepFixture) await rm(fixtureRoot, { recursive: true, force: true })
 }
 
 async function sendExistingCampMessage(request, campId, body, execution) {

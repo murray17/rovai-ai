@@ -397,8 +397,10 @@ test('Semantic Judge artifacts are retained immutably with current-user-only per
       ...execution
     }, fixture.evidenceIndex)
     assert.equal(pointer.status, 'complete')
-    assert.equal((await stat(join(root, pointer.locator))).mode & 0o777, 0o600)
-    assert.equal((await stat(join(root, 'judge-evidence-pack.json'))).mode & 0o777, 0o600)
+    if (process.platform !== 'win32') {
+      assert.equal((await stat(join(root, pointer.locator))).mode & 0o777, 0o600)
+      assert.equal((await stat(join(root, 'judge-evidence-pack.json'))).mode & 0o777, 0o600)
+    }
   } finally {
     await rm(root, { recursive: true, force: true })
   }

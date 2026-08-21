@@ -10,7 +10,7 @@ export const THEME_OPTIONS: ReadonlyArray<{
     value: 'system',
     label: '跟随系统',
     englishLabel: 'System',
-    description: '随 macOS 外观自动使用瓷灰日间或 Steel Night。'
+    description: '随系统外观自动使用瓷灰日间或 Steel Night。'
   },
   {
     value: 'day',

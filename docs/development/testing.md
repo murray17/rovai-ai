@@ -192,7 +192,7 @@ pnpm build:desktop
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
 | `pnpm smoke:missing-send-recovery` | 全部十种 Runtime | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；七个 ACP 额外执行 tool→final 并生成独立协议 fixture；TRAE 使用同一严格 candidate/抑制规则 |
-| `pnpm accept:planned-shutdown` | Claude Code + packaged App | 在隔离 Git workspace/`userData` 中等待真实 input accepted 后退出，验证 deadline、自然 child exit、无伪 terminal、进程 reap、重启 blocker 与关闭 modal 截图；运行前先执行 `pnpm package:mac` |
+| `pnpm accept:planned-shutdown` | Claude Code + 当前平台 packaged App | 在隔离 Git workspace/`userData` 中等待真实 input accepted 后退出，验证 deadline、自然 child exit、无伪 terminal、进程 reap、重启 blocker 与关闭 modal 截图；运行前在 macOS 执行 `pnpm package:mac`，在 Windows x64 执行 `pnpm package:windows:x64` |
 | `pnpm accept:onboarding-ui` | 本机首个可用正式 Runtime + packaged App | 不调用模型；用全新隔离 `userData` 验证三页断点、真实 provisioning、`初次集结`、Draft-only starter、重启与 `1040×700` 双主题截图 |
 
 `pnpm smoke:runtime-permissions` 是 `smoke:action-approval` 与
@@ -229,6 +229,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | --- | --- |
 | `ROVAI_ACP_SMOKE_ADAPTER` | `smoke:acp-runtime` |
 | `ROVAI_ACP_COMMAND_OUTPUT_ONLY=1` | `smoke:acp-runtime` 在固定 `printf` output 断言后停止；不替代默认完整 write/deny 回归 |
+| `ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER` | 仅 Windows debug Core 的逐 Runtime 资格采集；值为一个精确 `AdapterKind`，或仅在跨 Runtime 交接 Smoke 中使用逗号分隔的精确 `AdapterKind` 列表。它只允许列出的 Adapter 进入真实 Smoke，不改变平台准入投影，release 构建忽略该变量 |
 | `ROVAI_SKILL_SMOKE_ADAPTERS` | Skill Runtime 列表或 `all` |
 | `ROVAI_SKILL_SMOKE_MODEL` | Skill Smoke 只选一种 Runtime 时要显式验证的模型 ID |
 | `ROVAI_MCP_SMOKE_ADAPTERS` | MCP Runtime 列表 |
@@ -237,6 +238,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | `ROVAI_MCP_TRAE_MODEL` | TRAE MCP Projection Smoke 的可选显式动态模型 ID；省略时使用 Runtime 当前默认 |
 | `ROVAI_CORE_EXECUTABLE` | 让 MCP Projection Smoke 使用指定 Core，例如 packaged App 内的 Release Core |
 | `ROVAI_MCP_QODER_MODEL` / `ROVAI_MCP_CODEBUDDY_MODEL` / `ROVAI_MCP_QWEN_MODEL` | 同名 MCP Projection Smoke 的显式模型 |
+| `ROVAI_CODEBUDDY_MODEL` | CodeBuddy ACP 资格探测启动时使用的显式模型；自定义模型需使用 CLI 报告的完整 ID（例如 `custom-local:deepseek-v4-flash`） |
 | `ROVAI_MEMORY_RUNTIME_ADAPTERS` | Memory Runtime 列表 |
 | `ROVAI_RECOVERY_ADAPTER` | Recovery Runtime |
 | `ROVAI_MISSING_SEND_RECOVERY_ADAPTERS` | Missing-Send Recovery Runtime 列表或 `all`（默认） |

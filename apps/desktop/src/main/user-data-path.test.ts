@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { join } from 'node:path'
 import { legacyUserDataPath } from './user-data-path'
 
 describe('legacyUserDataPath', () => {
   it('keeps the existing Rovai-ai data directory after the display name changes to Rovai AI', () => {
     const existing = new Set([
-      '/application-support/Rovai AI',
-      '/application-support/Rovai-ai'
+      join('/application-support', 'Rovai AI'),
+      join('/application-support', 'Rovai-ai')
     ])
     expect(
       legacyUserDataPath(
@@ -14,13 +15,13 @@ describe('legacyUserDataPath', () => {
         false,
         (path) => existing.has(path)
       )
-    ).toBe('/application-support/Rovai-ai')
+    ).toBe(join('/application-support', 'Rovai-ai'))
   })
 
   it('prefers the most recent existing Horizonward userData directory', () => {
     const existing = new Set([
-      '/application-support/Horizonward',
-      '/application-support/Lumen AI'
+      join('/application-support', 'Horizonward'),
+      join('/application-support', 'Lumen AI')
     ])
     expect(
       legacyUserDataPath(
@@ -29,11 +30,11 @@ describe('legacyUserDataPath', () => {
         false,
         (path) => existing.has(path)
       )
-    ).toBe('/application-support/Horizonward')
+    ).toBe(join('/application-support', 'Horizonward'))
   })
 
   it('keeps an existing Lumen userData directory when Rovai-ai has none', () => {
-    const existing = new Set(['/application-support/Lumen AI'])
+    const existing = new Set([join('/application-support', 'Lumen AI')])
     expect(
       legacyUserDataPath(
         '/application-support',
@@ -41,14 +42,14 @@ describe('legacyUserDataPath', () => {
         false,
         (path) => existing.has(path)
       )
-    ).toBe('/application-support/Lumen AI')
+    ).toBe(join('/application-support', 'Lumen AI'))
   })
 
   it('prefers the Rovai-ai directory once it exists', () => {
     const existing = new Set([
-      '/application-support/Rovai-ai',
-      '/application-support/Horizonward',
-      '/application-support/Lumen AI'
+      join('/application-support', 'Rovai-ai'),
+      join('/application-support', 'Horizonward'),
+      join('/application-support', 'Lumen AI')
     ])
     expect(
       legacyUserDataPath(

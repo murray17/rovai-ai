@@ -10,6 +10,9 @@ const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-action-approval-smoke-'))
 const projectRoot = join(fixtureRoot, 'project')
 const approvedMarker = join(fixtureRoot, 'approved-by-rovai')
+const approvedMarkerCommand = process.platform === 'win32'
+  ? `New-Item -ItemType File -Force -Path '${approvedMarker.replaceAll("'", "''")}' | Out-Null`
+  : `/usr/bin/touch ${approvedMarker}`
 const dataDir = join(fixtureRoot, 'data')
 let core
 let shuttingDown = false
@@ -74,12 +77,38 @@ try {
 
   const health = await request('health.check')
   const codexInstallation = await configureCodexRuntime(request, health, ['agent_2'])
+  let profile = await request('members.get', { agentId: 'agent_2' })
+  const permissionsConfigured = await request('members.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentId: profile.agentId,
+      expectedVersion: profile.version,
+      adapterKind: 'codex-cli',
+      model: profile.runtimeConfiguration.model,
+      permissions: {
+        adapterKind: 'codex-cli',
+        schemaVersion: codexInstallation.snapshot.permissionSchemaVersion,
+        values: {
+          sandbox_mode: 'workspace-write',
+          approval_policy: 'on-request'
+        }
+      }
+    }
+  })
+  if (permissionsConfigured.status !== 'applied') {
+    throw new Error(`Codex approval permissions were rejected: ${JSON.stringify(permissionsConfigured)}`)
+  }
+  profile = await request('members.get', { agentId: profile.agentId })
+  if (profile.runtimeConfiguration?.permissions?.values?.sandbox_mode !== 'workspace-write'
+      || profile.runtimeConfiguration?.permissions?.values?.approval_policy !== 'on-request') {
+    throw new Error(`Codex approval permissions drifted: ${JSON.stringify(profile.runtimeConfiguration)}`)
+  }
   const workspace = await request('workspaces.inspect', { path: projectRoot })
 
   const result = await createConfiguredCampAndSend(request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: `Run exactly this command with the shell tool: /usr/bin/touch ${approvedMarker}. The target is intentionally outside the project. Request approval, then after it succeeds reply ACTION_APPROVAL_OK.`,
+    body: `Run exactly this command with the shell tool: ${approvedMarkerCommand}. The target is intentionally outside the project. Request approval, then after it succeeds reply ACTION_APPROVAL_OK.`,
     address: { mode: 'explicit', agentIds: ['agent_2'] },
     purpose: 'Exercise one exact Rovai-ai Action Approval and then report success',
   })

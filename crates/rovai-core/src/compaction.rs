@@ -1043,6 +1043,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(enabled_epoch, ("best_effort".to_string(), 3));
+        drop(database);
         std::fs::remove_dir_all(directory).unwrap();
     }
 }

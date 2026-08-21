@@ -1,7 +1,5 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fs::OpenOptions,
-    io::Write,
     path::{Component, Path, PathBuf},
     sync::{
         Arc,
@@ -10,8 +8,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(unix)]
+use std::{fs::OpenOptions, io::Write};
+
 use anyhow::{Context, Result, bail};
-#[cfg(test)]
+#[cfg(all(test, unix))]
 use rovai_core::agent_runtime_adapter::TRAE_RUNTIME_DEFAULT_MODEL_ID;
 use rovai_core::{
     action::{
@@ -248,6 +249,7 @@ enum AcpSessionMessageRoute {
         sequence: u64,
     },
     ReplayQuarantined,
+    IdleMetadata,
     Quarantined(String),
     ReplayRejected(String),
     Missing,
@@ -433,7 +435,8 @@ impl AcpHost {
         } else {
             cwd
         };
-        command.current_dir(process_working_directory);
+        let process_working_directory = PathBuf::from(acp_protocol_path(process_working_directory));
+        command.current_dir(&process_working_directory);
         let spec = ManagedProcessLaunchSpec::capture(
             &command,
             ManagedProcessPurpose::RuntimeHost,
@@ -568,7 +571,14 @@ impl AcpHost {
                             .map(str::to_string);
                         let route = match session_id.as_deref() {
                             Some(session_id) => {
-                                host.route_session_message(session_id, line.len()).await
+                                host.route_session_message(
+                                    session_id,
+                                    line.len(),
+                                    message.get("method").and_then(Value::as_str),
+                                    message.get("id").is_none(),
+                                    Self::session_update_kind(&message),
+                                )
+                                .await
                             }
                             None => AcpSessionMessageRoute::Missing,
                         };
@@ -607,6 +617,7 @@ impl AcpHost {
                                         .await;
                                 }
                             }
+                            AcpSessionMessageRoute::IdleMetadata => {}
                             AcpSessionMessageRoute::Quarantined(reason) => {
                                 host.send_host_diagnostic(format!(
                                     "ACP Session message was quarantined: {reason}"
@@ -822,6 +833,9 @@ impl AcpHost {
         &self,
         session_id: &str,
         message_bytes: usize,
+        message_method: Option<&str>,
+        message_is_notification: bool,
+        session_update_kind: Option<&str>,
     ) -> AcpSessionMessageRoute {
         let mut routes = self.routes.write().await;
         let Some(route) = routes.get_mut(session_id) else {
@@ -859,7 +873,23 @@ impl AcpHost {
                 AcpSessionMessageRoute::ReplayQuarantined
             }
             AcpSessionPhase::Ready => {
-                let reason = "session-scoped message arrived without an active prompt".to_string();
+                if Self::idle_session_message(
+                    self.adapter_kind,
+                    message_method,
+                    message_is_notification,
+                    session_update_kind,
+                ) {
+                    return AcpSessionMessageRoute::IdleMetadata;
+                }
+                let reason = match session_update_kind {
+                    Some(kind) => {
+                        format!("session-scoped {kind} update arrived without an active prompt")
+                    }
+                    None => format!(
+                        "session-scoped {} message arrived without an active prompt",
+                        message_method.unwrap_or("unknown")
+                    ),
+                };
                 route.phase = AcpSessionPhase::ProtocolViolated {
                     reason: reason.clone(),
                 };
@@ -867,7 +897,23 @@ impl AcpHost {
                 AcpSessionMessageRoute::Quarantined(reason)
             }
             AcpSessionPhase::PromptCompleted(_) => {
-                let reason = "session-scoped message arrived after prompt completion".to_string();
+                if Self::idle_session_message(
+                    self.adapter_kind,
+                    message_method,
+                    message_is_notification,
+                    session_update_kind,
+                ) {
+                    return AcpSessionMessageRoute::IdleMetadata;
+                }
+                let reason = match session_update_kind {
+                    Some(kind) => {
+                        format!("session-scoped {kind} update arrived after prompt completion")
+                    }
+                    None => format!(
+                        "session-scoped {} message arrived after prompt completion",
+                        message_method.unwrap_or("unknown")
+                    ),
+                };
                 route.phase = AcpSessionPhase::ProtocolViolated {
                     reason: reason.clone(),
                 };
@@ -878,6 +924,53 @@ impl AcpHost {
                 AcpSessionMessageRoute::Quarantined(reason.clone())
             }
         }
+    }
+
+    fn session_update_kind(message: &Value) -> Option<&str> {
+        if message.get("method").and_then(Value::as_str) != Some("session/update") {
+            return None;
+        }
+        message
+            .pointer("/params/update/sessionUpdate")
+            .and_then(Value::as_str)
+    }
+
+    fn idle_session_update_kind(adapter_kind: AdapterKind, kind: &str) -> bool {
+        matches!(
+            kind,
+            "available_commands_update"
+                | "current_mode_update"
+                | "config_option_update"
+                | "session_info_update"
+        )
+            // CodeBuddy CLI 2.137.1 emits a session-scoped private usage
+            // notification after Session/model setup and before the first
+            // prompt. It carries accounting metadata only, so admitting it
+            // while idle must not open the same exception for other adapters.
+            || (adapter_kind == AdapterKind::CodebuddyCli && kind == "usage_update")
+    }
+
+    fn idle_session_message(
+        adapter_kind: AdapterKind,
+        method: Option<&str>,
+        message_is_notification: bool,
+        session_update_kind: Option<&str>,
+    ) -> bool {
+        session_update_kind
+            .is_some_and(|kind| Self::idle_session_update_kind(adapter_kind, kind))
+            // CodeBuddy's private command notifications may be emitted during
+            // Session setup before a prompt exists. Keep the exception scoped
+            // to notifications from CodeBuddy's own namespace; requests and
+            // other adapters still fail closed.
+            || (adapter_kind == AdapterKind::CodebuddyCli
+                && message_is_notification
+                && method.is_some_and(|value| value.starts_with("_codebuddy.ai/")))
+            // Kiro documents its `_kiro.dev/` extension notifications as
+            // optional enhancements which ACP clients may safely ignore. Only
+            // notifications are admitted here; extension requests still fail
+            // closed unless a prompt owns the Session route.
+            || (message_is_notification
+                && method.is_some_and(|value| value.starts_with("_kiro.dev/")))
     }
 
     async fn has_loading_replay(&self) -> bool {
@@ -1184,7 +1277,14 @@ impl AcpHost {
                 bail!("ACP Session failed Host/Run fencing");
             }
             if !matches!(route.phase, AcpSessionPhase::Ready) {
-                bail!("ACP Session already has an active prompt");
+                let reason = match &route.phase {
+                    AcpSessionPhase::LoadingReplay { .. } => "history replay is still loading",
+                    AcpSessionPhase::PromptActive(_) => "another prompt is active",
+                    AcpSessionPhase::PromptCompleted(_) => "the completed prompt is not detached",
+                    AcpSessionPhase::ProtocolViolated { reason } => reason.as_str(),
+                    AcpSessionPhase::Ready => unreachable!(),
+                };
+                bail!("ACP Session is not ready for a new prompt: {reason}");
             }
             route.phase = AcpSessionPhase::PromptActive(AcpActivePrompt {
                 prompt_id: prompt_id.clone(),
@@ -1527,7 +1627,7 @@ impl AcpRuntime {
         model_options: &Value,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
     ) -> Result<String> {
-        let cwd = self.execution_root.to_string_lossy().to_string();
+        let cwd = acp_protocol_path(&self.execution_root);
         let additional_directories = session_additional_directories(
             self.host.adapter_kind,
             self.attachment_access_root.as_deref(),
@@ -1716,7 +1816,7 @@ impl AcpRuntime {
             .and_then(acp_runtime_model_id_from_session)
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     async fn verification_evidence(&self) -> Option<(Value, Value)> {
         let initialize = self.host.initialize_result.read().await.clone()?;
         let session = self.session_result.read().await.clone()?;
@@ -2289,13 +2389,13 @@ impl AcpCliRuntimeAdapter {
         agent_run_id: &str,
         execution_epoch: i64,
     ) {
-        if matches!(self.kind, AdapterKind::KiroCli | AdapterKind::TraeCnCli) {
-            // Kiro must finish Host teardown, while TRAE must publish its
-            // quiescent Host to the warm LRU, before a durable terminal lets a
-            // successor Run compete for a process. complete_agent_run is
-            // idempotent, so the common post-terminal cleanup remains safe.
-            self.complete_agent_run(agent_run_id, execution_epoch).await;
-        }
+        // Publish a quiescent Host before the durable terminal lets a successor
+        // Run compete for it. Besides Kiro's process-scoped Session lock, warm
+        // ACP Hosts retain a PromptCompleted route until detach; exposing the
+        // terminal first can therefore race the successor into "active prompt".
+        // complete_agent_run is idempotent, so common post-terminal cleanup is
+        // still safe.
+        self.complete_agent_run(agent_run_id, execution_epoch).await;
     }
 
     pub async fn shutdown_all(&self) {
@@ -2549,6 +2649,11 @@ fn configure_runtime_command(
                     });
                 }
                 AdapterKind::CodebuddyCli => {
+                    // CodeBuddy resolves the launch model while creating an ACP
+                    // Session. A custom provider cannot be selected later with
+                    // session/set_model when session/new already rejected the
+                    // product-account default for missing authentication.
+                    command.arg("--model").arg(&runtime.model.model_id);
                     command.arg("--permission-mode").arg(if legacy_read_only {
                         "dontAsk"
                     } else {
@@ -2776,6 +2881,7 @@ fn configure_compaction_detector_command(
     }
 }
 
+#[cfg(unix)]
 fn qoder_post_compact_hook_settings(hook_command: &str) -> Value {
     json!({"hooks": {"PostCompact": [{
         "matcher": "manual|auto",
@@ -2786,6 +2892,7 @@ fn qoder_post_compact_hook_settings(hook_command: &str) -> Value {
     }]}})
 }
 
+#[cfg(unix)]
 fn codebuddy_compaction_hook_settings(hook_command: &str) -> Value {
     // CodeBuddy 2.133.1 completes emergency automatic compaction before
     // emitting SessionStart(source=compact). Its separate pre-message strategy
@@ -2800,6 +2907,7 @@ fn codebuddy_compaction_hook_settings(hook_command: &str) -> Value {
     }]}})
 }
 
+#[cfg(unix)]
 fn append_post_compact_hook(settings: &mut Value, hook_command: &str) -> Result<()> {
     let settings = settings
         .as_object_mut()
@@ -2830,6 +2938,7 @@ fn append_post_compact_hook(settings: &mut Value, hook_command: &str) -> Result<
     Ok(())
 }
 
+#[cfg(unix)]
 fn append_opencode_compaction_plugin(config: &mut Value, plugin_path: &Path) -> Result<()> {
     let config = config
         .as_object_mut()
@@ -2902,6 +3011,7 @@ fn prepare_qwen_private_home(
     Ok((private_home, source_home, settings))
 }
 
+#[cfg(unix)]
 fn write_private_json_file(path: &Path, value: &Value) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -2920,6 +3030,7 @@ fn write_private_json_file(path: &Path, value: &Value) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn write_private_text_file(path: &Path, value: &str) -> Result<()> {
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -2937,6 +3048,7 @@ fn write_private_text_file(path: &Path, value: &str) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 fn quote_posix_shell_word(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'"))
 }
@@ -2960,8 +3072,40 @@ fn session_additional_directories(
     }
     attachment_access_root
         .iter()
-        .map(|root| root.to_string_lossy().into_owned())
+        .map(|root| acp_protocol_path(root))
         .collect()
+}
+
+fn acp_protocol_path(path: &Path) -> String {
+    let value = path.to_string_lossy();
+    #[cfg(windows)]
+    {
+        if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+            return format!(r"\\{rest}");
+        }
+        if let Some(rest) = value.strip_prefix(r"\\?\") {
+            return rest.to_string();
+        }
+    }
+    value.into_owned()
+}
+
+#[cfg(all(test, windows))]
+mod windows_path_tests {
+    use super::acp_protocol_path;
+    use std::path::Path;
+
+    #[test]
+    fn acp_protocol_paths_do_not_expose_windows_verbatim_prefixes() {
+        assert_eq!(
+            acp_protocol_path(Path::new(r"\\?\C:\workspace\project")),
+            r"C:\workspace\project"
+        );
+        assert_eq!(
+            acp_protocol_path(Path::new(r"\\?\UNC\server\share\project")),
+            r"\\server\share\project"
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -3518,6 +3662,45 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
     Ok(canonical)
 }
 
+#[cfg(test)]
+mod route_policy_tests {
+    use super::*;
+
+    #[test]
+    fn codebuddy_idle_usage_is_metadata_without_weakening_other_adapters() {
+        assert!(AcpHost::idle_session_update_kind(
+            AdapterKind::CodebuddyCli,
+            "usage_update"
+        ));
+        assert!(!AcpHost::idle_session_update_kind(
+            AdapterKind::TraeCnCli,
+            "usage_update"
+        ));
+        assert!(AcpHost::idle_session_update_kind(
+            AdapterKind::TraeCnCli,
+            "available_commands_update"
+        ));
+        assert!(AcpHost::idle_session_message(
+            AdapterKind::CodebuddyCli,
+            Some("_codebuddy.ai/command"),
+            true,
+            None
+        ));
+        assert!(!AcpHost::idle_session_message(
+            AdapterKind::CodebuddyCli,
+            Some("_codebuddy.ai/command"),
+            false,
+            None
+        ));
+        assert!(!AcpHost::idle_session_message(
+            AdapterKind::TraeCnCli,
+            Some("_codebuddy.ai/command"),
+            true,
+            None
+        ));
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -3876,6 +4059,41 @@ while IFS= read -r ignored; do :; done
             .unwrap();
         assert_eq!(session_id, "session-old");
         assert!(receiver.try_recv().is_err());
+        let idle_metadata = json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "session-old",
+                "update": {
+                    "sessionUpdate": "available_commands_update",
+                    "availableCommands": []
+                }
+            }
+        });
+        assert!(matches!(
+            host.route_session_message(
+                "session-old",
+                serde_json::to_vec(&idle_metadata).unwrap().len(),
+                Some("session/update"),
+                true,
+                AcpHost::session_update_kind(&idle_metadata),
+            )
+            .await,
+            AcpSessionMessageRoute::IdleMetadata
+        ));
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
+        assert!(matches!(
+            host.route_session_message(
+                "session-old",
+                64,
+                Some("_kiro.dev/commands/available"),
+                true,
+                None,
+            )
+            .await,
+            AcpSessionMessageRoute::IdleMetadata
+        ));
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
 
         let prompt_id = runtime
             .start_prompt("delivery-current", "continue")

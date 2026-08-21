@@ -240,7 +240,11 @@ async function readJson(path) {
 
 async function readPrivateJson(path) {
   const metadata = await lstat(path)
-  if (!metadata.isFile() || metadata.isSymbolicLink() || (metadata.mode & 0o077) !== 0) {
+  if (
+    !metadata.isFile()
+    || metadata.isSymbolicLink()
+    || (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0)
+  ) {
     throw new Error('Diagnostic Portfolio private operator input must be a regular 0600 file')
   }
   return readJson(path)

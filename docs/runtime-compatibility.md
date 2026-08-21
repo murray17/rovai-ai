@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-19
+last_updated: 2026-08-21
 ---
 
 # Agent Runtime 兼容性清单
@@ -49,6 +49,40 @@ Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。下表是证据缺�
 必须独立覆盖 discovery、executable identity、authentication、first run、Session continuation、Built-in Tool
 v14、Approval、cancellation、final boundary、process cleanup 与 planned shutdown；证据 revision 必须不可变且
 digest-bound。
+
+### 2026-08-21 Windows 10 22H2 本机实施复核
+
+本轮在 Windows 10 Pro 22H2 x64（build `19045.6466`）完成开发态全流程复核。它证明当前代码和下列本机安装
+可以进入真实 Runtime、Tool、MCP、Skill 与恢复路径，但不是 `Runtime Platform Admission` 的发布证据：执行时
+仅对正在测试的单个 Adapter 使用了开发验收覆盖，正式 packaged Release 对十个 Adapter 仍全部返回
+`runtime_platform_not_qualified`。Windows 11、逐项 cancellation/process-cleanup/planned-shutdown 和不可变
+digest-bound evidence 尚未形成，因此上表的 admission 与 evidence revision 均不改变。
+
+| AdapterKind | 本机版本 | 本轮认证/模型边界 |
+| --- | --- | --- |
+| `codex-cli` | `0.148.0` | 已登录账号；Runtime-native 模型目录 |
+| `opencode-cli` | `1.18.19` | 本机 Provider 配置；Runtime-native 模型目录 |
+| `copilot-cli` | `1.0.80` | 已登录 GitHub 账号；Runtime default |
+| `claude-code-cli` | `2.1.86` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash` |
+| `antigravity-app` | `1.1.17` | 已完成 AGY 账号授权；Runtime default |
+| `kiro-cli` | `2.19.0` | 本机账号态；Runtime default |
+| `qoder-cli` | `1.1.27` | DeepSeek API key；`deepseek-v4-flash` |
+| `codebuddy-cli` | `2.137.1` | 官方 `CODEBUDDY_API_KEY`/`CODEBUDDY_BASE_URL` ACP 路径；`custom-local:deepseek-v4-flash` |
+| `qwen-code` | `0.21.14` | DeepSeek API key；仅保留 `deepseek-v4-flash` Provider/model |
+| `trae-cn-cli` | `0.120.52` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash`，关闭 thinking |
+
+本机验证包含 Rust PR test profile、TypeScript/Vitest/Node tests、Windows x64 unpacked/NSIS 构建与 PE/manifest
+验证、clean install/start/upgrade/uninstall/data-preserve，以及十个 Runtime 的真实 ACP、Built-in CLI v17、
+Missing-Send Recovery 与 MCP Projection 矩阵。原生 Skill Projection 对支持该入口的九个 Runtime 通过；TRAE
+仍按既有边界不声明 Rovai Skill 路径。开发态 packaged Desktop 以 Claude `2.1.86` 完成真实 planned shutdown：
+Runtime 自然退出、7 个后代进程被 Job 回收、协议 v2 收敛、重启后 fenced Run 恢复为 cancelled，Release sidecar
+随后恢复并重新通过 verifier。
+
+CodeBuddy `2.137.1` 还暴露了两项版本差异：Session/model setup 后会在首个 Prompt 前发送私有
+`usage_update` 与 `_codebuddy.ai/command` notification。Core 只对 `codebuddy-cli` 的这两类空闲元数据放行，
+其他 Adapter、extension request 与未知 session-scoped message 继续 fail closed。修正后 CodeBuddy 的 ACP
+completion/continuation、allow-once/deny、15 项 Built-in operation、Missing-Send（49 个结构化 ACP tool event）、
+MCP Projection 与 `.codebuddy/skills` 全部以 Flash 模型通过。
 
 ### 2026-08-17 OpenCode Usage 与 Codex Cost Projection
 

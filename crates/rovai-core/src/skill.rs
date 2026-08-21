@@ -1833,6 +1833,7 @@ impl SkillLibraryService {
     }
 
     #[cfg(all(test, feature = "slow-tests"))]
+    #[allow(dead_code)]
     pub(crate) fn install_bundled_skill_for_test(
         &self,
         database: &mut Database,
@@ -3759,9 +3760,10 @@ mod windows_skill_library_tests {
             .unwrap();
         assert!(status.success(), "failed to create the junction fixture");
 
-        let error = stage_candidate(&source, "windows-tree", &sandbox.join("staging"))
-            .unwrap_err()
-            .to_string();
+        let error = format!(
+            "{:#}",
+            stage_candidate(&source, "windows-tree", &sandbox.join("staging")).unwrap_err()
+        );
         assert!(error.contains("reparse point"), "unexpected error: {error}");
 
         fs::remove_dir(&junction).unwrap();

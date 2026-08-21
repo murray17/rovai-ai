@@ -1,0 +1,76 @@
+name: Windows x64 package
+
+on:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "build/**"
+      - "crates/rovai-core/**"
+      - "resources/**"
+      - "scripts/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/windows-package.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/desktop/**"
+      - "build/**"
+      - "crates/rovai-core/**"
+      - "resources/**"
+      - "scripts/**"
+      - "Cargo.lock"
+      - "Cargo.toml"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - ".github/workflows/windows-package.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-package-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unsigned-package:
+    name: Windows x64 unsigned package
+    runs-on: windows-2022
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26
+
+      - name: Install pnpm
+        run: npm install --global pnpm@11.20.0
+
+      - name: Install Rust 1.97.1
+        run: |
+          rustup toolchain install 1.97.1 --profile minimal --target x86_64-pc-windows-msvc
+          rustup default 1.97.1
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and verify unsigned NSIS package
+        run: pnpm dist:windows:x64
+
+      - name: Upload unsigned package evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rovai-windows-x64-unsigned-${{ github.sha }}
+          path: |
+            dist/Rovai-ai-*-x64.exe
+            dist/Rovai-ai-*-x64.exe.blockmap
+            dist/windows-release-manifest.json
+            dist/windows-verification-report.txt
+            dist/win-unpacked/**
+          if-no-files-found: error

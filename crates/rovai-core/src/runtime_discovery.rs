@@ -35,6 +35,7 @@ use crate::{
 #[cfg(unix)]
 const SHELL_PATH_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(2);
+const CODEBUDDY_VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(unix)]
 const MAX_SHELL_PATH_BYTES: u64 = 64 * 1024;
 const MAX_VERSION_OUTPUT_BYTES: usize = 8 * 1024;
@@ -352,6 +353,7 @@ pub fn discover_runtime_path(
             .path
             .canonicalize()
             .unwrap_or_else(|_| candidate.path.clone());
+        let canonical = runtime_visible_path(canonical);
         match executable_fingerprint(&canonical) {
             Ok(fingerprint) => {
                 return RuntimeDiscoveryObservation {
@@ -525,6 +527,13 @@ fn version_arguments(kind: AdapterKind) -> &'static [&'static str] {
     }
 }
 
+fn version_timeout(kind: AdapterKind) -> Duration {
+    match kind {
+        AdapterKind::CodebuddyCli => CODEBUDDY_VERSION_TIMEOUT,
+        _ => VERSION_TIMEOUT,
+    }
+}
+
 async fn bounded_version_command(
     kind: AdapterKind,
     purpose: RuntimeLaunchPurpose,
@@ -541,7 +550,7 @@ async fn bounded_version_command(
     let output = run_bounded_command(
         &mut command,
         ProbeCommandLimits {
-            deadline: VERSION_TIMEOUT,
+            deadline: version_timeout(kind),
             stdout_bytes: MAX_VERSION_OUTPUT_BYTES,
             stderr_bytes: MAX_VERSION_OUTPUT_BYTES,
             cleanup_timeout: Duration::from_secs(1),
@@ -703,7 +712,22 @@ fn extend_paths(
 }
 
 fn normalize_directory(path: PathBuf) -> PathBuf {
-    path.canonicalize().unwrap_or(path)
+    let normalized = path.canonicalize().unwrap_or(path);
+    runtime_visible_path(normalized)
+}
+
+pub fn runtime_visible_path(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let value = path.to_string_lossy();
+        if let Some(rest) = value.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = value.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path
 }
 
 fn push_candidates(
@@ -729,7 +753,7 @@ fn push_concrete_candidate(
     path: PathBuf,
     source: InstallationSource,
 ) {
-    let canonical = path.canonicalize().unwrap_or(path);
+    let canonical = runtime_visible_path(path.canonicalize().unwrap_or(path));
     if candidates
         .iter()
         .any(|candidate| candidate.path == canonical)
@@ -1220,6 +1244,29 @@ mod tests {
 }
 
 #[cfg(all(test, windows))]
+mod windows_path_tests {
+    use super::*;
+
+    #[test]
+    fn normalized_runtime_path_entries_do_not_expose_verbatim_prefixes() {
+        let directory = env::temp_dir().join(format!(
+            "rovai-runtime-visible-path-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join("runtime.exe");
+        fs::write(&executable, b"native fixture").unwrap();
+
+        let normalized = normalize_directory(directory.clone());
+        assert!(!normalized.to_string_lossy().starts_with(r"\\?\"));
+        let executable = runtime_visible_path(executable.canonicalize().unwrap());
+        assert!(!executable.to_string_lossy().starts_with(r"\\?\"));
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+}
+
+#[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
 
@@ -1237,5 +1284,17 @@ mod windows_tests {
         assert!(!is_executable_file(&command_shim));
 
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn codebuddy_version_probe_allows_its_windows_cold_start() {
+        assert_eq!(
+            version_timeout(AdapterKind::CodebuddyCli),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            version_timeout(AdapterKind::CodexCli),
+            Duration::from_secs(2)
+        );
     }
 }

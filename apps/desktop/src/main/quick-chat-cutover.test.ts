@@ -36,7 +36,11 @@ describe('Quick Chat incompatible cutover', () => {
     await mkdir(userDataPath)
     await mkdir(outsidePath)
     await writeFile(join(outsidePath, 'preserved.txt'), 'preserved')
-    await symlink(outsidePath, join(userDataPath, 'lobby'))
+    await symlink(
+      outsidePath,
+      join(userDataPath, 'lobby'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    )
 
     await deleteRetiredManagedDirectory(userDataPath)
 
