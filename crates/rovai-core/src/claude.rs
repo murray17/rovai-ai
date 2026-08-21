@@ -1130,6 +1130,7 @@ fn normalize_claude_runtime_events(
                     .as_deref()
                     .filter(|name| name.eq_ignore_ascii_case("bash"))
                     .and_then(|_| public_claude_bash_output(event, block));
+                let input = state.tool_inputs.get(&tool_use_id).cloned();
                 let kind = tool_name.as_deref().map(claude_tool_kind).unwrap_or("tool");
                 let title = tool_name.clone();
                 normalized.push(ClaudeCodeRuntimeEvent {
@@ -1140,6 +1141,7 @@ fn normalize_claude_runtime_events(
                         "status": if failed { "failed" } else { "completed" },
                         "kind": kind,
                         "title": title,
+                        "input": input,
                         "output": output,
                     }),
                 });
@@ -2205,6 +2207,7 @@ exit 1
         assert_eq!(started.payload["input"], "printf CLAUDE_PRINTF_OK");
         assert_eq!(completed.payload["toolCallId"], "toolu_bash_1");
         assert_eq!(completed.payload["status"], "completed");
+        assert_eq!(completed.payload["input"], "printf CLAUDE_PRINTF_OK");
         assert_eq!(completed.payload["output"], "CLAUDE_PRINTF_OK");
         assert!(
             !serde_json::to_string(&completed.payload)

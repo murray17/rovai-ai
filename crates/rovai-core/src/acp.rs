@@ -1986,6 +1986,8 @@ impl AcpRuntime {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
             observed.native_kind =
                 Some(effective_action_kind(reported_kind, &raw_input).to_string());
+        } else if public_acp_shell_command(update.get("rawInput")).is_some() {
+            observed.native_kind = Some("execute".to_string());
         }
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
             observed.raw_input = Some(raw_input.clone());
@@ -2011,23 +2013,7 @@ impl AcpRuntime {
         let Some(mut completion) = completed_action(params)? else {
             return Ok(None);
         };
-        if let Some(native_kind) = observed.native_kind {
-            completion.native_kind = native_kind;
-        }
-        if let Some(observation_digest) = observed.observation_digest {
-            completion.observation_digest = observation_digest;
-        }
-        completion.effect_disposition = acp_effect_disposition(
-            matches!(completion.outcome, ActionResultOutcome::Succeeded),
-            &completion.native_kind,
-        )
-        .to_string();
-        if let Some(result_data) = completion.result_data.as_object_mut() {
-            result_data.insert(
-                "kind".to_string(),
-                Value::String(completion.native_kind.clone()),
-            );
-        }
+        completion = reconcile_completed_action(update, observed, completion)?;
         Ok(Some(completion))
     }
 
@@ -3284,6 +3270,10 @@ fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a s
         return reported_kind;
     }
 
+    if public_acp_shell_command(Some(raw_input)).is_some() {
+        return "execute";
+    }
+
     // OpenCode's ACP bridge currently reports an external-directory permission
     // request as `other`, even when the request belongs to a file-edit tool call.
     // The stable file target remains present in rawInput. Classify that narrow
@@ -3449,6 +3439,7 @@ pub fn legacy_approval_result(request: &Value, approved: bool) -> Result<Value> 
 pub struct CompletedAcpAction {
     pub native_item_id: String,
     pub native_kind: String,
+    pub public_command: Option<String>,
     pub observation_digest: String,
     pub outcome: ActionResultOutcome,
     pub result_code: String,
@@ -3466,11 +3457,11 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         }
         _ => return Ok(None),
     };
-    let status = update
+    let reported_status = update
         .get("status")
         .and_then(Value::as_str)
         .unwrap_or("in_progress");
-    if !matches!(status, "completed" | "failed") {
+    if !matches!(reported_status, "completed" | "failed") {
         return Ok(None);
     }
     let native_item_id = update
@@ -3478,7 +3469,8 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .and_then(Value::as_str)
         .context("ACP tool_call_update has no toolCallId")?
         .to_string();
-    let succeeded = status == "completed";
+    let raw_input = update.get("rawInput");
+    let public_command = public_acp_shell_command(raw_input);
     let raw_input_digest = update
         .get("rawInput")
         .map(canonical_json_digest)
@@ -3487,11 +3479,14 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .get("rawOutput")
         .map(canonical_json_digest)
         .transpose()?;
-    let native_kind = update
+    let reported_kind = update
         .get("kind")
         .and_then(Value::as_str)
-        .unwrap_or("other")
-        .to_string();
+        .unwrap_or("other");
+    let native_kind =
+        effective_action_kind(reported_kind, raw_input.unwrap_or(&Value::Null)).to_string();
+    let status = effective_acp_tool_status(update, &native_kind);
+    let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
         "nativeItemId": &native_item_id,
         "nativeKind": &native_kind,
@@ -3502,6 +3497,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
     Ok(Some(CompletedAcpAction {
         native_item_id: native_item_id.clone(),
         native_kind,
+        public_command,
         observation_digest,
         outcome: if succeeded {
             ActionResultOutcome::Succeeded
@@ -3537,6 +3533,58 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
     }))
 }
 
+fn reconcile_completed_action(
+    update: &Value,
+    observed: ObservedToolMetadata,
+    mut completion: CompletedAcpAction,
+) -> Result<CompletedAcpAction> {
+    let observed_raw_input_digest = observed
+        .raw_input
+        .as_ref()
+        .map(canonical_json_digest)
+        .transpose()?;
+    if completion.public_command.is_none() {
+        completion.public_command = public_acp_shell_command(observed.raw_input.as_ref());
+    }
+    if let Some(native_kind) = observed.native_kind {
+        completion.native_kind = native_kind;
+    }
+    if completion.native_kind == "other" && completion.public_command.is_some() {
+        completion.native_kind = "execute".to_string();
+    }
+    if let Some(observation_digest) = observed.observation_digest {
+        completion.observation_digest = observation_digest;
+    }
+    let effective_status = effective_acp_tool_status(update, &completion.native_kind);
+    completion.outcome = if effective_status == "completed" {
+        ActionResultOutcome::Succeeded
+    } else {
+        ActionResultOutcome::Failed
+    };
+    completion.result_code = format!("acp_tool_{effective_status}");
+    completion.effect_disposition = acp_effect_disposition(
+        matches!(completion.outcome, ActionResultOutcome::Succeeded),
+        &completion.native_kind,
+    )
+    .to_string();
+    if let Some(result_data) = completion.result_data.as_object_mut() {
+        result_data.insert(
+            "kind".to_string(),
+            Value::String(completion.native_kind.clone()),
+        );
+        result_data.insert("status".to_string(), Value::String(effective_status));
+        if result_data.get("rawInputDigest").is_none_or(Value::is_null)
+            && let Some(raw_input_digest) = observed_raw_input_digest
+        {
+            result_data.insert(
+                "rawInputDigest".to_string(),
+                Value::String(raw_input_digest),
+            );
+        }
+    }
+    Ok(completion)
+}
+
 fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     if succeeded {
         "complete"
@@ -3551,6 +3599,48 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     } else {
         "none"
     }
+}
+
+pub fn public_acp_shell_command(raw_input: Option<&Value>) -> Option<String> {
+    raw_input?
+        .get("command")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())
+        .map(str::to_string)
+}
+
+pub fn public_acp_tool_kind(update: &Value) -> Option<String> {
+    update
+        .get("kind")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+        .map(str::to_string)
+        .or_else(|| public_acp_shell_command(update.get("rawInput")).map(|_| "execute".to_string()))
+}
+
+pub fn effective_acp_tool_status(update: &Value, native_kind: &str) -> String {
+    let reported = update
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("in_progress");
+    if reported == "completed"
+        && native_kind == "execute"
+        && acp_tool_exit_code(update).is_some_and(|exit_code| exit_code != 0)
+    {
+        "failed".to_string()
+    } else {
+        reported.to_string()
+    }
+}
+
+fn acp_tool_exit_code(update: &Value) -> Option<i64> {
+    ["exitCode", "exit_code"].into_iter().find_map(|field| {
+        update
+            .get(field)
+            .or_else(|| update.get("rawOutput")?.get(field))
+            .and_then(Value::as_i64)
+    })
 }
 
 pub fn is_potential_side_effect(kind: &str) -> bool {
@@ -4957,7 +5047,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn completed_action_persists_digests_instead_of_raw_tool_payloads() {
+    fn completed_action_keeps_only_public_command_and_persists_raw_payload_digests() {
         let completion = completed_action(&json!({
             "update": {
                 "sessionUpdate": "tool_call_update",
@@ -4966,7 +5056,10 @@ while IFS= read -r ignored; do :; done
                 "kind": "execute",
                 "title": "Run command",
                 "rawInput": {"command": "echo TOP_SECRET_INPUT"},
-                "rawOutput": {"stdout": "TOP_SECRET_OUTPUT"}
+                "rawOutput": {
+                    "stdout": "TOP_SECRET_OUTPUT",
+                    "exitCode": 7
+                }
             }
         }))
         .expect("completion should normalize")
@@ -4979,7 +5072,55 @@ while IFS= read -r ignored; do :; done
         assert!(completion.result_data["rawInputDigest"].is_string());
         assert!(completion.result_data["rawOutputDigest"].is_string());
         assert_eq!(completion.native_kind, "execute");
+        assert_eq!(
+            completion.public_command.as_deref(),
+            Some("echo TOP_SECRET_INPUT")
+        );
+        assert!(matches!(completion.outcome, ActionResultOutcome::Failed));
+        assert_eq!(completion.result_data["status"], "failed");
         assert!(!completion.observation_digest.is_empty());
+
+        let sparse_update = json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "tool-sparse",
+            "status": "completed",
+            "rawOutput": {"stdout": "failed output", "exitCode": 7}
+        });
+        let sparse = completed_action(&json!({"update": sparse_update.clone()}))
+            .expect("sparse completion should normalize")
+            .expect("sparse terminal update should create a result");
+        let observed_raw_input = json!({
+            "command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
+            "credential": "SPARSE_PRIVATE_FIELD"
+        });
+        let observed_raw_input_digest = canonical_json_digest(&observed_raw_input).unwrap();
+        let reconciled = reconcile_completed_action(
+            &sparse_update,
+            ObservedToolMetadata {
+                native_kind: Some("execute".to_string()),
+                observation_digest: Some("observed-digest".to_string()),
+                raw_input: Some(observed_raw_input),
+                locations: None,
+            },
+            sparse,
+        )
+        .expect("active Prompt observation should enrich a sparse terminal update");
+        assert_eq!(reconciled.native_kind, "execute");
+        assert_eq!(
+            reconciled.public_command.as_deref(),
+            Some("printf 'SPARSE_TERMINAL_COMMAND\\n'")
+        );
+        assert_eq!(reconciled.result_data["status"], "failed");
+        assert_eq!(
+            reconciled.result_data["rawInputDigest"],
+            observed_raw_input_digest
+        );
+        assert!(
+            !reconciled
+                .result_data
+                .to_string()
+                .contains("SPARSE_PRIVATE_FIELD")
+        );
     }
 
     #[test]

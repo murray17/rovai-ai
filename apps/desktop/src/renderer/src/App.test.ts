@@ -3998,7 +3998,8 @@ describe('task event projections', () => {
       id: 'claude-bash-completed', agentRunId: 'run-claude', eventType: 'runtime.action',
       payload: {
         toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
-        toolName: 'Bash', title: 'Bash', output: null
+        toolName: 'Bash', title: 'Bash',
+        input: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'", output: null
       },
       canonical: canonicalActivity('toolu-claude-bash', {
         activityDomain: 'shell', semanticKind: 'shell.execute',
@@ -4009,11 +4010,16 @@ describe('task event projections', () => {
 
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
-      step: { title: 'printf', status: 'completed' }
+      step: {
+        title: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'",
+        status: 'completed'
+      }
     })
     const item = progress.items[0]
     if (item.kind !== 'tool') throw new Error('Expected Claude Bash tool progress')
-    expect(item.step.detail).toContain('ROVAI_CLAUDE_EMPTY_OUTPUT_OK')
+    expect(item.step.detail).toBe(
+      "命令\nprintf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
+    )
 
     const run: AgentRunView = {
       id: 'run-claude', campTurnId: 'turn-1', conversationId: 'conversation-claude',
@@ -4039,7 +4045,9 @@ describe('task event projections', () => {
     expect(markup).toContain('class="tool-call-state status-completed"')
     expect(markup).toContain('aria-label="成功"')
     expect(markup).toContain('tool-call-result-scroll')
-    expect(markup).toContain('class="tool-call-title" title="printf"')
+    expect(markup).toContain(
+      'class="tool-call-title" title="printf &#x27;%s\\n&#x27; &#x27;ROVAI_CLAUDE_EMPTY_OUTPUT_OK&#x27;"'
+    )
     expect(markup).not.toContain('tool-output-copy-button')
     expect(markup).not.toContain('>已完成<')
     expect(markup).not.toContain('tool-call-static')
@@ -4087,12 +4095,17 @@ describe('task event projections', () => {
       { adapter: 'qoder-cli', canonical: { ...genericShell, presentationHint: 'Search project' }, payload: {}, expected: 'Search project' },
       { adapter: 'codebuddy-cli', canonical: { ...genericShell, presentationHint: 'Apply patch' }, payload: {}, expected: 'Apply patch' },
       { adapter: 'qwen-code', canonical: { ...genericShell, presentationHint: 'Run tests' }, payload: {}, expected: 'Run tests' },
-      { adapter: 'trae-cn-cli', canonical: { ...genericShell, presentationHint: 'bash' }, payload: {}, expected: 'bash' },
+      {
+        adapter: 'trae-cn-cli',
+        canonical: { ...genericShell, presentationHint: 'bash' },
+        payload: { input: "printf 'TRAE_DISPLAY_LEFT\\n' && printf 'TRAE_DISPLAY_RIGHT\\n'" },
+        expected: "printf 'TRAE_DISPLAY_LEFT\\n' && printf 'TRAE_DISPLAY_RIGHT\\n'"
+      },
       {
         adapter: 'claude-code-cli',
         canonical: { ...genericShell, toolName: 'Bash', presentationHint: 'Bash' },
         payload: { input: "cargo test --package private-package -- token_must_not_leak" },
-        expected: 'cargo test'
+        expected: 'cargo test --package private-package -- token_must_not_leak'
       },
       {
         adapter: 'antigravity-app',
@@ -4285,6 +4298,13 @@ describe('task event projections', () => {
       output: { status: 'accepted', receiptId: 'receipt-1' },
       rawOutputDigest: 'must-not-be-rendered'
     })).toBe('{\n  "status": "accepted",\n  "receiptId": "receipt-1"\n}')
+    expect(executionEvidenceResultText('runtime.action', {
+      kind: 'execute',
+      input: "printf 'CLAUDE_DISPLAY_SINGLE\\n'",
+      output: 'CLAUDE_DISPLAY_SINGLE\n'
+    })).toBe(
+      "命令\nprintf 'CLAUDE_DISPLAY_SINGLE\\n'\n\n输出\nCLAUDE_DISPLAY_SINGLE\n"
+    )
     expect(executionEvidenceResultText('file.change.updated', {
       patch: '*** Begin Patch\n*** End Patch',
       itemId: 'hidden-identity'

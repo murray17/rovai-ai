@@ -18,8 +18,8 @@ last_updated: 2026-08-21
 | `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
-| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；实际 Probe 已证明稳定 `toolCallId`、结构化 permission request 与 started→terminal lifecycle；Terminal content 只作 display anchor | 受控 fixture 与固定 `printf` smoke 断言已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；当前安装真实 command-output smoke 通过，静态版本按 v0.87 边界保持 `null` |
-| `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal、空输出 Bash、narration/fallback、stdout 未结束前 structured retry diagnostic 与 provider error/UUID/Session/raw stderr 不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation 与实际 `system/api_retry` 429 重试流已实证；Rovai safe diagnostic UI 回归通过 |
+| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；仅 `rawInput.command` 进入公开 input，命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 公共 command/相邻 raw 字段排除、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；当前安装真实 command-output smoke 通过，完整展示 post-fix smoke 待运行 |
+| `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 started 与 terminal input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal command 自包含、空输出 Bash、narration/fallback、stdout 未结束前 structured retry diagnostic 与 provider error/UUID/Session/raw stderr 不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation 与实际 `system/api_retry` 429 重试流已实证；完整展示 post-fix smoke 待运行 |
 | `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json lifecycle/output 与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
@@ -89,7 +89,11 @@ wire shape，Core post-fix live smoke 仍需单独运行。
 | 未识别 | Evidence kind 可证明时使用其域，否则 `unknown` |
 
 `toolCallId` 是 lifecycle identity。ACP `title` 是 Runtime presentation hint，不是分类输入；只有明确的
-`toolName` 才作为精确名称。
+`toolName` 才作为精确名称。只有非空字符串 `rawInput.command` 可以投影为公开 `input`；相邻 rawInput 字段
+保持私有并只参与完整 `rawInputDigest`。Runtime 缺失 kind 时，这个窄 command shape 映射为 `execute`。同一
+`toolCallId` 的 terminal update 即使省略 rawInput/kind，也从当前 Prompt 的进程内观察携带相同 command、kind
+与 digest；不从 title 或 digest 推导。effective execute 的 `exitCode | exit_code` 非零时，公开 terminal status
+与 Action outcome 为 failed，即使 ACP tool lifecycle 报告 completed。
 
 Tool output 先读取 `ToolCallContent.type = content` 包裹的公开 text Content block，并兼容旧 adapter 的
 直接 text block。`diff`、image/audio/resource 与 `type = terminal` 都不被解释为命令输出；Rovai 声明
@@ -107,7 +111,8 @@ Client Terminal 不可用，因此不会读取 `terminalId` 或从私有 termina
 `--output-format stream-json --include-partial-messages` 中的 partial `content_block_start` 与完整 assistant
 `tool_use` 共同建立、去重同一个原生 tool-use ID；对应 user `tool_result` 结算 terminal。Bash 映射
 `shell.execute`，Read/Glob、Edit/Write、Grep/WebSearch 分别进入既有 file/tool domain；未知名称保持
-`tool.call`。只允许 Bash `tool_use.input.command` 进入公开 input，使没有 stdout/stderr 的命令仍可检查；
+`tool.call`。只允许 Bash `tool_use.input.command` 进入公开 input，并按 tool-use ID 同时放入 started 与 terminal
+Evidence，使没有 stdout/stderr或只加载 terminal 的命令仍可检查；
 只允许 Bash tool result 的公开 stdout/stderr 或标准公开 text result 进入 output。其它工具输入、文件内容和
 provider metadata 不公开。公开 `text_delta` 以 message/block-scoped item ID 投影为
 `agent.text.delta`；只有整次 Run 没有 text delta 时，才把已经公开的 success `result` 作为 narration
@@ -137,8 +142,10 @@ Capability snapshot 明确包含 `output.stream_json` 时，Adapter 消费公开
 - lifecycle completion 可以只报告 identity/status；这类稀疏更新只推进 phase/outcome，不得用 Evidence-kind fallback 覆盖同一 operation 已报告的结构化 domain、semantic kind 或 title；
 - terminal 冲突为 `unsettled`；
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
-- title、命令字符串、provider 和 Runtime 名称永远不决定 domain 或 identity；Codex 命令字符串只允许按上述
-  Renderer 边界生成完整脱敏的 presentation。
+- title、provider 和 Runtime 名称永远不决定 domain 或 identity；唯一例外是 Adapter 白名单公开的 ACP
+  `rawInput.command` 可在原生 kind 缺失时证明 shell/execute，但 command 正文不参与 operation identity。
+- 所有公开 Shell command 只允许按上述 Renderer 边界生成完整脱敏的 presentation；没有 command 时保持
+  toolName/title/domain fallback。
 - `runtime.diagnostic` 是 non-activity 状态证据；它不能因为 `kind=step`、Runtime 名称或展示文案而伪造成
   Tool operation，也不能替代可靠 terminal outcome。
 

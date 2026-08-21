@@ -56,6 +56,18 @@ last_updated: 2026-08-21
 - [x] Rust 时序测试覆盖实际 2.1.220 structured event 在 stdout 保持打开时即时投影，并与脱敏/分类、Renderer
   最新 attempt、状态诚实性和私有字段排除测试一并通过。
 
+## 6. Claude Code / TRAE Shell 展示维护修复
+
+- [x] Claude Bash started/terminal `runtime.action` 按同一 tool-use ID 携带相同公开 command；
+- [x] ACP 仅白名单公开 `rawInput.command`，稀疏 terminal update 从当前 Prompt 内存观察补齐
+  command/kind/digest，其他 rawInput 字段仍只参与 digest；
+- [x] ACP execute 的非零 exit code 映射为失败 outcome，并保留 stdout/stderr 与 unknown effect disposition；
+- [x] Renderer 对所有公开 Shell command 复用完整脱敏标题与独立“命令/输出”详情，没有 command 的 Adapter
+  继续使用现有 fallback；
+- [x] Rust/Renderer 定向 fixture 覆盖 Claude terminal 自包含、TRAE command allowlist、稀疏 terminal、exit 7、
+  复合命令与详情；
+- [ ] 完成全量门禁、打包、本机 Applications 替换与真实 Claude/TRAE post-fix 展示复验。
+
 ## References
 
 - [v1.20 版本概览](README.md)

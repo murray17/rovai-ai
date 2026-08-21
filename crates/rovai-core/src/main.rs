@@ -12078,7 +12078,8 @@ async fn process_agent_run_acp_message(
             None
         }
     };
-    let (event_type, payload) = normalize_acp_event(&method, &params);
+    let (event_type, payload) =
+        normalize_acp_event_with_completion(&method, &params, completed_action.as_ref());
     if event_type == "runtime.usage" {
         return;
     }
@@ -12169,6 +12170,14 @@ async fn process_agent_run_acp_message(
 }
 
 fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
+    normalize_acp_event_with_completion(method, params, None)
+}
+
+fn normalize_acp_event_with_completion(
+    method: &str,
+    params: &Value,
+    completion: Option<&acp::CompletedAcpAction>,
+) -> (&'static str, Value) {
     if method == "rovai/acp_prompt_completed" {
         return ("runtime.turn.completed", params.clone());
     }
@@ -12204,28 +12213,53 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
             )
         }
         Some("agent_thought_chunk") => ("agent.thought.delta", update),
-        Some("tool_call") | Some("tool_call_update") => (
-            "runtime.action",
-            json!({
+        Some("tool_call") | Some("tool_call_update") => {
+            let public_command = acp::public_acp_shell_command(update.get("rawInput"))
+                .or_else(|| completion.and_then(|value| value.public_command.clone()));
+            let public_kind = acp::public_acp_tool_kind(&update).or_else(|| {
+                completion
+                    .map(|value| value.native_kind.as_str())
+                    .filter(|kind| *kind != "other")
+                    .map(str::to_string)
+            });
+            let public_status = completion
+                .and_then(|value| value.result_data.get("status"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    acp::effective_acp_tool_status(
+                        &update,
+                        public_kind.as_deref().unwrap_or("other"),
+                    )
+                });
+            (
+                "runtime.action",
+                json!({
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
                 "toolName": update.get("toolName"),
-                "status": update.get("status"),
-                "kind": update.get("kind"),
+                "status": public_status,
+                "kind": public_kind,
                 "title": update.get("title"),
                 "locationCount": update
                     .get("locations")
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len),
                 "output": public_acp_tool_output(&update),
+                "input": public_command,
                 "rawInputDigest": update
                     .get("rawInput")
-                    .and_then(|value| canonical_json_digest(value).ok()),
+                    .and_then(|value| canonical_json_digest(value).ok())
+                    .or_else(|| completion
+                        .and_then(|value| value.result_data.get("rawInputDigest"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)),
                 "rawOutputDigest": update
                     .get("rawOutput")
                     .and_then(|value| canonical_json_digest(value).ok()),
-            }),
-        ),
+                }),
+            )
+        }
         Some("plan") => ("runtime.plan", update),
         Some("usage_update") => ("runtime.usage", update),
         _ => ("runtime.event", update),
@@ -16549,7 +16583,7 @@ mod tests {
     }
 
     #[test]
-    fn acp_tool_events_expose_digests_not_raw_payloads() {
+    fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
         let (_, payload) = normalize_acp_event(
             "session/update",
             &json!({
@@ -16561,7 +16595,10 @@ mod tests {
                     "kind": "execute",
                     "title": "Run command",
                     "content": [{"type": "text", "text": "Visible tool progress"}],
-                    "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                    "rawInput": {
+                        "command": "printf 'ACP_PUBLIC_COMMAND_OK\\n'",
+                        "credential": "ACP_PRIVATE_INPUT_MUST_NOT_LEAK"
+                    },
                     "rawOutput": {
                         "stdout": "unused public fallback",
                         "credential": "TOP_SECRET_OUTPUT"
@@ -16571,12 +16608,49 @@ mod tests {
         );
         let serialized = serde_json::to_string(&payload).expect("event payload should serialize");
 
-        assert!(!serialized.contains("TOP_SECRET_INPUT"));
+        assert_eq!(payload["input"], "printf 'ACP_PUBLIC_COMMAND_OK\\n'");
+        assert_eq!(payload["kind"], "execute");
+        assert!(!serialized.contains("ACP_PRIVATE_INPUT_MUST_NOT_LEAK"));
         assert!(!serialized.contains("TOP_SECRET_OUTPUT"));
         assert_eq!(payload["output"], "Visible tool progress");
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+
+        let terminal_params = json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "status": "completed",
+                "rawOutput": {
+                    "stdout": "Visible failed output",
+                    "exitCode": 7
+                }
+            }
+        });
+        let mut completion = acp::completed_action(&terminal_params)
+            .expect("terminal update should normalize")
+            .expect("terminal update should create a completion");
+        completion.native_kind = "execute".to_string();
+        completion.public_command = Some("printf 'ACP_PUBLIC_COMMAND_OK\\n'".to_string());
+        completion.result_data["status"] = json!("failed");
+        completion.result_data["rawInputDigest"] = payload["rawInputDigest"].clone();
+        let (_, terminal_payload) = normalize_acp_event_with_completion(
+            "session/update",
+            &terminal_params,
+            Some(&completion),
+        );
+        assert_eq!(
+            terminal_payload["input"],
+            "printf 'ACP_PUBLIC_COMMAND_OK\\n'"
+        );
+        assert_eq!(terminal_payload["kind"], "execute");
+        assert_eq!(terminal_payload["status"], "failed");
+        assert_eq!(
+            terminal_payload["rawInputDigest"],
+            payload["rawInputDigest"]
+        );
+        assert_eq!(terminal_payload["output"], "Visible failed output");
     }
 
     #[test]
