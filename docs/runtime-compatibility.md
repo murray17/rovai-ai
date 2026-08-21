@@ -163,6 +163,13 @@ Windows 原生 Skill 投影还验证了 OpenCode/Copilot 对健康 `.claude/skil
 reconciler 先退役旧 forwarded observation，再用新 operation ID 建立 Runtime-specific 直接副本；项目内容保留、
 重启恢复和 imported Skill 硬删除均通过，不再产生 `skill_projection_recovery_required` lineage 冲突。
 
+最终 `main` 合并后的十 Runtime Built-in 边界还复现了 warm Qwen Host 持有 `.qwen/skills/*/SKILL.md`
+delete-sharing handle 时，旧 Windows delete-on-close 语义只标记对象、未立即解除子项目录名，导致下一 Adapter 的
+投影清理以 `directory not empty` 失败。Windows file-tree backend 现在优先对已经按 identity 打开的精确 handle 使用
+Windows 10 POSIX disposition 立即 unlink，并只在平台/文件系统不支持时退回 legacy delete-on-close；回归同时保留
+打开的 `SKILL.md` handle、撤销投影，并验证目录项与 observation 均已消失。修正后的 Qwen→TRAE 同进程边界、
+TRAE 独立 Built-in 和十 Runtime Skill 矩阵均通过。
+
 ### Camp Published Attachment View visibility 基线
 
 当前十个 Adapter 在所有已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把

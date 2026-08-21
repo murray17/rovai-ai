@@ -30,6 +30,7 @@ last_updated: 2026-08-21
 - [x] 完成账号登录或 API-key 配置；DeepSeek 路径固定为 `deepseek-v4-flash`；
 - [x] 合并前完成真实 ACP、Approval、Built-in CLI、Missing-Send、MCP Projection 与适用 Skill smoke；
 - [x] 修正 CodeBuddy 官方 API-key ACP、显式 custom model、Idle `usage_update`/private command metadata；
+- [x] 修正 warm Runtime 文件 handle 下的 Windows Skill 投影即时 unlink，并完成 Qwen→TRAE 边界回归；
 - [x] 在最新 `main` 合并结果上重新执行十 Runtime 全矩阵；
 - [ ] 为每个 Adapter 分别形成 Windows 10/11 immutable digest-bound qualification evidence。
 

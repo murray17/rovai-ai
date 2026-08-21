@@ -36,6 +36,8 @@ planned shutdown 和十个 Runtime 的真实本机验收；开发态本机成功
   的适用矩阵；DeepSeek 路径固定使用 `deepseek-v4-flash`，不使用 DK V4 Pro；
 - 修正 CodeBuddy `2.137.1` 官方 API-key ACP 启动、显式 custom model 与 `_codebuddy.ai/command` Idle metadata；
 - 修正 Kiro `2.19.0` 的精确私有 Idle lifecycle notification 与 Windows Skill 共享投影转直接副本的恢复 lineage；
+- 修正 warm Runtime 持有 Skill 文件 handle 时 Windows legacy delete-on-close 未立即解除目录项的问题，使用精确
+  opened handle 的 POSIX disposition，并保留不支持平台的兼容 fallback；
 - 在真实 packaged Desktop 中完成 Windows 正常退出、Job descendant cleanup、durable shutdown fence 与重启恢复。
 
 ## 数据与 Context 兼容性

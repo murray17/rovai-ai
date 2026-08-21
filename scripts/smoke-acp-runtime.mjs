@@ -443,14 +443,19 @@ try {
         || specification.permissionValues.permission_mode === 'default'
         || specification.permissionValues.approval_mode === 'default'
       if (approvalExpected) {
-        const deniedPath = join(projectRoot, `ACP_DENIED_${adapterFileStem}.txt`)
+        // Keep the requested content semantically neutral. Some Runtime models
+        // interpret a file or payload literally named DENIED as an instruction
+        // not to issue the tool request, which bypasses the approval boundary
+        // this branch is intended to exercise. Core still performs the denial.
+        const deniedWriteToken = 'ROVAI_ACP_SECOND_WRITE'
+        const deniedPath = join(projectRoot, `ACP_SECOND_${adapterFileStem}.txt`)
         const deniedBody = specification.adapterKind === 'trae-cn-cli'
-          ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf 'DENIED_WRITE\\n' > '${deniedPath}'. Do not simulate or explain the tool call. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+          ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf '${deniedWriteToken}\\n' > '${deniedPath}'. Do not simulate or explain the tool call. Then immediately reply exactly ACP_SECOND_WRITE_OK.`
           : specification.adapterKind === 'codebuddy-cli'
-            ? `Use the terminal tool exactly once to run this command: powershell.exe -NoProfile -Command "Set-Content -LiteralPath '${deniedPath}' -Value 'DENIED_WRITE'". Do not call any other tool. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+            ? `Use the terminal tool exactly once to run this command: powershell.exe -NoProfile -Command "Set-Content -LiteralPath '${deniedPath}' -Value '${deniedWriteToken}'". Do not call any other tool. Then immediately reply exactly ACP_SECOND_WRITE_OK.`
             : specification.adapterKind === 'qwen-code'
-              ? `Use the terminal tool exactly once to run this Windows shell built-in command: echo DENIED_WRITE> "${deniedPath}". Do not call any other tool. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
-            : `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+              ? `Use the terminal tool exactly once to run this Windows shell built-in command: echo ${deniedWriteToken}> "${deniedPath}". Do not call any other tool. Then immediately reply exactly ACP_SECOND_WRITE_OK.`
+            : `Use the file editing tool exactly once to create ${deniedPath} with exactly ${deniedWriteToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_SECOND_WRITE_OK.`
         const deniedRequest = await sendExistingCampMessage(
           request,
           camp.id,

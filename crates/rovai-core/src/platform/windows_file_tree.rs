@@ -28,14 +28,16 @@ use windows_sys::{
         Storage::FileSystem::{
             CreateFileW, DELETE, FILE_ATTRIBUTE_DEVICE, FILE_ATTRIBUTE_DIRECTORY,
             FILE_ATTRIBUTE_READONLY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_ATTRIBUTE_TAG_INFO,
-            FILE_BASIC_INFO, FILE_DISPOSITION_INFO, FILE_FLAG_BACKUP_SEMANTICS,
+            FILE_BASIC_INFO, FILE_DISPOSITION_FLAG_DELETE,
+            FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE, FILE_DISPOSITION_FLAG_POSIX_SEMANTICS,
+            FILE_DISPOSITION_INFO, FILE_DISPOSITION_INFO_EX, FILE_FLAG_BACKUP_SEMANTICS,
             FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ, FILE_ID_BOTH_DIR_INFO, FILE_ID_INFO,
             FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO,
-            FileAttributeTagInfo, FileBasicInfo, FileDispositionInfo, FileIdBothDirectoryInfo,
-            FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo, GetFileAttributesW,
-            GetFileInformationByHandleEx, INVALID_FILE_ATTRIBUTES, MOVEFILE_REPLACE_EXISTING,
-            MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING, SetFileAttributesW,
-            SetFileInformationByHandle,
+            FileAttributeTagInfo, FileBasicInfo, FileDispositionInfo, FileDispositionInfoEx,
+            FileIdBothDirectoryInfo, FileIdBothDirectoryRestartInfo, FileIdInfo, FileStandardInfo,
+            GetFileAttributesW, GetFileInformationByHandleEx, INVALID_FILE_ATTRIBUTES,
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW, OPEN_EXISTING,
+            SetFileAttributesW, SetFileInformationByHandle,
         },
         System::IO::IO_STATUS_BLOCK,
     },
@@ -162,10 +164,36 @@ fn open_child_with_access(directory: &File, name: &OsStr, desired_access: u32) -
     owned_file(raw)
 }
 
-/// Marks the exact opened file or empty directory for deletion. The object is
-/// removed when the retained handle closes, so a same-path replacement cannot
-/// redirect this mutation to a different node.
+/// Unlinks the exact opened file or empty directory using Windows 10 POSIX
+/// disposition semantics. This removes the name even while a warm Runtime
+/// retains a delete-sharing handle, so verified child names cannot keep their
+/// parent directory artificially non-empty. Older filesystems fall back to
+/// delete-on-close. Both forms target the retained handle, so a same-path
+/// replacement cannot redirect this mutation to a different node.
 pub(crate) fn delete_on_close(file: &File) -> Result<()> {
+    let disposition_ex = FILE_DISPOSITION_INFO_EX {
+        Flags: FILE_DISPOSITION_FLAG_DELETE
+            | FILE_DISPOSITION_FLAG_POSIX_SEMANTICS
+            | FILE_DISPOSITION_FLAG_IGNORE_READONLY_ATTRIBUTE,
+    };
+    let deleted = unsafe {
+        // SAFETY: file remains live and was opened with DELETE access. The
+        // buffer has the exact type and byte length required by the class.
+        SetFileInformationByHandle(
+            file.as_raw_handle(),
+            FileDispositionInfoEx,
+            (&disposition_ex as *const FILE_DISPOSITION_INFO_EX).cast(),
+            size_of::<FILE_DISPOSITION_INFO_EX>() as u32,
+        )
+    };
+    if deleted != 0 {
+        return Ok(());
+    }
+    let extended_error = io::Error::last_os_error();
+    if !matches!(extended_error.raw_os_error(), Some(1 | 50 | 87)) {
+        return Err(extended_error).context("failed to unlink opened Windows file-tree node");
+    }
+
     let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
     let deleted = unsafe {
         // SAFETY: file remains live and was opened with DELETE access. The

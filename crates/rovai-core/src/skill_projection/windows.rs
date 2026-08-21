@@ -1931,6 +1931,48 @@ mod tests {
         }
 
         #[test]
+        fn removing_projection_unlinks_a_file_held_by_a_warm_runtime() {
+            let paths = TestPaths::new("rovai-windows-projection-warm-runtime-handle");
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&paths.data);
+            let library = SkillLibraryService::new(paths.library.clone()).unwrap();
+            let name = "windows-warm-runtime-handle";
+            write_source(&paths.source, name, "managed bytes");
+            let skill = import_skill(&mut database, &library, &paths.source, name, None);
+
+            SkillProjectionReconciler
+                .reconcile_root(
+                    &mut database,
+                    &library,
+                    &paths.root,
+                    &[SkillDeliveryGroupKey::Codex],
+                )
+                .unwrap();
+            let entry = paths.root.join(".codex/skills").join(name);
+            let held = crate::platform::windows_file_tree::open_path_without_following(
+                &entry.join("SKILL.md"),
+            )
+            .unwrap();
+
+            SkillProjectionReconciler
+                .reconcile_root(&mut database, &library, &paths.root, &[])
+                .unwrap();
+
+            assert!(!entry.exists());
+            assert!(
+                super::direct_observation(
+                    &database,
+                    &canonical_path_text(&paths.root),
+                    SkillDeliveryGroupKey::Codex,
+                    &skill.id,
+                )
+                .unwrap()
+                .is_none()
+            );
+            drop(held);
+            assert_no_operation_artifacts(&library, &paths.root);
+        }
+
+        #[test]
         fn deleting_shadowed_skill_releases_observation_and_preserves_project_copy() {
             let paths = TestPaths::new("rovai-windows-projection-delete-shadowed");
             let mut database = crate::test_support::fresh_schema_database_fast_at(&paths.data);
