@@ -11,7 +11,8 @@ last_updated: 2026-08-21
 
 # Rovai-ai v1.22：Runtime Probe 更新容错
 
-> 当前状态：设计与实现已完成，核心/Renderer/文档回归已通过；尚未执行主线同步或 App 打包安装。
+> 当前状态：设计与实现已完成，核心/Renderer/文档回归已通过，实现提交 `e2187f02` 已同步到
+> `origin/main`；尚未执行 App 打包安装。
 >
 > 前置版本：[v1.21 User Automation 与 Runtime Diagnostic Trial](../v1.21/README.md)已按完成事实冻结为
 > historical；其普通用户自动化、Runtime OS 隔离与诊断投影继续作为本版基线。

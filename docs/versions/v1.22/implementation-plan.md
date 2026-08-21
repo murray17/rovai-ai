@@ -34,7 +34,8 @@ last_updated: 2026-08-21
 - [x] 覆盖一次更新后成功、一次更新后稳定失败、更新持有 stdout、稳定 cleanup timeout 与两次更新；
 - [x] 覆盖旧 Ready/LKG 分离、TTL 不延长和旧 fingerprint attempt 过滤；
 - [x] 运行 Rust fmt、Clippy、定向/slow 测试、TypeScript/Vitest 与文档门禁；相关新增与受影响测试通过；
-- [ ] 记录最终提交、主线同步和打包/安装事实；未执行的交付不得标记完成。
+- [x] 记录实现提交 `e2187f02` 并将其同步到 `origin/main`；
+- [ ] 执行并记录 App 打包/安装事实；未执行的交付不得标记完成。
 
 ## 5. 验证结论
 
@@ -44,7 +45,8 @@ last_updated: 2026-08-21
   `docs/runtime-compatibility.md`；
 - 全量 `rovai-core` binary 的 5 个 ACP fixture 仍因缺少 Built-in Tool Run tmp 失败；已在未修改的
   `origin/main` 基线提交复现，v1.22 新增和受影响测试均通过；
-- 真实 Runtime smoke、主线同步和 App 打包/安装不在本轮已执行事实中。
+- 真实 Runtime smoke 和 App 打包/安装不在本轮已执行事实中；实现提交 `e2187f02` 已同步到
+  `origin/main`。
 
 ## References
 
