@@ -3,20 +3,20 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Built-in Tool Runtime Architecture
 
 本文件说明 Rovai built-in operations 的长期组件结构。当前字段与版本以
-[Built-in Tool Transport v19](../contracts/builtin-tool-transport-v19.md)、
+[Built-in Tool Transport v20](../contracts/builtin-tool-transport-v20.md)、
 [Built-in Tool Agent Output Projection v1](../contracts/builtin-tool-agent-output-projection-v1.md)、
 [Camp History Retrieval v4](../contracts/camp-history-v4.md)、
 [Durable Task v3](../contracts/durable-task-v3.md) 和
 [Camp Message Send v12](../contracts/camp-message-send-v12.md)、
 [Gather v3](../contracts/gather-v3.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)与
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v16 及更早 Transport 只保留
+[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md) 为准；v19 及更早 Transport 只保留
 historical 语义。决策理由见
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
 [Built-in 运输不变量](foundational-invariants.md#skills-builtin-transport)、
@@ -134,7 +134,8 @@ rovai memory view|search|read|write
 精确 return capture 不会逐条物化 Lead Run。成员的最后一条 current-generation return 是结果权威；每个
 Item/generation 最多捕获 16 条且不消耗普通 A2A ledger。组件边界见[持久 Gather Barrier](durable-gather-barrier.md)。
 
-Agent 先用 `rovai --help` 选择 operation，再用该 operation 的精确 `--help`。根 `send` 使用
+Agent 在 operation 不清楚时使用 `rovai --help`，在本次 invocation 所需 syntax 不清楚时查询所选
+operation 的精确 `--help`，并尽量复用当前 Native Session 已有的 help。根 `send` 使用
 `rovai send --help`；分组命令必须包含 action，例如 `rovai task create --help`。不存在
 `rovai task|camp|memory --help` 教学别名。Help 只列必要 flags、输入来源互斥规则、关键约束
 和短示例，不输出完整 JSON Schema、Envelope、receipt 或 catalog。Dotted canonical operation
@@ -166,9 +167,10 @@ Send exact help 公开 line-leading display-name alias：它必须是 logical li
 原子冲突；`agentAddressingMode` 表达 caller intent，`effectiveRecipients/deliveryIds` 表达实际结果。
 Parser 和 alias map 属于 Domain Service；
 CLI、Runtime Adapter、Bootstrap 与 Skill 都不重写正文。该 teaching/schema 继续进入当前 catalog digest。
-当前 v19 contract/CLI command version、`builtin_cli.transport.v19` capability 与 IPC protocol 2 必须同时进入
-Binding compatibility 和 digest。Camp History 使用 v4；Session Charter bytes 保持不变，动态 Context 使用
-Formatter 21 / ContextManifest 21。v19 Context 不做 endpoint 猜测并 fail closed。
+当前 v20 contract/CLI command version、`builtin_cli.transport.v20` capability 与 IPC protocol 2 必须同时进入
+Binding compatibility 和 digest。Camp History 使用 v4；Native Binding context contract 加入内部
+`sessionCharterRevision: 2`，使旧 Charter Binding 不可兼容恢复。Bootstrap v3/Formatter 3 不变；动态 Context
+继续使用 Formatter 21 / ContextManifest 21。v20 Context 不做 endpoint 猜测并 fail closed。
 
 `ROVAI_RUN_TMP` 是 Runtime Host 启动时继承的稳定精确路径，不是 process root、Camp workspace 或附件存储。
 每次新 lease 在 active context 写入前 fail-closed 清空并重建该目录；unbind/fence 只做 best-effort 清理，后继
@@ -372,7 +374,8 @@ Session Charter 只说明：
 
 - CLI contract 标题固定为 `Rovai Built-in CLI Contract`，不显示应用 release/version；
 - 使用 bundled `rovai`；
-- 固定业务命令，以及“先 `rovai --help`、再运行具体 operation 精确 `--help`，不假设 family help”；
+- 本地 `rovai` CLI 中的完整固定业务命令 catalog；operation 不清楚时使用根帮助，本次 invocation 所需
+  syntax 不清楚时查询具体 operation 的精确 `--help`，尽量复用当前 Native Session 已有 help，且不假设 family help；
 - `camp.message.send` 使用当前 Run Camp，不能传入 Camp ID；
 - 对 `explicit_send_only` Runtime，narration/final response 只是私有执行证据；当前责任需要在 Camp
   公开 answer/result/status/summary 时必须在结束前调用 `rovai send`，只有成功 send 才发布该回复；
@@ -468,6 +471,9 @@ Bootstrap v3 按固定顺序组装 Session Charter、`MEMBER_IDENTITY` 和 Memor
 文案变化由 Bootstrap Evidence 的精确 bytes/digest 证明，不单独创建 Bootstrap v4。v0.94 同时改变
 AgentRun Formatter/Manifest binding contract，并由 Migration 89 clean break 全部旧 Binding/Session 技术
 状态，因此 replacement Session 原子获得新 Charter；既有 Evidence 不回写。
+v1.23 不修改 Bootstrap wrapper、Formatter 或数据库，而是在 Native Binding context contract 中加入
+`sessionCharterRevision: 2`；该字段只进入每个 Adapter 的 Binding compatibility digest，使新 Run 轮换旧
+Native Session 并投递完整新 Charter，历史 Bootstrap Evidence 保留原 bytes/digest。
 `MEMBER_IDENTITY` 是该 Native Session 唯一的 self identity，包含最新已提交的完整六字段；它只在
 既有 eligible Bootstrap boundary 原子读取，不进入 AgentRun Dynamic Context，不持久化 Identity
 Blob、snapshot、digest 或 history。身份编辑不轮换 Session，也不构造下一 Run 的 patch。
@@ -603,5 +609,5 @@ Activity。命令文本、时间、cwd 或输出相似度不能建立关联。Sh
   退出码 `3`，必须先确认当前状态；
 - `camp.message.send` 的内部 Camp 不变量失败：fail closed，不加入稳定 Agent error contract；
 - external MCP 失败：遵循其独立 non-blocking degradation，不回退为 built-in MCP；
-- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v19 command、projection、replay、
+- macOS 每个正式 Runtime、以及 Windows 每个 `qualified` Runtime 未通过 v20 command、projection、replay、
   fence 和 negative-path 验收：对应平台版本不得完成。未准入 Windows Runtime 不进入 AgentRun。

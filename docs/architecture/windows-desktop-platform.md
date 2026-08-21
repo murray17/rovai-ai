@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Windows Desktop Platform
@@ -50,11 +50,11 @@ Planned Shutdown and accepted-input recovery keep that authority.
 
 ## 4. Local IPC
 
-[Built-in Tool Transport v19](../contracts/builtin-tool-transport-v19.md) inherits v14's one discriminated endpoint. Windows Pipe
+[Built-in Tool Transport v20](../contracts/builtin-tool-transport-v20.md) inherits v19 and v14's one discriminated endpoint. Windows Pipe
 instances are private at creation, byte-mode, local-only and authenticated again by process/lease tokens. The listener
 creates the next secured instance before dispatching the connected one; inability to replenish closes admission.
 
-The macOS Unix Socket implementation uses the same IPC v2 wire under v17. Router, receipt and replay remain
+The macOS Unix Socket implementation uses the same IPC v2 wire under v20. Router, receipt and replay remain
 transport-independent.
 
 ## 5. Storage and filesystem
