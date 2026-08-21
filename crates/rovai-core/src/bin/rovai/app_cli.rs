@@ -29,6 +29,7 @@ struct CliError {
     code: String,
     message: String,
     details: Option<Value>,
+    exit_code: u8,
 }
 
 impl CliError {
@@ -37,11 +38,17 @@ impl CliError {
             code: code.into(),
             message: message.into(),
             details: None,
+            exit_code: 2,
         }
     }
 
     fn with_details(mut self, details: Value) -> Self {
         self.details = Some(details);
+        self
+    }
+
+    fn with_exit_code(mut self, exit_code: u8) -> Self {
+        self.exit_code = exit_code;
         self
     }
 }
@@ -188,6 +195,7 @@ pub async fn run(args: &[String]) -> Result<u8> {
                         error.code.clone(),
                         error.message.clone(),
                         error.details.clone(),
+                        error.exit_code,
                     )
                 })
                 .unwrap_or_else(|| {
@@ -195,6 +203,7 @@ pub async fn run(args: &[String]) -> Result<u8> {
                         "automation_cli_error".to_string(),
                         "The User Automation command could not be completed.".to_string(),
                         None,
+                        2,
                     )
                 });
             println!(
@@ -203,7 +212,7 @@ pub async fn run(args: &[String]) -> Result<u8> {
                     "error": { "code": error.0, "message": error.1, "details": error.2 }
                 }))?
             );
-            Ok(2)
+            Ok(error.3)
         }
     }
 }
@@ -230,20 +239,39 @@ async fn execute(args: &[String]) -> Result<u8> {
         return Ok(0);
     }
     let flags = Flags::parse(rest).map_err(anyhow::Error::new)?;
-    match (command, action) {
+    let exit_code = match (command, action) {
         ("status", None) => {
             flags.validate(&[], &["json"]).map_err(anyhow::Error::new)?;
             print_json(&invoke("status", json!({})).await?)?;
+            0
         }
-        ("runtime", Some("list")) => runtime_list(&flags).await?,
-        ("member", Some("list")) => member_list(&flags).await?,
-        ("member", Some("show")) => member_show(&flags).await?,
+        ("runtime", Some("list")) => {
+            runtime_list(&flags).await?;
+            0
+        }
+        ("member", Some("list")) => {
+            member_list(&flags).await?;
+            0
+        }
+        ("member", Some("show")) => {
+            member_show(&flags).await?;
+            0
+        }
         ("camp", Some("create")) => camp_create(&flags).await?,
         ("camp", Some("send")) => camp_send(&flags).await?,
-        ("camp", Some("open")) => camp_open(&flags).await?,
-        ("agent-run", Some("show")) => agent_run_show(&flags).await?,
+        ("camp", Some("open")) => {
+            camp_open(&flags).await?;
+            0
+        }
+        ("agent-run", Some("show")) => {
+            agent_run_show(&flags).await?;
+            0
+        }
         ("agent-run", Some("watch")) => agent_run_watch(&flags).await?,
-        ("agent-run", Some("export")) => agent_run_export(&flags).await?,
+        ("agent-run", Some("export")) => {
+            agent_run_export(&flags).await?;
+            0
+        }
         ("agent-run", Some("cancel")) => agent_run_cancel(&flags).await?,
         ("trial", Some("run")) => trial_run(&flags).await?,
         _ => {
@@ -253,8 +281,8 @@ async fn execute(args: &[String]) -> Result<u8> {
             )
             .into());
         }
-    }
-    Ok(0)
+    };
+    Ok(exit_code)
 }
 
 fn print_help() {
@@ -346,7 +374,7 @@ async fn member_show(flags: &Flags) -> Result<()> {
     )
 }
 
-async fn camp_create(flags: &Flags) -> Result<()> {
+async fn camp_create(flags: &Flags) -> Result<u8> {
     flags
         .validate(
             &["name", "workspace", "member", "lead", "command-id"],
@@ -393,10 +421,11 @@ async fn camp_create(flags: &Flags) -> Result<()> {
         }),
     )
     .await?;
-    print_json(&result)
+    print_json(&result)?;
+    Ok(command_result_exit_code(&result))
 }
 
-async fn camp_send(flags: &Flags) -> Result<()> {
+async fn camp_send(flags: &Flags) -> Result<u8> {
     flags
         .validate(
             &[
@@ -429,7 +458,8 @@ async fn camp_send(flags: &Flags) -> Result<()> {
         }),
     )
     .await?;
-    print_json(&result)
+    print_json(&result)?;
+    Ok(launch_result_exit_code(&result))
 }
 
 async fn camp_open(flags: &Flags) -> Result<()> {
@@ -452,7 +482,7 @@ async fn agent_run_show(flags: &Flags) -> Result<()> {
     print_json(&diagnostic(flags.required("agent-run-id").map_err(anyhow::Error::new)?).await?)
 }
 
-async fn agent_run_watch(flags: &Flags) -> Result<()> {
+async fn agent_run_watch(flags: &Flags) -> Result<u8> {
     flags
         .validate(&["agent-run-id"], &["jsonl"])
         .map_err(anyhow::Error::new)?;
@@ -465,9 +495,10 @@ async fn agent_run_watch(flags: &Flags) -> Result<()> {
             "trial_settlement_incomplete",
             "The AgentRun did not settle before the watch safety deadline.",
         )
+        .with_exit_code(3)
         .into());
     }
-    Ok(())
+    Ok(terminal_exit_code(&outcome.diagnostic))
 }
 
 async fn agent_run_export(flags: &Flags) -> Result<()> {
@@ -487,7 +518,7 @@ async fn agent_run_export(flags: &Flags) -> Result<()> {
     }))
 }
 
-async fn agent_run_cancel(flags: &Flags) -> Result<()> {
+async fn agent_run_cancel(flags: &Flags) -> Result<u8> {
     flags
         .validate(&["agent-run-id", "command-id"], &["json"])
         .map_err(anyhow::Error::new)?;
@@ -500,10 +531,11 @@ async fn agent_run_cancel(flags: &Flags) -> Result<()> {
         }),
     )
     .await?;
-    print_json(&result)
+    print_json(&result)?;
+    Ok(command_result_exit_code(&result))
 }
 
-async fn trial_run(flags: &Flags) -> Result<()> {
+async fn trial_run(flags: &Flags) -> Result<u8> {
     flags
         .validate(
             &[
@@ -663,7 +695,7 @@ async fn trial_run(flags: &Flags) -> Result<()> {
             let _ = invoke("camp.open", json!({ "campId": camp_id })).await?;
         }
         print_json(&result)?;
-        return Ok(());
+        return Ok(1);
     }
     if status != Some("dispatched") {
         return Err(CliError::new(
@@ -752,6 +784,7 @@ async fn trial_run(flags: &Flags) -> Result<()> {
                 "journalPath": journal_path,
                 "resultDirectory": export_path.as_ref().map(|path| absolute_path(path)).transpose()?
             }))
+            .with_exit_code(3)
             .into());
         }
         Some(json!({
@@ -793,7 +826,13 @@ async fn trial_run(flags: &Flags) -> Result<()> {
     if flags.has("open") {
         let _ = invoke("camp.open", json!({ "campId": camp_id })).await?;
     }
-    print_json(&result)
+    let exit_code = if wait {
+        terminal_exit_code(&diagnostic_view)
+    } else {
+        0
+    };
+    print_json(&result)?;
+    Ok(exit_code)
 }
 
 #[derive(Debug, Default, Clone)]
@@ -954,6 +993,30 @@ fn terminal_status(diagnostic: &Value) -> bool {
         diagnostic.get("status").and_then(Value::as_str),
         Some("succeeded" | "failed" | "cancelled")
     )
+}
+
+fn command_result_exit_code(result: &Value) -> u8 {
+    match result.get("status").and_then(Value::as_str) {
+        Some("applied" | "accepted") => 0,
+        Some("rejected") => 1,
+        _ => 2,
+    }
+}
+
+fn launch_result_exit_code(result: &Value) -> u8 {
+    match result.get("status").and_then(Value::as_str) {
+        Some("dispatched") => 0,
+        Some("rejected") => 1,
+        _ => 2,
+    }
+}
+
+fn terminal_exit_code(diagnostic: &Value) -> u8 {
+    match diagnostic.get("status").and_then(Value::as_str) {
+        Some("succeeded") => 0,
+        Some("failed" | "cancelled") => 1,
+        _ => 3,
+    }
 }
 
 async fn diagnostic(agent_run_id: &str) -> Result<Value> {
@@ -1202,7 +1265,9 @@ fn applied_camp_id(result: &Value) -> Result<String> {
             .get("code")
             .and_then(Value::as_str)
             .unwrap_or("camp_create_rejected");
-        return Err(CliError::new(code, "Camp creation was rejected.").into());
+        return Err(CliError::new(code, "Camp creation was rejected.")
+            .with_exit_code(1)
+            .into());
     }
     result
         .pointer("/payload/campId")
@@ -1402,7 +1467,10 @@ fn restrict_private_file(path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Flags, event_belongs_to_run, parse_duration_seconds, terminal_status};
+    use super::{
+        Flags, command_result_exit_code, event_belongs_to_run, launch_result_exit_code,
+        parse_duration_seconds, terminal_exit_code, terminal_status,
+    };
     use serde_json::json;
 
     #[test]
@@ -1437,5 +1505,22 @@ mod tests {
         ));
         assert!(terminal_status(&json!({ "status": "succeeded" })));
         assert!(!terminal_status(&json!({ "status": "running" })));
+    }
+
+    #[test]
+    fn shell_exit_codes_distinguish_domain_and_terminal_outcomes() {
+        assert_eq!(command_result_exit_code(&json!({ "status": "applied" })), 0);
+        assert_eq!(
+            command_result_exit_code(&json!({ "status": "rejected" })),
+            1
+        );
+        assert_eq!(
+            launch_result_exit_code(&json!({ "status": "dispatched" })),
+            0
+        );
+        assert_eq!(launch_result_exit_code(&json!({ "status": "rejected" })), 1);
+        assert_eq!(terminal_exit_code(&json!({ "status": "succeeded" })), 0);
+        assert_eq!(terminal_exit_code(&json!({ "status": "failed" })), 1);
+        assert_eq!(terminal_exit_code(&json!({ "status": "cancelled" })), 1);
     }
 }

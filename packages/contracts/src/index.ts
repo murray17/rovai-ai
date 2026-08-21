@@ -2507,6 +2507,7 @@ export type CoreMethod =
   | 'camp.composerDraft.removeAttachment'
   | 'camp.composerDraft.discard'
   | 'camp.messages.send'
+  | 'userAutomation.camp.send'
   | 'action.approvals.resolve'
   | 'notifications.inbox'
   | 'notifications.changesSince'

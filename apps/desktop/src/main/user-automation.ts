@@ -6,7 +6,6 @@ import type {
   AgentProfile,
   AgentRunDiagnosticView,
   AdapterInstallation,
-  CampComposerDraftView,
   CoreMethod,
   SendCampMessageResult,
   StoredCommandResult
@@ -76,21 +75,6 @@ function optionalBoolean(value: RecordValue, key: string): boolean {
   return field
 }
 
-function ensureEmptyDraft(draft: CampComposerDraftView): void {
-  if (
-    draft.body.trim() !== ''
-    || draft.content.length > 0
-    || draft.attachments.length > 0
-    || draft.replyIntent !== null
-    || draft.continuationIntent !== null
-  ) {
-    throw new UserAutomationError(
-      'camp_draft_not_empty',
-      'The Camp has a user-owned Composer draft; send or discard it in the App first.'
-    )
-  }
-}
-
 function launchResult(result: SendCampMessageResult): RecordValue {
   if (result.pendingExecution !== null) {
     throw new UserAutomationError(
@@ -153,30 +137,15 @@ async function sendCampMessage(
   const agentId = stringField(input, 'agentId')
   const body = stringField(input, 'body')
   const commandId = stringField(input, 'commandId')
-  const draft = await dependencies.core.request<CampComposerDraftView>(
-    'camp.composerDraft.get',
-    { campId }
-  )
-  ensureEmptyDraft(draft)
-  const saved = await dependencies.core.request<CampComposerDraftView>(
-    'camp.composerDraft.save',
-    {
-      campId,
-      expectedRevision: draft.revision,
-      content: [
-        { kind: 'member_mention', agentId },
-        { kind: 'text', text: ` ${body}` }
-      ],
-      continuationSourceMessageId: null
-    }
-  )
   const budget = input.executionBudget === undefined
     ? null
     : record(input.executionBudget, 'executionBudget')
-  const result = await dependencies.core.request<SendCampMessageResult>('camp.messages.send', {
+  const result = await dependencies.core.request<SendCampMessageResult>(
+    'userAutomation.camp.send', {
     commandId,
     campId,
-    draftRevision: saved.revision,
+    agentId,
+    body,
     execution: {
       taskId: null,
       purpose: body,
@@ -185,6 +154,29 @@ async function sendCampMessage(
     }
   })
   return launchResult(result)
+}
+
+type StartableUserAutomationServer = {
+  start(): Promise<void>
+  stop(): Promise<void>
+}
+
+export async function startUserAutomationOptional<T extends StartableUserAutomationServer>(
+  create: () => T,
+  reportUnavailable: (error: unknown) => void = () => {
+    console.error('[rovai] User Automation is unavailable; Desktop will continue.')
+  }
+): Promise<T | null> {
+  let server: T | null = null
+  try {
+    server = create()
+    await server.start()
+    return server
+  } catch (error) {
+    await server?.stop().catch(() => undefined)
+    reportUnavailable(error)
+    return null
+  }
 }
 
 export async function dispatchUserAutomation(

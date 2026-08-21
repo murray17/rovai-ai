@@ -21,11 +21,15 @@ last_updated: 2026-08-21
 - [x] Server 验证 contract/instance/credential，限制 frame，并在 shutdown 清理本实例文件；
 - [x] closed dispatcher 仅映射 V1 operation，不提供 method name/generic invoke；
 - [x] `rovai app` 使用独立 context/credential，Desktop 未运行时返回 `app_not_running` 且不启动 App；
+- [x] macOS 所有 Core-managed Runtime/Probe 及后代通过 Managed Process OS policy deny `automation-v1` tree，CLI
+  guard 只作纵深防御；
+- [x] Automation Server 初始化/监听失败清理半初始化资源并降级，Desktop/Core 保持运行；
 - [x] 既有 Agent CLI transport、context、lease、Envelope 与命令行为不变。
 
 ## 3. Camp、Run 与 Renderer
 
-- [x] Camp create/send 复用正式 Core/Composer 路径，显式目标成员并冻结预算；
+- [x] Camp create 复用正式 Core 路径；send 使用一个幂等 Domain Command transaction，显式目标成员并冻结预算，
+  不读取、写入或消费用户 Composer；
 - [x] launch 只接受 dispatched/rejected，非空 `pendingExecution` 返回合同升级错误；
 - [x] AgentRun show/watch/cancel/export 使用安全 read methods 和 version fence；
 - [x] Camp open 经 Core existence check 后复用现有 window 与 Renderer activation flow。
@@ -42,9 +46,11 @@ last_updated: 2026-08-21
 
 - [x] TypeScript typecheck 与 User Automation dispatcher Vitest；
 - [x] Rust Core/CLI compile、CLI 参数/cursor 测试与 diagnostic allowlist slow test；
-- [x] 全量前端、Rust fmt/Clippy、文档门禁与 Desktop production build；Rust PR suite 功能相关范围、18 项 CLI
-  与 269 项 slow suite 通过，lib 296/297，唯一失败为 v1.20 已记录的 Runtime compatibility register 摘要
-  digest 基线失配；
+- [x] 定向验证 Automation send 单 Core call/幂等重放/无 staging/保留现有草稿、macOS sandbox 文件拒绝、
+  optional server startup 降级，以及 mutation/terminal shell exit code 映射；
+- [x] 全量前端、Rust fmt/Clippy、文档门禁与 Desktop production build；Rust PR suite 功能相关范围、20 项 CLI
+  与 272 项 slow suite 通过，lib 297/298，唯一失败为 v1.20 已记录的 Runtime compatibility register 摘要
+  digest 基线失配；Core binary 套件另有 5 项既存 ACP fixture/run-tmp 前置条件失败，本次未修改这些模块；
 - [x] 提交 `d87eeee4` 的 macOS arm64 package 通过深度验签、三枚 Mach-O arm64 与 Core/CLI Sidecar UUID 校验；
 - [x] 全新隔离 `userData` 验证 packaged User Automation status、instance credential、私有权限、CLI help 与
   受控关闭后的 socket/context 清理；App-not-running 负向行为已由 CLI 定向验证；

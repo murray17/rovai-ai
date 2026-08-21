@@ -26,7 +26,8 @@ rovai app ...                       每次命令一个短进程
     └── User Automation IPC ──────> Electron Main
 
 Agent Runtime
-    └── rovai send/... ───────────> process-private Agent CLI IPC ──> Core Built-in Router
+    └── OS-denied automation-v1 tree
+        └── rovai send/... ───────> process-private Agent CLI IPC ──> Core Built-in Router
 ```
 
 一个 binary 降低安装和命令认知成本；namespace 之后的调用身份和能力完全分离。Electron Main 是 User
@@ -46,9 +47,11 @@ owner，因此 V1 不采用。
 
 ## 调用与故障边界
 
-Main dispatcher 将每个 public operation 映射到固定 Core method/组合，不透传 method name。读写都经过既有
-Core service；Main 不直接访问 SQLite。`camp send` 使用 Composer revision 与正式 send，从而继承成员、预算、
-附件、pending 和执行准入。当前合同无法解释的新状态必须失败并要求升级，不能以 convenience path 绕过。
+Main dispatcher 将每个 public operation 映射到固定 Core method，不透传 method name。读写都经过既有 Core
+service；Main 不直接访问 SQLite。`camp send` 只发出一个带幂等 `commandId` 的
+`userAutomation.camp.send`；Core 在一个 Domain Command transaction 中复用正式 Message/Turn/Run 准入，但不以
+Composer 作为中间存储，也不读取、覆盖或消费用户草稿。当前合同无法解释的新状态必须失败并要求升级，不能以
+convenience path 绕过。
 
 IPC 断开不能证明 mutation 未发生。CLI 的 mutation command ID 在首次 Core 写之前进入 durable journal；失败
 时返回已知 identity 并引导用户用 read command 复核。V1 不自动重试无法证明 outcome 的 mutation。read/watch
@@ -71,6 +74,15 @@ Server 只随已运行 Desktop 存在，启动后写新 instance context，受�
 Core drain。异常遗留 context 在下一次连接时按 PID/socket/instance 失败为 `app_not_running`，不会启动 App 或
 连接其他用户实例。`camp open` 在 Core existence check 后复用现有 window/activation flow，不创建第二套
 Renderer route state。
+
+User Automation 是 Desktop 的可选控制面，不是 Desktop/Core 启动前提。endpoint bind、context publish 或
+Server 初始化失败时，Main 清理本次半初始化资源、记录本机诊断并让 Desktop/Core 继续可用；此时 Automation
+命令不可连接，但不得触发全局 `app.quit()`。受控关闭只停止已经成功启动的 Server。
+
+同 UID 文件 mode 不是 Runtime 隔离。Core 在 macOS 初始化 Managed Process policy 后，所有 Probe、Host 与
+one-shot Runtime 都通过同一启动边界继承对当前 `automation-v1` 树的 OS 级 read/write deny；缺少该保护时
+Runtime launch fail closed。CLI 根据受管 Run 环境隐藏并拒绝 `app` namespace，只作为纵深防御。绝对 binary
+路径、环境清除或后代进程都不得绕过 OS policy。
 
 ## 平台与演进
 

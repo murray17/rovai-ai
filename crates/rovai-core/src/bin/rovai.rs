@@ -66,6 +66,10 @@ fn main() -> ExitCode {
 async fn run() -> Result<u8> {
     let args = env::args().skip(1).collect::<Vec<_>>();
     if args.first().is_some_and(|arg| arg == "app") {
+        if !user_automation_available_in_current_process() {
+            print_user_automation_unavailable_in_runtime();
+            return Ok(2);
+        }
         return app_cli::run(&args[1..]).await;
     }
     if args.first().is_some_and(|arg| arg == "__compaction-hook") {
@@ -1406,8 +1410,47 @@ enum BuiltinToolIpcFailure {
 }
 
 fn print_root_help() {
+    print!(
+        "{}",
+        root_help_text(!user_automation_available_in_current_process())
+    );
+}
+
+fn root_help_text(managed_runtime: bool) -> String {
+    let mut text = "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai gather\n  rovai member create\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.\n".to_string();
+    if !managed_runtime {
+        text.push_str("\nUser Automation:\n  rovai app --help\n\nAgent operations keep their process-private transport. `rovai app` uses the running Desktop App's separate User Automation transport.\n");
+    }
+    text
+}
+
+fn user_automation_available_in_current_process() -> bool {
+    user_automation_available_in_process(
+        env::var(ROVAI_CLI_CONTEXT_ENV).ok().as_deref(),
+        env::var(ROVAI_RUN_TMP_ENV).ok().as_deref(),
+    )
+}
+
+fn user_automation_available_in_process(
+    builtin_tool_context: Option<&str>,
+    run_tmp: Option<&str>,
+) -> bool {
+    builtin_tool_context.is_none() && run_tmp.is_none()
+}
+
+fn print_user_automation_unavailable_in_runtime() {
     println!(
-        "Rovai CLI\n\nAgent operations:\n  rovai send\n  rovai gather\n  rovai member create\n  rovai task create|get|list|update\n  rovai camp list|search|read\n  rovai history search\n  rovai memory view|search|read|write\n\nRun an Agent operation's exact `--help` for its closed inputs. Each Agent operation supports direct flags, JSON stdin/heredoc, or --input-file <path>.\n\nUser Automation:\n  rovai app --help\n\nAgent operations keep their process-private transport. `rovai app` uses the running Desktop App's separate User Automation transport."
+        "{}",
+        serde_json::to_string(&json!({
+            "error": {
+                "code": "user_automation.unavailable_in_managed_runtime",
+                "message": "User Automation is unavailable inside a Core-managed Runtime process.",
+                "recovery": "stop"
+            }
+        }))
+        .unwrap_or_else(|_| {
+            "{\"error\":{\"code\":\"user_automation.unavailable_in_managed_runtime\",\"message\":\"User Automation is unavailable inside a Core-managed Runtime process.\",\"recovery\":\"stop\"}}".to_string()
+        })
     );
 }
 
@@ -2054,6 +2097,17 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::InvalidData
         );
+    }
+
+    #[test]
+    fn managed_runtime_cli_surface_does_not_advertise_or_admit_user_automation() {
+        assert!(!root_help_text(true).contains("rovai app"));
+        assert!(root_help_text(false).contains("rovai app --help"));
+        assert!(!user_automation_available_in_process(
+            Some("context"),
+            Some("run-tmp")
+        ));
+        assert!(user_automation_available_in_process(None, None));
     }
 
     #[test]

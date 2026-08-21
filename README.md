@@ -33,7 +33,8 @@ Rovai Desktop；App 未运行时返回 `app_not_running`，不会在后台自动
 
 希望直接输入 `rovai` 时，可将这个包内 binary 链接到 `PATH` 中的目录（例如 `~/.local/bin/rovai`）。
 `rovai app ...` 与供 Agent Runtime
-调用的既有 `rovai ...` 使用彼此隔离的本机 transport 和 credential。完整命令、安全和 Trial 导出边界见
+调用的既有 `rovai ...` 使用彼此隔离的本机 transport 和 credential；Core-managed Runtime 进程树不能读取
+Automation credential，也不能调用 `rovai app`。完整命令、安全和 Trial 导出边界见
 [User Automation v1](docs/contracts/user-automation-v1.md)。
 
 ## 文档
