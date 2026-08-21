@@ -116,7 +116,7 @@ export interface RuntimeModelCatalogView {
   runtimeKind: AdapterKind
   cache: RuntimeModelCatalogCache
   models: ModelDescriptor[]
-  refreshStatus: 'not_required' | 'scheduled' | 'joined' | 'completed' | 'failed'
+  refreshStatus: 'not_required' | 'scheduled' | 'joined' | 'completed' | 'failed' | 'deferred'
   diagnosticCode: string | null
 }
 

@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.21
+current_version: v1.22
 last_updated: 2026-08-21
 ---
 
@@ -172,4 +172,5 @@ last_updated: 2026-08-21
 | v1.18 | `historical` | Codex 执行台真实命令预览、敏感参数脱敏与完整命令/输出详情 | [v1.18/README.md](v1.18/README.md) |
 | v1.19 | `historical` | Agent 文件入口 lease 隔离、同 Camp Authority 串行化与纯附件发送 | [v1.19/README.md](v1.19/README.md) |
 | v1.20 | `historical` | 会话附件的 Authority 校验、系统默认打开与所在位置显示 | [v1.20/README.md](v1.20/README.md) |
-| v1.21 | `current` | 普通用户自动化入口与 Runtime Diagnostic Trial V1 | [v1.21/README.md](v1.21/README.md) |
+| v1.21 | `historical` | 普通用户自动化入口与 Runtime Diagnostic Trial V1 | [v1.21/README.md](v1.21/README.md) |
+| v1.22 | `current` | Runtime 更新期间的 Probe supersession、一次重新绑定与 stale LKG 模型目录 | [v1.22/README.md](v1.22/README.md) |

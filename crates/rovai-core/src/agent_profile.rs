@@ -461,7 +461,10 @@ pub fn runtime_model_catalog_cache_view(
             expires_at: None,
         };
     }
-    if snapshot.probe_status != "ready" {
+    let retained_lkg = snapshot.probe_status != "ready"
+        && snapshot.last_successful_probe_at.is_some()
+        && !snapshot.models.is_empty();
+    if snapshot.probe_status != "ready" && !retained_lkg {
         return RuntimeModelCatalogCacheView {
             status: RuntimeModelCatalogCacheStatus::Unavailable,
             observed_at: None,
@@ -494,7 +497,7 @@ pub fn runtime_model_catalog_cache_view(
         observed_at_time + chrono::Duration::seconds(MODEL_CATALOG_MAX_SERVICE_AGE_SECONDS);
     let status = if now >= expires_at {
         RuntimeModelCatalogCacheStatus::Expired
-    } else if now >= revalidate_after {
+    } else if retained_lkg || now >= revalidate_after {
         RuntimeModelCatalogCacheStatus::Stale
     } else {
         RuntimeModelCatalogCacheStatus::Fresh
@@ -1077,6 +1080,8 @@ impl AgentProfileService {
                       SELECT candidate.id
                       FROM adapter_probe_attempt AS candidate
                       WHERE candidate.installation_id = installation.id
+                        AND candidate.executable_fingerprint
+                            IS snapshot.executable_fingerprint
                       ORDER BY candidate.attempted_at DESC, candidate.id DESC
                       LIMIT 1
                   )
@@ -1628,7 +1633,9 @@ impl AgentProfileService {
                        snapshot.executable_fingerprint, snapshot.probe_status,
                        snapshot.permission_schema_version,
                        snapshot.permission_schema_digest,
-                       snapshot.permission_options_json
+                       snapshot.permission_options_json,
+                       snapshot.model_catalog_json,
+                       snapshot.last_successful_probe_at
                 FROM adapter_installation AS installation
                 LEFT JOIN adapter_capability_snapshot AS snapshot
                   ON snapshot.installation_id = installation.id
@@ -1646,6 +1653,8 @@ impl AgentProfileService {
                         row.get::<_, Option<i64>>(4)?,
                         row.get::<_, Option<String>>(5)?,
                         row.get::<_, Option<String>>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 },
             )
@@ -1659,6 +1668,7 @@ impl AgentProfileService {
             identity_changed,
             preserve_existing,
             normalize_legacy_trae_schema,
+            retained_lkg,
         ) = if let Some((
             id,
             path,
@@ -1667,6 +1677,8 @@ impl AgentProfileService {
             permission_schema_version,
             permission_schema_digest,
             permission_options_json,
+            model_catalog_json,
+            last_successful_probe_at,
         )) = existing
         {
             let identity_changed =
@@ -1723,6 +1735,14 @@ impl AgentProfileService {
                     || (probe_status.as_deref() == Some("light_ready")
                         && discovered.snapshot.probe_status == "light_failed"
                         && executable_is_usable));
+            let retained_lkg = identity_changed
+                .then(|| {
+                    let models_json = model_catalog_json?;
+                    let last_successful_probe_at = last_successful_probe_at?;
+                    let models = serde_json::from_str::<Vec<ModelDescriptor>>(&models_json).ok()?;
+                    (!models.is_empty()).then_some((models_json, last_successful_probe_at))
+                })
+                .flatten();
             (
                 id,
                 path,
@@ -1730,6 +1750,7 @@ impl AgentProfileService {
                 identity_changed,
                 preserve_existing,
                 normalize_legacy_trae_schema,
+                retained_lkg,
             )
         } else {
             let id = format!("adapter-installation-{}", Uuid::new_v4());
@@ -1754,7 +1775,7 @@ impl AgentProfileService {
                     now,
                 ],
             )?;
-            (id, String::new(), None, false, false, false)
+            (id, String::new(), None, false, false, false, None)
         };
 
         if !preserve_existing {
@@ -1774,6 +1795,17 @@ impl AgentProfileService {
                     installation_id,
                     discovered.snapshot.permission_schema_digest,
                 ],
+            )?;
+        }
+        if let Some((models_json, last_successful_probe_at)) = retained_lkg {
+            transaction.execute(
+                r#"
+                UPDATE adapter_capability_snapshot
+                SET model_catalog_json = ?2,
+                    last_successful_probe_at = ?3
+                WHERE installation_id = ?1
+                "#,
+                params![installation_id, models_json, last_successful_probe_at],
             )?;
         }
         if let (Some(identity), Some(fingerprint)) =
@@ -1882,7 +1914,11 @@ impl AgentProfileService {
             transaction.execute(
                 r#"
                 UPDATE adapter_capability_snapshot
-                SET stale_at = COALESCE(stale_at, ?2), last_error = ?3
+                SET stale_at = CASE
+                        WHEN probe_status = 'ready' THEN COALESCE(stale_at, ?2)
+                        ELSE stale_at
+                    END,
+                    last_error = ?3
                 WHERE installation_id = ?1
                 "#,
                 params![installation_id, attempted_at, recorded_diagnostic_code],
@@ -5183,11 +5219,159 @@ mod slow_tests {
         snapshot.stale_at = None;
         snapshot.probe_status = "light_ready".to_string();
         let light_cache = runtime_model_catalog_cache_view(Some(&snapshot), observed_at);
+        assert_eq!(light_cache.status, RuntimeModelCatalogCacheStatus::Stale);
+        assert_eq!(light_cache.observed_at, snapshot.last_successful_probe_at);
         assert_eq!(
-            light_cache.status,
-            RuntimeModelCatalogCacheStatus::Unavailable
+            runtime_model_catalog_cache_view(
+                Some(&snapshot),
+                observed_at + chrono::Duration::hours(24),
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Expired
         );
-        assert_eq!(light_cache.observed_at, None);
+    }
+
+    #[test]
+    fn fingerprint_change_revokes_ready_but_retains_lkg_and_hides_old_attempt() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let executable_path = directory.join("codex");
+        std::fs::write(&executable_path, b"old-runtime").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let last_successful = chrono::Utc::now() - chrono::Duration::minutes(5);
+        let last_successful_at = last_successful.to_rfc3339();
+        let mut ready = ready_codex_snapshot();
+        ready.executable_fingerprint = Some("sha256:old-runtime".to_string());
+        ready.last_attempted_at = last_successful_at.clone();
+        ready.last_successful_probe_at = Some(last_successful_at.clone());
+        let expected_models = ready.models.clone();
+        service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: ready,
+                },
+            )
+            .unwrap();
+        service
+            .record_managed_probe_failure(
+                &mut database,
+                ManagedProbeFailure {
+                    adapter_kind: AdapterKind::CodexCli,
+                    auth_scope: "default",
+                    candidate_path: &executable_path.to_string_lossy(),
+                    fingerprint: Some("sha256:old-runtime"),
+                    source: Some(InstallationSource::InheritedPath),
+                    failure_class: "transient",
+                    diagnostic_code: "old_runtime_probe_failed",
+                    failure: None,
+                },
+            )
+            .unwrap();
+
+        std::fs::write(&executable_path, b"new-runtime").unwrap();
+        let static_snapshot = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::CodexCli,
+                Some("new-runtime".to_string()),
+                "sha256:new-runtime".to_string(),
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        service
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::CodexCli,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "codex".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: static_snapshot,
+                },
+            )
+            .unwrap();
+
+        let installation = service
+            .managed_installation(&database, AdapterKind::CodexCli, "default")
+            .unwrap()
+            .unwrap();
+        let snapshot = installation.snapshot.as_ref().unwrap();
+        assert_eq!(snapshot.probe_status, "light_ready");
+        assert_eq!(
+            snapshot.executable_fingerprint.as_deref(),
+            Some("sha256:new-runtime")
+        );
+        assert_eq!(snapshot.authentication_status, "unknown");
+        assert!(snapshot.capabilities.is_empty());
+        assert!(snapshot.protocols.is_empty());
+        assert!(snapshot.native_session_compatibility_key.is_none());
+        assert_eq!(snapshot.models, expected_models);
+        assert_eq!(
+            snapshot.last_successful_probe_at.as_deref(),
+            Some(last_successful_at.as_str())
+        );
+        assert_eq!(
+            installation.model_catalog.status,
+            RuntimeModelCatalogCacheStatus::Stale
+        );
+        assert!(is_preflight_required_status(Some(&snapshot.probe_status)));
+        assert!(installation.last_probe_attempt.is_none());
+        assert_eq!(
+            runtime_model_catalog_cache_view(
+                Some(snapshot),
+                last_successful + chrono::Duration::hours(24),
+            )
+            .status,
+            RuntimeModelCatalogCacheStatus::Expired
+        );
+
+        service
+            .record_managed_probe_failure(
+                &mut database,
+                ManagedProbeFailure {
+                    adapter_kind: AdapterKind::CodexCli,
+                    auth_scope: "default",
+                    candidate_path: &executable_path.to_string_lossy(),
+                    fingerprint: Some("sha256:new-runtime"),
+                    source: Some(InstallationSource::InheritedPath),
+                    failure_class: "authentication_required",
+                    diagnostic_code: "runtime_authentication_required",
+                    failure: None,
+                },
+            )
+            .unwrap();
+        let stable_failure = service
+            .managed_installation(&database, AdapterKind::CodexCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stable_failure
+                .last_probe_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.executable_fingerprint.as_deref()),
+            Some("sha256:new-runtime")
+        );
+        assert_eq!(
+            stable_failure.model_catalog.status,
+            RuntimeModelCatalogCacheStatus::Stale
+        );
+        assert!(
+            stable_failure
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.stale_at.is_none())
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]
@@ -6517,20 +6701,29 @@ mod slow_tests {
             rejected_candidate.model_catalog.status,
             RuntimeModelCatalogCacheStatus::Fresh
         );
+        let current_attempt = rejected_candidate.last_probe_attempt.as_ref().unwrap();
+        assert_eq!(current_attempt.status, "ready");
+        assert_eq!(current_attempt.failure_class, "none");
         assert_eq!(
-            rejected_candidate
-                .last_probe_attempt
-                .as_ref()
-                .map(|attempt| attempt.failure_class.as_str()),
-            Some("transient")
+            current_attempt.executable_fingerprint.as_deref(),
+            Some("sha256:original")
         );
-        assert_eq!(
-            rejected_candidate
-                .last_probe_attempt
-                .as_ref()
-                .and_then(|attempt| attempt.diagnostic_code.as_deref()),
-            Some("runtime_alternate_candidate_probe_failed")
-        );
+        let retained_alternate_attempts = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT COUNT(*)
+                FROM adapter_probe_attempt
+                WHERE installation_id = ?1
+                  AND executable_fingerprint = 'sha256:wrong-program'
+                  AND failure_class = 'transient'
+                  AND diagnostic_code = 'runtime_alternate_candidate_probe_failed'
+                "#,
+                [&installation_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(retained_alternate_attempts, 1);
         assert_eq!(
             rejected_candidate.relocation_history[0].source,
             Some(InstallationSource::LoginShell)
