@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.22
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: implemented
@@ -16,6 +16,8 @@ last_updated: 2026-08-21
 >
 > 前置版本：[v1.21 User Automation 与 Runtime Diagnostic Trial](../v1.21/README.md)已按完成事实冻结为
 > historical；其普通用户自动化、Runtime OS 隔离与诊断投影继续作为本版基线。
+>
+> 后续版本：[v1.23 按需 Built-in CLI Help 与 Charter 精简](../v1.23/README.md)。
 
 ## 版本目标
 
