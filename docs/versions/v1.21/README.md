@@ -63,10 +63,13 @@ Managed Process 只增加 macOS credential tree deny，不改变 Runtime 输入�
   Desktop production build 与文档门禁已通过；Rust PR suite 的功能无关唯一失败是 v1.20 已记录的 Runtime
   compatibility register 摘要 digest 基线失配；Core binary 套件另有 5 项既存 ACP fixture/run-tmp 前置条件
   失败，本次未修改这些模块；
-- 提交 `d87eeee4` 的 macOS arm64 App 已通过深度验签，Main/Core/CLI 均为 arm64，包内 Core/CLI UUID 分别为
-  `759104C5-4CAA-301C-A8D3-2B8D6F12EEAA` 与 `9504A773-419B-38EB-A0C8-C32881F04ECB`；
-- 全新隔离 `userData` 已验证 Automation status、instance credential、`0700/0600/0600` 权限与受控关闭清理；
-  同一成品已非终止安装到 `/Applications/Rovai AI.app`，旧包保留为可恢复备份，用户级 PATH 已提供
+- 提交 `55dc5aa0` 的 macOS arm64 App 已通过深度验签，Main/Core/CLI 均为 arm64；包内 Core/CLI UUID 分别为
+  `FB4F6BBE-6FA1-3B8F-928C-9E4603F0BE19` 与 `C56BCB47-97DA-3FFF-962B-661E604781A6`，SHA-256 分别为
+  `ed60da48de5c5545587703af206269abc3e6e73b684ab4f7c0078e7315703b08` 与
+  `c2260fb4b54aa93593f04f890b11badb809a3cab7cbd7ab65d0a421d16adbe2b`；
+- 全新隔离 `userData` 已验证 Automation status、instance credential、`0700/0600/0600` 权限、Runtime CLI
+  guard 与受控关闭清理；同一成品已非终止安装到 `/Applications/Rovai AI.app`，替换前成品保留在
+  `/Applications/Rovai AI.backup-before-55dc5aa0.app`，原日常 App/Core 进程未被终止，用户级 PATH 继续使用
   `~/.local/bin/rovai`。
 
 ## 明确不做
