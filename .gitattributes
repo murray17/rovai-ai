@@ -1,0 +1,2 @@
+/legal/licenses/** -text -whitespace
+*.crate binary

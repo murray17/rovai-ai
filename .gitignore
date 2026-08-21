@@ -8,6 +8,7 @@ target/
 resources/bin/
 coverage/
 *.tsbuildinfo
+/.legal-payload/
 
 # Operating system files and crash dumps
 .DS_Store

@@ -52,5 +52,5 @@ Popover、设置和 Quick Chat 首页不接收；相关菜单结构与行为不�
 
 - [方向原型](../../prototypes/conversation-drop-zone/rovai-conversation-drop-zone.html)
 - [设计说明](../../prototypes/conversation-drop-zone/PROJECT_DESIGN.md)
-- [Camp Attachment v2](../../contracts/camp-attachment-v2.md)
+- [Camp Attachment v5](../../contracts/camp-attachment-v5.md)
 - [Camp 资源不变量](../../architecture/foundational-invariants.md#camp-resources)

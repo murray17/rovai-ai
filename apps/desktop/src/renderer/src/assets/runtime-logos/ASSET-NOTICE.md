@@ -3,7 +3,26 @@
 The runtime product logos in this directory come from
 [`@lobehub/icons-static-svg`](https://www.npmjs.com/package/@lobehub/icons-static-svg) version
 `1.94.0`. The source project is [Lobe Icons](https://github.com/lobehub/lobe-icons).
-The SVGs are bundled unchanged and retain their upstream product marks.
+The exact package tarball SHA-256 is
+`a813cbb544624f51344ceab00b21c3fb0e760a989453ca447c502098698b1ec2`.
+Nine local SVGs are byte-identical. Two differ only by one trailing newline;
+there are no material SVG changes.
+
+| Local file | Comparison to package 1.94.0 |
+|---|---|
+| `antigravity-color.svg` | `BYTE_IDENTICAL` |
+| `claudecode-color.svg` | `BYTE_IDENTICAL` |
+| `codebuddy-color.svg` | `BYTE_IDENTICAL` |
+| `codex-color.svg` | `BYTE_IDENTICAL` |
+| `copilot-color.svg` | `BYTE_IDENTICAL` |
+| `deepseek-color.svg` | `FORMAT_ONLY_TRAILING_NEWLINE` |
+| `kiro-color.svg` | `BYTE_IDENTICAL` |
+| `opencode.svg` | `BYTE_IDENTICAL` |
+| `qoder-color.svg` | `BYTE_IDENTICAL` |
+| `qwen-color.svg` | `BYTE_IDENTICAL` |
+| `trae-color.svg` | `FORMAT_ONLY_TRAILING_NEWLINE` |
+
+Material SVG changes: `0`.
 
 Lobe Icons is distributed under the MIT License:
 
@@ -26,3 +45,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Product names and logos remain trademarks or brand assets of their respective
+rights holders. Their inclusion identifies compatible runtime products and
+does not transfer ownership of those marks to Rovai AI.

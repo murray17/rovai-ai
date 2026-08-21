@@ -988,6 +988,10 @@ export function App(): React.JSX.Element {
     }
   }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
 
+  useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
+    void activateCamp(campId, { reconcileDefaultLead: false })
+  }), [activateCamp])
+
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const { snapshot } = await requestCampProjection(campId, 'open')
     if (activeCampIdRef.current !== campId) return
@@ -2777,6 +2781,7 @@ export function App(): React.JSX.Element {
             firstRunCamp={firstRunCamp}
             onConfigureRuntime={configureMemberRuntime}
             onDismissRuntimeRecovery={() => setRuntimeRecovery(null)}
+            onNotify={setToast}
           />
         )}
 
@@ -3267,7 +3272,10 @@ export function optimisticCampMessage(
     sourceAgentRunId: null,
     body: draft.body,
     content: draft.content,
-    attachments: draft.attachments,
+    attachments: draft.attachments.map((attachment) => ({
+      ...attachment,
+      runtimeProjectionState: 'pending' as const
+    })),
     addressMode: broadcast ? 'broadcast' : explicitlyMentionedIds.length > 0 ? 'explicit' : 'default',
     addressedAgentIds,
     replyToCampMessageId: draft.replyIntent?.replyToCampMessageId ?? null,

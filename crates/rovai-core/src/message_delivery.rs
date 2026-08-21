@@ -9,6 +9,7 @@ use uuid::Uuid;
 use crate::{
     agent_identity::parse_agent_id,
     agent_profile::{AdapterKind, resolve_frozen_runtime},
+    camp_attachment_publication::{AuthorityAttachment, CampAttachmentPublicationCoordinator},
     camp_content::{
         StructuredCampMessageSegment, canonical_content_digest, normalize_content,
         render_current_plain_text,
@@ -112,7 +113,7 @@ impl MessageDeliveryService {
                 .query_row(
                     r#"
                     SELECT camp_id, status, version, retry_generation,
-                           delivery_kind, gather_id
+                           delivery_kind, gather_id, failure_code
                     FROM message_delivery WHERE id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
@@ -124,12 +125,20 @@ impl MessageDeliveryService {
                             row.get::<_, i64>(3)?,
                             row.get::<_, String>(4)?,
                             row.get::<_, Option<String>>(5)?,
+                            row.get::<_, Option<String>>(6)?,
                         ))
                     },
                 )
                 .optional()?;
-            let Some((camp_id, status, version, retry_generation, delivery_kind, gather_id)) =
-                target
+            let Some((
+                camp_id,
+                status,
+                version,
+                retry_generation,
+                delivery_kind,
+                gather_id,
+                failure_code,
+            )) = target
             else {
                 return Ok(rejected(
                     "message_delivery.not_found",
@@ -152,6 +161,12 @@ impl MessageDeliveryService {
                 return Ok(rejected(
                     "message_delivery.retry_not_allowed",
                     "Only failed or interrupted-before-dispatch Deliveries may be retried",
+                ));
+            }
+            if failure_code.as_deref() == Some("attachment_projection_failed") {
+                return Ok(rejected(
+                    "message_delivery.retry_not_allowed",
+                    "The message attachment projection failed permanently",
                 ));
             }
             if delivery_kind == "gather_completion"
@@ -518,6 +533,7 @@ pub struct SendPublicA2aMessage<'a> {
     pub agent_addressing_mode: AgentAddressingMode,
     pub mention_user: bool,
     pub task_id: Option<&'a str>,
+    pub attachments: &'a [AuthorityAttachment],
     pub operation: PublicA2aOperation<'a>,
 }
 
@@ -1117,6 +1133,50 @@ pub fn persist_public_a2a_message(
             },
         ],
     )?;
+    let attachment_publication = CampAttachmentPublicationCoordinator.commit_agent_intent(
+        transaction,
+        request.camp_id,
+        &message_id,
+        request.command_id,
+        request.attachments,
+    )?;
+    for (position, attachment) in request.attachments.iter().enumerate() {
+        let publication = attachment_publication
+            .as_ref()
+            .context("Agent attachment publication aggregate is missing")?;
+        transaction.execute(
+            r#"
+            INSERT INTO message_attachment(
+                id, camp_id, camp_message_id, conversation_message_id,
+                position, display_name, media_type, byte_size,
+                content_digest, storage_path, preview_kind,
+                created_by_type, created_by_id, created_at,
+                runtime_projection_state, publication_operation_id,
+                publication_semantic_revision
+            ) VALUES (
+                ?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7,
+                ?8, ?9, ?10, 'agent', ?11, ?12,
+                'pending', ?13, ?14
+            )
+            "#,
+            params![
+                attachment.attachment_id,
+                request.camp_id,
+                message_id,
+                position as i64,
+                attachment.display_name,
+                attachment.media_type,
+                attachment.byte_size as i64,
+                attachment.content_digest,
+                attachment.storage_path.to_string_lossy(),
+                attachment.preview_kind,
+                request.author_agent_id,
+                now,
+                publication.operation_id,
+                publication.semantic_revision,
+            ],
+        )?;
+    }
     index_camp_message(
         transaction,
         &message_id,
@@ -1364,6 +1424,13 @@ pub fn persist_public_a2a_message(
         )?;
         delivery_ids.push(delivery_id);
     }
+    if let Some(publication) = attachment_publication.as_ref() {
+        CampAttachmentPublicationCoordinator.gate_deliveries(
+            transaction,
+            &delivery_ids,
+            &publication.operation_id,
+        )?;
+    }
     crate::collaboration::append_domain_event(
         transaction,
         "camp_message.public_a2a_sent",
@@ -1574,6 +1641,95 @@ pub fn mark_unstarted_deliveries_interrupted_before_dispatch(
     }
     transaction.commit()?;
     Ok(delivery_ids.len() + barrier_completion_ids.len())
+}
+
+pub(crate) fn settle_attachment_projection_failure(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+    failure_code: &str,
+    now: &str,
+) -> Result<Vec<(String, String)>> {
+    let deliveries = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT id, camp_id, recipient_agent_id
+            FROM message_delivery
+            WHERE projection_operation_id = ?1
+              AND status = 'pending'
+              AND dispatch_phase = 'projection_blocked'
+              AND pre_dispatch_gate = 'attachment_projection'
+              AND dispatch_attempt_count = 0
+            ORDER BY recipient_agent_id, queue_sequence, id
+            "#,
+        )?;
+        statement
+            .query_map([operation_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let actor = ActorRef::System {
+        component_id: "camp-attachment-publication".to_string(),
+    };
+    for (delivery_id, camp_id, _) in &deliveries {
+        let changed = transaction.execute(
+            r#"
+            UPDATE message_delivery
+            SET status = 'failed', dispatch_phase = 'terminal',
+                pre_dispatch_gate = NULL,
+                manual_intervention_required = 0,
+                failure_code = 'attachment_projection_failed',
+                failure_detail_json = ?2,
+                version = version + 1, updated_at = ?3, ended_at = ?3
+            WHERE id = ?1 AND status = 'pending'
+              AND dispatch_phase = 'projection_blocked'
+              AND pre_dispatch_gate = 'attachment_projection'
+              AND dispatch_attempt_count = 0
+            "#,
+            params![
+                delivery_id,
+                serde_json::to_string(&json!({
+                    "projectionOperationId": operation_id,
+                    "failureCode": failure_code,
+                }))?,
+                now,
+            ],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("message_delivery_projection_gate_conflict");
+        }
+        append_domain_event(
+            transaction,
+            "message_delivery.terminal",
+            Some(camp_id),
+            Some(("message_delivery", delivery_id)),
+            &actor,
+            None,
+            &json!({
+                "status": "failed",
+                "failureCode": "attachment_projection_failed",
+                "projectionFailureCode": failure_code,
+                "projectionOperationId": operation_id,
+            }),
+        )?;
+        settle_item_from_delivery_terminal(
+            transaction,
+            delivery_id,
+            "failed",
+            Some("attachment_projection_failed"),
+            &actor,
+            None,
+            now,
+        )?;
+    }
+    Ok(deliveries
+        .into_iter()
+        .map(|(_, camp_id, recipient_agent_id)| (camp_id, recipient_agent_id))
+        .collect())
 }
 
 pub fn dispatch_pending_for_recipient(

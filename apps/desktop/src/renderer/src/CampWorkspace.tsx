@@ -26,6 +26,7 @@ import type {
   TaskStatus,
   TaskView,
   NavigationCampItem,
+  PreparedAttachmentView,
   SkillDeliveryGroupView,
   SkillView,
   StoredCommandResult,
@@ -43,6 +44,7 @@ import {
   liveRuntimeEventFromExecutionEvidence,
   type LiveExecutionProgress,
   type LiveRuntimeEvent,
+  type RuntimeDiagnostic,
   localDayKey,
   messageClockTime,
   relativeTimeLabel,
@@ -134,6 +136,14 @@ export interface FirstRunCampContext {
 type CampInspectorSurfaceTab = CampInspectorTab | 'execution'
 type AttachmentKind = 'file' | 'directory'
 type AttachmentDragKind = 'files' | 'directory'
+
+export function attachmentRevealLabel(platform: NodeJS.Platform): string {
+  return platform === 'darwin'
+    ? '在 Finder 中显示'
+    : platform === 'win32'
+      ? '在文件资源管理器中显示'
+      : '显示所在位置'
+}
 type AttachmentPreparationInput = { file: File; kindHint: AttachmentKind }
 type ReplyFocusModality = 'pointer' | 'keyboard'
 type ConversationFindStatus = 'idle' | 'searching' | 'loading_target' | 'ready' | 'error'
@@ -1104,7 +1114,8 @@ export function CampWorkspace({
   runtimeRecovery = null,
   firstRunCamp = null,
   onConfigureRuntime,
-  onDismissRuntimeRecovery
+  onDismissRuntimeRecovery,
+  onNotify = () => undefined
 }: {
   snapshot: CampSnapshot
   openCoverage?: CampOpenProjection['coverage'] | null
@@ -1143,6 +1154,7 @@ export function CampWorkspace({
   firstRunCamp?: FirstRunCampContext | null
   onConfigureRuntime?(agentId: string): void
   onDismissRuntimeRecovery?(): void
+  onNotify?(message: string): void
 }): JSX.Element {
   const [messageContent, setMessageContent] = useState<StructuredCampMessageContent>([])
   const [composerDraft, setComposerDraft] = useState<CampComposerDraftView | null>(null)
@@ -1162,6 +1174,7 @@ export function CampWorkspace({
     status: 'loading' | 'ready' | 'error'
   }>({ skills: [], groups: [], status: 'loading' })
   const composerEditorRef = useRef<HTMLDivElement>(null)
+  const pendingStarterPromptFocusRef = useRef<string | null>(null)
   const composerFileInputRef = useRef<HTMLInputElement>(null)
   const draftSaveTimer = useRef<number | null>(null)
   const campLeaveTimer = useRef<{ campId: string; timer: number } | null>(null)
@@ -3081,20 +3094,31 @@ export function CampWorkspace({
   }
 
   const chooseStarterPrompt = (prompt: string, announceDraft = false): void => {
+    pendingStarterPromptFocusRef.current = prompt
     changeMessage([{ kind: 'text', text: prompt }])
     if (announceDraft) setStarterNotice('已填入输入框，可修改后发送')
-    window.requestAnimationFrame(() => {
-      const editor = composerEditorRef.current
-      if (!editor) return
-      editor.focus()
-      const selection = window.getSelection()
-      const range = document.createRange()
-      range.selectNodeContents(editor)
-      range.collapse(false)
-      selection?.removeAllRanges()
-      selection?.addRange(range)
-    })
   }
+
+  useLayoutEffect(() => {
+    const pendingPrompt = pendingStarterPromptFocusRef.current
+    if (
+      pendingPrompt === null
+      || messageContent.length !== 1
+      || messageContent[0].kind !== 'text'
+      || messageContent[0].text !== pendingPrompt
+    ) return
+
+    const editor = composerEditorRef.current
+    if (!editor) return
+    pendingStarterPromptFocusRef.current = null
+    editor.focus()
+    const selection = window.getSelection()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+  }, [messageContent])
 
   const selectInspectorTab = (tab: CampInspectorTab): void => {
     if (controlledInspectorTab === undefined) setLocalInspectorTab(tab)
@@ -3715,7 +3739,9 @@ export function CampWorkspace({
                                     {campMessage.attachments.map((attachment) => (
                                       <AttachmentCard
                                         attachment={attachment}
+                                        campId={snapshot.camp.id}
                                         key={attachment.id}
+                                        onNotify={onNotify}
                                         timeline
                                       />
                                     ))}
@@ -4837,7 +4863,7 @@ function ExecutionDrawer({
             {stopViewState === 'available' && resolvedFocusedRun && (
               <button
                 type="button"
-                className="quiet-button compact danger-text execution-run-stop-button"
+                className="quiet-button compact danger-text execution-drawer-action-button"
                 aria-label="停止当前运行"
                 onClick={() => {
                   const runId = resolvedFocusedRun.id
@@ -4855,7 +4881,7 @@ function ExecutionDrawer({
                 停止
               </button>
             )}
-            <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
+            <button type="button" className="quiet-button compact execution-drawer-action-button" onClick={onClose} aria-label="收起执行详情">收起</button>
           </div>
         </header>
         <div
@@ -6248,14 +6274,27 @@ function AttachmentFolderGlyph(): JSX.Element {
 function AttachmentCard({
   attachment,
   onRemove,
+  campId,
+  onNotify = () => undefined,
   timeline = false
 }: {
-  attachment: CampMessageAttachmentView
+  attachment: CampMessageAttachmentView | PreparedAttachmentView
   onRemove?: () => void
+  campId?: string
+  onNotify?: (message: string) => void
   timeline?: boolean
 }): JSX.Element {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewFailed, setPreviewFailed] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [attachmentAction, setAttachmentAction] = useState<'open' | 'reveal' | null>(null)
+  const [contextMenuOpen, setContextMenuOpen] = useState(false)
+  const [contextAnchor, setContextAnchor] = useState({ x: 0, y: 0 })
+  const attachmentButtonRef = useRef<HTMLButtonElement>(null)
+  const runtimeProjectionState = 'runtimeProjectionState' in attachment
+    ? attachment.runtimeProjectionState
+    : 'available'
+  const rendererPlatform = typeof window === 'undefined' ? 'darwin' : window.rovai.platform
   useEffect(() => {
     if (attachment.previewKind !== 'image') return
     let active = true
@@ -6281,6 +6320,55 @@ function AttachmentCard({
     }
   }, [attachment.id, attachment.previewKind])
 
+  const runAttachmentAction = async (action: 'open' | 'reveal'): Promise<void> => {
+    if (!timeline || !campId || attachmentAction) return
+    setAttachmentAction(action)
+    try {
+      if (action === 'open') {
+        const result = await window.rovai.attachments.open(campId, attachment.id)
+        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
+        else if (result.error) onNotify('无法使用系统应用打开此附件')
+      } else {
+        const result = await window.rovai.attachments.reveal(campId, attachment.id)
+        if (result.error === 'target_unavailable') onNotify('此附件当前不可用')
+        else if (result.error) {
+          onNotify(rendererPlatform === 'darwin'
+            ? '无法在 Finder 中显示此附件'
+            : rendererPlatform === 'win32'
+              ? '无法在文件资源管理器中显示此附件'
+              : '无法显示此附件所在位置')
+        }
+      }
+    } catch {
+      onNotify(action === 'open'
+        ? '无法使用系统应用打开此附件'
+        : '无法显示此附件所在位置')
+    } finally {
+      setAttachmentAction(null)
+    }
+  }
+
+  const revealLabel = attachmentRevealLabel(rendererPlatform)
+  const systemOpenLabel = attachment.kind === 'directory'
+    ? '打开文件夹'
+    : '使用系统应用打开'
+  const hasImagePreview = attachment.previewKind === 'image' && previewUrl !== null
+  const showAttachmentContextMenu = (x: number, y: number): void => {
+    setContextAnchor({ x, y })
+    setContextMenuOpen(true)
+  }
+  const showAttachmentKeyboardMenu = (): void => {
+    const bounds = attachmentButtonRef.current?.getBoundingClientRect()
+    showAttachmentContextMenu(bounds?.left ?? 8, bounds?.bottom ?? 8)
+  }
+
+  const projectionLabel = runtimeProjectionState === 'failed'
+    ? '队员读取不可用'
+    : runtimeProjectionState === 'pending'
+      || runtimeProjectionState === 'recovery_required'
+      ? '正在准备供队员读取'
+      : null
+
   const content = (
     <>
       <span className="attachment-visual" aria-hidden="true">
@@ -6293,24 +6381,113 @@ function AttachmentCard({
       <span className="attachment-copy">
         <strong title={attachment.displayName}>{attachment.displayName}</strong>
         <small>
-          {attachment.kind === 'directory'
+          {projectionLabel ?? (attachment.kind === 'directory'
             ? `${attachment.fileCount} 个文件 · ${formatByteSize(attachment.byteSize)} · 只读快照`
-            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`}
+            : `${attachmentTypeLabel(attachment.mediaType)} · ${formatByteSize(attachment.byteSize)}`)}
         </small>
       </span>
     </>
   )
 
   return (
-    <div className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''}`}>
-      {previewUrl
+    <div
+      className={`attachment-card ${timeline ? 'timeline-attachment-card' : ''} ${projectionLabel ? `attachment-projection-${runtimeProjectionState}` : ''}`}
+      aria-label={projectionLabel ? `${attachment.displayName}：${projectionLabel}` : undefined}
+      data-context-open={contextMenuOpen ? 'true' : undefined}
+      onContextMenu={timeline && campId
+        ? (event) => {
+            event.preventDefault()
+            if (event.clientX === 0 && event.clientY === 0) showAttachmentKeyboardMenu()
+            else showAttachmentContextMenu(event.clientX, event.clientY)
+          }
+        : undefined}
+    >
+      {timeline && campId
         ? (
-            <Dialog.Root>
-              <Dialog.Trigger asChild>
-                <button className="attachment-open" type="button" aria-label={`预览附件 ${attachment.displayName}`}>
-                  {content}
-                </button>
-              </Dialog.Trigger>
+            <>
+              <button
+                className={`attachment-open ${hasImagePreview ? 'is-preview' : ''}`}
+                type="button"
+                aria-busy={attachmentAction !== null}
+                aria-label={hasImagePreview
+                  ? `预览附件 ${attachment.displayName}`
+                  : `${systemOpenLabel} ${attachment.displayName}`}
+                disabled={attachmentAction !== null}
+                onClick={() => {
+                  if (hasImagePreview) setPreviewOpen(true)
+                  else void runAttachmentAction('open')
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return
+                  event.preventDefault()
+                  showAttachmentKeyboardMenu()
+                }}
+                ref={attachmentButtonRef}
+              >
+                {content}
+                {attachmentAction && <i className="attachment-action-loading" aria-hidden="true" />}
+              </button>
+              <DropdownMenu.Root open={contextMenuOpen} onOpenChange={setContextMenuOpen}>
+                <DropdownMenu.Trigger asChild>
+                  <span
+                    className="attachment-context-anchor"
+                    style={{ left: contextAnchor.x, top: contextAnchor.y }}
+                  />
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Portal>
+                  <DropdownMenu.Content
+                    className="attachment-context-menu"
+                    aria-label={`附件操作：${attachment.displayName}`}
+                    align="start"
+                    side="right"
+                    sideOffset={4}
+                    collisionPadding={8}
+                    loop
+                    onCloseAutoFocus={(event) => {
+                      event.preventDefault()
+                      attachmentButtonRef.current?.focus()
+                    }}
+                  >
+                    <DropdownMenu.Label className="attachment-context-menu-label">
+                      <strong>{attachment.displayName}</strong>
+                      <small>{attachment.kind === 'directory' ? '文件夹' : attachmentTypeLabel(attachment.mediaType)}</small>
+                    </DropdownMenu.Label>
+                    <DropdownMenu.Item
+                      className="attachment-context-menu-item"
+                      disabled={attachmentAction !== null}
+                      onSelect={() => void runAttachmentAction('open')}
+                    >
+                      <AttachmentOpenGlyph kind={attachment.kind} />
+                      <span>{systemOpenLabel}</span>
+                    </DropdownMenu.Item>
+                    <DropdownMenu.Separator className="attachment-context-menu-separator" />
+                    <DropdownMenu.Item
+                      className="attachment-context-menu-item"
+                      disabled={attachmentAction !== null}
+                      onSelect={() => void runAttachmentAction('reveal')}
+                    >
+                      <AttachmentRevealGlyph />
+                      <span>{revealLabel}</span>
+                    </DropdownMenu.Item>
+                  </DropdownMenu.Content>
+                </DropdownMenu.Portal>
+              </DropdownMenu.Root>
+            </>
+          )
+        : hasImagePreview
+          ? (
+              <button
+                className="attachment-open is-preview"
+                type="button"
+                aria-label={`预览附件 ${attachment.displayName}`}
+                onClick={() => setPreviewOpen(true)}
+              >
+                {content}
+              </button>
+            )
+          : <div className="attachment-open">{content}</div>}
+      {hasImagePreview && (
+            <Dialog.Root open={previewOpen} onOpenChange={setPreviewOpen}>
               <Dialog.Portal>
                 <Dialog.Overlay className="attachment-lightbox-overlay" />
                 <Dialog.Content className="attachment-lightbox" aria-describedby={undefined}>
@@ -6320,8 +6497,7 @@ function AttachmentCard({
                 </Dialog.Content>
               </Dialog.Portal>
             </Dialog.Root>
-          )
-        : <div className="attachment-open">{content}</div>}
+      )}
       {onRemove && (
         <button
           className="attachment-remove"
@@ -6333,6 +6509,32 @@ function AttachmentCard({
         </button>
       )}
     </div>
+  )
+}
+
+function AttachmentOpenGlyph({ kind }: { kind: 'file' | 'directory' }): JSX.Element {
+  return kind === 'directory'
+    ? (
+        <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M2.8 5.8h4l1.5 1.7h6.9v6.7H2.8z" />
+          <path d="M2.8 7.5V4.8h4.4l1.3 1.5" />
+        </svg>
+      )
+    : (
+        <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M3.4 3.2h7.2l4 4v7.6H3.4z" />
+          <path d="M10.6 3.2v4h4M6.2 11.1h5.7M9.7 8.8l2.2 2.3-2.2 2.2" />
+        </svg>
+      )
+}
+
+function AttachmentRevealGlyph(): JSX.Element {
+  return (
+    <svg className="attachment-menu-icon" viewBox="0 0 18 18" aria-hidden="true">
+      <path d="M2.8 5.8h4l1.5 1.7h6.9v6.7H2.8z" />
+      <circle cx="11.9" cy="11.2" r="2.1" />
+      <path d="m13.4 12.7 1.8 1.8" />
+    </svg>
   )
 }
 
@@ -6842,7 +7044,7 @@ function ToolCallRow({
   const summary = (
     <>
       <ToolCallIcon activityDomain={step.activityDomain} />
-      <span className="tool-call-title">{step.title}</span>
+      <span className="tool-call-title" title={step.title}>{step.title}</span>
       <ToolCallState status={status} />
       <span
         className={`tool-call-disclosure-slot${hasDetail ? '' : ' is-placeholder'}`}
@@ -6885,6 +7087,29 @@ function ToolCallRow({
         summaryRef={summaryRef}
       />
     </details>
+  )
+}
+
+function RuntimeRetryNotice({ diagnostic }: {
+  diagnostic: RuntimeDiagnostic
+}): JSX.Element {
+  const retryTiming = diagnostic.retryAfterSeconds === 0
+    ? '正在立即重试'
+    : `将在 ${diagnostic.retryAfterSeconds} 秒后重试`
+  return (
+    <section
+      className="runtime-retry-notice"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-label="Claude Code API 暂时不可用"
+    >
+      <strong>Claude Code API 暂时不可用</strong>
+      <p>
+        {retryTiming}（第 {diagnostic.attempt}/{diagnostic.maxAttempts} 次）。
+        本次执行尚未结束，可继续等待或停止执行。
+      </p>
+    </section>
   )
 }
 
@@ -6942,6 +7167,10 @@ export function RunExecutionDisclosure({
   const processItems = (effectiveProgress?.items ?? []).filter((item) =>
     item.kind !== 'narration' || !finalKey || comparableMessageText(item.body) !== finalKey
   )
+  const activeRetryDiagnostic = nonTerminal
+    ? processItems.reduce<RuntimeDiagnostic | null>((latest, item) =>
+        item.kind === 'diagnostic' ? item.diagnostic : latest, null)
+    : null
   const completeEvidence = selectCompleteExecutionEvidence(effectiveTruncatedEvidence)
   const hasProgress = processItems.length > 0
   const showUnsettledWarning = agentRunShowsUnsettledWarning(run)
@@ -6977,6 +7206,11 @@ export function RunExecutionDisclosure({
         </p>
       )}
       {processItems.map((item) => {
+        if (item.kind === 'diagnostic') {
+          return nonTerminal
+            ? <RuntimeRetryNotice diagnostic={item.diagnostic} key={item.key} />
+            : null
+        }
         if (item.kind === 'narration') {
           return (
             <div className={`process-copy stream-${item.kind}`} key={item.key}>
@@ -7055,7 +7289,9 @@ export function RunExecutionDisclosure({
             ? agentRunWaitDetail(run.waitReason) ?? '等待继续'
             : run.status === 'queued'
               ? '等待开始'
-              : '正在处理'}</span>
+              : activeRetryDiagnostic
+                ? `等待 Claude Code 自动重试（${activeRetryDiagnostic.attempt}/${activeRetryDiagnostic.maxAttempts}）`
+                : '正在处理'}</span>
         </div>
       )}
       {cancelling && nonTerminal && (
@@ -7207,7 +7443,7 @@ function runtimeAdapterLabel(kind: string): string {
     'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
-    'trae-cn-cli': 'TRAE CLI（中国企业版）',
+    'trae-cn-cli': 'TRAE CLI',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
 }

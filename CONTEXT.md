@@ -1619,8 +1619,8 @@ The authoritative ordered content of one CampMessage and, for user-authored inpu
 _Avoid_: generic rich-text document, HTML, Markdown AST, mention character offsets, parsed user lookalike, parallel body and routing truth
 
 **Published Attachment**:
-An immutable Authority Attachment whose exact Prepared Attachment was consumed by one accepted public CampMessage. The message commit makes it shared with the whole Camp regardless of addressing or whether it appears in a particular AgentRun's Context; every eligible Camp Agent may enumerate and read its Published Attachment Path. It supplements a required non-blank message body and can never constitute a body-free message by itself.
-_Avoid_: Prepared Attachment, addressed-recipient attachment, Context-scoped grant, pure attachment message, mutable upload
+An immutable Authority Attachment adopted by one accepted public CampMessage from a consumed Prepared Attachment or admitted Agent file ingress. The message commit makes it shared with the whole Camp regardless of addressing or whether it appears in a particular AgentRun's Context; it may accompany a body or constitute the complete attachment-only payload while every eligible Camp Agent may enumerate and read its Published Attachment Path.
+_Avoid_: Prepared Attachment, addressed-recipient attachment, Context-scoped grant, mutable upload
 
 **Camp Published Attachment View**:
 The instance-isolated, derived and rebuildable Runtime filesystem catalog containing exactly one Camp's Published Attachments and no Draft Attachment or Core-private metadata. Runtime receives only that Camp's exact `attachments` root; the View follows the Camp lifecycle, is not a second content authority, and never becomes a Camp Workspace Binding, Git worktree, Run projection, Session projection, or cross-Camp library.

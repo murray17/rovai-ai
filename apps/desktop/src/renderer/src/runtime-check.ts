@@ -4,6 +4,8 @@ export type ProductRuntimeCheckResult = {
   scheduled: true
   completed: true
   ready: boolean
+  outcome: 'ready' | 'stable_failure' | 'deferred'
+  status: 'ready' | 'stable_failure' | 'deferred'
   runtimeKind: AdapterKind
 }
 

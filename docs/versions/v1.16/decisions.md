@@ -1,7 +1,7 @@
 ---
 document_type: version-decisions
 version: v1.16
-lifecycle: current
+lifecycle: historical
 last_updated: 2026-08-20
 ---
 
@@ -63,4 +63,3 @@ Desktop 对这种执行请求提供稳定事实性 AgentRun purpose `Camp attach
 - [Camp Composer Draft 架构](../../architecture/camp-composer-draft.md)
 - [Composer Draft 与用户发送不变量](../../architecture/foundational-invariants.md#camp-composer)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)
-

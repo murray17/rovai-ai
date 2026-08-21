@@ -116,7 +116,7 @@ export interface RuntimeModelCatalogView {
   runtimeKind: AdapterKind
   cache: RuntimeModelCatalogCache
   models: ModelDescriptor[]
-  refreshStatus: 'not_required' | 'scheduled' | 'joined' | 'completed' | 'failed'
+  refreshStatus: 'not_required' | 'scheduled' | 'joined' | 'completed' | 'failed' | 'deferred'
   diagnosticCode: string | null
 }
 
@@ -972,9 +972,11 @@ export interface CampMessageAttachmentView {
   mediaType: string
   byteSize: number
   previewKind: 'image' | 'none'
+  runtimeProjectionState: 'pending' | 'available' | 'recovery_required' | 'failed'
 }
 
-export interface PreparedAttachmentView extends CampMessageAttachmentView {
+export interface PreparedAttachmentView
+  extends Omit<CampMessageAttachmentView, 'runtimeProjectionState'> {
   state: 'ready' | 'error'
   errorMessage: string | null
   createdAt: string
@@ -1022,6 +1024,18 @@ export type CampComposerReplyRecipient =
 export interface AttachmentPreview {
   mediaType: string
   bytes: Uint8Array
+}
+
+export type AttachmentActionError = 'target_unavailable' | 'open_failed' | 'reveal_failed'
+
+export interface AttachmentOpenResult {
+  opened: boolean
+  error: AttachmentActionError | null
+}
+
+export interface AttachmentRevealResult {
+  revealed: boolean
+  error: AttachmentActionError | null
 }
 
 export type CampTimelinePresentation =
@@ -1110,6 +1124,66 @@ export interface AgentRunView {
   startedAt: string | null
   endedAt: string | null
   updatedAt: string
+}
+
+export interface AgentRunDiagnosticView {
+  schemaVersion: 1
+  agentRunId: string
+  executionEpoch: number
+  campId: string
+  campTurnId: string
+  conversationId: string
+  agentId: string
+  status: AgentRunView['status']
+  waitReason: string | null
+  failure: RuntimeFailureView | null
+  version: number
+  createdAt: string
+  startedAt: string | null
+  endedAt: string | null
+  runtime: {
+    adapterKind: AdapterKind
+    runtimeInstallationId: string | null
+    effectiveConfigDigest: string
+    bindingCompatibilityDigest: string | null
+    permissionSemantics: AgentRunView['permissionSemantics']
+    observedModelId: string | null
+  }
+  output: {
+    finalOutputDigest: string | null
+    finalCampMessageId: string | null
+    publicOutput: string | null
+    unavailableReason: 'run_not_succeeded' | 'not_published' | 'published_message_unavailable' | null
+  }
+  git: {
+    starting: AgentRunDiagnosticGitObservation | null
+    ending: AgentRunDiagnosticGitObservation | null
+  }
+  contextManifest: {
+    manifestId: string | null
+    renderedPayloadDigest: string | null
+    charterDeliveryMode: 'native_append' | 'first_payload' | null
+    campMessageBoundarySequence: number | null
+    skillExposureDigest: string | null
+    mcpExposureDigest: string | null
+    mcpProjectionDigest: string | null
+    attachmentDigest: string | null
+  }
+  evidence: {
+    count: number
+    firstEvidenceSequence: number | null
+    lastEvidenceSequence: number | null
+  }
+  observedThroughGlobalSequence: number
+}
+
+export interface AgentRunDiagnosticGitObservation {
+  state: GitCapabilityState
+  objectFormat: string | null
+  headCommit: string | null
+  branch: string | null
+  dirty: boolean | null
+  observedAt: string
 }
 
 export interface CanonicalRuntimeActivityView {
@@ -1934,6 +2008,7 @@ export type SkillDeliveryGroupKey =
   | 'qoder'
   | 'codebuddy'
   | 'qwen'
+  | 'trae'
 
 export interface SkillRiskSummary {
   executableFileCount: number
@@ -2410,6 +2485,7 @@ export type CoreMethod =
   | 'camps.delete'
   | 'campTurns.cancel'
   | 'agentRuns.cancel'
+  | 'agentRuns.diagnostic.get'
   | 'agentRuns.resolveRecoveryBlocker'
   | 'camps.snapshot'
   | 'camp.messages.page'
@@ -2431,6 +2507,7 @@ export type CoreMethod =
   | 'camp.composerDraft.removeAttachment'
   | 'camp.composerDraft.discard'
   | 'camp.messages.send'
+  | 'userAutomation.camp.send'
   | 'action.approvals.resolve'
   | 'notifications.inbox'
   | 'notifications.changesSince'
@@ -2446,6 +2523,9 @@ export type CoreMethod =
 export interface RovaiApi {
   request<T>(method: CoreMethod, params?: unknown): Promise<T>
   onEvent(listener: (event: CoreEvent) => void): () => void
+  userAutomation: {
+    onOpenCamp(listener: (request: { campId: string }) => void): () => void
+  }
   appearance: AppearanceApi
   desktopSession: DesktopSessionApi
   generalPreferences: GeneralPreferencesApi
@@ -2456,6 +2536,10 @@ export interface RovaiApi {
   composerAttachments: {
     prepare(campId: string, expectedRevision: number, file: File): Promise<CampComposerDraftView>
     preview(attachmentId: string): Promise<AttachmentPreview | null>
+  }
+  attachments: {
+    open(campId: string, attachmentId: string): Promise<AttachmentOpenResult>
+    reveal(campId: string, attachmentId: string): Promise<AttachmentRevealResult>
   }
   clipboard: {
     write(input: { text: string; html: string | null }): Promise<void>

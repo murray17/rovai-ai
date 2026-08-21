@@ -8,7 +8,7 @@ mod runtime_fleet;
 mod runtime_mcp;
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     future::Future,
     path::{Path, PathBuf},
     sync::Arc,
@@ -33,6 +33,8 @@ use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
     CodexLiveModelValidationError, CodexRuntime,
 };
+#[cfg(target_os = "macos")]
+use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
@@ -45,16 +47,17 @@ use rovai_core::{
         AdapterInstallationView, AdapterKind, AdapterProbeAttempt, AgentProfileService,
         ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
         CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
-        InstallationClass, ManagedProbeFailure, RecordAdapterCapabilitySnapshotCommand,
-        RemoveMemberCommand, ReorderAgentProfilesCommand, RuntimeModelCatalogCacheStatus,
-        RuntimeReadinessStatus, SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
-        SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
-        UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        InstallationClass, InstallationSource, ManagedProbeFailure,
+        RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
+        RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus, SetAgentProfileAvatarCommand,
+        SetMemberPresenceCommand, SetMemberRuntimeConfigurationCommand,
+        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
         ClaudeCodeProbeObservation, CodexProbeObservation, ExecutableIntegrityStatus,
-        executable_fingerprint as fingerprint_executable, verify_executable_integrity,
+        executable_fingerprint as fingerprint_executable, observe_executable_file_identity,
+        verify_executable_integrity,
     },
     builtin_tool_evidence_projection::{
         BUILTIN_TOOL_EVIDENCE_PROJECTION_SCHEMA_VERSION, project_builtin_tool_invocation,
@@ -67,9 +70,13 @@ use rovai_core::{
         builtin_tool_catalog_digest, builtin_tool_description, recovery_for_error_code,
     },
     camp_attachment::{CampAttachmentStore, CampComposerReplyRecipient},
+    camp_attachment_publication::{
+        AuthorityAttachment, database_has_unresolved_writer_intent, frozen_sources_are_owned,
+        unresolved_publication_camp_ids,
+    },
     camp_attachment_view::{
-        CampAttachmentPublicationStaging, CampAttachmentRuntimeAuthorization,
-        CampAttachmentViewStore, CampAttachmentVisibilityMode, PreparedCampAttachmentCleanup,
+        CampAttachmentRuntimeAuthorization, CampAttachmentViewStore, CampAttachmentVisibilityMode,
+        PreparedCampAttachmentCleanup,
     },
     camp_content::StructuredCampMessageContent,
     camp_history::{
@@ -83,8 +90,9 @@ use rovai_core::{
         CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
         CreateCampCommand, CreateTaskCommand, DeleteCampCommand, DiscardPendingCampCommand,
         ExecutionRequest, ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand,
-        SendUserCampDraftCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
-        TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
+        SendUserAutomationCampMessageCommand, SendUserCampDraftCommand,
+        TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery,
+        TaskStatus, UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandHandlerResult,
@@ -139,9 +147,9 @@ use rovai_core::{
     },
     message_delivery::{
         CAMP_MESSAGE_SEND_TOOL_NAME, CancelMessageDeliveryCommand, DeliveryDispatchTrigger,
-        MessageDeliveryService, RetryMessageDeliveryCommand, dispatch_pending_for_recipient,
-        mark_unstarted_deliveries_interrupted_before_dispatch, runtime_waiting_camps,
-        runtime_waiting_recipients,
+        MessageDeliveryService, RetryMessageDeliveryCommand, dispatch_accepted_deliveries,
+        dispatch_pending_for_recipient, mark_unstarted_deliveries_interrupted_before_dispatch,
+        runtime_waiting_camps, runtime_waiting_recipients,
     },
     monitoring::{
         MonitoringFilter, MonitoringService, ParsedRuntimeUsage, RuntimeUsageBuffer,
@@ -260,6 +268,15 @@ impl CampAttachmentReadAdmission {
     }
 }
 
+fn release_agent_run_attachment_admission(
+    admission: CampAttachmentReadAdmission,
+    projection_requests: &mpsc::UnboundedSender<String>,
+) -> bool {
+    let camp_id = admission.camp_id.clone();
+    drop(admission);
+    projection_requests.send(camp_id).is_ok()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PlannedShutdownParams {
@@ -372,7 +389,10 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.product.check"
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
+            | "userAutomation.camp.send"
             | "camp.attachments.prepareFromPath"
+            | "camp.attachments.previewSource"
+            | "camp.attachments.desktopOpenTarget"
             | "campTurns.cancel"
             | "agentRuns.cancel"
             | "runtime.pendingExecution.cancel"
@@ -621,6 +641,12 @@ struct ExecutionEvidenceListParams {
     limit: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentRunDiagnosticParams {
+    agent_run_id: String,
+}
+
 fn default_execution_evidence_page_limit() -> i64 {
     500
 }
@@ -733,6 +759,16 @@ struct SendCampMessageParams {
     execution: Option<ExecutionRequest>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SendUserAutomationCampMessageParams {
+    command_id: String,
+    camp_id: CampId,
+    agent_id: String,
+    body: String,
+    execution: Option<ExecutionRequest>,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CampComposerDraftParams {
@@ -804,9 +840,61 @@ struct PrepareAttachmentFromPathParams {
     display_name: String,
 }
 
+async fn prepare_composer_attachment_from_path(
+    database: &Mutex<Database>,
+    data_dir: &Path,
+    params: PrepareAttachmentFromPathParams,
+) -> Result<Value> {
+    let store = CampAttachmentStore::new(data_dir);
+    let plan = {
+        let database = database.lock().await;
+        store.plan_prepare_from_path(
+            &database,
+            params.camp_id.as_str(),
+            params.expected_revision,
+            Path::new(&params.source_path),
+            &params.display_name,
+        )?
+    };
+    let filesystem_store = store.clone();
+    let prepared =
+        tokio::task::spawn_blocking(move || filesystem_store.prepare_from_path_filesystem(plan))
+            .await
+            .context("Camp Attachment preparation task failed")??;
+
+    let commit = {
+        let mut database = database.lock().await;
+        store.commit_prepared_attachment(&mut database, &prepared)
+    };
+    if let Err(error) = commit {
+        let cleanup_store = store.clone();
+        if let Err(cleanup_error) = tokio::task::spawn_blocking(move || {
+            cleanup_store.cleanup_uncommitted_prepared_attachment(prepared)
+        })
+        .await
+        {
+            eprintln!("Uncommitted Prepared Attachment cleanup task failed: {cleanup_error}");
+        }
+        return Err(error);
+    }
+
+    let draft = {
+        let database = database.lock().await;
+        store.load_draft(&database, params.camp_id.as_str())?
+    };
+    Ok(serde_json::to_value(draft)?)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AttachmentPreviewSourceParams {
+    attachment_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DesktopAttachmentTargetParams {
+    camp_id: CampId,
     attachment_id: String,
 }
 
@@ -919,6 +1007,91 @@ struct RuntimeDeepProbeResult {
 
 const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
 const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
+const RUNTIME_PROBE_UPDATE_RETRY_DELAY: Duration = Duration::from_millis(300);
+const RUNTIME_PROBE_MAX_EXECUTIONS: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RuntimeCheckOutcome {
+    Ready,
+    StableFailure,
+    Superseded,
+}
+
+impl RuntimeCheckOutcome {
+    fn is_ready(self) -> bool {
+        self == Self::Ready
+    }
+
+    fn public_status(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::StableFailure => "stable_failure",
+            Self::Superseded => "deferred",
+        }
+    }
+}
+
+#[derive(Default)]
+struct RuntimeCheckExecutionDeferrals {
+    runtime_kinds: BTreeSet<AdapterKind>,
+}
+
+impl RuntimeCheckExecutionDeferrals {
+    fn should_defer(&mut self, runtime_kind: AdapterKind, trigger: RuntimeCheckTrigger) -> bool {
+        if trigger == RuntimeCheckTrigger::Execution {
+            self.runtime_kinds.contains(&runtime_kind)
+        } else {
+            self.runtime_kinds.remove(&runtime_kind);
+            false
+        }
+    }
+
+    fn record(
+        &mut self,
+        runtime_kind: AdapterKind,
+        trigger: RuntimeCheckTrigger,
+        outcome: &std::result::Result<RuntimeCheckOutcome, String>,
+    ) {
+        if trigger == RuntimeCheckTrigger::Execution
+            && outcome.as_ref() == Ok(&RuntimeCheckOutcome::Superseded)
+        {
+            self.runtime_kinds.insert(runtime_kind);
+        }
+    }
+}
+
+enum IdentityCheckedProbe<T> {
+    Stable(std::result::Result<T, anyhow::Error>),
+    Superseded,
+}
+
+async fn run_identity_checked_probe<T>(
+    executable_path: &Path,
+    probe: impl Future<Output = Result<T>>,
+) -> IdentityCheckedProbe<T> {
+    let before = observe_executable_file_identity(executable_path).ok();
+    let result = probe.await;
+    let superseded = before.as_ref().is_some_and(|before| {
+        observe_executable_file_identity(executable_path)
+            .map(|after| after != *before)
+            .unwrap_or(true)
+    });
+    if superseded {
+        IdentityCheckedProbe::Superseded
+    } else {
+        IdentityCheckedProbe::Stable(result)
+    }
+}
+
+fn runtime_probe_update_retry_at(
+    now: tokio::time::Instant,
+    deadline: tokio::time::Instant,
+) -> Option<tokio::time::Instant> {
+    (now < deadline).then_some(std::cmp::min(
+        now + RUNTIME_PROBE_UPDATE_RETRY_DELAY,
+        deadline,
+    ))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum RuntimeCheckTrigger {
@@ -940,7 +1113,7 @@ struct RuntimeCheckRequest {
     purpose: RuntimeLaunchPurpose,
     trigger: RuntimeCheckTrigger,
     acknowledged: oneshot::Sender<bool>,
-    completion: Option<oneshot::Sender<std::result::Result<bool, String>>>,
+    completion: Option<oneshot::Sender<std::result::Result<RuntimeCheckOutcome, String>>>,
 }
 
 struct RuntimeCheckAttempt {
@@ -950,13 +1123,13 @@ struct RuntimeCheckAttempt {
     trigger: RuntimeCheckTrigger,
     started_at: tokio::time::Instant,
     deadline: tokio::time::Instant,
-    waiters: Vec<oneshot::Sender<std::result::Result<bool, String>>>,
+    waiters: Vec<oneshot::Sender<std::result::Result<RuntimeCheckOutcome, String>>>,
 }
 
 struct RuntimeCheckWorkerResult {
     attempt_id: String,
     runtime_kind: AdapterKind,
-    result: std::result::Result<bool, String>,
+    result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 }
 
@@ -1029,6 +1202,7 @@ struct Core {
     runtime_check_activity:
         RwLock<BTreeMap<rovai_core::agent_profile::AdapterKind, RuntimeCheckActivity>>,
     runtime_check_requests: mpsc::UnboundedSender<RuntimeCheckRequest>,
+    attachment_projection_requests: mpsc::UnboundedSender<String>,
     compaction_detector_policies: DesiredCompactionDetectorPolicies,
     agent_run_cancellation_notify: Notify,
     pending_execution_recovery: Mutex<()>,
@@ -1364,7 +1538,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::QoderCli => "Qoder CLI",
         AdapterKind::CodebuddyCli => "CodeBuddy CLI",
         AdapterKind::QwenCode => "Qwen Code",
-        AdapterKind::TraeCnCli => "TRAE CLI（中国企业版）",
+        AdapterKind::TraeCnCli => "TRAE CLI",
         AdapterKind::AntigravityApp => "Antigravity",
     }
 }
@@ -1863,6 +2037,51 @@ impl Core {
         Ok(())
     }
 
+    async fn commit_rebound_runtime_candidate(
+        &self,
+        kind: AdapterKind,
+        executable_path: &Path,
+        executable_fingerprint: &str,
+        source: InstallationSource,
+        search_generation: u64,
+    ) -> Result<()> {
+        let observed_at = chrono::Utc::now().to_rfc3339();
+        let snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
+            kind,
+            None,
+            executable_fingerprint.to_string(),
+            observed_at.clone(),
+        )?;
+        {
+            let mut database = self.database.lock().await;
+            AgentProfileService::default().commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: kind,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: kind.command_name().to_string(),
+                    source,
+                    auth_scope: "default".to_string(),
+                    snapshot,
+                },
+            )?;
+        }
+        self.runtime_product_diagnostics.write().await.remove(&kind);
+        self.publish_verified_runtime_discovery(RuntimeDiscoveryObservation {
+            runtime_kind: kind,
+            discovery_status: RuntimeDiscoveryStatus::Found,
+            executable_path: Some(executable_path.to_string_lossy().to_string()),
+            source: Some(source),
+            reported_version: None,
+            executable_fingerprint: Some(executable_fingerprint.to_string()),
+            search_generation,
+            observed_at,
+            diagnostic_code: None,
+        })
+        .await;
+        Ok(())
+    }
+
     async fn runtime_probe_identity_is_current(
         &self,
         kind: AdapterKind,
@@ -1946,7 +2165,7 @@ impl Core {
             RuntimeModelCatalogCacheStatus::Expired
             | RuntimeModelCatalogCacheStatus::Unavailable
             | RuntimeModelCatalogCacheStatus::Invalidated => {
-                if self
+                match self
                     .await_runtime_check(
                         kind,
                         RuntimeLaunchPurpose::AvailabilityCheck,
@@ -1954,9 +2173,9 @@ impl Core {
                     )
                     .await?
                 {
-                    "completed"
-                } else {
-                    "failed"
+                    RuntimeCheckOutcome::Ready => "completed",
+                    RuntimeCheckOutcome::StableFailure => "failed",
+                    RuntimeCheckOutcome::Superseded => "deferred",
                 }
             }
         };
@@ -2085,7 +2304,7 @@ impl Core {
         kind: AdapterKind,
         purpose: RuntimeLaunchPurpose,
         trigger: RuntimeCheckTrigger,
-    ) -> Result<bool> {
+    ) -> Result<RuntimeCheckOutcome> {
         if let Some(blocker) = current_runtime_platform_blocker(kind) {
             anyhow::bail!("{}: {}", blocker.code, blocker.payload);
         }
@@ -2223,13 +2442,19 @@ impl Core {
 
     async fn diagnostics_report(&self) -> DiagnosticsReport {
         let checked_at = chrono::Utc::now().to_rfc3339();
-        let git_health = serde_json::to_value(health::git_health().await).unwrap_or_else(|_| {
-            json!({
-                "installed": false,
-                "version": null,
-                "detail": "git health serialization failed"
-            })
-        });
+        let git_path = self
+            .runtime_search_environment
+            .read()
+            .await
+            .resolve_command_path("git");
+        let git_health =
+            serde_json::to_value(health::git_health(git_path).await).unwrap_or_else(|_| {
+                json!({
+                    "installed": false,
+                    "version": null,
+                    "detail": "git health serialization failed"
+                })
+            });
         let runtime_health = self.runtime_health_payload().await;
 
         let mut checks = vec![
@@ -2443,8 +2668,8 @@ impl Core {
         &self,
         kind: rovai_core::agent_profile::AdapterKind,
         purpose: RuntimeLaunchPurpose,
-    ) -> Result<bool> {
-        self.runtime_product_diagnostics.write().await.remove(&kind);
+        deadline: tokio::time::Instant,
+    ) -> Result<RuntimeCheckOutcome> {
         let (existing, search) = {
             let database = self.database.lock().await;
             (
@@ -2514,10 +2739,10 @@ impl Core {
                         .insert(kind, diagnostic);
                 }
             }
-            return Ok(false);
+            return Ok(RuntimeCheckOutcome::StableFailure);
         }
 
-        for (path, source) in candidates {
+        'candidate: for (path, source) in candidates {
             if !is_executable_file(&path) {
                 note_product_runtime_diagnostic(
                     &mut unresolved_diagnostic,
@@ -2555,8 +2780,8 @@ impl Core {
                 }
                 continue;
             }
-            let canonical = canonical_runtime_path(&path);
-            let candidate_fingerprint = match fingerprint_executable(&canonical) {
+            let mut canonical = canonical_runtime_path(&path);
+            let mut candidate_fingerprint = match fingerprint_executable(&canonical) {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
                     eprintln!(
@@ -2597,12 +2822,23 @@ impl Core {
                 }
             };
             let targets_current_installation = existing_canonical_path.as_ref() == Some(&canonical);
-            let identity_changed = targets_current_installation
+            let mut identity_changed = targets_current_installation
                 && existing
                     .as_ref()
                     .and_then(|installation| installation.snapshot.as_ref())
                     .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
-                    .is_some_and(|previous| previous != candidate_fingerprint);
+                    != Some(candidate_fingerprint.as_str());
+            if identity_changed {
+                self.commit_rebound_runtime_candidate(
+                    kind,
+                    &canonical,
+                    &candidate_fingerprint,
+                    source,
+                    search.generation(),
+                )
+                .await?;
+                identity_changed = false;
+            }
             let mut lightweight = RuntimeDiscoveryObservation {
                 runtime_kind: kind,
                 discovery_status: RuntimeDiscoveryStatus::Found,
@@ -2657,52 +2893,185 @@ impl Core {
                 );
                 continue;
             }
-            let deep_probe = match with_runtime_search_environment(
-                &search,
-                self.deep_probe_candidate(kind, &canonical, purpose),
-            )
-            .await
-            {
-                Ok(deep_probe) => deep_probe,
-                Err(error) => {
-                    eprintln!(
-                        "Runtime deep probe construction failed for {} at {}: {error:#}",
-                        kind.as_str(),
-                        canonical.display()
-                    );
-                    let failure_class = if identity_changed {
-                        "identity_changed"
-                    } else {
-                        "transient"
-                    };
-                    let diagnostic_code = if !targets_current_installation {
-                        "runtime_alternate_candidate_probe_failed"
-                    } else if identity_changed {
-                        "runtime_identity_changed"
-                    } else {
-                        "runtime_probe_transient_failure"
-                    };
-                    let mut database = self.database.lock().await;
-                    AgentProfileService::default().record_managed_probe_failure(
-                        &mut database,
-                        ManagedProbeFailure {
-                            adapter_kind: kind,
-                            auth_scope: "default",
-                            candidate_path: &canonical.to_string_lossy(),
-                            fingerprint: Some(&candidate_fingerprint),
-                            source: Some(source),
+            let mut probe_execution_count = 0;
+            let deep_probe = loop {
+                probe_execution_count += 1;
+                let checked = run_identity_checked_probe(
+                    &canonical,
+                    with_runtime_search_environment(
+                        &search,
+                        self.deep_probe_candidate(kind, &canonical, purpose),
+                    ),
+                )
+                .await;
+                let checked = match checked {
+                    IdentityCheckedProbe::Stable(Ok(deep_probe))
+                        if deep_probe
+                            .snapshot
+                            .executable_fingerprint
+                            .as_deref()
+                            .is_some_and(|fingerprint| fingerprint != candidate_fingerprint) =>
+                    {
+                        IdentityCheckedProbe::Superseded
+                    }
+                    other => other,
+                };
+                match checked {
+                    IdentityCheckedProbe::Stable(Ok(deep_probe)) => break deep_probe,
+                    IdentityCheckedProbe::Stable(Err(error)) => {
+                        eprintln!(
+                            "Runtime deep probe construction failed for {} at {}: {error:#}",
+                            kind.as_str(),
+                            canonical.display()
+                        );
+                        let failure_class = if identity_changed {
+                            "identity_changed"
+                        } else {
+                            "transient"
+                        };
+                        let diagnostic_code = if !targets_current_installation {
+                            "runtime_alternate_candidate_probe_failed"
+                        } else if identity_changed {
+                            "runtime_identity_changed"
+                        } else {
+                            "runtime_probe_transient_failure"
+                        };
+                        let mut database = self.database.lock().await;
+                        AgentProfileService::default().record_managed_probe_failure(
+                            &mut database,
+                            ManagedProbeFailure {
+                                adapter_kind: kind,
+                                auth_scope: "default",
+                                candidate_path: &canonical.to_string_lossy(),
+                                fingerprint: Some(&candidate_fingerprint),
+                                source: Some(source),
+                                failure_class,
+                                diagnostic_code,
+                                failure: None,
+                            },
+                        )?;
+                        note_product_runtime_diagnostic(
+                            &mut unresolved_diagnostic,
                             failure_class,
                             diagnostic_code,
-                            failure: None,
-                        },
-                    )?;
-                    note_product_runtime_diagnostic(
-                        &mut unresolved_diagnostic,
-                        failure_class,
-                        diagnostic_code,
-                        None,
-                    );
-                    continue;
+                            None,
+                        );
+                        continue 'candidate;
+                    }
+                    IdentityCheckedProbe::Superseded => {
+                        eprintln!(
+                            "runtime_probe_superseded_by_runtime_update runtime_kind={} path={} probe_execution={probe_execution_count}",
+                            kind.as_str(),
+                            canonical.display(),
+                        );
+                        if probe_execution_count >= RUNTIME_PROBE_MAX_EXECUTIONS {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        }
+                        let now = tokio::time::Instant::now();
+                        let Some(retry_at) = runtime_probe_update_retry_at(now, deadline) else {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        };
+                        tokio::time::sleep_until(retry_at).await;
+                        if tokio::time::Instant::now() >= deadline {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        }
+                        if self.runtime_search_environment.read().await.generation()
+                            != search.generation()
+                        {
+                            return Ok(RuntimeCheckOutcome::Superseded);
+                        }
+                        if !is_executable_file(&path) {
+                            let rebound_path = canonical_runtime_path(&path);
+                            let mut database = self.database.lock().await;
+                            AgentProfileService::default().record_managed_probe_failure(
+                                &mut database,
+                                ManagedProbeFailure {
+                                    adapter_kind: kind,
+                                    auth_scope: "default",
+                                    candidate_path: &rebound_path.to_string_lossy(),
+                                    fingerprint: None,
+                                    source: Some(source),
+                                    failure_class: "path_missing",
+                                    diagnostic_code: "runtime_path_missing",
+                                    failure: availability_environment_failure(
+                                        kind,
+                                        "runtime_executable_unavailable",
+                                        "Runtime 可执行文件不可用",
+                                    )
+                                    .as_ref(),
+                                },
+                            )?;
+                            note_product_runtime_diagnostic(
+                                &mut unresolved_diagnostic,
+                                "path_missing",
+                                "runtime_path_missing",
+                                availability_environment_failure(
+                                    kind,
+                                    "runtime_executable_unavailable",
+                                    "Runtime 可执行文件不可用",
+                                ),
+                            );
+                            continue 'candidate;
+                        }
+                        canonical = canonical_runtime_path(&path);
+                        candidate_fingerprint = match fingerprint_executable(&canonical) {
+                            Ok(fingerprint) => fingerprint,
+                            Err(error) => {
+                                eprintln!(
+                                    "Runtime rebound fingerprint failed for {} at {}: {error:#}",
+                                    kind.as_str(),
+                                    canonical.display()
+                                );
+                                let mut database = self.database.lock().await;
+                                AgentProfileService::default().record_managed_probe_failure(
+                                    &mut database,
+                                    ManagedProbeFailure {
+                                        adapter_kind: kind,
+                                        auth_scope: "default",
+                                        candidate_path: &canonical.to_string_lossy(),
+                                        fingerprint: None,
+                                        source: Some(source),
+                                        failure_class: "transient",
+                                        diagnostic_code: "runtime_fingerprint_failed",
+                                        failure: availability_environment_failure(
+                                            kind,
+                                            "runtime_executable_unavailable",
+                                            "无法读取 Runtime 可执行文件",
+                                        )
+                                        .as_ref(),
+                                    },
+                                )?;
+                                note_product_runtime_diagnostic(
+                                    &mut unresolved_diagnostic,
+                                    "transient",
+                                    "runtime_fingerprint_failed",
+                                    availability_environment_failure(
+                                        kind,
+                                        "runtime_executable_unavailable",
+                                        "无法读取 Runtime 可执行文件",
+                                    ),
+                                );
+                                continue 'candidate;
+                            }
+                        };
+                        identity_changed = targets_current_installation
+                            && existing
+                                .as_ref()
+                                .and_then(|installation| installation.snapshot.as_ref())
+                                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
+                                != Some(candidate_fingerprint.as_str());
+                        if targets_current_installation {
+                            self.commit_rebound_runtime_candidate(
+                                kind,
+                                &canonical,
+                                &candidate_fingerprint,
+                                source,
+                                search.generation(),
+                            )
+                            .await?;
+                            identity_changed = false;
+                        }
+                    }
                 }
             };
             let RuntimeDeepProbeResult { snapshot, failure } = deep_probe;
@@ -2715,7 +3084,7 @@ impl Core {
                 )
                 .await
             {
-                return Ok(false);
+                return Ok(RuntimeCheckOutcome::Superseded);
             }
             if snapshot.probe_status == "ready" {
                 let executable_path = canonical.to_string_lossy().to_string();
@@ -2745,7 +3114,7 @@ impl Core {
                 })
                 .await;
                 self.runtime_product_diagnostics.write().await.remove(&kind);
-                return Ok(true);
+                return Ok(RuntimeCheckOutcome::Ready);
             }
             let (failure_class, diagnostic_code) = match snapshot.probe_status.as_str() {
                 _ if !targets_current_installation => {
@@ -2791,7 +3160,7 @@ impl Core {
                 .await
                 .insert(kind, diagnostic);
         }
-        Ok(false)
+        Ok(RuntimeCheckOutcome::StableFailure)
     }
 
     async fn recover_pending_execution_intents(&self) {
@@ -3086,7 +3455,7 @@ impl Core {
                 "Built-in Tool IPC protocol version is unsupported",
             );
         }
-        let _invocation_guard = self.builtin_tool_leases.invocation_guard().await;
+        let invocation_guard = self.builtin_tool_leases.invocation_guard().await;
         let authorized = match self.builtin_tool_leases.authenticate(&auth).await {
             Ok(authorized) => authorized,
             Err(error) => return BuiltinToolIpcResponse::ipc_error(error.code, error.message),
@@ -3145,6 +3514,113 @@ impl Core {
                         );
                     }
                 }
+                let mut frozen_files = Vec::<AuthorityAttachment>::new();
+                let mut attachment_camp_id = None::<String>;
+                if operation == CAMP_MESSAGE_SEND_TOOL_NAME {
+                    let send_input =
+                        match serde_json::from_value::<CampMessageSendInput>(input.clone()) {
+                            Ok(input) => input,
+                            Err(_) => {
+                                return builtin_tool_rejection(
+                                    &operation,
+                                    &request_id,
+                                    "builtin_tool.invalid_input",
+                                    "Command input does not match the accepted arguments.",
+                                );
+                            }
+                        };
+                    let scoped_tool_call_id = scoped_runtime_tool_call_id(
+                        &authorized.agent_run_id,
+                        &format!("builtin-cli:{request_id}"),
+                    );
+                    let domain_command_id = TeamToolService::default().binding_command_id(
+                        &authorized.native_binding.native_binding_id,
+                        &authorized.native_binding.binding_credential,
+                        &scoped_tool_call_id,
+                    );
+                    let domain_recorded = if let Ok(command_id) = domain_command_id {
+                        let database = self.database.lock().await;
+                        TeamToolService::default()
+                            .recorded_binding_command_exists(&database, &command_id)
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+                    if !send_input.files.is_empty() && !domain_recorded {
+                        let scope = {
+                            let database = self.database.lock().await;
+                            TeamToolService::default().agent_file_ingress_scope(
+                                &database,
+                                &authorized.agent_run_id,
+                                authorized.execution_epoch,
+                            )
+                        };
+                        let (camp_id, workspace) = match scope {
+                            Ok(Some(scope)) => scope,
+                            _ => {
+                                return BuiltinToolIpcResponse::ipc_error(
+                                    "builtin_tool.run_not_bound",
+                                    "Built-in Tool CLI is not bound to the current AgentRun",
+                                );
+                            }
+                        };
+                        let data_dir = self.data_dir.clone();
+                        let run_tmp = authorized.run_tmp.clone();
+                        let files = send_input.files.clone();
+                        let freeze_camp_id = camp_id.clone();
+                        drop(invocation_guard);
+                        frozen_files = match tokio::task::spawn_blocking(move || {
+                            CampAttachmentStore::new(&data_dir).freeze_agent_sources(
+                                &freeze_camp_id,
+                                &files,
+                                workspace.path(),
+                                &run_tmp,
+                            )
+                        })
+                        .await
+                        {
+                            Ok(Ok(frozen)) => frozen,
+                            Ok(Err(error)) => {
+                                return builtin_tool_rejection(
+                                    &operation,
+                                    &request_id,
+                                    "builtin_tool.invalid_input",
+                                    &format!("Attachment source was rejected: {error:#}"),
+                                );
+                            }
+                            Err(error) => {
+                                return BuiltinToolIpcResponse::ipc_error(
+                                    "builtin_tool.internal_error",
+                                    format!("Attachment freeze task failed: {error}"),
+                                );
+                            }
+                        };
+                        attachment_camp_id = Some(camp_id);
+                        let reauthorized = self.builtin_tool_leases.authenticate(&auth).await;
+                        if !matches!(
+                            reauthorized,
+                            Ok(ref current)
+                                if current.agent_run_id == authorized.agent_run_id
+                                    && current.execution_epoch == authorized.execution_epoch
+                                    && current.native_binding.native_binding_id
+                                        == authorized.native_binding.native_binding_id
+                                    && current.run_tmp == authorized.run_tmp
+                        ) {
+                            CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
+                                attachment_camp_id.as_deref().unwrap_or_default(),
+                                &frozen_files,
+                            );
+                            return BuiltinToolIpcResponse::ipc_error(
+                                "builtin_tool.run_not_bound",
+                                "Built-in Tool CLI is not bound to the current AgentRun",
+                            );
+                        }
+                    } else {
+                        drop(invocation_guard);
+                    }
+                } else {
+                    drop(invocation_guard);
+                }
                 let domain_response = self
                     .handle_builtin_operation(
                         TeamToolIpcRequest {
@@ -3159,8 +3635,22 @@ impl Core {
                         },
                         Some((authorized.agent_run_id, authorized.execution_epoch)),
                         Some(request_id.clone()),
+                        frozen_files.clone(),
                     )
                     .await;
+                let mut attachments_adopted = false;
+                if !frozen_files.is_empty() {
+                    attachments_adopted = {
+                        let database = self.database.lock().await;
+                        frozen_sources_are_owned(&database, &frozen_files).unwrap_or(false)
+                    };
+                    if !attachments_adopted {
+                        CampAttachmentStore::new(&self.data_dir).cleanup_unowned_agent_sources(
+                            attachment_camp_id.as_deref().unwrap_or_default(),
+                            &frozen_files,
+                        );
+                    }
+                }
                 if domain_response.error.as_ref().is_some_and(|error| {
                     matches!(
                         error.code.as_str(),
@@ -3211,6 +3701,9 @@ impl Core {
                     .await
                 {
                     return BuiltinToolIpcResponse::ipc_error(error.code, error.message);
+                }
+                if attachments_adopted && let Some(camp_id) = attachment_camp_id.as_deref() {
+                    self.request_camp_attachment_projection(camp_id);
                 }
                 BuiltinToolIpcResponse::Envelope { envelope }
             }
@@ -3289,6 +3782,7 @@ impl Core {
         mut request: TeamToolIpcRequest,
         attested_run: Option<(String, i64)>,
         evidence_request_id: Option<String>,
+        frozen_files: Vec<AuthorityAttachment>,
     ) -> TeamToolIpcResponse {
         let evidence_tool_name = request.tool_name.clone();
         let evidence_input = request.input.clone();
@@ -3387,6 +3881,7 @@ impl Core {
                         binding_credential: request.binding_credential,
                         runtime_tool_call_id: request.runtime_tool_call_id,
                         input,
+                        frozen_files,
                     };
                     let execution =
                         if let Some((agent_run_id, execution_epoch)) = attested_run.as_ref() {
@@ -5039,44 +5534,66 @@ impl Core {
             "camp.composerDraft.removeAttachment" => {
                 let params: RemovePreparedAttachmentParams =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).remove_prepared(
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let (draft, cleanup) = {
+                    let mut database = self.database.lock().await;
+                    store.remove_prepared_from_database(
                         &mut database,
                         params.camp_id.as_str(),
                         params.expected_revision,
                         &params.attachment_id,
-                    )?,
-                )?)
+                    )?
+                };
+                let cleanup_store = store.clone();
+                if let Err(error) = tokio::task::spawn_blocking(move || {
+                    cleanup_store.cleanup_detached_attachments(cleanup)
+                })
+                .await
+                .context("Prepared Attachment cleanup task failed")?
+                {
+                    eprintln!(
+                        "Prepared Attachment {} was removed from Draft {}, but its superseded file could not be cleaned immediately: {error:#}",
+                        params.attachment_id, params.camp_id
+                    );
+                }
+                Ok(serde_json::to_value(draft)?)
             }
             "camp.composerDraft.discard" => {
                 let params: CampComposerDraftParams =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                CampAttachmentStore::new(&self.data_dir)
-                    .discard_draft(&mut database, params.camp_id.as_str())?;
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let cleanup = {
+                    let mut database = self.database.lock().await;
+                    store.discard_draft_from_database(&mut database, params.camp_id.as_str())?
+                };
+                tokio::task::spawn_blocking(move || store.cleanup_detached_attachments(cleanup))
+                    .await
+                    .context("Camp Composer Draft cleanup task failed")??;
                 Ok(json!({ "discarded": true }))
             }
             "camp.attachments.prepareFromPath" => {
                 let params: PrepareAttachmentFromPathParams =
                     serde_json::from_value(request.params.clone())?;
-                let mut database = self.database.lock().await;
-                Ok(serde_json::to_value(
-                    CampAttachmentStore::new(&self.data_dir).prepare_from_path(
-                        &mut database,
-                        params.camp_id.as_str(),
-                        params.expected_revision,
-                        Path::new(&params.source_path),
-                        &params.display_name,
-                    )?,
-                )?)
+                prepare_composer_attachment_from_path(&self.database, &self.data_dir, params).await
             }
             "camp.attachments.previewSource" => {
                 let params: AttachmentPreviewSourceParams =
                     serde_json::from_value(request.params.clone())?;
-                let database = self.database.lock().await;
-                let source = CampAttachmentStore::new(&self.data_dir)
-                    .preview_source(&database, &params.attachment_id)?;
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let candidate = {
+                    let database = self.database.lock().await;
+                    store.preview_candidate(&database, &params.attachment_id)?
+                };
+                let source = match candidate {
+                    Some(candidate) => Some(
+                        tokio::task::spawn_blocking(move || {
+                            store.verify_preview_candidate(candidate)
+                        })
+                        .await
+                        .context("Attachment preview verification task failed")??,
+                    ),
+                    None => None,
+                };
                 Ok(match source {
                     Some(source) => json!({
                         "path": source.path,
@@ -5086,9 +5603,36 @@ impl Core {
                     None => Value::Null,
                 })
             }
+            "camp.attachments.desktopOpenTarget" => {
+                let params: DesktopAttachmentTargetParams =
+                    serde_json::from_value(request.params.clone())?;
+                let store = CampAttachmentStore::new(&self.data_dir);
+                let candidate = {
+                    let database = self.database.lock().await;
+                    store.desktop_open_candidate(
+                        &database,
+                        params.camp_id.as_str(),
+                        &params.attachment_id,
+                    )?
+                };
+                let Some(candidate) = candidate else {
+                    return Ok(Value::Null);
+                };
+                let target = tokio::task::spawn_blocking(move || {
+                    store.verify_desktop_open_candidate(candidate)
+                })
+                .await
+                .context("Desktop Attachment target verification task failed")??;
+                Ok(serde_json::to_value(target)?)
+            }
             "camp.messages.send" => {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
                 self.send_test_camp_message_request(params).await
+            }
+            "userAutomation.camp.send" => {
+                let params: SendUserAutomationCampMessageParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.send_user_automation_camp_message_request(params).await
             }
             "runtime.pendingExecution.cancel" => {
                 let params: CancelPendingExecutionParams =
@@ -5237,6 +5781,14 @@ impl Core {
                     params.limit.unwrap_or(500),
                 )?)?)
             }
+            "agentRuns.diagnostic.get" => {
+                let params: AgentRunDiagnosticParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.agent_run_diagnostic(&mut database, &params.agent_run_id)?,
+                )?)
+            }
             "diagnostics.check" => Ok(serde_json::to_value(self.diagnostics_report().await)?),
             "monitoring.snapshot" => {
                 let filter: MonitoringFilter = serde_json::from_value(request.params.clone())?;
@@ -5306,7 +5858,7 @@ impl Core {
             "runtime.product.check" => {
                 let params: CheckProductRuntimeParams =
                     serde_json::from_value(request.params.clone())?;
-                let ready = self
+                let outcome = self
                     .await_runtime_check(
                         params.runtime_kind,
                         RuntimeLaunchPurpose::AvailabilityCheck,
@@ -5316,7 +5868,9 @@ impl Core {
                 Ok(json!({
                     "scheduled": true,
                     "completed": true,
-                    "ready": ready,
+                    "ready": outcome.is_ready(),
+                    "outcome": outcome.public_status(),
+                    "status": outcome.public_status(),
                     "runtimeKind": params.runtime_kind,
                 }))
             }
@@ -5326,7 +5880,12 @@ impl Core {
                 self.open_runtime_model_catalog(params.runtime_kind).await
             }
             "health.check" => {
-                let git = health::git_health().await;
+                let git_path = self
+                    .runtime_search_environment
+                    .read()
+                    .await
+                    .resolve_command_path("git");
+                let git = health::git_health(git_path).await;
                 let database = self.database.lock().await;
                 let mut payload = json!({
                     "core": {
@@ -5387,162 +5946,13 @@ impl Core {
             }));
         }
 
-        let staging = {
-            let mut database = self.database.lock().await;
-            let draft = CampAttachmentStore::new(&self.data_dir)
-                .load_draft(&database, params.camp_id.as_str())?;
-            if draft.revision == params.draft_revision {
-                let attachment_ids = draft
-                    .attachments
-                    .iter()
-                    .map(|attachment| attachment.id.clone())
-                    .collect::<Vec<_>>();
-                CampAttachmentStore::new(&self.data_dir).verify_send(
-                    &database,
-                    params.camp_id.as_str(),
-                    &attachment_ids,
-                )?;
-            }
-            self.attachment_views.plan_publication(
-                &mut database,
-                params.camp_id.as_str(),
-                &params.command_id,
-                params.draft_revision,
-            )?
-        };
-        let publication = match staging {
-            CampAttachmentPublicationStaging::None => None,
-            CampAttachmentPublicationStaging::Ready(publication) => Some(publication),
-            CampAttachmentPublicationStaging::Copy(plan) => {
-                let operation_id = plan.operation_id().to_string();
-                let attachment_store = CampAttachmentStore::new(&self.data_dir);
-                let copied = match tokio::task::spawn_blocking(move || {
-                    CampAttachmentViewStore::copy_publication(&attachment_store, plan)
-                })
-                .await
-                {
-                    Ok(Ok(copied)) => copied,
-                    Ok(Err(error)) => {
-                        let mut database = self.database.lock().await;
-                        self.attachment_views.rollback_publication(
-                            &mut database,
-                            &operation_id,
-                            "camp_attachment_view_source_invalid",
-                        )?;
-                        return Err(error).context("camp_attachment_view_source_invalid");
-                    }
-                    Err(error) => {
-                        let mut database = self.database.lock().await;
-                        self.attachment_views.rollback_publication(
-                            &mut database,
-                            &operation_id,
-                            "camp_attachment_view_source_invalid",
-                        )?;
-                        return Err(error).context("Camp Attachment View copy task failed");
-                    }
-                };
-                let staged = {
-                    let mut database = self.database.lock().await;
-                    self.attachment_views
-                        .finish_publication_staging(&mut database, copied)
-                };
-                match staged {
-                    Ok(publication) => Some(publication),
-                    Err(error) => {
-                        let rollback_error_code = if error
-                            .chain()
-                            .any(|cause| cause.to_string() == "draft_changed")
-                        {
-                            "draft_changed"
-                        } else {
-                            "camp_attachment_view_recovery_required"
-                        };
-                        let mut database = self.database.lock().await;
-                        self.attachment_views.rollback_publication(
-                            &mut database,
-                            &operation_id,
-                            rollback_error_code,
-                        )?;
-                        return Err(error);
-                    }
-                }
-            }
-        };
-        let execution = if let Some(publication) = publication.as_ref() {
-            let (_view_mutation, mutation_deadline) = match self
-                .acquire_camp_attachment_mutation(params.camp_id.as_str())
-                .await
-            {
-                Ok(admission) => admission,
-                Err(error) => {
-                    // Staging is outside the Runtime-authorized Camp tree, so it can be
-                    // rolled back without the write admission. Do not retain a quota
-                    // reservation merely because an active Run held the read guard.
-                    let mut database = self.database.lock().await;
-                    self.attachment_views.rollback_publication(
-                        &mut database,
-                        &publication.operation_id,
-                        "camp_attachment_view_busy",
-                    )?;
-                    return Err(error);
-                }
-            };
-            if let Err(error) = self
-                .wait_for_camp_attachment_quiescence(params.camp_id.as_str(), mutation_deadline)
-                .await
-            {
-                let mut database = self.database.lock().await;
-                self.attachment_views.rollback_publication(
-                    &mut database,
-                    &publication.operation_id,
-                    "camp_attachment_view_busy",
-                )?;
-                return Err(error);
-            }
-            {
-                let mut database = self.database.lock().await;
-                self.attachment_views
-                    .gate_publication(&mut database, publication)?;
-                self.attachment_views
-                    .promote_publication(&mut database, publication)?;
-            }
-            let committed = {
-                let mut database = self.database.lock().await;
-                CollaborationService::default().send_user_camp_draft_with_publication(
-                    &mut database,
-                    &envelope,
-                    Some(&publication.operation_id),
-                )
-            };
-            match committed {
-                Ok(execution) if execution.result.status != CommandResultStatus::Rejected => {
-                    self.complete_camp_attachment_publication(&publication.operation_id)
-                        .await?;
-                    execution
-                }
-                Ok(execution) => {
-                    let mut database = self.database.lock().await;
-                    self.attachment_views.rollback_publication(
-                        &mut database,
-                        &publication.operation_id,
-                        "camp_attachment_view_publish_failed",
-                    )?;
-                    execution
-                }
-                Err(error) => {
-                    let mut database = self.database.lock().await;
-                    self.attachment_views.rollback_publication(
-                        &mut database,
-                        &publication.operation_id,
-                        "camp_attachment_view_publish_failed",
-                    )?;
-                    return Err(error);
-                }
-            }
-        } else {
+        let execution = {
             let mut database = self.database.lock().await;
             CollaborationService::default().send_user_camp_draft(&mut database, &envelope)?
         };
+        if execution.result.status != CommandResultStatus::Rejected {
+            self.request_camp_attachment_projection(params.camp_id.as_str());
+        }
         Ok(json!({
             "commandResult": execution.result,
             "replayed": execution.replayed,
@@ -5551,48 +5961,161 @@ impl Core {
         }))
     }
 
-    async fn complete_camp_attachment_publication(&self, operation_id: &str) -> Result<()> {
-        let verification = {
+    async fn send_user_automation_camp_message_request(
+        &self,
+        params: SendUserAutomationCampMessageParams,
+    ) -> Result<Value> {
+        let camp_id = params.camp_id.to_string();
+        let envelope = CommandEnvelope {
+            command_id: params.command_id,
+            actor: ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            camp_id: Some(camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: SendUserAutomationCampMessageCommand {
+                camp_id: camp_id.clone(),
+                agent_id: params.agent_id,
+                body: params.body,
+                execution: params.execution,
+            },
+        };
+        let execution = {
             let mut database = self.database.lock().await;
-            self.attachment_views
-                .prepare_publication_completion(&mut database, operation_id)?
+            CollaborationService::default()
+                .send_user_automation_camp_message(&mut database, &envelope)?
         };
-        let camp_id = verification.camp_id().to_string();
-        let operation_id = verification.operation_id().to_string();
-        let verified = match tokio::task::spawn_blocking(move || verification.verify()).await {
-            Ok(Ok(verified)) => verified,
-            Ok(Err(error)) => {
-                let mut database = self.database.lock().await;
-                self.attachment_views.fail_publication_completion(
-                    &mut database,
-                    &operation_id,
-                    &camp_id,
-                )?;
-                return Err(error).context("camp_attachment_view_integrity_failed");
-            }
-            Err(error) => {
-                let mut database = self.database.lock().await;
-                self.attachment_views.fail_publication_completion(
-                    &mut database,
-                    &operation_id,
-                    &camp_id,
-                )?;
-                return Err(error).context("Camp Attachment View verification task failed");
-            }
-        };
-        let mut database = self.database.lock().await;
-        if let Err(error) = self
-            .attachment_views
-            .complete_verified_publication(&mut database, verified)
-        {
-            self.attachment_views.fail_publication_completion(
-                &mut database,
-                &operation_id,
-                &camp_id,
-            )?;
-            return Err(error);
+        if execution.result.status != CommandResultStatus::Rejected {
+            self.request_camp_attachment_projection(&camp_id);
         }
-        Ok(())
+        Ok(json!({
+            "commandResult": execution.result,
+            "replayed": execution.replayed,
+            "preflight": null,
+            "pendingExecution": null,
+        }))
+    }
+
+    fn request_camp_attachment_projection(&self, camp_id: &str) {
+        if self
+            .attachment_projection_requests
+            .send(camp_id.to_string())
+            .is_err()
+        {
+            eprintln!(
+                "Camp Attachment projection worker is unavailable; {camp_id} remains recoverable"
+            );
+        }
+    }
+
+    async fn drive_camp_attachment_publications(&self, camp_id: &str) -> Result<()> {
+        loop {
+            let plan = {
+                let mut database = self.database.lock().await;
+                self.attachment_views
+                    .plan_queued_publication(&mut database, camp_id)?
+            };
+            let Some(plan) = plan else {
+                return Ok(());
+            };
+            let operation_id = plan.operation_id().to_string();
+            let attachment_store = CampAttachmentStore::new(&self.data_dir);
+            let copied = match tokio::task::spawn_blocking(move || {
+                CampAttachmentViewStore::copy_publication(&attachment_store, plan)
+            })
+            .await
+            {
+                Ok(Ok(copied)) => copied,
+                Ok(Err(error)) => {
+                    let recipients = {
+                        let mut database = self.database.lock().await;
+                        self.attachment_views
+                            .resolve_semantic_publication_terminal_failure(
+                                &mut database,
+                                &operation_id,
+                                "camp_attachment_view_source_invalid",
+                            )?
+                    };
+                    let recipients = recipients.into_iter().collect::<BTreeSet<_>>();
+                    for (recipient_camp_id, recipient_agent_id) in recipients {
+                        let mut database = self.database.lock().await;
+                        let _ = dispatch_pending_for_recipient(
+                            &mut database,
+                            &recipient_camp_id,
+                            &recipient_agent_id,
+                            DeliveryDispatchTrigger::TargetRunEnded,
+                            true,
+                        )?;
+                    }
+                    eprintln!(
+                        "Camp Attachment publication {operation_id} terminalized after an invalid Authority source: {error:#}"
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .mark_semantic_publication_recovery_required(
+                            &mut database,
+                            &operation_id,
+                            "camp_attachment_view_copy_task_failed",
+                        )?;
+                    return Err(error).context("Camp Attachment View copy task failed");
+                }
+            };
+            let projection = async {
+                let publication = {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .finish_publication_staging(&mut database, copied)?
+                };
+                let (view_mutation, mutation_deadline) =
+                    self.acquire_camp_attachment_mutation(camp_id).await?;
+                self.wait_for_camp_attachment_quiescence(camp_id, mutation_deadline)
+                    .await?;
+                {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .gate_publication(&mut database, &publication)?;
+                    self.attachment_views
+                        .promote_publication(&mut database, &publication)?;
+                }
+                drop(view_mutation);
+                let delivery_ids = {
+                    let mut database = self.database.lock().await;
+                    let delivery_ids = self
+                        .attachment_views
+                        .resolve_semantic_publication_success(&mut database, &operation_id)?;
+                    self.attachment_views
+                        .finish_semantic_publication(&mut database, &operation_id)?;
+                    delivery_ids
+                };
+                if !delivery_ids.is_empty() {
+                    let mut database = self.database.lock().await;
+                    dispatch_accepted_deliveries(&mut database, &delivery_ids)?;
+                }
+                Ok::<(), anyhow::Error>(())
+            }
+            .await;
+            if let Err(error) = projection {
+                let recovery = {
+                    let mut database = self.database.lock().await;
+                    self.attachment_views
+                        .mark_semantic_publication_recovery_required(
+                            &mut database,
+                            &operation_id,
+                            "camp_attachment_view_projection_failed",
+                        )
+                };
+                if let Err(recovery_error) = recovery {
+                    eprintln!(
+                        "Camp Attachment publication {operation_id} could not persist recovery state: {recovery_error:#}"
+                    );
+                }
+                return Err(error);
+            }
+        }
     }
 
     async fn deep_probe_candidate(
@@ -5735,7 +6258,7 @@ impl Core {
         if installation.installation_class
             == rovai_core::agent_profile::InstallationClass::ManagedDefault
         {
-            let ready = self
+            let outcome = self
                 .await_runtime_check(
                     installation.adapter_kind,
                     RuntimeLaunchPurpose::InstallationRefresh,
@@ -5743,9 +6266,11 @@ impl Core {
                 )
                 .await?;
             return Ok(json!({
-                "status": if ready { "applied" } else { "rejected" },
-                "code": if ready {
+                "status": if outcome.is_ready() { "applied" } else { "rejected" },
+                "code": if outcome.is_ready() {
                     "adapter_installation.snapshot_recorded"
+                } else if outcome == RuntimeCheckOutcome::Superseded {
+                    "adapter_installation.refresh_deferred"
                 } else {
                     "adapter_installation.probe_unavailable"
                 },
@@ -5856,6 +6381,9 @@ impl Core {
         {
             Ok((_runtime, effective_version)) => candidate.version = effective_version,
             Err(failure) => {
+                if failure.code == "runtime_check_deferred" {
+                    return;
+                }
                 if let Some(effective_version) = failure.effective_version {
                     candidate.version = effective_version;
                 }
@@ -5871,6 +6399,9 @@ impl Core {
             attachment_view_gate,
             || async {
                 let mut database = self.database.lock().await;
+                if database_has_unresolved_writer_intent(&database, &candidate.camp_id)? {
+                    anyhow::bail!("camp_attachment_view_not_ready");
+                }
                 ExecutionRuntimeService::default().claim_agent_run(
                     &mut database,
                     &CommandEnvelope {
@@ -5996,6 +6527,19 @@ impl Core {
                     &mut launch_permit,
                 )
                 .await;
+            // Agent-authored attachment publication cannot take the Camp write admission
+            // while this Run owns its lifecycle read admission. Release first, then wake the
+            // persistent projection intent so a prior write timeout does not strand it until
+            // the next process restart.
+            if !release_agent_run_attachment_admission(
+                attachment_view_admission,
+                &core.attachment_projection_requests,
+            ) {
+                eprintln!(
+                    "Camp Attachment projection worker is unavailable; {} remains recoverable",
+                    execution.camp_id
+                );
+            }
             if launch_result.is_ok() {
                 core.planned_shutdown
                     .remove_active_if_unbound(&active_key)
@@ -7634,14 +8178,24 @@ impl Core {
             .invalidate_adapter(frozen_runtime.adapter_kind)
             .await;
         let refresh = match installation.installation_class {
-            InstallationClass::ManagedDefault => self
+            InstallationClass::ManagedDefault => match self
                 .await_runtime_check(
                     frozen_runtime.adapter_kind,
                     RuntimeLaunchPurpose::DispatchPreflight,
                     RuntimeCheckTrigger::Execution,
                 )
                 .await
-                .map(|_| ()),
+            {
+                Ok(RuntimeCheckOutcome::Ready | RuntimeCheckOutcome::StableFailure) => Ok(()),
+                Ok(RuntimeCheckOutcome::Superseded) => {
+                    return Err(RuntimeDispatchFailure {
+                        code: "runtime_check_deferred".to_string(),
+                        error: anyhow::anyhow!("Runtime update superseded the dispatch preflight"),
+                        effective_version: None,
+                    });
+                }
+                Err(error) => Err(error),
+            },
             InstallationClass::Custom => {
                 let search = self.runtime_search_environment.read().await.clone();
                 let deep_probe = with_runtime_search_environment(
@@ -9989,6 +10543,70 @@ fn main() -> Result<()> {
     result
 }
 
+async fn process_attachment_projection_worker(
+    core: Arc<Core>,
+    mut requests: mpsc::UnboundedReceiver<String>,
+    mut shutdown: oneshot::Receiver<()>,
+) {
+    let mut active_camps = HashSet::new();
+    let mut rerun_camps = HashSet::new();
+    let mut tasks = tokio::task::JoinSet::new();
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut shutdown => break,
+            camp_id = requests.recv() => {
+                let Some(camp_id) = camp_id else { break };
+                if active_camps.insert(camp_id.clone()) {
+                    spawn_attachment_projection_task(&mut tasks, core.clone(), camp_id);
+                } else {
+                    rerun_camps.insert(camp_id);
+                }
+            }
+            completed = tasks.join_next(), if !tasks.is_empty() => {
+                match completed {
+                    Some(Ok((camp_id, result))) => {
+                        active_camps.remove(&camp_id);
+                        if let Err(error) = result {
+                            eprintln!("Camp Attachment projection for {camp_id} requires recovery: {error:#}");
+                        }
+                        if rerun_camps.remove(&camp_id) {
+                            active_camps.insert(camp_id.clone());
+                            spawn_attachment_projection_task(&mut tasks, core.clone(), camp_id);
+                        }
+                    }
+                    Some(Err(error)) => {
+                        eprintln!("Camp Attachment projection task failed: {error}");
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    while let Some(completed) = tasks.join_next().await {
+        match completed {
+            Ok((camp_id, Err(error))) => eprintln!(
+                "Camp Attachment projection for {camp_id} requires recovery during shutdown: {error:#}"
+            ),
+            Ok((_, Ok(()))) => {}
+            Err(error) => {
+                eprintln!("Camp Attachment projection task failed during shutdown: {error}")
+            }
+        }
+    }
+}
+
+fn spawn_attachment_projection_task(
+    tasks: &mut tokio::task::JoinSet<(String, Result<()>)>,
+    core: Arc<Core>,
+    camp_id: String,
+) {
+    tasks.spawn(async move {
+        let result = core.drive_camp_attachment_publications(&camp_id).await;
+        (camp_id, result)
+    });
+}
+
 async fn run_core(
     runtime_search_environment: Arc<RuntimeSearchEnvironment>,
     startup_started_at: Instant,
@@ -9996,6 +10614,8 @@ async fn run_core(
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
+    #[cfg(target_os = "macos")]
+    configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
     let attachment_views = CampAttachmentViewStore::admit(
         &runtime_camp_files_root,
@@ -10163,6 +10783,7 @@ async fn run_core(
     let (output_tx, output_rx) = mpsc::unbounded_channel();
     let (output_control_tx, output_control_rx) = mpsc::channel(1);
     let (runtime_check_tx, runtime_check_rx) = mpsc::unbounded_channel();
+    let (attachment_projection_tx, attachment_projection_rx) = mpsc::unbounded_channel();
     let output_handle = tokio::spawn(write_output(output_rx, output_control_rx));
     let (event_shutdown_tx, event_shutdown_rx) = oneshot::channel();
     let antigravity_app = AntigravityAppRuntimeAdapter::new(&data_dir)?;
@@ -10197,6 +10818,7 @@ async fn run_core(
         runtime_product_diagnostics: RwLock::new(BTreeMap::new()),
         runtime_check_activity: RwLock::new(BTreeMap::new()),
         runtime_check_requests: runtime_check_tx,
+        attachment_projection_requests: attachment_projection_tx,
         compaction_detector_policies: compaction_detector_policies.clone(),
         agent_run_cancellation_notify: Notify::new(),
         pending_execution_recovery: Mutex::new(()),
@@ -10275,6 +10897,19 @@ async fn run_core(
         builtin_tool_leases,
         data_dir,
     });
+    let (attachment_projection_shutdown_tx, attachment_projection_shutdown_rx) = oneshot::channel();
+    let mut attachment_projection_handle = tokio::spawn(process_attachment_projection_worker(
+        core.clone(),
+        attachment_projection_rx,
+        attachment_projection_shutdown_rx,
+    ));
+    let startup_publication_camps = {
+        let database = core.database.lock().await;
+        unresolved_publication_camp_ids(&database)?
+    };
+    for camp_id in startup_publication_camps {
+        core.request_camp_attachment_projection(&camp_id);
+    }
     let (fleet_sweeper_shutdown_tx, fleet_sweeper_shutdown_rx) = oneshot::channel();
     let mut fleet_sweeper_handle = tokio::spawn(
         core.runtime_fleet
@@ -10458,6 +11093,7 @@ async fn run_core(
         // signals follow it, so no new recovery or scheduler launch can enter.
         core.planned_shutdown.close_launch_admission();
         let _ = scheduler_shutdown_tx.send(());
+        let _ = attachment_projection_shutdown_tx.send(());
         let _ = runtime_check_shutdown_tx.send(());
         let _ = fleet_sweeper_shutdown_tx.send(());
         runtime_discovery_handle.abort();
@@ -10524,6 +11160,8 @@ async fn run_core(
             drain_join_set_until(&mut background_requests, settlement_deadline).await;
         let scheduler_quiesced =
             join_or_abort_until(&mut scheduler_handle, settlement_deadline).await;
+        let attachment_projection_quiesced =
+            join_or_abort_until(&mut attachment_projection_handle, settlement_deadline).await;
         let runtime_checks_quiesced =
             join_or_abort_until(&mut runtime_check_handle, settlement_deadline).await;
         let fleet_sweeper_quiesced =
@@ -10602,6 +11240,7 @@ async fn run_core(
             && runtime_discovery_quiesced
             && background_requests_quiesced
             && scheduler_quiesced
+            && attachment_projection_quiesced
             && runtime_checks_quiesced
             && fleet_sweeper_quiesced
             && builtin_tool_quiesced
@@ -10677,6 +11316,7 @@ async fn run_core(
             || !runtime_discovery_quiesced
             || !background_requests_quiesced
             || !scheduler_quiesced
+            || !attachment_projection_quiesced
             || !runtime_checks_quiesced
             || !fleet_sweeper_quiesced
             || !stop_wait_completed
@@ -10732,6 +11372,8 @@ async fn run_core(
         let _ = runtime_discovery_handle.await;
         let _ = scheduler_shutdown_tx.send(());
         let _ = scheduler_handle.await;
+        let _ = attachment_projection_shutdown_tx.send(());
+        let _ = attachment_projection_handle.await;
         let _ = runtime_check_shutdown_tx.send(());
         let _ = runtime_check_handle.await;
         let _ = fleet_sweeper_shutdown_tx.send(());
@@ -11810,7 +12452,8 @@ async fn process_agent_run_acp_message(
             None
         }
     };
-    let (event_type, payload) = normalize_acp_event(&method, &params);
+    let (event_type, payload) =
+        normalize_acp_event_with_completion(&method, &params, completed_action.as_ref());
     if event_type == "runtime.usage" {
         return;
     }
@@ -11901,6 +12544,14 @@ async fn process_agent_run_acp_message(
 }
 
 fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
+    normalize_acp_event_with_completion(method, params, None)
+}
+
+fn normalize_acp_event_with_completion(
+    method: &str,
+    params: &Value,
+    completion: Option<&acp::CompletedAcpAction>,
+) -> (&'static str, Value) {
     if method == "rovai/acp_prompt_completed" {
         return ("runtime.turn.completed", params.clone());
     }
@@ -11936,28 +12587,53 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
             )
         }
         Some("agent_thought_chunk") => ("agent.thought.delta", update),
-        Some("tool_call") | Some("tool_call_update") => (
-            "runtime.action",
-            json!({
+        Some("tool_call") | Some("tool_call_update") => {
+            let public_command = acp::public_acp_shell_command(update.get("rawInput"))
+                .or_else(|| completion.and_then(|value| value.public_command.clone()));
+            let public_kind = acp::public_acp_tool_kind(&update).or_else(|| {
+                completion
+                    .map(|value| value.native_kind.as_str())
+                    .filter(|kind| *kind != "other")
+                    .map(str::to_string)
+            });
+            let public_status = completion
+                .and_then(|value| value.result_data.get("status"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    acp::effective_acp_tool_status(
+                        &update,
+                        public_kind.as_deref().unwrap_or("other"),
+                    )
+                });
+            (
+                "runtime.action",
+                json!({
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
                 "toolName": update.get("toolName"),
-                "status": update.get("status"),
-                "kind": update.get("kind"),
+                "status": public_status,
+                "kind": public_kind,
                 "title": update.get("title"),
                 "locationCount": update
                     .get("locations")
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len),
                 "output": public_acp_tool_output(&update),
+                "input": public_command,
                 "rawInputDigest": update
                     .get("rawInput")
-                    .and_then(|value| canonical_json_digest(value).ok()),
+                    .and_then(|value| canonical_json_digest(value).ok())
+                    .or_else(|| completion
+                        .and_then(|value| value.result_data.get("rawInputDigest"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)),
                 "rawOutputDigest": update
                     .get("rawOutput")
                     .and_then(|value| canonical_json_digest(value).ok()),
-            }),
-        ),
+                }),
+            )
+        }
         Some("plan") => ("runtime.plan", update),
         Some("usage_update") => ("runtime.usage", update),
         _ => ("runtime.event", update),
@@ -14092,10 +14768,18 @@ async fn process_runtime_check_manager(
     let mut checks: tokio::task::JoinSet<RuntimeCheckWorkerResult> = tokio::task::JoinSet::new();
     let mut active: HashMap<tokio::task::Id, RuntimeCheckAttempt> = HashMap::new();
     let mut pending: Vec<RuntimeCheckAttempt> = Vec::new();
+    let mut execution_deferrals = RuntimeCheckExecutionDeferrals::default();
     loop {
         tokio::select! {
             request = requests.recv() => {
                 let Some(request) = request else { break };
+                if execution_deferrals.should_defer(request.runtime_kind, request.trigger) {
+                    if let Some(completion) = request.completion {
+                        let _ = completion.send(Ok(RuntimeCheckOutcome::Superseded));
+                    }
+                    let _ = request.acknowledged.send(false);
+                    continue;
+                }
                 if let Some(existing) = pending
                     .iter_mut()
                     .find(|attempt| attempt.runtime_kind == request.runtime_kind)
@@ -14114,6 +14798,9 @@ async fn process_runtime_check_manager(
                     .values_mut()
                     .find(|attempt| attempt.runtime_kind == request.runtime_kind)
                 {
+                    if request.trigger > existing.trigger {
+                        existing.trigger = request.trigger;
+                    }
                     if let Some(completion) = request.completion {
                         existing.waiters.push(completion);
                     }
@@ -14172,6 +14859,11 @@ async fn process_runtime_check_manager(
                                 )
                                 .await;
                             } else {
+                                execution_deferrals.record(
+                                    attempt.runtime_kind,
+                                    attempt.trigger,
+                                    &worker.result,
+                                );
                                 finalize_runtime_check(
                                     &core,
                                     attempt,
@@ -14237,11 +14929,15 @@ async fn process_runtime_check_manager(
             let abort_handle = checks.spawn(async move {
                 let (result, finalization) = match tokio::time::timeout_at(
                     worker_deadline,
-                    check_core.run_product_runtime_resolution(worker_kind, worker_purpose),
+                    check_core.run_product_runtime_resolution(
+                        worker_kind,
+                        worker_purpose,
+                        worker_deadline,
+                    ),
                 )
                 .await
                 {
-                    Ok(Ok(ready)) => (Ok(ready), RuntimeCheckFinalization::Product),
+                    Ok(Ok(outcome)) => (Ok(outcome), RuntimeCheckFinalization::Product),
                     Ok(Err(error)) => (
                         Err(format!("runtime_check_failed: {error:#}")),
                         RuntimeCheckFinalization::Product,
@@ -14292,7 +14988,7 @@ async fn process_runtime_check_manager(
 async fn finalize_runtime_check(
     core: &Core,
     attempt: RuntimeCheckAttempt,
-    result: std::result::Result<bool, String>,
+    result: std::result::Result<RuntimeCheckOutcome, String>,
     finalization: RuntimeCheckFinalization,
 ) {
     let owns_terminal = {
@@ -14350,7 +15046,9 @@ async fn finalize_runtime_check(
         }),
     );
 
-    if result.as_ref().is_ok_and(|ready| *ready)
+    if result
+        .as_ref()
+        .is_ok_and(|outcome| *outcome == RuntimeCheckOutcome::Ready)
         && let Err(error) = core
             .pump_runtime_ready_recipients(attempt.runtime_kind)
             .await
@@ -14982,6 +15680,80 @@ fn parse_mcp_config_path() -> Result<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "slow-tests")]
+    use std::fs;
+
+    #[cfg(feature = "slow-tests")]
+    #[tokio::test]
+    async fn composer_prepare_releases_database_mutex_during_authority_file_io() {
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-composer-database-lock-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let data_dir = fixture.join("data");
+        let source = fixture.join("source.txt");
+        fs::create_dir_all(&fixture).unwrap();
+        fs::write(&source, b"lock-free filesystem phase").unwrap();
+
+        let database = Mutex::new(Database::open(&data_dir).unwrap());
+        let camp_id = "rvcamp_01h47kvsy5fk1shh6w1g60eecf";
+        {
+            let database = database.lock().await;
+            rovai_core::camp_attachment::insert_test_camp(&database, camp_id);
+        }
+
+        let pause =
+            rovai_core::camp_attachment::install_composer_prepare_test_pause(&data_dir, camp_id);
+        let prepare = prepare_composer_attachment_from_path(
+            &database,
+            &data_dir,
+            PrepareAttachmentFromPathParams {
+                camp_id: CampId::parse(camp_id).unwrap(),
+                expected_revision: 0,
+                source_path: source.to_string_lossy().into_owned(),
+                display_name: "source.txt".to_string(),
+            },
+        );
+        let observe_database = async {
+            let filesystem_phase_started = tokio::time::timeout(Duration::from_secs(2), async {
+                while !pause.started() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .is_ok();
+            let database_was_available = if filesystem_phase_started {
+                match tokio::time::timeout(Duration::from_secs(1), database.lock()).await {
+                    Ok(database) => {
+                        drop(database);
+                        true
+                    }
+                    Err(_) => false,
+                }
+            } else {
+                false
+            };
+            pause.release();
+            database_was_available
+        };
+
+        let (prepared, database_was_available) = tokio::join!(prepare, observe_database);
+        rovai_core::camp_attachment::remove_composer_prepare_test_pause(&data_dir, camp_id);
+        assert!(
+            database_was_available,
+            "Authority gate wait and file I/O must not retain the global Database mutex"
+        );
+        assert_eq!(
+            prepared.unwrap()["attachments"].as_array().unwrap().len(),
+            1
+        );
+
+        CampAttachmentStore::new(&data_dir)
+            .remove_camp(camp_id)
+            .unwrap();
+        drop(database);
+        fs::remove_dir_all(fixture).unwrap();
+    }
 
     #[test]
     fn runtime_check_activity_has_two_slots_and_one_terminal_owner() {
@@ -15014,6 +15786,121 @@ mod tests {
             "attempt-new",
         ));
         assert!(activity.is_empty());
+        assert!(RuntimeCheckOutcome::Ready.is_ready());
+        assert_eq!(
+            RuntimeCheckOutcome::StableFailure.public_status(),
+            "stable_failure"
+        );
+        assert_eq!(RuntimeCheckOutcome::Superseded.public_status(), "deferred");
+    }
+
+    #[test]
+    fn superseded_execution_is_deferred_until_an_explicit_refresh_trigger() {
+        let runtime_kind = AdapterKind::QwenCode;
+        let mut deferrals = RuntimeCheckExecutionDeferrals::default();
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+
+        deferrals.record(
+            runtime_kind,
+            RuntimeCheckTrigger::Execution,
+            &Ok(RuntimeCheckOutcome::Superseded),
+        );
+        assert!(deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+        assert!(deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::CatalogOpen));
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+
+        deferrals.record(
+            runtime_kind,
+            RuntimeCheckTrigger::UserCheck,
+            &Ok(RuntimeCheckOutcome::Superseded),
+        );
+        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn identity_checked_probe_discards_updated_results_and_keeps_stable_errors() {
+        use std::os::unix::fs::PermissionsExt;
+
+        fn write_executable(path: &Path, body: &[u8]) {
+            std::fs::write(path, body).unwrap();
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-runtime-probe-identity-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let executable = directory.join("fake-runtime");
+        write_executable(&executable, b"#!/bin/sh\nexit 0\n");
+
+        let replacement = directory.join("replacement");
+        let replaced = run_identity_checked_probe(&executable, async {
+            write_executable(&replacement, b"#!/bin/sh\nexit 1\n");
+            std::fs::rename(&replacement, &executable).unwrap();
+            Ok::<_, anyhow::Error>("obsolete-success")
+        })
+        .await;
+        assert!(matches!(replaced, IdentityCheckedProbe::Superseded));
+
+        let updater_holds_stdout = run_identity_checked_probe(&executable, async {
+            write_executable(&replacement, b"#!/bin/sh\nexit 2\n");
+            std::fs::rename(&replacement, &executable).unwrap();
+            Err::<(), _>(anyhow::anyhow!("runtime_probe_stdout_cleanup_timed_out"))
+        })
+        .await;
+        assert!(matches!(
+            updater_holds_stdout,
+            IdentityCheckedProbe::Superseded
+        ));
+
+        let stable_cleanup_timeout = run_identity_checked_probe(&executable, async {
+            Err::<(), _>(anyhow::anyhow!("runtime_probe_stderr_cleanup_timed_out"))
+        })
+        .await;
+        assert!(matches!(
+            stable_cleanup_timeout,
+            IdentityCheckedProbe::Stable(Err(_))
+        ));
+
+        let unverifiable_after = run_identity_checked_probe(&executable, async {
+            std::fs::remove_file(&executable).unwrap();
+            Err::<(), _>(anyhow::anyhow!("probe_failed_while_runtime_updated"))
+        })
+        .await;
+        assert!(matches!(
+            unverifiable_after,
+            IdentityCheckedProbe::Superseded
+        ));
+
+        let missing_before = directory.join("missing-runtime");
+        let existing_behavior = run_identity_checked_probe(&missing_before, async {
+            Err::<(), _>(anyhow::anyhow!("runtime_path_missing"))
+        })
+        .await;
+        assert!(matches!(
+            existing_behavior,
+            IdentityCheckedProbe::Stable(Err(_))
+        ));
+        assert_eq!(RUNTIME_PROBE_MAX_EXECUTIONS, 2);
+
+        let now = tokio::time::Instant::now();
+        let short_deadline = now + Duration::from_millis(100);
+        assert_eq!(
+            runtime_probe_update_retry_at(now, short_deadline),
+            Some(short_deadline)
+        );
+        let full_deadline = now + Duration::from_secs(1);
+        assert_eq!(
+            runtime_probe_update_retry_at(now, full_deadline),
+            Some(now + RUNTIME_PROBE_UPDATE_RETRY_DELAY)
+        );
+        assert_eq!(runtime_probe_update_retry_at(full_deadline, now), None);
+
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test]
@@ -15123,10 +16010,15 @@ mod tests {
                 .is_err(),
             "the returned admission must cover the claimed Run lifecycle"
         );
-        drop(admission);
+        let (projection_tx, mut projection_rx) = mpsc::unbounded_channel();
+        assert!(release_agent_run_attachment_admission(
+            admission,
+            &projection_tx
+        ));
+        assert_eq!(projection_rx.recv().await.as_deref(), Some("rvcamp_test"));
         tokio::time::timeout(Duration::from_secs(1), gate.write_owned())
             .await
-            .expect("the write gate should reopen when the Run admission ends");
+            .expect("the write gate should reopen before projection is reawakened");
     }
 
     #[test]
@@ -16177,6 +17069,7 @@ mod tests {
             "camps.reconcileDefaultLead"
         ));
         assert!(request_runs_outside_main_queue("camp.messages.send"));
+        assert!(request_runs_outside_main_queue("userAutomation.camp.send"));
         assert!(request_runs_outside_main_queue("campTurns.cancel"));
         assert!(request_runs_outside_main_queue("agentRuns.cancel"));
         assert!(request_runs_outside_main_queue(
@@ -16202,7 +17095,7 @@ mod tests {
     }
 
     #[test]
-    fn acp_tool_events_expose_digests_not_raw_payloads() {
+    fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
         let (_, payload) = normalize_acp_event(
             "session/update",
             &json!({
@@ -16214,7 +17107,10 @@ mod tests {
                     "kind": "execute",
                     "title": "Run command",
                     "content": [{"type": "text", "text": "Visible tool progress"}],
-                    "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                    "rawInput": {
+                        "command": "printf 'ACP_PUBLIC_COMMAND_OK\\n'",
+                        "credential": "ACP_PRIVATE_INPUT_MUST_NOT_LEAK"
+                    },
                     "rawOutput": {
                         "stdout": "unused public fallback",
                         "credential": "TOP_SECRET_OUTPUT"
@@ -16224,12 +17120,49 @@ mod tests {
         );
         let serialized = serde_json::to_string(&payload).expect("event payload should serialize");
 
-        assert!(!serialized.contains("TOP_SECRET_INPUT"));
+        assert_eq!(payload["input"], "printf 'ACP_PUBLIC_COMMAND_OK\\n'");
+        assert_eq!(payload["kind"], "execute");
+        assert!(!serialized.contains("ACP_PRIVATE_INPUT_MUST_NOT_LEAK"));
         assert!(!serialized.contains("TOP_SECRET_OUTPUT"));
         assert_eq!(payload["output"], "Visible tool progress");
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+
+        let terminal_params = json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "status": "completed",
+                "rawOutput": {
+                    "stdout": "Visible failed output",
+                    "exitCode": 7
+                }
+            }
+        });
+        let mut completion = acp::completed_action(&terminal_params)
+            .expect("terminal update should normalize")
+            .expect("terminal update should create a completion");
+        completion.native_kind = "execute".to_string();
+        completion.public_command = Some("printf 'ACP_PUBLIC_COMMAND_OK\\n'".to_string());
+        completion.result_data["status"] = json!("failed");
+        completion.result_data["rawInputDigest"] = payload["rawInputDigest"].clone();
+        let (_, terminal_payload) = normalize_acp_event_with_completion(
+            "session/update",
+            &terminal_params,
+            Some(&completion),
+        );
+        assert_eq!(
+            terminal_payload["input"],
+            "printf 'ACP_PUBLIC_COMMAND_OK\\n'"
+        );
+        assert_eq!(terminal_payload["kind"], "execute");
+        assert_eq!(terminal_payload["status"], "failed");
+        assert_eq!(
+            terminal_payload["rawInputDigest"],
+            payload["rawInputDigest"]
+        );
+        assert_eq!(terminal_payload["output"], "Visible failed output");
     }
 
     #[test]

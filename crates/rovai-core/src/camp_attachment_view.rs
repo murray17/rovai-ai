@@ -19,9 +19,10 @@ use crate::{
     camp_id::CampId,
     command::canonical_json_digest,
     db::Database,
+    message_delivery::settle_attachment_projection_failure,
 };
 
-pub const CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION: i64 = 2;
+pub const CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION: i64 = 3;
 pub const CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION: i64 = 2;
 pub const RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION: i64 = 1;
 pub const MAX_CAMP_VIEW_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -186,6 +187,9 @@ struct ReadyCampViewReceipt {
     catalog_digest: String,
     catalog_revision: i64,
     semantic_catalog_digest: String,
+    semantic_revision: i64,
+    resolved_revision: i64,
+    resolution_digest: String,
 }
 
 #[derive(Debug)]
@@ -631,6 +635,68 @@ impl CampAttachmentViewStore {
         ))
     }
 
+    pub fn plan_queued_publication(
+        &self,
+        database: &mut Database,
+        camp_id: &str,
+    ) -> Result<Option<CampAttachmentPublicationCopyPlan>> {
+        CampId::parse(camp_id)?;
+        let transaction = database.connection_mut().transaction()?;
+        let head = transaction
+            .query_row(
+                r#"
+                SELECT id, command_id, COALESCE(draft_revision, 0), status
+                FROM camp_attachment_view_operation
+                WHERE camp_id = ?1 AND kind = 'publish'
+                  AND resolution_state = 'unresolved'
+                ORDER BY semantic_revision, created_at, id
+                LIMIT 1
+                "#,
+                [camp_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((operation_id, command_id, draft_revision, status)) = head else {
+            transaction.commit()?;
+            return Ok(None);
+        };
+        if !matches!(status.as_str(), "planned" | "recovery_required") {
+            anyhow::bail!("camp_attachment_view_busy");
+        }
+        let rows = load_operation_authority_rows(&transaction, &operation_id)?;
+        if rows.is_empty() {
+            anyhow::bail!("camp_attachment_view_recovery_required: publication has no entries");
+        }
+        let changed = transaction.execute(
+            r#"
+            UPDATE camp_attachment_view_operation
+            SET status = 'copying', error_code = NULL, updated_at = ?2
+            WHERE id = ?1 AND status IN ('planned','recovery_required')
+              AND resolution_state = 'unresolved'
+            "#,
+            params![operation_id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("camp_attachment_view_busy");
+        }
+        transaction.commit()?;
+        Ok(Some(CampAttachmentPublicationCopyPlan {
+            operation_root: self.staging_operation_root(&operation_id)?,
+            operation_id,
+            camp_id: camp_id.to_string(),
+            command_id,
+            draft_revision,
+            rows,
+        }))
+    }
+
     pub fn copy_publication(
         attachment_store: &CampAttachmentStore,
         plan: CampAttachmentPublicationCopyPlan,
@@ -670,33 +736,42 @@ impl CampAttachmentViewStore {
     ) -> Result<PreparedCampAttachmentPublication> {
         let CopiedCampAttachmentPublication { plan, entries } = copied;
         let transaction = database.connection_mut().transaction()?;
-        let operation: (String, String, i64, String) = transaction.query_row(
+        let operation: (String, String, Option<i64>, String, String) = transaction.query_row(
             r#"
-            SELECT status, command_id, draft_revision, camp_id
+            SELECT status, command_id, draft_revision, camp_id, source_kind
             FROM camp_attachment_view_operation WHERE id = ?1 AND kind = 'publish'
             "#,
             [&plan.operation_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
         )?;
-        if operation
-            != (
-                "copying".to_string(),
-                plan.command_id.clone(),
-                plan.draft_revision,
-                plan.camp_id.clone(),
-            )
+        if operation.0 != "copying"
+            || operation.1 != plan.command_id
+            || operation.3 != plan.camp_id
+            || (operation.4 == "legacy" && operation.2 != Some(plan.draft_revision))
         {
             anyhow::bail!("camp_attachment_view_recovery_required: CopyPlan journal changed");
         }
-        let current_revision: i64 = transaction.query_row(
-            "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
-            [&plan.camp_id],
-            |row| row.get(0),
-        )?;
-        if current_revision != plan.draft_revision
-            || load_prepared_authority_rows(&transaction, &plan.camp_id)? != plan.rows
-        {
-            anyhow::bail!("draft_changed");
+        if operation.4 == "legacy" {
+            let current_revision: i64 = transaction.query_row(
+                "SELECT revision FROM camp_composer_draft WHERE camp_id = ?1",
+                [&plan.camp_id],
+                |row| row.get(0),
+            )?;
+            if current_revision != plan.draft_revision
+                || load_prepared_authority_rows(&transaction, &plan.camp_id)? != plan.rows
+            {
+                anyhow::bail!("draft_changed");
+            }
+        } else if load_operation_authority_rows(&transaction, &plan.operation_id)? != plan.rows {
+            anyhow::bail!("camp_attachment_view_recovery_required: Authority journal changed");
         }
         if entries.len() != plan.rows.len()
             || entries
@@ -868,7 +943,14 @@ impl CampAttachmentViewStore {
         publication: &PreparedCampAttachmentPublication,
     ) -> Result<()> {
         self.verify_publication_state(database.connection(), publication, "staged")?;
-        if !self.publication_matches_current_draft(database.connection(), publication)? {
+        let source_kind: String = database.connection().query_row(
+            "SELECT source_kind FROM camp_attachment_view_operation WHERE id = ?1",
+            [&publication.operation_id],
+            |row| row.get(0),
+        )?;
+        if source_kind == "legacy"
+            && !self.publication_matches_current_draft(database.connection(), publication)?
+        {
             self.rollback_publication(database, &publication.operation_id, "draft_changed")?;
             anyhow::bail!("draft_changed");
         }
@@ -982,7 +1064,8 @@ impl CampAttachmentViewStore {
         let changed = database.connection().execute(
             r#"
             UPDATE camp_attachment_view_operation
-            SET status = 'completed', completed_at = ?2, updated_at = ?2
+            SET status = 'completed', resolution_state = 'available',
+                reserved_bytes = 0, completed_at = ?2, updated_at = ?2
             WHERE id = ?1 AND status = 'committed'
             "#,
             params![operation_id, now],
@@ -1038,6 +1121,142 @@ impl CampAttachmentViewStore {
                 Err(error).context("camp_attachment_view_integrity_failed")
             }
         }
+    }
+
+    pub fn finish_semantic_publication(
+        &self,
+        database: &mut Database,
+        operation_id: &str,
+    ) -> Result<()> {
+        validate_operation_id(operation_id)?;
+        let resolution_state: String = database.connection().query_row(
+            "SELECT resolution_state FROM camp_attachment_view_operation WHERE id = ?1 AND status = 'committed'",
+            [operation_id],
+            |row| row.get(0),
+        )?;
+        if resolution_state != "available" {
+            anyhow::bail!("camp_attachment_view_recovery_required: publication is unresolved");
+        }
+        self.remove_operation_staging(database.connection(), operation_id)?;
+        let now = chrono::Utc::now().to_rfc3339();
+        let changed = database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view_operation
+            SET status = 'completed', completed_at = ?2, updated_at = ?2
+            WHERE id = ?1 AND status = 'committed' AND resolution_state = 'available'
+            "#,
+            params![operation_id, now],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("camp_attachment_view_recovery_required");
+        }
+        Ok(())
+    }
+
+    pub fn resolve_semantic_publication_success(
+        &self,
+        database: &mut Database,
+        operation_id: &str,
+    ) -> Result<Vec<String>> {
+        let transaction = database.connection_mut().transaction()?;
+        let delivery_ids = resolve_semantic_publication_success(&transaction, operation_id)?;
+        transaction.commit()?;
+        Ok(delivery_ids)
+    }
+
+    pub fn resolve_semantic_publication_terminal_failure(
+        &self,
+        database: &mut Database,
+        operation_id: &str,
+        failure_code: &str,
+    ) -> Result<Vec<(String, String)>> {
+        validate_operation_id(operation_id)?;
+        if failure_code.trim().is_empty() {
+            anyhow::bail!("attachment publication terminal failure requires a code");
+        }
+        let status: String = database.connection().query_row(
+            "SELECT status FROM camp_attachment_view_operation WHERE id = ?1 AND resolution_state = 'unresolved'",
+            [operation_id],
+            |row| row.get(0),
+        )?;
+        if matches!(status.as_str(), "promoting" | "promoted" | "committing") {
+            self.rollback_publication_inner(
+                database,
+                operation_id,
+                "attachment_projection_failed",
+            )?;
+        }
+        self.remove_operation_staging(database.connection(), operation_id)?;
+        let transaction = database.connection_mut().transaction()?;
+        let recipients = resolve_semantic_publication_terminal_failure(
+            &transaction,
+            operation_id,
+            failure_code,
+        )?;
+        transaction.commit()?;
+        Ok(recipients)
+    }
+
+    pub fn mark_semantic_publication_recovery_required(
+        &self,
+        database: &mut Database,
+        operation_id: &str,
+        error_code: &str,
+    ) -> Result<()> {
+        validate_operation_id(operation_id)?;
+        let status: String = database.connection().query_row(
+            "SELECT status FROM camp_attachment_view_operation WHERE id = ?1 AND resolution_state = 'unresolved'",
+            [operation_id],
+            |row| row.get(0),
+        )?;
+        if matches!(status.as_str(), "promoting" | "promoted" | "committing") {
+            self.rollback_publication_inner(
+                database,
+                operation_id,
+                "camp_attachment_view_recovery_required",
+            )?;
+        }
+        if matches!(
+            status.as_str(),
+            "planned" | "copying" | "staged" | "gated" | "promoting" | "promoted" | "committing"
+        ) {
+            self.remove_operation_staging(database.connection(), operation_id)?;
+            database.connection().execute(
+                r#"
+                UPDATE camp_attachment_view_operation_entry
+                SET state = 'planned', authority_safe_leaf = NULL, kind = NULL,
+                    file_count = NULL, directory_count = NULL, node_count = NULL,
+                    staging_identity_digest = NULL, final_identity_digest = NULL,
+                    updated_at = ?2
+                WHERE operation_id = ?1 AND state IN ('planned','copied','promoted','rolled_back')
+                "#,
+                params![operation_id, chrono::Utc::now().to_rfc3339()],
+            )?;
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let changed = database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view_operation
+            SET status = 'recovery_required', error_code = ?2, updated_at = ?3
+            WHERE id = ?1 AND resolution_state = 'unresolved'
+              AND status IN ('planned','copying','staged','gated','promoting',
+                             'promoted','committing','rolled_back','recovery_required')
+            "#,
+            params![operation_id, error_code, now],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("camp_attachment_view_recovery_required");
+        }
+        database.connection().execute(
+            r#"
+            UPDATE message_attachment
+            SET runtime_projection_state = 'recovery_required'
+            WHERE publication_operation_id = ?1
+              AND runtime_projection_state = 'pending'
+            "#,
+            [operation_id],
+        )?;
+        Ok(())
     }
 
     pub fn rollback_publication(
@@ -1166,7 +1385,20 @@ impl CampAttachmentViewStore {
             params![operation_id, now],
         )?;
         transaction.execute(
-            "UPDATE camp_attachment_view_operation SET status = 'rolled_back', completed_at = ?2, updated_at = ?2 WHERE id = ?1",
+            r#"
+            UPDATE camp_attachment_view_operation
+            SET status = 'rolled_back',
+                resolution_state = CASE
+                    WHEN source_kind = 'legacy' THEN 'failed'
+                    ELSE resolution_state
+                END,
+                reserved_bytes = CASE
+                    WHEN source_kind = 'legacy' THEN 0
+                    ELSE reserved_bytes
+                END,
+                completed_at = ?2, updated_at = ?2
+            WHERE id = ?1
+            "#,
             params![operation_id, now],
         )?;
         let (view_state, last_error): (&str, Option<&str>) = match kind.as_str() {
@@ -1220,6 +1452,9 @@ impl CampAttachmentViewStore {
         workspace: Option<&Path>,
         visibility_mode: CampAttachmentVisibilityMode,
     ) -> Result<CampAttachmentRuntimeAuthorizationVerification> {
+        if has_unresolved_publication(database.connection(), camp_id)? {
+            anyhow::bail!("camp_attachment_view_not_ready");
+        }
         let view = prepare_ready_camp_view_verification(
             database.connection(),
             &self.root,
@@ -1268,6 +1503,9 @@ impl CampAttachmentViewStore {
     }
 
     pub fn verify_camp_ready(&self, database: &Database, camp_id: &str) -> Result<()> {
+        if has_unresolved_publication(database.connection(), camp_id)? {
+            anyhow::bail!("camp_attachment_view_not_ready");
+        }
         verify_ready_camp_view(
             database.connection(),
             &self.root,
@@ -1278,6 +1516,9 @@ impl CampAttachmentViewStore {
     }
 
     pub fn verify_camp_ready_receipt(&self, database: &Database, camp_id: &str) -> Result<()> {
+        if has_unresolved_publication(database.connection(), camp_id)? {
+            anyhow::bail!("camp_attachment_view_not_ready");
+        }
         prepare_ready_camp_view_verification(
             database.connection(),
             &self.root,
@@ -1677,7 +1918,17 @@ impl CampAttachmentViewStore {
 
         if missing.is_empty() && !is_initial_backfill {
             if view_state.as_ref().is_some_and(|row| row.0 == "ready") {
-                match self.verify_camp_ready(database, camp_id) {
+                let verification = if has_unresolved_publication(database.connection(), camp_id)? {
+                    verify_ready_camp_view(
+                        database.connection(),
+                        &self.root,
+                        &self.root_identity_digest,
+                        camp_id,
+                    )
+                } else {
+                    self.verify_camp_ready(database, camp_id)
+                };
+                match verification {
                     Ok(()) => return Ok(()),
                     Err(error) => {
                         eprintln!(
@@ -2102,7 +2353,7 @@ impl CampAttachmentViewStore {
     fn recover_incomplete_operations(&self, database: &mut Database) -> Result<()> {
         let operations = {
             let mut statement = database.connection().prepare(
-                "SELECT id, camp_id, status, kind, command_id FROM camp_attachment_view_operation WHERE status NOT IN ('completed','rolled_back') ORDER BY created_at, id",
+                "SELECT id, camp_id, status, kind, command_id, source_kind, resolution_state FROM camp_attachment_view_operation WHERE status NOT IN ('completed','rolled_back') ORDER BY created_at, id",
             )?;
             statement
                 .query_map([], |row| {
@@ -2112,11 +2363,15 @@ impl CampAttachmentViewStore {
                         row.get::<_, String>(2)?,
                         row.get::<_, String>(3)?,
                         row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
                     ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?
         };
-        for (operation_id, camp_id, status, kind, command_id) in operations {
+        for (operation_id, camp_id, status, kind, command_id, source_kind, resolution_state) in
+            operations
+        {
             if kind == "camp_delete_cleanup" {
                 let cleanup = PreparedCampAttachmentCleanup {
                     operation_id,
@@ -2138,6 +2393,18 @@ impl CampAttachmentViewStore {
                 } else {
                     self.commit_camp_delete_cleanup(database, &cleanup)?;
                     self.complete_camp_delete_cleanup(database, &cleanup)?;
+                }
+                continue;
+            }
+            if kind == "publish" && source_kind != "legacy" {
+                if resolution_state == "available" && status == "committed" {
+                    self.finish_semantic_publication(database, &operation_id)?;
+                } else if resolution_state == "unresolved" {
+                    self.mark_semantic_publication_recovery_required(
+                        database,
+                        &operation_id,
+                        "camp_attachment_view_recovery_required",
+                    )?;
                 }
                 continue;
             }
@@ -2164,7 +2431,12 @@ impl CampAttachmentViewStore {
                 status
             };
             if status == "committed" {
-                match self.verify_camp_ready(database, &camp_id) {
+                match verify_ready_camp_view(
+                    database.connection(),
+                    &self.root,
+                    &self.root_identity_digest,
+                    &camp_id,
+                ) {
                     Ok(()) => self.complete_publication(database, &operation_id)?,
                     Err(error) => {
                         eprintln!(
@@ -2198,12 +2470,18 @@ impl CampAttachmentViewStore {
         database: &mut Database,
         camp_id: &str,
     ) -> Result<()> {
-        self.verify_camp_ready(database, camp_id)?;
+        verify_ready_camp_view(
+            database.connection(),
+            &self.root,
+            &self.root_identity_digest,
+            camp_id,
+        )?;
         let operation_ids = {
             let mut statement = database.connection().prepare(
                 r#"
                 SELECT id FROM camp_attachment_view_operation
                 WHERE camp_id = ?1 AND status = 'committed'
+                  AND source_kind = 'legacy'
                 ORDER BY created_at, id
                 "#,
             )?;
@@ -2217,8 +2495,10 @@ impl CampAttachmentViewStore {
             database.connection().execute(
                 r#"
                 UPDATE camp_attachment_view_operation
-                SET status = 'completed', completed_at = ?2, updated_at = ?2
+                SET status = 'completed', resolution_state = 'available',
+                    reserved_bytes = 0, completed_at = ?2, updated_at = ?2
                 WHERE id = ?1 AND status = 'committed'
+                  AND source_kind = 'legacy'
                 "#,
                 params![operation_id, now],
             )?;
@@ -2648,6 +2928,285 @@ pub fn commit_publication_in_message_transaction(
     commit_operation_entries(transaction, operation_id, camp_id, prepared_attachment_ids)
 }
 
+pub fn resolve_semantic_publication_success(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+) -> Result<Vec<String>> {
+    validate_operation_id(operation_id)?;
+    let (camp_id, semantic_revision, resolution_state): (String, i64, String) = transaction
+        .query_row(
+            r#"
+            SELECT camp_id, semantic_revision, resolution_state
+            FROM camp_attachment_view_operation
+            WHERE id = ?1 AND kind = 'publish'
+            "#,
+            [operation_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+    if resolution_state == "available" {
+        return load_projection_delivery_ids(transaction, operation_id);
+    }
+    if resolution_state != "unresolved" {
+        anyhow::bail!("camp_attachment_view_recovery_required: publication already resolved");
+    }
+    let attachment_ids = load_operation_attachment_ids(transaction, operation_id, "promoted")?;
+    mark_operation_committing(transaction, operation_id, &camp_id)?;
+    commit_operation_entries(transaction, operation_id, &camp_id, &attachment_ids)?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = transaction.execute(
+        r#"
+        UPDATE message_attachment
+        SET runtime_projection_state = 'available'
+        WHERE camp_id = ?1 AND publication_operation_id = ?2
+          AND publication_semantic_revision = ?3
+          AND runtime_projection_state IN ('pending','recovery_required')
+        "#,
+        params![camp_id, operation_id, semantic_revision],
+    )?;
+    if changed != attachment_ids.len() {
+        anyhow::bail!("camp_attachment_view_publish_failed: public attachment state changed");
+    }
+    let entry_digest = canonical_json_digest(&json!({
+        "operationId": operation_id,
+        "semanticRevision": semantic_revision,
+        "attachmentIds": attachment_ids,
+        "outcome": "available",
+    }))?;
+    let previous_resolution_digest: String = transaction.query_row(
+        "SELECT resolution_digest FROM camp_attachment_view WHERE camp_id = ?1",
+        [&camp_id],
+        |row| row.get(0),
+    )?;
+    let resolution_digest = canonical_json_digest(&json!({
+        "previous": previous_resolution_digest,
+        "revision": semantic_revision,
+        "entryDigest": entry_digest,
+    }))?;
+    transaction.execute(
+        r#"
+        INSERT INTO camp_attachment_publication_resolution(
+            camp_id, semantic_revision, operation_id, outcome,
+            entry_digest, tombstone_digest, failure_code, resolved_at
+        ) VALUES (?1, ?2, ?3, 'available', ?4, NULL, NULL, ?5)
+        "#,
+        params![camp_id, semantic_revision, operation_id, entry_digest, now],
+    )?;
+    let view_changed = transaction.execute(
+        r#"
+        UPDATE camp_attachment_view
+        SET resolved_revision = ?2, resolution_digest = ?3, updated_at = ?4
+        WHERE camp_id = ?1 AND resolved_revision = ?5
+          AND semantic_revision >= ?2
+        "#,
+        params![
+            camp_id,
+            semantic_revision,
+            resolution_digest,
+            now,
+            semantic_revision - 1
+        ],
+    )?;
+    if view_changed != 1 {
+        anyhow::bail!("camp_attachment_publication_resolution_conflict");
+    }
+    let operation_changed = transaction.execute(
+        r#"
+        UPDATE camp_attachment_view_operation
+        SET resolution_state = 'available', resolution_ledger_digest = ?2,
+            reserved_bytes = 0, updated_at = ?3
+        WHERE id = ?1 AND resolution_state = 'unresolved' AND status = 'committed'
+        "#,
+        params![operation_id, resolution_digest, now],
+    )?;
+    if operation_changed != 1 {
+        anyhow::bail!("camp_attachment_publication_resolution_conflict");
+    }
+    transaction.execute(
+        r#"
+        UPDATE message_delivery
+        SET dispatch_phase = 'never_attempted', pre_dispatch_gate = NULL,
+            projection_operation_id = NULL,
+            version = version + 1, updated_at = ?2
+        WHERE projection_operation_id = ?1 AND status = 'pending'
+          AND dispatch_phase = 'projection_blocked'
+          AND pre_dispatch_gate = 'attachment_projection'
+          AND dispatch_attempt_count = 0
+        "#,
+        params![operation_id, now],
+    )?;
+    load_projection_delivery_ids_from_message(transaction, operation_id)
+}
+
+pub fn resolve_semantic_publication_terminal_failure(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+    failure_code: &str,
+) -> Result<Vec<(String, String)>> {
+    validate_operation_id(operation_id)?;
+    let (camp_id, semantic_revision, resolution_state): (String, i64, String) = transaction
+        .query_row(
+            r#"
+            SELECT camp_id, semantic_revision, resolution_state
+            FROM camp_attachment_view_operation
+            WHERE id = ?1 AND kind = 'publish' AND source_kind <> 'legacy'
+            "#,
+            [operation_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+    if resolution_state == "failed" {
+        return Ok(Vec::new());
+    }
+    if resolution_state != "unresolved" {
+        anyhow::bail!("camp_attachment_view_recovery_required: publication already resolved");
+    }
+    let attachment_ids = {
+        let mut statement = transaction.prepare(
+            r#"
+            SELECT attachment_id
+            FROM camp_attachment_view_operation_entry
+            WHERE operation_id = ?1
+            ORDER BY attachment_id
+            "#,
+        )?;
+        statement
+            .query_map([operation_id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    if attachment_ids.is_empty() {
+        anyhow::bail!("camp_attachment_view_recovery_required: publication has no entries");
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let changed = transaction.execute(
+        r#"
+        UPDATE message_attachment
+        SET runtime_projection_state = 'failed'
+        WHERE camp_id = ?1 AND publication_operation_id = ?2
+          AND publication_semantic_revision = ?3
+          AND runtime_projection_state IN ('pending','recovery_required')
+        "#,
+        params![camp_id, operation_id, semantic_revision],
+    )?;
+    if changed != attachment_ids.len() {
+        anyhow::bail!("camp_attachment_view_publish_failed: public attachment state changed");
+    }
+    let tombstone_digest = canonical_json_digest(&json!({
+        "operationId": operation_id,
+        "semanticRevision": semantic_revision,
+        "attachmentIds": attachment_ids,
+        "outcome": "failed",
+        "failureCode": failure_code,
+    }))?;
+    let previous_resolution_digest: String = transaction.query_row(
+        "SELECT resolution_digest FROM camp_attachment_view WHERE camp_id = ?1",
+        [&camp_id],
+        |row| row.get(0),
+    )?;
+    let resolution_digest = canonical_json_digest(&json!({
+        "previous": previous_resolution_digest,
+        "revision": semantic_revision,
+        "tombstoneDigest": tombstone_digest,
+    }))?;
+    transaction.execute(
+        r#"
+        INSERT INTO camp_attachment_publication_resolution(
+            camp_id, semantic_revision, operation_id, outcome,
+            entry_digest, tombstone_digest, failure_code, resolved_at
+        ) VALUES (?1, ?2, ?3, 'failed', NULL, ?4, ?5, ?6)
+        "#,
+        params![
+            camp_id,
+            semantic_revision,
+            operation_id,
+            tombstone_digest,
+            failure_code,
+            now,
+        ],
+    )?;
+    let view_changed = transaction.execute(
+        r#"
+        UPDATE camp_attachment_view
+        SET state = 'ready', resolved_revision = ?2,
+            resolution_digest = ?3, active_operation_id = NULL,
+            last_error_code = NULL, updated_at = ?4
+        WHERE camp_id = ?1 AND resolved_revision = ?5
+          AND semantic_revision >= ?2
+        "#,
+        params![
+            camp_id,
+            semantic_revision,
+            resolution_digest,
+            now,
+            semantic_revision - 1,
+        ],
+    )?;
+    if view_changed != 1 {
+        anyhow::bail!("camp_attachment_publication_resolution_conflict");
+    }
+    transaction.execute(
+        r#"
+        UPDATE camp_attachment_view_operation_entry
+        SET state = CASE WHEN state = 'committed' THEN state ELSE 'rolled_back' END,
+            updated_at = ?2
+        WHERE operation_id = ?1
+        "#,
+        params![operation_id, now],
+    )?;
+    let operation_changed = transaction.execute(
+        r#"
+        UPDATE camp_attachment_view_operation
+        SET status = 'completed', resolution_state = 'failed',
+            resolution_ledger_digest = ?2, terminal_failure_code = ?3,
+            error_code = ?3, reserved_bytes = 0,
+            completed_at = ?4, updated_at = ?4
+        WHERE id = ?1 AND resolution_state = 'unresolved'
+        "#,
+        params![operation_id, resolution_digest, failure_code, now],
+    )?;
+    if operation_changed != 1 {
+        anyhow::bail!("camp_attachment_publication_resolution_conflict");
+    }
+    settle_attachment_projection_failure(transaction, operation_id, failure_code, &now)
+}
+
+fn load_projection_delivery_ids(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+) -> Result<Vec<String>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT id FROM message_delivery
+        WHERE projection_operation_id = ?1
+        ORDER BY recipient_agent_id, queue_sequence, id
+        "#,
+    )?;
+    Ok(statement
+        .query_map([operation_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn load_projection_delivery_ids_from_message(
+    transaction: &Transaction<'_>,
+    operation_id: &str,
+) -> Result<Vec<String>> {
+    let mut statement = transaction.prepare(
+        r#"
+        SELECT delivery.id
+        FROM message_delivery AS delivery
+        JOIN message_attachment AS attachment
+          ON attachment.camp_message_id = delivery.message_id
+        WHERE attachment.publication_operation_id = ?1
+          AND delivery.status = 'pending'
+          AND delivery.dispatch_phase = 'never_attempted'
+        GROUP BY delivery.id, delivery.recipient_agent_id, delivery.queue_sequence
+        ORDER BY delivery.recipient_agent_id, delivery.queue_sequence, delivery.id
+        "#,
+    )?;
+    Ok(statement
+        .query_map([operation_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
 pub fn load_camp_attachment_view_receipt(
     connection: &Connection,
     camp_id: &str,
@@ -2742,6 +3301,12 @@ pub fn resolve_published_attachment_path(
             JOIN camp_attachment_view AS view ON view.camp_id = entry.camp_id
             WHERE entry.camp_id = ?1 AND entry.attachment_id = ?2
               AND view.state = 'ready' AND view.root_identity_digest = rovai_runtime_camp_files_root_identity_digest()
+              AND EXISTS(
+                  SELECT 1 FROM message_attachment AS attachment
+                  WHERE attachment.camp_id = entry.camp_id
+                    AND attachment.id = entry.attachment_id
+                    AND attachment.runtime_projection_state = 'available'
+              )
             "#,
             params![camp_id, attachment_id],
             |row| row.get(0),
@@ -2785,6 +3350,9 @@ pub fn runtime_attachment_auth_receipt(
     visibility_mode: CampAttachmentVisibilityMode,
 ) -> Result<(RuntimeAttachmentAuthReceiptV1, String)> {
     CampId::parse(camp_id)?;
+    if has_unresolved_publication(connection, camp_id)? {
+        anyhow::bail!("camp_attachment_view_not_ready");
+    }
     let current = connection
         .query_row(
             r#"
@@ -3452,6 +4020,7 @@ fn prepare_ready_camp_view_verification(
     {
         anyhow::bail!("Camp Attachment View semantic receipt is inconsistent");
     }
+    verify_resolution_ledger(connection, camp_id, &receipt)?;
     Ok(CampAttachmentViewVerification {
         camp_id: camp_id.to_string(),
         root: root.to_path_buf(),
@@ -3472,7 +4041,8 @@ fn load_ready_camp_view_receipt(
             SELECT state, generation, root_relative_path, root_identity_digest,
                    entry_count, aggregate_bytes, catalog_digest,
                    catalog_revision, semantic_catalog_digest,
-                   active_operation_id
+                   active_operation_id, semantic_revision,
+                   resolved_revision, resolution_digest
             FROM camp_attachment_view WHERE camp_id = ?1
             "#,
             [camp_id],
@@ -3488,6 +4058,9 @@ fn load_ready_camp_view_receipt(
                     row.get::<_, i64>(7)?,
                     row.get::<_, String>(8)?,
                     row.get::<_, Option<String>>(9)?,
+                    row.get::<_, i64>(10)?,
+                    row.get::<_, i64>(11)?,
+                    row.get::<_, String>(12)?,
                 ))
             },
         )
@@ -3501,6 +4074,9 @@ fn load_ready_camp_view_receipt(
         || view.5 < 0
         || view.7 < 0
         || view.9.is_some()
+        || view.10 < 0
+        || view.11 < 0
+        || view.11 > view.10
     {
         anyhow::bail!("Camp Attachment View state receipt is inconsistent");
     }
@@ -3513,7 +4089,168 @@ fn load_ready_camp_view_receipt(
         catalog_digest: view.6,
         catalog_revision: view.7,
         semantic_catalog_digest: view.8,
+        semantic_revision: view.10,
+        resolved_revision: view.11,
+        resolution_digest: view.12,
     })
+}
+
+fn verify_resolution_ledger(
+    connection: &Connection,
+    camp_id: &str,
+    receipt: &ReadyCampViewReceipt,
+) -> Result<()> {
+    let empty_digest = empty_catalog_digest()?;
+    let rows = {
+        let mut statement = connection.prepare(
+            r#"
+            SELECT semantic_revision, operation_id, outcome,
+                   entry_digest, tombstone_digest, failure_code
+            FROM camp_attachment_publication_resolution
+            WHERE camp_id = ?1
+            ORDER BY semantic_revision
+            "#,
+        )?;
+        statement
+            .query_map([camp_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                    row.get::<_, Option<String>>(5)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    if receipt.resolved_revision == 0 {
+        if !rows.is_empty() || receipt.resolution_digest != empty_digest {
+            anyhow::bail!("Camp Attachment empty resolution ledger is inconsistent");
+        }
+        return Ok(());
+    }
+    let mut previous_revision = 0_i64;
+    let mut digest = empty_digest;
+    for (revision, operation_id, outcome, entry_digest, tombstone_digest, failure_code) in rows {
+        if operation_id.is_none() {
+            // A migration checkpoint seals the catalog prefix that existed at
+            // its revision; later semantic publications append to that prefix.
+            let (_, _, checkpoint_catalog_digest) =
+                semantic_catalog_state_through_revision(connection, camp_id, Some(revision))?;
+            if previous_revision != 0
+                || outcome != "available"
+                || revision < 1
+                || entry_digest.as_deref() != Some(checkpoint_catalog_digest.as_str())
+                || tombstone_digest.is_some()
+                || failure_code.is_some()
+            {
+                anyhow::bail!("Camp Attachment migration resolution checkpoint is inconsistent");
+            }
+            previous_revision = revision;
+            digest = entry_digest.expect("checked migration checkpoint digest");
+            continue;
+        }
+        if revision != previous_revision + 1 {
+            anyhow::bail!("Camp Attachment resolution ledger is not contiguous");
+        }
+        let operation_id = operation_id.expect("checked operation ID");
+        let (operation_revision, operation_resolution, operation_digest, operation_failure): (
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = connection.query_row(
+            r#"
+            SELECT semantic_revision, resolution_state,
+                   resolution_ledger_digest, terminal_failure_code
+            FROM camp_attachment_view_operation
+            WHERE id = ?1 AND camp_id = ?2
+            "#,
+            params![operation_id, camp_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+        if operation_revision != revision || operation_resolution != outcome {
+            anyhow::bail!("Camp Attachment resolution operation receipt is inconsistent");
+        }
+        let attachment_ids = load_all_operation_attachment_ids(connection, &operation_id)?;
+        let projected_attachment_ids = {
+            let mut statement = connection.prepare(
+                r#"
+                SELECT id FROM message_attachment
+                WHERE publication_operation_id = ?1
+                  AND publication_semantic_revision = ?2
+                  AND runtime_projection_state = ?3
+                ORDER BY id
+                "#,
+            )?;
+            statement
+                .query_map(params![operation_id, revision, outcome], |row| {
+                    row.get::<_, String>(0)
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        let mut expected_projected_ids = attachment_ids.clone();
+        expected_projected_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+        if projected_attachment_ids != expected_projected_ids {
+            anyhow::bail!("Camp Attachment public resolution state is inconsistent");
+        }
+        digest = match outcome.as_str() {
+            "available" => {
+                let expected_entry_digest = canonical_json_digest(&json!({
+                    "operationId": operation_id,
+                    "semanticRevision": revision,
+                    "attachmentIds": attachment_ids,
+                    "outcome": "available",
+                }))?;
+                if entry_digest.as_deref() != Some(expected_entry_digest.as_str())
+                    || tombstone_digest.is_some()
+                    || failure_code.is_some()
+                {
+                    anyhow::bail!("Camp Attachment available resolution receipt is inconsistent");
+                }
+                canonical_json_digest(&json!({
+                    "previous": digest,
+                    "revision": revision,
+                    "entryDigest": expected_entry_digest,
+                }))?
+            }
+            "failed" => {
+                let mut attachment_ids = attachment_ids;
+                attachment_ids.sort_by(|left, right| left.as_bytes().cmp(right.as_bytes()));
+                let failure_code = failure_code
+                    .as_deref()
+                    .context("Camp Attachment failed resolution has no failure code")?;
+                let expected_tombstone_digest = canonical_json_digest(&json!({
+                    "operationId": operation_id,
+                    "semanticRevision": revision,
+                    "attachmentIds": attachment_ids,
+                    "outcome": "failed",
+                    "failureCode": failure_code,
+                }))?;
+                if tombstone_digest.as_deref() != Some(expected_tombstone_digest.as_str())
+                    || entry_digest.is_some()
+                    || operation_failure.as_deref() != Some(failure_code)
+                {
+                    anyhow::bail!("Camp Attachment failed resolution tombstone is inconsistent");
+                }
+                canonical_json_digest(&json!({
+                    "previous": digest,
+                    "revision": revision,
+                    "tombstoneDigest": expected_tombstone_digest,
+                }))?
+            }
+            _ => anyhow::bail!("Camp Attachment resolution outcome is invalid"),
+        };
+        if operation_digest.as_deref() != Some(digest.as_str()) {
+            anyhow::bail!("Camp Attachment operation resolution digest is inconsistent");
+        }
+        previous_revision = revision;
+    }
+    if previous_revision != receipt.resolved_revision || digest != receipt.resolution_digest {
+        anyhow::bail!("Camp Attachment resolution ledger aggregate is inconsistent");
+    }
+    Ok(())
 }
 
 fn inspect_ready_camp_view(verification: &CampAttachmentViewVerification) -> Result<()> {
@@ -3765,11 +4502,57 @@ fn load_published_authority_rows(
         r#"
         SELECT id, media_type, byte_size, content_digest, storage_path
         FROM message_attachment
-        WHERE camp_id = ?1
+        WHERE camp_id = ?1 AND runtime_projection_state = 'available'
         ORDER BY CAST(id AS BLOB)
         "#,
         camp_id,
     )
+}
+
+fn has_unresolved_publication(connection: &Connection, camp_id: &str) -> Result<bool> {
+    connection
+        .query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1 FROM camp_attachment_view_operation
+                WHERE camp_id = ?1 AND resolution_state = 'unresolved'
+            )
+            "#,
+            [camp_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
+}
+
+fn load_operation_authority_rows(
+    connection: &Connection,
+    operation_id: &str,
+) -> Result<Vec<AuthorityAttachmentRow>> {
+    let mut statement = connection.prepare(
+        r#"
+        SELECT attachment_id, media_type, expected_byte_size,
+               expected_content_digest, authority_storage_path
+        FROM camp_attachment_view_operation_entry
+        WHERE operation_id = ?1
+        ORDER BY rowid
+        "#,
+    )?;
+    statement
+        .query_map([operation_id], |row| {
+            let size = row.get::<_, i64>(2)?;
+            if size < 0 {
+                return Err(rusqlite::Error::IntegralValueOutOfRange(2, size));
+            }
+            Ok(AuthorityAttachmentRow {
+                attachment_id: row.get(0)?,
+                media_type: row.get(1)?,
+                byte_size: size as u64,
+                content_digest: row.get(3)?,
+                storage_path: PathBuf::from(row.get::<_, String>(4)?),
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 fn load_authority_rows(
@@ -4571,6 +5354,414 @@ mod tests {
         if data_dir.join("camp-attachments").exists() {
             set_directory_mode(&data_dir.join("camp-attachments"), 0o700).unwrap();
         }
+    }
+
+    fn commit_semantic_composer_attachment(
+        database: &mut Database,
+        data_dir: &Path,
+        camp_id: &str,
+        body: &str,
+    ) -> (String, String) {
+        let attachment_store = CampAttachmentStore::new(data_dir);
+        let source = data_dir.join(format!("{}.txt", Uuid::new_v4()));
+        fs::write(&source, body.as_bytes()).unwrap();
+        let saved = attachment_store.save_body(database, camp_id, body).unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                database,
+                camp_id,
+                saved.revision,
+                &source,
+                "semantic-publication.txt",
+            )
+            .unwrap();
+        let attachment_id = draft.attachments[0].id.clone();
+        let command_id = Uuid::new_v4().to_string();
+        let execution = CollaborationService::default()
+            .send_user_camp_draft(
+                database,
+                &CommandEnvelope {
+                    command_id,
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: Some(camp_id.to_string()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: SendUserCampDraftCommand {
+                        camp_id: camp_id.to_string(),
+                        draft_revision: draft.revision,
+                        execution: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(execution.result.status, CommandResultStatus::Applied);
+        let operation_id = database
+            .connection()
+            .query_row(
+                "SELECT publication_operation_id FROM message_attachment WHERE id = ?1",
+                [&attachment_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        (operation_id, attachment_id)
+    }
+
+    fn finish_semantic_composer_attachment(
+        database: &mut Database,
+        data_dir: &Path,
+        camp_id: &str,
+        view: &CampAttachmentViewStore,
+        operation_id: &str,
+    ) {
+        view.reconcile(database, &CampAttachmentStore::new(data_dir))
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT status FROM camp_attachment_view_operation WHERE id = ?1",
+                    [operation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "recovery_required"
+        );
+        let plan = view
+            .plan_queued_publication(database, camp_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.operation_id(), operation_id);
+        let copied =
+            CampAttachmentViewStore::copy_publication(&CampAttachmentStore::new(data_dir), plan)
+                .unwrap();
+        let publication = view.finish_publication_staging(database, copied).unwrap();
+        view.gate_publication(database, &publication).unwrap();
+        view.promote_publication(database, &publication).unwrap();
+        assert!(
+            view.resolve_semantic_publication_success(database, operation_id)
+                .unwrap()
+                .is_empty()
+        );
+        view.finish_semantic_publication(database, operation_id)
+            .unwrap();
+    }
+
+    #[test]
+    fn semantic_publication_success_commits_a_verified_resolution_ledger() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let (operation_id, attachment_id) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "semantic success",
+        );
+        finish_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            &operation_id,
+        );
+
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT runtime_projection_state FROM message_attachment WHERE id = ?1",
+                    [&attachment_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "available"
+        );
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn migration_resolution_checkpoint_remains_valid_after_semantic_append() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let (legacy_operation_id, legacy_attachment_id) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "legacy semantic publication",
+        );
+        finish_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            &legacy_operation_id,
+        );
+
+        let semantic_catalog_digest = database
+            .connection()
+            .query_row(
+                "SELECT semantic_catalog_digest FROM camp_attachment_view WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        let transaction = database.connection_mut().transaction().unwrap();
+        transaction
+            .execute(
+                r#"
+                UPDATE message_attachment
+                SET publication_operation_id = NULL,
+                    publication_semantic_revision = NULL
+                WHERE id = ?1
+                "#,
+                [&legacy_attachment_id],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                r#"
+                UPDATE camp_attachment_view_operation
+                SET source_kind = 'legacy', semantic_revision = NULL,
+                    resolution_ledger_digest = NULL
+                WHERE id = ?1
+                "#,
+                [&legacy_operation_id],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                r#"
+                UPDATE camp_attachment_publication_resolution
+                SET operation_id = NULL, entry_digest = ?2
+                WHERE camp_id = ?1 AND semantic_revision = 1
+                "#,
+                params![camp_id, semantic_catalog_digest],
+            )
+            .unwrap();
+        transaction
+            .execute(
+                "UPDATE camp_attachment_view SET resolution_digest = ?2 WHERE camp_id = ?1",
+                params![camp_id, semantic_catalog_digest],
+            )
+            .unwrap();
+        transaction.commit().unwrap();
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+
+        let (operation_id, _) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "post-migration semantic publication",
+        );
+        finish_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            &view,
+            &operation_id,
+        );
+
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn same_camp_semantic_publications_project_fifo_and_retain_follower_reservation() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let (first_operation, first_attachment) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "first semantic publication",
+        );
+        let (second_operation, second_attachment) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "second semantic publication",
+        );
+        let queued = database
+            .connection()
+            .prepare(
+                r#"
+                SELECT id, semantic_revision, reserved_bytes
+                FROM camp_attachment_view_operation
+                WHERE id IN (?1, ?2)
+                ORDER BY semantic_revision
+                "#,
+            )
+            .unwrap()
+            .query_map(params![first_operation, second_operation], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert_eq!(queued.len(), 2);
+        assert_eq!(queued[0].0, first_operation);
+        assert_eq!(queued[0].1, 1);
+        assert!(queued[0].2 > 0);
+        assert_eq!(queued[1].0, second_operation);
+        assert_eq!(queued[1].1, 2);
+        assert!(queued[1].2 > 0);
+
+        let first_plan = view
+            .plan_queued_publication(&mut database, &camp_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(first_plan.operation_id(), first_operation);
+        assert!(
+            view.plan_queued_publication(&mut database, &camp_id)
+                .unwrap_err()
+                .to_string()
+                .contains("camp_attachment_view_busy"),
+            "the follower must not overtake a copying FIFO head"
+        );
+        let first_copy = CampAttachmentViewStore::copy_publication(
+            &CampAttachmentStore::new(&data_dir),
+            first_plan,
+        )
+        .unwrap();
+        let first_publication = view
+            .finish_publication_staging(&mut database, first_copy)
+            .unwrap();
+        view.gate_publication(&mut database, &first_publication)
+            .unwrap();
+        view.promote_publication(&mut database, &first_publication)
+            .unwrap();
+        view.resolve_semantic_publication_success(&mut database, &first_operation)
+            .unwrap();
+        view.finish_semantic_publication(&mut database, &first_operation)
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT reserved_bytes FROM camp_attachment_view_operation WHERE id = ?1",
+                    [&second_operation],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            queued[1].2,
+            "resolving the head must not release the follower reservation"
+        );
+
+        let second_plan = view
+            .plan_queued_publication(&mut database, &camp_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(second_plan.operation_id(), second_operation);
+        let second_copy = CampAttachmentViewStore::copy_publication(
+            &CampAttachmentStore::new(&data_dir),
+            second_plan,
+        )
+        .unwrap();
+        let second_publication = view
+            .finish_publication_staging(&mut database, second_copy)
+            .unwrap();
+        view.gate_publication(&mut database, &second_publication)
+            .unwrap();
+        view.promote_publication(&mut database, &second_publication)
+            .unwrap();
+        view.resolve_semantic_publication_success(&mut database, &second_operation)
+            .unwrap();
+        view.finish_semantic_publication(&mut database, &second_operation)
+            .unwrap();
+
+        assert!(
+            view.plan_queued_publication(&mut database, &camp_id)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            resolve_published_attachment_path(database.connection(), &camp_id, &first_attachment)
+                .is_ok()
+        );
+        assert!(
+            resolve_published_attachment_path(database.connection(), &camp_id, &second_attachment)
+                .is_ok()
+        );
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn terminal_projection_failure_tombstones_public_attachment_and_releases_intent() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let (operation_id, attachment_id) = commit_semantic_composer_attachment(
+            &mut database,
+            &data_dir,
+            &camp_id,
+            "semantic failure",
+        );
+        let authority_path = database
+            .connection()
+            .query_row(
+                "SELECT storage_path FROM message_attachment WHERE id = ?1",
+                [&attachment_id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap();
+        set_file_mode(Path::new(&authority_path), 0o600).unwrap();
+        fs::write(&authority_path, b"tampered after semantic commit").unwrap();
+        let plan = view
+            .plan_queued_publication(&mut database, &camp_id)
+            .unwrap()
+            .unwrap();
+        assert!(
+            CampAttachmentViewStore::copy_publication(&CampAttachmentStore::new(&data_dir), plan,)
+                .is_err()
+        );
+        assert!(
+            view.resolve_semantic_publication_terminal_failure(
+                &mut database,
+                &operation_id,
+                "camp_attachment_view_source_invalid",
+            )
+            .unwrap()
+            .is_empty()
+        );
+
+        let state: (String, String, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT attachment.runtime_projection_state,
+                       operation.resolution_state, operation.reserved_bytes
+                FROM message_attachment AS attachment
+                JOIN camp_attachment_view_operation AS operation
+                  ON operation.id = attachment.publication_operation_id
+                WHERE attachment.id = ?1
+                "#,
+                [&attachment_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("failed".to_string(), "failed".to_string(), 0));
+        assert!(!has_unresolved_publication(database.connection(), &camp_id).unwrap());
+        assert!(
+            resolve_published_attachment_path(database.connection(), &camp_id, &attachment_id)
+                .is_err()
+        );
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE camp_attachment_publication_resolution
+                SET tombstone_digest = 'tampered'
+                WHERE operation_id = ?1
+                "#,
+                [&operation_id],
+            )
+            .unwrap();
+        assert!(view.verify_camp_ready(&database, &camp_id).is_err());
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
     }
 
     #[test]

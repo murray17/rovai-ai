@@ -74,6 +74,7 @@ import {
   attachmentDragKind,
   attachmentDropIsBlocked,
   agentRunStopViewState,
+  attachmentRevealLabel,
   canStopAgentRun,
   campConversationHasVisibleHistory,
   campConversationViewFromStoredValue,
@@ -3126,7 +3127,17 @@ describe('task event projections', () => {
         fileCount: 1,
         mediaType: 'text/plain',
         byteSize: 12,
-        previewKind: 'none'
+        previewKind: 'none',
+        runtimeProjectionState: 'pending'
+      }, {
+        id: 'attachment-timeline-failed',
+        displayName: '不可用.txt',
+        kind: 'file',
+        fileCount: 1,
+        mediaType: 'text/plain',
+        byteSize: 8,
+        previewKind: 'none',
+        runtimeProjectionState: 'failed'
       }],
       addressMode: 'default',
       addressedAgentIds: ['agent_1'],
@@ -3177,7 +3188,20 @@ describe('task event projections', () => {
     expect(markup).toContain('aria-label="回复这条消息"')
     expect(markup).toContain('class="timeline-attachments" aria-label="消息附件"')
     expect(markup).toContain('说明.txt')
+    expect(markup).toContain('正在准备供队员读取')
+    expect(markup).toContain('队员读取不可用')
+    expect(markup).toContain('attachment-projection-pending')
+    expect(markup).toContain('attachment-projection-failed')
+    expect(markup).toContain('aria-label="使用系统应用打开 说明.txt"')
+    expect(markup).toContain('aria-label="使用系统应用打开 不可用.txt"')
+    expect(markup).not.toContain('aria-label="使用系统应用打开 不可用.txt" disabled=""')
     expect(markup).not.toContain('class="message-bubble"')
+  })
+
+  it('uses platform-native labels for revealing Timeline Attachments', () => {
+    expect(attachmentRevealLabel('darwin')).toBe('在 Finder 中显示')
+    expect(attachmentRevealLabel('win32')).toBe('在文件资源管理器中显示')
+    expect(attachmentRevealLabel('linux')).toBe('显示所在位置')
   })
 
   it('renders a public A2A message with the Scheme C handoff footer', () => {
@@ -3530,7 +3554,7 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({
       step: {
         title: 'pnpm test',
-        detail: 'pnpm test',
+        detail: '命令\npnpm test',
         status: 'running'
       }
     })
@@ -3592,6 +3616,61 @@ describe('task event projections', () => {
     expect(progress.items[2]).toMatchObject({ body: '第二段说明。' })
   })
 
+  it('shows the latest Claude API retry while the AgentRun is still running', () => {
+    const retryEvents = [1, 2].map((attempt) => liveRuntimeEventFromCore({
+      method: 'runtime.diagnostic',
+      params: {
+        agentRunId: 'run-claude-retrying',
+        payload: {
+          diagnosticId: 'claude-api-retry',
+          code: 'runtime_api_retrying',
+          status: 'retrying',
+          attempt,
+          maxAttempts: 10,
+          retryAfterSeconds: attempt === 1 ? 0 : 4,
+          rawDetail: 'api_key=private-key'
+        }
+      }
+    }, `retry-${attempt}`)).filter((event) => event !== null)
+    const progress = buildLiveExecutionProgress(retryEvents, 'run-claude-retrying')
+    expect(progress.items).toEqual([{
+      key: 'diagnostic:claude-api-retry',
+      kind: 'diagnostic',
+      diagnostic: {
+        id: 'claude-api-retry',
+        code: 'runtime_api_retrying',
+        status: 'retrying',
+        attempt: 2,
+        maxAttempts: 10,
+        retryAfterSeconds: 4
+      }
+    }])
+
+    const run: AgentRunView = {
+      id: 'run-claude-retrying', campTurnId: 'turn-1', conversationId: 'conversation-claude',
+      agentId: 'agent-claude', taskId: null, responsibilityKey: 'direct:agent-claude',
+      responsibilityGeneration: 0, purpose: '检查 API', completionRole: 'required',
+      status: 'running', waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+      cancelAcknowledgedAt: null, executionEpoch: 1, terminalResolutionSource: null,
+      terminalReasonCode: null, failure: null, runtimeModel: null,
+      permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+      triggerDeliveryGeneration: 0, a2aParentAgentRunId: null, a2aRootAgentRunId: null,
+      a2aDepth: 0, executionEvidenceCount: 2, hasUnsettledExternalEffects: false,
+      workspace: { path: '/repo' }, startingGitObservation: null, endingGitObservation: null,
+      version: 1, createdAt: '2026-08-20T15:50:27Z', startedAt: '2026-08-20T15:50:28Z',
+      endedAt: null, updatedAt: '2026-08-20T15:50:29Z'
+    }
+    const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
+      run, progress, campId: 'camp-1', focused: true
+    }))
+    expect(markup).toContain('class="runtime-retry-notice"')
+    expect(markup).toContain('Claude Code API 暂时不可用')
+    expect(markup).toContain('将在 4 秒后重试（第 2/10 次）')
+    expect(markup).toContain('本次执行尚未结束，可继续等待或停止执行。')
+    expect(markup).toContain('等待 Claude Code 自动重试（2/10）')
+    expect(markup).not.toContain('private-key')
+  })
+
   it('keeps the complete Tool chronology after more than twelve operations', () => {
     const progress = buildLiveExecutionProgress(Array.from({ length: 15 }, (_, index) => ({
       id: `tool-evidence-${index + 1}`,
@@ -3634,7 +3713,8 @@ describe('task event projections', () => {
       payload: {
         item: {
           id: 'native-command-1', type: 'commandExecution',
-          command: 'sed -n 1,120p SKILL.md', status: 'inProgress'
+          command: 'sed -n 1,120p SKILL.md', status: 'inProgress',
+          commandActions: [{ type: 'read', path: 'SKILL.md' }]
         }
       },
       canonical,
@@ -3646,7 +3726,8 @@ describe('task event projections', () => {
       payload: {
         item: {
           id: 'native-command-1', type: 'commandExecution',
-          command: 'sed -n 1,120p SKILL.md', status: 'completed'
+          command: 'sed -n 1,120p SKILL.md', status: 'completed',
+          commandActions: [{ type: 'read', path: 'SKILL.md' }]
         }
       },
       canonical,
@@ -3961,7 +4042,8 @@ describe('task event projections', () => {
       id: 'claude-bash-completed', agentRunId: 'run-claude', eventType: 'runtime.action',
       payload: {
         toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
-        toolName: 'Bash', title: 'Bash', output: null
+        toolName: 'Bash', title: 'Bash',
+        input: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'", output: null
       },
       canonical: canonicalActivity('toolu-claude-bash', {
         activityDomain: 'shell', semanticKind: 'shell.execute',
@@ -3972,11 +4054,16 @@ describe('task event projections', () => {
 
     expect(progress.items[0]).toMatchObject({
       kind: 'tool',
-      step: { title: 'printf', status: 'completed' }
+      step: {
+        title: "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'",
+        status: 'completed'
+      }
     })
     const item = progress.items[0]
     if (item.kind !== 'tool') throw new Error('Expected Claude Bash tool progress')
-    expect(item.step.detail).toContain('ROVAI_CLAUDE_EMPTY_OUTPUT_OK')
+    expect(item.step.detail).toBe(
+      "命令\nprintf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
+    )
 
     const run: AgentRunView = {
       id: 'run-claude', campTurnId: 'turn-1', conversationId: 'conversation-claude',
@@ -4002,6 +4089,9 @@ describe('task event projections', () => {
     expect(markup).toContain('class="tool-call-state status-completed"')
     expect(markup).toContain('aria-label="成功"')
     expect(markup).toContain('tool-call-result-scroll')
+    expect(markup).toContain(
+      'class="tool-call-title" title="printf &#x27;%s\\n&#x27; &#x27;ROVAI_CLAUDE_EMPTY_OUTPUT_OK&#x27;"'
+    )
     expect(markup).not.toContain('tool-output-copy-button')
     expect(markup).not.toContain('>已完成<')
     expect(markup).not.toContain('tool-call-static')
@@ -4026,21 +4116,22 @@ describe('task event projections', () => {
     expect(failedMarkup).toContain('aria-label="失败"')
   })
 
-  it('uses bounded concrete command labels across the current ten Runtime adapters', () => {
+  it('uses truthful Codex command previews without changing the other Runtime adapters', () => {
     const genericShell = canonicalActivity('shell-command', {
       activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null,
       presentationHint: '执行 Shell 命令', phase: 'started', outcome: 'unknown'
+    })
+    const codexPayload = (command: string): Record<string, unknown> => ({
+      item: { type: 'commandExecution', command, commandActions: [{ type: 'unknown' }] }
     })
     const cases = [
       {
         adapter: 'codex-cli',
         canonical: genericShell,
-        payload: {
-          item: {
-            command: "/bin/zsh -lc 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'"
-          }
-        },
-        expected: 'rovai camp read --help'
+        payload: codexPayload(
+          "/bin/zsh -lc 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'"
+        ),
+        expected: 'rovai camp read --help && rovai camp read --camp-id rvcamp_example'
       },
       { adapter: 'opencode-cli', canonical: { ...genericShell, presentationHint: 'Run fixed printf' }, payload: {}, expected: 'Run fixed printf' },
       { adapter: 'copilot-cli', canonical: { ...genericShell, presentationHint: 'Inspect attachment file' }, payload: {}, expected: 'Inspect attachment file' },
@@ -4048,12 +4139,17 @@ describe('task event projections', () => {
       { adapter: 'qoder-cli', canonical: { ...genericShell, presentationHint: 'Search project' }, payload: {}, expected: 'Search project' },
       { adapter: 'codebuddy-cli', canonical: { ...genericShell, presentationHint: 'Apply patch' }, payload: {}, expected: 'Apply patch' },
       { adapter: 'qwen-code', canonical: { ...genericShell, presentationHint: 'Run tests' }, payload: {}, expected: 'Run tests' },
-      { adapter: 'trae-cn-cli', canonical: { ...genericShell, presentationHint: 'bash' }, payload: {}, expected: 'bash' },
+      {
+        adapter: 'trae-cn-cli',
+        canonical: { ...genericShell, presentationHint: 'bash' },
+        payload: { input: "printf 'TRAE_DISPLAY_LEFT\\n' && printf 'TRAE_DISPLAY_RIGHT\\n'" },
+        expected: "printf 'TRAE_DISPLAY_LEFT\\n' && printf 'TRAE_DISPLAY_RIGHT\\n'"
+      },
       {
         adapter: 'claude-code-cli',
         canonical: { ...genericShell, toolName: 'Bash', presentationHint: 'Bash' },
         payload: { input: "cargo test --package private-package -- token_must_not_leak" },
-        expected: 'cargo test'
+        expected: 'cargo test --package private-package -- token_must_not_leak'
       },
       {
         adapter: 'antigravity-app',
@@ -4070,29 +4166,56 @@ describe('task event projections', () => {
         testCase.adapter
       ).toBe(testCase.expected)
     }
-    expect(executionActivityTitle(genericShell, {
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
+    ))).toBe('rovai send --public-only --body [已隐藏]')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `/bin/zsh -lc 'rovai --help'`
+    ))).toBe('rovai --help')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `/bin/zsh -lc 'rovai send --help'`
+    ))).toBe('rovai send --help')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rg --help /private/project/path`
+    ))).toBe('rg --help /private/project/path')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rovai send --body '--help'`
+    ))).toBe('rovai send --body [已隐藏]')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rovai send 'TOP_SECRET_POSITIONAL_BODY'`
+    ))).toBe('rovai send [已隐藏]')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `rovai camp TOP_SECRET_UNKNOWN_ACTION`
+    ))).toBe('rovai camp TOP_SECRET_UNKNOWN_ACTION')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `git status && git checkout feature/command-preview && git rebase main`
+    ))).toBe('git status && git checkout feature/command-preview && git rebase main')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `node -e 'console.log("一段很长的内联脚本")'`
+    ))).toBe(`node -e 'console.log("一段很长的内联脚本")'`)
+    expect(executionActivityTitle(genericShell, codexPayload(
+      "node <<'NODE'\nconst message = 'heredoc script';\nconsole.log(message);\nNODE"
+    ))).toBe("node const message = 'heredoc script' ; console.log(message)")
+    const sensitive = executionActivityTitle(genericShell, codexPayload(
+      `OPENAI_API_KEY=sk-secret curl -H 'Authorization: Bearer secret-token' --token abc https://example.test`
+    ))
+    expect(sensitive).toContain('OPENAI_API_KEY=[已隐藏]')
+    expect(sensitive).toContain('"Authorization: [已隐藏]"')
+    expect(sensitive).toContain('--token [已隐藏]')
+    expect(sensitive).not.toContain('sk-secret')
+    expect(sensitive).not.toContain('secret-token')
+    expect(executionActivityTitle(genericShell, codexPayload(
+      `curl --header='Authorization: Bearer another-secret' https://example.test`
+    ))).toBe('curl --header="Authorization: [已隐藏]" https://example.test')
+    expect(executionActivityTitle({
+      ...genericShell,
+      presentationHint: '搜索项目文件'
+    }, {
       item: {
-        command: `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
+        type: 'commandExecution', command: 'rg executionActivityTitle apps',
+        commandActions: [{ type: 'search', query: 'executionActivityTitle', path: 'apps' }]
       }
-    })).toBe('rovai send')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `/bin/zsh -lc 'rovai --help'` }
-    })).toBe('rovai --help')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `/bin/zsh -lc 'rovai send --help'` }
-    })).toBe('rovai send --help')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rg --help /private/project/path` }
-    })).toBe('rg --help')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rovai send --body '--help'` }
-    })).toBe('rovai send')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rovai send 'TOP_SECRET_POSITIONAL_BODY'` }
-    })).toBe('rovai send')
-    expect(executionActivityTitle(genericShell, {
-      item: { command: `rovai camp TOP_SECRET_UNKNOWN_ACTION` }
-    })).toBe('rovai camp')
+    })).toBe('搜索项目文件')
     expect(executionActivityTitle(canonicalActivity('file-write', {
       activityDomain: 'file', semanticKind: 'file.write', toolName: null,
       presentationHint: 'write_file', phase: 'started', outcome: 'unknown'
@@ -4101,13 +4224,14 @@ describe('task event projections', () => {
     })).toBe('write_file')
   })
 
-  it('uses the Core Codex presentation hint without parsing the command in Renderer', () => {
+  it('keeps the Core Codex presentation hint for structured read commands', () => {
     const progress = buildLiveExecutionProgress([{
       id: 'codex-command', agentRunId: 'run-codex', eventType: 'activity.started',
       payload: {
         item: {
           id: 'command-1', type: 'commandExecution', status: 'inProgress',
-          command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"'
+          command: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
+          commandActions: [{ type: 'read', path: '/repo/docs/README.md' }]
         }
       },
       canonical: canonicalActivity('command-1', {
@@ -4121,7 +4245,7 @@ describe('task event projections', () => {
       kind: 'tool',
       step: {
         title: '读取 README.md',
-        detail: '/bin/zsh -lc "sed -n 1,120p /repo/docs/README.md"',
+        detail: '命令\nsed -n 1,120p /repo/docs/README.md',
         activityDomain: 'shell'
       }
     })
@@ -4204,11 +4328,27 @@ describe('task event projections', () => {
         exitCode: 0
       },
       _rovaiTruncated: true
-    })).toBe('full diff\nsecond line')
+    })).toBe('命令\ngit diff\n\n输出\nfull diff\nsecond line')
+    expect(executionEvidenceResultText('activity.completed', {
+      item: {
+        type: 'commandExecution',
+        command: "node <<'NODE'\nconst token = 'must-not-leak';\nconsole.log('done');\nNODE",
+        aggregatedOutput: 'done'
+      }
+    })).toBe(
+      "命令\nnode <<'NODE' ; const token = '[已隐藏]' ; console.log('done') ; NODE\n\n输出\ndone"
+    )
     expect(executionEvidenceResultText('runtime.action', {
       output: { status: 'accepted', receiptId: 'receipt-1' },
       rawOutputDigest: 'must-not-be-rendered'
     })).toBe('{\n  "status": "accepted",\n  "receiptId": "receipt-1"\n}')
+    expect(executionEvidenceResultText('runtime.action', {
+      kind: 'execute',
+      input: "printf 'CLAUDE_DISPLAY_SINGLE\\n'",
+      output: 'CLAUDE_DISPLAY_SINGLE\n'
+    })).toBe(
+      "命令\nprintf 'CLAUDE_DISPLAY_SINGLE\\n'\n\n输出\nCLAUDE_DISPLAY_SINGLE\n"
+    )
     expect(executionEvidenceResultText('file.change.updated', {
       patch: '*** Begin Patch\n*** End Patch',
       itemId: 'hidden-identity'
@@ -4454,7 +4594,7 @@ describe('task event projections', () => {
     expect(markup).toContain('>Qoder</option>')
     expect(markup).toContain('>CodeBuddy</option>')
     expect(markup).toContain('>Qwen Code</option>')
-    expect(markup).toContain('>TRAE CLI（中国企业版）</option>')
+    expect(markup).toContain('>TRAE CLI</option>')
     expect(markup).toContain('>Antigravity</option>')
     expect(markup).not.toContain('>DeepSeek Harness</option>')
     expect(markup).toContain('未配置 Agent 运行时')
@@ -4463,7 +4603,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Claude Code CLI')
     expect(markup).not.toContain('Antigravity App')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('<h3>Agent 运行时</h3>')
+    expect(markup).toContain('<h3>运行时</h3>')
     expect(markup).toContain('Agent 运行时')
     expect(markup).toContain('保存运行配置')
     expect(markup).toContain('放弃更改')
@@ -4544,7 +4684,7 @@ describe('task event projections', () => {
     expect(markup).toContain('正在检查…')
     expect(markup).toContain('Codex CLI')
     expect(markup).toContain('Antigravity')
-    expect(markup).toContain('TRAE CLI（中国企业版）')
+    expect(markup).toContain('TRAE CLI')
     expect(markup).not.toContain('正在检测')
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
@@ -4648,7 +4788,7 @@ describe('task event projections', () => {
     expect(markup).toContain('GitHub Copilot')
     expect(markup).toContain('Claude Code')
     expect(markup).toContain('Antigravity')
-    expect(markup).toContain('TRAE CLI（中国企业版）')
+    expect(markup).toContain('TRAE CLI')
     expect(markup).toContain('DeepSeek Harness')
     expect(markup).toContain('待支持')
     expect(markup).toContain('尚未开放')

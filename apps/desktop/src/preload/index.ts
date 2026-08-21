@@ -22,6 +22,16 @@ const api: RovaiApi = {
     ipcRenderer.on('rovai:event', handler)
     return () => ipcRenderer.removeListener('rovai:event', handler)
   },
+  userAutomation: {
+    onOpenCamp(listener) {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        request: { campId: string }
+      ): void => listener(request)
+      ipcRenderer.on('rovai:user-automation-open-camp', handler)
+      return () => ipcRenderer.removeListener('rovai:user-automation-open-camp', handler)
+    }
+  },
   appearance: {
     get() {
       return ipcRenderer.invoke('rovai:appearance-get') as Promise<AppearanceSnapshot>
@@ -181,6 +191,14 @@ const api: RovaiApi = {
     },
     preview(attachmentId) {
       return ipcRenderer.invoke('rovai:composer-attachment-preview', attachmentId)
+    }
+  },
+  attachments: {
+    open(campId, attachmentId) {
+      return ipcRenderer.invoke('rovai:attachment-open', campId, attachmentId)
+    },
+    reveal(campId, attachmentId) {
+      return ipcRenderer.invoke('rovai:attachment-reveal', campId, attachmentId)
     }
   },
   clipboard: {

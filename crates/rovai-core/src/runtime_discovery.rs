@@ -237,6 +237,29 @@ impl RuntimeSearchEnvironment {
         &self.path_entries
     }
 
+    pub fn resolve_command_path(&self, command_name: &str) -> Option<PathBuf> {
+        let command_path = Path::new(command_name);
+        if command_name.is_empty()
+            || command_path.components().count() != 1
+            || command_path.file_name() != Some(OsStr::new(command_name))
+        {
+            return None;
+        }
+        for entry in &self.path_entries {
+            for suffix in &self.executable_suffixes {
+                let mut executable_name = OsString::from(command_name);
+                executable_name.push(suffix);
+                let candidate = entry.path.join(executable_name);
+                if is_executable_file(&candidate)
+                    && let Ok(canonical) = candidate.canonicalize()
+                {
+                    return Some(canonical);
+                }
+            }
+        }
+        None
+    }
+
     pub fn summary(&self) -> RuntimeSearchEnvironmentSummary {
         RuntimeSearchEnvironmentSummary {
             generation: self.generation,
@@ -963,6 +986,36 @@ mod tests {
             candidates[0].path.file_name(),
             Some(OsStr::new("codex.exe"))
         );
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn command_resolution_returns_the_first_executable_as_an_absolute_path() {
+        let directory =
+            env::temp_dir().join(format!("rovai-command-resolution-{}", Uuid::new_v4()));
+        let first = directory.join("first");
+        let second = directory.join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        fs::write(first.join("git"), "not executable").unwrap();
+        executable(&second.join("git"), "#!/bin/sh\nexit 0\n");
+        let search = test_search(vec![
+            SearchPathEntry {
+                path: first,
+                sources: vec![SearchPathSource::InheritedPath],
+            },
+            SearchPathEntry {
+                path: second.clone(),
+                sources: vec![SearchPathSource::LoginShell],
+            },
+        ]);
+
+        assert_eq!(
+            search.resolve_command_path("git"),
+            Some(second.join("git").canonicalize().unwrap())
+        );
+        assert_eq!(search.resolve_command_path("missing-command"), None);
 
         fs::remove_dir_all(directory).unwrap();
     }

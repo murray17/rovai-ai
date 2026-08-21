@@ -81,6 +81,15 @@ export function runtimeCampFilesRoot(
   return join(canonicalPath(homeDirectory), '.rovai', 'instances', instanceKey, 'runtime-files')
 }
 
+export function coreProcessHomeDirectory(
+  electronHomeDirectory: string,
+  environmentHomeDirectory: string | undefined = process.env.HOME,
+  platform: NodeJS.Platform = process.platform
+): string {
+  if (platform === 'win32') return electronHomeDirectory
+  return environmentHomeDirectory || electronHomeDirectory
+}
+
 export function desktopSkillLibraryRoot(
   dataDirectory: string,
   hasExplicitUserDataDirectory: boolean,
@@ -118,7 +127,10 @@ export class CoreClient {
 
   constructor(
     dataDirectory: string = app.getPath('userData'),
-    runtimeFilesRoot: string = runtimeCampFilesRoot(dataDirectory, app.getPath('home'))
+    runtimeFilesRoot: string = runtimeCampFilesRoot(
+      dataDirectory,
+      coreProcessHomeDirectory(app.getPath('home'))
+    )
   ) {
     this.#dataDirectory = dataDirectory
     this.#runtimeCampFilesRoot = runtimeFilesRoot

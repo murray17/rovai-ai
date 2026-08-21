@@ -6,15 +6,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    camp_attachment::managed_attachment_summary,
+    camp_attachment::{DIRECTORY_MEDIA_TYPE, managed_attachment_summary},
     camp_content::{StructuredCampMessageContent, normalize_content, render_current_plain_text},
     camp_message_publication::{
         public_camp_message_event_predicate, public_camp_message_publication_cte,
     },
     canonical_activity::CanonicalRuntimeActivity,
+    command::canonical_json_digest,
     current_input_skill::CurrentInputSkillResolution,
     db::Database,
-    git::GitObservation,
+    git::{GitCapabilityState, GitObservation},
     mcp_projection::McpExposureSnapshot,
     runtime_failure::RuntimeFailureView,
     skill_projection::SkillExposureSnapshot,
@@ -28,6 +29,7 @@ pub const CAMP_MESSAGE_AROUND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_MESSAGE_FIND_SCHEMA_VERSION: i64 = 1;
 pub const CAMP_OPEN_SCHEMA_VERSION: i64 = 3;
 pub const CAMP_MESSAGE_PAGE_SCHEMA_VERSION: i64 = 1;
+pub const AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION: i64 = 1;
 pub const NAVIGATION_RECENT_CAMP_LIMIT: usize = 5;
 const EXECUTION_EVIDENCE_SNAPSHOT_LIMIT: i64 = 1_200;
 const CAMP_MESSAGE_AROUND_RADIUS: i64 = 20;
@@ -207,6 +209,7 @@ pub struct CampMessageAttachmentView {
     pub media_type: String,
     pub byte_size: i64,
     pub preview_kind: String,
+    pub runtime_projection_state: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -291,6 +294,109 @@ pub struct AgentRunView {
     pub started_at: Option<String>,
     pub ended_at: Option<String>,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunDiagnosticRuntimeView {
+    pub adapter_kind: String,
+    pub runtime_installation_id: Option<String>,
+    pub effective_config_digest: String,
+    pub binding_compatibility_digest: Option<String>,
+    pub permission_semantics: String,
+    pub observed_model_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunDiagnosticOutputView {
+    pub final_output_digest: Option<String>,
+    pub final_camp_message_id: Option<String>,
+    pub public_output: Option<String>,
+    pub unavailable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunDiagnosticGitView {
+    pub starting: Option<AgentRunDiagnosticGitObservationView>,
+    pub ending: Option<AgentRunDiagnosticGitObservationView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunDiagnosticGitObservationView {
+    pub state: GitCapabilityState,
+    pub object_format: Option<String>,
+    pub head_commit: Option<String>,
+    pub branch: Option<String>,
+    pub dirty: Option<bool>,
+    pub observed_at: String,
+}
+
+impl From<GitObservation> for AgentRunDiagnosticGitObservationView {
+    fn from(observation: GitObservation) -> Self {
+        Self {
+            state: observation.state,
+            object_format: observation.object_format,
+            head_commit: observation.head_commit,
+            branch: observation.branch,
+            dirty: observation.dirty,
+            observed_at: observation.observed_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunDiagnosticContextManifestView {
+    pub manifest_id: Option<String>,
+    pub rendered_payload_digest: Option<String>,
+    pub charter_delivery_mode: Option<String>,
+    pub camp_message_boundary_sequence: Option<i64>,
+    pub skill_exposure_digest: Option<String>,
+    pub mcp_exposure_digest: Option<String>,
+    pub mcp_projection_digest: Option<String>,
+    pub attachment_digest: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunDiagnosticEvidenceView {
+    pub count: i64,
+    pub first_evidence_sequence: Option<i64>,
+    pub last_evidence_sequence: Option<i64>,
+}
+
+/// Closed, user-readable execution summary for local Runtime diagnostics.
+///
+/// This view deliberately excludes the raw effective Runtime configuration,
+/// Runtime input, Bootstrap, Dynamic Context, environment and credentials.
+/// Runtime final output is not a durable Core fact; only an explicitly
+/// published Camp message may appear as `publicOutput`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunDiagnosticView {
+    pub schema_version: i64,
+    pub agent_run_id: String,
+    pub execution_epoch: i64,
+    pub camp_id: String,
+    pub camp_turn_id: String,
+    pub conversation_id: String,
+    pub agent_id: String,
+    pub status: String,
+    pub wait_reason: Option<String>,
+    pub failure: Option<RuntimeFailureView>,
+    pub version: i64,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub runtime: AgentRunDiagnosticRuntimeView,
+    pub output: AgentRunDiagnosticOutputView,
+    pub git: AgentRunDiagnosticGitView,
+    pub context_manifest: AgentRunDiagnosticContextManifestView,
+    pub evidence: AgentRunDiagnosticEvidenceView,
+    pub observed_through_global_sequence: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1200,6 +1306,214 @@ impl ReadModelService {
         })
     }
 
+    pub fn agent_run_diagnostic(
+        &self,
+        database: &mut Database,
+        agent_run_id: &str,
+    ) -> Result<AgentRunDiagnosticView> {
+        let transaction = database.connection_mut().transaction()?;
+        let observed_through_global_sequence = current_global_sequence(&transaction)?;
+        let row = transaction
+            .query_row(
+                r#"
+                SELECT agent_run.id, agent_run.execution_epoch,
+                       camp_turn.camp_id, agent_run.camp_turn_id,
+                       agent_run.conversation_id, conversation.agent_id,
+                       agent_run.status, agent_run.wait_reason,
+                       agent_run.public_runtime_failure_json,
+                       agent_run.version, agent_run.created_at,
+                       agent_run.started_at, agent_run.ended_at,
+                       agent_run.runtime_adapter_kind,
+                       agent_run.runtime_installation_id,
+                       agent_run.effective_config_json,
+                       agent_run.runtime_binding_compatibility_digest,
+                       agent_run.permission_semantics,
+                       agent_run.runtime_observed_model_id,
+                       agent_run.starting_git_observation_json,
+                       agent_run.ending_git_observation_json,
+                       agent_run.final_camp_message_id,
+                       (SELECT body FROM camp_message
+                        WHERE camp_message.id = agent_run.final_camp_message_id
+                          AND camp_message.camp_id = camp_turn.camp_id
+                          AND camp_message.tombstoned_at IS NULL),
+                       (SELECT json_extract(event_log.payload_json, '$.finalOutputDigest')
+                        FROM event_log
+                        WHERE event_log.event_type = 'agent_run.succeeded'
+                          AND event_log.entity_type = 'agent_run'
+                          AND event_log.entity_id = agent_run.id
+                        ORDER BY event_log.global_sequence DESC
+                        LIMIT 1),
+                       (SELECT COUNT(*) FROM agent_run_execution_evidence
+                        WHERE agent_run_execution_evidence.agent_run_id = agent_run.id),
+                       (SELECT MIN(sequence) FROM agent_run_execution_evidence
+                        WHERE agent_run_execution_evidence.agent_run_id = agent_run.id),
+                       (SELECT MAX(sequence) FROM agent_run_execution_evidence
+                        WHERE agent_run_execution_evidence.agent_run_id = agent_run.id)
+                FROM agent_run
+                JOIN camp_turn ON camp_turn.id = agent_run.camp_turn_id
+                JOIN conversation ON conversation.id = agent_run.conversation_id
+                WHERE agent_run.id = ?1
+                "#,
+                [agent_run_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                        row.get::<_, i64>(9)?,
+                        row.get::<_, String>(10)?,
+                        row.get::<_, Option<String>>(11)?,
+                        row.get::<_, Option<String>>(12)?,
+                        row.get::<_, Option<String>>(13)?,
+                        row.get::<_, Option<String>>(14)?,
+                        row.get::<_, String>(15)?,
+                        row.get::<_, Option<String>>(16)?,
+                        row.get::<_, String>(17)?,
+                        row.get::<_, Option<String>>(18)?,
+                        row.get::<_, Option<String>>(19)?,
+                        row.get::<_, Option<String>>(20)?,
+                        row.get::<_, Option<String>>(21)?,
+                        row.get::<_, Option<String>>(22)?,
+                        row.get::<_, Option<String>>(23)?,
+                        row.get::<_, i64>(24)?,
+                        row.get::<_, Option<i64>>(25)?,
+                        row.get::<_, Option<i64>>(26)?,
+                    ))
+                },
+            )
+            .optional()?
+            .context("AgentRun does not exist")?;
+        let effective_config: Value = serde_json::from_str(&row.15)
+            .context("AgentRun effective Runtime configuration is invalid")?;
+        let adapter_kind = row
+            .13
+            .clone()
+            .or_else(|| {
+                effective_config
+                    .get("adapterKind")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .context("AgentRun has no frozen Runtime adapter")?;
+        let failure = row
+            .8
+            .as_deref()
+            .map(serde_json::from_str::<RuntimeFailureView>)
+            .transpose()
+            .context("AgentRun public Runtime failure is invalid")?;
+        let starting = row
+            .19
+            .as_deref()
+            .map(serde_json::from_str::<GitObservation>)
+            .transpose()
+            .context("AgentRun starting Git observation is invalid")?
+            .map(AgentRunDiagnosticGitObservationView::from);
+        let ending = row
+            .20
+            .as_deref()
+            .map(serde_json::from_str::<GitObservation>)
+            .transpose()
+            .context("AgentRun ending Git observation is invalid")?
+            .map(AgentRunDiagnosticGitObservationView::from);
+        let context_manifest = transaction
+            .query_row(
+                r#"
+                SELECT manifest.id, manifest.rendered_payload_digest,
+                       bootstrap.delivery_mode,
+                       manifest.camp_message_boundary_sequence,
+                       manifest.skill_exposure_digest,
+                       manifest.mcp_exposure_digest,
+                       manifest.mcp_projection_digest,
+                       manifest.attachment_digest
+                FROM context_manifest AS manifest
+                JOIN native_session_bootstrap_evidence AS bootstrap
+                  ON bootstrap.id = manifest.bootstrap_evidence_id
+                WHERE manifest.agent_run_id = ?1
+                ORDER BY manifest.created_at DESC, manifest.id DESC
+                LIMIT 1
+                "#,
+                [agent_run_id],
+                |manifest| {
+                    Ok(AgentRunDiagnosticContextManifestView {
+                        manifest_id: Some(manifest.get(0)?),
+                        rendered_payload_digest: Some(manifest.get(1)?),
+                        charter_delivery_mode: Some(manifest.get(2)?),
+                        camp_message_boundary_sequence: Some(manifest.get(3)?),
+                        skill_exposure_digest: Some(manifest.get(4)?),
+                        mcp_exposure_digest: Some(manifest.get(5)?),
+                        mcp_projection_digest: Some(manifest.get(6)?),
+                        attachment_digest: Some(manifest.get(7)?),
+                    })
+                },
+            )
+            .optional()?
+            .unwrap_or(AgentRunDiagnosticContextManifestView {
+                manifest_id: None,
+                rendered_payload_digest: None,
+                charter_delivery_mode: None,
+                camp_message_boundary_sequence: None,
+                skill_exposure_digest: None,
+                mcp_exposure_digest: None,
+                mcp_projection_digest: None,
+                attachment_digest: None,
+            });
+        let unavailable_reason = if row.6 != "succeeded" {
+            Some("run_not_succeeded".to_string())
+        } else if row.21.is_none() {
+            Some("not_published".to_string())
+        } else if row.22.is_none() {
+            Some("published_message_unavailable".to_string())
+        } else {
+            None
+        };
+        let view = AgentRunDiagnosticView {
+            schema_version: AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION,
+            agent_run_id: row.0,
+            execution_epoch: row.1,
+            camp_id: row.2,
+            camp_turn_id: row.3,
+            conversation_id: row.4,
+            agent_id: row.5,
+            status: row.6,
+            wait_reason: row.7,
+            failure,
+            version: row.9,
+            created_at: row.10,
+            started_at: row.11,
+            ended_at: row.12,
+            runtime: AgentRunDiagnosticRuntimeView {
+                adapter_kind,
+                runtime_installation_id: row.14,
+                effective_config_digest: canonical_json_digest(&effective_config)?,
+                binding_compatibility_digest: row.16,
+                permission_semantics: row.17,
+                observed_model_id: row.18,
+            },
+            output: AgentRunDiagnosticOutputView {
+                final_output_digest: row.23,
+                final_camp_message_id: row.21,
+                public_output: row.22,
+                unavailable_reason,
+            },
+            git: AgentRunDiagnosticGitView { starting, ending },
+            context_manifest,
+            evidence: AgentRunDiagnosticEvidenceView {
+                count: row.24,
+                first_evidence_sequence: row.25,
+                last_evidence_sequence: row.26,
+            },
+            observed_through_global_sequence,
+        };
+        transaction.commit()?;
+        Ok(view)
+    }
+
     pub fn events_since(
         &self,
         database: &mut Database,
@@ -1909,7 +2223,8 @@ fn hydrate_message_views(
         )
         SELECT attachment.camp_message_id,
                attachment.id, attachment.display_name, attachment.media_type,
-               attachment.byte_size, attachment.preview_kind, attachment.storage_path
+               attachment.byte_size, attachment.preview_kind, attachment.storage_path,
+               attachment.runtime_projection_state
         FROM requested
         JOIN message_attachment AS attachment
           ON attachment.camp_message_id = requested.camp_message_id
@@ -1926,22 +2241,42 @@ fn hydrate_message_views(
                 row.get::<_, i64>(4)?,
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut attachments_by_message_id = BTreeMap::<String, Vec<CampMessageAttachmentView>>::new();
-    for (message_id, id, display_name, media_type, byte_size, preview_kind, storage_path) in
-        attachment_rows
+    for (
+        message_id,
+        id,
+        display_name,
+        media_type,
+        byte_size,
+        preview_kind,
+        storage_path,
+        runtime_projection_state,
+    ) in attachment_rows
     {
-        let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+        let (kind, file_count) = if runtime_projection_state == "available" {
+            let summary = managed_attachment_summary(Path::new(&storage_path), &media_type)?;
+            (summary.kind, summary.file_count)
+        } else if media_type == DIRECTORY_MEDIA_TYPE {
+            // Pending/recovery/failed cards are a semantic projection. Their Authority source
+            // may be unavailable (and can be the reason for a terminal tombstone), so Camp
+            // reads must not traverse it merely to render a status card.
+            ("directory".to_string(), 0)
+        } else {
+            ("file".to_string(), 1)
+        };
         let attachment = CampMessageAttachmentView {
             id,
             display_name,
-            kind: summary.kind,
-            file_count: summary.file_count,
+            kind,
+            file_count,
             media_type,
             byte_size,
             preview_kind,
+            runtime_projection_state,
         };
         attachments_by_message_id
             .entry(message_id)
@@ -3766,6 +4101,32 @@ mod slow_tests {
         assert_eq!(anchor.attachments[0].kind, "file");
         assert_eq!(anchor.attachments[0].file_count, 1);
 
+        database
+            .connection()
+            .execute(
+                r#"
+                UPDATE message_attachment
+                SET media_type = 'inode/directory',
+                    storage_path = '/missing/terminal-attachment',
+                    runtime_projection_state = 'failed'
+                WHERE id = 'around-attachment'
+                "#,
+                [],
+            )
+            .unwrap();
+        let failed_projection = read_model
+            .camp_messages_around(&mut database, &camp_id, "around-message-25")
+            .expect("a failed attachment source must not make Camp history unreadable");
+        let failed_attachment = &failed_projection
+            .messages
+            .iter()
+            .find(|message| message.id == failed_projection.anchor_message_id)
+            .unwrap()
+            .attachments[0];
+        assert_eq!(failed_attachment.kind, "directory");
+        assert_eq!(failed_attachment.file_count, 0);
+        assert_eq!(failed_attachment.runtime_projection_state, "failed");
+
         for (requested_camp, requested_message) in [
             (other_camp_id.as_str(), "around-message-25"),
             (camp_id.as_str(), "missing-message"),
@@ -4702,6 +5063,62 @@ mod slow_tests {
         assert_eq!(open.coverage.execution_evidence.loaded_count, 85);
         assert_eq!(open.coverage.execution_evidence.total_count, 85);
         assert!(open.coverage.execution_evidence.complete);
+
+        drop(database);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn agent_run_diagnostic_projects_only_safe_frozen_and_public_facts() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-agent-run-diagnostic-test-{}",
+            Uuid::new_v4()
+        ));
+        let workspace = directory.join("workspace");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        configure_test_runtime(&database, &["agent_1"]);
+        let created = CollaborationService::default()
+            .create_test_camp_conversation(
+                &mut database,
+                &user_envelope(
+                    "diagnostic-create",
+                    None,
+                    TestCampConversationCommand {
+                        project_path: workspace.to_string_lossy().to_string(),
+                        project_binding_kind: ProjectBindingKind::Directory,
+                        body: "诊断任务".to_string(),
+                        address: TestCampMessageAddress::Default,
+                        purpose: "验证安全诊断投影".to_string(),
+                    },
+                ),
+            )
+            .unwrap();
+        let agent_run_id = created.result.payload["agentRunIds"][0].as_str().unwrap();
+        let diagnostic = ReadModelService
+            .agent_run_diagnostic(&mut database, agent_run_id)
+            .unwrap();
+        let serialized = serde_json::to_value(&diagnostic).unwrap();
+
+        assert_eq!(
+            diagnostic.schema_version,
+            AGENT_RUN_DIAGNOSTIC_SCHEMA_VERSION
+        );
+        assert_eq!(diagnostic.agent_run_id, agent_run_id);
+        assert!(!diagnostic.runtime.effective_config_digest.is_empty());
+        assert_eq!(diagnostic.output.public_output, None);
+        assert_eq!(
+            diagnostic.output.unavailable_reason.as_deref(),
+            Some("run_not_succeeded")
+        );
+        let text = serialized.to_string();
+        assert!(!text.contains("effectiveConfigJson"));
+        assert!(!text.contains("runtimePayloadDigest"));
+        assert!(!text.contains(&workspace.to_string_lossy().to_string()));
+        assert!(!text.contains("repositoryRoot"));
+        assert!(!text.contains("gitCommonDir"));
+        assert!(!text.contains("executablePath"));
+        assert!(!text.contains("credential"));
 
         drop(database);
         std::fs::remove_dir_all(directory).unwrap();

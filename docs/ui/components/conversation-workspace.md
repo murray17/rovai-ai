@@ -2,7 +2,7 @@
 document_type: ui-component-contract
 authority: renderer-camp-workspace
 status: accepted
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Camp 会话工作区
@@ -14,7 +14,7 @@ viewport `>= 1800px` 时独立扩展到 `1440px`。
 
 ## 打开与渐进历史
 
-Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v5](../../contracts/camp-open-projection-v5.md)：
+Camp 的首个 meaningful paint 只依赖 [Camp Open Projection v6](../../contracts/camp-open-projection-v6.md)：
 Camp/成员、最近消息、当前运行摘要、pending Approval 和 Composer 可用即完成。项目导航恢复、侧栏刷新
 与可见来源确认在首屏后执行，失败不能撤销已打开会话。只显示“正在打开对话”的 Shell 不算完成。
 
@@ -224,24 +224,29 @@ Task related execution、停止结果和世界地图入口在右侧承载时必�
 Core 公共 `result/error` 形成同一 Tool 行的详情，`camp.read/search` 不因顶层 `input/output` 为空而退化为
 静态行；Envelope、request/receipt 和 canonical input 不进入详情或剪贴板。
 
-Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Shell 活动只有通用标题、同时公开 Evidence
-含命令文本时，Renderer 可以只提炼可审阅的可执行文件名与有界子命令，例如 `rovai camp read` 或
-`pnpm test`。紧随已展示命令或子命令的精确 `--help` 可以原样保留，使帮助查询区别于实际执行；
-不得扫描后续 token 猜测帮助语义。其他参数、正文、路径和环境值不得进入标题，无法安全提炼时继续使用
-中性回退。该提炼只改变展示，
-不得参与 Activity 分类、identity 或 lifecycle 合并。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
+Tool 行优先显示 Core 的精确工具名或有意义的 Runtime 标题。Codex `commandExecution` 只有在结构化
+`commandActions` 全部证明 read/list/search 时继续显示“读取 / 列出 / 搜索 / 检索项目文件”等中文语义；
+除此以外，Codex、Claude Code、TRAE 与其他 ACP Shell 行只要同一公开 payload 有 command，就使用完整脱敏
+预览：去掉外层 Shell `-c/-lc` 包装，保留参数、Node inline/heredoc 代码开头、全部子命令及
+`&&`、`||`、`|`、`;`、`&`。已知 token、password、
+Authorization、API key 与 `rovai send` 正文值替换为脱敏占位。标题值不做固定字符截断，由名称轨在真实
+宽度内单行视觉省略；完整脱敏值仍可通过 `title` 与辅助技术读取。没有公开 command 的 Runtime 继续使用
+各自现有 toolName/title/有界 fallback。命令展示只改变 presentation，不得参与 identity 或 lifecycle 合并；
+ACP 仅由 Adapter 白名单的 command shape 在原生 kind 缺失时证明 execute。Tool 行固定为 `16px 类型图标 / 可缩略名称 /
 16px 状态轨 / 20px disclosure 轨`，不可展开行也保留末轨占位。类型图标是 Shell、File、Git、
 Network、Permission、Runtime、Plan、Tool 和 Unknown 九类统一 16px 单色线性 SVG，不代表状态。
 Tool 行尾状态仍只使用 7px 小点：运行蓝色、等待审批橙色、成功绿色、失败或停止红色，仅记录为中性色。
 普通 Tool 行不再重复显示“已完成”文字；状态仍须通过 `aria-label` 与 `title` 可读取。
 
-Tool disclosure 展开后在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
+Shell command Tool disclosure 展开后先显示完整脱敏“命令”，再显示存在时的完整公开“输出”，两者不得
+互相替代；Claude/ACP terminal Evidence 自带 command，不依赖 Renderer 回看 started event。其他 Tool
+disclosure 继续在原位渲染完整公开结果，不再截断，不再提供复制按钮。本地已有全文时
 直接展示；截断 Evidence/Managed Blob 只在用户展开精确 Tool 行后读取。读取中、精确错误与
 “重试”都留在该 disclosure，重试成功后焦点进入结果区域。全文置于固定最大高度的可聚焦
 `role=region` 中，超出后内部滚动；Arrow、Page Up/Down、Space、Home/End 可滚动，Escape 只返回
 对应 summary。底部和 Inspector 复用同一行为。仍不显示 standalone raw Evidence、Envelope JSON 或独立
 “查看完整工具调用”。精确合同见
-[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
 
 使用“Agent 运行时默认”的 Run 在既有 `.execution-run-meta` 中保持一个模型字段：尚无可信观测时显示
 “模型 Agent 运行时默认”，首次 Runtime-native 观测到达后原位收敛为“模型 {modelId} · 默认”。固定模型
@@ -251,7 +256,15 @@ Inspector 复用同一语义。刷新不得自动打开执行台、改变 Run se
 当权威 AgentRun 已取消时，该 Run 中仍为 running 的 Tool Call 停止所有运行动画，并以中性图形和
 “已停止”作为主状态。该展示只表达父 Run 已失去继续执行权，不改写子活动的 Canonical phase/outcome，
 也不隐藏独立的外部效果待确认提示；明确 canonical cancelled 的 Tool Call 同样显示“已停止”。精确合同见
-[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
+
+当前非终态 Claude Code Run 收到安全 `runtime_api_retrying` Evidence 时，在精确 Run 过程内显示 attention
+notice：“Claude Code API 暂时不可用”，并显示最新重试次数、等待秒数和“本次执行尚未结束，可继续等待或
+停止执行”。同一 diagnostic 只显示最新 attempt，底部“正在处理”同步改为等待 Claude Code 自动重试。
+该状态仍是 running，不产生 Tool、Toast、消息或终态 failure；Run 终态后隐藏旧 notice，真实失败继续使用
+下述 Runtime failure 边界。Renderer 只接受固定 code/status 与有界数字，不展示 raw stderr、API body、
+凭证、用户名或绝对路径。精确合同见
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
 
 failed Claude Code 或 Antigravity Run 的公开 `failure` 必须在对应 Run stage 显示 Runtime 名称、安全
 summary 与可选 detail；即使没有任何 Execution Evidence 也默认展开，不能被空详情逻辑隐藏。标题按
@@ -279,7 +292,7 @@ Composer 中的 CampTurn Stop 继续是唯一整轮停止入口并 fence 当前�
 Header、Task 卡、时间线和 Composer 不增加 Run-local 入口。`recovery_blocked` 继续只显示“结束此运行”，
 不与普通 Stop 同时出现。Run-local 请求不创建 Camp 时间线消息；Turn-level 终态用户取消仍以一条“你已在
 {耗时} 后停止”进入时间线。精确资格、required/optional 后果与不确定态见
-[Run Process Detail Surface v16](../../contracts/run-process-detail-surface-v16.md)。
+[Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)。
 
 ## Camp Composer
 
@@ -330,8 +343,21 @@ Message Mention 通知导航必须以 `campId + sourceMessageId` 加载和定位
 不移动。正文非空或至少存在一个 ready 附件时才可发送；submit guard 与按钮必须共用该判断，不能只放宽
 视觉控件。纯附件消息保留完整时间线外壳、作者、时间、复制/回复和附件卡，但不渲染空正文气泡，也不生成
 占位正文。拖放命中、反馈和卡片合同见[会话区文件与文件夹拖放](conversation-drop-zone.md)，领域与
-快照限制见 [Camp Attachment v2](../../contracts/camp-attachment-v2.md)，发送边界见
-[Camp Composer Draft v3](../../contracts/camp-composer-draft-v3.md)。
+快照限制见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)，发送边界见
+[Camp Composer Draft v4](../../contracts/camp-composer-draft-v4.md)。
+
+Timeline Attachment Card 必须投影 `runtimeProjectionState`。`pending | recovery_required` 使用低强调的
+“正在准备供队员读取”，不得伪造百分比或进度；`failed` 明确显示“队员读取不可用”。该状态只描述队员
+Runtime View，不禁用用户对仍完整 Authority Attachment 的预览、打开或显示所在位置。状态使用既有
+Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不暴露 Authority/View 路径或内部 operation ID。
+
+图片单击继续打开会话内大图预览；图片 Authority preview 失败时，卡片退化为“使用系统应用打开”。普通
+文件单击交给系统默认应用，目录单击在 Finder / 文件资源管理器中打开。Timeline 卡片右键菜单提供同一
+主动作和“在 Finder / 文件资源管理器中显示”；菜单支持键盘循环、Escape 关闭、collision handling 与关闭后
+焦点回到真实卡片。执行中单卡防重复提交；目标 parent 不可枚举、target 消失或 native 请求失败时均显示固定
+的无路径提示，不把 best-effort Shell dispatch 当作文件管理器已确认选择。高风险文件由 Desktop Main 使用原生
+确认，不在 Renderer 判断。Composer Prepared Attachment 保持既有预览/移除交互，不复用 Timeline open API。
+精确安全与结果合同见 [Camp Attachment v5](../../contracts/camp-attachment-v5.md)。
 
 ## 空 Camp 欢迎状态
 

@@ -52,9 +52,11 @@ const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
   return `fixture output line ${index + 1} · vehicle prepayment reconciliation`
 }).join('\n')
 const directoryAttachmentSource = join(fixtureRoot, '项目资料')
+const codexExpectedCommand = 'rovai camp read --mode timeline --direction before --limit 20'
+const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
 
 const runtimes = [
-  runtime('codex', 'codex-cli', 'Codex CLI', 'rovai camp read', {
+  runtime('codex', 'codex-cli', 'Codex CLI', codexExpectedCommand, {
     protocol: 'codex-app-server', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'command', eventType: 'activity.completed', presentationHint: '执行 Shell 命令', payload: {
       item: {
@@ -78,8 +80,8 @@ const runtimes = [
   }),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
-  runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
-  runtime('claude', 'claude-code-cli', 'Claude Code', 'printf', {
+  runtime('trae', 'trae-cn-cli', 'TRAE CLI', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
+  runtime('claude', 'claude-code-cli', 'Claude Code', claudeExpectedCommand, {
     protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {
       toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
@@ -2142,7 +2144,7 @@ async function verifyResponsiveRuntimeModelLayouts(cdp, capturesDirectory) {
   await wait(150)
   const openedLongResultAtZoom = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
     if (disclosure && !disclosure.open) disclosure.querySelector(':scope > summary')?.click()
     return Boolean(disclosure)
   })()`)
@@ -2545,7 +2547,7 @@ async function verifyRecoveryBlockerResolution(cdp) {
 async function verifyCompleteToolOutput(cdp) {
   const opened = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'rovai camp read')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === ${JSON.stringify(codexExpectedCommand)})
     const beforeText = disclosure?.querySelector('.tool-call-detail')?.textContent ?? ''
     if (disclosure && !disclosure.open) disclosure.querySelector('summary')?.click()
     return {
@@ -2577,6 +2579,7 @@ async function verifyCompleteToolOutput(cdp) {
       hasFirstMarker: text.includes(${JSON.stringify(longToolOutputFirstMarker)}),
       hasMiddleMarker: text.includes(${JSON.stringify(longToolOutputMiddleMarker)}),
       hasLastMarker: text.includes(${JSON.stringify(longToolOutputLastMarker)}),
+      startsWithCommandAndOutputSections: text.startsWith(${JSON.stringify(`命令\n${codexExpectedCommand}\n\n输出\n${longToolOutputFirstMarker}`)}),
       endsWithPublicOutput: text.endsWith(${JSON.stringify(`${longToolOutputLastMarker} · line 8432`)}),
       hasCutNotice: text.includes('…（后续内容未显示）'),
       leakedEnvelope: text.startsWith('{') || text.includes('"_rovaiTruncated"'),
@@ -2596,8 +2599,9 @@ async function verifyCompleteToolOutput(cdp) {
   assert(presentation.hasFirstMarker
     && presentation.hasMiddleMarker
     && presentation.hasLastMarker
+    && presentation.startsWithCommandAndOutputSections
     && presentation.endsWithPublicOutput
-    && presentation.lineCount === 8_432
+    && presentation.lineCount === 8_436
     && presentation.verticalOverflow
     && !presentation.hasCutNotice
     && !presentation.leakedEnvelope,
@@ -2834,10 +2838,11 @@ async function verifyClaudeCommandDisclosure(cdp) {
   })()`)
   await waitForExpression(cdp, `(() => [...document.querySelectorAll(
     '.execution-drawer details.tool-call-disclosure .tool-call-title'
-  )].some((candidate) => candidate.textContent?.trim() === 'printf'))()`)
+  )].some((candidate) => candidate.textContent?.trim() === ${JSON.stringify(claudeExpectedCommand)}))()`)
   const presentation = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'printf')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
+        === ${JSON.stringify(claudeExpectedCommand)})
     disclosure?.querySelector('summary')?.click()
     return {
       found: Boolean(disclosure),
