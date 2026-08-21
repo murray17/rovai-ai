@@ -63,6 +63,125 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 
 ---
 
+## 看看一支队伍如何开始协作
+
+这一次，我们招募到了四位伙伴：
+
+> **游学者叮叮**——听说狐狸就是这么叫的；<br>
+> **爱反驳的芝士**——呃，一只雪豹；<br>
+> **猫头鹰咕咕**——总能从别人没想到的角度看问题；<br>
+> **绘画师小兔**——负责把沿途所见画下来。
+
+他们带着不同的脾气和本事，第一次在同一个 **Camp** 中见面。
+
+### 初次集结
+
+队伍的第一件事，不是马上分头行动，而是先知道彼此是谁、这次要做什么，
+以及谁适合先开口。
+
+<p align="center">
+  <a href="docs/assets/readme/camp-conversation.png">
+    <img
+      src="docs/assets/readme/camp-conversation.png"
+      alt="游学者叮叮、雪豹芝士、猫头鹰咕咕和绘画师小兔第一次在 Rovai AI Camp 中会合"
+      width="100%"
+    >
+  </a>
+</p>
+
+<p align="center">
+  <sub>叮叮、芝士、咕咕和小兔第一次在 Camp 中会合。点击图片查看完整截图。</sub>
+</p>
+
+<details>
+<summary><strong>🗺️ 换到地图视图，看看队伍走到了哪里</strong></summary>
+
+<br>
+
+地图把同一个 Camp 中的探索、审阅、审批、交接、交付与记忆，
+变成旅程中的不同地点。它不是另一套任务系统，只是换一个角度观察
+队伍正停留在哪里、准备走向哪里。
+
+<p align="center">
+  <a href="docs/assets/readme/camp-map.png">
+    <img
+      src="docs/assets/readme/camp-map.png"
+      alt="Rovai AI Camp 地图视图，展示队员所在的探索、审阅、交付与记忆区域"
+      width="900"
+    >
+  </a>
+</p>
+
+</details>
+
+### 接下来，他们这样一起工作
+
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <a href="docs/assets/readme/recruit-member.png">
+        <img
+          src="docs/assets/readme/recruit-member.png"
+          alt="Rovai AI 队员招募流程"
+          width="100%"
+        >
+      </a>
+      <p align="center">
+        <strong>招募伙伴</strong><br>
+        <sub>Member Studio</sub>
+      </p>
+      <p>
+        队员不是模型列表里的另一个名字。你先描述想遇见怎样的伙伴，
+        再确认他的身份、性格、职责、头像与 Runtime。
+      </p>
+    </td>
+    <td width="33%" valign="top">
+      <a href="docs/assets/readme/grill-duo.png">
+        <img
+          src="docs/assets/readme/grill-duo.png"
+          alt="Rovai AI grill-duo 双人追问"
+          width="100%"
+        >
+      </a>
+      <p align="center">
+        <strong>把问题问到底</strong><br>
+        <sub>grill-duo</sub>
+      </p>
+      <p>
+        一个队员负责追问，另一个负责反驳。两种视角互相较劲，
+        直到模糊的想法被磨成能够行动的决定。
+      </p>
+    </td>
+    <td width="33%" valign="top">
+      <a href="docs/assets/readme/campfire.png">
+        <img
+          src="docs/assets/readme/campfire.png"
+          alt="Rovai AI campfire 篝火会议"
+          width="100%"
+        >
+      </a>
+      <p align="center">
+        <strong>围着篝火形成方向</strong><br>
+        <sub>campfire</sub>
+      </p>
+      <p>
+        遇到需要整支队伍判断的问题，伙伴们先独立表达观点，
+        再把共识、分歧和证据缺口放到一起，由 Principal 决定下一步。
+      </p>
+    </td>
+  </tr>
+</table>
+
+<p align="center">
+  <sub>点击任意图片查看完整截图。</sub>
+</p>
+
+第一次集结时，他们只是性格与分工不同的伙伴。
+
+随着一次次讨论、行动与交接，这些差异才慢慢变成队伍之间的默契。
+
+---
+
 ## 快速开始
 
 ### 1. 安装 Rovai AI
@@ -157,170 +276,6 @@ Rovai 不用一份粗暴的通用 System Prompt 覆盖所有 Runtime，而是通
 
 ---
 
-### 3. 使用指南
-
-## 看看一支队伍如何开始协作
-
-在 Rovai 中，队员不会被分散在一组互不相干的窗口里。
-
-他们围绕同一个目标会合，共享正在面对的问题，接过彼此留下的结果，
-并让讨论、执行和决定发生在同一段旅程中。
-
-这个让队伍反复会合、共同工作的地方，叫作 **Camp**。
-
-### Camp：让会话、行动与队伍待在同一个地方
-
-Camp 有两种互相切换的观察方式：**会话**与**地图**。
-
-会话视图用于推进真实工作；地图视图则把队员与工作阶段放进 Rovai 的世界中，
-让你从另一种视角看见这支队伍正停留在哪里、准备走向哪里。
-
-<p align="center">
-  <img
-    src="docs/assets/readme/camp-conversation.png"
-    alt="Rovai AI Camp 会话视图，包含会话区、执行台、队员与任务区域"
-    width="100%"
-  >
-</p>
-
-在会话视图中：
-
-- **会话区**<br>
-  队员围绕当前 Camp 公开交流、回应彼此、发送结论与附件。重要讨论不会被拆散
-  到多个彼此隔离的 Agent 窗口。
-
-- **执行台**<br>
-  每名正在行动的队员都有自己的 Run。你可以查看执行状态、工具调用、中间结果
-  与最终交付，也可以继续追问或调整任务，而不必把执行日志混进公共对话。
-
-- **队员**<br>
-  Camp 的队员名单展示当前伙伴、角色、Runtime 与在线状态。你可以指定默认 Lead，
-  也可以直接 @ 某位队员，让任务落到合适的人手中。
-
-- **任务**<br>
-  任务区集中承载与 Camp 相关的工作项及状态，让需要继续推进的事情不只停留在
-  某一条聊天消息里。
-
-<p align="center">
-  <img
-    src="docs/assets/readme/camp-map.png"
-    alt="Rovai AI Camp 地图视图，队员分布在探索、审阅、审批、交付、记忆等工作区域"
-    width="100%"
-  >
-</p>
-
-地图视图把同一个 Camp 转化成一张可观察的旅程地图：
-
-- **探索林地**对应研究和信息搜集；
-- **观测台**用于远程观察与持续跟进；
-- **审阅塔**承载 Review；
-- **守门所**表示 Approval 与关键决策门；
-- **河畔会合点**代表 A2A 交接；
-- **星火工坊**对应 Build；
-- **港湾城**面向 Delivery；
-- **记忆馆**保存值得带到下一段旅程的经验；
-- **协作公会**是队伍共同会合的 Home。
-
-地图不是另一套任务系统，而是同一个 Camp 的视觉表达。你可以随时切回会话，
-继续真正的讨论与执行。
-
----
-
-### 招募你的伙伴
-
-招募队员可以从一句很具体、也很有个人偏好的描述开始。
-
-你可以描述他的外观、性格、专业能力、工作方式，以及你希望他在队伍中承担
-什么角色。现有队员会帮助你把这个角色原型整理成一份可确认的长期队员方案。
-
-<p align="center">
-  <img
-    src="docs/assets/readme/recruit-member.png"
-    alt="Rovai AI 招募流程，从伙伴原型、头像附件确认到长期队员创建结果"
-    width="100%"
-  >
-</p>
-
-在确认之前，招募流程会把模糊想法逐步整理成：
-
-- 队员名称与团队角色；
-- 专业职责和协作边界；
-- 性格与表达方式；
-- 工作准则与成长课题；
-- 头像和视觉要求；
-- 适合绑定的 Agent Runtime。
-
-你也可以让一位擅长图像生成的伙伴协助准备头像，再把生成结果作为 Camp 附件交回。
-
-只有在 Principal 明确确认后，新伙伴才会正式入队。创建结果会说明队员身份、
-角色、性格与 Runtime 状态；招募不会自动把新队员加入所有 Camp，也不会替你
-改变现有 Lead。
-
-你招募的不是一个新的聊天标签，而是一位准备长期相处的队员。
-
----
-
-### 双人追问：把模糊想法追问成可执行决定
-
-`grill-duo` 是 `grill-me` 的双人追问版本。
-
-一个队员负责持续追问目标、限制与偏好，另一个队员从独立角度查证事实、
-提出反例并检查风险。两个人不需要快速达成一致，他们的任务是把真正重要的
-问题问出来。
-
-<p align="center">
-  <img
-    src="docs/assets/readme/grill-duo.png"
-    alt="Rovai AI 双人追问，两名队员独立查证、提出风险并帮助 Principal 形成决策"
-    width="760"
-  >
-</p>
-
-适合使用双人追问的场景包括：
-
-- 方案只有大致方向，还没有形成验收标准；
-- 几个选项各有利弊，需要先补齐事实；
-- 一个 Agent 的结论听起来合理，但你希望有人独立反证；
-- 决策会影响架构、成本、兼容性或长期维护；
-- 你知道自己想做什么，却还说不清真正的约束。
-
-`grill-duo` 不替 Principal 拍板。它负责把事实、分歧与关键问题摆到桌面上，
-让最后的决定不再建立在一段含糊的模型回复上。
-
----
-
-### 篝火会议：让整支队伍一起来讨论
-
-当问题不适合交给一个人回答时，可以发起 `campfire`。
-
-篝火会议会先收集每位队员的独立观点，让他们从自己的职责出发给出判断，
-再整理已经形成的共识、仍然存在的分歧、证据缺口与下一步选择。
-
-<p align="center">
-  <img
-    src="docs/assets/readme/campfire.png"
-    alt="Rovai AI 篝火会议，多名队员提交独立观点并形成共识、分歧和下一步建议"
-    width="760"
-  >
-</p>
-
-在一场篝火会议中：
-
-1. Principal 提出需要集体判断的问题；
-2. 每名队员先给出独立观点，避免最先发言的人过早影响所有人；
-3. 队员根据各自角色补充证据、指出风险和提出改变判断的条件；
-4. Lead 整理共识与分歧；
-5. Principal 决定继续行动，还是先补齐证据。
-
-篝火会议的目标不是让所有人说出同一个答案，而是让队伍知道：
-
-- 哪些事实已经足够可靠；
-- 哪些风险仍然没有解决；
-- 谁对什么问题最有发言权；
-- 下一步应该行动、试验，还是继续调查。
-
----
-
 ## 设计理念
 
 ### 队员不等于模型
@@ -367,7 +322,7 @@ Rovai 不把多人讨论停留在一串看起来热闹的消息里。
 
 | 你想做什么 | 从这里开始 |
 |---|---|
-| 招募队员、配置身份、职责与 Runtime | [招募你的伙伴](#招募你的伙伴) |
+| 招募队员、配置身份、职责与 Runtime | [看看队伍如何一起工作](#接下来他们这样一起工作) |
 | 准备本地开发环境并运行 Rovai | [开发环境与依赖](docs/development/environment.md) |
 | 提交 Issue、改进代码或参与文档建设 | [GitHub Issues](https://github.com/murray17/rovai-ai/issues) |
 | 阅读架构选择、约束与跨版本决策 | [当前决策导航](docs/decisions/CURRENT.md) |
