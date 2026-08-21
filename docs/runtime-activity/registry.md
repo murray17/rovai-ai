@@ -132,10 +132,11 @@ non-terminal Evidence，不能变成 Canonical Activity，也不能推进 Run ou
 Capability snapshot 明确包含 `output.stream_json` 时，Adapter 消费公开 NDJSON `init`、`step_update`、
 `result`；tool step 只用结构化 conversation、step index、state、tool name 和白名单 command output。仅
 `run_command`、`bash`、`terminal` 等明确 Shell 工具读取 `tool_info.parameters.CommandLine`，并只投影为
-`input.command`；started command 在当前进程内按 `conversation_id + step_index` 缓存，使省略 parameters 的
-terminal Evidence 仍自带同一 command。完整 parameters、Cwd 与相邻私有字段不公开，原生 `toolName` 只保留为
-Runtime 工具标识，不生成 `title`；Renderer 将 `run_command`、`exec_command`、`execute_command` 视为 generic
-Shell 名称，有 command 时显示统一脱敏后的完整命令，无 command 时显示“终端操作”。命令只参与展示，不参与
+`input.command`；started phase 的 command 观察在 lifecycle 去重前按 `conversation_id + step_index` 缓存，
+terminal 当前携带 CommandLine 时优先使用，缺失 parameters 时消费该缓存补齐。完整 parameters、Cwd 与相邻私有
+字段不公开，原生 `toolName` 只保留为 Runtime 工具标识，不生成 `title`；Renderer 对 presentation hint 与
+`toolName` 共用一套 generic Shell 名称判断（包括 `run_command`、`exec_command`、`execute_command`、`bash`、
+`execute`、`shell`、`terminal`），有 command 时显示统一脱敏后的完整命令，无 command 时显示“终端操作”。命令只参与展示，不参与
 Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。
 没有该 capability 的旧安装继续使用 text final/run-level 展示。私有日志仍只校验 Conversation 和输入接受，
 不得产生工具 Evidence；workspace diff、最终文本或产品能力也不得反推内部步骤。Core 自己调度的 Team Tool

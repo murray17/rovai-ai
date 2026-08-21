@@ -750,7 +750,7 @@ export function executionActivityTitle(
     }
     const commandLabel = command ? shellCommandLabel(command) : null
     if (commandLabel) return commandLabel
-    if (canonical?.toolName && !genericShellToolId(canonical.toolName)) return canonical.toolName
+    if (canonical?.toolName && !genericShellTitle(canonical.toolName)) return canonical.toolName
     if (presentationHint && !genericShellTitle(presentationHint)) return presentationHint
   } else {
     if (canonical?.toolName) return canonical.toolName
@@ -784,12 +784,6 @@ const GENERIC_SHELL_TITLES = new Set([
 
 function genericShellTitle(title: string): boolean {
   return GENERIC_SHELL_TITLES.has(title.toLocaleLowerCase())
-}
-
-const GENERIC_SHELL_TOOL_IDS = new Set(['exec_command', 'execute_command', 'run_command'])
-
-function genericShellToolId(toolName: string): boolean {
-  return GENERIC_SHELL_TOOL_IDS.has(toolName.toLocaleLowerCase())
 }
 
 const CODEX_STRUCTURED_COMMAND_ACTIONS = new Set(['read', 'listFiles', 'search'])

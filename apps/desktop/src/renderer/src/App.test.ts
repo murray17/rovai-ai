@@ -4166,7 +4166,15 @@ describe('task event projections', () => {
         testCase.adapter
       ).toBe(testCase.expected)
     }
-    for (const toolName of ['run_command', 'exec_command', 'execute_command']) {
+    for (const toolName of [
+      'run_command',
+      'exec_command',
+      'execute_command',
+      'bash',
+      'execute',
+      'shell',
+      'terminal'
+    ]) {
       expect(executionActivityTitle({
         ...genericShell,
         toolName,
