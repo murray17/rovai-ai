@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.23
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: implemented
@@ -16,6 +16,8 @@ last_updated: 2026-08-21
 >
 > 前置版本：[v1.22 Runtime Probe 更新容错](../v1.22/README.md)已按完成事实冻结为 historical；其
 > Runtime Probe supersession 与 stale LKG 边界继续作为本版基线。
+>
+> 后续版本：[v1.24 Runtime Probe 完整边界与自动恢复](../v1.24/README.md)。
 
 ## 版本目标
 

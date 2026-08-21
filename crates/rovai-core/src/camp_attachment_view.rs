@@ -308,8 +308,8 @@ struct SemanticCatalogEntryReceipt<'a> {
 }
 
 impl CampAttachmentViewStore {
-    #[cfg(test)]
-    pub(crate) fn for_test(database: &Database) -> Result<Self> {
+    #[cfg(any(test, feature = "slow-tests"))]
+    pub fn for_test(database: &Database) -> Result<Self> {
         let root = database.runtime_camp_files_root().to_path_buf();
         ensure_private_directory(&root)?;
         let mut lock_file = private_open_read_write(&root.join(ROOT_LOCK))?;

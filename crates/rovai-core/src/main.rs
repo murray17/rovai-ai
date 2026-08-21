@@ -1009,6 +1009,7 @@ const RUNTIME_CHECK_TOTAL_DEADLINE: Duration = Duration::from_secs(90);
 const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
 const RUNTIME_PROBE_UPDATE_RETRY_DELAY: Duration = Duration::from_millis(300);
 const RUNTIME_PROBE_MAX_EXECUTIONS: usize = 2;
+const RUNTIME_CHECK_EXECUTION_COOLDOWN: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeCheckOutcome {
@@ -1033,15 +1034,31 @@ impl RuntimeCheckOutcome {
 
 #[derive(Default)]
 struct RuntimeCheckExecutionDeferrals {
-    runtime_kinds: BTreeSet<AdapterKind>,
+    deferred_until: HashMap<AdapterKind, tokio::time::Instant>,
 }
 
 impl RuntimeCheckExecutionDeferrals {
     fn should_defer(&mut self, runtime_kind: AdapterKind, trigger: RuntimeCheckTrigger) -> bool {
+        self.should_defer_at(runtime_kind, trigger, tokio::time::Instant::now())
+    }
+
+    fn should_defer_at(
+        &mut self,
+        runtime_kind: AdapterKind,
+        trigger: RuntimeCheckTrigger,
+        now: tokio::time::Instant,
+    ) -> bool {
         if trigger == RuntimeCheckTrigger::Execution {
-            self.runtime_kinds.contains(&runtime_kind)
+            match self.deferred_until.get(&runtime_kind).copied() {
+                Some(deferred_until) if now < deferred_until => true,
+                Some(_) => {
+                    self.deferred_until.remove(&runtime_kind);
+                    false
+                }
+                None => false,
+            }
         } else {
-            self.runtime_kinds.remove(&runtime_kind);
+            self.deferred_until.remove(&runtime_kind);
             false
         }
     }
@@ -1052,10 +1069,21 @@ impl RuntimeCheckExecutionDeferrals {
         trigger: RuntimeCheckTrigger,
         outcome: &std::result::Result<RuntimeCheckOutcome, String>,
     ) {
+        self.record_at(runtime_kind, trigger, outcome, tokio::time::Instant::now());
+    }
+
+    fn record_at(
+        &mut self,
+        runtime_kind: AdapterKind,
+        trigger: RuntimeCheckTrigger,
+        outcome: &std::result::Result<RuntimeCheckOutcome, String>,
+        now: tokio::time::Instant,
+    ) {
         if trigger == RuntimeCheckTrigger::Execution
             && outcome.as_ref() == Ok(&RuntimeCheckOutcome::Superseded)
         {
-            self.runtime_kinds.insert(runtime_kind);
+            self.deferred_until
+                .insert(runtime_kind, now + RUNTIME_CHECK_EXECUTION_COOLDOWN);
         }
     }
 }
@@ -2838,60 +2866,6 @@ impl Core {
                 )
                 .await?;
                 identity_changed = false;
-            }
-            let mut lightweight = RuntimeDiscoveryObservation {
-                runtime_kind: kind,
-                discovery_status: RuntimeDiscoveryStatus::Found,
-                executable_path: Some(canonical.to_string_lossy().to_string()),
-                source: Some(source),
-                reported_version: None,
-                executable_fingerprint: Some(candidate_fingerprint.clone()),
-                search_generation: search.generation(),
-                observed_at: chrono::Utc::now().to_rfc3339(),
-                diagnostic_code: None,
-            };
-            let deep_probe_reports_version = matches!(
-                kind,
-                AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp
-            );
-            if !deep_probe_reports_version {
-                discover_runtime_version(&mut lightweight, &search).await;
-            }
-            if !deep_probe_reports_version && lightweight.reported_version.is_none() {
-                let failure_class = if identity_changed {
-                    "identity_changed"
-                } else {
-                    "transient"
-                };
-                let diagnostic_code = if targets_current_installation {
-                    lightweight
-                        .diagnostic_code
-                        .as_deref()
-                        .unwrap_or("runtime_version_failed")
-                } else {
-                    "runtime_alternate_candidate_probe_failed"
-                };
-                let mut database = self.database.lock().await;
-                AgentProfileService::default().record_managed_probe_failure(
-                    &mut database,
-                    ManagedProbeFailure {
-                        adapter_kind: kind,
-                        auth_scope: "default",
-                        candidate_path: &canonical.to_string_lossy(),
-                        fingerprint: Some(&candidate_fingerprint),
-                        source: Some(source),
-                        failure_class,
-                        diagnostic_code,
-                        failure: None,
-                    },
-                )?;
-                note_product_runtime_diagnostic(
-                    &mut unresolved_diagnostic,
-                    failure_class,
-                    diagnostic_code,
-                    None,
-                );
-                continue;
             }
             let mut probe_execution_count = 0;
             let deep_probe = loop {
@@ -15795,28 +15769,381 @@ mod tests {
     }
 
     #[test]
-    fn superseded_execution_is_deferred_until_an_explicit_refresh_trigger() {
+    fn superseded_execution_uses_a_bounded_cooldown_and_recovers_automatically() {
         let runtime_kind = AdapterKind::QwenCode;
         let mut deferrals = RuntimeCheckExecutionDeferrals::default();
-        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+        let now = tokio::time::Instant::now();
+        assert!(!deferrals.should_defer_at(runtime_kind, RuntimeCheckTrigger::Execution, now));
 
-        deferrals.record(
+        deferrals.record_at(
             runtime_kind,
             RuntimeCheckTrigger::Execution,
             &Ok(RuntimeCheckOutcome::Superseded),
+            now,
         );
-        assert!(deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
-        assert!(deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+        assert!(deferrals.should_defer_at(runtime_kind, RuntimeCheckTrigger::Execution, now));
+        assert!(deferrals.should_defer_at(
+            runtime_kind,
+            RuntimeCheckTrigger::Execution,
+            now + RUNTIME_CHECK_EXECUTION_COOLDOWN - Duration::from_millis(1)
+        ));
+        assert!(!deferrals.should_defer_at(
+            runtime_kind,
+            RuntimeCheckTrigger::Execution,
+            now + RUNTIME_CHECK_EXECUTION_COOLDOWN
+        ));
+        assert!(!deferrals.should_defer_at(
+            runtime_kind,
+            RuntimeCheckTrigger::Execution,
+            now + RUNTIME_CHECK_EXECUTION_COOLDOWN + Duration::from_secs(1)
+        ));
 
-        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::CatalogOpen));
-        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+        deferrals.record_at(
+            runtime_kind,
+            RuntimeCheckTrigger::Execution,
+            &Ok(RuntimeCheckOutcome::Superseded),
+            now,
+        );
+        assert!(!deferrals.should_defer_at(runtime_kind, RuntimeCheckTrigger::CatalogOpen, now));
+        assert!(!deferrals.should_defer_at(runtime_kind, RuntimeCheckTrigger::Execution, now));
 
-        deferrals.record(
+        deferrals.record_at(
             runtime_kind,
             RuntimeCheckTrigger::UserCheck,
             &Ok(RuntimeCheckOutcome::Superseded),
+            now,
         );
-        assert!(!deferrals.should_defer(runtime_kind, RuntimeCheckTrigger::Execution));
+        assert!(!deferrals.should_defer_at(runtime_kind, RuntimeCheckTrigger::Execution, now));
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    fn runtime_resolution_test_core(root: &Path) -> Result<Core> {
+        let data_dir = root.join("data");
+        let skill_library_root = root.join("skills");
+        std::fs::create_dir_all(&data_dir)?;
+        std::fs::create_dir_all(&skill_library_root)?;
+        let database = Database::open(&data_dir)?;
+        let attachment_views = CampAttachmentViewStore::for_test(&database)?;
+        let skill_library = SkillLibraryService::new(skill_library_root)?;
+        let mcp_config = McpConfigStore::new(root.join("mcp.json"));
+        let mcp_projection = McpProjectionService::new(&data_dir);
+        let compaction_detector_policies =
+            DesiredCompactionDetectorPolicies::from_process_environment();
+        let (output, _output_rx) = mpsc::unbounded_channel();
+        let (runtime_check_requests, _runtime_check_rx) = mpsc::unbounded_channel();
+        let (attachment_projection_requests, _attachment_projection_rx) = mpsc::unbounded_channel();
+        let (codex_tx, _codex_rx) = mpsc::unbounded_channel();
+        let (acp_tx, _acp_rx) = mpsc::unbounded_channel();
+        let builtin_tool_leases = Arc::new(BuiltinToolLeaseRegistry::default());
+        let runtime_fleet = Arc::new(AgentRuntimeFleetManager::new_with_builtin_tools(
+            AgentRuntimeFleetConfig::default(),
+            &data_dir,
+            builtin_tool_leases.clone(),
+        ));
+
+        Ok(Core {
+            database: Mutex::new(database),
+            runtime_usage: Mutex::new(RuntimeUsageBuffer::default()),
+            runtime_usage_flush: Mutex::new(()),
+            output,
+            runtime_search_environment: RwLock::new(Arc::new(
+                RuntimeSearchEnvironment::for_test_paths(1, Vec::new()),
+            )),
+            runtime_discovery: RwLock::new(BTreeMap::new()),
+            runtime_product_diagnostics: RwLock::new(BTreeMap::new()),
+            runtime_check_activity: RwLock::new(BTreeMap::new()),
+            runtime_check_requests,
+            attachment_projection_requests,
+            compaction_detector_policies: compaction_detector_policies.clone(),
+            agent_run_cancellation_notify: Notify::new(),
+            pending_execution_recovery: Mutex::new(()),
+            skill_library,
+            mcp_config,
+            mcp_projection,
+            codex_cli: CodexCliRuntimeAdapter::new(codex_tx, runtime_fleet.clone()),
+            opencode_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::OpencodeCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/opencode"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::OpencodeCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            copilot_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::CopilotCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/copilot"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::CopilotCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            kiro_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::KiroCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/kiro"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::KiroCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            qoder_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::QoderCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/qoder"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::QoderCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            codebuddy_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::CodebuddyCli,
+                acp_tx.clone(),
+                data_dir.join("runtime/codebuddy"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::CodebuddyCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            qwen_code: AcpCliRuntimeAdapter::new(
+                AdapterKind::QwenCode,
+                acp_tx.clone(),
+                data_dir.join("runtime/qwen"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::QwenCode)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            trae_cn_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::TraeCnCli,
+                acp_tx,
+                data_dir.join("runtime/trae-cn"),
+                runtime_fleet.clone(),
+                CompactionDetectorPolicy::Disabled,
+            )?,
+            claude_code_cli: ClaudeCodeCliRuntimeAdapter::new(&data_dir)?,
+            antigravity_app: AntigravityAppRuntimeAdapter::new(&data_dir)?,
+            planned_shutdown: PlannedShutdownCoordinator::new(uuid::Uuid::new_v4().to_string()),
+            agent_run_tasks: Mutex::new(tokio::task::JoinSet::new()),
+            attachment_views,
+            attachment_view_gates: Mutex::new(HashMap::new()),
+            data_dir,
+            runtime_fleet,
+            builtin_tool_leases,
+        })
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    fn write_runtime_resolution_executable(path: &Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::write(path, body).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    async fn seed_runtime_resolution_installation(core: &Core, executable: &Path) -> String {
+        let fingerprint = fingerprint_executable(executable).unwrap();
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::TraeCnCli,
+                Some("trae-cli version obsolete".to_string()),
+                fingerprint.clone(),
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        let mut database = core.database.lock().await;
+        AgentProfileService::default()
+            .commit_discovered_managed_installation(
+                &mut database,
+                DiscoveredManagedInstallation {
+                    adapter_kind: AdapterKind::TraeCnCli,
+                    executable_path: executable.to_string_lossy().to_string(),
+                    command_name: AdapterKind::TraeCnCli.command_name().to_string(),
+                    source: InstallationSource::Manual,
+                    auth_scope: "default".to_string(),
+                    snapshot,
+                },
+            )
+            .unwrap();
+        fingerprint
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    fn replacing_runtime_script(runtime: &Path, replacement: &Path, invocations: &Path) -> String {
+        format!(
+            "#!/bin/sh\nprintf 'old:%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = \"--version\" ]; then\n  /bin/mv '{}' '{}'\n  exit 1\nfi\nexit 1\n",
+            invocations.display(),
+            replacement.display(),
+            runtime.display(),
+        )
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    fn stable_runtime_script(invocations: &Path, ready: bool) -> String {
+        if !ready {
+            return format!(
+                "#!/bin/sh\nprintf 'new:%s\\n' \"$*\" >> '{}'\nif [ \"$1\" = \"--version\" ]; then\n  printf '%s\\n' 'trae-cli version stable-failure'\n  exit 0\nfi\nexit 1\n",
+                invocations.display(),
+            );
+        }
+        format!(
+            r#"#!/bin/sh
+printf 'new:%s\n' "$*" >> '{}'
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'trae-cli version stable-ready'
+  exit 0
+fi
+IFS= read -r _initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true}}}}}}'
+IFS= read -r _session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-runtime-update","configOptions":[{{"id":"model","currentValue":"GLM-5.2","options":[{{"value":"GLM-5.2","name":"GLM-5.2"}}]}}],"modes":{{"currentModeId":"default","availableModes":[{{"id":"default","name":"Default"}},{{"id":"bypass_permissions","name":"Bypass permissions"}}]}}}}}}'
+while IFS= read -r _ignored; do :; done
+"#,
+            invocations.display(),
+        )
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn runtime_check_manager_rebinds_after_version_replacement_and_commits_ready() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-runtime-manager-rebind-ready-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let runtime = root.join("traecli");
+        let replacement = root.join("replacement");
+        let invocations = root.join("invocations.log");
+        write_runtime_resolution_executable(
+            &replacement,
+            &stable_runtime_script(&invocations, true),
+        );
+        let rebound_fingerprint = fingerprint_executable(&replacement).unwrap();
+        write_runtime_resolution_executable(
+            &runtime,
+            &replacing_runtime_script(&runtime, &replacement, &invocations),
+        );
+        let core = runtime_resolution_test_core(&root).unwrap();
+        let obsolete_fingerprint = seed_runtime_resolution_installation(&core, &runtime).await;
+
+        let outcome = core
+            .run_product_runtime_resolution(
+                AdapterKind::TraeCnCli,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, RuntimeCheckOutcome::Ready);
+        assert_ne!(obsolete_fingerprint, rebound_fingerprint);
+        let database = core.database.lock().await;
+        let installation = AgentProfileService::default()
+            .managed_installation(&database, AdapterKind::TraeCnCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            installation
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
+            Some(rebound_fingerprint.as_str())
+        );
+        assert_eq!(
+            installation
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.probe_status.as_str()),
+            Some("ready")
+        );
+        drop(database);
+        assert_eq!(
+            std::fs::read_to_string(&invocations)
+                .unwrap()
+                .lines()
+                .filter(|line| line.ends_with("--version"))
+                .count(),
+            2
+        );
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn runtime_check_manager_binds_stable_failure_to_rebound_fingerprint() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-runtime-manager-rebind-failure-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let runtime = root.join("traecli");
+        let replacement = root.join("replacement");
+        let invocations = root.join("invocations.log");
+        write_runtime_resolution_executable(
+            &replacement,
+            &stable_runtime_script(&invocations, false),
+        );
+        let rebound_fingerprint = fingerprint_executable(&replacement).unwrap();
+        write_runtime_resolution_executable(
+            &runtime,
+            &replacing_runtime_script(&runtime, &replacement, &invocations),
+        );
+        let core = runtime_resolution_test_core(&root).unwrap();
+        let obsolete_fingerprint = seed_runtime_resolution_installation(&core, &runtime).await;
+
+        let outcome = core
+            .run_product_runtime_resolution(
+                AdapterKind::TraeCnCli,
+                RuntimeLaunchPurpose::AvailabilityCheck,
+                tokio::time::Instant::now() + RUNTIME_CHECK_TOTAL_DEADLINE,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, RuntimeCheckOutcome::StableFailure);
+        assert_ne!(obsolete_fingerprint, rebound_fingerprint);
+        let database = core.database.lock().await;
+        let installation = AgentProfileService::default()
+            .managed_installation(&database, AdapterKind::TraeCnCli, "default")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            installation
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref()),
+            Some(rebound_fingerprint.as_str())
+        );
+        assert_eq!(
+            installation
+                .last_probe_attempt
+                .as_ref()
+                .and_then(|attempt| attempt.executable_fingerprint.as_deref()),
+            Some(rebound_fingerprint.as_str())
+        );
+        assert_eq!(
+            installation
+                .last_probe_attempt
+                .as_ref()
+                .map(|attempt| attempt.status.as_str()),
+            Some("failed")
+        );
+        drop(database);
+        assert_eq!(
+            std::fs::read_to_string(&invocations)
+                .unwrap()
+                .lines()
+                .filter(|line| line.ends_with("--version"))
+                .count(),
+            2
+        );
+        drop(core);
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[cfg(unix)]

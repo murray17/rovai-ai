@@ -1,7 +1,7 @@
 ---
 document_type: versions-index
 authority: version-lifecycle
-current_version: v1.23
+current_version: v1.24
 last_updated: 2026-08-21
 ---
 
@@ -174,4 +174,5 @@ last_updated: 2026-08-21
 | v1.20 | `historical` | 会话附件的 Authority 校验、系统默认打开与所在位置显示 | [v1.20/README.md](v1.20/README.md) |
 | v1.21 | `historical` | 普通用户自动化入口与 Runtime Diagnostic Trial V1 | [v1.21/README.md](v1.21/README.md) |
 | v1.22 | `historical` | Runtime 更新期间的 Probe supersession、一次重新绑定与 stale LKG 模型目录 | [v1.22/README.md](v1.22/README.md) |
-| v1.23 | `current` | 按需 Built-in CLI Help、Charter 精简与兼容 Session 轮换实施 | [v1.23/README.md](v1.23/README.md) |
+| v1.23 | `historical` | 按需 Built-in CLI Help、Charter 精简与兼容 Session 轮换实施 | [v1.23/README.md](v1.23/README.md) |
+| v1.24 | `current` | Runtime 完整 Probe identity 边界与 Superseded 自动恢复 | [v1.24/README.md](v1.24/README.md) |

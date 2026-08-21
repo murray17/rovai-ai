@@ -176,6 +176,33 @@ impl RuntimeDiscoveryObservation {
 }
 
 impl RuntimeSearchEnvironment {
+    #[cfg(feature = "slow-tests")]
+    pub fn for_test_paths(generation: u64, paths: Vec<PathBuf>) -> Self {
+        let path_entries = paths
+            .into_iter()
+            .map(|path| SearchPathEntry {
+                path,
+                sources: vec![SearchPathSource::InheritedPath],
+            })
+            .collect::<Vec<_>>();
+        let path_value = env::join_paths(path_entries.iter().map(|entry| entry.path.as_os_str()))
+            .unwrap_or_default();
+        Self {
+            generation: generation.max(1),
+            path_entries,
+            path_value,
+            executable_suffixes: runtime_executable_suffixes(),
+            created_at: chrono::Utc::now().to_rfc3339(),
+            shell_diagnostic: ShellPathDiagnostic {
+                status: ShellPathStatus::Captured,
+                interactive: false,
+                shell_name: None,
+                entry_count: 0,
+                elapsed_millis: 0,
+            },
+        }
+    }
+
     pub fn capture_initial() -> Self {
         Self::capture(1, false)
     }
