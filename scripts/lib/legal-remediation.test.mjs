@@ -152,7 +152,10 @@ test('project artwork manifest covers tracked, embedded, duplicate, and design a
   const committed = readJson(join(root, 'legal/manifests/project-artwork.json'))
   validateArtworkManifest(root, committed)
   assert.deepEqual(committed, generateArtworkManifest(root))
-  assert.equal(committed.assets.length, 19)
+  assert.equal(committed.assets.length, 24)
+  const readmeScreenshots = committed.assets.filter((asset) => asset.role === 'readme-screenshot')
+  assert.equal(readmeScreenshots.length, 5)
+  assert.ok(readmeScreenshots.every((asset) => asset.source_classification === 'FIRST_PARTY_PROJECT_SCREENSHOT'))
   assert.equal(committed.embedded_assets.length, 16)
   assert.equal(new Set(committed.embedded_assets.map((asset) => asset.sha256)).size, 8)
   assert.equal(

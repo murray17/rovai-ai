@@ -29,6 +29,11 @@ works.
 | `apps/desktop/src/renderer/src/assets/world-map/harbor-city-2k.webp` | `a2f8bdd324331d46a31ba1f2771defe4fda22a131a15654a30915e62b8107d94` | world map | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `build/icon.png` | `b0427759b487324dfb6ccb2ad0ee18a9dfc0666f23a326db72e800b24a5a003b` | application icon | `AI_GENERATED_FIRST_PARTY` | approved | approved |
 | `build/icon.svg` | `58a0b8ca29b4d04bf44f7358be1485d8ea0efd4757b9db3016a566a53e983d50` | application icon | `AI_GENERATED_FIRST_PARTY` | approved | approved |
+| `docs/assets/readme/camp-conversation.png` | `780e39f64b822ee7b9856178e52a8cce705228fc2a5b246115a5611e0e62e05e` | README screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
+| `docs/assets/readme/camp-map.png` | `4dd7498aa5f6f2e3fa0edd6505d6d0a0fcd44ad49145413d522d3203c788eece` | README screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
+| `docs/assets/readme/campfire.png` | `4975015f460c4e9586e535c3ef6a17e25faaedb2f2668ae9ce2d51b9d4a6eda2` | README screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
+| `docs/assets/readme/grill-duo.png` | `515a8d702dbebf721d1818b3050980652e0453cc8aa0f6151cfbd7636be3c75b` | README screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
+| `docs/assets/readme/recruit-member.png` | `dbd1ef1597cb2b61fd01264c821876051804f0f05cb76459a9394da1c5b96628` | README screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
 | `docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-day-1040x700.png` | `d698c6e16d251395f6875e70740e66bf3ba8a1a5b027f7090f8ca9a5a9b1cbe3` | prototype screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
 | `docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-day-1440x920.png` | `e4d5ce1ddd0235b6ef36059c815f92a49f3762979dd90d9634dfab3bc5776117` | prototype screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |
 | `docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-night-1440x920.png` | `bdb7124aaf4830c572ed5491487a3234fbdbf2e076231058a562cacbfc36d147` | prototype screenshot | `FIRST_PARTY_PROJECT_SCREENSHOT` | approved | not included |

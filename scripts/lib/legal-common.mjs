@@ -181,6 +181,7 @@ function artworkRole(path) {
   if (path.includes('/characters/')) return path.endsWith('/source.png') ? 'character-portrait' : 'character-avatar'
   if (path.includes('/world-map/')) return 'world-map'
   if (path === 'build/icon.png' || path === 'build/icon.svg') return 'application-icon'
+  if (path.startsWith('docs/assets/readme/')) return 'readme-screenshot'
   if (path.includes('/conversation-drop-zone/')) return 'prototype-screenshot'
   if (path.includes('/execution-console-command-status/')) return 'prototype-screenshot'
   if (path.includes('/mention-popover/')) return 'duplicate-prototype-character-illustration'
@@ -190,7 +191,9 @@ function artworkRole(path) {
 export function generateArtworkManifest(root) {
   const paths = [...trackedRasterFiles(root), 'build/icon.svg'].sort()
   const assets = paths.map((path) => {
-    const screenshot = path.includes('/acceptance/') || path.includes('/execution-console-command-status/')
+    const screenshot = path.startsWith('docs/assets/readme/')
+      || path.includes('/acceptance/')
+      || path.includes('/execution-console-command-status/')
     const binary = path.startsWith('apps/desktop/') || path.startsWith('build/')
     return {
       path,

@@ -108,6 +108,51 @@
       "status": "APPROVED_FOR_SOURCE_AND_BINARY"
     },
     {
+      "path": "docs/assets/readme/camp-conversation.png",
+      "sha256": "780e39f64b822ee7b9856178e52a8cce705228fc2a5b246115a5611e0e62e05e",
+      "role": "readme-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/assets/readme/camp-map.png",
+      "sha256": "4dd7498aa5f6f2e3fa0edd6505d6d0a0fcd44ad49145413d522d3203c788eece",
+      "role": "readme-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/assets/readme/campfire.png",
+      "sha256": "4975015f460c4e9586e535c3ef6a17e25faaedb2f2668ae9ce2d51b9d4a6eda2",
+      "role": "readme-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/assets/readme/grill-duo.png",
+      "sha256": "515a8d702dbebf721d1818b3050980652e0453cc8aa0f6151cfbd7636be3c75b",
+      "role": "readme-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
+      "path": "docs/assets/readme/recruit-member.png",
+      "sha256": "dbd1ef1597cb2b61fd01264c821876051804f0f05cb76459a9394da1c5b96628",
+      "role": "readme-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
       "path": "docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-day-1040x700.png",
       "sha256": "d698c6e16d251395f6875e70740e66bf3ba8a1a5b027f7090f8ca9a5a9b1cbe3",
       "role": "prototype-screenshot",
