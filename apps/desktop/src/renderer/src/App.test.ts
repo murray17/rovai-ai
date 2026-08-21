@@ -4116,7 +4116,7 @@ describe('task event projections', () => {
     expect(failedMarkup).toContain('aria-label="失败"')
   })
 
-  it('uses truthful Codex command previews without changing the other Runtime adapters', () => {
+  it('uses truthful public Shell command previews across Runtime adapters', () => {
     const genericShell = canonicalActivity('shell-command', {
       activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null,
       presentationHint: '执行 Shell 命令', phase: 'started', outcome: 'unknown'
@@ -4154,8 +4154,8 @@ describe('task event projections', () => {
       {
         adapter: 'antigravity-app',
         canonical: { ...genericShell, toolName: 'run_command', presentationHint: 'run_command' },
-        payload: {},
-        expected: 'run_command'
+        payload: { input: { command: 'pnpm test' } },
+        expected: 'pnpm test'
       }
     ]
 
@@ -4166,6 +4166,49 @@ describe('task event projections', () => {
         testCase.adapter
       ).toBe(testCase.expected)
     }
+    for (const toolName of ['run_command', 'exec_command', 'execute_command']) {
+      expect(executionActivityTitle({
+        ...genericShell,
+        toolName,
+        presentationHint: toolName
+      }, {})).toBe('终端操作')
+    }
+    const agySensitive = executionActivityTitle({
+      ...genericShell,
+      toolName: 'run_command'
+    }, {
+      input: {
+        command: 'OPENAI_API_KEY=sk-agy-secret pnpm test -- --password agy-password --token agy-token'
+      }
+    })
+    expect(agySensitive).toContain('OPENAI_API_KEY=[已隐藏]')
+    expect(agySensitive).toContain('--password [已隐藏]')
+    expect(agySensitive).toContain('--token [已隐藏]')
+    expect(agySensitive).not.toContain('sk-agy-secret')
+    expect(agySensitive).not.toContain('agy-password')
+    expect(agySensitive).not.toContain('agy-token')
+    const reopenedAgyProgress = buildLiveExecutionProgress([{
+      id: 'agy-command-completed', agentRunId: 'run-agy', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'agy:conversation:step:4', status: 'completed', kind: 'execute',
+        toolName: 'run_command', input: { command: 'pnpm test' }, output: 'tests passed'
+      },
+      canonical: canonicalActivity('agy:conversation:step:4', {
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'run_command',
+        phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-08-21T00:00:00Z'
+    }], 'run-agy')
+    expect(reopenedAgyProgress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: 'pnpm test',
+        detail: '命令\npnpm test\n\n输出\ntests passed',
+        status: 'completed',
+        activityDomain: 'shell',
+        toolName: 'run_command'
+      }
+    })
     expect(executionActivityTitle(genericShell, codexPayload(
       `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
     ))).toBe('rovai send --public-only --body [已隐藏]')

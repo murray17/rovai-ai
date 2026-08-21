@@ -909,6 +909,7 @@ struct AntigravityStreamCapture {
     model_observation_emitted: bool,
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
+    started_shell_commands: HashMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -1150,6 +1151,26 @@ fn normalize_antigravity_tool_step(
     let output = antigravity_command_tool(tool_name)
         .then(|| public_antigravity_command_output(tool_info))
         .flatten();
+    let input = if antigravity_command_tool(tool_name) {
+        let observed_command = public_antigravity_shell_command(tool_info);
+        if status == "in_progress" {
+            if let Some(command) = observed_command.as_ref() {
+                capture
+                    .started_shell_commands
+                    .insert(tool_call_id.clone(), command.clone());
+            }
+            observed_command
+        } else {
+            capture
+                .started_shell_commands
+                .get(&tool_call_id)
+                .cloned()
+                .or(observed_command)
+        }
+        .map(|command| serde_json::json!({"command": command}))
+    } else {
+        None
+    };
     Ok(Some(AntigravityRuntimeEvent {
         event_type: "runtime.action",
         payload: serde_json::json!({
@@ -1157,7 +1178,7 @@ fn normalize_antigravity_tool_step(
             "toolName": tool_name,
             "status": status,
             "kind": antigravity_tool_kind(tool_name),
-            "title": tool_name,
+            "input": input,
             "output": output,
         }),
     }))
@@ -1179,6 +1200,14 @@ fn antigravity_command_tool(tool_name: &str) -> bool {
         tool_name.to_ascii_lowercase().as_str(),
         "run_command" | "bash" | "terminal"
     )
+}
+
+fn public_antigravity_shell_command(tool_info: &Value) -> Option<String> {
+    tool_info
+        .pointer("/parameters/CommandLine")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())
+        .map(str::to_string)
 }
 
 fn public_antigravity_command_output(tool_info: &Value) -> Option<String> {
@@ -1872,8 +1901,10 @@ echo "Created conversation $session_id" >> "$log_file"
 echo "Forwarding user message to conversation $session_id" >> "$log_file"
 echo "I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1" >> "$log_file"
 printf '%s\n' '{"event":"init","conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","init":{"tools":["run_command"]}}'
-printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"RUNNING","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"private command"}}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"RUNNING","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"pnpm test","Cwd":"/private/workspace","privateToken":"AGY_STARTED_MUST_NOT_LEAK"}}}}'
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","output":"AGY_PRINTF_OK","privateToken":"AGY_MUST_NOT_LEAK"}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":5,"state":"RUNNING","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file","parameters":{"CommandLine":"cat /private/secret","Cwd":"/private/workspace"}}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":5,"state":"DONE","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file"}}}'
 printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","status":"SUCCESS","response":"structured final"}}'
 "#,
         )
@@ -1910,6 +1941,12 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
         let completed = runtime_event_receiver
             .try_recv()
             .expect("structured tool result should be emitted");
+        let read_started = runtime_event_receiver
+            .try_recv()
+            .expect("structured non-Shell tool start should be emitted");
+        let read_completed = runtime_event_receiver
+            .try_recv()
+            .expect("structured non-Shell tool result should be emitted");
         assert_eq!(
             started.payload["toolCallId"],
             completed.payload["toolCallId"]
@@ -1917,15 +1954,42 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
         assert_eq!(started.payload["status"], "in_progress");
         assert_eq!(completed.payload["status"], "completed");
         assert_eq!(completed.payload["kind"], "execute");
-        assert_eq!(completed.payload["output"], "AGY_PRINTF_OK");
-        assert!(
-            !serde_json::to_string(&completed.payload)
-                .expect("normalized event should serialize")
-                .contains("AGY_MUST_NOT_LEAK")
+        assert_eq!(started.payload["toolName"], "run_command");
+        assert_eq!(
+            started.payload["input"],
+            serde_json::json!({"command": "pnpm test"})
         );
+        assert_eq!(completed.payload["input"], started.payload["input"]);
+        assert!(started.payload.get("title").is_none());
+        assert!(completed.payload.get("title").is_none());
+        assert_eq!(completed.payload["output"], "AGY_PRINTF_OK");
+        assert_eq!(read_started.payload["kind"], "read");
+        assert!(read_started.payload["input"].is_null());
+        assert!(read_completed.payload["input"].is_null());
+        let normalized_events = serde_json::to_string(&serde_json::json!([
+            started.payload,
+            completed.payload,
+            read_started.payload,
+            read_completed.payload,
+        ]))
+        .expect("normalized events should serialize");
+        for private_value in [
+            "AGY_STARTED_MUST_NOT_LEAK",
+            "AGY_MUST_NOT_LEAK",
+            "/private/workspace",
+            "cat /private/secret",
+            "CommandLine",
+            "parameters",
+        ] {
+            assert!(!normalized_events.contains(private_value));
+        }
         let arguments = std::fs::read_to_string(workspace.join(".agy-args"))
             .expect("structured fixture should record its arguments");
         assert!(arguments.contains("--output-format\nstream-json"));
+        for tool_name in ["run_command", "bash", "terminal"] {
+            assert_eq!(antigravity_tool_kind(tool_name), "execute");
+            assert!(antigravity_command_tool(tool_name));
+        }
         assert_eq!(antigravity_tool_kind("read_file"), "read");
         assert_eq!(antigravity_tool_kind("write_to_file"), "write");
         assert_eq!(antigravity_tool_kind("future_tool"), "tool");
