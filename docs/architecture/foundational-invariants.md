@@ -369,8 +369,9 @@ last_updated: 2026-08-21
 - 分类升级生成显式平行 projection/version，携带来源 Evidence set、classifier/mapping digest、输出 digest 和可回滚迁移记录；默认历史读取保持首次建立版本，live operation 不中途换 classifier。当前产品只维护一张 current Canonical Activity Projection 和当前 Mapping Registry；任意历史身份 replay 基础设施未准入前，不伪造已支持的重放能力。
 - 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
 - Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，ACP 仅
-  `rawInput.command` 字符串。相邻 raw object 字段不公开；started/terminal 必须按同一原生 operation identity
-  携带相同公共 command，不能要求 Renderer 从 digest、title、output 或私有 terminal 还原。
+  `rawInput.command` 字符串，Antigravity 仅明确 Shell 工具的 `tool_info.parameters.CommandLine` 字符串。
+  相邻 raw object 字段不公开；started/terminal 必须按同一原生 operation identity 携带相同公共 command，
+  不能要求 Renderer 从 digest、title、output 或私有 terminal 还原。
 
 <a id="evidence-usage"></a>
 

@@ -20,7 +20,7 @@ last_updated: 2026-08-21
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；仅 `rawInput.command` 进入公开 input，命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 公共 command/相邻 raw 字段排除、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；当前安装真实 command-output smoke 通过，完整展示 post-fix smoke 待运行 |
 | `claude-code-cli` | Claude Code | Claude stream-json + bounded stderr fallback | `fine_grained` | `tool_use.id` 是 lifecycle identity；Bash/Read/Edit/Write 等原生名称映射到既有 kind；仅 Bash 的公开 `input.command` 进入 started 与 terminal input，仅 Bash tool result 的公开 stdout/stderr 进入 output；公开 `text_delta` 进入 narration；session-bound `system/api_retry` 只投影固定 code/status、次数和等待秒数，不产生 Tool | partial + complete message 去重、started→terminal command 自包含、空输出 Bash、narration/fallback、stdout 未结束前 structured retry diagnostic 与 provider error/UUID/Session/raw stderr 不泄露 fixture 通过 | 既有 Skill turn 与 MCP projection 通过；`2.1.220` 原生 Bash command-output、公开 narration、Session continuation 与实际 `system/api_retry` 429 重试流已实证；完整展示 post-fix smoke 待运行 |
-| `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json lifecycle/output 与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
+| `antigravity-app` | Antigravity | Antigravity stream-json / legacy text | `run_level` | capability-gated stream-json 使用 `conversation_id + step_index` 作为结构化 tool identity；仅 Shell 工具公开 `tool_info.parameters.CommandLine` 为 `input.command`，terminal 缺失 parameters 时按相同 identity 补齐；`toolName` 保留原生 ID 但不作为标题；旧版 text 保持 run-level，私有日志不产生工具 Evidence | stream-json command/lifecycle/output、非 Shell 输入排除与 legacy fallback fixture 通过 | 既有 manual completion + Skill turn 通过；`agy 1.1.13` 原生 `run_command` output、Session continuation 与 AGY→Codex handoff smoke 通过 |
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
 该运行不能因为产品基线为 `fine_grained` 就补写工具调用。
@@ -130,7 +130,13 @@ non-terminal Evidence，不能变成 Canonical Activity，也不能推进 Run ou
 ### Antigravity
 
 Capability snapshot 明确包含 `output.stream_json` 时，Adapter 消费公开 NDJSON `init`、`step_update`、
-`result`；tool step 只用结构化 conversation、step index、state、tool name 和白名单 command output。
+`result`；tool step 只用结构化 conversation、step index、state、tool name 和白名单 command output。仅
+`run_command`、`bash`、`terminal` 等明确 Shell 工具读取 `tool_info.parameters.CommandLine`，并只投影为
+`input.command`；started command 在当前进程内按 `conversation_id + step_index` 缓存，使省略 parameters 的
+terminal Evidence 仍自带同一 command。完整 parameters、Cwd 与相邻私有字段不公开，原生 `toolName` 只保留为
+Runtime 工具标识，不生成 `title`；Renderer 将 `run_command`、`exec_command`、`execute_command` 视为 generic
+Shell 名称，有 command 时显示统一脱敏后的完整命令，无 command 时显示“终端操作”。命令只参与展示，不参与
+Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。
 没有该 capability 的旧安装继续使用 text final/run-level 展示。私有日志仍只校验 Conversation 和输入接受，
 不得产生工具 Evidence；workspace diff、最终文本或产品能力也不得反推内部步骤。Core 自己调度的 Team Tool
 仍是独立的 Core-verified Activity。
