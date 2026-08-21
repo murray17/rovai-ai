@@ -1169,12 +1169,6 @@ enum RuntimeCheckFinalization {
     CleanupOnly,
 }
 
-fn current_runtime_platform_admission(
-    runtime_kind: AdapterKind,
-) -> Option<RuntimePlatformAdmission> {
-    AgentRuntimeAdapterRegistry::default().current_platform_admission(runtime_kind)
-}
-
 fn windows_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
     #[cfg(all(debug_assertions, target_os = "windows"))]
     {
@@ -1192,6 +1186,48 @@ fn windows_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
         let _ = runtime_kind;
         false
     }
+}
+
+const WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION: &str =
+    "local-debug:windows-runtime-qualification-adapter";
+
+fn apply_windows_runtime_qualification_override(
+    admission: RuntimePlatformAdmission,
+    locally_qualified: bool,
+) -> RuntimePlatformAdmission {
+    if locally_qualified && admission.platform() == HostPlatformKey::WindowsX64 {
+        RuntimePlatformAdmission::qualified(
+            admission.runtime_kind(),
+            admission.platform(),
+            WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION,
+        )
+    } else {
+        admission
+    }
+}
+
+fn current_runtime_platform_admission(
+    runtime_kind: AdapterKind,
+) -> Option<RuntimePlatformAdmission> {
+    AgentRuntimeAdapterRegistry::default()
+        .current_platform_admission(runtime_kind)
+        .map(|admission| {
+            apply_windows_runtime_qualification_override(
+                admission,
+                windows_runtime_qualification_allows(runtime_kind),
+            )
+        })
+}
+
+fn runtime_platform_admission_matrix() -> Vec<RuntimePlatformAdmission> {
+    AgentRuntimeAdapterRegistry::default()
+        .platform_admission_matrix()
+        .into_iter()
+        .map(|admission| {
+            let locally_qualified = windows_runtime_qualification_allows(admission.runtime_kind());
+            apply_windows_runtime_qualification_override(admission, locally_qualified)
+        })
+        .collect()
 }
 
 fn current_platform_qualified_runtime_kinds() -> Vec<AdapterKind> {
@@ -2413,9 +2449,8 @@ impl Core {
     }
 
     async fn runtime_health_payload(&self) -> Result<Value> {
-        let registry = AgentRuntimeAdapterRegistry::default();
         let host_platform = HostPlatformKey::current();
-        let platform_admission = registry.platform_admission_matrix();
+        let platform_admission = runtime_platform_admission_matrix();
         let qualified_runtime_kinds = current_platform_qualified_runtime_kinds();
         let observations = self.runtime_discovery.read().await.clone();
         let product_diagnostics = self.runtime_product_diagnostics.read().await.clone();
@@ -17348,6 +17383,37 @@ while IFS= read -r _ignored; do :; done
                 "2026-08-18T00:00:00Z",
             )
             .is_empty()
+        );
+    }
+
+    #[test]
+    fn local_windows_qualification_updates_the_projected_admission_only_when_allowed() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let denied = apply_windows_runtime_qualification_override(
+            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
+            false,
+        );
+        assert!(!denied.is_qualified());
+        assert_eq!(denied.evidence_revision(), None);
+
+        let qualified = apply_windows_runtime_qualification_override(
+            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
+            true,
+        );
+        assert!(qualified.is_qualified());
+        assert_eq!(
+            qualified.evidence_revision(),
+            Some(WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
+        );
+
+        let macos = apply_windows_runtime_qualification_override(
+            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::MacosArm64),
+            true,
+        );
+        assert!(macos.is_qualified());
+        assert_ne!(
+            macos.evidence_revision(),
+            Some(WINDOWS_LOCAL_QUALIFICATION_EVIDENCE_REVISION)
         );
     }
 

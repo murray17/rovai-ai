@@ -229,7 +229,7 @@ Team Case 可在密封 manifest 中声明 `collaboration` 合同。Runner 将它
 | --- | --- |
 | `ROVAI_ACP_SMOKE_ADAPTER` | `smoke:acp-runtime` |
 | `ROVAI_ACP_COMMAND_OUTPUT_ONLY=1` | `smoke:acp-runtime` 在固定 `printf` output 断言后停止；不替代默认完整 write/deny 回归 |
-| `ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER` | 仅 Windows debug Core 的逐 Runtime 资格采集；值为一个精确 `AdapterKind`，或仅在跨 Runtime 交接 Smoke 中使用逗号分隔的精确 `AdapterKind` 列表。它只允许列出的 Adapter 进入真实 Smoke，不改变平台准入投影，release 构建忽略该变量 |
+| `ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER` | 仅 Windows debug Core 的逐 Runtime 资格采集；值为一个精确 `AdapterKind`，或仅在跨 Runtime 交接 Smoke / 本机资格 App 中使用逗号分隔的精确 `AdapterKind` 列表。它只允许列出的 Adapter 进入真实检查和执行，并把当前 Windows debug Catalog 中对应行投影为带 `local-debug` evidence 的 `qualified`，使训练营可以继续安装与认证检查；release 构建忽略该变量且仍使用正式平台准入矩阵 |
 | `ROVAI_SKILL_SMOKE_ADAPTERS` | Skill Runtime 列表或 `all` |
 | `ROVAI_SKILL_SMOKE_MODEL` | Skill Smoke 只选一种 Runtime 时要显式验证的模型 ID |
 | `ROVAI_MCP_SMOKE_ADAPTERS` | MCP Runtime 列表 |

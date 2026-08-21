@@ -45,6 +45,8 @@ last_updated: 2026-08-21
 - [x] 修正 Kiro lifecycle/Skill lineage、warm Runtime handle unlink、Missing-Send PowerShell/cmd Tool 投递；
 - [x] Qoder 使用官方 DeepSeek BYOK Flash 条目，直连、ACP、Built-in、Missing-Send、MCP 与 Skill 通过；
 - [x] 在最终合并结果上重跑七 ACP，完整覆盖回复、固定命令输出、allow/deny 与原生会话延续；
+- [x] 修正 Windows debug 本地资格开关只放行执行门、却未同步 Runtime Catalog 准入投影的问题；训练营现在只对
+  显式列出的 Adapter 展示 `local-debug` qualified，正式 Release 继续忽略该开关；
 - [x] 根据用户停止重复测试的指令，不再重跑九个当前可调用 Runtime 的 Built-in、Missing-Send、MCP、Skill
   与专项恢复；保留上一 main 基线的最近完整通过证据，不把本项写成最新基线复跑通过；
 - [ ] Antigravity `1.1.17` 账号恢复可用 Flash quota 后重跑最终在线矩阵；当前认证成功但返回
