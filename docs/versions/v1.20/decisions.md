@@ -1,13 +1,14 @@
 ---
 document_type: version-decisions
 version: v1.20
-lifecycle: current
+lifecycle: historical
 last_updated: 2026-08-21
 ---
 
 # v1.20 决策记录
 
-本文件只解释 v1.20 的本机附件打开边界；当前字段和行为由 Architecture、Contracts 与 UI 直接拥有。
+本文件解释 v1.20 的本机附件打开边界与 Runtime Shell command 公共投影；当前字段和行为由
+Architecture、Contracts 与 UI 直接拥有。
 
 <a id="v1-20-d01"></a>
 
@@ -56,4 +57,49 @@ Agent 可读性。Prepared Attachment 不进入这条 Timeline API。
 - [Camp Attachment v5](../../contracts/camp-attachment-v5.md)
 - [Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)
 - [当前基础架构不变量](../../architecture/foundational-invariants.md#camp-resources)
+- [Camp 会话工作区](../../ui/components/conversation-workspace.md)
+
+<a id="v1-20-d02"></a>
+
+## V1.20-D02：Shell command 由 Adapter 白名单投影，并让 terminal Evidence 自包含
+
+### 背景
+
+Claude Code 已在 Bash started event 公开 `input.command`，但 terminal event 只有 output；live Renderer 可以
+偶然通过 operation reducer 保留早期 input，历史全文读取若只选择 terminal Evidence 就会丢命令。TRAE 的
+ACP started event 则只有 `title=bash` 与 `rawInputDigest`，虽然原生 `rawInput.command` 存在，公开层无法从
+digest 还原命令。只修改标题函数不能补出不存在的事实，也会让不同页面依赖不同的 Evidence join 行为。
+
+### 决定
+
+Claude Adapter 按原生 tool-use ID 把已经准入的 Bash command 同时放入 started 和 terminal
+`runtime.action.input`。ACP Adapter 只从 `rawInput.command` 白名单提取非空字符串；相邻 rawInput 字段不公开，
+完整 raw input 只保留 digest。命令结构可在 Runtime 缺失 kind 时证明 `execute`；Prompt 存活期间按
+`toolCallId` 在内存保留 command/kind/digest，使稀疏 terminal event 自包含，私有 raw object 不落入 Action
+记录或 transcript。
+
+Renderer 对所有具有公开 command 的 Shell Activity 复用同一完整预览和确定性脱敏，详情分开显示命令与
+输出。ACP execute 的非零 exit code 优先表达进程失败，不能因为 tool lifecycle 写着 completed 就显示成功。
+
+### 后果
+
+- live、Camp 恢复和只读取 terminal Evidence 的全文页面获得一致命令与结果；
+- TRAE 能显示真实复合命令、Node inline/heredoc 与失败状态，不从 digest 或 terminal output 猜测；
+- command 本身成为授权用户可读 Evidence，已知敏感值在 Renderer DOM 前脱敏；其他 rawInput 字段仍不可见；
+- 稀疏旧 Evidence 仍可使用既有 reducer fallback，但不作为新事件正确性的前提。
+
+### 被拒绝方案
+
+- Renderer 按 operation ID 拼 started input 与 terminal output：只修复加载完整 lifecycle 的页面，单独全文
+  Evidence 仍丢 command；
+- 从 `rawInputDigest`、title、stdout 或私有 terminal 反推命令：信息不足且会伪造来源事实；
+- 公开完整 `rawInput`：会把 description、cwd、credential 和未来未知字段扩大为公共合同；
+- 只改 Renderer 的 `bash/Bash` 标题：无法得到参数、复合命令或脚本正文。
+
+### 当前权威影响
+
+- [Runtime Launch and Verification v16](../../contracts/runtime-launch-and-verification-v16.md)
+- [Run Process Detail Surface v19](../../contracts/run-process-detail-surface-v19.md)
+- [Runtime Activity Mapping Registry](../../runtime-activity/registry.md)
+- [Execution Evidence 基础不变量](../../architecture/foundational-invariants.md#evidence-canonical-activity)
 - [Camp 会话工作区](../../ui/components/conversation-workspace.md)

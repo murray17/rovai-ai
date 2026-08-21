@@ -43,7 +43,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [Runtime Launch and Verification v15（当前）](runtime-launch-and-verification-v15.md) | v14 lifecycle 与 payload 不变；Claude Code stream-json 的 session-bound `system/api_retry` 成为权威 live source，stderr grammar 保持兼容 fallback |
+| [Runtime Launch and Verification v16（当前）](runtime-launch-and-verification-v16.md) | v15 启动与 retry 边界不变；Claude Bash 与 ACP 仅公开 Shell command，并让 started/terminal Evidence 自包含；ACP 非零 exit code 诚实映射失败 |
+| [Runtime Launch and Verification v15（历史）](runtime-launch-and-verification-v15.md) | v14 lifecycle 与 payload 不变；Claude Code stream-json 的 session-bound `system/api_retry` 成为权威 live source，stderr grammar 保持兼容 fallback |
 | [Runtime Launch and Verification v14（历史）](runtime-launch-and-verification-v14.md) | v13 启动与 Run tmp 边界不变；Claude Code 可把严格白名单的运行中 API retry 状态即时投影为安全诊断，不公开 raw stderr |
 | [Runtime Launch and Verification v13（历史）](runtime-launch-and-verification-v13.md) | v12 View/Ready 边界不变；所有正式 Runtime 显式获得当前 lease 已重置的 exact writable Run tmp root |
 | [Runtime Launch and Verification v12（历史）](runtime-launch-and-verification-v12.md) | v11 exact-root/receipt 不变；View contract 3 要求 resolved publication；TRAE 使用统一 Machine Ready，并允许 Idle Session metadata |
@@ -53,7 +54,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Launch and Verification v8（历史）](runtime-launch-and-verification-v8.md) | v7 启动/恢复边界不变；增加 Claude Code/Antigravity 安全公开 failure、AgentRun/Probe 持久化、Availability 与内部诊断分离 |
 | [Runtime Launch and Verification v7（历史）](runtime-launch-and-verification-v7.md) | v6 加恢复 response exact-ID 校验；不同 ID 使 Host protocol-violated 并进入 continuity-lost fallback，禁止换绑返回 ID；不含公开 Runtime failure |
 | [Runtime Platform Admission v1（当前）](runtime-platform-admission-v1.md) | `AdapterKind × HostPlatformKey` 产品级准入、closed reason/evidence、现有配置保留与 execution blocker |
-| [Managed Runtime Process v1（当前）](managed-runtime-process-v1.md) | 统一进程启动 interface、Windows 创建时 Job/handle list、native EXE/validated Node shim 与 descendant cleanup |
+| [Managed Runtime Process v1（当前）](managed-runtime-process-v1.md) | 统一进程启动 interface、Windows 创建时 Job/handle list、macOS User Automation protected-tree deny、native EXE/validated Node shim 与 descendant cleanup |
 | [Runtime Launch and Verification v6（历史）](runtime-launch-and-verification-v6.md) | v5 加 TRAE exact-ID Provider Resume Probe、受控 ACP HistoryRestore、replay quarantine、兼容性 fence 与 continuity-lost fallback；其接受不同 response ID 的语义已由 v7 替代 |
 | [Runtime Launch and Verification v5（历史）](runtime-launch-and-verification-v5.md) | v4 加 TRAE 有界启动轻检、用户授权快速 ACP Session Probe 与 Ready commit fence |
 | [Runtime Launch and Verification v4（历史）](runtime-launch-and-verification-v4.md) | v3 加 TRAE/Kiro 最高权限队员默认、Kiro trust-all Host 映射与 permission schema digest preserve fence |
@@ -64,6 +65,7 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Runtime Usage Monitoring v2（历史）](runtime-usage-monitoring-v2.md) | 五表 clean break、内存 Usage 合并、稀疏 Token/Cache/Cost、Coverage、单 Snapshot 与有界刷新 |
 | [Runtime Monitoring v1（历史）](runtime-monitoring-v1.md) | Clean-break collection/enrollment、稀疏 Usage Observation、Native Session fact、三类查询、Coverage、Tool Duration 与 Cost layer |
 | [Diagnostics Center v1（当前）](diagnostics-center-v1.md) | `diagnostics.check` typed read model、三态分类、显式单项修复映射、Recovery 与集中脱敏的 `rovai-diagnostics-v5` |
+| [User Automation v1（当前）](user-automation-v1.md) | 普通用户 `rovai app` 的独立本机 IPC、Runtime OS 隔离、原子 Camp/Run 自动化、真实 shell exit、双 cursor Diagnostic Trial、安全投影与私有 bundle |
 | [Accepted Input Recovery v3（当前）](accepted-input-recovery-v3.md) | v2 outcome-unknown 边界不变；Manifest 21 使用语义 View receipt，并增加 Migration 100 clean break |
 | [Accepted Input Recovery v2（历史）](accepted-input-recovery-v2.md) | v1 正常恢复边界不变；增加 Migration 99 对旧 Formatter 20 非终态输入的 evidence-aware clean break |
 | [Accepted Input Recovery v1（历史）](accepted-input-recovery-v1.md) | accepted Runtime input 的启动分类、`recovery_blocked`、Scheduler fence、用户命令与 Stop/预算 outcome-unknown 收敛；不含 Migration 99 |
@@ -165,7 +167,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [ContextManifest Evidence v9 (historical)](context-manifest-evidence-v9.md) | bounded public omission evidence；不作为 Formatter v13 恢复入口 |
 | [Context Delivery Profile v2 (historical)](context-delivery-profile-v2.md) | 公共引用链与历史 budget 的旧当前合同；不选择 self-active Task |
 | [Context Delivery Profile v1 (historical)](context-delivery-profile-v1.md) | AgentRun 公共消息窗口、Unicode scalar 正文截断、历史字符预算与遗漏提示 |
-| [Run Process Detail Surface v18（当前）](run-process-detail-surface-v18.md) | v17 命令与详情边界不变；运行中的 Claude Code API retry 以安全 attention notice、最新次数与等待状态明显呈现 |
+| [Run Process Detail Surface v19（当前）](run-process-detail-surface-v19.md) | v18 retry 与执行台边界不变；所有拥有公开 command 的 Shell Activity 使用完整脱敏标题，并在详情分开显示命令与输出 |
+| [Run Process Detail Surface v18（历史）](run-process-detail-surface-v18.md) | v17 命令与详情边界不变；运行中的 Claude Code API retry 以安全 attention notice、最新次数与等待状态明显呈现 |
 | [Run Process Detail Surface v17（历史）](run-process-detail-surface-v17.md) | v16 Inspector 顺序不变；Codex structured read/list/search 保留中文语义，其余 Shell 行展示完整脱敏命令并在详情分开显示命令与输出 |
 | [Run Process Detail Surface v16（历史）](run-process-detail-surface-v16.md) | v15 进入恢复与执行台语义不变；普通 Inspector 改为“队员 / 任务”，右侧改为“执行 / 队员 / 任务” |
 | [Run Process Detail Surface v15（历史）](run-process-detail-surface-v15.md) | v14 全局位置偏好与稳定 Drawer 不变；进入带 running Run 的 Camp 时自动打开精确执行，右侧基础 Tab 仍为“任务 / 队员” |

@@ -2,7 +2,7 @@
 document_type: architecture
 authority: diagnostics-center-component-boundary
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-21
 ---
 
 # Diagnostics Center Architecture
@@ -12,8 +12,8 @@ last_updated: 2026-08-18
 | Component | Responsibility |
 | --- | --- |
 | Core diagnostics module | Owns public status/group DTOs, summary aggregation, read-only SQLite quick check and the final v5 centralized redaction pass. |
-| Core router | Composes current Core/Git/data-dir facts, stored Skill projection state, strict-read MCP inspection, persistent member Runtime selections and cached Runtime evidence into one `DiagnosticsReport`. |
-| Skill projection reconciler | Exposes stored observation/root-access/dirty diagnostics without reading execution roots; explicit user reconcile remains a separate filesystem mutation. |
+| Core router | Composes current Core/Git/data-dir facts, stored Skill projection state, strict-read MCP inspection, persistent member Runtime selections and cached Runtime evidence into one `DiagnosticsReport`; Git is resolved to an absolute executable through the shared Runtime search environment before the managed health process starts. |
+| Skill projection reconciler | Exposes stored observation/root-access/dirty diagnostics without reading execution roots; explicit user reconcile remains a separate filesystem mutation and may retire only strictly recognized recorded `.lumen` broken links. |
 | MCP config store | Exposes `inspect` that never materializes a missing file; `get` and permission repair remain separate user-authorized operations. |
 | Runtime platform admission + health cache | Supplies platform rows for the complete Product Runtime Catalog, but machine observations only for qualified Adapters and without rescan/probe scheduling. Runtime check remains an explicit qualified-product command. |
 | Renderer Diagnostics Center | Owns Loading/Running/Partial/Error/Success/Disabled/Recovery presentation, attention-only issue projection, filters and the explicit action-to-Core mapping. |
@@ -55,6 +55,9 @@ export
 - Runtime Catalog visibility and Runtime issue eligibility are different: all supported Adapters are visible, only selected
   platform-qualified unavailable products become attention. Not-qualified/unsupported rows never become machine health.
 - Repair and its post-action read are a two-step protocol; mutation success alone is not health success.
+- The legacy-link exception belongs only to explicit `skills.reconcile`: automatic preflight/terminal cleanup preserves
+  every project-owned entry, while explicit repair may remove a recorded missing symlink only when its target is exactly
+  `$HOME/.lumen/skills/revisions/<UUID>/<UUID>`.
 - v5 is built from an allowlist and still receives a final recursive redaction pass; raw health/profile/camp objects
   never become export fields.
 

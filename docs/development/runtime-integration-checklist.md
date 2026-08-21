@@ -2,7 +2,7 @@
 document_type: development-checklist
 authority: development-procedure
 status: proposed
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # Agent Runtime 接入与准入 Checklist
@@ -16,7 +16,7 @@ last_updated: 2026-08-20
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v15.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v16.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
 

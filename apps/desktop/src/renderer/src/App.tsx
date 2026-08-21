@@ -988,6 +988,10 @@ export function App(): React.JSX.Element {
     }
   }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
 
+  useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
+    void activateCamp(campId, { reconcileDefaultLead: false })
+  }), [activateCamp])
+
   const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
     const { snapshot } = await requestCampProjection(campId, 'open')
     if (activeCampIdRef.current !== campId) return

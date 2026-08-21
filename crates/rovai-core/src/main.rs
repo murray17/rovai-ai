@@ -33,6 +33,8 @@ use codex::{
     CodexAgentRunRuntimeRequest, CodexAgentThreadOptions, CodexCliRuntimeAdapter, CodexIncoming,
     CodexLiveModelValidationError, CodexRuntime,
 };
+#[cfg(target_os = "macos")]
+use rovai_core::managed_process::configure_user_automation_denial_root;
 use rovai_core::{
     action::{
         AcknowledgeRuntimeDeliveryCommand, AcquireRuntimeDeliveryCommand, ActionControlMode,
@@ -87,8 +89,9 @@ use rovai_core::{
         CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
         CreateCampCommand, CreateTaskCommand, DeleteCampCommand, DiscardPendingCampCommand,
         ExecutionRequest, ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand,
-        SendUserCampDraftCommand, TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter,
-        TaskAssigneeUpdate, TaskListQuery, TaskStatus, UpdateTaskCommand,
+        SendUserAutomationCampMessageCommand, SendUserCampDraftCommand,
+        TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery,
+        TaskStatus, UpdateTaskCommand,
     },
     command::{
         ActorRef, CommandEnvelope, CommandExecution, CommandGatewayError, CommandHandlerResult,
@@ -385,6 +388,7 @@ fn request_runs_outside_main_queue(method: &str) -> bool {
             | "runtime.product.check"
             | "runtime.modelCatalog.open"
             | "camp.messages.send"
+            | "userAutomation.camp.send"
             | "camp.attachments.prepareFromPath"
             | "camp.attachments.previewSource"
             | "camp.attachments.desktopOpenTarget"
@@ -636,6 +640,12 @@ struct ExecutionEvidenceListParams {
     limit: i64,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AgentRunDiagnosticParams {
+    agent_run_id: String,
+}
+
 fn default_execution_evidence_page_limit() -> i64 {
     500
 }
@@ -745,6 +755,16 @@ struct SendCampMessageParams {
     command_id: String,
     camp_id: CampId,
     draft_revision: i64,
+    execution: Option<ExecutionRequest>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SendUserAutomationCampMessageParams {
+    command_id: String,
+    camp_id: CampId,
+    agent_id: String,
+    body: String,
     execution: Option<ExecutionRequest>,
 }
 
@@ -1432,7 +1452,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::QoderCli => "Qoder CLI",
         AdapterKind::CodebuddyCli => "CodeBuddy CLI",
         AdapterKind::QwenCode => "Qwen Code",
-        AdapterKind::TraeCnCli => "TRAE CLI（中国企业版）",
+        AdapterKind::TraeCnCli => "TRAE CLI",
         AdapterKind::AntigravityApp => "Antigravity",
     }
 }
@@ -2291,13 +2311,19 @@ impl Core {
 
     async fn diagnostics_report(&self) -> DiagnosticsReport {
         let checked_at = chrono::Utc::now().to_rfc3339();
-        let git_health = serde_json::to_value(health::git_health().await).unwrap_or_else(|_| {
-            json!({
-                "installed": false,
-                "version": null,
-                "detail": "git health serialization failed"
-            })
-        });
+        let git_path = self
+            .runtime_search_environment
+            .read()
+            .await
+            .resolve_command_path("git");
+        let git_health =
+            serde_json::to_value(health::git_health(git_path).await).unwrap_or_else(|_| {
+                json!({
+                    "installed": false,
+                    "version": null,
+                    "detail": "git health serialization failed"
+                })
+            });
         let runtime_health = self.runtime_health_payload().await;
 
         let mut checks = vec![
@@ -5328,6 +5354,11 @@ impl Core {
                 let params: SendCampMessageParams = serde_json::from_value(request.params.clone())?;
                 self.send_test_camp_message_request(params).await
             }
+            "userAutomation.camp.send" => {
+                let params: SendUserAutomationCampMessageParams =
+                    serde_json::from_value(request.params.clone())?;
+                self.send_user_automation_camp_message_request(params).await
+            }
             "runtime.pendingExecution.cancel" => {
                 let params: CancelPendingExecutionParams =
                     serde_json::from_value(request.params.clone())?;
@@ -5475,6 +5506,14 @@ impl Core {
                     params.limit.unwrap_or(500),
                 )?)?)
             }
+            "agentRuns.diagnostic.get" => {
+                let params: AgentRunDiagnosticParams =
+                    serde_json::from_value(request.params.clone())?;
+                let mut database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    ReadModelService.agent_run_diagnostic(&mut database, &params.agent_run_id)?,
+                )?)
+            }
             "diagnostics.check" => Ok(serde_json::to_value(self.diagnostics_report().await)?),
             "monitoring.snapshot" => {
                 let filter: MonitoringFilter = serde_json::from_value(request.params.clone())?;
@@ -5564,7 +5603,12 @@ impl Core {
                 self.open_runtime_model_catalog(params.runtime_kind).await
             }
             "health.check" => {
-                let git = health::git_health().await;
+                let git_path = self
+                    .runtime_search_environment
+                    .read()
+                    .await
+                    .resolve_command_path("git");
+                let git = health::git_health(git_path).await;
                 let database = self.database.lock().await;
                 let mut payload = json!({
                     "core": {
@@ -5631,6 +5675,42 @@ impl Core {
         };
         if execution.result.status != CommandResultStatus::Rejected {
             self.request_camp_attachment_projection(params.camp_id.as_str());
+        }
+        Ok(json!({
+            "commandResult": execution.result,
+            "replayed": execution.replayed,
+            "preflight": null,
+            "pendingExecution": null,
+        }))
+    }
+
+    async fn send_user_automation_camp_message_request(
+        &self,
+        params: SendUserAutomationCampMessageParams,
+    ) -> Result<Value> {
+        let camp_id = params.camp_id.to_string();
+        let envelope = CommandEnvelope {
+            command_id: params.command_id,
+            actor: ActorRef::User {
+                user_id: CURRENT_USER_ID.to_string(),
+            },
+            camp_id: Some(camp_id.clone()),
+            expected_versions: Vec::new(),
+            execution_epoch: None,
+            payload: SendUserAutomationCampMessageCommand {
+                camp_id: camp_id.clone(),
+                agent_id: params.agent_id,
+                body: params.body,
+                execution: params.execution,
+            },
+        };
+        let execution = {
+            let mut database = self.database.lock().await;
+            CollaborationService::default()
+                .send_user_automation_camp_message(&mut database, &envelope)?
+        };
+        if execution.result.status != CommandResultStatus::Rejected {
+            self.request_camp_attachment_projection(&camp_id);
         }
         Ok(json!({
             "commandResult": execution.result,
@@ -10242,6 +10322,8 @@ async fn run_core(
     let data_dir = parse_data_dir()?;
     let skill_library_root = parse_skill_library_root()?;
     let _data_dir_lock = CoreDataDirLock::acquire(&data_dir)?;
+    #[cfg(target_os = "macos")]
+    configure_user_automation_denial_root(&data_dir.join("automation-v1"))?;
     let runtime_camp_files_root = parse_runtime_camp_files_root()?;
     let attachment_views = CampAttachmentViewStore::admit(
         &runtime_camp_files_root,
@@ -12078,7 +12160,8 @@ async fn process_agent_run_acp_message(
             None
         }
     };
-    let (event_type, payload) = normalize_acp_event(&method, &params);
+    let (event_type, payload) =
+        normalize_acp_event_with_completion(&method, &params, completed_action.as_ref());
     if event_type == "runtime.usage" {
         return;
     }
@@ -12169,6 +12252,14 @@ async fn process_agent_run_acp_message(
 }
 
 fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
+    normalize_acp_event_with_completion(method, params, None)
+}
+
+fn normalize_acp_event_with_completion(
+    method: &str,
+    params: &Value,
+    completion: Option<&acp::CompletedAcpAction>,
+) -> (&'static str, Value) {
     if method == "rovai/acp_prompt_completed" {
         return ("runtime.turn.completed", params.clone());
     }
@@ -12204,28 +12295,53 @@ fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
             )
         }
         Some("agent_thought_chunk") => ("agent.thought.delta", update),
-        Some("tool_call") | Some("tool_call_update") => (
-            "runtime.action",
-            json!({
+        Some("tool_call") | Some("tool_call_update") => {
+            let public_command = acp::public_acp_shell_command(update.get("rawInput"))
+                .or_else(|| completion.and_then(|value| value.public_command.clone()));
+            let public_kind = acp::public_acp_tool_kind(&update).or_else(|| {
+                completion
+                    .map(|value| value.native_kind.as_str())
+                    .filter(|kind| *kind != "other")
+                    .map(str::to_string)
+            });
+            let public_status = completion
+                .and_then(|value| value.result_data.get("status"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    acp::effective_acp_tool_status(
+                        &update,
+                        public_kind.as_deref().unwrap_or("other"),
+                    )
+                });
+            (
+                "runtime.action",
+                json!({
                 "sessionUpdate": update.get("sessionUpdate"),
                 "toolCallId": update.get("toolCallId"),
                 "toolName": update.get("toolName"),
-                "status": update.get("status"),
-                "kind": update.get("kind"),
+                "status": public_status,
+                "kind": public_kind,
                 "title": update.get("title"),
                 "locationCount": update
                     .get("locations")
                     .and_then(Value::as_array)
                     .map_or(0, Vec::len),
                 "output": public_acp_tool_output(&update),
+                "input": public_command,
                 "rawInputDigest": update
                     .get("rawInput")
-                    .and_then(|value| canonical_json_digest(value).ok()),
+                    .and_then(|value| canonical_json_digest(value).ok())
+                    .or_else(|| completion
+                        .and_then(|value| value.result_data.get("rawInputDigest"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)),
                 "rawOutputDigest": update
                     .get("rawOutput")
                     .and_then(|value| canonical_json_digest(value).ok()),
-            }),
-        ),
+                }),
+            )
+        }
         Some("plan") => ("runtime.plan", update),
         Some("usage_update") => ("runtime.usage", update),
         _ => ("runtime.event", update),
@@ -16524,6 +16640,7 @@ mod tests {
             "camps.reconcileDefaultLead"
         ));
         assert!(request_runs_outside_main_queue("camp.messages.send"));
+        assert!(request_runs_outside_main_queue("userAutomation.camp.send"));
         assert!(request_runs_outside_main_queue("campTurns.cancel"));
         assert!(request_runs_outside_main_queue("agentRuns.cancel"));
         assert!(request_runs_outside_main_queue(
@@ -16549,7 +16666,7 @@ mod tests {
     }
 
     #[test]
-    fn acp_tool_events_expose_digests_not_raw_payloads() {
+    fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
         let (_, payload) = normalize_acp_event(
             "session/update",
             &json!({
@@ -16561,7 +16678,10 @@ mod tests {
                     "kind": "execute",
                     "title": "Run command",
                     "content": [{"type": "text", "text": "Visible tool progress"}],
-                    "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                    "rawInput": {
+                        "command": "printf 'ACP_PUBLIC_COMMAND_OK\\n'",
+                        "credential": "ACP_PRIVATE_INPUT_MUST_NOT_LEAK"
+                    },
                     "rawOutput": {
                         "stdout": "unused public fallback",
                         "credential": "TOP_SECRET_OUTPUT"
@@ -16571,12 +16691,49 @@ mod tests {
         );
         let serialized = serde_json::to_string(&payload).expect("event payload should serialize");
 
-        assert!(!serialized.contains("TOP_SECRET_INPUT"));
+        assert_eq!(payload["input"], "printf 'ACP_PUBLIC_COMMAND_OK\\n'");
+        assert_eq!(payload["kind"], "execute");
+        assert!(!serialized.contains("ACP_PRIVATE_INPUT_MUST_NOT_LEAK"));
         assert!(!serialized.contains("TOP_SECRET_OUTPUT"));
         assert_eq!(payload["output"], "Visible tool progress");
         assert_eq!(payload["toolName"], "execute");
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
+
+        let terminal_params = json!({
+            "update": {
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "tool-1",
+                "status": "completed",
+                "rawOutput": {
+                    "stdout": "Visible failed output",
+                    "exitCode": 7
+                }
+            }
+        });
+        let mut completion = acp::completed_action(&terminal_params)
+            .expect("terminal update should normalize")
+            .expect("terminal update should create a completion");
+        completion.native_kind = "execute".to_string();
+        completion.public_command = Some("printf 'ACP_PUBLIC_COMMAND_OK\\n'".to_string());
+        completion.result_data["status"] = json!("failed");
+        completion.result_data["rawInputDigest"] = payload["rawInputDigest"].clone();
+        let (_, terminal_payload) = normalize_acp_event_with_completion(
+            "session/update",
+            &terminal_params,
+            Some(&completion),
+        );
+        assert_eq!(
+            terminal_payload["input"],
+            "printf 'ACP_PUBLIC_COMMAND_OK\\n'"
+        );
+        assert_eq!(terminal_payload["kind"], "execute");
+        assert_eq!(terminal_payload["status"], "failed");
+        assert_eq!(
+            terminal_payload["rawInputDigest"],
+            payload["rawInputDigest"]
+        );
+        assert_eq!(terminal_payload["output"], "Visible failed output");
     }
 
     #[test]

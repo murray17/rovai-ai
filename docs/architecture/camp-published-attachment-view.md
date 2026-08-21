@@ -43,7 +43,9 @@ reveal 前必须先确认 parent 可枚举且 target 仍存在；预检失败不
 ## 组件职责
 
 - Desktop 从 canonical `userData` 派生 macOS instance key，或在 Windows 选择 `<data_dir>\runtime-files`，并把
-  完整绝对 `--runtime-camp-files-root` 显式传给 Core；Core 不从 Home 猜共享默认值。
+  完整绝对 `--runtime-camp-files-root` 显式传给 Core；Core 不从 Home 猜共享默认值。macOS Desktop 与子 Core
+  必须使用同一 Home：进程环境提供非空 `HOME` 时 Main 以该值派生 root，否则使用 Electron Home；Windows
+  root 不依赖 Home。这样显式隔离 Home 不会与 Core 的 root admission 产生分歧。
 - `CampAttachmentStore` 只负责 Composer/Agent Authority ingress、不可变快照和 no-follow 源校验。所有实例按
   exact Authority root + Camp ID 共享 per-Camp ingress admission；Camp root 权限切换、child create/remove、
   failure cleanup 与 Camp Authority removal 必须持有一次 admission，已持有者使用私有 root helper，不可重入。
@@ -151,7 +153,7 @@ directory allowlist evidence。存在不受控 ambient filesystem access 时，�
 - [Camp Published Attachment View v3](../contracts/camp-published-attachment-view-v3.md)
 - [Camp Attachment v5](../contracts/camp-attachment-v5.md)
 - [ContextManifest Evidence v21](../contracts/context-manifest-evidence-v21.md)
-- [Runtime Launch and Verification v15](../contracts/runtime-launch-and-verification-v15.md)
+- [Runtime Launch and Verification v16](../contracts/runtime-launch-and-verification-v16.md)
 - [V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)
 - [V1.20-D01](../versions/v1.20/decisions.md#v1-20-d01)
 - [V1.17-D01](../versions/v1.17/decisions.md#v1-17-d01)

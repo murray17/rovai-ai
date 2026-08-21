@@ -54,6 +54,12 @@ import { OnboardingStore } from './onboarding-preferences'
 import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
 import { windowChromeOptions } from './window-chrome'
 import {
+  UserAutomationError,
+  UserAutomationServer,
+  startUserAutomationOptional,
+  userAutomationRoot
+} from './user-automation'
+import {
   isAttachmentId,
   openDesktopAttachmentTarget,
   parseDesktopAttachmentTarget,
@@ -162,6 +168,7 @@ const allowedMethods = new Set<CoreMethod>([
   'camp.composerDraft.removeAttachment',
   'camp.composerDraft.discard',
   'camp.messages.send',
+  'userAutomation.camp.send',
   'action.approvals.resolve',
   'notifications.inbox',
   'notifications.changesSince',
@@ -216,6 +223,7 @@ let generalPreferences: GeneralPreferencesStore | null = null
 let onboarding: OnboardingStore | null = null
 let restorableLocations: RestorableLocationStore | null = null
 let navigationPreferences: NavigationPreferencesStore | null = null
+let userAutomation: UserAutomationServer | null = null
 let quitDrainStarted = false
 let quitDrainCompleted = false
 const desktopSessions = new DesktopSessionRegistry()
@@ -378,6 +386,35 @@ function createWindow(): void {
   }
 }
 
+async function openCampFromAutomation(campId: string): Promise<{ campId: string; opened: true }> {
+  if (!isCampId(campId)) {
+    throw new UserAutomationError('automation_invalid_input', 'campId is not canonical')
+  }
+  const exists = await core.request<boolean>('camps.exists', { campId })
+  if (!exists) {
+    throw new UserAutomationError('camp_not_found', 'The requested Camp does not exist.')
+  }
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow()
+  const window = mainWindow
+  if (!window || window.isDestroyed()) {
+    throw new UserAutomationError('app_window_unavailable', 'The App window is unavailable.')
+  }
+  if (window.isMinimized()) window.restore()
+  window.show()
+  window.focus()
+  const publish = (): void => {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+      window.webContents.send('rovai:user-automation-open-camp', { campId })
+    }
+  }
+  if (window.webContents.isLoadingMainFrame()) {
+    window.webContents.once('did-finish-load', publish)
+  } else {
+    publish()
+  }
+  return { campId, opened: true }
+}
+
 if (primaryInstance) void app.whenReady().then(async () => {
   console.info(
     `[startup] stage=electron_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
@@ -427,6 +464,17 @@ if (primaryInstance) void app.whenReady().then(async () => {
       process.platform
     ) ?? undefined
   })
+  if (process.platform !== 'win32') {
+    userAutomation = await startUserAutomationOptional(
+      () => new UserAutomationServer(
+        userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
+        { core, openCamp: openCampFromAutomation, appVersion: app.getVersion() }
+      )
+    )
+    if (userAutomation) {
+      console.info('[startup] stage=user_automation_ready contract_version=1')
+    }
+  }
 
   app.on('activate', () => {
     const windows = BrowserWindow.getAllWindows()
@@ -992,7 +1040,13 @@ app.on('before-quit', (event) => {
   if (quitDrainStarted) return
   quitDrainStarted = true
   nativeTheme.removeListener('updated', publishAppearance)
-  void core.shutdown()
+  const stopAutomation = userAutomation?.stop() ?? Promise.resolve()
+  userAutomation = null
+  void stopAutomation
+    .catch((error) => {
+      console.error('Rovai User Automation shutdown failed', error)
+    })
+    .then(() => core.shutdown())
     .then((result) => {
       console.error(`[rovai-core] controlled shutdown result ${JSON.stringify(result)}`)
     })

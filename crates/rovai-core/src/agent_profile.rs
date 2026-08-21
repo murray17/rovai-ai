@@ -144,7 +144,7 @@ impl AdapterKind {
             Self::QoderCli => "Qoder",
             Self::CodebuddyCli => "CodeBuddy",
             Self::QwenCode => "Qwen Code",
-            Self::TraeCnCli => "TRAE CLI（中国企业版）",
+            Self::TraeCnCli => "TRAE CLI",
             Self::AntigravityApp => "Antigravity",
         }
     }

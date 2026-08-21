@@ -53,6 +53,7 @@ const longToolOutput = Array.from({ length: 8_432 }, (_, index) => {
 }).join('\n')
 const directoryAttachmentSource = join(fixtureRoot, '项目资料')
 const codexExpectedCommand = 'rovai camp read --mode timeline --direction before --limit 20'
+const claudeExpectedCommand = "printf '%s\\n' 'ROVAI_CLAUDE_EMPTY_OUTPUT_OK'"
 
 const runtimes = [
   runtime('codex', 'codex-cli', 'Codex CLI', codexExpectedCommand, {
@@ -79,8 +80,8 @@ const runtimes = [
   }),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
-  runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
-  runtime('claude', 'claude-code-cli', 'Claude Code', 'printf', {
+  runtime('trae', 'trae-cn-cli', 'TRAE CLI', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
+  runtime('claude', 'claude-code-cli', 'Claude Code', claudeExpectedCommand, {
     protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {
       toolCallId: 'toolu-claude-bash', status: 'completed', kind: 'execute',
@@ -2837,10 +2838,11 @@ async function verifyClaudeCommandDisclosure(cdp) {
   })()`)
   await waitForExpression(cdp, `(() => [...document.querySelectorAll(
     '.execution-drawer details.tool-call-disclosure .tool-call-title'
-  )].some((candidate) => candidate.textContent?.trim() === 'printf'))()`)
+  )].some((candidate) => candidate.textContent?.trim() === ${JSON.stringify(claudeExpectedCommand)}))()`)
   const presentation = await evaluate(cdp, `(() => {
     const disclosure = [...document.querySelectorAll('.execution-drawer details.tool-call-disclosure')]
-      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim() === 'printf')
+      .find((candidate) => candidate.querySelector('.tool-call-title')?.textContent?.trim()
+        === ${JSON.stringify(claudeExpectedCommand)})
     disclosure?.querySelector('summary')?.click()
     return {
       found: Boolean(disclosure),

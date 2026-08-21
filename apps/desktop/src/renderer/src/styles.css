@@ -1184,7 +1184,7 @@ html[data-rovai-platform="win32"] *::after {
 .execution-run-stop-state { display: inline-flex; min-height: 28px; align-items: center; padding: 0 4px; font-size: 9.5px; font-weight: 720; white-space: nowrap; }
 .execution-run-stop-state.tone-attention { color: var(--attention); }
 .execution-run-stop-state.tone-neutral { color: var(--muted); }
-.execution-run-stop-button { min-width: 48px; }
+.execution-drawer-action-button { min-width: 48px; }
 .execution-drawer-body { min-height: 0; overflow: auto; padding: 12px 20px 18px; overscroll-behavior: contain; scroll-behavior: smooth; }
 .execution-process-timeline { position: relative; display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
 .execution-process-timeline::before { position: absolute; top: 13px; bottom: 17px; left: 6px; width: 1px; background: var(--line-strong); content: ""; }

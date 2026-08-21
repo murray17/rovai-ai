@@ -417,10 +417,10 @@ export function buildLiveExecutionProgress(
         : null
       const publicOutput = rawOutput !== null ? stripAnsi(rawOutput) : structuredOutput
       const codexCommand = nativeType === 'commandExecution' && command
-        ? codexShellCommandDetailText(command)
+        ? shellCommandDetailText(command)
         : null
       const detail = codexCommand
-        ? codexCommandDetail(codexCommand, publicOutput)
+        ? shellCommandDetail(codexCommand, publicOutput)
         : publicOutput
           ?? command
           ?? fileChangeDetail(item)
@@ -649,8 +649,17 @@ function runtimeActionEvidenceText(payload: Record<string, unknown>): string | n
       return fullEvidenceValue(operationProjection.canonicalResult)
     }
   }
-  return fullEvidenceValue(payload.output)
-    ?? fullEvidenceValue(payload.input)
+  const output = fullEvidenceValue(payload.output)
+  const command = runtimeActionShellCommand(payload)
+  const commandDetail = command ? shellCommandDetailText(command) : null
+  if (commandDetail) return shellCommandDetail(commandDetail, output)
+  return output ?? fullEvidenceValue(payload.input)
+}
+
+function runtimeActionShellCommand(payload: Record<string, unknown>): string | null {
+  const kind = stringField(payload, 'kind')?.toLocaleLowerCase()
+  if (!kind || !['execute', 'command', 'terminal', 'shell'].includes(kind)) return null
+  return publicShellCommand(payload)
 }
 
 export function executionEvidenceResultText(
@@ -661,9 +670,9 @@ export function executionEvidenceResultText(
   if (eventType === 'activity.started' || eventType === 'activity.completed') {
     const item = asRecord(payload.item)
     const command = stringField(item, 'command')
-    const commandDetail = command ? codexShellCommandDetailText(command) : null
+    const commandDetail = command ? shellCommandDetailText(command) : null
     const output = fullEvidenceValue(item.aggregatedOutput ?? item.output)
-    if (commandDetail) return codexCommandDetail(commandDetail, output)
+    if (commandDetail) return shellCommandDetail(commandDetail, output)
     return output
       ?? fullEvidenceValue(item.changes)
       ?? runtimeToolDetail(item, stringField(item, 'type') ?? 'activity')
@@ -733,9 +742,9 @@ export function executionActivityTitle(
       if (presentationHint && codexStructuredCommandPresentation(payload)) {
         return presentationHint
       }
-      const commandPreview = command ? codexShellCommandPreview(command) : null
-      if (commandPreview) return commandPreview
     }
+    const commandPreview = command ? shellCommandPreview(command) : null
+    if (commandPreview) return commandPreview
     if (presentationHint && !genericShellTitle(presentationHint)) {
       return presentationHint
     }
@@ -813,19 +822,19 @@ type ShellPreviewToken = {
   operator: boolean
 }
 
-function codexShellCommandPreview(command: string): string | null {
-  return normalizeCodexShellCommand(command, true)
+function shellCommandPreview(command: string): string | null {
+  return normalizePublicShellCommand(command, true)
 }
 
-function codexShellCommandDetailText(command: string): string | null {
-  return normalizeCodexShellCommand(command, false)
+function shellCommandDetailText(command: string): string | null {
+  return normalizePublicShellCommand(command, false)
 }
 
-function normalizeCodexShellCommand(
+function normalizePublicShellCommand(
   command: string,
   inlineNodeHeredoc: boolean
 ): string | null {
-  const unwrapped = unwrapCodexShellCommand(stripAnsi(command).trim())
+  const unwrapped = unwrapShellCommand(stripAnsi(command).trim())
   if (!unwrapped) return null
   const presentable = inlineNodeHeredoc ? unwrapNodeHeredoc(unwrapped) : unwrapped
   const tokens = tokenizeShellPreview(presentable)
@@ -841,7 +850,7 @@ function normalizeCodexShellCommand(
   return redactInlineSensitiveAssignments(normalized)
 }
 
-function unwrapCodexShellCommand(command: string): string {
+function unwrapShellCommand(command: string): string {
   let current = command.trim()
   for (let depth = 0; depth < 3; depth += 1) {
     const tokens = tokenizeShellPreview(current)
@@ -1084,7 +1093,7 @@ function redactInlineSensitiveAssignments(command: string): string {
   )
 }
 
-function codexCommandDetail(command: string, output: string | null): string {
+function shellCommandDetail(command: string, output: string | null): string {
   const sections = [`命令\n${command}`]
   if (output !== null && output.length > 0) sections.push(`输出\n${stripAnsi(output)}`)
   return sections.join('\n\n')

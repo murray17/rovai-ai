@@ -4,7 +4,7 @@ contract: diagnostics-center
 version: 1
 authority: diagnostics-read-repair-and-export
 status: accepted
-last_updated: 2026-08-18
+last_updated: 2026-08-21
 ---
 
 # Diagnostics Center v1
@@ -45,6 +45,9 @@ interface DiagnosticCheck {
 固定机器检查范围为 Rust Core、应用数据目录、Git、SQLite `PRAGMA quick_check`、Skill 投影、MCP
 配置和 Product Runtime Catalog 中当前宿主平台已 `qualified` 的 Runtime。Runtime 结果附稳定
 `subjectId = AdapterKind`；
+Git 检查必须先从 Core 的 `RuntimeSearchEnvironment` 按顺序解析可执行文件，再把绝对路径交给
+Managed Process 执行 `--version`；不得把裸 `git` 相对名交给要求绝对 application 的进程边界。
+搜索环境中没有可执行文件时才返回 `attention / git_not_available`。
 未被未移除队员选择的 Runtime 即使未安装也返回 `ok / runtime_not_in_use`。已被选择的 Runtime：
 
 - 当前可用为 `ok`；
@@ -64,7 +67,7 @@ dirty 状态；不得 resolve、canonicalize、stat 或枚举任何历史 Projec
 
 | 检查结果 | 唯一允许的下一步 |
 | --- | --- |
-| Skill `attention` | 用户点击后调用 `skills.reconcile`，完成后重读 `diagnostics.check` |
+| Skill `attention` | 用户点击后调用 `skills.reconcile`，完成后重读 `diagnostics.check`；存在 `broken_or_unavailable_symlink` 时动作明确显示“清理旧链接并重新同步” |
 | MCP 权限过宽 | 用户点击后调用 `mcp.config.repairPermissions`，完成后重读 |
 | MCP malformed / 非普通文件 | 前往 MCP 设置；不得调用修复权限或覆盖文件 |
 | Runtime `attention` | 前往对应 Agent 运行时设置 |
@@ -73,6 +76,12 @@ dirty 状态；不得 resolve、canonicalize、stat 或枚举任何历史 Projec
 
 任何单项操作只有在复检返回同一 `id` 且 `status = ok` 后才能显示 Success。复检失败保留最近成功
 报告并进入 Recovery；没有批量修复 Method 或 UI。
+
+`skills.reconcile` 的旧链接修复是用户显式、窄范围的兼容退役：只删除 Observation 已登记为同一
+`entry_path`、自身仍为 symlink、目标确实不存在，且目标严格匹配
+`$HOME/.lumen/skills/revisions/<UUID>/<UUID>` 的入口；随后按当前 Library desired state 重新投影。
+自动 AgentRun preflight、AgentRun terminal reconcile 与 Project cleanup 不启用该策略。普通文件、目录、
+可解析外部链接、其他位置的断链以及未被 Observation 证明的入口全部保持不动并继续报告。
 
 ## 3. `diagnostics.export` / v5
 
