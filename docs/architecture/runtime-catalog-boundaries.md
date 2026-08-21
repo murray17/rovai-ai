@@ -14,7 +14,7 @@ last_updated: 2026-08-21
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v16](../contracts/runtime-launch-and-verification-v16.md)。实测版本和能力只由
+[Runtime Launch and Verification v17](../contracts/runtime-launch-and-verification-v17.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -59,10 +59,16 @@ continuation、Built-in Tool、Approval、cancel、terminal、process cleanup �
 “可用”主状态，但只表示 executable 已通过轻度启动验证、可选择和尝试运行。认证、协议、模型、Session 与
 capability 仍要求用户显式检查或首次真实 AgentRun 的深检。
 
-发现结束、页面进入和成员选择不排队深检；模型 Picker 按 60 秒/24 小时策略请求刷新。fingerprint 变化只替换静态快照并
-使旧 Ready 失效。Runtime Check Manager 以内部 attempt identity、总 deadline、每 Runtime 单飞和全局并发二
-统一收口 success、failure、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
+发现结束、页面进入和成员选择不排队深检；模型 Picker 按 60 秒/24 小时策略请求刷新。fingerprint 变化只替换
+当前静态快照并立即使旧 Ready 失效；旧 capabilities、认证、动态 permission 与 Session compatibility 不迁移。
+Runtime Check Manager 以内部 attempt identity、总 deadline、每 Runtime 单飞和全局并发二统一收口 success、
+stable failure、superseded、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
 和整进程树 cleanup。
+
+每轮完整 Deep Probe 前后复核同一 executable 的轻量 file identity；开始可读而结束变化或无法复核时，无论
+Probe 成功、直接错误还是 cleanup timeout，本轮都被 Runtime 更新 supersede。首次发生时在原 attempt/deadline
+内重新解析 path、canonicalize、计算当前 SHA 并最多重试一次；第二次仍变化则 deferred，不提交 snapshot、
+failure、diagnostic，不唤醒等待执行，也不自动扩展 deadline 或继续循环。
 
 ### Machine Ready 与 Adapter 行为证据
 
@@ -93,15 +99,21 @@ catalog。Rovai 只有在唯一内容的项目 Skill 同时通过新 Session adv
 ## 模型目录缓存与执行事实
 
 模型目录是 Product Runtime Availability snapshot 的一部分，但其配置体验与执行事实分离。只有 deep probe
-形成的 `ready` 成功 snapshot 才是 catalog success；`light_ready`、`installed_unverified`、failed attempt
-或 synthetic runtime-default descriptor 不能冒充动态目录。Core 从成功时间统一投影 `fresh`（60 秒内）、
+形成的 `ready` 成功 snapshot 才能创建或替换 catalog success；`light_ready`、`installed_unverified`、failed
+attempt 或 synthetic runtime-default descriptor 不能自行制造动态目录。Core 从成功时间统一投影 `fresh`（60 秒内）、
 `stale`（60 秒至 24 小时）、`expired`（24 小时及以上）、`unavailable` 与 `invalidated`，Renderer 不自行计算
 TTL。
 
+当前 executable fingerprint 改变时，旧 Deep Probe 不再构成当前 Runtime Ready evidence。发现事务可以只保留
+旧成功 snapshot 的 models 与原 `lastSuccessfulProbeAt` 作为 stale LKG；即使原成功不足 60 秒也不能投影 fresh，
+24 小时上限继续从原成功时间计算且不得刷新。LKG 只服务模型下拉，不证明新 binary 支持相同模型，不继承
+capability/auth/permission/session evidence，也不能绕过当前 fingerprint 的 Dispatch Preflight。
+
 切换队员 Runtime 只读取 Installation，不启动进程。打开模型 Picker 才进入 `runtime.modelCatalog.open` seam：
 fresh 直接返回，stale 立即服务 last-known-good 并由 Check Manager 后台单飞刷新，其他状态等待一次用户动作
-授权的 Availability Check。刷新失败只追加 failed Probe Attempt，保留成功 snapshot。只有当前 Installation
-canonical path 自身的确定 fingerprint/identity 变化才可使目录立即失效；其他搜索候选的失败是
+授权的 Availability Check。刷新失败只追加 failed Probe Attempt，保留成功 snapshot。Superseded 刷新不追加
+attempt，等待式 Picker 返回 `deferred`；当前 fingerprint 尚未 Ready 时，未过期 LKG 继续以 stale 服务。只有
+当前 Installation canonical path 自身的确定 fingerprint/identity 变化才可撤销当前 Ready；其他搜索候选的失败是
 candidate-local transient attempt，不得修改当前 snapshot 的 `stale_at`。备用候选只有完整 deep probe 成功并
 即将正式采用时，才能替换 Installation 并推进 generation。确定的安装或 capability identity 变化同样立即
 失效。account/provider 变化只有 Adapter 提供稳定、非敏感 identity
@@ -131,7 +143,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v16](../contracts/runtime-launch-and-verification-v16.md)。
+[Runtime Launch and Verification v17](../contracts/runtime-launch-and-verification-v17.md)。
 
 ## TRAE CLI CN 当前边界
 

@@ -16,7 +16,7 @@ last_updated: 2026-08-21
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v16.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v17.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
 

@@ -646,7 +646,7 @@ function missingModelLabel(
   return `尚未核对 · ${modelId}`
 }
 
-function modelCatalogStatusCopy(
+export function modelCatalogStatusCopy(
   cache: RuntimeModelCatalogCache,
   state: {
     loading: boolean
@@ -663,6 +663,11 @@ function modelCatalogStatusCopy(
   }
   if (state.refreshStatus === 'scheduled' || state.refreshStatus === 'joined') {
     return '显示上次成功结果，正在后台刷新'
+  }
+  if (state.refreshStatus === 'deferred') {
+    return state.servingCachedModels
+      ? '运行环境正在更新，继续显示上次成功结果'
+      : '运行环境正在更新，稍后重新获取'
   }
   switch (cache.status) {
     case 'fresh': return '模型目录刚刚核对'
