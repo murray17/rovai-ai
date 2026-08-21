@@ -11,7 +11,8 @@ last_updated: 2026-08-21
 
 # Rovai-ai v1.21：User Automation 与 Runtime Diagnostic Trial
 
-> 当前状态：设计与实现已完成。`rovai app` 是随 Desktop 安装、供普通用户在终端使用的正式本机自动化入口，
+> 当前状态：设计、实现、推送、macOS arm64 打包、隔离成品验收与本机安装均已完成。`rovai app` 是随
+> Desktop 安装、供普通用户在终端使用的正式本机自动化入口，
 > 不是调试后门；Runtime Diagnostic Trial V1 是 CLI-owned 的诊断闭环，不构成 Benchmark 或正式资格。
 >
 > 前置版本：[v1.20 会话附件系统打开](../v1.20/README.md)已按完成事实冻结为 historical。
@@ -52,8 +53,12 @@ Agent result projection 或模型输入字节。新增 Core method 是 Desktop �
 - Renderer 只增加 Main-owned Camp open navigation hook，复用既有 Camp activation，没有视觉系统或新 surface；
 - TypeScript、71 个前端测试文件/483 项 Vitest、189 项协议测试、18 项 CLI、269 项 slow suite、严格 Clippy、
   Desktop production build 与文档门禁已通过；Rust PR suite 的功能无关唯一失败是 v1.20 已记录的 Runtime
-  compatibility register 摘要 digest 基线失配。macOS 打包和隔离成品验收记录在
-  [实施计划](implementation-plan.md)。
+  compatibility register 摘要 digest 基线失配；
+- 提交 `d87eeee4` 的 macOS arm64 App 已通过深度验签，Main/Core/CLI 均为 arm64，包内 Core/CLI UUID 分别为
+  `759104C5-4CAA-301C-A8D3-2B8D6F12EEAA` 与 `9504A773-419B-38EB-A0C8-C32881F04ECB`；
+- 全新隔离 `userData` 已验证 Automation status、instance credential、`0700/0600/0600` 权限与受控关闭清理；
+  同一成品已非终止安装到 `/Applications/Rovai AI.app`，旧包保留为可恢复备份，用户级 PATH 已提供
+  `~/.local/bin/rovai`。
 
 ## 明确不做
 

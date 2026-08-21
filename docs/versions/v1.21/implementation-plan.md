@@ -45,9 +45,12 @@ last_updated: 2026-08-21
 - [x] 全量前端、Rust fmt/Clippy、文档门禁与 Desktop production build；Rust PR suite 功能相关范围、18 项 CLI
   与 269 项 slow suite 通过，lib 296/297，唯一失败为 v1.20 已记录的 Runtime compatibility register 摘要
   digest 基线失配；
-- [ ] macOS arm64 package 深度验签、Mach-O/Sidecar UUID 校验；
-- [ ] 全新隔离 `userData` 验证 packaged User Automation status 与 App-not-running 行为；
-- [ ] 非中断方式安装到 `/Applications` 并验证包内/终端 CLI。
+- [x] 提交 `d87eeee4` 的 macOS arm64 package 通过深度验签、三枚 Mach-O arm64 与 Core/CLI Sidecar UUID 校验；
+- [x] 全新隔离 `userData` 验证 packaged User Automation status、instance credential、私有权限、CLI help 与
+  受控关闭后的 socket/context 清理；App-not-running 负向行为已由 CLI 定向验证；
+- [x] 以同文件系统暂存和原子改名非中断安装到 `/Applications/Rovai AI.app`，保留
+  `/Applications/Rovai AI.backup-before-d87eeee4.app`；安装前日常进程仍存活且未热升级，用户退出后从规范路径
+  重启即可生效；`~/.local/bin/rovai` 已指向安装包内 CLI 并通过 version/help 验证。
 
 ## References
 
