@@ -4147,11 +4147,11 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "#,
         [camp_id],
     )?;
-    transaction.execute("DELETE FROM message_delivery WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         r#"
         UPDATE agent_run
-        SET trigger_conversation_message_id = NULL,
+        SET trigger_message_delivery_id = NULL,
+            trigger_conversation_message_id = NULL,
             trigger_camp_message_id = NULL,
             input_ready_at = NULL,
             final_conversation_message_id = NULL,
@@ -4160,6 +4160,7 @@ pub(crate) fn delete_camp_aggregate(transaction: &Connection, camp_id: &str) -> 
         "#,
         [camp_id],
     )?;
+    transaction.execute("DELETE FROM message_delivery WHERE camp_id = ?1", [camp_id])?;
     transaction.execute(
         "DELETE FROM conversation_message WHERE conversation_id IN (SELECT id FROM conversation WHERE camp_id = ?1)",
         [camp_id],
@@ -6002,6 +6003,42 @@ mod slow_tests {
                 [agent_run_id],
             )
             .unwrap();
+        let delivery_id = "delivery-before-delete";
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO message_delivery(
+                    id, camp_id, camp_turn_id, message_id,
+                    recipient_agent_id, recipient_canonical_position,
+                    recipient_digest, message_body_digest,
+                    source_agent_run_id, edge_kind,
+                    target_parent_agent_run_id, a2a_root_agent_run_id, a2a_depth,
+                    ancestor_agent_ids_json, recipient_presentation_snapshot_json,
+                    frozen_snapshot_json, camp_message_boundary_sequence,
+                    queue_sequence, status, dispatch_phase, dispatch_attempt_count,
+                    created_at, updated_at, ended_at
+                )
+                SELECT
+                    ?2, ?3, agent_run.camp_turn_id, agent_run.trigger_camp_message_id,
+                    'agent_2', 0, 'sha256:recipient', 'sha256:message',
+                    agent_run.id, 'forward', agent_run.id, agent_run.id, 1,
+                    '[]', '{}', '{}', 0,
+                    1, 'settled', 'terminal', 1,
+                    datetime('now'), datetime('now'), datetime('now')
+                FROM agent_run
+                WHERE agent_run.id = ?1
+                "#,
+                rusqlite::params![agent_run_id, delivery_id, camp_id],
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE agent_run SET trigger_message_delivery_id = ?2 WHERE id = ?1",
+                rusqlite::params![agent_run_id, delivery_id],
+            )
+            .unwrap();
         service
             .create_task(
                 &mut database,
@@ -6040,6 +6077,7 @@ mod slow_tests {
         assert_eq!(row_count(&database, "camp_member"), 0);
         assert_eq!(row_count(&database, "conversation"), 0);
         assert_eq!(row_count(&database, "camp_message"), 0);
+        assert_eq!(row_count(&database, "message_delivery"), 0);
         assert_eq!(row_count(&database, "task"), 0);
         let foreign_key_violations: i64 = database
             .connection()
