@@ -186,29 +186,20 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 
 ### 1. 安装 Rovai AI
 
-#### 从 GitHub Releases 安装
+#### 桌面安装包（推荐）
 
-请只从 Rovai AI 的官方
-[GitHub Releases](https://github.com/murray17/rovai-ai/releases)
-下载安装包。
-
-Releases 中实际出现的安装包，才代表该平台已经完成当前版本的发布验收。
-如果没有看到对应平台的文件，就表示该版本尚未开放下载。
+请从 [GitHub Releases](https://github.com/murray17/rovai-ai/releases)
+下载与你的设备匹配的安装包。
 
 | 平台 | 在 Release 中选择 | 安装方式 |
 |---|---|---|
 | **macOS · Apple Silicon** | 文件名标记为 `arm64` 的 `.dmg` | 打开 DMG，将 Rovai AI 拖入 `Applications`，再从应用程序目录启动 |
 | **macOS · Intel** | 文件名标记为 `x64` 的 `.dmg` | 打开 DMG，将 Rovai AI 拖入 `Applications`，再从应用程序目录启动 |
-| **Windows · x64** | Release 中明确标记为 Windows x64 的 `.exe` 安装包 | 运行安装程序并按照向导完成安装；若该版本没有 Windows 资产，则表示尚未开放 |
+| **Windows · x64** | Release 中明确标记为 Windows x64 的 `.exe` 安装包 | 运行安装程序并按照向导完成安装 |
 
-首次启动前，请确认安装包来自官方 Release。若系统显示安全提示，请按照
-对应 Release 中的签名、公证与首次启动说明操作，不要全局关闭系统安全机制。
+#### 从源码运行（开发者）
 
-#### 从源码运行
-
-源码安装、环境准备、隔离数据目录与构建步骤见：
-
-**[开发者指南](docs/development/README.md)**
+源码安装、环境准备、隔离数据目录与构建步骤见：[**开发者指南**](docs/development/README.md)
 
 最短开发入口：
 
@@ -219,8 +210,6 @@ cd rovai-ai
 pnpm install --frozen-lockfile
 pnpm dev
 ```
-
-不要直接运行 `electron-vite dev` 绕过 Rovai 的开发数据隔离和启动检查。
 
 ---
 
