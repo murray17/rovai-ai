@@ -1839,7 +1839,7 @@ fn trae_permission_options(session_result: &Value) -> Result<Vec<PermissionOptio
     Ok(vec![PermissionOptionDescriptor {
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
-        description: "TRAE CLI CN's native permission mode reported by the current ACP Session. Rovai does not enable --yolo by default.".to_string(),
+        description: "TRAE CLI's native permission mode reported by the current ACP Session. Rovai does not enable --yolo by default.".to_string(),
         value_type: "enum".to_string(),
         choices,
         recommended_value: json!("default"),
@@ -1856,7 +1856,7 @@ pub(crate) fn trae_static_permission_options() -> Vec<PermissionOptionDescriptor
         key: "permission_mode".to_string(),
         label: "permission-mode".to_string(),
         description:
-            "TRAE CLI CN 的轻检启动权限模式；完整模式目录会在显式检查或首次真实任务建立 ACP Session 后刷新。"
+            "TRAE CLI 的轻检启动权限模式；完整模式目录会在显式检查或首次真实任务建立 ACP Session 后刷新。"
                 .to_string(),
         value_type: "enum".to_string(),
         choices: vec![

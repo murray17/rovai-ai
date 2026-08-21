@@ -7439,7 +7439,7 @@ function runtimeAdapterLabel(kind: string): string {
     'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
-    'trae-cn-cli': 'TRAE CLI（中国企业版）',
+    'trae-cn-cli': 'TRAE CLI',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
 }

@@ -2675,7 +2675,7 @@ fn configure_runtime_command(
             let configured = values
                 .get("permission_mode")
                 .and_then(Value::as_str)
-                .context("TRAE CLI CN Runtime requires permission_mode")?;
+                .context("TRAE CLI requires permission_mode")?;
             health::configure_acp_command(command, runtime.adapter_kind, false);
             let legacy_read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
                 && workspace.access == "read_only";

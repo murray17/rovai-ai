@@ -949,7 +949,7 @@ function runtimeLabel(kind) {
     'qoder-cli': 'Qoder',
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
-    'trae-cn-cli': 'TRAE CLI CN'
+    'trae-cn-cli': 'TRAE CLI'
   })[kind] ?? kind
 }
 

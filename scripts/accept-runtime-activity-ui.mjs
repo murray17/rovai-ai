@@ -80,7 +80,7 @@ const runtimes = [
   }),
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
-  runtime('trae', 'trae-cn-cli', 'TRAE CLI（中国企业版）', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
+  runtime('trae', 'trae-cn-cli', 'TRAE CLI', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
   runtime('claude', 'claude-code-cli', 'Claude Code', claudeExpectedCommand, {
     protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {

@@ -1432,7 +1432,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::QoderCli => "Qoder CLI",
         AdapterKind::CodebuddyCli => "CodeBuddy CLI",
         AdapterKind::QwenCode => "Qwen Code",
-        AdapterKind::TraeCnCli => "TRAE CLI（中国企业版）",
+        AdapterKind::TraeCnCli => "TRAE CLI",
         AdapterKind::AntigravityApp => "Antigravity",
     }
 }
