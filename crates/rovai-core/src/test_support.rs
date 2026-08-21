@@ -153,8 +153,8 @@ fn clone_template_to(
     // Camp Attachment View receipts bind the physical Runtime Files Root identity.
     // Materialize that root before opening the cloned connection so tests never
     // freeze the synthetic "unmaterialized" identity and then change it later.
-    std::fs::create_dir_all(directory.join("runtime-files"))
-        .expect("test Runtime Files Root should exist before database open");
+    crate::platform::private_storage::prepare_private_directory(&directory.join("runtime-files"))
+        .expect("test Runtime Files Root should be private before database open");
     std::fs::copy(&template.database_path, directory.join("rovai.sqlite"))
         .expect("test database template should copy");
     Database::open_verified_test_clone(directory, mode)

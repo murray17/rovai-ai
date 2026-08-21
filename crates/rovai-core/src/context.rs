@@ -9490,13 +9490,13 @@ mod slow_tests {
             std::fs::read_to_string(&stable_path).unwrap(),
             private_attachment_body
         );
-        let attachment_content_digest: String = fixture
+        let (attachment_id, attachment_content_digest): (String, String) = fixture
             .database
             .connection()
             .query_row(
-                "SELECT content_digest FROM message_attachment WHERE camp_message_id = ?1",
+                "SELECT id, content_digest FROM message_attachment WHERE camp_message_id = ?1",
                 [&camp_message_id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
         assert!(!first.rendered_payload.contains(&attachment_content_digest));
@@ -9509,10 +9509,15 @@ mod slow_tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(attachment_refs_json.contains(&attachment_content_digest));
-        assert!(attachment_refs_json.contains(&stable_path));
-        assert!(!attachment_refs_json.contains(&authority_path));
-        assert!(!attachment_refs_json.contains(&camp_message_id));
+        let attachment_refs: Value = serde_json::from_str(&attachment_refs_json).unwrap();
+        assert_eq!(
+            attachment_refs,
+            json!([{
+                "attachmentId": attachment_id,
+                "path": stable_path,
+                "contentDigest": attachment_content_digest,
+            }])
+        );
         assert!(
             std::fs::metadata(&authority_path)
                 .unwrap()
@@ -9608,6 +9613,7 @@ mod slow_tests {
             std::os::unix::fs::PermissionsExt::from_mode(0o700),
         )
         .unwrap();
+        drop(view_store);
         fixture.cleanup();
     }
 
@@ -13384,7 +13390,7 @@ mod slow_tests {
         .unwrap();
         assert_eq!(omitted, None);
         assert!(omission_entries.is_empty());
-        std::fs::remove_dir_all(fixture.directory).unwrap();
+        fixture.cleanup();
     }
 
     #[test]

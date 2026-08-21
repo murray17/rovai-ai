@@ -4,6 +4,9 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 
+#[cfg(windows)]
+use std::fs::OpenOptions;
+
 use anyhow::{Context, Result};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
@@ -358,7 +361,8 @@ impl CampAttachmentViewStore {
         }
         #[cfg(windows)]
         {
-            if root != canonical_data_dir.join("runtime-files") {
+            let expected = canonical_data_dir.join("runtime-files");
+            if normalize_existing_or_lexical(root)? != normalize_existing_or_lexical(&expected)? {
                 anyhow::bail!(
                     "runtime_camp_files_root_invalid: Windows root must be data_dir\\runtime-files"
                 );
@@ -3313,9 +3317,7 @@ pub fn resolve_published_attachment_path(
         )
         .optional()?
         .context("camp_attachment_view_not_ready: Published Attachment entry is unavailable")?;
-    validate_root_relative_path(Path::new(&relative))?;
-    Ok(runtime_files_root_from_connection(connection)?
-        .join(relative)
+    Ok(resolve_root_relative_runtime_path(connection, &relative)?
         .to_string_lossy()
         .into_owned())
 }
@@ -3337,8 +3339,7 @@ pub fn resolve_published_attachment_root(connection: &Connection, camp_id: &str)
     if relative != camp_attachment_root_relative(camp_id) {
         anyhow::bail!("camp_attachment_view_not_ready: semantic root path is inconsistent");
     }
-    Ok(runtime_files_root_from_connection(connection)?
-        .join(relative)
+    Ok(resolve_root_relative_runtime_path(connection, &relative)?
         .to_string_lossy()
         .into_owned())
 }
@@ -3384,8 +3385,7 @@ pub fn runtime_attachment_auth_receipt(
     let auth = RuntimeAttachmentAuthReceiptV1 {
         schema_version: RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION,
         camp_id: camp_id.to_string(),
-        published_attachment_root: runtime_files_root_from_connection(connection)?
-            .join(&current.4)
+        published_attachment_root: resolve_root_relative_runtime_path(connection, &current.4)?
             .to_string_lossy()
             .into_owned(),
         root_identity_digest: current.2,
@@ -4710,6 +4710,19 @@ fn runtime_files_root_from_connection(connection: &Connection) -> Result<PathBuf
         .context("runtime_camp_files_root_invalid: connection has no admitted Runtime Files Root")
 }
 
+fn resolve_root_relative_runtime_path(connection: &Connection, relative: &str) -> Result<PathBuf> {
+    let relative = Path::new(relative);
+    validate_root_relative_path(relative)?;
+    let mut resolved = runtime_files_root_from_connection(connection)?;
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            unreachable!("validated Runtime Files paths contain only normal components");
+        };
+        resolved.push(name);
+    }
+    Ok(resolved)
+}
+
 fn camp_attachment_root_relative(camp_id: &str) -> String {
     format!("camps/{camp_id}/attachments")
 }
@@ -5140,14 +5153,22 @@ fn sync_tree(path: &Path) -> Result<()> {
         }
         sync_directory(path)
     } else if metadata.is_file() {
-        File::open(path)?.sync_all().map_err(Into::into)
+        #[cfg(windows)]
+        let file = OpenOptions::new().read(true).write(true).open(path)?;
+        #[cfg(not(windows))]
+        let file = File::open(path)?;
+        file.sync_all().map_err(Into::into)
     } else {
         anyhow::bail!("cannot sync an unsupported Runtime View node");
     }
 }
 
 fn sync_directory(path: &Path) -> Result<()> {
-    File::open(path)?.sync_all().map_err(Into::into)
+    #[cfg(windows)]
+    let _ = path;
+    #[cfg(not(windows))]
+    File::open(path)?.sync_all()?;
+    Ok(())
 }
 
 fn set_directory_mode(path: &Path, mode: u32) -> Result<()> {

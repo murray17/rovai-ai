@@ -15,6 +15,7 @@ import { release, tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { inspectPortableExecutable } from './lib/windows-pe.mjs'
+import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 
 if (process.platform !== 'win32' || process.arch !== 'x64') {
   throw new Error('Windows release verification requires a native Windows x64 host')
@@ -155,7 +156,7 @@ async function verifyBinary(label, path) {
 
 function startCore(executable, dataDirectory) {
   const child = spawn(executable, [
-    '--data-dir', dataDirectory,
+    ...coreDataDirectoryArguments(dataDirectory),
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: appDirectory,
@@ -213,7 +214,7 @@ try {
     cli: await verifyBinary('rovai', cliExecutable)
   }
   const cliVersion = run(cliExecutable, ['--version'])
-  if (!cliVersion.includes(`rovai ${packageMetadata.version} contract-v17 ipc-v2`)) {
+  if (!cliVersion.includes(`rovai ${packageMetadata.version} contract-v19 ipc-v2`)) {
     throw new Error(`unexpected packaged CLI version: ${cliVersion}`)
   }
   report.push(`CLI: ${cliVersion}`)
@@ -226,7 +227,7 @@ try {
   const health = await core.request('health.check')
   if (health?.core?.ok !== true
       || health.core.version !== packageMetadata.version
-      || health.core.builtinToolContractVersion !== 17
+      || health.core.builtinToolContractVersion !== 19
       || health.core.builtinToolIpcProtocolVersion !== 2) {
     throw new Error(`packaged Core health is incompatible: ${JSON.stringify(health?.core)}`)
   }
@@ -268,7 +269,7 @@ try {
     packagedCoreSmoke: {
       isolatedDataRoot: true,
       healthCheck: true,
-      builtinToolContractVersion: 17,
+      builtinToolContractVersion: 19,
       builtinToolIpcProtocolVersion: 2
     }
   }

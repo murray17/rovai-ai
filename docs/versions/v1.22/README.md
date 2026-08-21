@@ -4,7 +4,7 @@ version: v1.22
 lifecycle: current
 authority: version-scope-and-status
 design_status: accepted
-implementation_status: in_progress
+implementation_status: implemented
 model_context_change: false
 last_updated: 2026-08-21
 ---
@@ -12,7 +12,7 @@ last_updated: 2026-08-21
 # Rovai-ai v1.22：Windows x64 本机实现与 Runtime 复核闭环
 
 > 当前状态：v1.05 与 v1.15 冻结的 Windows 边界已经迁入包含 v1.21 的最新 `main`，Windows 10 22H2 x64
-> 本机代码、打包、安装生命周期、计划关闭和十 Runtime 开发态矩阵已完成合并前验证；正在最新代码上执行最终
+> 本机代码、打包、安装生命周期、计划关闭和十 Runtime 开发态矩阵已在包含 v1.21 的最新 `main` 上完成最终
 > 全量复跑。正式 packaged Release 继续阻断所有缺少 immutable evidence 的 Windows Runtime，Windows 11、
 > Authenticode/RFC 3161 与 SmartScreen 尚未完成，因此不得宣称 Windows 已发布。
 >
@@ -35,6 +35,7 @@ planned shutdown 和十个 Runtime 的真实本机验收；开发态本机成功
 - 安装并探测十个 Product Runtime，完成 ACP、Approval、Built-in CLI、Missing-Send、MCP Projection 与原生 Skill
   的适用矩阵；DeepSeek 路径固定使用 `deepseek-v4-flash`，不使用 DK V4 Pro；
 - 修正 CodeBuddy `2.137.1` 官方 API-key ACP 启动、显式 custom model 与 `_codebuddy.ai/command` Idle metadata；
+- 修正 Kiro `2.19.0` 的精确私有 Idle lifecycle notification 与 Windows Skill 共享投影转直接副本的恢复 lineage；
 - 在真实 packaged Desktop 中完成 Windows 正常退出、Job descendant cleanup、durable shutdown fence 与重启恢复。
 
 ## 数据与 Context 兼容性

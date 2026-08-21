@@ -154,7 +154,9 @@ describe('User Automation transport', () => {
     )).rejects.toBeInstanceOf(UserAutomationError)
   })
 
-  it('binds each socket request to the published App instance and removes discovery on stop', async () => {
+  it.runIf(process.platform !== 'win32')(
+    'binds each socket request to the published App instance and removes discovery on stop',
+    async () => {
     const root = await mkdtemp(join(tmpdir(), 'rovai-automation-'))
     const core = {
       async request<T>(method: CoreMethod): Promise<T> {
@@ -207,5 +209,27 @@ describe('User Automation transport', () => {
       await expect(readFile(server.contextPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
       await rm(root, { recursive: true, force: true })
     }
-  })
+    }
+  )
+
+  it.runIf(process.platform === 'win32')(
+    'fails closed before publishing discovery when Unix-domain automation is unavailable',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'rovai-automation-windows-'))
+      const server = new UserAutomationServer(root, {
+        core: { request: async <T>() => ({} as T) },
+        openCamp: async (campId) => ({ campId, opened: true }),
+        appVersion: 'app-test'
+      })
+      try {
+        await expect(server.start()).rejects.toMatchObject({
+          code: 'automation_platform_unsupported'
+        })
+        await expect(readFile(server.contextPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+      } finally {
+        await server.stop()
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  )
 })

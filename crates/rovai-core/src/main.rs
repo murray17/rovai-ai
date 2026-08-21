@@ -1050,13 +1050,13 @@ fn current_runtime_platform_admission(
 fn windows_runtime_qualification_allows(runtime_kind: AdapterKind) -> bool {
     #[cfg(all(debug_assertions, target_os = "windows"))]
     {
-        return std::env::var("ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER")
+        std::env::var("ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER")
             .ok()
             .is_some_and(|candidates| {
                 candidates
                     .split(',')
                     .any(|candidate| candidate.trim() == runtime_kind.as_str())
-            });
+            })
     }
 
     #[cfg(not(all(debug_assertions, target_os = "windows")))]

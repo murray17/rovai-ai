@@ -7,7 +7,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// the generation-fenced Attachment View fallback without claiming a new
 /// live-append Probe. Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:c60ef938c136cdc2da6f451c38eb975e2a5ed2ebae60901557fff52d0562f1c8";
+    "sha256:588c708175639299f30cdaed1f5b0540cc652d172053ef3833b6397f2f22941d";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]

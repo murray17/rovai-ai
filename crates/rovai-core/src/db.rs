@@ -21295,11 +21295,8 @@ mod tests {
         )
         .unwrap();
         #[cfg(windows)]
-        {
-            let mut permissions = fs::metadata(&authority_path).unwrap().permissions();
-            permissions.set_readonly(false);
-            fs::set_permissions(&authority_path, permissions).unwrap();
-        }
+        crate::platform::windows_file_tree::clear_read_only(std::path::Path::new(&authority_path))
+            .unwrap();
         fs::write(&authority_path, b"tampered authority bytes").unwrap();
 
         let error = database

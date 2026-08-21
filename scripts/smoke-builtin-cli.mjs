@@ -103,6 +103,8 @@ try {
     )
     const explicitModel = specification.adapterKind === 'codex-cli'
       ? process.env.ROVAI_BUILTIN_CLI_CODEX_MODEL?.trim()
+      : specification.adapterKind === 'opencode-cli'
+        ? process.env.ROVAI_BUILTIN_CLI_OPENCODE_MODEL?.trim()
       : specification.adapterKind === 'codebuddy-cli'
         ? process.env.ROVAI_BUILTIN_CLI_CODEBUDDY_MODEL?.trim()
         : null
@@ -159,6 +161,11 @@ try {
     marker: historyPublicA2aMarker,
     completionMarker: historySeedCompletionMarker
   })
+  await waitForHistoricalDeliveryTerminal(
+    core,
+    historyCampId,
+    historicalPublicA2a.deliveryId
+  )
 
   const historyAttachmentSourcePath = join(projectRoot, 'historical-attachment.txt')
   await writeFile(
@@ -417,7 +424,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 17,
+    contractVersion: 19,
     ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -462,9 +469,9 @@ function assertBuiltinCliCapability(label, installation, allowDeferred = false) 
     return
   }
   if (snapshot?.probeStatus !== 'ready'
-      || !snapshot.capabilities.includes('builtin_cli.transport.v17')
+      || !snapshot.capabilities.includes('builtin_cli.transport.v19')
       || !snapshot.models.length) {
-    throw new Error(`${label} is not ready for Built-in CLI v17: ${JSON.stringify(snapshot)}`)
+    throw new Error(`${label} is not ready for Built-in CLI v19: ${JSON.stringify(snapshot)}`)
   }
 }
 
@@ -627,13 +634,24 @@ async function createHistoricalAttachmentMessage(request, input) {
     draftRevision: saved.revision,
     execution: null
   })
-  const snapshot = await request('camps.snapshot', { campId: input.campId })
-  const message = snapshot.messages.find((candidate) =>
-    candidate.body === input.marker
-      && candidate.attachments?.some((candidateAttachment) => candidateAttachment.id === attachment.id)
-  )
-  const projectedAttachment = message?.attachments?.find((candidate) => candidate.id === attachment.id)
+  const deadline = Date.now() + 60_000
+  let message
+  let projectedAttachment
+  while (Date.now() < deadline) {
+    const snapshot = await request('camps.snapshot', { campId: input.campId })
+    message = snapshot.messages.find((candidate) =>
+      candidate.body === input.marker
+        && candidate.attachments?.some((candidateAttachment) => candidateAttachment.id === attachment.id)
+    )
+    projectedAttachment = message?.attachments?.find((candidate) => candidate.id === attachment.id)
+    if (projectedAttachment?.runtimeProjectionState === 'available') break
+    if (projectedAttachment?.runtimeProjectionState === 'failed') {
+      throw new Error(`Historical attachment Runtime projection failed: ${JSON.stringify(projectedAttachment)}`)
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100))
+  }
   if (!message
+      || projectedAttachment?.runtimeProjectionState !== 'available'
       || projectedAttachment?.kind !== 'file'
       || projectedAttachment.fileCount !== 1) {
     throw new Error(`Historical attachment message was not persisted with its public shape: ${JSON.stringify({
@@ -717,6 +735,47 @@ async function waitForRun(coreClient, campId, agentRunId, options) {
     await delay(400)
   }
   throw new Error(`Timed out waiting for AgentRun ${agentRunId}`)
+}
+
+async function waitForHistoricalDeliveryTerminal(coreClient, campId, deliveryId) {
+  const deadline = Date.now() + 480_000
+  let cancellationRequested = false
+  while (Date.now() < deadline) {
+    const snapshot = await coreClient.request('camps.snapshot', { campId })
+    const delivery = snapshot.messageDeliveries.find((candidate) => candidate.id === deliveryId)
+    const targetRun = delivery?.targetAgentRunId
+      ? snapshot.agentRuns.find((candidate) => candidate.id === delivery.targetAgentRunId)
+      : null
+    if (targetRun) {
+      if (targetRun.status === 'succeeded') return
+      if (targetRun.status === 'cancelled') return
+      if (['failed', 'interrupted'].includes(targetRun.status)) {
+        throw new Error(`Historical Public A2A target Run entered ${targetRun.status}: ${JSON.stringify(targetRun)}`)
+      }
+      // The historical fixture needs the committed Public A2A message and
+      // Delivery, not concurrent recipient work. Quiesce that exact target
+      // before publishing the attachment used by the cross-Camp read checks.
+      if (!cancellationRequested) {
+        const cancellation = await coreClient.request('agentRuns.cancel', {
+          commandId: crypto.randomUUID(),
+          command: {
+            campId,
+            agentRunId: targetRun.id,
+            expectedVersion: targetRun.version
+          }
+        })
+        if (cancellation.status === 'rejected') {
+          throw new Error(`Historical Public A2A target cancellation was rejected: ${JSON.stringify(cancellation)}`)
+        }
+        cancellationRequested = true
+      }
+    }
+    if (delivery && ['failed', 'cancelled'].includes(delivery.status)) {
+      throw new Error(`Historical Public A2A Delivery entered ${delivery.status}: ${JSON.stringify(delivery)}`)
+    }
+    await delay(400)
+  }
+  throw new Error(`Timed out waiting for historical Public A2A Delivery ${deliveryId}`)
 }
 
 async function waitForRecipientRun(coreClient, specification, recipientProfileId) {
@@ -1002,7 +1061,7 @@ function verificationScript(input) {
     action: 'add',
     scope: 'companion',
     kind: 'preference',
-    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v17 qualification.`,
+    body: `Remember that ${input.adapterKind} completed Built-in CLI transport v19 qualification.`,
     retrievalKeys: [`cli-${input.slug.slice(0, 18)}`]
   })
   const hearth = JSON.stringify({
@@ -1069,11 +1128,11 @@ assert_fix_input() {
 }
 
 STEP=version
-"$CLI" --version | grep -q 'contract-v17 ipc-v2'
+"$CLI" --version | grep -q 'contract-v19 ipc-v2'
 
 STEP=exact_help
 root_help="$("$CLI" --help)"
-printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run `rovai --help` to choose an operation, then run that operation's exact `--help`. Do not assume that a command family has its own help entry.")}
+printf '%s\n' "$root_help" | grep -Fq ${shellQuote("Run an Agent operation's exact `--help` for its closed inputs.")}
 send_help="$("$CLI" send --help)"
 printf '%s\n' "$send_help" | grep -Fq -- '--public-only'
 printf '%s\n' "$send_help" | grep -Fq -- '--to-principal'
@@ -1163,7 +1222,19 @@ cat > "$RUN_TMP/task-create.json" <<'ROVAI_JSON'
 ${taskCreate}
 ROVAI_JSON
 STEP=task_create
-task_create="$("$CLI" task create --input-file "$RUN_TMP/task-create.json")"
+task_create_status=1
+for task_create_attempt in 1 2 3; do
+  set +e
+  task_create="$("$CLI" task create --input-file "$RUN_TMP/task-create.json")"
+  task_create_status=$?
+  set -e
+  if [ "$task_create_status" -eq 0 ]; then
+    break
+  fi
+  printf '%s\n' "$task_create" > "$RUN_TMP/task-create-error-$task_create_attempt.json"
+  sleep 1
+done
+test "$task_create_status" -eq 0
 assert_success "$task_create" 'team.create_task'
 task_id="$(printf '%s\n' "$task_create" | "$JQ" -er '.taskId')"
 task_version="$(printf '%s\n' "$task_create" | "$JQ" -er '.version')"

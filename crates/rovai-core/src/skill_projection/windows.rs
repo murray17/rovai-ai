@@ -1990,6 +1990,69 @@ mod tests {
         }
 
         #[test]
+        fn shadowed_claude_projection_falls_back_to_direct_opencode_copy() {
+            let paths = TestPaths::new("rovai-windows-projection-opencode-fallback");
+            let mut database = crate::test_support::fresh_schema_database_fast_at(&paths.data);
+            let library = SkillLibraryService::new(paths.library.clone()).unwrap();
+            let name = "windows-opencode-fallback";
+            write_source(&paths.source, name, "managed bytes");
+            let imported = import_skill(&mut database, &library, &paths.source, name, None);
+            library
+                .set_group_assignments(
+                    &mut database,
+                    &user_envelope(SetSkillGroupAssignmentsCommand {
+                        skill_id: imported.id.clone(),
+                        expected_version: imported.version,
+                        group_keys: vec![
+                            SkillDeliveryGroupKey::ClaudeCompatible,
+                            SkillDeliveryGroupKey::Opencode,
+                        ],
+                    }),
+                )
+                .unwrap();
+            let required = [
+                SkillDeliveryGroupKey::ClaudeCompatible,
+                SkillDeliveryGroupKey::Opencode,
+            ];
+
+            let first = SkillProjectionReconciler
+                .reconcile_root(&mut database, &library, &paths.root, &required)
+                .unwrap();
+            assert!(first.observations.iter().any(|observation| {
+                observation.group_key == SkillDeliveryGroupKey::Opencode
+                    && observation.delivered_via_group_key
+                        == Some(SkillDeliveryGroupKey::ClaudeCompatible)
+            }));
+
+            let claude_entry = paths
+                .root
+                .join(SkillDeliveryGroupKey::ClaudeCompatible.relative_path())
+                .join(name);
+            fs::remove_dir_all(&claude_entry).unwrap();
+            fs::create_dir_all(&claude_entry).unwrap();
+            fs::write(claude_entry.join("SKILL.md"), "project-owned bytes").unwrap();
+
+            let second = SkillProjectionReconciler
+                .reconcile_root(&mut database, &library, &paths.root, &required)
+                .unwrap();
+            let direct_entry = paths
+                .root
+                .join(SkillDeliveryGroupKey::Opencode.relative_path())
+                .join(name);
+            assert!(direct_entry.is_dir());
+            assert!(second.observations.iter().any(|observation| {
+                observation.group_key == SkillDeliveryGroupKey::Opencode
+                    && observation.state == "ready"
+                    && observation.delivered_via_group_key == Some(SkillDeliveryGroupKey::Opencode)
+            }));
+            assert!(second.observations.iter().any(|observation| {
+                observation.group_key == SkillDeliveryGroupKey::ClaudeCompatible
+                    && observation.state == "shadowed"
+            }));
+            assert_no_operation_artifacts(&library, &paths.root);
+        }
+
+        #[test]
         fn windows_skill_projection_preserves_git_exclude_and_hides_managed_copy() {
             let paths = TestPaths::new("rovai-windows-projection-git");
             let initialized = std::process::Command::new("git")

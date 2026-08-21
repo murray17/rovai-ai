@@ -1243,12 +1243,12 @@ async fn run_acp_probe(
     }
     let mut command = runtime_command(path);
     configure_acp_command(&mut command, kind, false);
-    if kind == AdapterKind::CodebuddyCli {
-        if let Ok(model) = env::var("ROVAI_CODEBUDDY_MODEL") {
-            let model = model.trim();
-            if !model.is_empty() {
-                command.arg("--model").arg(model);
-            }
+    if kind == AdapterKind::CodebuddyCli
+        && let Ok(model) = env::var("ROVAI_CODEBUDDY_MODEL")
+    {
+        let model = model.trim();
+        if !model.is_empty() {
+            command.arg("--model").arg(model);
         }
     }
     if kind == AdapterKind::TraeCnCli {

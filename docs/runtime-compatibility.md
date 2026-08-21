@@ -129,7 +129,7 @@ digest-bound evidence 尚未形成，因此上表的 admission 与 evidence revi
 | AdapterKind | 本机版本 | 本轮认证/模型边界 |
 | --- | --- | --- |
 | `codex-cli` | `0.148.0` | 已登录账号；Runtime-native 模型目录 |
-| `opencode-cli` | `1.18.19` | 本机 Provider 配置；Runtime-native 模型目录 |
+| `opencode-cli` | `1.18.19` | 本机 DeepSeek Provider；`deepseek/deepseek-v4-flash` |
 | `copilot-cli` | `1.0.80` | 已登录 GitHub 账号；Runtime default |
 | `claude-code-cli` | `2.1.86` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash` |
 | `antigravity-app` | `1.1.17` | 已完成 AGY 账号授权；Runtime default |
@@ -139,12 +139,13 @@ digest-bound evidence 尚未形成，因此上表的 admission 与 evidence revi
 | `qwen-code` | `0.21.14` | DeepSeek API key；仅保留 `deepseek-v4-flash` Provider/model |
 | `trae-cn-cli` | `0.120.52` | OpenAI-compatible DeepSeek endpoint；`deepseek-v4-flash`，关闭 thinking |
 
-本机验证包含 Rust PR test profile、TypeScript/Vitest/Node tests、Windows x64 unpacked/NSIS 构建与 PE/manifest
-验证、clean install/start/upgrade/uninstall/data-preserve，以及十个 Runtime 的真实 ACP、Built-in CLI v19、
-Missing-Send Recovery、MCP Projection 与原生 Skill Projection 矩阵；TRAE 使用当前权威的 `.trae/skills`
-managed delivery。开发态 packaged Desktop 以 Claude `2.1.86` 完成真实 planned shutdown：
-Runtime 自然退出、7 个后代进程被 Job 回收、协议 v2 收敛、重启后 fenced Run 恢复为 cancelled，Release sidecar
-随后恢复并重新通过 verifier。
+本机验证包含 Rust PR test profile、Rust fmt/Clippy、TypeScript/Vitest/Node tests、Windows x64 unpacked/NSIS
+构建与 PE/manifest 验证、clean install/start/upgrade/uninstall/data-preserve，以及七个适用 Runtime 的真实 ACP/
+Approval、十个 Runtime 的 Built-in CLI v19 与 Missing-Send Recovery、九个适用 Runtime 的 MCP Projection、十个
+Runtime 的原生 Skill Projection 矩阵；TRAE 使用当前权威的 `.trae/skills` managed delivery，并另行通过冷恢复。
+OpenCode、Qoder、CodeBuddy、Qwen 与 TRAE 的相应模型证据均为 Flash，不使用 DK V4 Pro。开发态 packaged Desktop
+以 Claude `2.1.86` 完成真实 planned shutdown：Runtime 在 8162ms 自然退出、7 个后代进程被 Job 回收、协议 v2
+收敛、重启后 fenced Run 恢复为 cancelled；Release sidecar 随后按备份 hash 恢复并重新通过 verifier。
 
 CodeBuddy `2.137.1` 还暴露了两项版本差异：Session/model setup 后会在首个 Prompt 前发送私有
 `usage_update` 与 `_codebuddy.ai/command` notification。当前通用 ACP 路由已把合法 Idle `usage_update` 作为
@@ -152,6 +153,15 @@ Session metadata；本轮只把精确的 CodeBuddy 私有 command notification �
 其他 Adapter 的该私有 method、extension request 与未知 session-scoped message 继续 fail closed。修正后 CodeBuddy 的 ACP
 completion/continuation、allow-once/deny、15 项 Built-in operation、Missing-Send（49 个结构化 ACP tool event）、
 MCP Projection 与 `.codebuddy/skills` 全部以 Flash 模型通过。
+
+Kiro `2.19.0` 在普通 Ready、MCP 和 Built-in 路径额外发送 `_kiro.dev/commands/available`、
+`_kiro.dev/metadata` 与 `_kiro.dev/mcp/server_initialized`。当前 ACP 路由只把这些精确、无 request ID 的 Kiro
+notification 认作 Session lifecycle metadata；同名 request、其他 Adapter 和未知 session-scoped message 继续
+fail closed。Kiro 的 ACP/Approval、Built-in、Missing-Send、MCP 与 `.kiro/skills` 复跑均通过。
+
+Windows 原生 Skill 投影还验证了 OpenCode/Copilot 对健康 `.claude/skills` 的共享发现：共享入口被项目内容遮蔽时，
+reconciler 先退役旧 forwarded observation，再用新 operation ID 建立 Runtime-specific 直接副本；项目内容保留、
+重启恢复和 imported Skill 硬删除均通过，不再产生 `skill_projection_recovery_required` lineage 冲突。
 
 ### Camp Published Attachment View visibility 基线
 

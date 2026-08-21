@@ -1392,6 +1392,12 @@ fn reconcile_desired_entry(
             }
             #[cfg(windows)]
             {
+                // A ready observation can point at a shared Claude-compatible
+                // projection even though this group's direct entry is absent.
+                // Once that shared entry is shadowed, Windows must retire the
+                // forwarded observation before starting a new journal whose
+                // old-entry lineage is intentionally empty.
+                delete_observation(database, execution_root, group_key, &skill.id)?;
                 windows_projection::publish_managed_copy(
                     database,
                     library,

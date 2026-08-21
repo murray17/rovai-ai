@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createInterface } from 'node:readline'
 import { accessSync, constants, realpathSync } from 'node:fs'
-import { join, resolve, win32 } from 'node:path'
+import { join, posix, resolve, win32 } from 'node:path'
 import { app } from 'electron'
 import type { CoreEvent, CoreMethod } from '@contracts'
 
@@ -59,11 +59,13 @@ export function coreLaunchArguments(
   return args
 }
 
-function canonicalPath(path: string): string {
+function canonicalPath(path: string, platform: NodeJS.Platform = process.platform): string {
+  const pathApi = platform === 'win32' ? win32 : posix
+  if (platform !== process.platform) return pathApi.resolve(path)
   try {
-    return realpathSync.native(resolve(path))
+    return realpathSync.native(pathApi.resolve(path))
   } catch {
-    return resolve(path)
+    return pathApi.resolve(path)
   }
 }
 
@@ -73,12 +75,18 @@ export function runtimeCampFilesRoot(
   platform: NodeJS.Platform = process.platform
 ): string {
   if (platform === 'win32') return win32.join(dataDirectory, 'runtime-files')
-  const canonicalUserData = canonicalPath(dataDirectory)
+  const canonicalUserData = canonicalPath(dataDirectory, platform)
   const instanceKey = `v1-${createHash('sha256')
     .update('rovai-runtime-camp-files-instance-v1\0', 'utf8')
     .update(canonicalUserData, 'utf8')
     .digest('hex')}`
-  return join(canonicalPath(homeDirectory), '.rovai', 'instances', instanceKey, 'runtime-files')
+  return posix.join(
+    canonicalPath(homeDirectory, platform),
+    '.rovai',
+    'instances',
+    instanceKey,
+    'runtime-files'
+  )
 }
 
 export function desktopSkillLibraryRoot(

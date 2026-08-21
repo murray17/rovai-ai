@@ -281,6 +281,12 @@ fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Val
         && matches!(
             (adapter_kind, message.get("method").and_then(Value::as_str)),
             (AdapterKind::KiroCli, Some("_kiro.dev/compaction/status"))
+                | (AdapterKind::KiroCli, Some("_kiro.dev/commands/available"))
+                | (AdapterKind::KiroCli, Some("_kiro.dev/metadata"))
+                | (
+                    AdapterKind::KiroCli,
+                    Some("_kiro.dev/mcp/server_initialized")
+                )
                 | (AdapterKind::CodebuddyCli, Some("_codebuddy.ai/command"))
         )
 }
@@ -961,7 +967,18 @@ impl AcpHost {
                 if is_idle_session_metadata(self.adapter_kind, message) {
                     return AcpSessionMessageRoute::SessionMetadata;
                 }
-                let reason = "session-scoped message arrived without an active prompt".to_string();
+                let reason = format!(
+                    "session-scoped message arrived without an active prompt (method={}, update={}, request={})",
+                    message
+                        .get("method")
+                        .and_then(Value::as_str)
+                        .unwrap_or("missing"),
+                    message
+                        .pointer("/params/update/sessionUpdate")
+                        .and_then(Value::as_str)
+                        .unwrap_or("missing"),
+                    message.get("id").is_some()
+                );
                 route.phase = AcpSessionPhase::ProtocolViolated {
                     reason: reason.clone(),
                 };
@@ -3796,6 +3813,54 @@ mod route_policy_tests {
         assert!(!is_known_session_lifecycle_extension(
             AdapterKind::CodebuddyCli,
             &request
+        ));
+    }
+
+    #[test]
+    fn kiro_private_command_catalog_notification_is_narrow_idle_metadata() {
+        let notification = json!({
+            "jsonrpc": "2.0",
+            "method": "_kiro.dev/commands/available",
+            "params": { "sessionId": "session-kiro", "commands": [] }
+        });
+        assert!(is_known_session_lifecycle_extension(
+            AdapterKind::KiroCli,
+            &notification
+        ));
+        let metadata = json!({
+            "jsonrpc": "2.0",
+            "method": "_kiro.dev/metadata",
+            "params": { "sessionId": "session-kiro", "metadata": {} }
+        });
+        assert!(is_known_session_lifecycle_extension(
+            AdapterKind::KiroCli,
+            &metadata
+        ));
+        let mcp_server_initialized = json!({
+            "jsonrpc": "2.0",
+            "method": "_kiro.dev/mcp/server_initialized",
+            "params": { "sessionId": "session-kiro", "serverName": "rovai_smoke" }
+        });
+        assert!(is_known_session_lifecycle_extension(
+            AdapterKind::KiroCli,
+            &mcp_server_initialized
+        ));
+        assert!(!is_known_session_lifecycle_extension(
+            AdapterKind::CodebuddyCli,
+            &notification
+        ));
+
+        let mut request = notification;
+        request["id"] = json!(1);
+        assert!(!is_known_session_lifecycle_extension(
+            AdapterKind::KiroCli,
+            &request
+        ));
+        let mut mcp_request = mcp_server_initialized;
+        mcp_request["id"] = json!(2);
+        assert!(!is_known_session_lifecycle_extension(
+            AdapterKind::KiroCli,
+            &mcp_request
         ));
     }
 }
