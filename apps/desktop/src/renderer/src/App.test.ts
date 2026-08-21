@@ -4539,7 +4539,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('Claude Code CLI')
     expect(markup).not.toContain('Antigravity App')
     expect(markup).not.toContain('/opt/homebrew/bin/codex')
-    expect(markup).toContain('<h3>Agent 运行时</h3>')
+    expect(markup).toContain('<h3>运行时</h3>')
     expect(markup).toContain('Agent 运行时')
     expect(markup).toContain('保存运行配置')
     expect(markup).toContain('放弃更改')

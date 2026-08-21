@@ -4859,7 +4859,7 @@ function ExecutionDrawer({
             {stopViewState === 'available' && resolvedFocusedRun && (
               <button
                 type="button"
-                className="quiet-button compact danger-text execution-run-stop-button"
+                className="quiet-button compact danger-text execution-drawer-action-button"
                 aria-label="停止当前运行"
                 onClick={() => {
                   const runId = resolvedFocusedRun.id
@@ -4877,7 +4877,7 @@ function ExecutionDrawer({
                 停止
               </button>
             )}
-            <button type="button" className="quiet-button" onClick={onClose} aria-label="收起执行详情">收起</button>
+            <button type="button" className="quiet-button compact execution-drawer-action-button" onClick={onClose} aria-label="收起执行详情">收起</button>
           </div>
         </header>
         <div

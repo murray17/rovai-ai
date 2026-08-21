@@ -1086,7 +1086,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
     <section className="member-section member-runtime-section">
       <div className="member-section-heading">
         <div>
-          <h3>Agent 运行时</h3>
+          <h3>运行时</h3>
           <p>选择执行产品，并确认当前安装与可用状态。</p>
         </div>
       </div>
