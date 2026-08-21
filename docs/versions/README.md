@@ -175,4 +175,4 @@ last_updated: 2026-08-21
 | v1.21 | `historical` | 普通用户自动化入口与 Runtime Diagnostic Trial V1 | [v1.21/README.md](v1.21/README.md) |
 | v1.22 | `historical` | Runtime 更新期间的 Probe supersession、一次重新绑定与 stale LKG 模型目录 | [v1.22/README.md](v1.22/README.md) |
 | v1.23 | `historical` | 按需 Built-in CLI Help、Charter 精简与兼容 Session 轮换实施 | [v1.23/README.md](v1.23/README.md) |
-| v1.24 | `current` | Windows x64 本机实现闭环、安装验收与十 Runtime 实测复核 | [v1.24/README.md](v1.24/README.md) |
+| v1.24 | `current` | Runtime Probe v18 自动恢复与 Windows x64 本机实现、安装和十 Runtime 复核 | [v1.24/README.md](v1.24/README.md) |

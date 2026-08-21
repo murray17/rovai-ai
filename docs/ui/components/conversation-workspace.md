@@ -188,7 +188,7 @@ Mention，本 Draft 也只回到默认 Lead，不能让路由控件反复出现�
 
 移到现有 Inspector 时，底部入口与详情完全移除，Inspector 临时增加首个“执行”Tab，并自动显示、
 激活该 Tab。右侧使用既有 310px / compact 260px 宽度，不新增可拖宽 Sidecar。移回底部后恢复用户
-切换前最后使用的“队员 / 任务”基础 Tab。位置偏好只拥有承载位置，不跨 Camp 保存 Agent/Run selection、
+切换前最后使用的“任务 / 队员”基础 Tab。位置偏好只拥有承载位置，不跨 Camp 保存 Agent/Run selection、
 Drawer 开合、Tool 全文或滚动位置，也不根据窗口宽度自动改变。重新进入 Camp 时可以从当前权威 snapshot
 推导最新 running Run；这是新的瞬时 selection，不是恢复旧 Drawer 状态，也不改写位置偏好。
 
@@ -366,13 +366,15 @@ Porcelain Day / Steel Night 语义 token，不引入新的视觉世界，也不�
 
 ## Camp 右侧详情栏（Inspector）
 
-默认底部执行台时，ordinary Inspector 只有“队员 / 任务”。队员读取当前 CampMember 与 AgentProfile，
+默认底部执行台时，ordinary Inspector 只有“任务 / 队员”，DOM、视觉与键盘顺序也保持一致；进入新的
+Camp workspace 时默认选择首个“任务”Tab。队员读取当前 CampMember 与 AgentProfile，
 并通过既有 versioned Core 命令提供唯一 Default Lead 选择器；Task 提供列表与详情责任层。ContextManifest 与
 Runtime Input Delivery Evidence 继续存在于 Core/Snapshot，但不进入普通 Inspector；审批只在
 Approval Dock 决定。
 
 仅当用户把执行台移到右侧时，Inspector 增加条件式首个“执行”Tab；右侧 Tab 的 DOM、视觉与键盘顺序为
-“执行 / 队员 / 任务”。它承载同一 Agent 过程详情，
+“执行 / 任务 / 队员”。进入新的 Camp workspace 时默认选择首个“执行”Tab；若权威 snapshot 含 running
+Run，既有进入逻辑仍须进一步定位精确 Agent/Run，不能被空的默认执行页覆盖。它承载同一 Agent 过程详情，
 不是新的 Activity/Audit timeline，也不改变 Task、队员、Default Lead 或 Approval 边界。移回底部后
 该 Tab 从 DOM 和键盘顺序中消失。
 

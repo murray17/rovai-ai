@@ -1,0 +1,490 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Rovai AI · 展示问题交互评审</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --home: #fbfbfa;
+      --surface: #fbfbfa;
+      --surface-raised: #fff;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #eef0f1;
+      --rail: #f3f4f4;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #757e86;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --brand: #526f88;
+      --brand-ink: #405f7e;
+      --brand-soft: #e9eef3;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --focus: #526f88;
+      --shadow-float: 0 18px 56px rgb(38 45 58 / 14%);
+    }
+    html[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --home: #151a1e;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --rail: #11161a;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --brand: #7897ae;
+      --brand-ink: #c0d4e1;
+      --brand-soft: #22303a;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --focus: #8fb3cb;
+      --shadow-float: 0 22px 64px rgb(0 0 0 / 42%);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-width: 0; height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.6;
+      text-rendering: optimizeLegibility;
+    }
+    button, input, select { color: inherit; font: inherit; }
+    button { cursor: pointer; }
+    button:active:not(:disabled) { transform: translateY(1px); }
+    button:disabled { cursor: default; opacity: .64; }
+    :where(button, input, select):focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .review-shell { display: grid; width: 100%; height: 100%; grid-template-rows: 48px minmax(0, 1fr); }
+    .review-bar {
+      z-index: 20;
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line-strong);
+      background: var(--surface-raised);
+      box-shadow: 0 8px 24px rgb(38 45 58 / 7%);
+    }
+    .review-title { display: flex; min-width: 0; align-items: center; gap: 10px; }
+    .review-mark { position: relative; width: 22px; height: 22px; flex: 0 0 22px; color: var(--brand); }
+    .review-mark::before {
+      position: absolute;
+      top: 1px;
+      left: 8px;
+      width: 7px;
+      height: 7px;
+      background: currentColor;
+      content: "";
+      clip-path: polygon(50% 0, 63% 36%, 100% 50%, 63% 64%, 50% 100%, 37% 64%, 0 50%, 37% 36%);
+    }
+    .review-mark::after { position: absolute; right: 1px; bottom: 3px; left: 1px; height: 7px; border-top: 2px solid currentColor; border-radius: 50%; content: ""; }
+    .review-title strong { overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+    .review-nav { display: flex; align-items: center; gap: 3px; padding: 3px; border-radius: 8px; background: var(--surface-muted); }
+    .review-nav button, .theme-button {
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .review-nav button:hover, .theme-button:hover { color: var(--ink); background: var(--surface-hover); }
+    .review-nav button[aria-selected="true"] { color: var(--brand-ink); background: var(--surface-raised); box-shadow: 0 1px 2px rgb(23 27 32 / 10%); }
+    .theme-button { min-width: 74px; border: 1px solid var(--line); }
+    .scene { display: none; min-width: 0; min-height: 0; }
+    .scene.active { display: block; }
+
+    /* Scene 1: only the execution console. */
+    .console-scene { height: 100%; overflow: auto; padding: clamp(34px, 7vh, 76px) clamp(18px, 5vw, 72px); background: var(--canvas); }
+    .console-stage { display: grid; width: min(980px, 100%); min-height: 440px; align-content: end; margin: 0 auto; }
+    .console-context { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 2px 10px; color: var(--faint); font-size: 10px; }
+    .console-context strong { color: var(--muted); font-size: 11px; }
+    .execution-drawer {
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: var(--surface);
+      box-shadow: var(--shadow-float);
+    }
+    .execution-header {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px 16px 10px;
+      border-bottom: 1px solid var(--line);
+      background: color-mix(in srgb, var(--surface) 96%, var(--brand-soft));
+    }
+    .execution-agent { display: flex; min-width: 0; align-items: center; gap: 9px; }
+    .avatar {
+      display: grid;
+      width: 34px;
+      height: 34px;
+      flex: 0 0 34px;
+      place-items: center;
+      overflow: hidden;
+      border-radius: 50%;
+      color: #edf4f7;
+      background: #6f8290;
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .execution-copy { display: grid; min-width: 0; gap: 1px; }
+    .execution-title-line { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
+    .execution-title-line h1 { overflow: hidden; margin: 0; font-size: 12px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+    .execution-model { overflow: hidden; color: var(--muted); font: 9px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .execution-copy p { margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.4; }
+    .execution-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
+    .execution-action {
+      display: inline-flex;
+      width: 52px;
+      min-width: 52px;
+      height: 28px;
+      min-height: 28px;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 8px;
+      border: 1px solid var(--line-strong);
+      border-radius: 6px;
+      color: var(--ink);
+      background: var(--surface);
+      font-size: 11px;
+      font-weight: 650;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .execution-action:hover:not(:disabled) { background: var(--surface-muted); }
+    .execution-action.stop { color: var(--danger); }
+    .execution-action.stop:hover:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 48%, var(--line)); background: var(--danger-soft); }
+    .execution-state { min-width: 74px; color: var(--attention); font-size: 9.5px; font-weight: 700; text-align: right; white-space: nowrap; }
+    .execution-body { max-height: 340px; overflow-y: auto; padding: 14px 17px 20px; }
+    .execution-body[hidden] { display: none; }
+    .timeline { position: relative; display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+    .timeline::before { position: absolute; top: 13px; bottom: 18px; left: 6px; width: 1px; background: var(--line-strong); content: ""; }
+    .stage { position: relative; display: grid; min-width: 0; grid-template-columns: 14px minmax(0, 1fr); gap: 9px; padding-bottom: 13px; }
+    .stage:last-child { padding-bottom: 0; }
+    .stage-node { z-index: 1; width: 13px; height: 13px; margin-top: 4px; border: 2px solid var(--success); border-radius: 50%; background: var(--success-soft); }
+    .stage.running .stage-node { border-color: var(--info); background: var(--info-soft); }
+    .stage-card { min-width: 0; padding: 10px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); }
+    .stage.running .stage-card { border-color: color-mix(in srgb, var(--info) 50%, var(--line)); background: color-mix(in srgb, var(--surface-raised) 88%, var(--info-soft)); }
+    .stage-card header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .stage-card strong { font-size: 11.5px; }
+    .stage-card time { color: var(--faint); font: 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .stage-card p { margin: 6px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .tool-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 7px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .tool-icon { display: grid; width: 16px; height: 16px; place-items: center; border: 1px solid var(--line-strong); border-radius: 4px; font: 700 8px/1 -apple-system, BlinkMacSystemFont, sans-serif; }
+    .tool-state { width: 7px; height: 7px; border-radius: 50%; background: var(--info); box-shadow: 0 0 0 3px color-mix(in srgb, var(--info) 12%, transparent); }
+
+    /* Scene 2: reduced but faithful member workspace. */
+    .member-scene { height: 100%; background: var(--home); }
+    .app-shell { display: grid; width: 100%; height: 100%; grid-template-columns: 230px minmax(0, 1fr); grid-template-rows: 50px minmax(0, 1fr); }
+    .app-rail { display: flex; min-height: 0; grid-row: 1 / -1; flex-direction: column; padding: 18px 10px 10px; border-right: 1px solid var(--line); background: var(--rail); }
+    .brand { display: flex; align-items: center; gap: 9px; padding: 0 10px 17px; color: var(--brand); }
+    .brand .review-mark { width: 20px; height: 20px; flex-basis: 20px; }
+    .brand strong { color: var(--ink); font-size: 14px; }
+    .app-nav { display: grid; gap: 3px; }
+    .app-nav button { display: flex; min-height: 34px; align-items: center; gap: 9px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: 12px; text-align: left; }
+    .app-nav button:hover { color: var(--ink); background: var(--surface-muted); }
+    .app-nav button.active { color: var(--brand-ink); background: var(--surface-selected); }
+    .nav-symbol { display: grid; width: 18px; place-items: center; color: inherit; font-size: 13px; }
+    .rail-spacer { flex: 1; }
+    .app-topbar { grid-column: 2; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .member-workspace { display: flex; min-width: 0; min-height: 0; grid-column: 2; overflow: hidden; }
+    .member-list { display: flex; width: 220px; min-width: 220px; flex-direction: column; border-right: 1px solid var(--line-strong); background: var(--surface); }
+    .member-list-heading { display: flex; min-height: 70px; align-items: center; justify-content: space-between; padding: 18px 13px 12px; border-bottom: 1px solid var(--line); }
+    .member-list-heading strong { font-size: 13px; }
+    .member-count { color: var(--faint); font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .member-filter { padding: 10px; border-bottom: 1px solid var(--line); }
+    .member-filter input { width: 100%; min-height: 32px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-raised); font-size: 11px; }
+    .member-rows { display: grid; gap: 2px; padding: 7px; }
+    .member-row { position: relative; display: grid; min-height: 54px; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 9px; padding: 7px 9px; border: 0; border-radius: 8px; background: transparent; text-align: left; }
+    .member-row:hover { background: var(--surface-muted); }
+    .member-row.active { background: var(--surface-selected); }
+    .member-row.active::before { position: absolute; top: 9px; bottom: 9px; left: 0; width: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .member-row .avatar { width: 34px; height: 34px; }
+    .member-row-copy { display: grid; min-width: 0; gap: 2px; }
+    .member-row-copy strong, .member-row-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-row-copy strong { font-size: 11.5px; }
+    .member-row-copy small { color: var(--muted); font-size: 9.5px; }
+    .member-detail { min-width: 0; flex: 1; overflow-y: auto; padding: 30px 26px 48px; background: var(--home); }
+    .detail-track { width: min(900px, 100%); margin: 0 auto; }
+    .detail-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding-bottom: 18px; }
+    .detail-person { display: flex; min-width: 0; align-items: center; gap: 13px; }
+    .detail-person .avatar { width: 50px; height: 50px; flex-basis: 50px; font-size: 15px; }
+    .detail-person h1 { margin: 0; font-size: 24px; font-weight: 680; line-height: 1.14; letter-spacing: -.025em; }
+    .detail-person p { margin: 5px 0 0; color: var(--muted); font-size: 10.5px; }
+    .member-facts { display: flex; flex-wrap: wrap; gap: 7px 14px; margin-top: 8px; color: var(--muted); font-size: 9.5px; font-weight: 650; }
+    .member-facts span { display: inline-flex; align-items: center; gap: 6px; }
+    .member-facts span::before { width: 6px; height: 6px; border-radius: 50%; background: var(--success); content: ""; }
+    .member-facts .runtime-fact { color: var(--brand-ink); }
+    .member-facts .runtime-fact::before { display: none; }
+    .quiet-button, .primary-button { display: inline-flex; min-height: 30px; align-items: center; justify-content: center; padding: 5px 10px; border-radius: 7px; font-size: 10.5px; font-weight: 650; }
+    .quiet-button { border: 1px solid var(--line-strong); background: var(--surface); }
+    .quiet-button:hover { background: var(--surface-muted); }
+    .primary-button { border: 1px solid var(--brand); color: #fff; background: var(--brand); }
+    html[data-theme="night"] .primary-button { color: #091116; }
+    .member-tabs { display: flex; min-height: 42px; align-items: end; gap: 4px; margin-top: 17px; border-bottom: 1px solid var(--line); }
+    .member-tabs button { position: relative; min-height: 36px; padding: 0 12px 8px; border: 0; color: var(--muted); background: transparent; font-size: 10.5px; font-weight: 700; }
+    .member-tabs button[aria-selected="true"] { color: var(--brand-ink); }
+    .member-tabs button[aria-selected="true"]::after { position: absolute; right: 8px; bottom: -1px; left: 8px; height: 2px; border-radius: 2px; background: var(--brand); content: ""; }
+    .member-panel { display: none; min-width: 0; }
+    .member-panel.active { display: block; }
+    .runtime-intro { max-width: 760px; margin: 14px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+    .runtime-section { padding-top: 14px; }
+    .section-heading h2 { margin: 4px 0 0; font-size: 16px; }
+    .section-heading p { max-width: 620px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .runtime-form { display: grid; gap: 14px; padding-top: 16px; }
+    .runtime-primary { display: grid; grid-template-columns: minmax(260px, 430px) minmax(220px, 1fr); align-items: end; gap: 14px; }
+    .field { display: grid; gap: 6px; color: var(--muted); font-size: 10px; font-weight: 650; }
+    .field select { width: 100%; min-height: 36px; padding: 7px 9px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface-raised); font-size: 11px; }
+    .runtime-status { display: flex; min-height: 48px; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); }
+    .runtime-status-copy { display: grid; gap: 2px; }
+    .runtime-status-copy strong { color: var(--ink); font-size: 11px; }
+    .runtime-status-copy small { color: var(--success); font-size: 9.5px; }
+    .runtime-status code { color: var(--faint); font-size: 9px; }
+    .parameter-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border-radius: 9px; background: var(--line); }
+    .parameter { min-height: 76px; padding: 12px; background: var(--surface-raised); }
+    .parameter span { display: block; color: var(--faint); font-size: 9.5px; }
+    .parameter strong { display: block; margin-top: 6px; font-size: 11.5px; }
+    .form-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+    .identity-placeholder { display: grid; min-height: 260px; place-items: center; margin-top: 18px; border: 1px solid var(--line); border-radius: 10px; color: var(--muted); background: var(--surface-raised); font-size: 12px; text-align: center; }
+
+    @media (max-width: 900px) {
+      .app-shell { grid-template-columns: 0 minmax(0, 1fr); }
+      .app-rail { visibility: hidden; }
+      .member-list { width: 190px; min-width: 190px; }
+      .runtime-primary { grid-template-columns: 1fr; align-items: stretch; }
+    }
+    @media (max-width: 670px) {
+      .review-title strong { display: none; }
+      .review-nav button { padding-right: 7px; padding-left: 7px; }
+      .member-list { display: none; }
+      .member-detail { padding: 22px 16px 36px; }
+      .detail-header { flex-direction: column; }
+      .runtime-primary, .parameter-grid { grid-template-columns: 1fr; }
+      .execution-header { align-items: flex-start; flex-direction: column; }
+      .execution-actions { align-self: stretch; justify-content: flex-end; }
+      .execution-state { margin-right: auto; text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main class="review-shell">
+    <header class="review-bar">
+      <div class="review-title"><span class="review-mark" aria-hidden="true"></span><strong>展示问题交互评审</strong></div>
+      <nav class="review-nav" role="tablist" aria-label="评审场景">
+        <button id="scene-console-tab" type="button" role="tab" aria-selected="true" aria-controls="scene-console" data-scene="console">1 · 执行台</button>
+        <button id="scene-member-tab" type="button" role="tab" aria-selected="false" aria-controls="scene-member" data-scene="member">2 · 队员页</button>
+      </nav>
+      <button id="theme-button" class="theme-button" type="button" aria-pressed="false">Night</button>
+    </header>
+
+    <section id="scene-console" class="scene console-scene active" role="tabpanel" aria-labelledby="scene-console-tab">
+      <div class="console-stage">
+        <div class="console-context"><strong>Agent 执行台</strong><span>按钮规格：52 × 28 px</span></div>
+        <section class="execution-drawer" aria-labelledby="execution-title">
+          <header class="execution-header">
+            <div class="execution-agent">
+              <span class="avatar" aria-hidden="true">爱</span>
+              <div class="execution-copy">
+                <div class="execution-title-line"><h1 id="execution-title">爱丽丝 · 本轮执行</h1><span class="execution-model">gpt-5.6-sol · high</span></div>
+                <p>当前载入 2 次执行 · 当前正在执行</p>
+              </div>
+            </div>
+            <div class="execution-actions">
+              <span id="execution-state" class="execution-state" role="status" aria-live="polite"></span>
+              <button id="stop-button" class="execution-action stop" type="button">停止</button>
+              <button id="collapse-button" class="execution-action" type="button" aria-expanded="true" aria-controls="execution-body">收起</button>
+            </div>
+          </header>
+          <div id="execution-body" class="execution-body">
+            <ol class="timeline">
+              <li class="stage">
+                <span class="stage-node" aria-hidden="true"></span>
+                <article class="stage-card">
+                  <header><strong>读取目标界面与约束</strong><time>18:21:04</time></header>
+                  <p>已确认执行台按钮、队员页标题和会话 Inspector 的现有结构。</p>
+                </article>
+              </li>
+              <li class="stage running">
+                <span class="stage-node" aria-hidden="true"></span>
+                <article class="stage-card">
+                  <header><strong>制作展示修正交互稿</strong><time>18:22:16</time></header>
+                  <p>保留现有 Porcelain Day / Steel Night 视觉世界，只收敛尺寸与标题层级。</p>
+                  <div class="tool-row"><span class="tool-icon" aria-hidden="true">&gt;_</span><span>pnpm typecheck</span><span class="tool-state" aria-label="运行中"></span></div>
+                </article>
+              </li>
+            </ol>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section id="scene-member" class="scene member-scene" role="tabpanel" aria-labelledby="scene-member-tab" hidden>
+      <div class="app-shell">
+        <aside class="app-rail" aria-label="主导航">
+          <div class="brand"><span class="review-mark" aria-hidden="true"></span><strong>Rovai AI</strong></div>
+          <nav class="app-nav">
+            <button type="button"><span class="nav-symbol">⌂</span>快速对话</button>
+            <button class="active" type="button"><span class="nav-symbol">♙</span>队员</button>
+            <button type="button"><span class="nav-symbol">◇</span>记忆</button>
+          </nav>
+          <div class="rail-spacer"></div>
+          <nav class="app-nav"><button type="button"><span class="nav-symbol">⚙</span>设置</button></nav>
+        </aside>
+        <header class="app-topbar"></header>
+        <div class="member-workspace">
+          <aside class="member-list" aria-label="队员列表">
+            <div class="member-list-heading"><strong>队员</strong><span class="member-count">3</span></div>
+            <div class="member-filter"><input type="search" placeholder="查找队员" aria-label="查找队员"></div>
+            <div class="member-rows">
+              <button class="member-row active" type="button"><span class="avatar" aria-hidden="true">爱</span><span class="member-row-copy"><strong>爱丽丝</strong><small>五号街卖花女</small></span></button>
+              <button class="member-row" type="button"><span class="avatar" aria-hidden="true">雾</span><span class="member-row-copy"><strong>雾切响子</strong><small>超高校级的侦探</small></span></button>
+              <button class="member-row" type="button"><span class="avatar" aria-hidden="true">惠</span><span class="member-row-copy"><strong>药师寺惠</strong><small>机兵驾驶员</small></span></button>
+            </div>
+          </aside>
+          <section class="member-detail">
+            <div class="detail-track">
+              <header class="detail-header">
+                <div class="detail-person">
+                  <span class="avatar" aria-hidden="true">爱</span>
+                  <div><h1>爱丽丝</h1><p>五号街卖花女</p><div class="member-facts"><span>在队</span><span class="runtime-fact">Codex 可用 →</span></div></div>
+                </div>
+                <button class="quiet-button" type="button">编辑身份</button>
+              </header>
+              <div class="member-tabs" role="tablist" aria-label="队员资料">
+                <button id="identity-tab" type="button" role="tab" aria-selected="false" aria-controls="identity-panel" data-member-tab="identity">身份信息</button>
+                <button id="runtime-tab" type="button" role="tab" aria-selected="true" aria-controls="runtime-panel" data-member-tab="runtime">Agent 运行时</button>
+              </div>
+              <div id="identity-panel" class="member-panel" role="tabpanel" aria-labelledby="identity-tab">
+                <div class="identity-placeholder">身份信息沿用现有页面；本稿只评审运行时标题层级。</div>
+              </div>
+              <div id="runtime-panel" class="member-panel active" role="tabpanel" aria-labelledby="runtime-tab">
+                <p class="runtime-intro">设置这位队员后续执行使用的 Agent 运行时、模型和权限。保存后仅影响之后开始的新执行。</p>
+                <section class="runtime-section" aria-labelledby="runtime-section-title">
+                  <div class="section-heading"><h2 id="runtime-section-title">运行时</h2><p>选择执行产品，并确认当前安装与可用状态。</p></div>
+                  <form class="runtime-form">
+                    <div class="runtime-primary">
+                      <label class="field">Agent 运行时
+                        <select id="runtime-select"><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="trae">TRAE</option></select>
+                      </label>
+                      <div class="runtime-status" role="status"><span class="runtime-status-copy"><strong id="runtime-name">Codex</strong><small>可用</small></span><code id="runtime-version">0.94.0</code></div>
+                    </div>
+                    <div class="parameter-grid">
+                      <div class="parameter"><span>模型</span><strong>gpt-5.6-sol</strong></div>
+                      <div class="parameter"><span>推理强度</span><strong>High</strong></div>
+                    </div>
+                    <div class="form-actions"><button class="quiet-button" type="button">清除配置</button><button class="primary-button" type="button">保存运行配置</button></div>
+                  </form>
+                </section>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const root = document.documentElement;
+    const sceneTabs = [...document.querySelectorAll('[data-scene]')];
+    const scenes = [...document.querySelectorAll('.scene')];
+    const themeButton = document.querySelector('#theme-button');
+    const stopButton = document.querySelector('#stop-button');
+    const collapseButton = document.querySelector('#collapse-button');
+    const executionBody = document.querySelector('#execution-body');
+    const executionState = document.querySelector('#execution-state');
+    const memberTabs = [...document.querySelectorAll('[data-member-tab]')];
+    const memberPanels = [...document.querySelectorAll('.member-panel')];
+    const runtimeSelect = document.querySelector('#runtime-select');
+    const runtimeName = document.querySelector('#runtime-name');
+    const runtimeVersion = document.querySelector('#runtime-version');
+
+    sceneTabs.forEach((tab) => tab.addEventListener('click', () => {
+      const target = tab.dataset.scene;
+      sceneTabs.forEach((candidate) => candidate.setAttribute('aria-selected', String(candidate === tab)));
+      scenes.forEach((scene) => {
+        const active = scene.id === `scene-${target}`;
+        scene.classList.toggle('active', active);
+        scene.hidden = !active;
+      });
+    }));
+
+    themeButton.addEventListener('click', () => {
+      const night = root.dataset.theme !== 'night';
+      root.dataset.theme = night ? 'night' : 'day';
+      themeButton.textContent = night ? 'Day' : 'Night';
+      themeButton.setAttribute('aria-pressed', String(night));
+    });
+
+    stopButton.addEventListener('click', () => {
+      stopButton.disabled = true;
+      stopButton.textContent = '停止中';
+      executionState.textContent = '正在停止…';
+      window.setTimeout(() => {
+        stopButton.textContent = '已停止';
+        executionState.textContent = '';
+      }, 900);
+    });
+
+    collapseButton.addEventListener('click', () => {
+      const expanded = collapseButton.getAttribute('aria-expanded') === 'true';
+      collapseButton.setAttribute('aria-expanded', String(!expanded));
+      collapseButton.textContent = expanded ? '展开' : '收起';
+      executionBody.hidden = expanded;
+    });
+
+    memberTabs.forEach((tab) => tab.addEventListener('click', () => {
+      const target = tab.dataset.memberTab;
+      memberTabs.forEach((candidate) => candidate.setAttribute('aria-selected', String(candidate === tab)));
+      memberPanels.forEach((panel) => panel.classList.toggle('active', panel.id === `${target}-panel`));
+    }));
+
+    const runtimeMeta = {
+      codex: ['Codex', '0.94.0'],
+      claude: ['Claude Code', '2.1.58'],
+      trae: ['TRAE', '1.4.2']
+    };
+    runtimeSelect.addEventListener('change', () => {
+      const [name, version] = runtimeMeta[runtimeSelect.value];
+      runtimeName.textContent = name;
+      runtimeVersion.textContent = version;
+    });
+  </script>
+</body>
+</html>

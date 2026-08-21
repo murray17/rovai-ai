@@ -14,7 +14,7 @@ last_updated: 2026-08-21
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v17](../contracts/runtime-launch-and-verification-v17.md)。实测版本和能力只由
+[Runtime Launch and Verification v18](../contracts/runtime-launch-and-verification-v18.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -65,10 +65,13 @@ Runtime Check Manager 以内部 attempt identity、总 deadline、每 Runtime �
 stable failure、superseded、timeout、JoinError、abort 与 shutdown；短生命周期 Runtime 子进程统一使用受限输出
 和整进程树 cleanup。
 
-每轮完整 Deep Probe 前后复核同一 executable 的轻量 file identity；开始可读而结束变化或无法复核时，无论
-Probe 成功、直接错误还是 cleanup timeout，本轮都被 Runtime 更新 supersede。首次发生时在原 attempt/deadline
-内重新解析 path、canonicalize、计算当前 SHA 并最多重试一次；第二次仍变化则 deferred，不提交 snapshot、
-failure、diagnostic，不唤醒等待执行，也不自动扩展 deadline 或继续循环。
+Managed Runtime resolution 不在 Adapter Deep Probe 外重复执行 version gate；Adapter 自己的 version、认证、
+capability、协议和模型检查共同构成一轮完整 Probe。每轮 Probe 前后复核同一 executable 的轻量 file identity；
+开始可读而结束变化或无法复核时，无论 Probe 成功、直接错误还是 cleanup timeout，本轮都被 Runtime 更新
+supersede。首次发生时在原 attempt/deadline 内重新解析 path、canonicalize、计算当前 SHA 并最多重试一次；
+第二次仍变化则 deferred，不提交 snapshot、failure、diagnostic，也不唤醒等待执行。Execution 触发的 deferred
+只建立三秒进程内冷却；冷却期 Scheduler 不启动新 Probe，过期后的下一次 tick 自动获得新的有界 attempt，
+不要求打开 Picker、手动检查或重启 App。
 
 ### Machine Ready 与 Adapter 行为证据
 
@@ -143,7 +146,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v17](../contracts/runtime-launch-and-verification-v17.md)。
+[Runtime Launch and Verification v18](../contracts/runtime-launch-and-verification-v18.md)。
 
 ## TRAE CLI CN 当前边界
 

@@ -6,55 +6,63 @@ status: in_progress
 last_updated: 2026-08-21
 ---
 
-# v1.24 Windows x64 本机实现与 Runtime 复核计划
+# v1.24 Runtime Probe v18 与 Windows x64 本机闭环实施计划
 
-## 1. 最新 `main` 集成
+## 1. 版本与权威
 
-- [x] 在可恢复的 `codex/windows-x64-adaptation` 分支保存 Windows 改动；
-- [x] 获取并合入 `origin/main@645994cc`，不使用 reset/stash 覆盖本地工作；
-- [x] 保留 v1.23 为 historical，并把 Windows current scope 迁到 v1.24；
-- [x] 按 Built-in Transport v20、Probe supersession、Attachment View、Runtime Files Root 与法律文件门禁解决重叠；
-- [x] 合并后通过 Rust fmt/Clippy、TypeScript、Node/Vitest、Rust PR、文档和 diff 门禁。
+- [x] 冻结已交付 v1.23，建立唯一 current v1.24；
+- [x] 接受 [V1.24-D01](decisions.md#v1-24-d01) 与 Runtime Launch and Verification v18；
+- [x] 同步 Runtime Architecture、基础不变量、Contract/Decision/Documentation routing；
+- [x] 把 Windows 分支合入 `origin/main@217a46d4`，合并上游 v1.24 与 Windows v1.24 文档而不覆盖任一范围；
+- [ ] 在该最终合并结果上完成全部代码、文档、Windows package 与真实 Runtime 复跑。
 
-## 2. Windows build、package 与 installation
+## 2. Runtime Check Manager
 
-- [x] 合并前完成 Rust PR profile、前端/Node tests、native x64 unpacked/NSIS build 和 release verifier；
+- [x] 删除 identity 保护外重复的 managed-resolution version gate；
+- [x] 让 Adapter version、认证、能力、协议与模型检查共同进入完整 identity 复核；
+- [x] 把永久 Execution deferral 集合替换为三秒、不被 deferred 请求续期的进程内冷却；
+- [x] 冷却到期后允许 Scheduler 自动建立下一次有界 attempt，Catalog/User Check 可提前清除；
+- [x] manager-level fake Runtime + SQLite 覆盖 version 自替换后的 Ready commit、新 fingerprint failure 与冷却放行；
+- [x] 上游 Rust、TypeScript/Vitest、Node、文档、macOS package/legal/signature 和隔离 App 验收通过。
+
+## 3. Windows build、package 与 installation
+
+- [x] 合并前完成 Rust PR、前端/Node tests、native x64 unpacked/NSIS、release verifier 与 legal payload；
 - [x] 合并前完成 clean install/start/same-version upgrade/uninstall/data-preserve；
 - [x] 合并前以真实 Claude Runtime 完成 packaged planned shutdown、7-descendant Job cleanup 与重启恢复；
-- [x] 把上游外置 legal payload 生成、复制与完整性门禁接入 Windows unpacked/NSIS 命令；
-- [x] 在最新 `main` 合并结果上重新执行 build、NSIS、verifier、legal payload、installer lifecycle 和 planned shutdown；
+- [x] 把外置 legal payload 生成、复制与完整性门禁接入 Windows unpacked/NSIS 命令；
+- [ ] 在 `origin/main@217a46d4` 合并结果上重跑 build、NSIS、verifier、legal、installer lifecycle 与 planned shutdown；
 - [ ] 在 Windows 11 client OS 重跑并保存发布证据；
 - [ ] 完成 Authenticode、RFC 3161 timestamp、release signer/hash allowlist 与 SmartScreen 证据。
 
-## 3. 十 Runtime 本机矩阵
+## 4. 十 Runtime 本机矩阵
 
 - [x] 安装/探测 Codex、OpenCode、Copilot、Claude、Antigravity、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE；
 - [x] 完成账号登录或 API-key 配置；DeepSeek 路径固定为 `deepseek-v4-flash`；
 - [x] 合并前完成真实 ACP、Approval、Built-in CLI、Missing-Send、MCP Projection 与适用 Skill smoke；
-- [x] 修正 CodeBuddy 官方 API-key ACP、显式 custom model、Idle `usage_update`/private command metadata；
-- [x] 修正 warm Runtime 文件 handle 下的 Windows Skill 投影即时 unlink，并完成 Qwen→TRAE 边界回归；
-- [x] 修正 CodeBuddy 环境下 native `--input-file` Win32 path、resume evidence path 与 Missing-Send
-  PowerShell/cmd Tool 投递；
-- [x] 在最新 `main` 合并结果上按 Built-in Transport v20 重新执行九个当前可调用 Runtime 的 ACP、Built-in、
-  Missing-Send、MCP、Skill 与专项恢复矩阵；
-- [ ] Antigravity `1.1.17` 账号恢复可用 Flash quota 后重跑最终在线矩阵；当前静默认证成功，但模型服务返回
-  `429 RESOURCE_EXHAUSTED`，备用 Gemini API key 不改变 AGY 的账号 Code Assist quota 路径；
-- [x] 按用户要求验证 Groq/Gemini 替代线路并记录真实边界：OpenCode/CodeBuddy/Qwen 点测通过，Groq TPM、Gemini
-  free-tier request window、Qoder/TRAE Provider/账号 quota 阻止替代线路的高频全矩阵；用户授权继续 DeepSeek 后
-  恢复的路径固定为 `deepseek-v4-flash`，不回退 DK V4 Pro；
+- [x] 修正 CodeBuddy API-key ACP、显式 custom model、Idle metadata 与 Windows path；
+- [x] 修正 Kiro lifecycle/Skill lineage、warm Runtime handle unlink、Missing-Send PowerShell/cmd Tool 投递；
+- [x] Qoder 使用官方 DeepSeek BYOK Flash 条目，直连、ACP、Built-in、Missing-Send、MCP 与 Skill 通过；
+- [ ] 在最终合并结果上重跑七 ACP 和九个当前可调用 Runtime 的 Built-in、Missing-Send、MCP、Skill 与专项恢复；
+- [ ] Antigravity `1.1.17` 账号恢复可用 Flash quota 后重跑最终在线矩阵；当前认证成功但返回
+  `429 RESOURCE_EXHAUSTED`，备用 Gemini API key 不改变账号 Code Assist quota 路由；
+- [x] 记录 Groq TPM、Gemini free-tier request window、Qoder/TRAE Provider/账号 quota 等替代线路真实边界；
 - [ ] 为每个 Adapter 分别形成 Windows 10/11 immutable digest-bound qualification evidence。
 
-## 4. 发布与清理
+## 5. 发布与清理
 
 - [x] 正式 Release 对所有缺证据 Windows Runtime 保持 `runtime_platform_not_qualified`；
-- [x] 删除最终复跑产生的临时登录 helper、失败 Fixture 和 sidecar backup，保留非敏感验收报告；
-- [x] 以不回显内容的扫描确认用户 API key 未进入 Git diff 或 tracked files；验收报告与诊断只保留非敏感事实；
-- [ ] Antigravity quota、Windows 11、签名与 immutable evidence 全部闭环后将本版状态更新为 implemented；
+- [x] 删除既有复跑产生的临时登录 helper、失败 Fixture 和 sidecar backup，保留非敏感验收报告；
+- [x] 不回显扫描确认用户 API key 未进入 Git diff 或 tracked files；
+- [ ] 最终复跑后再次执行 secret scan、临时文件清理与 `main` 新提交检查；
+- [ ] Antigravity quota、Windows 11、签名与 immutable evidence 全部闭环后才把整版状态更新为 implemented；
   按用户最终指令不执行关机。
 
 ## References
 
 - [v1.24 版本概览](README.md)
+- [V1.24-D01](decisions.md#v1-24-d01)
+- [Runtime Launch and Verification v18](../../contracts/runtime-launch-and-verification-v18.md)
 - [Windows packaging guide](../../development/packaging-windows.md)
 - [Runtime 兼容性清单](../../runtime-compatibility.md)
 - [Rust 测试准入与退役门槛](../../development/testing.md#rust-测试准入与退役门槛)

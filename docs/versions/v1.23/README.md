@@ -17,7 +17,7 @@ last_updated: 2026-08-21
 > 前置版本：[v1.22 Runtime Probe 更新容错](../v1.22/README.md)已按完成事实冻结为 historical；其
 > Runtime Probe supersession 与 stale LKG 边界继续作为本版基线。
 >
-> 后续版本：[v1.24 Windows x64 本机实现与 Runtime 复核闭环](../v1.24/README.md)。
+> 后续版本：[v1.24 Runtime Probe v18 自动恢复与 Windows x64 本机实现、安装和 Runtime 复核](../v1.24/README.md)。
 
 ## 版本目标
 
