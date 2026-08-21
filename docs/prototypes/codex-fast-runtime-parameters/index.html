@@ -1,0 +1,1374 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="day">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Codex Fast mode · 运行参数交互稿</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --canvas: #eceeef;
+      --surface: #fbfbfa;
+      --surface-raised: #ffffff;
+      --surface-subtle: #f0f2f4;
+      --surface-muted: #e7eaed;
+      --surface-selected: #e9ecee;
+      --surface-hover: #e8eaea;
+      --surface-sunken: #e4e8eb;
+      --input: #ffffff;
+      --ink: #171b20;
+      --muted: #616a73;
+      --faint: #6e7382;
+      --line: #dfe4e8;
+      --line-strong: #c7cfd6;
+      --control-line: #8b9389;
+      --rail: #f3f4f4;
+      --rail-ink: #626b72;
+      --rail-line: #dadde0;
+      --rail-logo: #526f88;
+      --brand: #526f88;
+      --brand-hover: #3d5874;
+      --brand-contrast: #ffffff;
+      --brand-soft: #e9eef3;
+      --brand-ink: #405f7e;
+      --ember: #d3a45f;
+      --success: #3e775c;
+      --success-soft: #e7f1ea;
+      --attention: #8a6226;
+      --attention-soft: #f8edda;
+      --info: #416c86;
+      --info-soft: #e5eef3;
+      --danger: #a24c46;
+      --danger-soft: #f7e6e3;
+      --focus: #526f88;
+      --focus-soft: rgba(82, 111, 136, 0.16);
+      --identity-1: #a65f4a;
+      --identity-2: #39777a;
+      --identity-3: #74628f;
+      --identity-4: #9a6a32;
+      --identity-5: #4f729b;
+      --shadow-float: 0 18px 56px rgba(38, 45, 58, 0.14);
+      --selection: rgba(82, 111, 136, 0.22);
+    }
+
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --canvas: #0d1114;
+      --surface: #151a1e;
+      --surface-raised: #1b2227;
+      --surface-subtle: #1a2024;
+      --surface-muted: #242d33;
+      --surface-selected: #222c33;
+      --surface-hover: #1d252b;
+      --surface-sunken: #10161a;
+      --input: #1b2227;
+      --ink: #e7ecef;
+      --muted: #abb5bc;
+      --faint: #919da6;
+      --line: #333e46;
+      --line-strong: #53616b;
+      --control-line: #687b88;
+      --rail: #11161a;
+      --rail-ink: #a6b1b8;
+      --rail-line: #313b43;
+      --rail-logo: #b1c8d8;
+      --brand: #7897ae;
+      --brand-hover: #b1c8d8;
+      --brand-contrast: #091116;
+      --brand-soft: #22303a;
+      --brand-ink: #c0d4e1;
+      --ember: #d2aa72;
+      --success: #82b695;
+      --success-soft: #1a2b22;
+      --attention: #d2ac70;
+      --attention-soft: #302719;
+      --info: #83afc9;
+      --info-soft: #182832;
+      --danger: #d6857f;
+      --danger-soft: #321e1d;
+      --focus: #8fb3cb;
+      --focus-soft: rgba(143, 179, 203, 0.18);
+      --identity-1: #c98572;
+      --identity-2: #70b0ae;
+      --identity-3: #a89ac8;
+      --identity-4: #d0a46c;
+      --identity-5: #80abd1;
+      --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
+      --selection: rgba(143, 179, 203, 0.24);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; background: var(--canvas); }
+
+    body {
+      min-width: 320px;
+      min-height: 100vh;
+      margin: 0;
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      font-size: 13px;
+      line-height: 1.6;
+      text-rendering: optimizeLegibility;
+    }
+
+    button,
+    select,
+    input { font: inherit; }
+
+    button,
+    select { color: inherit; }
+
+    button { cursor: pointer; }
+
+    button:disabled,
+    select:disabled { cursor: not-allowed; }
+
+    ::selection { color: var(--ink); background: var(--selection); }
+
+    :focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+
+    .prototype {
+      width: min(1480px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 36px;
+    }
+
+    .prototype-header {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 24px;
+      margin-bottom: 18px;
+    }
+
+    .prototype-heading { min-width: 0; }
+
+    .prototype-heading h1 {
+      max-width: 780px;
+      margin: 0;
+      font-size: clamp(22px, 2vw, 30px);
+      font-weight: 720;
+      letter-spacing: -0.026em;
+      line-height: 1.18;
+      text-wrap: balance;
+    }
+
+    .prototype-heading p {
+      max-width: 76ch;
+      margin: 7px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.62;
+    }
+
+    .theme-button {
+      display: inline-flex;
+      min-height: 36px;
+      flex: 0 0 auto;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      color: var(--muted);
+      background: var(--surface);
+    }
+
+    .theme-button:hover { color: var(--ink); background: var(--surface-raised); }
+    .theme-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
+
+    .review-strip {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 10px;
+      padding: 6px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+      scrollbar-color: var(--line-strong) transparent;
+      scrollbar-width: thin;
+    }
+
+    .review-label {
+      flex: 0 0 auto;
+      padding: 0 5px;
+      color: var(--faint);
+      font-size: 10.5px;
+      font-weight: 680;
+      white-space: nowrap;
+    }
+
+    .scenario-button {
+      min-height: 31px;
+      flex: 0 0 auto;
+      padding: 5px 9px;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .scenario-button:hover { color: var(--ink); background: var(--surface-muted); }
+
+    .scenario-button[aria-pressed="true"] {
+      border-color: var(--line);
+      color: var(--brand-ink);
+      background: var(--brand-soft);
+      font-weight: 680;
+    }
+
+    .review-state {
+      flex: 0 0 auto;
+      margin-left: auto;
+      padding: 0 7px;
+      color: var(--faint);
+      font-size: 10.5px;
+      white-space: nowrap;
+    }
+
+    .app-window {
+      min-height: 736px;
+      overflow: hidden;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+    }
+
+    .window-bar {
+      display: grid;
+      min-height: 50px;
+      grid-template-columns: 270px minmax(0, 1fr) auto;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .brand-lockup {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 10px;
+      padding: 0 17px;
+    }
+
+    .rovai-mark { width: 25px; height: 25px; flex: 0 0 auto; color: var(--rail-logo); }
+    .rovai-mark .rendezvous { fill: var(--ember); stroke: none; }
+    .brand-lockup strong { font-size: 12px; letter-spacing: -0.01em; }
+
+    .window-location {
+      min-width: 0;
+      padding: 0 18px;
+      border-left: 1px solid var(--line);
+    }
+
+    .window-location strong,
+    .window-location span {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .window-location strong { font-size: 11.5px; }
+    .window-location span { margin-top: 1px; color: var(--faint); font-size: 9.5px; }
+
+    .window-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin-right: 16px;
+      color: var(--muted);
+      font-size: 10.5px;
+    }
+
+    .window-state i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+
+    .app-layout {
+      display: grid;
+      min-height: 686px;
+      grid-template-columns: 270px 236px minmax(0, 1fr);
+    }
+
+    .global-rail {
+      position: relative;
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      padding: 14px 10px;
+      border-right: 1px solid var(--rail-line);
+      background: var(--rail);
+    }
+
+    .rail-section-title {
+      margin: 7px 10px 6px;
+      color: var(--faint);
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      line-height: 1.3;
+      text-transform: uppercase;
+    }
+
+    .rail-item {
+      position: relative;
+      display: flex;
+      width: 100%;
+      min-height: 36px;
+      align-items: center;
+      gap: 9px;
+      margin: 1px 0;
+      padding: 6px 9px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--rail-ink);
+      background: transparent;
+      text-align: left;
+      font-size: 11.5px;
+    }
+
+    .rail-item:hover { color: var(--ink); background: var(--surface-hover); }
+
+    .rail-item.active {
+      color: var(--brand-ink);
+      background: var(--surface-selected);
+      font-weight: 680;
+    }
+
+    .rail-item.active::before {
+      position: absolute;
+      top: 8px;
+      bottom: 8px;
+      left: 0;
+      width: 2px;
+      border-radius: 2px;
+      background: var(--brand);
+      content: "";
+    }
+
+    .rail-icon { width: 17px; height: 17px; flex: 0 0 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.45; }
+    .rail-item small { margin-left: auto; color: var(--faint); font-size: 9px; }
+    .rail-rule { height: 1px; margin: 12px 9px; background: var(--rail-line); }
+
+    .rail-footer {
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      margin-top: auto;
+      padding: 10px 9px 2px;
+      border-top: 1px solid var(--rail-line);
+    }
+
+    .principal-avatar,
+    .member-avatar {
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--surface-raised);
+      font-weight: 760;
+      line-height: 1;
+    }
+
+    .principal-avatar { width: 30px; height: 30px; background: var(--identity-5); font-size: 10px; }
+    .rail-footer strong, .rail-footer span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rail-footer strong { font-size: 10.5px; }
+    .rail-footer span { color: var(--faint); font-size: 9px; }
+
+    .member-roster {
+      min-width: 0;
+      border-right: 1px solid var(--line);
+      background: var(--surface-subtle);
+    }
+
+    .roster-header {
+      display: flex;
+      min-height: 55px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .roster-header strong { font-size: 12px; }
+    .roster-header span { color: var(--faint); font-size: 9.5px; }
+
+    .roster-list { padding: 8px; }
+
+    .member-row {
+      position: relative;
+      display: grid;
+      width: 100%;
+      min-height: 49px;
+      grid-template-columns: 31px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      margin: 2px 0;
+      padding: 6px 7px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--muted);
+      background: transparent;
+      text-align: left;
+    }
+
+    .member-row:hover { color: var(--ink); background: var(--surface-hover); }
+
+    .member-row.active {
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: inset 2px 0 0 var(--brand);
+    }
+
+    .member-avatar { width: 31px; height: 31px; background: var(--identity-1); font-size: 9px; }
+    .member-row:nth-child(2) .member-avatar { background: var(--identity-2); }
+    .member-row:nth-child(3) .member-avatar { background: var(--identity-3); }
+    .member-row:nth-child(4) .member-avatar { background: var(--identity-4); }
+    .member-row:nth-child(5) .member-avatar { background: var(--identity-5); }
+
+    .member-copy { min-width: 0; }
+    .member-copy strong, .member-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .member-copy strong { color: inherit; font-size: 10.8px; }
+    .member-copy small { margin-top: 1px; color: var(--faint); font-size: 9px; }
+
+    .runtime-shortcut {
+      display: grid;
+      width: 23px;
+      height: 23px;
+      place-items: center;
+      border: 0;
+      border-radius: 5px;
+      color: var(--success);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 760;
+    }
+
+    .runtime-shortcut:hover { background: var(--success-soft); }
+
+    .member-detail {
+      min-width: 0;
+      overflow: hidden;
+      background: var(--surface-raised);
+    }
+
+    .detail-scroll {
+      height: 686px;
+      overflow: auto;
+      scrollbar-color: var(--line-strong) transparent;
+      scrollbar-width: thin;
+    }
+
+    .detail-content { width: min(880px, calc(100% - 48px)); margin: 0 auto; padding: 24px 0 26px; }
+
+    .member-identity {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 13px;
+      padding-bottom: 17px;
+    }
+
+    .portrait {
+      display: grid;
+      width: 54px;
+      height: 54px;
+      place-items: center;
+      border: 1px solid color-mix(in srgb, var(--identity-3) 42%, var(--line));
+      border-radius: 50%;
+      color: var(--surface-raised);
+      background: var(--identity-3);
+      font-size: 15px;
+      font-weight: 760;
+    }
+
+    .identity-copy { min-width: 0; }
+    .identity-copy h2 { margin: 0; font-size: 19px; font-weight: 720; letter-spacing: -0.02em; line-height: 1.2; }
+    .identity-copy p { margin: 4px 0 0; color: var(--muted); font-size: 10.8px; }
+
+    .identity-facts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px 12px; color: var(--muted); font-size: 10.5px; }
+    .identity-fact { display: inline-flex; align-items: center; gap: 6px; }
+    .identity-fact i { width: 7px; height: 7px; border-radius: 50%; background: var(--success); }
+    .identity-fact.runtime { color: var(--brand-ink); }
+
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tab {
+      position: relative;
+      min-height: 36px;
+      padding: 6px 10px;
+      border: 0;
+      color: var(--muted);
+      background: transparent;
+      font-size: 11px;
+    }
+
+    .tab:hover { color: var(--ink); }
+    .tab.active { color: var(--ink); font-weight: 680; }
+
+    .tab.active::after {
+      position: absolute;
+      right: 9px;
+      bottom: -1px;
+      left: 9px;
+      height: 2px;
+      border-radius: 2px 2px 0 0;
+      background: var(--brand);
+      content: "";
+    }
+
+    .runtime-intro { max-width: 76ch; margin: 14px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.6; }
+
+    .runtime-section { padding-top: 16px; }
+
+    .section-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+    .section-heading h3 { margin: 0; font-size: 14px; font-weight: 710; }
+    .section-heading p { margin: 3px 0 0; color: var(--muted); font-size: 10.5px; }
+
+    .runtime-primary {
+      display: grid;
+      grid-template-columns: minmax(250px, 410px) minmax(0, 1fr);
+      gap: 14px;
+      align-items: end;
+      margin-top: 13px;
+    }
+
+    .field { display: grid; min-width: 0; gap: 5px; }
+    .field > span, .field legend { color: var(--ink); font-size: 10.8px; font-weight: 650; }
+
+    .field select {
+      width: 100%;
+      min-height: 40px;
+      padding: 7px 31px 7px 10px;
+      border: 1px solid var(--control-line);
+      border-radius: 7px;
+      color: var(--ink);
+      background: var(--input);
+    }
+
+    .field select:hover:not(:disabled) { border-color: var(--brand); }
+    .field select:disabled { opacity: 0.58; }
+
+    .runtime-summary {
+      display: grid;
+      min-height: 58px;
+      align-content: center;
+      gap: 3px;
+      padding: 8px 0 8px 12px;
+      border-left: 1px solid var(--line-strong);
+    }
+
+    .runtime-summary-main { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 7px; }
+    .runtime-logo { width: 18px; height: 18px; flex: 0 0 18px; object-fit: contain; }
+    .runtime-summary strong { font-size: 11px; }
+    .runtime-status { display: inline-flex; align-items: center; gap: 5px; color: var(--success); font-size: 10px; }
+    .runtime-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    .runtime-summary code { color: var(--faint); font: 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .runtime-summary small { color: var(--muted); font-size: 9.8px; line-height: 1.45; }
+
+    .runtime-help { display: block; margin-top: 6px; color: var(--faint); font-size: 9.8px; }
+
+    .runtime-parameters { margin-top: 12px; padding-top: 19px; border-top: 1px solid var(--line); }
+    .parameters-heading { display: grid; gap: 3px; }
+    .parameters-heading strong { font-size: 13.5px; }
+    .parameters-heading small { color: var(--muted); font-size: 10.5px; }
+
+    .parameter-form {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 13px;
+    }
+
+    .model-meta { display: block; margin-top: -1px; color: var(--faint); font-size: 9.5px; line-height: 1.4; }
+
+    .speed-field {
+      min-width: 0;
+      grid-column: 1 / -1;
+      margin: 0;
+      padding: 0;
+      border: 0;
+    }
+
+    .speed-field legend { margin-bottom: 5px; padding: 0; }
+
+    .speed-options {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+
+    .speed-option {
+      position: relative;
+      display: grid;
+      min-width: 0;
+      min-height: 63px;
+      grid-template-columns: 18px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 10px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: var(--input);
+      cursor: pointer;
+    }
+
+    .speed-option:hover { border-color: var(--brand); background: var(--surface-raised); }
+    .speed-option:has(input:checked) { border-color: var(--brand); background: var(--brand-soft); }
+    .speed-option:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+    .speed-option.is-disabled { color: var(--faint); background: var(--surface-subtle); cursor: not-allowed; opacity: 0.68; }
+    .speed-option.is-disabled:hover { border-color: var(--line-strong); background: var(--surface-subtle); }
+
+    .speed-option input {
+      width: 16px;
+      height: 16px;
+      margin: 0;
+      accent-color: var(--brand);
+    }
+
+    .speed-copy { display: grid; min-width: 0; gap: 2px; }
+    .speed-copy strong { font-size: 11.5px; }
+    .speed-copy small { color: var(--muted); font-size: 9.8px; line-height: 1.4; }
+
+    .fast-mark {
+      display: inline-flex;
+      min-height: 22px;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 6px;
+      border: 1px solid color-mix(in srgb, var(--brand) 52%, var(--line));
+      border-radius: 5px;
+      color: var(--brand-ink);
+      background: var(--surface-raised);
+      font-size: 8.5px;
+      font-weight: 760;
+      letter-spacing: 0.045em;
+    }
+
+    .fast-mark svg { width: 11px; height: 11px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-width: 1.5; }
+
+    .speed-note {
+      display: grid;
+      grid-template-columns: 16px minmax(0, 1fr);
+      gap: 8px;
+      margin: 7px 0 0;
+      padding: 8px 9px;
+      border-radius: 7px;
+      color: var(--muted);
+      background: var(--surface-subtle);
+      font-size: 9.8px;
+      line-height: 1.48;
+    }
+
+    .speed-note svg { width: 15px; height: 15px; margin-top: 1px; fill: none; stroke: var(--info); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+    .speed-note.attention { color: var(--attention); background: var(--attention-soft); }
+    .speed-note.attention svg { stroke: currentColor; }
+
+    .configuration-readback {
+      display: flex;
+      min-width: 0;
+      grid-column: 1 / -1;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 36px;
+      padding: 6px 9px;
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 10px;
+    }
+
+    .configuration-readback strong { color: var(--ink); font-weight: 650; }
+    .configuration-readback code { overflow: hidden; color: var(--brand-ink); font: 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; white-space: nowrap; }
+
+    .form-actions {
+      display: flex;
+      min-height: 58px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .save-state { color: var(--faint); font-size: 10px; }
+    .save-state.dirty { color: var(--attention); }
+
+    .action-buttons { display: flex; gap: 7px; }
+    .quiet-button, .primary-button {
+      min-height: 34px;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 10.8px;
+      font-weight: 620;
+    }
+
+    .quiet-button { border: 1px solid var(--line-strong); color: var(--muted); background: var(--surface-raised); }
+    .quiet-button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+    .primary-button { border: 1px solid var(--brand); color: var(--brand-contrast); background: var(--brand); }
+    .primary-button:hover:not(:disabled) { border-color: var(--brand-hover); background: var(--brand-hover); }
+    .quiet-button:disabled, .primary-button:disabled { opacity: 0.5; }
+
+    .prototype-footer {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    .design-note,
+    .mapping-note {
+      min-width: 0;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--surface);
+    }
+
+    .design-note h2,
+    .mapping-note h2 { margin: 0; font-size: 12px; }
+    .design-note p, .mapping-note p { margin: 5px 0 0; color: var(--muted); font-size: 10.8px; line-height: 1.58; }
+    .design-note a { color: var(--brand-ink); text-underline-offset: 2px; }
+    .mapping-note code { color: var(--brand-ink); font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .toast-region {
+      position: fixed;
+      z-index: 10;
+      right: 20px;
+      bottom: 20px;
+      display: grid;
+      gap: 7px;
+      pointer-events: none;
+    }
+
+    .toast {
+      display: flex;
+      min-width: 240px;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 9px;
+      color: var(--ink);
+      background: var(--surface-raised);
+      box-shadow: var(--shadow-float);
+      font-size: 11px;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 140ms ease-out, transform 140ms ease-out;
+    }
+
+    .toast.visible { opacity: 1; transform: translateY(0); }
+    .toast svg { width: 15px; height: 15px; fill: none; stroke: var(--success); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+
+    @media (max-width: 1120px) {
+      .prototype { width: min(100% - 20px, 1480px); padding-top: 18px; }
+      .app-layout { grid-template-columns: 210px 210px minmax(0, 1fr); }
+      .window-bar { grid-template-columns: 210px minmax(0, 1fr) auto; }
+      .detail-content { width: min(880px, calc(100% - 32px)); }
+      .rail-item { padding-inline: 7px; }
+    }
+
+    @media (max-width: 900px) {
+      .prototype-header { align-items: flex-start; }
+      .app-layout { grid-template-columns: 68px 72px minmax(0, 1fr); }
+      .window-bar { grid-template-columns: 140px minmax(0, 1fr) auto; }
+      .brand-lockup { padding-inline: 12px; }
+      .global-rail { padding-inline: 8px; }
+      .rail-section-title, .rail-item span, .rail-item small, .rail-footer > div:last-child { display: none; }
+      .rail-item { justify-content: center; padding: 6px; }
+      .rail-item.active::before { top: 7px; bottom: 7px; }
+      .rail-footer { grid-template-columns: 30px; justify-content: center; padding-inline: 0; }
+      .roster-header { justify-content: center; padding-inline: 4px; }
+      .roster-header strong { font-size: 0; }
+      .roster-header strong::after { font-size: 11px; content: "队员"; }
+      .roster-header span, .member-copy, .runtime-shortcut { display: none; }
+      .member-row { grid-template-columns: 31px; justify-content: center; padding-inline: 3px; }
+      .member-row.active { box-shadow: inset 2px 0 0 var(--brand); }
+      .member-identity { grid-template-columns: 50px minmax(0, 1fr); }
+      .identity-facts { grid-column: 1 / -1; justify-content: flex-start; }
+      .runtime-primary { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+      .runtime-summary { padding-left: 0; border-top: 1px solid var(--line); border-left: 0; }
+      .prototype-footer { grid-template-columns: minmax(0, 1fr); }
+    }
+
+    @media (max-width: 640px) {
+      .prototype { width: 100%; padding: 14px 0 0; }
+      .prototype-header, .review-strip, .prototype-footer { margin-right: 12px; margin-left: 12px; }
+      .prototype-header { display: grid; gap: 12px; }
+      .theme-button { width: fit-content; }
+      .review-state { display: none; }
+      .app-window { min-height: 720px; border-right: 0; border-left: 0; border-radius: 0; box-shadow: none; }
+      .window-bar { grid-template-columns: minmax(0, 1fr) auto; }
+      .brand-lockup { display: none; }
+      .window-location { border-left: 0; }
+      .window-state { margin-right: 12px; font-size: 0; }
+      .app-layout { grid-template-columns: minmax(0, 1fr); min-height: 670px; }
+      .global-rail, .member-roster { display: none; }
+      .detail-scroll { height: 670px; }
+      .detail-content { width: calc(100% - 24px); padding-top: 17px; }
+      .portrait { width: 46px; height: 46px; }
+      .member-identity { grid-template-columns: 46px minmax(0, 1fr); gap: 10px; }
+      .parameter-form, .speed-options { grid-template-columns: minmax(0, 1fr); }
+      .configuration-readback { align-items: flex-start; flex-direction: column; gap: 3px; }
+      .configuration-readback code { width: 100%; }
+      .form-actions { align-items: flex-start; flex-direction: column; }
+      .action-buttons { width: 100%; }
+      .action-buttons button { flex: 1 1 0; }
+      .prototype-footer { padding-bottom: 18px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+    }
+
+    @media (forced-colors: active) {
+      .rail-item.active::before, .tab.active::after { background: Highlight; }
+      .runtime-status i, .window-state i, .identity-fact i { background: currentColor; }
+      .portrait, .member-avatar, .principal-avatar { border: 1px solid CanvasText; color: Canvas; background: CanvasText; }
+      .speed-option:has(input:checked) { outline: 2px solid Highlight; }
+    }
+  </style>
+</head>
+<body>
+  <main class="prototype">
+    <header class="prototype-header">
+      <div class="prototype-heading">
+        <h1>Codex Fast mode · 运行参数交互稿</h1>
+        <p>把 Fast 作为与模型、推理强度并列的执行档位呈现。评审重点是能力发现、费用提示、模型不兼容与认证方式变化时的反馈，而不是把它伪装成一个新模型。</p>
+      </div>
+      <button class="theme-button" id="theme-button" type="button" aria-label="切换为 Steel Night 主题">
+        <svg viewBox="0 0 18 18" aria-hidden="true"><path d="M9 2.1v1.5M9 14.4v1.5M2.1 9h1.5M14.4 9h1.5M4.1 4.1l1 1M12.9 12.9l1 1M13.9 4.1l-1 1M5.1 12.9l-1 1"/><circle cx="9" cy="9" r="3.2"/></svg>
+        <span>Steel Night</span>
+      </button>
+    </header>
+
+    <nav class="review-strip" aria-label="原型状态切换">
+      <span class="review-label">原型状态</span>
+      <button class="scenario-button" type="button" data-scenario="supported" aria-pressed="true">ChatGPT · GPT-5.6</button>
+      <button class="scenario-button" type="button" data-scenario="unsupported" aria-pressed="false">模型不支持 Fast</button>
+      <button class="scenario-button" type="button" data-scenario="api" aria-pressed="false">API Key</button>
+      <button class="scenario-button" type="button" data-scenario="unverified" aria-pressed="false">目录尚未核对</button>
+      <span class="review-state" id="review-state">当前：Fast 可用</span>
+    </nav>
+
+    <section class="app-window" aria-label="Rovai AI 队员运行配置原型">
+      <header class="window-bar">
+        <div class="brand-lockup">
+          <svg class="rovai-mark" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M16 3.2c.5 4.7 2.7 7 7.3 7.5-4.6.6-6.8 2.9-7.3 7.6-.6-4.7-2.8-7-7.4-7.6 4.6-.5 6.8-2.8 7.4-7.5Z" fill="currentColor"/>
+            <path d="M5.2 25.2c3.1-3.4 6.7-5.1 10.8-5.1s7.7 1.7 10.8 5.1" fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2"/>
+            <circle class="rendezvous" cx="16" cy="24.1" r="1.45"/>
+          </svg>
+          <strong>Rovai AI</strong>
+        </div>
+        <div class="window-location">
+          <strong>Rovai-ai · 队员</strong>
+          <span>本地协作工作区</span>
+        </div>
+        <div class="window-state"><i aria-hidden="true"></i><span>Core 已连接</span></div>
+      </header>
+
+      <div class="app-layout">
+        <aside class="global-rail" aria-label="主导航">
+          <p class="rail-section-title">Project</p>
+          <button class="rail-item" type="button">
+            <svg class="rail-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 5.3h5l1.3 1.5h6.7v8.1H3.5z"/><path d="M3.5 6.8V4.2h4.3l1.1 1.1"/></svg>
+            <span>Rovai-ai</span><small>⌘1</small>
+          </button>
+          <button class="rail-item" type="button">
+            <svg class="rail-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 5.2h12v10H4z"/><path d="M7 3.5v3.4M13 3.5v3.4M4 8.2h12"/></svg>
+            <span>Camps</span><small>3</small>
+          </button>
+          <button class="rail-item active" type="button" aria-current="page">
+            <svg class="rail-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="7" cy="7" r="2.3"/><circle cx="13.2" cy="7.8" r="1.8"/><path d="M3.5 15c.4-2.7 1.6-4.1 3.7-4.1s3.3 1.4 3.7 4.1M11 14.8c.3-2 1.2-3 2.8-3 1.4 0 2.3 1 2.7 3"/></svg>
+            <span>队员</span><small>5</small>
+          </button>
+          <button class="rail-item" type="button">
+            <svg class="rail-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3.8h8.2l1.8 1.9v10.5H5z"/><path d="M12.8 3.8v2.3H15M7.6 9.1h4.8M7.6 12h4.8"/></svg>
+            <span>记忆</span>
+          </button>
+          <div class="rail-rule"></div>
+          <p class="rail-section-title">Workspace</p>
+          <button class="rail-item" type="button">
+            <svg class="rail-icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M4 4h12v11H4z"/><path d="M7 7h6M7 10h6M7 13h3"/></svg>
+            <span>诊断</span>
+          </button>
+          <button class="rail-item" type="button">
+            <svg class="rail-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.4"/><path d="M10 3.2v1.5M10 15.3v1.5M3.2 10h1.5M15.3 10h1.5M5.2 5.2l1.1 1.1M13.7 13.7l1.1 1.1M14.8 5.2l-1.1 1.1M6.3 13.7l-1.1 1.1"/></svg>
+            <span>设置</span><small>⌘,</small>
+          </button>
+          <div class="rail-footer">
+            <span class="principal-avatar" aria-hidden="true">主</span>
+            <div><strong>Principal</strong><span>本机工作区</span></div>
+          </div>
+        </aside>
+
+        <aside class="member-roster" aria-label="队员名册">
+          <header class="roster-header"><strong>队员</strong><span>5 位在队</span></header>
+          <div class="roster-list">
+            <button class="member-row active" type="button" aria-current="true">
+              <span class="member-avatar" aria-hidden="true">奥</span>
+              <span class="member-copy"><strong>奥黛丽</strong><small>观众途径</small></span>
+              <span class="runtime-shortcut" aria-label="Codex 可用">✓</span>
+            </button>
+            <button class="member-row" type="button">
+              <span class="member-avatar" aria-hidden="true">爱</span>
+              <span class="member-copy"><strong>爱丽丝</strong><small>Default Lead</small></span>
+              <span class="runtime-shortcut" aria-label="Codex 可用">✓</span>
+            </button>
+            <button class="member-row" type="button">
+              <span class="member-avatar" aria-hidden="true">雾</span>
+              <span class="member-copy"><strong>雾切响子</strong><small>独立审核</small></span>
+              <span class="runtime-shortcut" aria-label="Codex 可用">✓</span>
+            </button>
+            <button class="member-row" type="button">
+              <span class="member-avatar" aria-hidden="true">药</span>
+              <span class="member-copy"><strong>药师寺惠</strong><small>测试与验证</small></span>
+              <span class="runtime-shortcut" aria-label="Codex 可用">✓</span>
+            </button>
+            <button class="member-row" type="button">
+              <span class="member-avatar" aria-hidden="true">新</span>
+              <span class="member-copy"><strong>新岛真</strong><small>战术调度</small></span>
+              <span class="runtime-shortcut" aria-label="Codex 可用">✓</span>
+            </button>
+          </div>
+        </aside>
+
+        <section class="member-detail" aria-labelledby="member-name">
+          <div class="detail-scroll">
+            <div class="detail-content">
+              <header class="member-identity">
+                <div class="portrait" aria-hidden="true">奥</div>
+                <div class="identity-copy">
+                  <h2 id="member-name">奥黛丽</h2>
+                  <p>正义小姐 · 观众途径</p>
+                </div>
+                <div class="identity-facts">
+                  <span class="identity-fact"><i aria-hidden="true"></i>在队</span>
+                  <span class="identity-fact runtime">Codex 可用 →</span>
+                </div>
+              </header>
+
+              <div class="tabs" role="tablist" aria-label="队员配置">
+                <button class="tab" type="button" role="tab" aria-selected="false">队员资料</button>
+                <button class="tab active" type="button" role="tab" aria-selected="true">运行配置</button>
+              </div>
+
+              <p class="runtime-intro">设置这位队员后续执行使用的 Agent 运行时、模型和权限。保存后仅影响之后开始的新执行。</p>
+
+              <section class="runtime-section" aria-labelledby="runtime-heading">
+                <div class="section-heading">
+                  <div>
+                    <h3 id="runtime-heading">Agent 运行时</h3>
+                    <p>选择执行产品，并确认当前安装与可用状态。</p>
+                  </div>
+                </div>
+
+                <div class="runtime-primary">
+                  <label class="field">
+                    <span>Agent 运行时</span>
+                    <select id="runtime-select">
+                      <option selected>Codex</option>
+                      <option>Claude Code</option>
+                      <option>OpenCode</option>
+                    </select>
+                  </label>
+
+                  <div class="runtime-summary" role="status" aria-live="polite">
+                    <div class="runtime-summary-main">
+                      <img class="runtime-logo" src="../../../apps/desktop/src/renderer/src/assets/runtime-logos/codex-color.svg" alt="" />
+                      <strong>Codex</strong>
+                      <span class="runtime-status" id="runtime-status"><i aria-hidden="true"></i><span>可用</span></span>
+                      <code>0.147.0</code>
+                    </div>
+                    <small id="auth-summary">ChatGPT 已登录 · 模型目录刚刚核对</small>
+                  </div>
+                </div>
+                <small class="runtime-help">运行时、模型、速度档位与权限会作为一份配置共同保存。</small>
+
+                <section class="runtime-parameters" aria-labelledby="parameters-heading">
+                  <header class="parameters-heading">
+                    <strong id="parameters-heading">运行参数</strong>
+                    <small>模型、执行档位与 Agent 运行时原生权限。</small>
+                  </header>
+
+                  <form id="runtime-form">
+                    <div class="parameter-form">
+                      <label class="field">
+                        <span>模型策略</span>
+                        <select id="model-select">
+                          <option value="runtime_default">跟随 Agent 运行时默认</option>
+                          <option value="gpt-5.6" selected>GPT-5.6</option>
+                          <option value="gpt-5.5">GPT-5.5</option>
+                          <option value="gpt-5.4">GPT-5.4</option>
+                          <option value="gpt-5.3-codex">GPT-5.3-Codex</option>
+                        </select>
+                        <small class="model-meta" id="model-meta">固定模型 · 目录刚刚核对</small>
+                      </label>
+
+                      <label class="field">
+                        <span>推理强度</span>
+                        <select id="effort-select">
+                          <option value="default">跟随模型默认值</option>
+                          <option value="low">Low</option>
+                          <option value="medium" selected>Medium</option>
+                          <option value="high">High</option>
+                          <option value="xhigh">Xhigh</option>
+                        </select>
+                      </label>
+
+                      <fieldset class="field speed-field" id="speed-field" aria-describedby="speed-note">
+                        <legend>响应速度</legend>
+                        <div class="speed-options">
+                          <label class="speed-option" id="standard-option">
+                            <input type="radio" name="service-tier" value="standard" />
+                            <span class="speed-copy"><strong>标准</strong><small>常规响应速度 · 标准 credits 费率</small></span>
+                          </label>
+                          <label class="speed-option" id="fast-option">
+                            <input type="radio" name="service-tier" value="fast" checked />
+                            <span class="speed-copy"><strong>快速</strong><small id="fast-option-detail">约 1.5× 生成速度 · 2.5× credits</small></span>
+                            <span class="fast-mark"><svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 4h6M2 7h9M2 10h6"/></svg>FAST</span>
+                          </label>
+                        </div>
+                        <p class="speed-note" id="speed-note" role="status" aria-live="polite">
+                          <svg viewBox="0 0 18 18" aria-hidden="true"><circle cx="9" cy="9" r="6.5"/><path d="M9 8.1v4M9 5.5h.01"/></svg>
+                          <span>GPT-5.6 支持 Fast。选择后约提升至 1.5× 生成速度，并按 2.5× 标准 credits 费率消耗；不会改变推理强度。</span>
+                        </p>
+                      </fieldset>
+
+                      <label class="field">
+                        <span>文件系统访问</span>
+                        <select id="sandbox-select">
+                          <option value="read-only">只读</option>
+                          <option value="workspace-write">工作区可写</option>
+                          <option value="danger-full-access" selected>完全访问</option>
+                        </select>
+                      </label>
+
+                      <label class="field">
+                        <span>审批策略</span>
+                        <select id="approval-select">
+                          <option value="untrusted">不受信任时询问</option>
+                          <option value="on-request">按需询问</option>
+                          <option value="never" selected>不询问</option>
+                        </select>
+                      </label>
+
+                      <div class="configuration-readback" aria-live="polite">
+                        <strong id="selection-summary">GPT-5.6 · Medium · Fast</strong>
+                        <code id="service-tier-readback">turn/start · serviceTier: "fast"</code>
+                      </div>
+                    </div>
+
+                    <div class="form-actions">
+                      <span class="save-state" id="save-state" role="status" aria-live="polite">当前配置已保存</span>
+                      <div class="action-buttons">
+                        <button class="quiet-button" id="discard-button" type="button" disabled>放弃更改</button>
+                        <button class="primary-button" id="save-button" type="submit" disabled>保存运行配置</button>
+                      </div>
+                    </div>
+                  </form>
+                </section>
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <footer class="prototype-footer">
+      <section class="design-note">
+        <h2>设计判断</h2>
+        <p>Fast 是受支持模型上的 run-scoped service tier，不是模型身份，也不是权限。它因此位于“运行参数”中，排在模型与推理强度之后；只有当前 Codex 模型目录明确广告该档位时才可选择。示例倍率依据 <a href="https://learn.chatgpt.com/docs/agent-configuration/speed" target="_blank" rel="noreferrer">OpenAI 官方 Speed 文档</a>。</p>
+      </section>
+      <section class="mapping-note">
+        <h2>建议的生产映射</h2>
+        <p><code>ModelDescriptor.serviceTiers</code> → 可见选项<br />独立 <code>service_tier</code> run option → 队员偏好<br /><code>turn/start.serviceTier</code> → 每次执行</p>
+      </section>
+    </footer>
+  </main>
+
+  <div class="toast-region" aria-live="polite" aria-atomic="true">
+    <div class="toast" id="save-toast" role="status">
+      <svg viewBox="0 0 18 18" aria-hidden="true"><path d="m3.5 9.2 3.4 3.4 7.6-7.6"/></svg>
+      <span>运行配置已保存；新执行将使用这组参数。</span>
+    </div>
+  </div>
+
+  <script>
+    const root = document.documentElement;
+    const themeButton = document.querySelector('#theme-button');
+    const themeLabel = themeButton.querySelector('span');
+    const scenarioButtons = [...document.querySelectorAll('[data-scenario]')];
+    const reviewState = document.querySelector('#review-state');
+    const form = document.querySelector('#runtime-form');
+    const modelSelect = document.querySelector('#model-select');
+    const effortSelect = document.querySelector('#effort-select');
+    const sandboxSelect = document.querySelector('#sandbox-select');
+    const approvalSelect = document.querySelector('#approval-select');
+    const tierInputs = [...document.querySelectorAll('input[name="service-tier"]')];
+    const standardInput = tierInputs.find((input) => input.value === 'standard');
+    const fastInput = tierInputs.find((input) => input.value === 'fast');
+    const fastOption = document.querySelector('#fast-option');
+    const speedNote = document.querySelector('#speed-note');
+    const fastOptionDetail = document.querySelector('#fast-option-detail');
+    const modelMeta = document.querySelector('#model-meta');
+    const authSummary = document.querySelector('#auth-summary');
+    const runtimeStatus = document.querySelector('#runtime-status');
+    const selectionSummary = document.querySelector('#selection-summary');
+    const serviceTierReadback = document.querySelector('#service-tier-readback');
+    const saveState = document.querySelector('#save-state');
+    const discardButton = document.querySelector('#discard-button');
+    const saveButton = document.querySelector('#save-button');
+    const saveToast = document.querySelector('#save-toast');
+
+    const modelFacts = {
+      'runtime_default': { label: 'Agent 运行时默认', effective: 'GPT-5.6', supportsFast: true, multiplier: '2.5×' },
+      'gpt-5.6': { label: 'GPT-5.6', effective: 'GPT-5.6', supportsFast: true, multiplier: '2.5×' },
+      'gpt-5.5': { label: 'GPT-5.5', effective: 'GPT-5.5', supportsFast: true, multiplier: '2.5×' },
+      'gpt-5.4': { label: 'GPT-5.4', effective: 'GPT-5.4', supportsFast: true, multiplier: '2×' },
+      'gpt-5.3-codex': { label: 'GPT-5.3-Codex', effective: 'GPT-5.3-Codex', supportsFast: false, multiplier: null }
+    };
+
+    const state = {
+      auth: 'chatgpt',
+      catalog: 'fresh',
+      dirty: false,
+      saving: false,
+      custom: false,
+      fallbackMessage: '',
+      baseline: null
+    };
+
+    const scenarios = {
+      supported: { auth: 'chatgpt', catalog: 'fresh', model: 'gpt-5.6', effort: 'medium', tier: 'fast', label: '当前：Fast 可用' },
+      unsupported: { auth: 'chatgpt', catalog: 'fresh', model: 'gpt-5.3-codex', effort: 'medium', tier: 'standard', label: '当前：模型不支持 Fast' },
+      api: { auth: 'api', catalog: 'fresh', model: 'gpt-5.6', effort: 'medium', tier: 'standard', label: '当前：API Key 计价' },
+      unverified: { auth: 'unknown', catalog: 'unverified', model: 'runtime_default', effort: 'default', tier: 'standard', label: '当前：等待能力核对' }
+    };
+
+    function selectedTier() {
+      return tierInputs.find((input) => input.checked)?.value || 'standard';
+    }
+
+    function snapshot() {
+      return JSON.stringify({
+        auth: state.auth,
+        catalog: state.catalog,
+        model: modelSelect.value,
+        effort: effortSelect.value,
+        tier: selectedTier(),
+        sandbox: sandboxSelect.value,
+        approval: approvalSelect.value
+      });
+    }
+
+    function updateDirty() {
+      state.dirty = snapshot() !== state.baseline;
+      saveState.textContent = state.saving ? '正在保存…' : state.dirty ? '有未保存更改' : '当前配置已保存';
+      saveState.classList.toggle('dirty', state.dirty && !state.saving);
+      discardButton.disabled = !state.dirty || state.saving;
+      saveButton.disabled = !state.dirty || state.saving || state.catalog === 'unverified';
+      saveButton.textContent = state.saving ? '正在保存…' : '保存运行配置';
+    }
+
+    function markCustom() {
+      state.custom = true;
+      scenarioButtons.forEach((button) => button.setAttribute('aria-pressed', 'false'));
+      reviewState.textContent = '当前：手动调整中';
+    }
+
+    function tierAvailability() {
+      const facts = modelFacts[modelSelect.value];
+      if (state.catalog !== 'fresh') return { available: false, reason: 'unverified', facts };
+      if (state.auth !== 'chatgpt') return { available: false, reason: 'api', facts };
+      if (!facts.supportsFast) return { available: false, reason: 'model', facts };
+      return { available: true, reason: null, facts };
+    }
+
+    function setTier(value) {
+      tierInputs.forEach((input) => { input.checked = input.value === value; });
+    }
+
+    function render() {
+      const availability = tierAvailability();
+      const facts = availability.facts;
+
+      fastInput.disabled = !availability.available;
+      fastOption.classList.toggle('is-disabled', !availability.available);
+      fastOption.setAttribute('aria-disabled', String(!availability.available));
+
+      if (!availability.available && fastInput.checked) {
+        setTier('standard');
+        state.fallbackMessage = availability.reason === 'model'
+          ? `${facts.label} 未提供 Fast，已恢复为标准速度。`
+          : availability.reason === 'api'
+            ? 'API Key 不使用 ChatGPT Fast credits 档位，已恢复为标准速度。'
+            : '模型目录尚未核对，已恢复为标准速度。';
+      }
+
+      const tier = selectedTier();
+      fastOptionDetail.textContent = availability.available
+        ? `约 1.5× 生成速度 · ${facts.multiplier} credits`
+        : availability.reason === 'model'
+          ? '当前模型未广告 Fast 档位'
+          : availability.reason === 'api'
+            ? 'API Priority 需作为独立能力处理'
+            : '核对模型目录后才能选择';
+
+      if (state.fallbackMessage) {
+        speedNote.classList.add('attention');
+        speedNote.querySelector('span').textContent = state.fallbackMessage;
+        state.fallbackMessage = '';
+      } else if (availability.reason === 'model') {
+        speedNote.classList.add('attention');
+        speedNote.querySelector('span').textContent = `${facts.label} 的当前目录未提供 Fast service tier。标准速度保持可用；切换到 GPT-5.6、GPT-5.5 或 GPT-5.4 后可再选择。`;
+      } else if (availability.reason === 'api') {
+        speedNote.classList.add('attention');
+        speedNote.querySelector('span').textContent = 'Fast 是 ChatGPT credits 功能。API Key 使用 API token 计价；API Priority 有自己的费率，不能借用这个开关表达。';
+      } else if (availability.reason === 'unverified') {
+        speedNote.classList.add('attention');
+        speedNote.querySelector('span').textContent = '当前还没有可核对的模型档位。完成 Codex 可用性检查或打开模型目录后，再决定是否显示 Fast。';
+      } else {
+        speedNote.classList.remove('attention');
+        speedNote.querySelector('span').textContent = tier === 'fast'
+          ? `${facts.effective} 支持 Fast。选择后约提升至 1.5× 生成速度，并按 ${facts.multiplier} 标准 credits 费率消耗；不会改变推理强度。`
+          : `${facts.effective} 支持 Fast，但当前使用标准速度与标准 credits 费率。`;
+      }
+
+      modelSelect.disabled = state.catalog !== 'fresh';
+      effortSelect.disabled = state.catalog !== 'fresh';
+      tierInputs.forEach((input) => {
+        if (input.value === 'standard') input.disabled = state.catalog !== 'fresh';
+      });
+
+      if (state.catalog === 'fresh') {
+        runtimeStatus.className = 'runtime-status';
+        runtimeStatus.querySelector('span').textContent = '可用';
+        authSummary.textContent = state.auth === 'chatgpt'
+          ? 'ChatGPT 已登录 · 模型目录刚刚核对'
+          : 'API Key 已配置 · 模型目录刚刚核对';
+        modelMeta.textContent = modelSelect.value === 'runtime_default'
+          ? `跟随 Agent 运行时默认 · 当前为 ${facts.effective}`
+          : '固定模型 · 目录刚刚核对';
+      } else {
+        runtimeStatus.className = 'runtime-status';
+        runtimeStatus.querySelector('span').textContent = '基础可用';
+        authSummary.textContent = '登录、模型与能力尚未显式核对';
+        modelMeta.textContent = '跟随 Agent 运行时默认 · 尚未获取目录';
+      }
+
+      const effortLabel = effortSelect.value === 'default'
+        ? '模型默认推理强度'
+        : effortSelect.options[effortSelect.selectedIndex].text;
+      const tierLabel = tier === 'fast' ? 'Fast' : '标准速度';
+      selectionSummary.textContent = `${facts.label} · ${effortLabel} · ${tierLabel}`;
+      serviceTierReadback.textContent = tier === 'fast'
+        ? 'turn/start · serviceTier: "fast"'
+        : 'turn/start · serviceTier: null';
+
+      updateDirty();
+    }
+
+    function applyScenario(name) {
+      const next = scenarios[name];
+      saveToast.classList.remove('visible');
+      state.auth = next.auth;
+      state.catalog = next.catalog;
+      state.custom = false;
+      state.fallbackMessage = '';
+      modelSelect.value = next.model;
+      effortSelect.value = next.effort;
+      setTier(next.tier);
+      sandboxSelect.value = 'danger-full-access';
+      approvalSelect.value = 'never';
+      scenarioButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.scenario === name)));
+      reviewState.textContent = next.label;
+      render();
+      state.baseline = snapshot();
+      updateDirty();
+    }
+
+    function showToast() {
+      saveToast.classList.add('visible');
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => saveToast.classList.remove('visible'), 2600);
+    }
+
+    themeButton.addEventListener('click', () => {
+      const nextTheme = root.dataset.theme === 'night' ? 'day' : 'night';
+      root.dataset.theme = nextTheme;
+      const targetName = nextTheme === 'night' ? 'Porcelain Day' : 'Steel Night';
+      themeLabel.textContent = targetName;
+      themeButton.setAttribute('aria-label', `切换为 ${targetName} 主题`);
+    });
+
+    scenarioButtons.forEach((button) => {
+      button.addEventListener('click', () => applyScenario(button.dataset.scenario));
+    });
+
+    [modelSelect, effortSelect, sandboxSelect, approvalSelect].forEach((control) => {
+      control.addEventListener('change', () => {
+        markCustom();
+        render();
+      });
+    });
+
+    tierInputs.forEach((input) => {
+      input.addEventListener('change', () => {
+        markCustom();
+        render();
+      });
+    });
+
+    discardButton.addEventListener('click', () => {
+      const baseline = JSON.parse(state.baseline);
+      state.auth = baseline.auth;
+      state.catalog = baseline.catalog;
+      modelSelect.value = baseline.model;
+      effortSelect.value = baseline.effort;
+      setTier(baseline.tier);
+      sandboxSelect.value = baseline.sandbox;
+      approvalSelect.value = baseline.approval;
+      state.fallbackMessage = '';
+      render();
+      reviewState.textContent = '当前：已恢复保存值';
+    });
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!state.dirty || state.saving || state.catalog !== 'fresh') return;
+      state.saving = true;
+      updateDirty();
+      window.setTimeout(() => {
+        state.saving = false;
+        state.baseline = snapshot();
+        updateDirty();
+        reviewState.textContent = '当前：配置已保存';
+        showToast();
+      }, 650);
+    });
+
+    applyScenario('supported');
+  </script>
+</body>
+</html>
