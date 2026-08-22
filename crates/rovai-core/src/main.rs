@@ -10905,7 +10905,9 @@ async fn run_core(
             acp_tx,
             data_dir.join("runtime/kimi-code"),
             runtime_fleet.clone(),
-            CompactionDetectorPolicy::Disabled,
+            compaction_detector_policies
+                .policy_for(AdapterKind::KimiCodeCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         claude_code_cli,
         antigravity_app,
@@ -16019,7 +16021,9 @@ mod tests {
                 acp_tx,
                 data_dir.join("runtime/kimi-code"),
                 runtime_fleet.clone(),
-                CompactionDetectorPolicy::Disabled,
+                compaction_detector_policies
+                    .policy_for(AdapterKind::KimiCodeCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
             claude_code_cli: ClaudeCodeCliRuntimeAdapter::new(&data_dir)?,
             antigravity_app: AntigravityAppRuntimeAdapter::new(&data_dir)?,

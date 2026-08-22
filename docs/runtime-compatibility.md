@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # Agent Runtime 兼容性清单
@@ -24,7 +24,8 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
 Cursor 在三个目标平台均为 `not_qualified`。Kimi 的 macOS arm64 完整资格矩阵已通过并为
 digest-bound `qualified`；macOS x64 与 Windows x64 仍为 `not_qualified`。
-设置页的
+Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
+目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
@@ -46,20 +47,22 @@ diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Pla
 | Tool / permission | Shell allow-once 真实通过；stdout、stderr、mixed、empty、nonzero 与 128 KiB large output 六类均产生唯一 stable Tool ID 和 terminal Evidence | 只以 terminal phase 判定真实 command output；large output 有界截断并保留首部 marker，nonzero 保持 Tool failed |
 | Deny / filesystem | 独立 Camp 中真实 deny Approval 返回 `rovai_approval_denied`，Tool 为 `failed/not_executed`，目标文件不存在 | ACP Client fs write 没有匹配 one-time authorization 时由 Core 拒绝；Runtime Tool 前预拒绝仍可单独如实记录 |
 | Cancel / cleanup | `sleep 30` 获准后发送 `session/cancel`，约 6 ms 返回 `cancelled`，无目标残留进程 | cancel、terminal、planned shutdown、Camp 删除与 App shutdown 都停止私有 Host/进程树 |
-| Session | 同 Host 同 Session 多轮精确回忆通过；同 Host 两个 Session 的 marker 无串话；新进程复用同一 `KIMI_CODE_HOME` 时，`session/resume` 与 `session/load` 都保持精确 Session ID 并回忆 marker；换用隔离 home 后 resume 返回 `-32602 Unknown sessionId`；产品级 fake Runtime 回归证明不同 Host 复用 scoped home，协议为 new→resume 且 Session ID 不变 | Kimi AgentRun 仍逐 Run 停止 Host；Rovai 按 Camp/成员/installation/auth scope 稳定保留私有 home，snapshot 声明真实 resume/load，新 Host 优先 exact resume，load-only 时进入 replay quarantine |
-| Catalog | `session/new.configOptions` 报告 synthetic env model、thinking `on/off` 与四种 mode；Idle `available_commands_update` 报告内建 command 和 Skill command | Runtime advertisement 为 Verified；Host 已安全路由 async metadata。尚未维护产品权威 async catalog snapshot 是功能空缺，不是启动、Session continuation 或平台准入硬阻断 |
+| Session / Home | 同 Host 同 Session 多轮精确回忆通过；同 Host 两个 Session 的 marker 无串话；新进程复用同一 `KIMI_CODE_HOME` 时，`session/resume` 与 `session/load` 都保持精确 Session ID 并回忆 marker；换用隔离 Home 后 resume 返回 `-32602 Unknown sessionId`；产品级回归证明正常完成后同一 Host/Session 直接续接且无 resume/load，显式停止后新 Host exact resume 且 Session ID 不变 | 正式 AgentRun 不设置 `HOME` / `KIMI_CODE_HOME`，继承用户原生状态根；Deep Probe 使用一次性临时 Home。健康、quiescent 且 compatibility key 完全一致的 Kimi Host 进入 warm LRU；停止或淘汰后新 Host 优先 exact resume，load-only 时进入 replay quarantine；v22 旧私有 Home 不自动迁移或删除 |
+| Catalog | `session/new.configOptions` 报告 synthetic env model、thinking `on/off` 与四种 mode；Idle `available_commands_update` 报告内建 command 和 Skill command | Runtime advertisement 为 Verified；Host 安全路由为私有 async metadata。当前产品不消费该 catalog，不建立产品 snapshot，也不列为遗留问题 |
 | Skill | `.kimi-code/skills` 两次都被发现并返回唯一 marker，且正确选择 canonical `--to-principal` 但不触发当前用户注意力 | managed Skill discovery/invocation 与消息局部注意力教学均为 Verified |
-| External MCP | 原始 ACP `session/new.mcpServers` 注入 stdio echo Server 后，真实 Tool pending→in-progress→completed、Tool result 与最终 marker 均通过；紧邻空 MCP Session 看不到该 Tool | Runtime 原始 happy path 与相邻 Session 隔离为 Verified；Rovai projection 仍 Disabled，尚缺同名 precedence、完整定义矩阵与 Host compatibility 准入 |
+| External MCP | 原始 ACP stdio 与相邻空 Session 隔离通过；产品 smoke 经 Core、Assignment、AgentRun Projection、ContextManifest 和 MiniMax M3 真实 Tool call，同时返回 Rovai stdio、Streamable HTTP 与额外 stdio 三个 marker，项目同名 native 定义均未覆盖 Rovai 定义 | `AdditivePerRun / RovaiWins`；标准 ACP `session/new/resume/load.mcpServers`，三项 Manifest exposure 均为 `ready`，不写 Runtime 用户级配置 |
 | Missing-Send | zero-send publication、accepted-send suppression、ACP tool→final 三场景通过；Kimi private stream 未进入公共 fixture | `IfNoAcceptedSend` candidate 经过 thinking 清洗、terminal record 与既有 suppression gate |
-| Usage / compaction | 多轮 Prompt、resume/load 与 MCP 调用均未观察到 `usage_update`；命令目录存在 `usage`/`compact`，手动 `/compact` 只产生普通 agent text，没有结构化 compaction lifecycle | Usage/Cost、Compaction Disabled；command advertisement 不能冒充结构化 telemetry |
+| Usage / compaction | 多轮 Prompt、resume/load 与 MCP 调用均未观察到 `usage_update`；手动 `/compact` 的完成 text 经 Kimi `0.32.0` 安装包与官方 `main` 源码确认由内部 `compaction.completed` 固定格式化，官方 E2E 证明该 frame 在 Prompt settled 后异步到达 | Usage/Cost Disabled；Compaction `best_effort`，仅 Kimi idle metadata route 完整匹配官方四行 frame，不安装 Hook、不改用户配置、不使用 token heuristic；真实自动/手动完整 Core observation smoke 待执行 |
 | Built-in CLI | 早期 `0/15` fixture 把 legacy stdin 非法输入的当前退出码 `2` 错写为 `1`，Kimi 实际已执行 Shell 并在首项 canonical operation 前退出；修正后十五项 operation、三种输入、Gather、exact successor read、conflict、initial/resumed lease fencing、logical/native continuation 全部通过，共 56 条 full-run evidence | macOS arm64 Built-in transport 为 Verified；snapshot 声明 capability，默认 Built-in 与 Skill 资格集合包含 Kimi |
 
 项目级最终固定输出为 `ROVAI_KIMI_ACP_OK`，命令 output marker 为
 `ROVAI_KIMI_CODE_CLI_PRINTF_OK`，allow 与 deny 都完成真实 Approval roundtrip。基础 AgentRun 可用于隔离诊断，
 修正过期 fixture 后 Built-in hard gate 已通过，所以 macOS arm64 为 digest-bound `qualified`；snapshot 声明
-Built-in transport，普通产品与默认资格 Smoke 包含 Kimi。该结论不扩大为 External MCP、Usage、Compaction、
-warm Host、macOS x64 或 Windows x64 产品资格。native resume 已按 scoped home 进入产品，History Restore 只
-作为 load-only fallback；异步 command catalog snapshot 尚未实现是独立功能空缺，不是当前平台硬阻断。
+Built-in transport，普通产品与默认资格 Smoke 包含 Kimi。External MCP 与兼容 warm Host 已由独立产品矩阵
+启用；Kimi Compaction compatibility detector 独立以 `best_effort` 启用，该结论不扩大为 Usage、macOS x64
+或 Windows x64 产品资格。native resume 使用唯一全局
+私有 home，History Restore 只作为 load-only fallback。异步 command catalog 没有当前产品消费者，不再作为
+功能空缺跟踪。
 
 ### 2026-08-22 Cursor Agent `2026.08.11-e8db854` 隔离探测与未准入记录
 
@@ -593,14 +596,16 @@ response-before-forward、forward-without-response、new/resumed Session、早�
 ## Native Session compaction detector
 
 2026-08-08 的 v0.48 qualification 对六个目标 Runtime 执行真实 compaction，并观察 Rovai 选择的
-官方结构化 surface。detector 是 `best_effort` 内部增强能力；此表证明目标版本上 signal 可达，不把
+官方结构化 surface；v1.27 另以 Kimi `0.32.0` 安装包、官方源码/E2E 和已有手动 wire 建立精确文本
+compatibility surface。detector 是 `best_effort` 内部增强能力；此表记录各目标版本的证据强度，不把
 detector readiness 提升为 Runtime admission 条件。
 
-| Runtime | 实测版本 | 真实操作与观察 | v0.48 admission / transport | 结论与边界 |
+| Runtime | 实测版本 | 真实操作与观察 | 当前 admission / transport | 结论与边界 |
 | --- | --- | --- | --- | --- |
 | GitHub Copilot | `1.0.78` | ACP Session 内真实 `/compact` 触发 Plugin `preCompact`，后续 ACP prompt accepted | one-shot `preCompact`；隔离 `--plugin-dir` | pass；目标 Hook payload 不带 event name，relay command 冻结 expected source；Unix Hook 使用 `bash` 字段 |
 | OpenCode | `1.18.10` | server summarize 完成并发出 native `session.compacted` | completed；隔离 native Plugin，prompt 保持 ACP | pass；ACP inbound 本身不转发该 native event |
 | Kiro | `2.16.1` | `_kiro.dev/commands/execute compact` 后观察 status `started`、`completed` | 仅 nested `params.status.type=completed`；现有 ACP inbound | pass；summary 不参与 admission 或 evidence digest |
+| Kimi Code | `0.32.0` | 手动 `/compact` 产生普通完成 frame；安装包与官方 `main` 证明 native ACP server 只在内部 `compaction.completed` 后格式化固定四行 `agent_message_chunk`，官方 E2E 证明 Prompt settled 后异步到达 | `kimi.acp.compaction.completed_text.v1 / completed`；Kimi-only idle ACP metadata route | source-qualified best-effort；严格完整格式，active Prompt、started/cancelled/blocked、宽泛文本和 token-drop 不准入；无 Hook/用户配置修改；真实自动/手动完整 Core observation smoke 待执行 |
 | Qoder | `1.1.14` | 真实 `/compact` 触发 `PostCompact(manual)` | completed；隔离 `--settings` Hook | pass |
 | CodeBuddy | `2.133.1` | 强制真实 emergency auto compaction 完成后触发 `SessionStart(source=compact)` | completed；隔离 `--plugin-dir` Plugin Hook | best-effort pass；CLI additional settings 未进入 Hook registry。该版本 pre-message compaction 实测绕过 `PreCompact`、`PostCompact` 和 `SessionStart(compact)`，因此存在已记录的 detector coverage gap，不使用 token heuristic 补猜 |
 | Qwen Code | `0.21.5` | 真实 `/compress` 完成并触发 `PostCompact(manual)` | completed；私有 `QWEN_HOME` user-scope Hook | pass；HookRegistry 不读取 system Hook，trigger matcher 为 exact match，配置 `*` 后由 relay 校验 trigger |
@@ -608,7 +613,7 @@ detector readiness 提升为 Runtime admission 条件。
 
 Claude Code 与 Codex CLI 的 Bootstrap 位于普通 compaction 不触及的 instruction layer，不建立
 detector。Antigravity v0.48 与 TRAE 当前 policy 为 `disabled`，因为尚无合格 compaction lifecycle event；Rovai 不
-使用 token 数或 context telemetry 猜测 compaction。detector 建立失败、短暂中断或恢复都不改变九个
+使用 token 数或 context telemetry 猜测 compaction。detector 建立失败、短暂中断或恢复都不改变 Product
 Runtime 的 Built-in CLI 兼容性结论。完整时序与持久边界见
 [Native Session Bootstrap Redelivery](architecture/native-session-bootstrap-redelivery.md)。
 
@@ -632,7 +637,7 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | TRAE CLI CN | `AdditivePerRun` / `RovaiWins` | 首次 ACP `session/new.mcpServers`；后续只有 compatibility digest 相同时复用 warm Host/Session | `0.120.52` 原生 Session A/B 追加与不泄漏 Probe、正式 Core smoke 均通过 |
 | Antigravity | `Unsupported` | 无不修改 Global/Workspace 文件的逐 Run 动态通道 | 诊断披露；配置页保持中立 |
 | Cursor Agent | `Unsupported` | 当前未准入，不注入 External MCP | 完整 authenticated Session 与 same-name matrix 前保持 Disabled |
-| Kimi Code | `Unsupported` | 当前产品不向 `session/new` 注入 External MCP | 上游能力不替代 additive isolation/same-name 真实矩阵；当前保持 Disabled |
+| Kimi Code | `AdditivePerRun` / `RovaiWins` | ACP `session/new/resume/load.mcpServers`，不写用户级配置 | `0.32.0` + MiniMax M3 真实 Core smoke 已通过 stdio、Streamable HTTP、同名整项优先与三项 `ready` Manifest exposure |
 
 ## 历史：内置 MCP / Antigravity 专项复核
 

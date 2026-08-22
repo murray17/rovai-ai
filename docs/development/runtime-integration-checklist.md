@@ -2,7 +2,7 @@
 document_type: development-checklist
 authority: development-procedure
 status: proposed
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # Agent Runtime 接入与准入 Checklist
@@ -16,9 +16,54 @@ last_updated: 2026-08-22
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v20.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v23.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
+
+## 使用顺序：先保持现有产品能力，再研究可选能力
+
+本清单不是要求一次接入同时实现所有 Runtime 能力。按以下顺序执行，前一层未闭合时不进入后一层：
+
+1. **现有行为对齐硬门：** 完成第 0 节，先确定 Home、Host、Session、Built-in CLI、Settings 展示和最接近
+   Adapter 的既有基线；
+2. **基础准入：** 完成 identity/discovery、正式启动、可靠 final、Tool/Approval、cancel/cleanup、同一逻辑
+   Conversation 的 continuation、Built-in transport 与对应平台真实 Smoke；
+3. **声明能力：** 只验收准备在 capability snapshot 或产品表面启用的 MCP、managed Skill、Missing-Send 等能力；
+4. **可选观测：** Usage/Cost、Compaction、异步 command catalog 没有可靠证据或产品消费者时，分别保持
+   `Disabled` / `NotImplemented`，不阻断基础准入，也不继续扩张实现范围。
+
+不得为了填满清单先追逐所有上游 feature。每项验证必须回答“它保护哪个现有 Rovai 特性、哪个公开声明或
+哪个安全边界”；答不出来时移到可选研究记录，不进入当前接入关键路径。
+
+## 0. 现有行为对齐硬门
+
+实现前先选出最接近的已接入 Adapter，并从生产代码而非历史 Research 复制基线。至少填写：
+
+| 对齐轴 | 现有基线 | 新 Runtime 决定 | 差异依据 |
+| --- | --- | --- | --- |
+| 正式 AgentRun Home / state root | | | |
+| Probe / test Home | | | |
+| warm Host 与同 Host Session | | | |
+| cold exact resume / history restore | | | |
+| provider、MCP、Skill overlay | | | |
+| Built-in CLI 当前 catalog / help / charter revision | | | |
+| Settings、成员选择与平台准入可见性 | | | |
+
+- [ ] 正式 AgentRun 默认继承用户的通用 `HOME` 与 Runtime 原生 state/config Home。不得仅为实现方便设置
+      `CODEX_HOME`、`KIMI_CODE_HOME`、`CLAUDE_CONFIG_DIR` 或等价变量；确需隔离时，必须先有明确产品需求、
+      当前 Version Decision、Contract、迁移/清理方案和与现有 Runtime 不一致的理由。
+- [ ] Probe、fixture 可以使用一次性临时 Home，但必须与正式启动分开验证、完成后清理，且其 Session/认证
+      结论不得外推到 AgentRun。临时 cwd、Run tmp、MCP 文件或 provider env overlay 不等于独立 Runtime Home。
+- [ ] continuation 默认顺序为：同一兼容 warm Host 已知 Session 直接复用 → 新 Host exact native resume →
+      仅在 Runtime 没有 resume 且已有隔离实现时 history restore → 新 Session。不得在没有产品场景时人为
+      更换 Home、认证用户或 state root，再把 resume 失败列成 Runtime 问题。
+- [ ] Built-in CLI 验收必须从当前 `Builtin Tool Transport` 合同、运行时 catalog/help 和当前 charter revision
+      取得 canonical 命令及参数；不得沿用旧 Research、旧 fixture 或另一个 Runtime 曾使用的 `--to-user`、
+      `--to-principal` 等拼写。fixture 在执行首个 operation 前失败时，先定位过期断言，不能先归因于模型。
+- [ ] 未完成真实产品资格的 Runtime 默认不进入 Settings Runtime 目录、成员选择、自动检查或普通 AgentRun；
+      保留 closed identity 或历史 reader 不等于对用户展示“已接入”。
+- [ ] 对现有基线的每个差异都已明确分类为：上游协议必需、用户明确需求、安全合同要求或暂不实现；没有
+      依据的差异必须删除。
 
 ## 1. 接入记录
 
@@ -39,6 +84,8 @@ last_updated: 2026-08-22
 - [ ] 空输出、stderr、非零退出、超时、格式变化和命令不存在均有明确结果。
 - [ ] 显式深检只检查用户选择的 Runtime；页面进入和成员选择不自动深检。
 - [ ] Discovery、Availability Check、Probe 和 AgentRun 使用不同 launch purpose。
+- [ ] 正式 AgentRun 与 Probe 的 cwd、`HOME`、Runtime-specific Home、provider env 和临时目录逐项记录；测试
+      必须断言生产路径没有意外继承 Probe 的隔离覆盖。
 - [ ] Adapter/version/platform 的行为资格与当前机器 Runtime Ready 分开记录；行为 Smoke 不进入
       Availability Check 或每次 Dispatch 的 Ready 前置条件。
 - [ ] Availability Check 写入 `ready` 与 Scheduler/Dispatch Preflight 接受 `ready` 使用同一证据合同和
@@ -109,7 +156,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 
 ### ACP 完整消息面枚举
 
-每个阶段都必须分别保存脱敏 shape；不能只记录一次成功 Prompt：
+仅对实际观察到的 method/variant、准备公开声明的能力和可能污染 Prompt/Session 的生命周期面保存脱敏 shape；
+不能只记录一次成功 Prompt，也不要求为了“完整”主动实现没有产品消费者的可选 catalog：
 
 - [ ] `initialize` response 后、`session/new` 前的通知和 extension。
 - [ ] `session/new` response 后的有界异步 Session metadata/catalog。
@@ -125,6 +173,9 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 
 ### 异步 catalog 状态
 
+本节仅在产品准备消费异步 catalog 时成为实现门禁；否则只要求安全隔离已观察到的 wire shape，并把产品实现
+状态明确记为 `NotImplemented`。
+
 - [ ] 首条 catalog update 到达前状态为 `Pending` / `Unknown`，不得提前冻结成权威空列表。
 - [ ] 每种 update 的 full replacement、partial update 或 delta 语义来自协议 schema 或当前
       Runtime/version 的明确证据；没有证据时不合并、不猜测。
@@ -136,6 +187,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
       shape 不等于产品已经实现 command/Skill discovery、展示或调用。
 
 ### Runtime command 与 Skill 分层
+
+本节仅在当前接入准备声明 Runtime advertised command 或 Rovai managed Skill 时成为准入门禁。
 
 - [ ] 文件投递层：分别验证受管项目级路径、用户级路径、同名优先级和 Rovai ownership/cleanup 边界。
 - [ ] Runtime 发现与加载层：用唯一名称/内容验证 cold Host、warm Host、新 Session、`session/load` 和既有
@@ -149,13 +202,16 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 
 ## 4. Session Continuation 与 Resume
 
-- [ ] 明确策略：`warm_host`、`exact_resume`、`history_restore` 或 `new_only`。
+- [ ] 明确并按优先级组合策略：`warm_host` → `exact_resume` → `history_restore` → `new_only`；不能只填一个标签
+      而遗漏正常完成、显式停止、Host 淘汰和 Core/App 重启后的差异。
 - [ ] 首次 Run 持久化精确 Native Session ID。
 - [ ] 后继 Run 保持同一 logical Conversation。
 - [ ] 声称支持 Resume 时，真实 Smoke 必须验证精确 Native Session ID 延续。
 - [ ] 不使用“最近 Session”、`AUTO`、模糊匹配或解析私有 Session 文件代替精确 ID。
 - [ ] Runtime 返回不同 Session ID 时 fail closed，不静默换绑。
 - [ ] Core 或 Host 重启后完成冷恢复验证。
+- [ ] cold resume 使用与正常产品相同的用户 Home、认证、cwd 和 Runtime state root；除非产品确实支持切换，
+      不把“新进程 + 不同 Home”纳入必过矩阵。
 - [ ] ACP v1 `session/load` 的 history replay 在 response 前发生并在当前 Prompt 前完全隔离；response 后只在
       有界 grace/quiet boundary 内接收可证明的迟到 replay。
 - [ ] `session/load` replay 不产生公开文本、Action、Approval、Usage、Missing-Send 或副作用，并受时间、
@@ -185,6 +241,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] 不同 MCP 集合不会复用不兼容 Host。
 - [ ] 未配置 MCP 的相邻 Session 看不到前一 Run 的 Server。
 - [ ] Runtime 能实际调用 bundled `rovai` CLI，并通过 Built-in Tool Smoke。
+- [ ] Built-in fixture 在本次 Runtime 验收前已先对当前 CLI contract 自校验，且验证实际执行了首个 canonical
+      operation；旧退出码、旧 alias 或旧 catalog 不得制造 Runtime 假失败。
 
 ## 6. Narration、Final、Missing-Send 与错误
 
@@ -203,7 +261,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 
 ## 7. Usage、Token、Cache 与 Cost
 
-本节是可选能力。Runtime 不上报 Usage 不阻断基础准入；未验证字段保持未知。
+本节是可选能力。只有 capability snapshot 或监控页准备声明对应字段时才执行；Runtime 不上报 Usage 不阻断
+基础准入，未验证字段保持未知，不得为了“清单完整”从文本、token drop 或私有缓存猜测。
 
 - [ ] 记录 Usage 的精确事件来源、scope、counter mode 和 Runtime 版本。
 - [ ] 明确 `inputTokens` 是总输入、未缓存输入，还是语义未知。
@@ -220,6 +279,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] 不持久化完整原始 Usage payload、Prompt、Output、Tool 内容或 Native ID。
 
 ## 8. Compaction 信号
+
+本节是可选能力。没有产品需求或可靠 lifecycle signal 时保持 detector `Disabled`，不阻断 Runtime 基础准入。
 
 - [ ] 先检查 Runtime advertised commands 中是否存在 `compact`、`compress` 或等价入口，并优先通过该入口
       分别触发 manual 与 auto 场景。
@@ -247,10 +308,10 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 | Approval allow | 一次批准只产生一次副作用 |
 | Approval deny | 拒绝后没有副作用 |
 | Cancellation | 收敛为 cancelled，之后无延迟副作用 |
-| Warm continuation | 按声明策略复用，且不串 Prompt/MCP/权限 |
-| Cold continuation | Core/Host 重启后用精确 Session ID 恢复 |
-| Restore failure | 错误 ID、非法 JSON、超限 replay 均 fail closed |
-| MCP isolation | 只对当前 Run 生效，不污染相邻 Session |
+| Warm continuation | 若 Runtime 支持常驻 Host，按声明策略复用，且不串 Prompt/MCP/权限 |
+| Cold continuation | 若声明 native resume，使用正常用户 Home 并在 Core/Host 重启后以精确 Session ID 恢复 |
+| Restore failure | 若声明 resume/load，错误 ID、非法 JSON、超限 replay 均 fail closed |
+| MCP isolation | 仅在启用 External MCP 时必过；只对当前 Run 生效，不污染相邻 Session |
 | Missing-Send | zero-send、send suppression、tool→final 均通过 |
 | Built-in CLI | 实际调用正式 `rovai` operation 集 |
 | Process cleanup | 所有退出路径都无残留进程 |
@@ -262,6 +323,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] 增加子进程持有 stdio 的进程树清理测试。
 - [ ] 增加真实 Runtime Smoke；Fixture 不能代替本机实测。
 - [ ] 新 Runtime 纳入 Runtime Activity、诊断、planned shutdown 和 Built-in CLI 验收。
+- [ ] 使用代码搜索审计所有 `HOME` / Runtime-specific Home override，并把正式运行、Probe、fixture 三类结果
+      分开记录；不能只检查新 Adapter 的一个 launch function。
 - [ ] 运行 `pnpm typecheck`、`pnpm test` 和适用的 Rust 门禁。
 - [ ] 记录 Runtime 版本、模型、平台、fingerprint、日期和仓库 revision。
 - [ ] 一次实测不外推为其他版本、模型或账号均兼容。
@@ -290,6 +353,9 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] Usage 缺少来源、scope、counter mode 或版本证据却被声明为支持。
 - [ ] Usage 重发会重复累计，或 Session cost 被误记为 Run cost。
 - [ ] 只有 `initialize` 或一次普通回复成功，没有完整行为 Smoke。
+- [ ] 正式 AgentRun 无产品依据地改写用户 Runtime Home，或者把 Probe 的临时 Home 行为带入生产启动。
+- [ ] continuation 失败只在主动切换 Home、认证或 state root 后复现，却被写成正常产品阻断。
+- [ ] Built-in 资格脚本未执行首个 canonical operation，仍把旧 fixture/alias/退出码失败归因于 Runtime 或模型。
 - [ ] Availability Check 与 Dispatch Preflight 对同一 Adapter/version/fingerprint 使用不同 Ready requirements，
       或 persisted `ready` 无法通过当前统一 Ready validator。
 - [ ] 合法 Idle Session metadata 被投影为 Prompt output、被标记为无 Prompt 泄漏或使 Session 协议违规。
@@ -300,181 +366,44 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 
 ## 12. 最终汇报要求
 
-完成 Runtime 调研或接入后，必须按以下格式汇报。不得只写“支持 ACP”或“支持 Resume”。
+默认汇报控制在一个可扫描页面内；不得只写“支持 ACP”或“支持 Resume”，也不得把未启用的所有可选能力
+展开成遗留问题。
 
 ### 基本结论
 
 ```text
-Runtime:
-AdapterKind:
-Version / build:
+Runtime / AdapterKind:
+Version / model / account:
 Platform / architecture:
 Admission: qualified | not_qualified | unsupported
-一句话结论:
+Integration shape / exact launch:
 最接近的现有 Adapter:
+一句话结论:
 ```
 
-### 1. 接入形态
+### 现有行为对齐
 
-Integration shape:
+| 轴 | 最终行为 | 与现有 Runtime 的差异 |
+| --- | --- | --- |
+| 正式 AgentRun Home | 用户原生 / 明确例外 | |
+| Probe Home | 临时隔离 / 不启动 Runtime | |
+| continuation | warm → exact resume → load → new 的实际子集 | |
+| Built-in CLI | 当前 contract/catalog revision 与真实 operation 结果 | |
+| Settings / 平台可见性 | 展示或隐藏；qualified 平台 | |
 
-- `codex_native_server`
-- `standard_acp_stdio`
-- `vendor_extended_acp`
-- `stream_json_cli`
-- `one_shot_cli`
-- `other`
+### 已启用能力与硬证据
 
-```text
-Exact launch command:
-Transport / protocol version:
-是否为常驻 Host:
-一个 Host 是否支持多个 Session:
-依赖的私有 method / notification:
-```
-
-必须明确说明：
-
-- 是类似 Codex 的专用原生 Server，还是通用 ACP；
-- 若为 ACP，是纯标准 ACP，还是依赖 Runtime 私有扩展。
-
-### 2. Session 生命周期
-
-| 能力 | 状态与精确语义 |
-| --- | --- |
-| `session/new` | |
-| 同 Host 复用原 Session | |
-| `session/resume` | 是否保持相同 Session ID；是否 replay |
-| `session/load` | 是否保持相同 Session ID；是否 replay |
-| Host/Core 重启后的恢复 | exact resume / history restore / new session |
-| 恢复失败策略 | fail closed / fresh session fallback |
-
-最终 Session 策略：
-
-- `warm_host`
-- `exact_resume`
-- `history_restore`
-- `new_only`
-
-不得把 `session/resume` 与 `session/load` 合并汇报。
-
-### 3. Host 与 Session 兼容性
+只列当前产品声明的能力，并分别填写 Runtime evidence 与 Rovai implementation。至少覆盖 reliable final、
+structured Tool、Approval、cancel/cleanup、continuation 和 Built-in transport；MCP、Skill、Missing-Send、Usage、
+Compaction、async catalog 仅在启用或本次明确研究时出现。
 
 ```text
-Host compatibility inputs:
-Native Session compatibility inputs:
-```
-
-分别说明以下变化后的处理方式：
-
-| 变化 | 复用原 Session | 新 Session | 重启 Host |
-| --- | --- | --- | --- |
-| Runtime version / executable | | | |
-| Model | | | |
-| Permission / mode | | | |
-| MCP | | | |
-| Skill exposure | | | |
-| cwd / workspace access | | | |
-| Attachment root | | | |
-
-同时说明每项资源在何时加载：
-
-`process_start | session_new | session_load | session_resume | per_prompt | live_watch`
-
-### 4. Ready 语义
-
-```text
-Machine Ready requirements:
-AvailabilityCheck 与 Dispatch 是否使用同一 validator:
-AvailabilityCheck 是否发送模型 Prompt:
-DispatchPreflight 是否发送模型 Prompt:
-Ready 的失效条件:
-主要启动耗时来源:
-```
-
-### 5. 核心能力
-
-每项同时填写：
-
-- Runtime evidence：`Verified | DocumentationOnly | Unverified | NotObserved | Unsupported`
-- Rovai implementation：`Implemented | Disabled | NotImplemented | Blocked`
-
-| 能力 | Runtime evidence | Rovai implementation | 边界说明 |
-| --- | --- | --- | --- |
-| Dynamic model catalog | | | |
-| Permission / mode catalog | | | |
-| Structured Tool lifecycle | | | |
-| Approval allow / deny | | | |
-| Cancellation | | | |
-| Reliable final boundary | | | |
-| External MCP | | | |
-| Rovai managed Skill | | | |
-| Runtime advertised commands | | | |
-| Compaction signal | | | |
-| Usage / Token / Cache / Cost | | | |
-
-### 6. Skill 与异步 Catalog
-
-```text
-Managed Skill 项目路径:
-其他 Runtime 扫描路径:
-Skill 扫描或刷新时机:
-既有 Idle Session 是否刷新:
-新 Session 是否刷新:
-session/load 是否刷新:
-available_commands_update 是否存在:
-首条 update 到达时间:
-update 是 full replacement 还是 delta:
-```
-
-### 7. Compaction
-
-```text
-是否确实触发过压缩:
-Manual trigger:
-Automatic trigger:
-结构化 signal:
-Signal phase: imminent_edge | started | completed | none
-Occurrence / 去重依据:
-实际启动方式下 Hook 是否可达:
-Rovai detector: BestEffort | Disabled
-```
-
-必须区分：
-
-- Runtime 是否真的发生压缩；
-- Runtime 是否公开结构化生命周期信号；
-- Rovai 是否已经实现 detector。
-
-### 8. Windows 平台边界
-
-Install form:
-
-- native `.exe`
-- npm launcher
-- `.cmd` / `.bat`
-- PowerShell script
-- WSL only
-- bundled executable
-
-```text
-实际启动的文件:
-支持的 Windows 版本:
-支持的架构:
-Native Windows 或 WSL:
-认证存储位置:
-进程树清理方式:
-已知 Windows 限制:
-```
-
-### 最终决定
-
-```text
-Qualified capabilities:
-Disabled capabilities:
-Unverified capabilities:
-Required code changes:
-Required document changes:
+Verified and enabled:
+Intentionally disabled / not implemented:
 Blocking issues:
-Recommended admission decision:
+Exact test and smoke commands:
+Evidence revision:
 ```
+
+“剩余问题”只包含阻断当前声明或用户可见行为的事项。没有产品消费者的 async catalog、Runtime 未上报的
+Usage、未接入的 Compaction 等应写为有意关闭边界，不作为接入未完成项。

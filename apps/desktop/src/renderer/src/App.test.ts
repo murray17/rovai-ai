@@ -2047,6 +2047,7 @@ describe('task event projections', () => {
     expect(rescan).toBeLessThan(headerEnd)
     expect(headerEnd).toBeLessThan(directory)
     expect(markup).toContain('管理本机 Agent 运行时及其可用状态。')
+    expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('高级诊断与自定义启动入口')
   })
 
@@ -4857,8 +4858,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
-    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(13)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(13)
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(12)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(12)
     expect(markup.match(/检查可用性/g)).toHaveLength(11)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
@@ -4898,8 +4899,8 @@ describe('task event projections', () => {
       onReload: async () => undefined
     }))
 
-    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(12)
-    expect(markup.match(/不可检查/g)).toHaveLength(12)
+    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(11)
+    expect(markup.match(/不可检查/g)).toHaveLength(11)
     expect(markup).not.toContain('检查可用性')
     expect(markup).toContain('当前平台尚无可检测 Runtime')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')

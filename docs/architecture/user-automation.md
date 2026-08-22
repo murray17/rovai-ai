@@ -3,7 +3,7 @@ document_type: architecture
 architecture: user-automation
 authority: desktop-user-automation-component-boundaries
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-23
 ---
 
 # User Automation Architecture
@@ -48,7 +48,10 @@ owner，因此 V1 不采用。
 ## 调用与故障边界
 
 Main dispatcher 将每个 public operation 映射到固定 Core method，不透传 method name。读写都经过既有 Core
-service；Main 不直接访问 SQLite。`camp send` 只发出一个带幂等 `commandId` 的
+service；Main 不直接访问 SQLite。成员创建与 Runtime 配置只映射到 `members.create`、
+`members.runtime.set`、`members.runtime.clear` 三个既有 Domain Command；显式模型配置前可通过
+`runtime.product.check` 与 `runtime.modelCatalog.open` 两个固定 Read Model 核对可用性和目录，不能透传 path、
+环境或 provider secret。`camp send` 只发出一个带幂等 `commandId` 的
 `userAutomation.camp.send`；Core 在一个 Domain Command transaction 中复用正式 Message/Turn/Run 准入，但不以
 Composer 作为中间存储，也不读取、覆盖或消费用户草稿。当前合同无法解释的新状态必须失败并要求升级，不能以
 convenience path 绕过。

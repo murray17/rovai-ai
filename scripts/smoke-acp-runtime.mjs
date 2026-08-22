@@ -379,8 +379,8 @@ try {
             && writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId)
           || (specification.adapterKind === 'trae-cn-cli'
             && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)
-          || (specification.adapterKind === 'kimi-code-cli'
-            && writeStart?.params?.hostInstanceId === results.at(-1).hostInstanceId)) {
+          || (['trae-cn-cli', 'kimi-code-cli'].includes(specification.adapterKind)
+            && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)) {
         throw new Error(`ACP approved write did not converge: ${JSON.stringify({
           writeRun,
           writeActions,

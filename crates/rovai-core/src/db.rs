@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.19";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 60;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.20";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 61;
+const V106_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.19";
+const V106_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 60;
 const V104_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.17";
 const V104_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 58;
 const V105_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.18";
@@ -160,6 +162,7 @@ struct CurrentMigrationState {
     v103: bool,
     v104: bool,
     v105: bool,
+    v106: bool,
 }
 
 impl CurrentMigrationState {
@@ -169,6 +172,46 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106;
+        }
+        if self.v106 {
+            return false;
+        }
+        if contract == V106_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V106_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1039,7 +1082,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 102),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 103),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 104),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 105)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 105),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 106)
         "#,
         [],
         |row| {
@@ -1080,6 +1124,7 @@ fn load_current_migration_state(
                 v103: row.get(33)?,
                 v104: row.get(34)?,
                 v105: row.get(35)?,
+                v106: row.get(36)?,
             })
         },
     )
@@ -2522,6 +2567,9 @@ impl Database {
             if !self.schema_migration_applied(105)? {
                 self.migrate_kimi_runtime_catalog_v105()?;
             }
+            if !self.schema_migration_applied(106)? {
+                self.migrate_kimi_compaction_detector_v106()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2886,6 +2934,9 @@ impl Database {
         }
         if !self.schema_migration_applied(105)? {
             self.migrate_kimi_runtime_catalog_v105()?;
+        }
+        if !self.schema_migration_applied(106)? {
+            self.migrate_kimi_compaction_detector_v106()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -14719,6 +14770,225 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_kimi_compaction_detector_v106(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE bootstrap_redelivery_requirement_v106 (
+                    conversation_id TEXT NOT NULL
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli',
+                        'codebuddy-cli', 'qwen-code', 'kimi-code-cli'
+                    )),
+                    requested_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK(requested_revision >= 0),
+                    acknowledged_revision INTEGER NOT NULL DEFAULT 0
+                        CHECK(acknowledged_revision >= 0),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(native_binding_id, native_binding_generation),
+                    UNIQUE(conversation_id, native_binding_generation),
+                    CHECK(acknowledged_revision <= requested_revision)
+                );
+
+                INSERT INTO bootstrap_redelivery_requirement_v106(
+                    conversation_id, native_binding_id, native_binding_generation,
+                    adapter_kind, requested_revision, acknowledged_revision,
+                    created_at, updated_at
+                )
+                SELECT conversation_id, native_binding_id, native_binding_generation,
+                       adapter_kind, requested_revision, acknowledged_revision,
+                       created_at, updated_at
+                FROM bootstrap_redelivery_requirement;
+
+                CREATE TABLE compaction_detector_policy_v106 (
+                    adapter_kind TEXT PRIMARY KEY CHECK(adapter_kind IN (
+                        'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli',
+                        'codebuddy-cli', 'qwen-code', 'kimi-code-cli',
+                        'antigravity-app'
+                    )),
+                    policy TEXT NOT NULL CHECK(policy IN ('disabled', 'best_effort')),
+                    policy_epoch INTEGER NOT NULL CHECK(policy_epoch >= 1),
+                    release_version TEXT NOT NULL,
+                    applied_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO compaction_detector_policy_v106(
+                    adapter_kind, policy, policy_epoch, release_version,
+                    applied_at, updated_at
+                )
+                SELECT adapter_kind, policy, policy_epoch, release_version,
+                       applied_at, updated_at
+                FROM compaction_detector_policy;
+
+                CREATE TABLE native_session_compaction_observer_lease_v106 (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL
+                        REFERENCES conversation(id) ON DELETE CASCADE,
+                    adapter_installation_id TEXT NOT NULL,
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'copilot-cli', 'opencode-cli', 'kiro-cli', 'qoder-cli',
+                        'codebuddy-cli', 'qwen-code', 'kimi-code-cli'
+                    )),
+                    host_instance_id TEXT NOT NULL CHECK(length(trim(host_instance_id)) > 0),
+                    relay_process_id TEXT NOT NULL CHECK(length(trim(relay_process_id)) > 0),
+                    native_session_id TEXT NOT NULL CHECK(length(trim(native_session_id)) > 0),
+                    native_binding_id TEXT NOT NULL CHECK(length(trim(native_binding_id)) > 0),
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    detector_policy_epoch INTEGER NOT NULL
+                        CHECK(detector_policy_epoch >= 1),
+                    status TEXT NOT NULL CHECK(status IN ('active', 'fenced')),
+                    created_at TEXT NOT NULL,
+                    fenced_at TEXT,
+                    fence_reason TEXT,
+                    updated_at TEXT NOT NULL,
+                    CHECK(
+                        (status = 'active' AND fenced_at IS NULL AND fence_reason IS NULL)
+                        OR
+                        (status = 'fenced' AND fenced_at IS NOT NULL
+                            AND length(trim(fence_reason)) > 0)
+                    )
+                );
+
+                INSERT INTO native_session_compaction_observer_lease_v106(
+                    id, conversation_id, adapter_installation_id, adapter_kind,
+                    host_instance_id, relay_process_id, native_session_id,
+                    native_binding_id, native_binding_generation,
+                    detector_policy_epoch, status, created_at, fenced_at,
+                    fence_reason, updated_at
+                )
+                SELECT id, conversation_id, adapter_installation_id, adapter_kind,
+                       host_instance_id, relay_process_id, native_session_id,
+                       native_binding_id, native_binding_generation,
+                       detector_policy_epoch, status, created_at, fenced_at,
+                       fence_reason, updated_at
+                FROM native_session_compaction_observer_lease;
+
+                CREATE TABLE native_session_compaction_observation_v106 (
+                    id TEXT PRIMARY KEY,
+                    observer_lease_id TEXT NOT NULL
+                        REFERENCES native_session_compaction_observer_lease_v106(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    source_observation_id TEXT NOT NULL,
+                    source_signal TEXT NOT NULL,
+                    admission_point TEXT NOT NULL,
+                    source_event_digest TEXT NOT NULL,
+                    requested_revision INTEGER NOT NULL CHECK(requested_revision >= 1),
+                    observed_at TEXT NOT NULL,
+                    committed_at TEXT NOT NULL,
+                    UNIQUE(
+                        native_binding_id, native_binding_generation,
+                        source_observation_id
+                    )
+                );
+
+                INSERT INTO native_session_compaction_observation_v106(
+                    id, observer_lease_id, native_binding_id,
+                    native_binding_generation, source_observation_id,
+                    source_signal, admission_point, source_event_digest,
+                    requested_revision, observed_at, committed_at
+                )
+                SELECT id, observer_lease_id, native_binding_id,
+                       native_binding_generation, source_observation_id,
+                       source_signal, admission_point, source_event_digest,
+                       requested_revision, observed_at, committed_at
+                FROM native_session_compaction_observation;
+
+                DROP TABLE native_session_compaction_observation;
+                DROP TRIGGER native_session_compaction_observer_binding_fence;
+                DROP TABLE native_session_compaction_observer_lease;
+                DROP TABLE compaction_detector_policy;
+                DROP TABLE bootstrap_redelivery_requirement;
+
+                ALTER TABLE bootstrap_redelivery_requirement_v106
+                    RENAME TO bootstrap_redelivery_requirement;
+                ALTER TABLE compaction_detector_policy_v106
+                    RENAME TO compaction_detector_policy;
+                ALTER TABLE native_session_compaction_observer_lease_v106
+                    RENAME TO native_session_compaction_observer_lease;
+                ALTER TABLE native_session_compaction_observation_v106
+                    RENAME TO native_session_compaction_observation;
+
+                CREATE INDEX bootstrap_redelivery_pending_idx
+                    ON bootstrap_redelivery_requirement(
+                        adapter_kind, requested_revision, acknowledged_revision
+                    )
+                    WHERE requested_revision > acknowledged_revision;
+                CREATE UNIQUE INDEX native_session_compaction_observer_active_idx
+                    ON native_session_compaction_observer_lease(
+                        conversation_id, native_binding_id,
+                        native_binding_generation
+                    )
+                    WHERE status = 'active';
+                CREATE INDEX native_session_compaction_observer_host_idx
+                    ON native_session_compaction_observer_lease(
+                        adapter_kind, host_instance_id, relay_process_id, status
+                    );
+                CREATE INDEX native_session_compaction_observation_revision_idx
+                    ON native_session_compaction_observation(
+                        native_binding_id, native_binding_generation,
+                        requested_revision
+                    );
+
+                CREATE TRIGGER native_session_compaction_observer_binding_fence
+                AFTER UPDATE OF
+                    native_adapter_installation_id,
+                    native_session_id,
+                    native_binding_id,
+                    native_binding_generation
+                ON conversation
+                WHEN OLD.native_adapter_installation_id IS NOT NEW.native_adapter_installation_id
+                  OR OLD.native_session_id IS NOT NEW.native_session_id
+                  OR OLD.native_binding_id IS NOT NEW.native_binding_id
+                  OR OLD.native_binding_generation IS NOT NEW.native_binding_generation
+                BEGIN
+                    UPDATE native_session_compaction_observer_lease
+                    SET status = 'fenced', fenced_at = datetime('now'),
+                        fence_reason = 'native_binding_replaced',
+                        updated_at = datetime('now')
+                    WHERE conversation_id = NEW.id AND status = 'active';
+                END;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.20', projection_schema_version = 61,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (106, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v106 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -19245,6 +19515,7 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 56
             WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 106;
             DELETE FROM schema_migration WHERE version = 105;
             DELETE FROM schema_migration WHERE version = 104;
             DELETE FROM schema_migration WHERE version = 103;
@@ -19784,6 +20055,7 @@ mod tests {
             v103: version >= 103,
             v104: version >= 104,
             v105: version >= 105,
+            v106: version >= 106,
         }
     }
 
@@ -19794,6 +20066,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                106,
+            ),
+            (
+                "v1.19/schema-60",
+                V106_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V106_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 105,
             ),
             (
@@ -20060,7 +20338,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(105));
+        assert_eq!(state, migration_state_through(106));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -21165,6 +21443,7 @@ mod tests {
                     datetime('now'), datetime('now'), NULL, NULL, 'legacy-trae-ready'
                 );
 
+                DELETE FROM schema_migration WHERE version = 106;
                 DELETE FROM schema_migration WHERE version = 105;
                 DELETE FROM schema_migration WHERE version = 104;
                 DELETE FROM schema_migration WHERE version = 103;
@@ -21378,6 +21657,7 @@ mod tests {
                 END
                 WHERE id IN ('v104-full', 'v104-custom', 'v104-required');
 
+                DELETE FROM schema_migration WHERE version = 106;
                 DELETE FROM schema_migration WHERE version = 105;
                 DELETE FROM schema_migration WHERE version = 104;
                 UPDATE rovai_data_contract
@@ -21555,6 +21835,7 @@ mod tests {
                 END
                 WHERE id IN ('v105-full', 'v105-custom', 'v105-required');
 
+                DELETE FROM schema_migration WHERE version = 106;
                 DELETE FROM schema_migration WHERE version = 105;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.18', projection_schema_version = 59
@@ -21677,6 +21958,100 @@ mod tests {
                 .unwrap(),
             0
         );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v106_extends_compaction_detector_closed_sets_and_preserves_policy_rows() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v106-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO compaction_detector_policy(
+                    adapter_kind, policy, policy_epoch, release_version,
+                    applied_at, updated_at
+                ) VALUES (
+                    'opencode-cli', 'best_effort', 3, 'v0.48',
+                    '2026-08-08T00:00:00Z', '2026-08-08T00:00:00Z'
+                );
+                DELETE FROM schema_migration WHERE version = 106;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.19', projection_schema_version = 60
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+
+        database.migrate_kimi_compaction_detector_v106().unwrap();
+
+        let policy: (String, i64, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT policy, policy_epoch, release_version
+                FROM compaction_detector_policy
+                WHERE adapter_kind = 'opencode-cli'
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(policy, ("best_effort".to_string(), 3, "v0.48".to_string()));
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO compaction_detector_policy(
+                    adapter_kind, policy, policy_epoch, release_version,
+                    applied_at, updated_at
+                ) VALUES (
+                    'kimi-code-cli', 'best_effort', 1, 'v1.27',
+                    '2026-08-23T00:00:00Z', '2026-08-23T00:00:00Z'
+                )
+                "#,
+                [],
+            )
+            .unwrap();
+        for table in [
+            "bootstrap_redelivery_requirement",
+            "compaction_detector_policy",
+            "native_session_compaction_observer_lease",
+        ] {
+            let schema: String = database
+                .connection()
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                schema.contains("'kimi-code-cli'"),
+                "{table} does not admit the Kimi compaction detector"
+            );
+        }
+        let contract: (String, i64) = database
+            .connection()
+            .query_row(
+                "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v1.20".to_string(), 61));
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                },)
+                .unwrap(),
+            0
+        );
+
         drop(database);
         std::fs::remove_dir_all(directory).expect("temporary database should be removable");
     }
@@ -27098,7 +27473,7 @@ mod tests {
             connection,
             &[
                 58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
-                102, 103, 104, 105,
+                102, 103, 104, 105, 106,
             ],
         );
         for table in [

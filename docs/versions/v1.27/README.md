@@ -4,9 +4,9 @@ version: v1.27
 lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: complete
+implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # Rovai-ai v1.27：Kimi Code + MiniMax M3 本地 Runtime 接入
@@ -28,19 +28,23 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 
 ## 交付范围
 
-- 新增 `AdapterKind = kimi-code-cli`、`SkillDeliveryGroupKey = kimi`、Migration 105 与 Data Contract
-  `v1.19 / projection schema 60`；
-- 发现 `kimi`，以 `kimi acp` 启动 ACP v1；每个 AgentRun 完成后回收 Host，但同一 Camp/成员的兼容逻辑
-  会话复用稳定、隔离的 Rovai `KIMI_CODE_HOME`；
+- 新增 `AdapterKind = kimi-code-cli`、`SkillDeliveryGroupKey = kimi` 与 Migration 105；Migration 106 扩展
+  Compaction policy、Observer 与 Requirement closed kinds，当前 Data Contract 为
+  `v1.20 / projection schema 61`；
+- 发现 `kimi`，以 `kimi acp` 启动 ACP v1；正式 AgentRun 继承用户原生 Kimi Home，正常完成的兼容 Run 复用
+  warm Host/Session，Host 被停止或淘汰后由后继 Host 在同一原生 Home 中精确恢复；显式 Deep Probe 仍使用
+  一次性临时 Home；
 - 从 `~/.config/rovai/kimi-code.env`（或 `ROVAI_KIMI_CONFIG`）读取严格 allowlist 的六个
   `KIMI_MODEL_*` 字段；Unix 上拒绝 group/other 可访问文件；
 - 支持 `default`、`plan`、`auto`、`yolo` 权限模式，Core read-only 强制 `plan`；真实 Shell 工具调用仍由
   Rovai permission request 决定，不把 provider 配置当作授权；
 - 不强制关闭 Kimi/MiniMax thinking；`KIMI_MODEL_CAPABILITIES=thinking` 只作为能力声明。
   `<think>...</think>` 推理块不进入公开消息，完整闭合块被剥离，未闭合块 fail closed；
-- Kimi Skill 投影到 `.kimi-code/skills`；External MCP、Usage/Cost、Compaction 与 warm Host reuse 保持
-  Disabled。capability snapshot 保留真实 `session.resume/load`，新 Host 优先精确 resume，load 只作
-  replay-quarantined fallback；
+- Kimi Skill 投影到 `.kimi-code/skills`；External MCP 通过标准 ACP Session `mcpServers` 以
+  `AdditivePerRun / RovaiWins` 启用，stdio、Streamable HTTP 与真实模型 Tool call 已通过；warm Host/Session
+  reuse 已启用；Usage/Cost 保持 Disabled。Compaction 通过 Kimi-only idle ACP completion frame 以
+  `best_effort` 启用，不安装 Hook 或修改用户配置。capability snapshot 保留真实 `session.resume/load`，
+  Host 停止或淘汰后由新 Host 优先精确 resume，load 只作 replay-quarantined fallback；
 - macOS arm64 声明 Built-in transport 并进入普通 discovery、检查、成员配置和执行路径；macOS x64 与
   Windows x64 仍保持准入阻断，不从 arm64 证据外推。
 
@@ -58,10 +62,18 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   operation、三种输入、Gather、conflict、lease fence、exact successor read 与 logical/native continuation
   全部通过，Kimi 声明 built-in transport capability 并进入默认矩阵；
 - 原始 ACP Probe 中，同 Host 多 Session 无串话；新进程复用同一 `KIMI_CODE_HOME` 的 exact resume/load 保持
-  Session ID 和上下文，而新隔离 home 对旧 ID 返回 `Unknown sessionId`。产品现按稳定逻辑 scope 保留私有
-  home：terminal 前仍停止 Host，后继新 Host 精确 resume；load 仅作为带 quarantine 的 fallback；
-- 原始 ACP stdio MCP Tool 调用与相邻空 MCP Session 隔离通过，但 Rovai projection 尚缺 precedence、完整定义
-  和 Host compatibility 准入；本版没有把 External MCP、Token Usage、Cost 或 Compaction 写成已支持；
+  Session ID 和上下文，而新隔离 Home 对旧 ID 返回 `Unknown sessionId`。产品正式 AgentRun 不覆盖
+  `HOME` / `KIMI_CODE_HOME`，继承用户原生状态根：正常完成后兼容 Run 复用同一 warm Host/Session；显式停止后
+  后继新 Host 精确 resume；load 仅作为带 quarantine 的 fallback。v22 旧私有 Home 不自动迁移或删除；
+- 产品级 External MCP smoke 经 Core、Assignment、AgentRun Projection、ContextManifest 与真实模型 Tool call
+  同时验证 stdio、Streamable HTTP 和 `RovaiWins` 同名整项优先；未写 Runtime 用户级配置；
+- Kimi 异步 command/config advertisement 只作为私有 metadata 安全路由。当前产品不消费该 catalog，因此
+  不再把“缺少权威 async catalog snapshot”列为遗留问题；
+- Kimi `0.32.0` 与官方 `main` 都把内部 `compaction.completed` 转为固定四行
+  `agent_message_chunk`。Rovai 只在 Prompt 已结束的 Kimi Session metadata route，或 observer 仍绑定于同一
+  warm Host/Session 的 detached AgentRun route，完整匹配该格式并产生 authoritative Compaction Observation；
+  active Prompt 文本、started/cancelled/blocked、宽泛关键词和 token-drop 均不参与。源码、现有真实手动
+  `/compact` wire 与 detached warm-Host Rust seam 已核对，真实自动 compact 的完整 Core smoke 尚未执行；
 - macOS x64 与 Windows x64 没有从 arm64 结论外推资格。
 
 ## 跨版本文档影响
@@ -69,19 +81,20 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.26 冻结为 historical；本概览、计划、决定和版本索引建立唯一 current v1.27。 |
-| Decisions | 已更新 | [V1.27-D01](decisions.md#v1-27-d01)记录私有 provider 配置；[V1.27-D02](decisions.md#v1-27-d02)替代其每 Host home/new-only 选择；[V1.27-D03](decisions.md#v1-27-d03)记录 Built-in fixture 根因和 macOS arm64 准入。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v21](../../contracts/runtime-launch-and-verification-v21.md)冻结稳定 Session home、跨新 Host exact continuation 与 macOS arm64 资格。 |
-| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity，并记录 Kimi 边界。 |
-| UI | 已更新 | Member/Settings surface brief 与 Renderer catalog 加入 Kimi 图标、权限和逐平台状态。 |
+| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录 Kimi idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home，并保留 Probe 临时隔离。 |
+| Contracts | 已更新 | [Runtime Launch and Verification v23](../../contracts/runtime-launch-and-verification-v23.md)冻结用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP 与 Cursor 默认隐藏边界。 |
+| User Automation | 已更新 | [User Automation v1](../../contracts/user-automation-v1.md)补齐 `runtime check/models` 与成员 create/runtime set/clear 的封闭 App CLI；所有写入复用既有 Core Domain Command、显式版本 fence 与幂等 command ID，不开放 generic invoke。 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector 与无 Hook 边界。 |
+| UI | 已更新 | Settings Agent Runtime 目录继续展示已接入 Kimi，并隐藏尚未走通、未准入的 Cursor；现有布局与状态语义不变。 |
 | Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)加入 Kimi ACP `run_level` baseline 与真实 Shell Evidence。 |
-| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 `0.32.0`、MiniMax M3、真实 prompt/approval/output/cancel/cleanup、Built-in 15/15 与平台边界。 |
-| Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航路由到 v21、本版本与 Kimi Research。 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 `0.32.0`、MiniMax M3、用户原生 Home、Probe 隔离、warm/cold continuation、External MCP、Built-in 15/15、Kimi Compaction detector 与平台边界。 |
+| Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航路由到 v22、本版本与 Kimi Research。 |
 | Root README | 已更新 | 常青能力更新为十二种 Product Runtime identity。 |
 
 ## References
 
 - [实施与验收计划](implementation-plan.md)
 - [版本决定](decisions.md)
-- [Runtime Launch and Verification v21](../../contracts/runtime-launch-and-verification-v21.md)
+- [Runtime Launch and Verification v23](../../contracts/runtime-launch-and-verification-v23.md)
 - [Kimi Code Runtime Research](../../research/kimi-code-runtime-research.md)
 - [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)

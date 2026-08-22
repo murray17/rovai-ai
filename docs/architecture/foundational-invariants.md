@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-21
+last_updated: 2026-08-23
 ---
 
 # 当前基础架构不变量
@@ -208,6 +208,7 @@ last_updated: 2026-08-21
 - Run 结束只有在输入结果已知、输出和 tool work 收敛、Team/Run lease 已解绑且 Adapter 能证明进程 quiescent/healthy 时才可进入 IdleWarm；否则必须关闭。Fleet 启动时必须同时启动单调时间 TTL 与 LRU Sweeper，配置变更、Camp 删除、成员永久移除、不健康和容量回收也会立即使精确 scope 失效/停止；已冻结活跃 Run 只标记 run 后退役，不被容量策略中断。
 - IdleWarm 可保留精确冻结的外部 MCP 投影、Runtime 内存、私有配置与其进程/连接直到 TTL、失效或容量回收；这不等于 AgentRun 终态即撤销外部凭据。空闲期没有活跃 Run lease，built-in/Team 调用 fail closed；不能证明安全保留精确字节时必须关闭整个 Runtime。
 - Fleet 是单一 Core generation 的内存状态，不写 SQLite、不跨重启接管。正常关闭停止并 reap 全部进程；崩溃清理只能在 owner record、旧 generation、进程组组长与命令身份均可证明时终止，不能仅凭 PID、路径或 UID 猜测性杀进程。
+- 正式 AgentRun 默认继承用户通用 `HOME` 与 Runtime 原生 state/config Home；Provider env、External MCP、Run tmp、私有 cwd 或 Skill projection 都不能隐式升级成独立 Runtime Home。只有当前产品合同明确要求隔离、同时定义迁移与清理时才能覆盖 Runtime-specific Home。Discovery/Probe/fixture 可以使用一次性临时 Home，但其 Session、认证和 continuation 证据不得外推到正式 AgentRun，也不得进入产品 Binding。
 - Rovai 启动 Codex 时不设置/覆盖 `CODEX_HOME`，不拥有 Codex Home、Home lock、Camp cleanup 或 orphan GC；用户、Project、managed、plugin、hook、memory 和 native MCP 按目标 executable、process environment 与 cwd 的 Codex 原生规则生效。Conversation 只持久 Native Binding/thread ID 和证据，逻辑私有连续性不承诺 Camp/member 级物理 Home 隔离；Camp 删除也不宣称删除外部 Runtime 数据。
 - Codex Adapter 在 thread start/resume 前通过 native `config/read(includeLayers=true, cwd=executionRoot)` 发现有效 top-level MCP 名称，只将不同名的 Rovai Server 以 thread-scoped addition 传入。Codex process compatibility 只包含真正 process-scoped 输入，不包含 Conversation Home 或 thread MCP；每次 acquire 都重新发现并 finalise 本 Run 的 additive projection。
 - Runtime launch 明确区分 discovery、light verification、用户授权 deep probe 和执行期验证，且每次子进程启动必须通过中央 purpose policy。Probe/check attempt 由 Manager 拥有、按 generation/fingerprint fencing，使用比产品执行更窄的进程与权限边界；Probe 期间 identity 变化使整轮结果 superseded，未验证身份或 stale LKG 不能冒充 Ready。
@@ -244,7 +245,7 @@ last_updated: 2026-08-21
 - Bootstrap 各组件、完整序列化 bytes 和实际投递是不同 evidence 层；不用“已生成完整 Bootstrap”替代 Runtime accepted evidence。ContextManifest 记录冻结 digest/versions，Runtime Input Delivery Evidence 记录实际 bytes 与 accepted ACK；只有 accepted ACK 推进 Conversation 投递水位，失败/未知必须在后续输入重试。
 - Bootstrap redelivery 是 durable requirement，但 detector signal 本身不证明 compaction、不授权发送。Core 通过每 Native Session 唯一的 observer lease/generation、Runtime-owned policy epoch、prepared-input cutoff 和幂等 Session-scoped command 决定下一个尚未准备的输入是否需要 redelivery；旧 binding、旧 generation、迟到信号或已经 prepare 的输入都 fail closed。
 - 所有 Runtime 输入在一个 Core-owned 串行 preparation boundary 中冻结。Redelivery 是完整 Bootstrap 在本次输入上的 transient overlay，不改写 Session Charter、正常 Dynamic Context 或历史消息；Bootstrap+Current Input 共享有界 payload 门禁，无法完整交付时本次输入整体失败，不部分发送。
-- Runtime 特定 compaction detector 只能在真实 probe 证明 best-effort、非阻塞、不消费/伪造用户输入、不破坏 Session 且有可控停止边界时准入。Detector state 不是 Runtime Readiness，中断/恢复不可追溯推断 compaction；只有明确、结构化、可区分完成边界且有 occurrence ID/去重依据的 signal 才能 admission。token/usage 下降、历史变短、模型 summary 或普通 assistant 文本不能补猜。已按目标场景查找但未见可靠信号时状态为 `NotObserved` / `Unverified` 且 policy `Disabled`；只有结构化负证据证明上游不提供时才声明 `Unsupported`。
+- Runtime 特定 compaction detector 只能在真实 probe 证明 best-effort、非阻塞、不消费/伪造用户输入、不破坏 Session 且有可控停止边界时准入。Detector state 不是 Runtime Readiness，中断/恢复不可追溯推断 compaction。admission 必须来自明确、可区分的完成边界并具有 occurrence identity：优先使用结构化 lifecycle event；上游若把原生完成事件确定性降格为文本，只允许 Runtime 私有 compatibility route 在源码与真实 wire shape 均固定后完整匹配官方 frame，并与 active Prompt 普通 assistant 文本隔离。token/usage 下降、历史变短、模型 summary、宽泛关键词或普通 assistant 文本不能补猜。已按目标场景查找但未见可靠信号时状态为 `NotObserved` / `Unverified` 且 policy `Disabled`；只有结构化负证据证明上游不提供时才声明 `Unsupported`。
 
 <a id="context-public-history"></a>
 
@@ -326,7 +327,7 @@ last_updated: 2026-08-21
 
 - 一个安装包可以只交付一个 `rovai` binary，但 `rovai app` 普通用户自动化与已有 Agent CLI 必须使用不同 endpoint、credential、principal、授权和命令目录；共享可执行文件不构成共享能力。User Automation 不接受 process-private Run context，Agent CLI 不接受应用级用户 credential。macOS Core-managed Runtime/Probe 及其后代必须由统一 Managed Process 边界 OS-deny 完整 `automation-v1` tree；同 UID file mode 和环境变量不构成该隔离，CLI 隐藏/拒绝 `app` 只能作为纵深防御。
 - Electron Main 是 User Automation endpoint、connection context、credential、封闭 operation dispatcher 与 Renderer navigation 的唯一 owner；Core 只提供既有领域 mutation 和显式安全 Read Model。不存在 generic invoke、独立 automation daemon 或隐式 Desktop launch。App 未运行稳定失败，不能把状态检查变成隐藏进程副作用。
-- User Automation mutation 必须复用正式 Core Message/Turn/Run seam、预算和版本 fence，不能直接写 SQLite、调用 Runtime 或把用户 Composer 当 staging area。一次公共 mutation 对应一个幂等 Core Domain Command transaction；重放返回原结果且不重复效果，用户草稿在成功、拒绝和错误后都保持原样。调用方无法解释的新状态（包括 V1 非空 `pendingExecution`）必须要求合同升级；断连不能证明 mutation 未发生，无法证明时不盲目重发。
+- User Automation mutation 必须复用正式 Core Domain Command seam：成员创建与 Runtime 配置只映射到 `members.create/runtime.set/runtime.clear`，消息执行复用 Message/Turn/Run、预算和版本 fence；不能直接写 SQLite、调用 Runtime 或把用户 Composer 当 staging area。一次公共 mutation 对应一个幂等 Core Domain Command transaction；重放返回原结果且不重复效果，用户草稿在成功、拒绝和错误后都保持原样。调用方无法解释的新状态（包括 V1 非空 `pendingExecution`）必须要求合同升级；断连不能证明 mutation 未发生，无法证明时不盲目重发。
 - User Automation Server 是 Desktop 可选控制面；监听、context publish 或初始化失败只能让该控制面降级并清理半初始化资源，不能终止 Desktop/Core。CLI shell exit 必须区分成功 `0`、业务拒绝/terminal failure `1`、输入/transport/contract error `2` 与 outcome/settlement indeterminate `3`，不能因已打印 JSON 把失败返回为 `0`。
 - Diagnostic Trial 是 CLI-owned durable workflow，不是 Core Trial/Benchmark/Qualification entity。它在首次 Core mutation 前持久化 journal，每次只接受一个 root AgentRun，冻结单责任、零 A2A 与 elapsed budget，并以 global domain sequence、Run-local evidence sequence 双 cursor 观察；AgentRun terminal 只由领域状态决定。
 - AgentRun 诊断采用字段 allowlist，不从 raw payload 黑名单删减。raw effective config、Runtime payload/final output、secret、environment、context/bootstrap bytes 与 Authority path 永不进入普通终端或 bundle；公共输出只取正式 CampMessage。Trial/export 必须明示非正式资格，不能自动晋升为 Benchmark 结果。

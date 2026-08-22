@@ -901,7 +901,9 @@ type RuntimeCatalogEntry =
     }
 
 const RUNTIME_CATALOG: RuntimeCatalogEntry[] = [
-  ...PRODUCT_RUNTIMES.map((runtimeKind) => ({ state: 'supported' as const, runtimeKind })),
+  ...PRODUCT_RUNTIMES
+    .filter((runtimeKind) => runtimeKind !== 'cursor-agent')
+    .map((runtimeKind) => ({ state: 'supported' as const, runtimeKind })),
   {
     state: 'pending',
     id: 'deepseek-harness',

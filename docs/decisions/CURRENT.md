@@ -1,7 +1,7 @@
 ---
 document_type: current-decision-navigation
 authority: current-authority-and-rationale-routing
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # 当前规范与决定理由导航
@@ -32,9 +32,9 @@ last_updated: 2026-08-22
 
 ## Runtime execution 与 Security
 
-- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)、[Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)和[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)。
+- 当前规范：[Runtime 基础不变量](../architecture/foundational-invariants.md#runtime-catalog-installation)、[Runtime Catalog](../architecture/runtime-catalog-boundaries.md)、[AgentRun Recovery](../architecture/agent-run-recovery.md)、[Planned Shutdown](../architecture/planned-shutdown.md)、[Camp Published Attachment View](../architecture/camp-published-attachment-view.md)、[Windows Platform](../architecture/windows-desktop-platform.md)、[Runtime Launch and Verification v23](../contracts/runtime-launch-and-verification-v23.md)、[Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)和[Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md)。
 - 当前 Cursor identity、同名 `agent` 碰撞与未准入策略的理由：[V1.26-D01](../versions/v1.26/decisions.md#v1-26-d01)。
-- 当前 Kimi provider 凭据隔离理由：[V1.27-D01](../versions/v1.27/decisions.md#v1-27-d01)；稳定私有 Session home 与跨新 Host exact continuation 理由：[V1.27-D02](../versions/v1.27/decisions.md#v1-27-d02)；Built-in fixture 修正与 macOS arm64 准入理由：[V1.27-D03](../versions/v1.27/decisions.md#v1-27-d03)。
+- 当前 Kimi provider 凭据隔离理由：[V1.27-D01](../versions/v1.27/decisions.md#v1-27-d01)；Built-in fixture 修正与 macOS arm64 准入理由：[V1.27-D03](../versions/v1.27/decisions.md#v1-27-d03)；warm Host、External MCP 与 async catalog 边界理由：[V1.27-D04](../versions/v1.27/decisions.md#v1-27-d04)；Kimi 原生完成帧与 idle ACP Compaction 准入理由：[V1.27-D05](../versions/v1.27/decisions.md#v1-27-d05)；正式 AgentRun 继承用户原生 Home、Probe 独立隔离的理由：[V1.27-D06](../versions/v1.27/decisions.md#v1-27-d06)。
 - 理由来源：[v0.16](../versions/v0.16/decisions.md)、[v0.17](../versions/v0.17/decisions.md)、[v0.19](../versions/v0.19/decisions.md)、[v0.20](../versions/v0.20/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.64](../versions/v0.64/decisions.md)、[v0.66](../versions/v0.66/decisions.md)、[v1.01](../versions/v1.01/decisions.md)、[v1.03](../versions/v1.03/decisions.md)、[v1.04](../versions/v1.04/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.11](../versions/v1.11/decisions.md)、[v1.12](../versions/v1.12/decisions.md)、[v1.13](../versions/v1.13/decisions.md)、[V1.15-D04](../versions/v1.15/decisions.md#v1-15-d04)、[V1.15-D06](../versions/v1.15/decisions.md#v1-15-d06)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.20-D02](../versions/v1.20/decisions.md#v1-20-d02)、[V1.21-D03](../versions/v1.21/decisions.md#v1-21-d03)、[V1.22-D01](../versions/v1.22/decisions.md#v1-22-d01)、[V1.24-D01](../versions/v1.24/decisions.md#v1-24-d01)。
 
 ## Session、Context 与 Bootstrap
@@ -50,7 +50,7 @@ last_updated: 2026-08-22
 ## Skills、MCP 与 Built-ins
 
 - 当前规范：[Skill/MCP 基础不变量](../architecture/foundational-invariants.md#skills-builtin-transport)、[Built-in Tool Runtime](../architecture/builtin-tool-runtime.md)、[Skill Projection](../architecture/skill-projection-reconciliation.md)、[Built-in Tool Transport v20](../contracts/builtin-tool-transport-v20.md)、[Windows Skill Projection v1](../contracts/windows-skill-projection-v1.md)。
-- 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)。
+- 理由来源：[v0.06](../versions/v0.06/decisions.md)、[v0.09](../versions/v0.09/decisions.md)、[v0.31](../versions/v0.31/decisions.md)、[v0.37](../versions/v0.37/decisions.md)、[v0.42](../versions/v0.42/decisions.md)、[v0.43](../versions/v0.43/decisions.md)、[v0.58](../versions/v0.58/decisions.md)、[v0.67](../versions/v0.67/decisions.md)、[v0.82](../versions/v0.82/decisions.md)、[v0.85](../versions/v0.85/decisions.md)、[v0.91](../versions/v0.91/decisions.md)、[v0.92](../versions/v0.92/decisions.md)、[v0.93](../versions/v0.93/decisions.md)、[v1.05](../versions/v1.05/decisions.md)、[v1.07](../versions/v1.07/decisions.md)、[v1.14](../versions/v1.14/decisions.md)、[V1.17-D02](../versions/v1.17/decisions.md#v1-17-d02)、[V1.19-D01](../versions/v1.19/decisions.md#v1-19-d01)、[V1.19-D02](../versions/v1.19/decisions.md#v1-19-d02)、[V1.21-D01](../versions/v1.21/decisions.md#v1-21-d01)、[V1.27-D04](../versions/v1.27/decisions.md#v1-27-d04)。
 
 ## User Automation 与 Diagnostic Trial
 
