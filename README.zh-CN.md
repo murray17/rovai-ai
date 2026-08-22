@@ -235,6 +235,22 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 | **协作记忆** | 沉淀重要决定、经验与团队习惯，让队员逐渐理解这支队伍过去如何共同解决问题。 |
 | **原生能力兼容** | 通过通用 ACP Adapter 接入支持 ACP 的 Agent Runtime，尽量保留其原生模型、权限、Skill、MCP 与会话能力。 |
 
+这些能力并不是彼此孤立的功能，而是由同一套协作架构连接起来：
+
+<p align="center">
+  <img
+    src="docs/assets/readme/rovai-architecture.png"
+    alt="Rovai AI architecture showing Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and runtime-native capabilities"
+    width="100%"
+  >
+</p>
+
+<p align="center">
+  <sub>
+    Agent Runtime 提供个体能力，Rovai 负责把它们组织成一支队伍。
+  </sub>
+</p>
+
 ---
 
 ## 设计理念
@@ -269,15 +285,27 @@ Rovai 的设计始终保持克制，不会为了世界观增加无关流程或�
 
 ---
 
-## 继续这段旅程
+## 文档
 
-| 你想做什么 | 从这里开始 |
-|---|---|
-| 招募队员、配置身份、职责与 Runtime | [看看队伍如何一起工作](#接下来他们这样一起工作) |
-| 准备本地开发环境并运行 Rovai | [开发环境与依赖](docs/development/environment.md) |
-| 提交 Issue、改进代码或参与文档建设 | [GitHub Issues](https://github.com/murray17/rovai-ai/issues) |
-| 阅读架构选择、约束与跨版本决策 | [当前决策导航](docs/decisions/CURRENT.md) |
-| 了解项目与第三方组件的授权边界 | [MIT License](LICENSE) · [Third-Party Notices](THIRD_PARTY_NOTICES.md) |
+- [**安装指南**](docs/guides/installation.md)：下载安装、首次启动与常见问题
+- [**操作指南**](docs/guides/operations.md)：配置队友、选择 Runtime 与设置权限
+- [**架构决策**](docs/decisions/CURRENT.md)：当前有效的架构选择与约束
+- [**开发环境与依赖**](docs/development/environment.md)：本地开发所需环境与工具
+
+---
+
+## 贡献
+
+欢迎提交 [Issue](https://github.com/murray17/rovai-ai/issues) 或
+[Pull Request](https://github.com/murray17/rovai-ai/pulls)。
+
+正在进行和计划中的工作见：[**版本路线图**](docs/versions/README.md)。
+
+---
+
+## 许可证
+
+[MIT License](LICENSE) 允许自由使用、修改、分发和商业使用。
 
 第三方产品名称、Logo 与商标仍归各自权利人所有。Rovai 对它们的引用仅用于
 说明兼容性，不代表隶属、背书或所有权。
