@@ -128,7 +128,6 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
       <br>
       <strong>招募伙伴</strong>
     </td>
-
     <td align="center" width="33%">
       <a href="docs/assets/readme/grill-duo.png">
         <img
@@ -140,7 +139,6 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
       <br>
       <strong>双人追问</strong>
     </td>
-
     <td align="center" width="33%">
       <a href="docs/assets/readme/campfire.png">
         <img
