@@ -83,7 +83,7 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
   <img
     src="docs/assets/readme/camp-conversation.png"
     alt="Rovai AI Camp 会话视图，包含会话区、执行台、队员与任务区域"
-    width="800"
+    width="900"
   >
 </p>
 
@@ -115,7 +115,7 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 
 ### 接下来，他们这样一起工作
 
-<table>
+<table align="center">
   <tr>
     <td align="center" width="33%">
       <a href="docs/assets/readme/recruit-member.png">
