@@ -43,13 +43,13 @@ export function runtimeCampFilesRootForDataDirectory(
   )
 }
 
-export function coreDataDirectoryArguments(dataDirectory) {
+export function coreDataDirectoryArguments(dataDirectory, options = {}) {
   const canonicalDataDirectory = canonicalPath(dataDirectory)
   return [
     '--data-dir',
     canonicalDataDirectory,
     '--runtime-camp-files-root',
-    runtimeCampFilesRootForDataDirectory(canonicalDataDirectory)
+    runtimeCampFilesRootForDataDirectory(canonicalDataDirectory, options)
   ]
 }
 

@@ -79,8 +79,10 @@ import claudeCodeLogo from './assets/runtime-logos/claudecode-color.svg'
 import codeBuddyLogo from './assets/runtime-logos/codebuddy-color.svg'
 import codexLogo from './assets/runtime-logos/codex-color.svg'
 import copilotLogo from './assets/runtime-logos/copilot-color.svg'
+import cursorLogo from './assets/runtime-logos/cursor.svg'
 import deepSeekLogo from './assets/runtime-logos/deepseek-color.svg'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
+import kimiLogo from './assets/runtime-logos/kimi.svg'
 import openCodeLogo from './assets/runtime-logos/opencode.svg'
 import qoderLogo from './assets/runtime-logos/qoder-color.svg'
 import qwenLogo from './assets/runtime-logos/qwen-color.svg'
@@ -868,6 +870,8 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'codebuddy-cli',
   'qwen-code',
   'trae-cn-cli',
+  'cursor-agent',
+  'kimi-code-cli',
   'antigravity-app'
 ]
 
@@ -881,6 +885,8 @@ const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'codebuddy-cli': codeBuddyLogo,
   'qwen-code': qwenLogo,
   'trae-cn-cli': traeLogo,
+  'cursor-agent': cursorLogo,
+  'kimi-code-cli': kimiLogo,
   'antigravity-app': antigravityLogo
 }
 
@@ -1759,6 +1765,8 @@ function adapterLabel(kind: AdapterKind): string {
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
     'trae-cn-cli': 'TRAE CLI',
+    'cursor-agent': 'Cursor Agent',
+    'kimi-code-cli': 'Kimi Code',
     'antigravity-app': 'Antigravity'
   })[kind]
 }
@@ -1774,6 +1782,8 @@ function adapterMaturityLabel(kind: AdapterKind): string {
     'codebuddy-cli': '实验性',
     'qwen-code': '实验性',
     'trae-cn-cli': '实验性',
+    'cursor-agent': '实验性',
+    'kimi-code-cli': '实验性',
     'antigravity-app': '实验性'
   })[kind]
 }

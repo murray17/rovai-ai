@@ -5,7 +5,7 @@ upstream: Cursor CLI
 authority: research-evidence-only
 status: proposed
 admission: not_qualified
-last_updated: 2026-08-20
+last_updated: 2026-08-22
 ---
 
 # Cursor Agent Runtime 接入研究
@@ -17,25 +17,28 @@ last_updated: 2026-08-20
 
 ```text
 Runtime: Cursor Agent CLI
-建议 AdapterKind: cursor-agent
-上游版本: 未冻结；必须以 agent --version + executable fingerprint 记录
+AdapterKind: cursor-agent
+本机候选版本: 2026.08.11-e8db854（隔离下载；未进入用户安装目录）
 建议接入形态: vendor_extended_acp
-Exact launch command: agent acp
+Exact launch command: <validated cursor-agent-or-agent> acp
 Transport: stdio / newline-delimited JSON-RPC 2.0 / ACP
 当前 Admission: not_qualified
-一句话结论: 官方 ACP 已可用，但必须实现 Cursor 阻塞式私有方法，并证明 session/load、per-Run MCP 和 Tool 输出。
+一句话结论: Catalog/Adapter 已实现并保守处理 Cursor 私有消息，但本机认证 Session 未建立，所有平台仍未准入。
 最接近的现有 Adapter: 通用 ACP Host + Cursor 私有 request/notification router。
 ```
 
 ### 推荐决定
 
-**进入 P1 实机 Probe；在以下三点通过前不要加入正式 Product Runtime Catalog：**
+**已进入 Product Runtime Catalog，但在以下行为证据通过前保持逐平台 `not_qualified`：**
 
 1. `session/load` 必须在 warm Host、cold Host 和 Core restart 后保持精确 Session ID。
 2. `cursor/ask_question` 与 `cursor/create_plan` 是阻塞请求，Rovai 必须可靠响应，否则 Agent 会永久等待。
 3. 官方 ACP 页面只明确保证项目/用户 `.cursor/mcp.json`；Rovai 所需的 per-Run additive MCP 注入必须单独证明，不能靠配置文件推断。
 
 Cursor CLI 默认自动更新，因此 Runtime version/fingerprint 变化必须立即使旧 Ready 和行为资格失效。
+
+Catalog identity 只表示实现了 closed Adapter、Migration、配置与 UI 投影；它不授予 discovery、成员选择、
+Probe 或 AgentRun。平台准入仍由 `AdapterKind × HostPlatformKey` 矩阵单独控制。
 
 ## 1. 证据边界
 
@@ -69,14 +72,29 @@ Cursor CLI 默认自动更新，因此 Runtime version/fingerprint 变化必须�
 - ACP Usage/Cache/Cost 与 Compaction lifecycle。
 - Native Windows 的实际 executable、子进程和 Job Object 行为。
 
+### 2026-08-22 本机隔离探测
+
+- `/opt/homebrew/bin/agent --version` 返回 `grok 0.2.118`，证明通用命令名存在真实产品碰撞；因此 Rovai
+  以 `cursor-agent` 为 canonical command，并只在 `agent --version` 严格符合
+  `YYYY.MM.DD-<build>` Cursor build identity 时接受兼容别名；
+- 用户现有 `~/.local/bin/cursor-agent` 为 `2025.09.18-7ae6800`，没有 ACP 子命令；
+- 仅在临时隔离目录下载的最新候选为 `2026.08.11-e8db854`，`agent acp` 可完成 ACP v1 initialize；
+- `authenticate({methodId:"cursor_login"})` 在 15 秒有界窗口内未完成；跳过认证时 `session/new` 明确返回
+  Authentication required；
+- 探测没有执行 `agent login`、没有改写用户凭据/配置、没有发送模型 Prompt，也没有把临时 CLI 安装为
+  日常命令。
+
+因此这轮只建立 executable identity、launch shape 与 initialize 证据。它不能建立 authenticated Ready，
+更不能替代 command output、Approval、cancel、private request、Session continuation、MCP 或 cleanup Smoke。
+
 ## 2. 接入形态
 
 ```text
 Integration shape: vendor_extended_acp
 Exact launch command: agent acp
 Discovery candidates:
-- agent
-- cursor-agent（仅作为旧安装候选；不得作为产品 identity）
+- cursor-agent（canonical command）
+- agent（仅在严格 Cursor build identity 验证后接受）
 是否为常驻 Host: 是
 一个 Host 是否支持多个 Session: 未验证
 依赖的私有方法:
@@ -172,14 +190,14 @@ CLI 默认自动更新。建议在真实 `agent --help` 中寻找官方的禁用
 
 | 能力 | Runtime evidence | Rovai implementation | 边界说明 |
 | --- | --- | --- | --- |
-| Dynamic model catalog | Unverified | NotImplemented | 官方页面未冻结完整 ACP model catalog shape |
-| Permission / mode catalog | DocumentationOnly | NotImplemented | 三种 mode + 三个 permission option 已文档化 |
-| Structured Tool lifecycle | Unverified | NotImplemented | 必须枚举标准 update 与 Cursor 扩展 |
-| Approval allow / deny | DocumentationOnly | NotImplemented | 不响应会阻塞；需 allow/deny 副作用 Smoke |
-| Cancellation | DocumentationOnly | NotImplemented | `session/cancel` 已文档化，终态/迟到事件待验证 |
-| Reliable final boundary | DocumentationOnly | NotImplemented | Prompt response stop reason 候选；需 late-notification grace |
-| External MCP | Unverified | Blocked | `.cursor/mcp.json` 已确认；per-Run additive MCP 未确认 |
-| Rovai managed Skill | DocumentationOnly | NotImplemented | 候选 `.cursor/skills` / `.agents/skills` |
+| Dynamic model catalog | Unverified | Disabled | 只提供 runtime-default；不伪造动态 catalog |
+| Permission / mode catalog | DocumentationOnly | Implemented | 静态 `agent/plan/ask` 与 `default/auto_review/force`；不冒充 Session 证据 |
+| Structured Tool lifecycle | Unverified | Implemented | 复用 ACP parser，但 Activity baseline 保持 run-level，待真实 Tool fixture |
+| Approval allow / deny | DocumentationOnly | Implemented | 复用标准 ACP permission router；副作用 Smoke 未通过，不能准入 |
+| Cancellation | DocumentationOnly | Implemented | 复用 `session/cancel`；真实终态/迟到事件仍未验证 |
+| Reliable final boundary | DocumentationOnly | Implemented | 复用 ACP Prompt response；Missing-Send 保持 Disabled |
+| External MCP | Unverified | Disabled | `.cursor/mcp.json` 已确认；per-Run additive MCP 未确认 |
+| Rovai managed Skill | DocumentationOnly | Implemented | 只投影项目 `.cursor/skills`；load/invocation 未验证 |
 | Runtime advertised commands | Unverified | NotImplemented | Skill slash command存在，但 ACP update 时机需 Probe |
 | Compaction signal | NotObserved | Disabled | 未发现官方 ACP structured compaction lifecycle |
 | Usage / Token / Cache / Cost | NotObserved | Disabled | Headless 能力不能直接外推到 ACP |
@@ -305,11 +323,10 @@ Verification: agent --version
 
 ## 11. Rovai 所需改动
 
-- 新增 `AdapterKind::CursorAgent`、Migration、图标、显示名和逐平台 Admission。
-- 增加 executable discovery：首选 `agent`，兼容识别旧 `cursor-agent`。
-- 实现 Cursor ACP auth flow 和私有 extension router。
-- 新增 durable Ask 与 Plan Review 映射。
-- 建立 `session/load` 专用 History Restore quarantine，不实现虚假的 `session/resume`。
+- 已新增 `AdapterKind::CursorAgent`、Migration 104、图标、显示名和逐平台 Admission。
+- 已增加 executable discovery：首选 `cursor-agent`，严格验证后兼容 `agent`。
+- 已实现 Cursor ACP auth flow 和私有 extension router；Ask 当前安全跳过、Plan 当前安全拒绝，不声明 durable review。
+- `session/load` / `session/resume` 均未准入；完成 Run 后停止 Host，不实现虚假的 continuation。
 - 冻结自动更新/版本 fingerprint 行为。
 - 在 per-Run MCP 通过前保持 MCP/Built-in transport Blocked。
 - 新增 `smoke:cursor-runtime`，覆盖 private request、command output、resume、Approval、cleanup。
@@ -320,9 +337,10 @@ Verification: agent --version
 ```text
 Qualified capabilities: 无
 Disabled capabilities: Usage/Cost、Compaction detector
-Unverified capabilities: Tool output、model catalog、session/load、per-Run MCP、Skill refresh、Windows
-Blocking issues: 两个阻塞式 Cursor 私有方法；精确 session/load；MCP 注入边界
-Recommended admission decision: not_qualified；先完成 macOS arm64/当前 CLI 的全消息面 Probe
+Implemented but not behavior-qualified: identity/discovery、ACP auth flow、private request router、静态权限、planned shutdown、项目 Skill 投影
+Unverified capabilities: authenticated session、Tool output、model catalog、Approval/cancel、session/load、per-Run MCP、Skill invocation、Windows
+Blocking issues: 当前候选 authenticate 超时；尚无 authenticated Session 与完整行为 Smoke
+Admission decision: macOS arm64、macOS x64、Windows x64 全部 not_qualified
 ```
 
 ## 上游来源

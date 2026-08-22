@@ -221,10 +221,12 @@ pub enum SkillDeliveryGroupKey {
     Codebuddy,
     Qwen,
     Trae,
+    Cursor,
+    Kimi,
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::Codex,
         Self::Opencode,
         Self::Copilot,
@@ -235,6 +237,8 @@ impl SkillDeliveryGroupKey {
         Self::Codebuddy,
         Self::Qwen,
         Self::Trae,
+        Self::Cursor,
+        Self::Kimi,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -249,6 +253,8 @@ impl SkillDeliveryGroupKey {
             Self::Codebuddy => "codebuddy",
             Self::Qwen => "qwen",
             Self::Trae => "trae",
+            Self::Cursor => "cursor",
+            Self::Kimi => "kimi",
         }
     }
 
@@ -264,6 +270,8 @@ impl SkillDeliveryGroupKey {
             Self::Codebuddy => Path::new(".codebuddy/skills"),
             Self::Qwen => Path::new(".qwen/skills"),
             Self::Trae => Path::new(".trae/skills"),
+            Self::Cursor => Path::new(".cursor/skills"),
+            Self::Kimi => Path::new(".kimi-code/skills"),
         }
     }
 }
@@ -283,6 +291,8 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "codebuddy" => Ok(Self::Codebuddy),
             "qwen" => Ok(Self::Qwen),
             "trae" => Ok(Self::Trae),
+            "cursor" => Ok(Self::Cursor),
+            "kimi" => Ok(Self::Kimi),
             _ => anyhow::bail!("unsupported Skill delivery group: {value}"),
         }
     }
@@ -423,6 +433,7 @@ pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-de
 /// not yet exposed its live model catalog. The first real ACP Session leaves
 /// the Runtime's current model untouched.
 pub const TRAE_RUNTIME_DEFAULT_MODEL_ID: &str = "trae-cn-cli://runtime-default";
+pub const CURSOR_RUNTIME_DEFAULT_MODEL_ID: &str = "cursor-agent://runtime-default";
 pub const KIRO_ADDITIVE_AGENT_NAME: &str = "rovai";
 
 /// Writes the Kiro custom Agent used by Rovai-ai ACP Hosts. Native MCP sources
@@ -486,6 +497,21 @@ impl AgentRuntimeAdapterRegistry {
         kind: AdapterKind,
         platform: HostPlatformKey,
     ) -> RuntimePlatformAdmission {
+        if kind == AdapterKind::CursorAgent {
+            return RuntimePlatformAdmission::not_qualified(
+                kind,
+                platform,
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            );
+        }
+        if kind == AdapterKind::KimiCodeCli {
+            let reason = if platform == HostPlatformKey::MacosArm64 {
+                RuntimePlatformAdmissionReasonCode::BuiltinTransportUnqualified
+            } else {
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing
+            };
+            return RuntimePlatformAdmission::not_qualified(kind, platform, reason);
+        }
         match platform {
             HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64 => {
                 RuntimePlatformAdmission::qualified(
@@ -550,6 +576,13 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::TraeCnCli => json!({
                 "permission_mode": "bypass_permissions",
             }),
+            AdapterKind::CursorAgent => json!({
+                "execution_mode": "agent",
+                "approval_policy": "force",
+            }),
+            AdapterKind::KimiCodeCli => json!({
+                "permission_mode": "default",
+            }),
             AdapterKind::AntigravityApp => json!({
                 "mode": "accept-edits",
                 "sandbox": "off",
@@ -573,7 +606,9 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::QoderCli
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
-            | AdapterKind::TraeCnCli => resolve_acp_runtime(kind, input),
+            | AdapterKind::TraeCnCli
+            | AdapterKind::CursorAgent
+            | AdapterKind::KimiCodeCli => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -604,6 +639,14 @@ impl AgentRuntimeAdapterRegistry {
                 [SkillDeliveryGroupKey::Trae],
                 SkillDiscoveryVerification::Verified,
             ),
+            AdapterKind::CursorAgent => native_skill_discovery(
+                [SkillDeliveryGroupKey::Cursor],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            AdapterKind::KimiCodeCli => native_skill_discovery(
+                [SkillDeliveryGroupKey::Kimi],
+                SkillDiscoveryVerification::Verified,
+            ),
         }
     }
 
@@ -620,6 +663,9 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli => {
                 additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
+            }
+            AdapterKind::CursorAgent | AdapterKind::KimiCodeCli => {
+                unsupported_external_mcp_projection()
             }
         }
     }
@@ -658,6 +704,12 @@ impl AgentRuntimeAdapterRegistry {
                 acp_capability_snapshot(observation, permission_options)
             }
             AdapterKind::KiroCli => acp_capability_snapshot(observation, kiro_permission_options()),
+            AdapterKind::CursorAgent => {
+                acp_capability_snapshot(observation, cursor_permission_options())
+            }
+            AdapterKind::KimiCodeCli => {
+                acp_capability_snapshot(observation, kimi_permission_options())
+            }
             kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
         }
     }
@@ -680,6 +732,8 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::QwenCode => qwen_permission_options(),
             AdapterKind::AntigravityApp => antigravity_permission_options(),
             AdapterKind::TraeCnCli => trae_static_permission_options(),
+            AdapterKind::CursorAgent => cursor_permission_options(),
+            AdapterKind::KimiCodeCli => kimi_permission_options(),
         };
         let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
         Ok(AdapterCapabilitySnapshot {
@@ -1385,6 +1439,32 @@ pub fn validate_machine_ready_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<()> {
+    if adapter_kind == AdapterKind::CursorAgent && snapshot.probe_status == "ready" {
+        let required = ["acp.initialize", "cursor.authenticate", "session.new"];
+        let complete = snapshot.authentication_status == "authenticated"
+            && snapshot
+                .reported_version
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            && snapshot
+                .executable_fingerprint
+                .as_deref()
+                .is_some_and(|value| !value.trim().is_empty())
+            && required.into_iter().all(|capability| {
+                snapshot
+                    .capabilities
+                    .iter()
+                    .any(|value| value == capability)
+            })
+            && !snapshot.models.is_empty()
+            && !snapshot.permission_options.is_empty();
+        if !complete {
+            anyhow::bail!(
+                "Cursor Agent ready snapshot does not satisfy the machine Ready contract"
+            );
+        }
+        return Ok(());
+    }
     if adapter_kind != AdapterKind::TraeCnCli || snapshot.probe_status != "ready" {
         return Ok(());
     }
@@ -1441,7 +1521,10 @@ fn acp_capability_snapshot(
             Err(_)
                 if matches!(
                     adapter_kind,
-                    AdapterKind::QoderCli | AdapterKind::CodebuddyCli | AdapterKind::QwenCode
+                    AdapterKind::QoderCli
+                        | AdapterKind::CodebuddyCli
+                        | AdapterKind::QwenCode
+                        | AdapterKind::CursorAgent
                 ) =>
             {
                 vec![ModelDescriptor {
@@ -1464,18 +1547,31 @@ fn acp_capability_snapshot(
         }
     }
     let mut capabilities = observation.capabilities;
+    if adapter_kind == AdapterKind::KimiCodeCli {
+        capabilities
+            .retain(|capability| !matches!(capability.as_str(), "session.load" | "session.resume"));
+    }
     if ready {
-        for capability in [
-            "acp.initialize",
-            "session.new",
-            "session.prompt",
-            "session.cancel",
-            "session.update",
-            "structured_permission_request",
-            "context.charter.first_payload",
-        ] {
+        let standard_capabilities: &[&str] = if adapter_kind == AdapterKind::CursorAgent {
+            &[
+                "acp.initialize",
+                "session.new",
+                "context.charter.first_payload",
+            ]
+        } else {
+            &[
+                "acp.initialize",
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "structured_permission_request",
+                "context.charter.first_payload",
+            ]
+        };
+        for capability in standard_capabilities {
             if !capabilities.iter().any(|value| value == capability) {
-                capabilities.push(capability.to_string());
+                capabilities.push((*capability).to_string());
             }
         }
         let supports_load = observation
@@ -1484,7 +1580,7 @@ fn acp_capability_snapshot(
             .and_then(|value| value.pointer("/agentCapabilities/loadSession"))
             .and_then(Value::as_bool)
             == Some(true);
-        if supports_load {
+        if supports_load && adapter_kind != AdapterKind::KimiCodeCli {
             capabilities.push("session.load".to_string());
         }
         let supports_resume = observation
@@ -1492,11 +1588,21 @@ fn acp_capability_snapshot(
             .as_ref()
             .and_then(|value| value.pointer("/agentCapabilities/sessionCapabilities/resume"))
             .is_some_and(Value::is_object);
-        if supports_resume {
+        if supports_resume && adapter_kind != AdapterKind::KimiCodeCli {
             capabilities.push("session.resume".to_string());
         }
-        capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
-        append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
+        if !matches!(
+            adapter_kind,
+            AdapterKind::CursorAgent | AdapterKind::KimiCodeCli
+        ) {
+            capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
+        }
+        if !matches!(
+            adapter_kind,
+            AdapterKind::CursorAgent | AdapterKind::KimiCodeCli
+        ) {
+            append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
+        }
     }
     capabilities.sort();
     capabilities.dedup();
@@ -1508,15 +1614,20 @@ fn acp_capability_snapshot(
     let permission_schema_digest =
         adapter_permission_schema_digest(adapter_kind, &permission_options)?;
     let native_session_compatibility_key = if ready {
-        Some(if adapter_kind == AdapterKind::TraeCnCli {
-            let fingerprint = observation
-                .executable_fingerprint
-                .as_deref()
-                .context("ready TRAE snapshot has no executable fingerprint")?;
-            format!("{}:acp-v1:{fingerprint}", adapter_kind.as_str())
-        } else {
-            format!("{}:acp-v1", adapter_kind.as_str())
-        })
+        Some(
+            if matches!(
+                adapter_kind,
+                AdapterKind::TraeCnCli | AdapterKind::CursorAgent
+            ) {
+                let fingerprint = observation
+                    .executable_fingerprint
+                    .as_deref()
+                    .context("ready TRAE snapshot has no executable fingerprint")?;
+                format!("{}:acp-v1:{fingerprint}", adapter_kind.as_str())
+            } else {
+                format!("{}:acp-v1", adapter_kind.as_str())
+            },
+        )
     } else {
         None
     };
@@ -1807,6 +1918,62 @@ fn qwen_permission_options() -> Vec<PermissionOptionDescriptor> {
         recommended_value: json!("default"),
         scope: RuntimeOptionScope::Host,
         risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn cursor_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![
+        PermissionOptionDescriptor {
+            key: "execution_mode".to_string(),
+            label: "mode".to_string(),
+            description: "Cursor Agent's ACP execution mode for this Host.".to_string(),
+            value_type: "enum".to_string(),
+            choices: ["agent", "plan", "ask"]
+                .into_iter()
+                .map(|value| choice(value, value))
+                .collect(),
+            recommended_value: json!("agent"),
+            scope: RuntimeOptionScope::Host,
+            risk: "elevated".to_string(),
+            supported: true,
+            required: true,
+            unsupported_reason: None,
+        },
+        PermissionOptionDescriptor {
+            key: "approval_policy".to_string(),
+            label: "approval-policy".to_string(),
+            description: "Cursor Agent's native approval policy for this ACP Host.".to_string(),
+            value_type: "enum".to_string(),
+            choices: ["default", "auto_review", "force"]
+                .into_iter()
+                .map(|value| choice(value, value))
+                .collect(),
+            recommended_value: json!("default"),
+            scope: RuntimeOptionScope::Host,
+            risk: "dangerous".to_string(),
+            supported: true,
+            required: true,
+            unsupported_reason: None,
+        },
+    ]
+}
+
+fn kimi_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "mode".to_string(),
+        description: "Kimi Code's native ACP Session mode. Plan is read-only; auto and yolo progressively reduce interactive approval prompts.".to_string(),
+        value_type: "enum".to_string(),
+        choices: ["default", "plan", "auto", "yolo"]
+            .into_iter()
+            .map(|value| choice(value, value))
+            .collect(),
+        recommended_value: json!("default"),
+        scope: RuntimeOptionScope::Session,
+        risk: "dangerous".to_string(),
         supported: true,
         required: true,
         unsupported_reason: None,
@@ -2257,6 +2424,14 @@ mod tests {
                 json!({"permission_mode": "bypass_permissions"}),
             ),
             (
+                AdapterKind::CursorAgent,
+                json!({"execution_mode": "agent", "approval_policy": "force"}),
+            ),
+            (
+                AdapterKind::KimiCodeCli,
+                json!({"permission_mode": "default"}),
+            ),
+            (
                 AdapterKind::AntigravityApp,
                 json!({
                     "mode": "accept-edits",
@@ -2576,6 +2751,51 @@ mod tests {
             snapshot
                 .capabilities
                 .contains(&"context.charter.first_payload".to_string())
+        );
+    }
+
+    #[test]
+    fn kimi_snapshot_is_new_only_and_does_not_claim_external_mcp() {
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::KimiCodeCli,
+                reported_version: Some("0.32.0".to_string()),
+                executable_fingerprint: Some("sha256:kimi".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: vec!["session.load".to_string(), "session.resume".to_string()],
+                initialize_result: Some(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {
+                        "loadSession": true,
+                        "sessionCapabilities": {"resume": {}}
+                    }
+                })),
+                session_result: Some(json!({
+                    "sessionId": "kimi-session",
+                    "configOptions": [{
+                        "id": "model",
+                        "name": "Model",
+                        "currentValue": "runtime_default",
+                        "options": [{"value": "runtime_default", "name": "Runtime Default"}]
+                    }]
+                })),
+                attempted_at: "2026-08-22T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("Kimi ACP catalog should map");
+
+        assert!(!snapshot.capabilities.contains(&"session.load".to_string()));
+        assert!(
+            !snapshot
+                .capabilities
+                .contains(&"session.resume".to_string())
+        );
+        assert!(!snapshot.capabilities.contains(&"mcp.additive".to_string()));
+        assert!(
+            !snapshot
+                .capabilities
+                .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
         );
     }
 
@@ -3068,6 +3288,16 @@ mod tests {
                 &[SkillDeliveryGroupKey::Trae],
                 SkillDiscoveryVerification::Verified,
             ),
+            (
+                AdapterKind::CursorAgent,
+                &[SkillDeliveryGroupKey::Cursor],
+                SkillDiscoveryVerification::DocumentationOnly,
+            ),
+            (
+                AdapterKind::KimiCodeCli,
+                &[SkillDeliveryGroupKey::Kimi],
+                SkillDiscoveryVerification::Verified,
+            ),
         ];
         assert_eq!(cases.len(), AdapterKind::ALL.len());
         for (kind, delivery_groups, verification) in cases {
@@ -3121,17 +3351,19 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
-        let capability = registry.mcp_projection(AdapterKind::AntigravityApp);
-        assert!(!capability.supports_stdio);
-        assert!(!capability.supports_streamable_http);
-        assert_eq!(
-            capability.external_mcp_projection,
-            ExternalMcpProjection::Unsupported
-        );
-        assert_eq!(capability.same_name_policy, None);
-        assert_eq!(
-            capability.approval_control,
-            McpApprovalControl::RuntimeNative
-        );
+        for kind in [AdapterKind::AntigravityApp, AdapterKind::CursorAgent] {
+            let capability = registry.mcp_projection(kind);
+            assert!(!capability.supports_stdio);
+            assert!(!capability.supports_streamable_http);
+            assert_eq!(
+                capability.external_mcp_projection,
+                ExternalMcpProjection::Unsupported
+            );
+            assert_eq!(capability.same_name_policy, None);
+            assert_eq!(
+                capability.approval_control,
+                McpApprovalControl::RuntimeNative
+            );
+        }
     }
 }

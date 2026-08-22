@@ -7444,6 +7444,8 @@ function runtimeAdapterLabel(kind: string): string {
     'codebuddy-cli': 'CodeBuddy',
     'qwen-code': 'Qwen Code',
     'trae-cn-cli': 'TRAE CLI',
+    'cursor-agent': 'Cursor Agent',
+    'kimi-code-cli': 'Kimi Code',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
 }

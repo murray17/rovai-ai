@@ -84,6 +84,17 @@ configuration shows frozen historical values but no Runtime/model/permission mut
 Name, role, portrait and other unrelated edits remain available and save while preserving the Runtime
 subobject exactly; the Renderer must not manufacture a default or require users to discard that history.
 
+The same admission-first behavior applies to Cursor Agent on macOS, where the label is “当前平台尚未验证”.
+Cursor remains in the complete product selector but disabled until Core returns a qualified row; do not
+manufacture its `execution_mode` or `approval_policy` defaults while the platform is unqualified.
+
+Kimi Code follows the same admission-first rule. macOS arm64 currently remains not qualified because its
+Built-in CLI qualification matrix did not produce operation evidence; therefore its model and
+`default | plan | auto | yolo` permission selector stay disabled. macOS x64 and Windows x64 also stay disabled.
+Read-only workspace always projects effective `plan` once a future platform is qualified; provider
+credentials remain private Core configuration and never appear in this surface. Kimi/MiniMax thinking is not
+forcibly disabled; process detail may retain it while final public output excludes raw reasoning tags.
+
 ## Removal
 
 Permanent removal is blocked while the teammate owns a non-terminal AgentRun. Otherwise the Chinese

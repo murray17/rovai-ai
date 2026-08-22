@@ -169,7 +169,7 @@ pnpm build:desktop
 | 命令 | 主要范围 | 外部要求 |
 | --- | --- | --- |
 | `pnpm smoke:core` | 全新数据库、普通目录、空 Git 仓库、导航、重启和删除 | Git；不调用模型 |
-| `pnpm smoke:member-config` | 十种产品目录、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；Settings Preview 不进入该矩阵 |
+| `pnpm smoke:member-config` | 十二种产品目录 identity、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；未准入 Cursor 与 Kimi 只验证 Catalog/Admission 阻断，不制造 Installation 或配置；Settings Preview 不进入该矩阵 |
 | `pnpm smoke:memory` | Memory Migration、治理、Revision、导出、投影恢复和权限 | 不调用模型 |
 
 ### 真实 Runtime Smoke
@@ -180,18 +180,18 @@ pnpm build:desktop
 | 命令 | 默认或支持的 Runtime | 额外说明 |
 | --- | --- | --- |
 | `pnpm smoke:intake` | Codex | 创建 Git fixture；验证 Camp 消息、连续 Conversation、重启和删除 |
-| `pnpm smoke:acp-runtime` | OpenCode + Copilot + TRAE | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个；三者都执行固定 `printf` 并断言公开 command output 进入 `runtime.action.payload.output`；TRAE 使用 `traecli acp serve` 与动态 Session capability，并覆盖 completion、后继 Run 复用同一 warm Host/Session、allow-once 与 deny；cold continuation 使用 exact Session ID 的受控 `session/load`，replay 不进入当前 Run |
+| `pnpm smoke:acp-runtime` | OpenCode + Copilot + TRAE + Kimi | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个；四者都执行固定 `printf` 并断言公开 command output 进入 `runtime.action.payload.output`；TRAE 使用 warm Host/Session 与 `session/load`；Kimi 使用私有 provider 配置、每 Run 新 Host/Session、allow-once、无副作用 deny/pre-refusal、thinking 输出隔离与 cancel |
 | `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume；两次无工具回复必须投影公开 narration；随后强制 `Bash` 固定 `printf`，断言公开 output、原生 tool-use ID 与同 Session/Conversation 关联 |
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 要求 `output.stream_json`，强制原生 `run_command` 固定 `printf` 并断言公开 output/step ID；另覆盖同 Session 续接、私有日志清理和 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:builtin-cli` | 全部十种正式 Runtime | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；任一选中 Runtime 缺失、未认证或漏项即失败 |
-| `pnpm smoke:skills` | Codex 默认；selector 接受全部十种已证明 Skill projection 的 Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 会逐一尝试十组真实投递与发现；TRAE 使用已验证的项目 `.trae/skills`，Runtime 兼容扫描到的其他项目/用户路径不属于 managed projection |
+| `pnpm smoke:builtin-cli` | 默认十种已通过完整矩阵的 Runtime；Cursor 未准入，Kimi 仅保留显式资格诊断 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖；Kimi 本轮一次超时、两次 `0/15`，因此不进入默认列表且平台保持未准入 |
+| `pnpm smoke:skills` | Codex 默认；`all` 为十种已准入 Runtime，Kimi 可显式诊断 | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills` 的投影、发现、调用 marker 与 canonical `--to-principal` 教学已通过，但平台仍未准入，因此暂不进入 `all` |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
 | `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略；Codex 同名项应跳过，另外八种应由 Rovai 整项优先；默认九种 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
-| `pnpm smoke:missing-send-recovery` | 全部十种 Runtime | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；七个 ACP 额外执行 tool→final 并生成独立协议 fixture；TRAE 使用同一严格 candidate/抑制规则 |
+| `pnpm smoke:missing-send-recovery` | 十一种已完成专项矩阵的 Runtime（含 Kimi）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture；TRAE/Kimi 使用同一严格 candidate/抑制规则，Kimi private assistant stream 不进入公共 fixture，candidate 先清洗 thinking block |
 | `pnpm accept:planned-shutdown` | Claude Code + packaged App | 在隔离 Git workspace/`userData` 中等待真实 input accepted 后退出，验证 deadline、自然 child exit、无伪 terminal、进程 reap、重启 blocker 与关闭 modal 截图；运行前先执行 `pnpm package:mac` |
 | `pnpm accept:onboarding-ui` | 本机首个可用正式 Runtime + packaged App | 不调用模型；用全新隔离 `userData` 验证三页断点、真实 provisioning、`初次集结`、Draft-only starter、重启与 `1040×700` 双主题截图 |
 
@@ -281,6 +281,6 @@ fixture、截图、窗口尺寸和直接调用 capture 脚本的方法见
 - 任何声明会写文件的测试都必须把目标限制在临时 fixture；失败后先检查脚本是否保留
   了排查路径，再决定清理。
 - 模型回复、耗时和费用不是稳定断言。测试应断言协议、状态、证据和限定 marker。
-- 某个 Smoke 通过只证明该 suite 的范围，不代表十种 Runtime 的完整兼容性复核；TRAE managed Skill
+- 某个 Smoke 通过只证明该 suite 的范围，不代表全部 Product Runtime 的完整兼容性复核；TRAE managed Skill
   projection Verified 不会升级用户级 Skill 调用或 Compaction detector，后者继续按独立证据保持
   `Unverified` / `NotObserved`。

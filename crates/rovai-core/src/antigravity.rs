@@ -430,7 +430,7 @@ impl AntigravityAppRuntimeAdapter {
                     runtime_events.as_ref(),
                 )
                 .await
-                .map(AntigravityStdoutCapture::Structured)
+                .map(|capture| AntigravityStdoutCapture::Structured(Box::new(capture)))
             })
         } else {
             tokio::spawn(async move {
@@ -605,6 +605,7 @@ impl AntigravityAppRuntimeAdapter {
         }
         let final_output = match stdout {
             AntigravityStdoutCapture::Structured(capture) => {
+                let capture = *capture;
                 let result = match capture.final_result {
                     Some(result) => result,
                     None => {
@@ -898,7 +899,7 @@ fn canonical_antigravity_workspace_roots(
 
 #[derive(Debug)]
 enum AntigravityStdoutCapture {
-    Structured(AntigravityStreamCapture),
+    Structured(Box<AntigravityStreamCapture>),
     Legacy(CapturedBytes),
 }
 
@@ -1144,12 +1145,12 @@ fn normalize_antigravity_tool_step(
     let observed_command = shell_tool
         .then(|| public_antigravity_shell_command(tool_info))
         .flatten();
-    if status == "in_progress" {
-        if let Some(command) = observed_command.as_ref() {
-            capture
-                .started_shell_commands
-                .insert(tool_call_id.clone(), command.clone());
-        }
+    if status == "in_progress"
+        && let Some(command) = observed_command.as_ref()
+    {
+        capture
+            .started_shell_commands
+            .insert(tool_call_id.clone(), command.clone());
     }
     let newly_observed = if status == "in_progress" {
         capture.started_tools.insert(tool_call_id.clone())

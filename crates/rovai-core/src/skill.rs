@@ -2358,6 +2358,8 @@ fn delivery_group_label(key: SkillDeliveryGroupKey) -> &'static str {
         SkillDeliveryGroupKey::Codebuddy => "CodeBuddy",
         SkillDeliveryGroupKey::Qwen => "Qwen",
         SkillDeliveryGroupKey::Trae => "TRAE",
+        SkillDeliveryGroupKey::Cursor => "Cursor",
+        SkillDeliveryGroupKey::Kimi => "Kimi Code",
     }
 }
 

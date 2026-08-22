@@ -30,6 +30,8 @@ export type AdapterKind =
   | 'codebuddy-cli'
   | 'qwen-code'
   | 'trae-cn-cli'
+  | 'cursor-agent'
+  | 'kimi-code-cli'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'
@@ -2009,6 +2011,8 @@ export type SkillDeliveryGroupKey =
   | 'codebuddy'
   | 'qwen'
   | 'trae'
+  | 'cursor'
+  | 'kimi'
 
 export interface SkillRiskSummary {
   executableFileCount: number

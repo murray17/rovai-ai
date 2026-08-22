@@ -44,6 +44,8 @@ pub enum AdapterKind {
     CodebuddyCli,
     QwenCode,
     TraeCnCli,
+    CursorAgent,
+    KimiCodeCli,
     AntigravityApp,
 }
 
@@ -91,7 +93,7 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 12] = [
         Self::CodexCli,
         Self::OpencodeCli,
         Self::CopilotCli,
@@ -102,6 +104,8 @@ impl AdapterKind {
         Self::CodebuddyCli,
         Self::QwenCode,
         Self::TraeCnCli,
+        Self::CursorAgent,
+        Self::KimiCodeCli,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -115,6 +119,8 @@ impl AdapterKind {
             Self::CodebuddyCli => "codebuddy-cli",
             Self::QwenCode => "qwen-code",
             Self::TraeCnCli => "trae-cn-cli",
+            Self::CursorAgent => "cursor-agent",
+            Self::KimiCodeCli => "kimi-code-cli",
             Self::AntigravityApp => "antigravity-app",
         }
     }
@@ -130,7 +136,31 @@ impl AdapterKind {
             Self::CodebuddyCli => "codebuddy",
             Self::QwenCode => "qwen",
             Self::TraeCnCli => "traecli",
+            Self::CursorAgent => "cursor-agent",
+            Self::KimiCodeCli => "kimi",
             Self::AntigravityApp => "agy",
+        }
+    }
+
+    /// Candidate executable names in discovery order.
+    ///
+    /// Cursor's installer publishes both `cursor-agent` and the generic
+    /// `agent` alias. The latter is shared by other products, so discovery
+    /// must validate Cursor's reported version before committing it.
+    pub fn command_names(self) -> &'static [&'static str] {
+        match self {
+            Self::CursorAgent => &["cursor-agent", "agent"],
+            Self::KimiCodeCli => &["kimi"],
+            Self::CodexCli => &["codex"],
+            Self::OpencodeCli => &["opencode"],
+            Self::CopilotCli => &["copilot"],
+            Self::ClaudeCodeCli => &["claude"],
+            Self::KiroCli => &["kiro-cli"],
+            Self::QoderCli => &["qodercli"],
+            Self::CodebuddyCli => &["codebuddy"],
+            Self::QwenCode => &["qwen"],
+            Self::TraeCnCli => &["traecli"],
+            Self::AntigravityApp => &["agy"],
         }
     }
 
@@ -145,6 +175,8 @@ impl AdapterKind {
             Self::CodebuddyCli => "CodeBuddy",
             Self::QwenCode => "Qwen Code",
             Self::TraeCnCli => "TRAE CLI",
+            Self::CursorAgent => "Cursor Agent",
+            Self::KimiCodeCli => "Kimi Code",
             Self::AntigravityApp => "Antigravity",
         }
     }
@@ -159,6 +191,8 @@ impl AdapterKind {
                 | Self::CodebuddyCli
                 | Self::QwenCode
                 | Self::TraeCnCli
+                | Self::CursorAgent
+                | Self::KimiCodeCli
         )
     }
 
@@ -173,6 +207,8 @@ impl AdapterKind {
             Self::CodebuddyCli => "ROVAI_CODEBUDDY_BIN",
             Self::QwenCode => "ROVAI_QWEN_BIN",
             Self::TraeCnCli => "ROVAI_TRAE_CN_BIN",
+            Self::CursorAgent => "ROVAI_CURSOR_BIN",
+            Self::KimiCodeCli => "ROVAI_KIMI_BIN",
             Self::AntigravityApp => "ROVAI_ANTIGRAVITY_BIN",
         }
     }
@@ -193,6 +229,8 @@ impl AdapterKind {
             | Self::CodebuddyCli
             | Self::QwenCode
             | Self::TraeCnCli
+            | Self::CursorAgent
+            | Self::KimiCodeCli
             | Self::AntigravityApp => PublicOutputMode::ExplicitSendOnly,
         }
     }
@@ -211,7 +249,9 @@ impl AdapterKind {
             | Self::CodebuddyCli
             | Self::QwenCode
             | Self::TraeCnCli
+            | Self::KimiCodeCli
             | Self::AntigravityApp => MissingSendRecoveryMode::IfNoAcceptedSend,
+            Self::CursorAgent => MissingSendRecoveryMode::Disabled,
         }
     }
 }
@@ -230,6 +270,8 @@ impl FromStr for AdapterKind {
             "codebuddy-cli" => Ok(Self::CodebuddyCli),
             "qwen-code" => Ok(Self::QwenCode),
             "trae-cn-cli" => Ok(Self::TraeCnCli),
+            "cursor-agent" => Ok(Self::CursorAgent),
+            "kimi-code-cli" => Ok(Self::KimiCodeCli),
             "antigravity-app" => Ok(Self::AntigravityApp),
             _ => anyhow::bail!("unsupported Adapter kind: {value}"),
         }
@@ -3388,7 +3430,9 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::QoderCli
         | AdapterKind::CodebuddyCli
         | AdapterKind::QwenCode
-        | AdapterKind::TraeCnCli => "acp-v1",
+        | AdapterKind::TraeCnCli
+        | AdapterKind::CursorAgent
+        | AdapterKind::KimiCodeCli => "acp-v1",
     }
 }
 
@@ -4909,6 +4953,8 @@ mod slow_tests {
                 AdapterKind::CodebuddyCli,
                 AdapterKind::QwenCode,
                 AdapterKind::TraeCnCli,
+                AdapterKind::CursorAgent,
+                AdapterKind::KimiCodeCli,
             ]
         );
     }
@@ -4930,7 +4976,11 @@ mod slow_tests {
         for kind in AdapterKind::ALL {
             assert_eq!(
                 kind.missing_send_recovery_mode(),
-                MissingSendRecoveryMode::IfNoAcceptedSend,
+                if kind == AdapterKind::CursorAgent {
+                    MissingSendRecoveryMode::Disabled
+                } else {
+                    MissingSendRecoveryMode::IfNoAcceptedSend
+                },
                 "{} must not publish beyond its qualified final boundary",
                 kind.as_str(),
             );

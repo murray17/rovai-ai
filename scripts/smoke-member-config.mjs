@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -9,7 +9,8 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const dataDir = await mkdtemp(join(tmpdir(), 'rovai-member-config-smoke-'))
+const dataDir = await realpath(await mkdtemp(join(tmpdir(), 'rovai-member-config-smoke-')))
+const runtimeHome = await realpath(await mkdtemp(join(tmpdir(), 'rovai-member-config-home-')))
 let first
 let reopened
 
@@ -82,11 +83,51 @@ try {
       || selectedRuntime.code !== 'runtime_configuration_unavailable') {
     throw new Error(`Unavailable Runtime configuration was not rejected atomically: ${JSON.stringify(selectedRuntime)}`)
   }
+  const unqualifiedCursor = await first.request('members.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentId,
+      expectedVersion: profile.version,
+      adapterKind: 'cursor-agent',
+      model: { mode: 'runtime_default' },
+      permissions: {
+        adapterKind: 'cursor-agent',
+        schemaVersion: 1,
+        values: { execution_mode: 'agent', approval_policy: 'force' }
+      }
+    }
+  })
+  if (unqualifiedCursor.status !== 'rejected'
+      || unqualifiedCursor.code !== 'runtime_platform_not_qualified') {
+    throw new Error(`Unqualified Cursor configuration was not rejected atomically: ${JSON.stringify(unqualifiedCursor)}`)
+  }
+  const unqualifiedKimi = await first.request('members.runtime.set', {
+    commandId: crypto.randomUUID(),
+    command: {
+      agentId,
+      expectedVersion: profile.version,
+      adapterKind: 'kimi-code-cli',
+      model: { mode: 'runtime_default' },
+      permissions: {
+        adapterKind: 'kimi-code-cli',
+        schemaVersion: 1,
+        values: { permission_mode: 'default' }
+      }
+    }
+  })
+  if (unqualifiedKimi.status !== 'rejected'
+      || unqualifiedKimi.code !== 'runtime_platform_not_qualified') {
+    throw new Error(`Unqualified Kimi configuration was not rejected atomically: ${JSON.stringify(unqualifiedKimi)}`)
+  }
   const unresolvedProfile = await first.request('members.get', { agentId })
   const unresolvedInstallations = await first.request('runtime.installations.list')
   if (unresolvedProfile.runtimeConfiguration !== null
       || unresolvedProfile.runtimeReadiness?.status !== 'runtime_not_configured'
-      || unresolvedInstallations.some((installation) => installation.adapterKind === 'qoder-cli')) {
+      || unresolvedInstallations.some((installation) => (
+        installation.adapterKind === 'qoder-cli'
+        || installation.adapterKind === 'cursor-agent'
+        || installation.adapterKind === 'kimi-code-cli'
+      ))) {
     throw new Error(`Missing Product Runtime did not remain unresolved without fallback: ${JSON.stringify({
       unresolvedProfile,
       unresolvedInstallations
@@ -105,7 +146,11 @@ try {
       || persistedProfile.workingPrinciples !== 'Do not execute during this smoke.'
       || persistedProfile.runtimeConfiguration !== null
       || persistedProfile.runtimeReadiness?.status !== 'runtime_not_configured'
-      || installations.some((installation) => installation.adapterKind === 'qoder-cli')) {
+      || installations.some((installation) => (
+        installation.adapterKind === 'qoder-cli'
+        || installation.adapterKind === 'cursor-agent'
+        || installation.adapterKind === 'kimi-code-cli'
+      ))) {
     throw new Error(`Member configuration did not survive restart: ${JSON.stringify({
       persistedProfile,
       installations
@@ -123,20 +168,23 @@ try {
     unconfiguredMemberCount: preflight.presentMembers
       .filter((member) => !member.runtimeConfigured).length,
     noRuntimeFallback: true,
+    cursorPlatformAdmissionBlocked: true,
+    kimiPlatformAdmissionBlocked: true,
     noEmptyCampOnStartup: true,
     restartPersistence: true
   }, null, 2))
 } finally {
   await first?.stop()
   await reopened?.stop()
-  await removeEphemeralRuntimeCampFilesRoot(dataDir)
+  await removeEphemeralRuntimeCampFilesRoot(dataDir, { homeDirectory: runtimeHome })
   await rm(dataDir, { recursive: true, force: true })
+  await rm(runtimeHome, { recursive: true, force: true })
 }
 
 function startCore(dataDirectory) {
   const childEnvironment = {
     ...process.env,
-    HOME: dataDirectory,
+    HOME: runtimeHome,
     PATH: '/usr/bin:/bin',
     SHELL: '/bin/sh',
     PNPM_HOME: ''
@@ -151,12 +199,14 @@ function startCore(dataDirectory) {
     'ROVAI_CODEBUDDY_BIN',
     'ROVAI_QWEN_BIN',
     'ROVAI_TRAE_CN_BIN',
+    'ROVAI_CURSOR_BIN',
+    'ROVAI_KIMI_BIN',
     'ROVAI_ANTIGRAVITY_BIN'
   ]) {
     delete childEnvironment[key]
   }
   const child = spawn(join(root, 'target', 'debug', 'rovai-core'), [
-    ...coreDataDirectoryArguments(dataDirectory),
+    ...coreDataDirectoryArguments(dataDirectory, { homeDirectory: runtimeHome }),
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: root,

@@ -24,6 +24,8 @@ const ADAPTER_KINDS = new Set<AdapterKind>([
   'codebuddy-cli',
   'qwen-code',
   'trae-cn-cli',
+  'cursor-agent',
+  'kimi-code-cli',
   'antigravity-app'
 ])
 const STEPS = new Set<OnboardingStep>(['welcome', 'member', 'runtime'])

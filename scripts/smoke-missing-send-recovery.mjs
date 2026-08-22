@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -26,7 +26,8 @@ const allSpecifications = [
   ['qoder-cli', 'Qoder'],
   ['codebuddy-cli', 'CodeBuddy'],
   ['qwen-code', 'Qwen'],
-  ['trae-cn-cli', 'TRAE']
+  ['trae-cn-cli', 'TRAE'],
+  ['kimi-code-cli', 'Kimi Code']
 ].map(([adapterKind, label]) => ({
   adapterKind,
   label,
@@ -60,7 +61,9 @@ await persistReport()
 
 for (const specification of specifications) {
   process.stderr.write(`\n[missing-send-recovery] ${specification.adapterKind}: isolated real Runtime acceptance\n`)
-  const fixtureRoot = await mkdtemp(join(tmpdir(), `rovai-missing-send-${specification.slug}-`))
+  const fixtureRoot = await realpath(
+    await mkdtemp(join(tmpdir(), `rovai-missing-send-${specification.slug}-`))
+  )
   const projectRoot = join(fixtureRoot, 'project')
   const dataDir = join(fixtureRoot, 'data')
   const databasePath = join(dataDir, 'rovai.sqlite')
@@ -167,7 +170,8 @@ for (const specification of specifications) {
         core.events,
         specification.adapterKind,
         toolStart.agentRunId,
-        toolFixtureToken
+        toolFixtureToken,
+        toolFacts
       )
       acpProtocol = validateAcpRecoveryProtocolFixture(protocolFixture)
       await writeFile(
@@ -480,7 +484,7 @@ function assertAcceptedSendSuppression(facts, {
   }
 }
 
-function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal) {
+function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal, facts) {
   const fixtureEvents = []
   for (const [sequence, event] of events.entries()) {
     if (event.params?.agentRunId !== agentRunId) continue
@@ -509,7 +513,16 @@ function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal)
       })
     }
   }
-  return { schemaVersion: 1, adapterKind, agentRunId, expectedFinal, events: fixtureEvents }
+  return {
+    schemaVersion: 1,
+    adapterKind,
+    agentRunId,
+    expectedFinal,
+    assistantStreamVisibility: adapterKind === 'kimi-code-cli' ? 'private' : 'public',
+    publishedFinal: facts.messages[0]?.body ?? null,
+    recovery: facts.terminalEvent?.missingSendRecovery ?? null,
+    events: fixtureEvents
+  }
 }
 
 function expectedBoundary(specification) {

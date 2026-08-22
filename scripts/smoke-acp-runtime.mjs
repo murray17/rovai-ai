@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -11,10 +11,11 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-'))
+const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-acp-runtime-smoke-')))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const commandOutputOnly = process.env.ROVAI_ACP_COMMAND_OUTPUT_ONLY === '1'
+const fullCommandOutputMatrix = process.env.ROVAI_ACP_FULL_COMMAND_MATRIX === '1'
 let core
 let shuttingDown = false
 
@@ -97,6 +98,11 @@ try {
       adapterKind: 'trae-cn-cli',
       permissionValues: { permission_mode: process.env.ROVAI_TRAE_PERMISSION_MODE ?? 'default' },
       token: 'ROVAI_TRAE_ACP_OK'
+    },
+    {
+      adapterKind: 'kimi-code-cli',
+      permissionValues: { permission_mode: process.env.ROVAI_KIMI_PERMISSION_MODE ?? 'default' },
+      token: 'ROVAI_KIMI_ACP_OK'
     }
   ].filter((specification) => !process.env.ROVAI_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.ROVAI_ACP_SMOKE_ADAPTER)
   const results = []
@@ -212,7 +218,7 @@ try {
       output: output.body
     })
 
-    if (['opencode-cli', 'copilot-cli', 'trae-cn-cli'].includes(specification.adapterKind)) {
+    if (['opencode-cli', 'copilot-cli', 'trae-cn-cli', 'kimi-code-cli'].includes(specification.adapterKind)) {
       const commandMarker = `ROVAI_${specification.adapterKind.replaceAll('-', '_').toUpperCase()}_PRINTF_OK`
       const commandRequest = await sendExistingCampMessage(
         request,
@@ -265,6 +271,8 @@ try {
       const commandOutputEvent = events.find((event) =>
         event.method === 'runtime.action'
           && event.params?.agentRunId === commandRunId
+          && event.params?.canonical?.phase === 'terminal'
+          && ['completed', 'failed'].includes(event.params?.payload?.status)
           && String(event.params?.payload?.output ?? '').includes(commandMarker)
       )
       if (commandRun?.status !== 'succeeded' || !commandOutputEvent) {
@@ -281,19 +289,31 @@ try {
         output: commandOutputEvent.params.payload.output,
         approvalCount: commandApprovals.size
       }
+      if (fullCommandOutputMatrix) {
+        results.at(-1).commandOutputMatrix = await runCommandOutputMatrix({
+          request,
+          events,
+          campId: camp.id,
+          adapterKind: specification.adapterKind
+        })
+      }
       if (commandOutputOnly) continue
 
       const writeToken = 'ROVAI_ACP_APPROVED_WRITE'
       const adapterFileStem = ({
         'opencode-cli': 'OPENCODE',
         'copilot-cli': 'COPILOT',
-        'trae-cn-cli': 'TRAE'
+        'trae-cn-cli': 'TRAE',
+        'kimi-code-cli': 'KIMI'
       })[specification.adapterKind]
       const writePath = join(projectRoot, `ACP_APPROVED_${adapterFileStem}.txt`)
+      const writeBody = specification.adapterKind === 'kimi-code-cli'
+        ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf '%s\\n' '${writeToken}' > '${writePath}'. Then immediately reply exactly ACP_WRITE_OK.`
+        : `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`
       const writeRequest = await sendExistingCampMessage(
         request,
         camp.id,
-        `Use the file editing tool exactly once to create ${writePath} with exactly ${writeToken} and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_WRITE_OK.`,
+        writeBody,
         {
           taskId: null,
           purpose: 'Verify ACP permission mediation and one-time file write authorization',
@@ -351,10 +371,12 @@ try {
         if (error?.code === 'ENOENT') return null
         throw error
       })
+      const requiresNativeSessionContinuation = specification.adapterKind !== 'kimi-code-cli'
       if (writeRun?.status !== 'succeeded'
           || written !== `${writeToken}\n`
           || !writeActions.some((action) => action.status === 'succeeded')
-          || writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId
+          || (requiresNativeSessionContinuation
+            && writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId)
           || (specification.adapterKind === 'trae-cn-cli'
             && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)) {
         throw new Error(`ACP approved write did not converge: ${JSON.stringify({
@@ -371,7 +393,8 @@ try {
       results.at(-1).approval = {
         resolved: resolvedApprovals.size,
         actionKinds: writeActions.map((action) => action.actionKind),
-        nativeSessionContinued: true,
+        nativeSessionContinued: writeStart?.params?.nativeThreadId === results.at(-1).nativeSessionId,
+        continuationStrategy: requiresNativeSessionContinuation ? 'native_session' : 'new_only',
         warmHostReused: writeStart?.params?.hostInstanceId === results.at(-1).hostInstanceId,
         written
       }
@@ -381,27 +404,42 @@ try {
         || specification.permissionValues.permission_mode === 'default'
       if (approvalExpected) {
         const deniedPath = join(projectRoot, `ACP_DENIED_${adapterFileStem}.txt`)
-        const deniedBody = specification.adapterKind === 'trae-cn-cli'
-          ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf 'DENIED_WRITE\\n' > '${deniedPath}'. Do not simulate or explain the tool call. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
+        const deniedBody = specification.adapterKind === 'kimi-code-cli'
+          ? `Use the Bash tool exactly once to run this command and do not use any other tool: touch '${deniedPath}'. Do not simulate or explain the tool call. Then briefly report the concrete result.`
+          : specification.adapterKind === 'trae-cn-cli'
+            ? `Use the Bash tool exactly once to run this command and do not use any other tool: printf 'DENIED_WRITE\\n' > '${deniedPath}'. Do not simulate or explain the tool call. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
           : `Use the file editing tool exactly once to create ${deniedPath} with exactly DENIED_WRITE and a trailing newline. Do not call shell, list, read, or any verification tool before or after the edit. Then immediately reply exactly ACP_DENIED_WRITE_OK.`
-        const deniedRequest = await sendExistingCampMessage(
-          request,
-          camp.id,
-          deniedBody,
-          {
-            taskId: null,
-            purpose: 'Create the requested file and report the concrete result',
-            completionRole: 'required'
-          }
-        )
+        const deniedRequest = specification.adapterKind === 'kimi-code-cli'
+          ? await createConfiguredCampAndSend(request, {
+              commandId: crypto.randomUUID(),
+              name: 'Kimi ACP denial isolation',
+              workspace,
+              body: deniedBody,
+              address: { mode: 'explicit', agentIds: [agentId] },
+              purpose: 'Create the requested file and report the concrete result'
+            })
+          : await sendExistingCampMessage(
+              request,
+              camp.id,
+              deniedBody,
+              {
+                taskId: null,
+                purpose: 'Create the requested file and report the concrete result',
+                completionRole: 'required'
+              }
+            )
+        const deniedCampId = deniedRequest.commandResult?.payload?.campId
+          ?? deniedRequest.payload?.campId
+          ?? camp.id
         const deniedRunId = deniedRequest.commandResult?.payload?.agentRunIds?.[0]
+          ?? deniedRequest.payload?.agentRunIds?.[0]
         if (!deniedRunId) throw new Error(`ACP denied AgentRun was not accepted: ${JSON.stringify(deniedRequest)}`)
         const deniedApprovals = new Set()
         const deniedDeadline = Date.now() + 180_000
         let deniedSnapshot
         let deniedRun
         while (Date.now() < deniedDeadline) {
-          deniedSnapshot = await request('camps.snapshot', { campId: camp.id })
+          deniedSnapshot = await request('camps.snapshot', { campId: deniedCampId })
           for (const approval of deniedSnapshot.approvals.filter((candidate) =>
             candidate.status === 'pending'
               && !deniedApprovals.has(candidate.id)
@@ -412,7 +450,7 @@ try {
             if (!option) throw new Error(`ACP request has no exact safe option: ${JSON.stringify(approval)}`)
             const resolution = await request('action.approvals.resolve', {
               commandId: crypto.randomUUID(),
-              campId: camp.id,
+              campId: deniedCampId,
               approvalId: approval.id,
               expectedVersion: approval.version,
               optionId: option.optionId,
@@ -430,15 +468,17 @@ try {
           if (error?.code === 'ENOENT') return false
           throw error
         })
+        const explicitDenial = deniedApprovals.size > 0
+          && deniedActions.some((action) => action.status === 'not_executed')
+        const refusedBeforeTool = deniedApprovals.size === 0 && deniedActions.length === 0
         if (!deniedRun
             || !['succeeded', 'failed'].includes(deniedRun.status)
-            || deniedApprovals.size === 0
             || deniedFileExists
-            || !deniedActions.some((action) => action.status === 'not_executed')) {
+            || (!explicitDenial && !refusedBeforeTool)) {
           throw new Error(`ACP denial did not fail closed: ${JSON.stringify({ deniedRun, deniedActions, deniedApprovals: deniedApprovals.size, deniedFileExists })}`)
         }
         results.at(-1).denial = {
-          path: 'rovai_approval_denied',
+          path: explicitDenial ? 'rovai_approval_denied' : 'runtime_refused_before_tool',
           resolved: deniedApprovals.size,
           actionStatuses: deniedActions.map((action) => action.status),
           fileCreated: deniedFileExists
@@ -475,6 +515,137 @@ async function sendExistingCampMessage(request, campId, body, execution) {
     draftRevision: saved.revision,
     execution
   })
+}
+
+async function runCommandOutputMatrix({ request, events, campId, adapterKind }) {
+  const stem = adapterKind.replaceAll('-', '_').toUpperCase()
+  const cases = [
+    {
+      name: 'stdout',
+      command: `printf '%s\\n' 'ROVAI_${stem}_STDOUT_OK'`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_STDOUT_OK`]
+    },
+    {
+      name: 'stderr',
+      command: `printf '%s\\n' 'ROVAI_${stem}_STDERR_OK' >&2`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_STDERR_OK`]
+    },
+    {
+      name: 'mixed',
+      command: `printf '%s\\n' 'ROVAI_${stem}_MIXED_STDOUT_OK'; printf '%s\\n' 'ROVAI_${stem}_MIXED_STDERR_OK' >&2`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_MIXED_STDOUT_OK`, `ROVAI_${stem}_MIXED_STDERR_OK`]
+    },
+    {
+      name: 'empty',
+      command: ':',
+      status: 'completed',
+      markers: []
+    },
+    {
+      name: 'nonzero',
+      command: `printf '%s\\n' 'ROVAI_${stem}_NONZERO_OK' >&2; exit 7`,
+      status: 'failed',
+      markers: [`ROVAI_${stem}_NONZERO_OK`]
+    },
+    {
+      name: 'large',
+      command: `printf '%s\\n' 'ROVAI_${stem}_LARGE_BEGIN'; /usr/bin/yes '0123456789abcdef' | /usr/bin/head -c 131072`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_LARGE_BEGIN`]
+    }
+  ]
+  const results = []
+  for (const specification of cases) {
+    const sent = await sendExistingCampMessage(
+      request,
+      campId,
+      [
+        'Use the Bash or terminal tool exactly once to run the following command verbatim.',
+        'Do not call any other tool and do not alter the command.',
+        specification.command,
+        'After the tool reaches a terminal state, briefly report that it finished.'
+      ].join('\n'),
+      {
+        taskId: null,
+        purpose: `Verify ACP ${specification.name} command-output behavior`,
+        completionRole: 'required'
+      }
+    )
+    const runId = sent.commandResult?.payload?.agentRunIds?.[0]
+    if (!runId) throw new Error(`ACP ${specification.name} matrix Run was not accepted: ${JSON.stringify(sent)}`)
+    const resolvedApprovals = new Set()
+    const deadline = Date.now() + 180_000
+    let snapshot
+    let run
+    while (Date.now() < deadline) {
+      snapshot = await request('camps.snapshot', { campId })
+      const actionIds = new Set(snapshot.actions
+        .filter((action) => action.agentRunId === runId)
+        .map((action) => action.id))
+      for (const approval of snapshot.approvals.filter((candidate) =>
+        candidate.status === 'pending'
+          && actionIds.has(candidate.actionId)
+          && !resolvedApprovals.has(candidate.id)
+      )) {
+        const option = approval.options.find((candidate) => candidate.kind === 'allow_once')
+          ?? approval.options.find((candidate) => candidate.kind === 'allow_session')
+        if (!option) throw new Error(`ACP ${specification.name} request has no bounded allow option`)
+        const resolution = await request('action.approvals.resolve', {
+          commandId: crypto.randomUUID(),
+          campId,
+          approvalId: approval.id,
+          expectedVersion: approval.version,
+          optionId: option.optionId,
+          reason: `ACP ${specification.name} output matrix`
+        })
+        if (resolution.status === 'rejected') {
+          throw new Error(`ACP ${specification.name} approval was rejected: ${JSON.stringify(resolution)}`)
+        }
+        resolvedApprovals.add(approval.id)
+      }
+      run = snapshot.agentRuns.find((candidate) => candidate.id === runId)
+      if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) break
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+    }
+    const actionEvents = events.filter((event) =>
+      event.method === 'runtime.action' && event.params?.agentRunId === runId
+    )
+    const toolCallIds = new Set(actionEvents
+      .map((event) => event.params?.payload?.toolCallId)
+      .filter((value) => typeof value === 'string' && value.length > 0))
+    const terminal = actionEvents.find((event) =>
+      event.params?.canonical?.phase === 'terminal'
+        && event.params?.payload?.status === specification.status
+    )
+    const output = String(terminal?.params?.payload?.output ?? '')
+    const input = String(terminal?.params?.payload?.input ?? '')
+    if (!run
+        || !['succeeded', 'failed'].includes(run.status)
+        || toolCallIds.size !== 1
+        || !terminal
+        || !input.includes(specification.command)
+        || !specification.markers.every((marker) => output.includes(marker))) {
+      throw new Error(`ACP ${specification.name} output matrix failed: ${JSON.stringify({
+        run,
+        expectedStatus: specification.status,
+        expectedMarkers: specification.markers,
+        toolCallIds: [...toolCallIds],
+        actionEvents
+      })}`)
+    }
+    results.push({
+      name: specification.name,
+      runStatus: run.status,
+      toolStatus: terminal.params.payload.status,
+      toolCallId: [...toolCallIds][0],
+      approvalCount: resolvedApprovals.size,
+      outputBytes: Buffer.byteLength(output)
+    })
+  }
+  return results
 }
 
 async function run(command, args, cwd) {

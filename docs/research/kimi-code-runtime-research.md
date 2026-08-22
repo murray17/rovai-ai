@@ -3,15 +3,16 @@ document_type: runtime-research
 runtime: kimi-code-cli
 upstream: MoonshotAI/kimi-code
 authority: research-evidence-only
-status: proposed
+status: implemented
 admission: not_qualified
-last_updated: 2026-08-20
+last_updated: 2026-08-22
 ---
 
 # Kimi Code CLI Runtime 接入研究
 
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
-> 这是接入前研究，不是平台准入证据；任何 `qualified` 结论仍需要目标安装版本、目标平台和真实行为 Smoke。
+> 第 1–11 节保留接入前研究快照；其假设不能覆盖后续真实证据。当前实施与准入结论见第 12 节及
+> [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 基本结论
 
@@ -22,12 +23,12 @@ Runtime: Kimi Code CLI
 建议接入形态: vendor_extended_acp
 Exact launch command: kimi acp
 Transport: stdio / JSON-RPC 2.0 / ACP v1
-当前 Admission: not_qualified
-一句话结论: ACP 主面完整，适合优先接入；但 stdio MCP、真实命令输出、认证与精确恢复必须先做实机 Probe。
+当前 Admission: macOS arm64 / macOS x64 / Windows x64 均为 not_qualified
+一句话结论: ACP 基础 AgentRun 已用 Kimi 0.32.0 + MiniMax M3 完成隔离诊断，但 Built-in CLI 完整矩阵一次超时、两次为 0/15，macOS arm64 因 hard gate 失败不能准入。
 最接近的现有 Adapter: TRAE/Kiro ACP Host，加上 Kimi 私有 Session、Skill catalog 与交互扩展处理。
 ```
 
-### 推荐决定
+### 接入前推荐决定（历史研究快照）
 
 **进入 P0 Probe 和实现设计，但不要直接进入 Product Runtime Catalog。**
 
@@ -280,14 +281,52 @@ Shell override: KIMI_SHELL_PATH
 - 增加 `smoke:kimi-runtime`，并纳入 Built-in CLI、Runtime Activity、diagnostics、planned shutdown。
 - 更新 `runtime-compatibility.md` 和平台 evidence revision。
 
+## 12. 2026-08-22 实施与真实验收回填
+
+本机实际安装版本为 Kimi Code `0.32.0`，早于研究时 main/package `0.38.0`；本节只记录该目标安装的真实
+行为，不能由新源码文档反向补全。
+
+- 已建立 `kimi-code-cli` Adapter、`kimi` Skill group、Migration 105、Data Contract v1.19 / schema 60、
+  Renderer identity、Runtime Activity、Health、shutdown 与逐平台 Admission；
+- `kimi acp` 完成 initialize、session/new、MiniMax M3 prompt 和 `end_turn`；项目级 Core Smoke 的公开最终
+  文本为 `ROVAI_KIMI_ACP_OK`；
+- Shell allow-once permission 真实通过；stdout、stderr、mixed、empty、nonzero 与 128 KiB large output 六类均
+  保留唯一 stable Tool ID 与 terminal Evidence，公开 output marker 为 `ROVAI_KIMI_CODE_CLI_PRINTF_OK`；
+- 独立 Camp 中 deny Approval 返回 `rovai_approval_denied`，目标 Tool 为 `failed/not_executed` 且文件不存在；
+- `sleep 30` 获准后发送 cancel，约 6 ms 得到 cancelled，目标进程没有残留；
+- ACP Client fs write 在没有匹配一次性授权时由 Core 拒绝；危险写入场景可能被 Runtime 在 Tool 前拒绝，
+  无 Approval、Tool 或文件副作用时如实记录，不伪造 deny；
+- provider 只通过权限 `0600` 的仓库外配置注入目标进程，用户 `~/.kimi/config.toml` 保持不变，真实 token
+  不进入仓库、数据库或 Evidence；
+- Rovai 不强制关闭 Kimi/MiniMax thinking；完整 `<think>` reasoning block 不进入最终公开消息，未闭合块
+  fail closed，执行过程仍可留在私有 observation/执行台；
+- 每个 Run 使用隔离 `KIMI_CODE_HOME` 并在 terminal 后停止 Host。原始 ACP Probe 证明同一 home 的新进程可
+  exact resume/load 并保留上下文，而新的隔离 home 对旧 ID 返回 `Unknown sessionId`；因而产品 continuation
+  仍固定 `new_only`，snapshot 不声明 `session.resume`；
+- `.kimi-code/skills` 已进入 Rovai managed projection，真实调用两次都返回唯一 Skill marker，并正确选择
+  canonical `--to-principal` 且不触发当前用户注意力；原始 ACP stdio MCP 调用及相邻空 Session 隔离通过，
+  但 Rovai External MCP projection 因完整 precedence/compatibility 矩阵未完成而继续 Disabled；
+- 同 Host 两个 Session 使用不同 marker 并交错回到第一个 Session 后无串话；多轮 Prompt、resume/load、MCP
+  与手动 `/compact` 没有产生结构化 `usage_update` 或 compaction lifecycle，Usage/Cost 与 Compaction Disabled；
+- Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景通过，Kimi private stream 未进入
+  公共 protocol fixture；
+- 完整十五项 Built-in CLI matrix 一次等待 12 分钟没有 execution evidence，随后两次模型均跳过 shell 并以
+  `0/15` operation evidence 结束。这是资格 hard failure，不再通过重复采样把偶然服从当成 transport 资格。
+
+基于以上证据，macOS arm64 为
+`not_qualified / runtime_platform.builtin_transport_unqualified`；macOS x64 与 Windows x64 保持
+`not_qualified / runtime_platform.qualification_evidence_missing`。三个平台均不发布 qualified evidence revision。
+
 ## 最终决定
 
 ```text
-Qualified capabilities: 无；尚未形成目标安装与平台真实证据
-Disabled capabilities: Compaction detector、Usage/Cost monitoring
-Unverified capabilities: 精确 Resume/Load、认证、Command Output、Windows、并发 Session
-Blocking issues: stdio MCP 转换冲突；Client Terminal 输出投影；完整真实 Smoke
-Recommended admission decision: not_qualified；完成 P0 Probe 后再决定 macOS arm64 首个平台准入
+Qualified capabilities: 无；基础 ACP、Approval、command output、Missing-Send、cancel/cleanup 与 managed Skill 只形成诊断 evidence，不等于平台资格
+Disabled capabilities: External MCP、Compaction detector、Usage/Cost monitoring、History Restore、native resume、warm Host reuse
+Verified upstream-only boundaries: 同 Host 并发 Session 隔离、同 home exact resume/load、跨隔离 home Unknown session、ACP stdio MCP happy path 与相邻 Session 隔离
+Unverified capabilities: macOS x64、Windows x64、External MCP 同名 precedence/完整定义/Host compatibility
+Known boundary: Client fs write 需要 Core one-time authorization；Runtime 预拒绝不得伪造用户 deny
+Blocking issues: 完整 Built-in CLI matrix 一次超时、两次 0/15
+Admission decision: macOS arm64 / macOS x64 / Windows x64 均为 not_qualified
 ```
 
 ## 上游来源

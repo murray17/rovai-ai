@@ -114,6 +114,17 @@ availability probe, install, rescan, selection or execution action. They must no
 installed, unavailable, a red health failure or synthetic checking. Diagnostics may show the platform row
 and evidence revision without starting that Adapter.
 
+Cursor Agent is a Product Runtime Catalog row whose current macOS and Windows admissions are all
+`not_qualified`. On macOS it renders “当前平台尚未验证”, never the Windows-specific label. It remains visible
+with no check/configuration action; this is distinct from a Renderer-only preview and must not be relabeled
+“待支持”.
+
+Kimi Code is a Product Runtime Catalog row. It is not qualified on the current macOS arm64 host because its
+Built-in CLI qualification matrix did not produce operation evidence, so it must not offer normal discovery,
+availability check and configuration path; macOS x64 and Windows x64 remain `not_qualified` and expose no
+machine action. Settings never renders the private provider file, token or base URL, and does not expose a
+Rovai-owned switch that forces Kimi/MiniMax thinking off.
+
 If an existing teammate references an unqualified Runtime, preserve the Runtime/model/permission/parameter
 subobject byte-for-byte through unrelated profile edits. Show the frozen values read-only and keep identity,
 role, portrait and other unrelated fields editable. Only a Runtime-subobject mutation receives a field-level

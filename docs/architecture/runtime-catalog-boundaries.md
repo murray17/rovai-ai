@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 ---
 
 # Runtime Catalog Boundaries
@@ -14,7 +14,7 @@ last_updated: 2026-08-21
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v18](../contracts/runtime-launch-and-verification-v18.md)。实测版本和能力只由
+[Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -26,11 +26,11 @@ last_updated: 2026-08-21
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含十种可执行 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前包含十二种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
 成员选项始终只来自 `AdapterKind`，但在当前主机上还必须先经过 Runtime Platform Admission。
 
-`qualified` 是进入 Product Runtime Availability 的前置条件；`not_qualified` 显示“Windows 尚未验证”，
+`qualified` 是进入 Product Runtime Availability 的前置条件；`not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，
 `unsupported` 显示平台不支持。两者都不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
 可以原样读取并在修改无关队员字段时原样保留，但不能修改 Runtime 子对象、重新保存默认值或执行。
 
@@ -45,6 +45,11 @@ Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的�
 5. 成员配置、Runtime 设置、诊断、测试与文档投影。
 
 图标、版本输出、`initialize` 成功或 Settings Preview 都不能单独满足准入。
+
+Catalog admission 与平台 qualification 是独立轴。`cursor-agent` 已具备稳定 identity、Adapter、Migration、
+ACP launch、保守配置与 Renderer projection，因此属于 Product Runtime Catalog；但 macOS arm64、macOS x64
+与 Windows x64 都尚无完整行为 Smoke，当前三行均为 `not_qualified`。这不会把 Preview 升级为 Adapter，
+也不会让未准入 Catalog row 获得 discovery、Installation、配置或执行语义。
 
 每个 shipped `HostPlatformKey` 还必须逐 Adapter 完成 discovery、identity、auth、first run、Session
 continuation、Built-in Tool、Approval、cancel、terminal、process cleanup 与 planned shutdown 证据。三种进程形态
@@ -146,7 +151,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v18](../contracts/runtime-launch-and-verification-v18.md)。
+[Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -194,6 +199,48 @@ TRAE 的 `append_system_prompt` 已实测为独立 system message，但正式集
 兼容扫描到的其他项目/用户路径不进入 Rovai ownership。Compaction detector 仍因可靠结构化完成信号
 `NotObserved` 而保持 `Disabled`，不是 `Unsupported`。Missing-Send Recovery 则只在 zero-send、
 accepted-send suppression 与真实 tool→final 三条专项 Smoke 通过后启用，不从“Runtime 已支持”反向推断。
+
+## Cursor Agent 当前边界
+
+`cursor-agent` 复用 ACP v1 Host，并依赖 Cursor vendor extensions。产品优先解析 `cursor-agent`；兼容别名
+`agent` 必须先通过 Cursor build identity 校验，避免与 Grok Build 等同名程序碰撞。Host 使用
+`<resolved-executable> acp`，initialize 后有界调用 `authenticate(cursor_login)`，再建立 `session/new`。
+
+`cursor/ask_question` 与 `cursor/create_plan` 只能进入唯一 Active Prompt；当前分别返回 skipped/rejected。
+三个已知 private notification 保持私有，未知 Cursor request 返回 Method not found。External MCP、cold
+continuation、Missing-Send、Usage、Compaction 和细粒度 Activity 都没有真实资格证据，保持禁用或 run-level。
+Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
+
+项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
+Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
+Cursor。字段级行为见 [Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)，
+证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
+
+## Kimi Code 当前边界
+
+`kimi-code-cli` 通过 `kimi acp` 复用 ACP v1 Host。Core 不读取或改写用户 `~/.kimi`，而是从权限收窄的
+`~/.config/rovai/kimi-code.env`（可由 `ROVAI_KIMI_CONFIG` 覆盖）读取严格 allowlist 的
+`KIMI_MODEL_*` provider 字段，并只注入目标子进程。`KIMI_MODEL_CAPABILITIES=thinking` 只声明能力，
+Rovai 不强制关闭 Kimi/MiniMax thinking。未知、重复、缺失、格式错误或权限过宽均在 launch 前
+fail closed；秘密不进入数据库、Evidence、diagnostics 或公开 command。
+
+每个 Host 使用隔离 `KIMI_CODE_HOME`，AgentRun 结束即停止；当前 Session strategy 为 `new_only`。真实原始
+ACP Probe 已证明同一 home 下 `session/resume` 与 `session/load` 都保持精确 Session ID 和上下文，换用新的
+隔离 home 则返回 `Unknown sessionId`。snapshot 因而不声明 `session.resume`，也不跨私有 home 尝试 native
+continuation；Rovai portable context 仍按既有合同进入新 Session。
+
+Kimi/MiniMax 可能在普通文本中返回 `<think>` 块，因此 Kimi streamed text 只作为私有 observation；只有 terminal
+候选完成推理清洗后才能进入公开输出，未闭合块 fail closed。原始 ACP `mcpServers` stdio happy path 与相邻
+Session 隔离已经实测，但 Rovai External MCP projection 仍缺完整 precedence/compatibility 准入；External MCP、
+Usage/Cost、Compaction、warm reuse 和 History Restore 保持 Disabled。Rovai managed Skill 投影目标为
+`.kimi-code/skills`。
+
+本机 `kimi 0.32.0` 使用 MiniMax M3 在 macOS arm64 完成真实 prompt、Shell allow/deny、六类 terminal output、
+Missing-Send、cancel 与 cleanup；但完整 Built-in CLI matrix 一次超时、两次为 `0/15`，因此不声明 built-in
+transport capability，该平台保持 `not_qualified / runtime_platform.builtin_transport_unqualified`。macOS x64
+与 Windows x64 没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
+[Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)，证据状态见
+[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
 

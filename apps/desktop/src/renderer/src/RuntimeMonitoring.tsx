@@ -47,6 +47,8 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'codebuddy-cli', label: 'CodeBuddy' },
   { value: 'qwen-code', label: 'Qwen Code' },
   { value: 'trae-cn-cli', label: 'TRAE' },
+  { value: 'cursor-agent', label: 'Cursor Agent' },
+  { value: 'kimi-code-cli', label: 'Kimi Code' },
   { value: 'antigravity-app', label: 'Antigravity' }
 ]
 

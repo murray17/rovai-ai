@@ -1245,6 +1245,8 @@ struct Core {
     codebuddy_cli: AcpCliRuntimeAdapter,
     qwen_code: AcpCliRuntimeAdapter,
     trae_cn_cli: AcpCliRuntimeAdapter,
+    cursor_agent: AcpCliRuntimeAdapter,
+    kimi_code_cli: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
@@ -1567,6 +1569,8 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::CodebuddyCli => "CodeBuddy CLI",
         AdapterKind::QwenCode => "Qwen Code",
         AdapterKind::TraeCnCli => "TRAE CLI",
+        AdapterKind::CursorAgent => "Cursor Agent",
+        AdapterKind::KimiCodeCli => "Kimi Code",
         AdapterKind::AntigravityApp => "Antigravity",
     }
 }
@@ -1758,6 +1762,8 @@ impl Core {
             self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CodebuddyCli),
             self.stop_deleted_camp_runtime_kind(targets, AdapterKind::QwenCode),
             self.stop_deleted_camp_runtime_kind(targets, AdapterKind::TraeCnCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CursorAgent),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::KimiCodeCli),
         );
         for target in targets {
             self.planned_shutdown
@@ -3258,7 +3264,21 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
-        self.trae_cn_cli
+        if let Some(runtime) = self
+            .trae_cn_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        if let Some(runtime) = self
+            .cursor_agent
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        self.kimi_code_cli
             .get_agent_run(agent_run_id, execution_epoch)
             .await
             .map(AgentRunRuntime::Acp)
@@ -3369,6 +3389,8 @@ impl Core {
             self.codebuddy_cli.shutdown_all(),
             self.qwen_code.shutdown_all(),
             self.trae_cn_cli.shutdown_all(),
+            self.cursor_agent.shutdown_all(),
+            self.kimi_code_cli.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
             self.antigravity_app.shutdown_all(),
         );
@@ -3386,6 +3408,8 @@ impl Core {
                 self.codebuddy_cli.shutdown_all(),
                 self.qwen_code.shutdown_all(),
                 self.trae_cn_cli.shutdown_all(),
+                self.cursor_agent.shutdown_all(),
+                self.kimi_code_cli.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
                 self.antigravity_app.shutdown_all(),
             );
@@ -3408,6 +3432,8 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::CodebuddyCli => Some(&self.codebuddy_cli),
             rovai_core::agent_profile::AdapterKind::QwenCode => Some(&self.qwen_code),
             rovai_core::agent_profile::AdapterKind::TraeCnCli => Some(&self.trae_cn_cli),
+            rovai_core::agent_profile::AdapterKind::CursorAgent => Some(&self.cursor_agent),
+            rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
             | rovai_core::agent_profile::AdapterKind::AntigravityApp => None,
@@ -6150,7 +6176,9 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::QoderCli
             | rovai_core::agent_profile::AdapterKind::CodebuddyCli
             | rovai_core::agent_profile::AdapterKind::QwenCode
-            | rovai_core::agent_profile::AdapterKind::TraeCnCli) => {
+            | rovai_core::agent_profile::AdapterKind::TraeCnCli
+            | rovai_core::agent_profile::AdapterKind::CursorAgent
+            | rovai_core::agent_profile::AdapterKind::KimiCodeCli) => {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
                         .await;
@@ -7002,7 +7030,9 @@ impl Core {
                 | rovai_core::agent_profile::AdapterKind::QoderCli
                 | rovai_core::agent_profile::AdapterKind::CodebuddyCli
                 | rovai_core::agent_profile::AdapterKind::QwenCode
-                | rovai_core::agent_profile::AdapterKind::TraeCnCli) => {
+                | rovai_core::agent_profile::AdapterKind::TraeCnCli
+                | rovai_core::agent_profile::AdapterKind::CursorAgent
+                | rovai_core::agent_profile::AdapterKind::KimiCodeCli) => {
                     if let Some(adapter) = self.acp_adapter(kind) {
                         adapter
                             .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
@@ -10128,7 +10158,9 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::QoderCli
             | rovai_core::agent_profile::AdapterKind::CodebuddyCli
             | rovai_core::agent_profile::AdapterKind::QwenCode
-            | rovai_core::agent_profile::AdapterKind::TraeCnCli) => {
+            | rovai_core::agent_profile::AdapterKind::TraeCnCli
+            | rovai_core::agent_profile::AdapterKind::CursorAgent
+            | rovai_core::agent_profile::AdapterKind::KimiCodeCli) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
                         .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -10856,8 +10888,22 @@ async fn run_core(
         )?,
         trae_cn_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::TraeCnCli,
-            acp_tx,
+            acp_tx.clone(),
             data_dir.join("runtime/trae-cn"),
+            runtime_fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        )?,
+        cursor_agent: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::CursorAgent,
+            acp_tx.clone(),
+            data_dir.join("runtime/cursor"),
+            runtime_fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        )?,
+        kimi_code_cli: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::KimiCodeCli,
+            acp_tx,
+            data_dir.join("runtime/kimi-code"),
             runtime_fleet.clone(),
             CompactionDetectorPolicy::Disabled,
         )?,
@@ -11434,6 +11480,13 @@ fn acp_delta_batch_identity(
     let session_update = message
         .pointer("/params/update/sessionUpdate")
         .and_then(Value::as_str);
+    if *adapter_kind == AdapterKind::KimiCodeCli && session_update == Some("agent_message_chunk") {
+        // MiniMax OpenAI-compatible responses can expose <think> blocks as
+        // ordinary ACP agent text. Kimi text is therefore collected until the
+        // terminal boundary and sanitized there instead of being batched into
+        // public deltas.
+        return None;
+    }
     matches!(
         session_update,
         Some("agent_message_chunk" | "agent_thought_chunk")
@@ -12370,6 +12423,24 @@ async fn process_agent_run_acp_message(
                         .await
                 }
             },
+            "cursor/ask_question" if adapter_kind == AdapterKind::CursorAgent => {
+                runtime
+                    .respond(id, json!({"outcome": {"outcome": "skipped"}}))
+                    .await
+            }
+            "cursor/create_plan" if adapter_kind == AdapterKind::CursorAgent => {
+                runtime
+                    .respond(
+                        id,
+                        json!({
+                            "outcome": {
+                                "outcome": "rejected",
+                                "reason": "Rovai-ai does not yet expose Cursor Plan Review"
+                            }
+                        }),
+                    )
+                    .await
+            }
             _ => {
                 runtime
                     .respond_error(
@@ -12426,6 +12497,15 @@ async fn process_agent_run_acp_message(
             None
         }
     };
+    if adapter_kind == AdapterKind::KimiCodeCli
+        && method == "session/update"
+        && params
+            .pointer("/update/sessionUpdate")
+            .and_then(Value::as_str)
+            == Some("agent_message_chunk")
+    {
+        return;
+    }
     let (event_type, payload) =
         normalize_acp_event_with_completion(&method, &params, completed_action.as_ref());
     if event_type == "runtime.usage" {
@@ -13291,8 +13371,13 @@ async fn persist_acp_prompt_completion(
     };
     let terminal_discriminator =
         canonical_json_digest(params).unwrap_or_else(|_| format!("{prompt_id}:{stop_reason}"));
-    if matches!(adapter_kind, AdapterKind::KiroCli | AdapterKind::TraeCnCli)
-        && !core.planned_shutdown.shutdown_started()
+    if matches!(
+        adapter_kind,
+        AdapterKind::KiroCli
+            | AdapterKind::TraeCnCli
+            | AdapterKind::CursorAgent
+            | AdapterKind::KimiCodeCli
+    ) && !core.planned_shutdown.shutdown_started()
     {
         runtime_route_permit.complete_callback();
         if let Some(adapter) = core.acp_adapter(adapter_kind) {
@@ -15917,8 +16002,22 @@ mod tests {
             )?,
             trae_cn_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::TraeCnCli,
-                acp_tx,
+                acp_tx.clone(),
                 data_dir.join("runtime/trae-cn"),
+                runtime_fleet.clone(),
+                CompactionDetectorPolicy::Disabled,
+            )?,
+            cursor_agent: AcpCliRuntimeAdapter::new(
+                AdapterKind::CursorAgent,
+                acp_tx.clone(),
+                data_dir.join("runtime/cursor"),
+                runtime_fleet.clone(),
+                CompactionDetectorPolicy::Disabled,
+            )?,
+            kimi_code_cli: AcpCliRuntimeAdapter::new(
+                AdapterKind::KimiCodeCli,
+                acp_tx,
+                data_dir.join("runtime/kimi-code"),
                 runtime_fleet.clone(),
                 CompactionDetectorPolicy::Disabled,
             )?,
