@@ -54,9 +54,7 @@ const allRuntimeSpecifications = [
   ['trae-cn-cli', 'TRAE'],
   ['kimi-code-cli', 'Kimi Code']
 ].map(([adapterKind, label]) => ({ adapterKind, label, slug: adapterKind.replaceAll('-', '_') }))
-const defaultRuntimeSpecifications = allRuntimeSpecifications.filter(
-  (specification) => specification.adapterKind !== 'kimi-code-cli'
-)
+const defaultRuntimeSpecifications = allRuntimeSpecifications
 const selectedAdapters = new Set((process.env.ROVAI_BUILTIN_CLI_ADAPTERS
   ?? defaultRuntimeSpecifications.map((value) => value.adapterKind).join(','))
   .split(',')
@@ -414,7 +412,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    contractVersion: 17,
+    contractVersion: 20,
     ipcProtocolVersion: 2,
     runtimeCount: results.length,
     operationCountPerRuntime: expectedOperations.length,
@@ -1138,7 +1136,7 @@ set +e
 legacy_json="$(printf '%s\n' '{"campId":"camp-legacy","body":"rejected"}' | "$CLI" send 2>"$RUN_TMP/legacy-json.err")"
 legacy_json_status=$?
 set -e
-test "$legacy_json_status" -eq 1
+test "$legacy_json_status" -eq 2
 test ! -s "$RUN_TMP/legacy-json.err"
 assert_fix_input "$legacy_json"
 

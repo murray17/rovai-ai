@@ -505,12 +505,18 @@ impl AgentRuntimeAdapterRegistry {
             );
         }
         if kind == AdapterKind::KimiCodeCli {
-            let reason = if platform == HostPlatformKey::MacosArm64 {
-                RuntimePlatformAdmissionReasonCode::BuiltinTransportUnqualified
-            } else {
-                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing
-            };
-            return RuntimePlatformAdmission::not_qualified(kind, platform, reason);
+            if platform == HostPlatformKey::MacosArm64 {
+                return RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+                );
+            }
+            return RuntimePlatformAdmission::not_qualified(
+                kind,
+                platform,
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            );
         }
         match platform {
             HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64 => {
@@ -1547,10 +1553,6 @@ fn acp_capability_snapshot(
         }
     }
     let mut capabilities = observation.capabilities;
-    if adapter_kind == AdapterKind::KimiCodeCli {
-        capabilities
-            .retain(|capability| !matches!(capability.as_str(), "session.load" | "session.resume"));
-    }
     if ready {
         let standard_capabilities: &[&str] = if adapter_kind == AdapterKind::CursorAgent {
             &[
@@ -1580,7 +1582,7 @@ fn acp_capability_snapshot(
             .and_then(|value| value.pointer("/agentCapabilities/loadSession"))
             .and_then(Value::as_bool)
             == Some(true);
-        if supports_load && adapter_kind != AdapterKind::KimiCodeCli {
+        if supports_load {
             capabilities.push("session.load".to_string());
         }
         let supports_resume = observation
@@ -1588,13 +1590,10 @@ fn acp_capability_snapshot(
             .as_ref()
             .and_then(|value| value.pointer("/agentCapabilities/sessionCapabilities/resume"))
             .is_some_and(Value::is_object);
-        if supports_resume && adapter_kind != AdapterKind::KimiCodeCli {
+        if supports_resume {
             capabilities.push("session.resume".to_string());
         }
-        if !matches!(
-            adapter_kind,
-            AdapterKind::CursorAgent | AdapterKind::KimiCodeCli
-        ) {
+        if adapter_kind != AdapterKind::CursorAgent {
             capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
         }
         if !matches!(
@@ -2755,7 +2754,7 @@ mod tests {
     }
 
     #[test]
-    fn kimi_snapshot_is_new_only_and_does_not_claim_external_mcp() {
+    fn kimi_snapshot_keeps_native_continuation_without_claiming_external_mcp() {
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .acp_capability_snapshot(AcpProbeObservation {
                 adapter_kind: AdapterKind::KimiCodeCli,
@@ -2785,15 +2784,15 @@ mod tests {
             })
             .expect("Kimi ACP catalog should map");
 
-        assert!(!snapshot.capabilities.contains(&"session.load".to_string()));
+        assert!(snapshot.capabilities.contains(&"session.load".to_string()));
         assert!(
-            !snapshot
+            snapshot
                 .capabilities
                 .contains(&"session.resume".to_string())
         );
         assert!(!snapshot.capabilities.contains(&"mcp.additive".to_string()));
         assert!(
-            !snapshot
+            snapshot
                 .capabilities
                 .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
         );

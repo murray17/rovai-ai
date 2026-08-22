@@ -22,8 +22,8 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 当前 closed `AdapterKind` 包含十二种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
-Cursor 与 Kimi 在三个目标平台均为 `not_qualified`；Kimi 的 macOS arm64 基础 ACP 诊断已完成，但 Built-in
-CLI 资格矩阵未建立任何 operation evidence，因此不能进入普通产品执行路径。
+Cursor 在三个目标平台均为 `not_qualified`。Kimi 的 macOS arm64 完整资格矩阵已通过并为
+digest-bound `qualified`；macOS x64 与 Windows x64 仍为 `not_qualified`。
 设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
@@ -46,20 +46,20 @@ diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Pla
 | Tool / permission | Shell allow-once 真实通过；stdout、stderr、mixed、empty、nonzero 与 128 KiB large output 六类均产生唯一 stable Tool ID 和 terminal Evidence | 只以 terminal phase 判定真实 command output；large output 有界截断并保留首部 marker，nonzero 保持 Tool failed |
 | Deny / filesystem | 独立 Camp 中真实 deny Approval 返回 `rovai_approval_denied`，Tool 为 `failed/not_executed`，目标文件不存在 | ACP Client fs write 没有匹配 one-time authorization 时由 Core 拒绝；Runtime Tool 前预拒绝仍可单独如实记录 |
 | Cancel / cleanup | `sleep 30` 获准后发送 `session/cancel`，约 6 ms 返回 `cancelled`，无目标残留进程 | cancel、terminal、planned shutdown、Camp 删除与 App shutdown 都停止私有 Host/进程树 |
-| Session | 同 Host 同 Session 多轮精确回忆通过；同 Host 两个 Session 的 marker 无串话；新进程复用同一 `KIMI_CODE_HOME` 时，`session/resume` 与 `session/load` 都保持精确 Session ID 并回忆 marker；换用隔离 home 后 resume 返回 `-32602 Unknown sessionId` | Runtime 原始能力为同 home exact resume/load；Rovai 每 Host 新建隔离 home 且 terminal 前停止 Host，因此产品 continuation 仍固定 `new_only`，snapshot 不声明 `session.resume` |
-| Catalog | `session/new.configOptions` 报告 synthetic env model、thinking `on/off` 与四种 mode；Idle `available_commands_update` 报告内建 command 和 Skill command | Runtime advertisement 为 Verified；Rovai 尚未消费 Kimi async catalog 为产品权威 snapshot |
+| Session | 同 Host 同 Session 多轮精确回忆通过；同 Host 两个 Session 的 marker 无串话；新进程复用同一 `KIMI_CODE_HOME` 时，`session/resume` 与 `session/load` 都保持精确 Session ID 并回忆 marker；换用隔离 home 后 resume 返回 `-32602 Unknown sessionId`；产品级 fake Runtime 回归证明不同 Host 复用 scoped home，协议为 new→resume 且 Session ID 不变 | Kimi AgentRun 仍逐 Run 停止 Host；Rovai 按 Camp/成员/installation/auth scope 稳定保留私有 home，snapshot 声明真实 resume/load，新 Host 优先 exact resume，load-only 时进入 replay quarantine |
+| Catalog | `session/new.configOptions` 报告 synthetic env model、thinking `on/off` 与四种 mode；Idle `available_commands_update` 报告内建 command 和 Skill command | Runtime advertisement 为 Verified；Host 已安全路由 async metadata。尚未维护产品权威 async catalog snapshot 是功能空缺，不是启动、Session continuation 或平台准入硬阻断 |
 | Skill | `.kimi-code/skills` 两次都被发现并返回唯一 marker，且正确选择 canonical `--to-principal` 但不触发当前用户注意力 | managed Skill discovery/invocation 与消息局部注意力教学均为 Verified |
 | External MCP | 原始 ACP `session/new.mcpServers` 注入 stdio echo Server 后，真实 Tool pending→in-progress→completed、Tool result 与最终 marker 均通过；紧邻空 MCP Session 看不到该 Tool | Runtime 原始 happy path 与相邻 Session 隔离为 Verified；Rovai projection 仍 Disabled，尚缺同名 precedence、完整定义矩阵与 Host compatibility 准入 |
 | Missing-Send | zero-send publication、accepted-send suppression、ACP tool→final 三场景通过；Kimi private stream 未进入公共 fixture | `IfNoAcceptedSend` candidate 经过 thinking 清洗、terminal record 与既有 suppression gate |
 | Usage / compaction | 多轮 Prompt、resume/load 与 MCP 调用均未观察到 `usage_update`；命令目录存在 `usage`/`compact`，手动 `/compact` 只产生普通 agent text，没有结构化 compaction lifecycle | Usage/Cost、Compaction Disabled；command advertisement 不能冒充结构化 telemetry |
-| Built-in CLI | 完整 matrix 一次等待 12 分钟无 execution evidence；两次快速结束但模型跳过 shell，均为 `0/15` operation evidence | hard qualification failure；snapshot 不声明 built-in transport capability，默认 smoke 不包含 Kimi |
+| Built-in CLI | 早期 `0/15` fixture 把 legacy stdin 非法输入的当前退出码 `2` 错写为 `1`，Kimi 实际已执行 Shell 并在首项 canonical operation 前退出；修正后十五项 operation、三种输入、Gather、exact successor read、conflict、initial/resumed lease fencing、logical/native continuation 全部通过，共 56 条 full-run evidence | macOS arm64 Built-in transport 为 Verified；snapshot 声明 capability，默认 Built-in 与 Skill 资格集合包含 Kimi |
 
 项目级最终固定输出为 `ROVAI_KIMI_ACP_OK`，命令 output marker 为
 `ROVAI_KIMI_CODE_CLI_PRINTF_OK`，allow 与 deny 都完成真实 Approval roundtrip。基础 AgentRun 可用于隔离诊断，
-但 Built-in hard gate 失败，所以 macOS arm64 为
-`not_qualified / runtime_platform.builtin_transport_unqualified` 且 evidence revision 为空；不扩大为 External MCP、
-Usage、Compaction、native resume、History Restore、macOS x64 或 Windows x64 产品资格。原始 Runtime 的
-same-home continuation、并发 Session 与 MCP 证据只收窄问题边界，不绕过 Rovai compatibility、隔离和平台门禁。
+修正过期 fixture 后 Built-in hard gate 已通过，所以 macOS arm64 为 digest-bound `qualified`；snapshot 声明
+Built-in transport，普通产品与默认资格 Smoke 包含 Kimi。该结论不扩大为 External MCP、Usage、Compaction、
+warm Host、macOS x64 或 Windows x64 产品资格。native resume 已按 scoped home 进入产品，History Restore 只
+作为 load-only fallback；异步 command catalog snapshot 尚未实现是独立功能空缺，不是当前平台硬阻断。
 
 ### 2026-08-22 Cursor Agent `2026.08.11-e8db854` 隔离探测与未准入记录
 

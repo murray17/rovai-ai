@@ -39,7 +39,8 @@ const requestedAdapters = adapterSelection === 'all'
       'qoder-cli',
       'codebuddy-cli',
       'qwen-code',
-      'trae-cn-cli'
+      'trae-cn-cli',
+      'kimi-code-cli'
     ]
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([

@@ -407,6 +407,7 @@ pub(crate) struct AcpHost {
     initialize_result: RwLock<Option<Value>>,
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
+    remove_private_config_root_on_shutdown: bool,
     session_permission_mode: Option<String>,
     detector_config_root: Option<PathBuf>,
     ephemeral_config: Mutex<Option<EphemeralMcpConfigFile>>,
@@ -427,6 +428,7 @@ impl AcpHost {
         allow_client_fs: bool,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         private_runtime_dir: &Path,
+        private_session_scope: Option<&str>,
         attachment_access_root: Option<&Path>,
     ) -> Result<Arc<Self>> {
         if !runtime_launch_allowed(
@@ -435,8 +437,12 @@ impl AcpHost {
         ) {
             bail!("Runtime launch policy rejected Agent execution");
         }
-        let private_config_root =
-            prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
+        let private_config = prepare_private_host_config(
+            private_runtime_dir,
+            frozen_runtime.adapter_kind,
+            private_session_scope,
+        )?;
+        let private_config_root = private_config.as_ref().map(|config| config.root.as_path());
         let session_permission_mode = if frozen_runtime.adapter_kind == AdapterKind::KimiCodeCli {
             Some(
                 frozen_runtime
@@ -464,7 +470,7 @@ impl AcpHost {
             !allow_client_fs,
             external_mcp_servers,
             private_runtime_dir,
-            private_config_root.as_deref(),
+            private_config_root,
             attachment_access_root,
             builtin_tools
                 .as_ref()
@@ -498,9 +504,7 @@ impl AcpHost {
             None
         };
         let process_working_directory = if frozen_runtime.adapter_kind == AdapterKind::KiroCli {
-            private_config_root
-                .as_deref()
-                .context("Kiro Host isolation directory is missing")?
+            private_config_root.context("Kiro Host isolation directory is missing")?
         } else {
             cwd
         };
@@ -539,7 +543,10 @@ impl AcpHost {
             protocol_violated: AtomicBool::new(false),
             initialize_result: RwLock::new(None),
             startup_diagnostics: Mutex::new(String::new()),
-            private_config_root,
+            private_config_root: private_config.as_ref().map(|config| config.root.clone()),
+            remove_private_config_root_on_shutdown: private_config
+                .as_ref()
+                .is_some_and(|config| config.remove_on_shutdown),
             session_permission_mode,
             detector_config_root,
             ephemeral_config: Mutex::new(ephemeral_config),
@@ -1320,7 +1327,9 @@ impl AcpHost {
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
         let _ = child.force_terminate_tree();
-        if let Some(root) = self.private_config_root.as_ref() {
+        if self.remove_private_config_root_on_shutdown
+            && let Some(root) = self.private_config_root.as_ref()
+        {
             let _ = std::fs::remove_dir_all(root);
         }
         if let Some(root) = self.detector_config_root.as_ref() {
@@ -1714,6 +1723,7 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
+            | AdapterKind::KimiCodeCli
     )
 }
 
@@ -2408,6 +2418,7 @@ impl AcpCliRuntimeAdapter {
                 .await;
         }
         let execution_root = PathBuf::from(&workspace.execution_root);
+        let private_session_scope = kimi_private_session_scope(camp_id, agent_id, frozen_runtime)?;
         let fleet_lease = self
             .fleet
             .acquire(
@@ -2433,6 +2444,7 @@ impl AcpCliRuntimeAdapter {
                         true,
                         external_mcp_servers,
                         &self.private_runtime_dir,
+                        private_session_scope.as_deref(),
                         Some(attachment_access_root),
                     )
                     .await?;
@@ -2581,9 +2593,9 @@ fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseD
         AdapterKind::KiroCli | AdapterKind::CursorAgent | AdapterKind::KimiCodeCli
     ) {
         // Kiro keeps a Native Session locked for the lifetime of its ACP
-        // process. Cursor and Kimi product Host reuse remain outside the
-        // current contract. Stop these Hosts instead of extending unadmitted
-        // process state across AgentRuns.
+        // process. Cursor Host reuse remains outside the current contract.
+        // Kimi resumes from its scoped persistent home on a successor Host,
+        // so it does not need to retain process state across AgentRuns.
         FleetReleaseDisposition::Stop
     } else {
         FleetReleaseDisposition::Reusable
@@ -2680,19 +2692,52 @@ pub(crate) fn freeze_history_restore_compatibility(
     Ok(frozen_runtime)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreparedPrivateHostConfig {
+    root: PathBuf,
+    remove_on_shutdown: bool,
+}
+
+fn kimi_private_session_scope(
+    camp_id: &str,
+    agent_id: &str,
+    frozen_runtime: &FrozenAgentRuntimeConfig,
+) -> Result<Option<String>> {
+    if frozen_runtime.adapter_kind != AdapterKind::KimiCodeCli {
+        return Ok(None);
+    }
+    Ok(Some(canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "adapterKind": frozen_runtime.adapter_kind,
+        "campId": camp_id,
+        "agentId": agent_id,
+        "installationId": frozen_runtime.installation_id,
+        "authScope": frozen_runtime.auth_scope,
+    }))?))
+}
+
 fn prepare_private_host_config(
     private_runtime_dir: &Path,
     adapter_kind: AdapterKind,
-) -> Result<Option<PathBuf>> {
-    if !matches!(
-        adapter_kind,
-        AdapterKind::KiroCli | AdapterKind::KimiCodeCli
-    ) {
-        return Ok(None);
-    }
-    let root = private_runtime_dir
-        .join("acp-host")
-        .join(uuid::Uuid::new_v4().to_string());
+    private_session_scope: Option<&str>,
+) -> Result<Option<PreparedPrivateHostConfig>> {
+    let (root, remove_on_shutdown) = match adapter_kind {
+        AdapterKind::KiroCli => (
+            private_runtime_dir
+                .join("acp-host")
+                .join(uuid::Uuid::new_v4().to_string()),
+            true,
+        ),
+        AdapterKind::KimiCodeCli => {
+            let scope =
+                private_session_scope.context("Kimi Code private Session scope is missing")?;
+            if scope.len() != 64 || !scope.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                bail!("Kimi Code private Session scope is invalid");
+            }
+            (private_runtime_dir.join("session-homes").join(scope), false)
+        }
+        _ => return Ok(None),
+    };
     std::fs::create_dir_all(&root).with_context(|| {
         format!(
             "failed to create private ACP Host directory {}",
@@ -2700,7 +2745,10 @@ fn prepare_private_host_config(
         )
     })?;
     restrict_private_directory(&root)?;
-    Ok(Some(root))
+    Ok(Some(PreparedPrivateHostConfig {
+        root,
+        remove_on_shutdown,
+    }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -4177,6 +4225,35 @@ mod tests {
         }
     }
 
+    fn frozen_kimi_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
+        FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::KimiCodeCli,
+            installation_id: "installation-kimi".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "default".to_string(),
+            reported_version: Some("0.32.0".to_string()),
+            executable_fingerprint: "sha256:kimi".to_string(),
+            capabilities: vec!["session.load".to_string(), "session.resume".to_string()],
+            protocol_version: "acp-v1".to_string(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: "runtime_default".to_string(),
+                options: json!({}),
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: AdapterKind::KimiCodeCli,
+                schema_version: 1,
+                values: json!({"permission_mode": "default"}),
+            },
+            native_session_compatibility_key: Some("kimi-code-cli:acp-v1".to_string()),
+            binding_compatibility_digest: "sha256:binding".to_string(),
+            host_config_digest: "sha256:host".to_string(),
+            config_digest: "sha256:config".to_string(),
+        }
+    }
+
     #[test]
     fn kimi_provider_configuration_is_allowlisted_and_process_local() {
         let root = std::env::temp_dir().join(format!(
@@ -4403,6 +4480,7 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -4585,6 +4663,7 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -4672,6 +4751,7 @@ while IFS= read -r ignored; do :; done
             true,
             &BTreeMap::new(),
             &root.join("private"),
+            None,
             None,
         )
         .await
@@ -4767,6 +4847,7 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -4855,6 +4936,7 @@ while IFS= read -r ignored; do :; done
             true,
             &BTreeMap::new(),
             &root.join("private"),
+            None,
             None,
         )
         .await
@@ -4981,6 +5063,7 @@ while IFS= read -r ignored; do :; done
                 true,
                 &BTreeMap::new(),
                 &root.join("private"),
+                None,
                 None,
             )
             .await
@@ -5179,6 +5262,163 @@ while IFS= read -r ignored; do :; done
         assert_eq!(protocol.matches("\"method\":\"session/prompt\"").count(), 2);
         assert!(!protocol.contains("\"method\":\"session/load\""));
         assert!(!protocol.contains("\"method\":\"session/resume\""));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn kimi_completed_run_starts_a_new_host_and_exactly_resumes_the_scoped_session() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-kimi-cold-resume-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("kimi");
+        let protocol_log = root.join("protocol.jsonl");
+        let invocation_log = root.join("invocations");
+        let home_log = root.join("homes");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+printf '%s\n' "$KIMI_CODE_HOME" >> '{}'
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' "$session" >> '{}'
+case "$session" in
+  *'"method":"session/new"'*)
+    printf '%s\n' 'session-kimi' > "$KIMI_CODE_HOME/session-id"
+    ;;
+  *'"method":"session/resume"'*)
+    test "$(cat "$KIMI_CODE_HOME/session-id")" = 'session-kimi' || exit 2
+    ;;
+  *) exit 3 ;;
+esac
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-kimi","configOptions":[{{"id":"model","currentValue":"runtime_default","options":[{{"value":"runtime_default","name":"Runtime Default"}}]}},{{"id":"mode","currentValue":"default","options":[{{"value":"default","name":"Default"}}]}}]}}}}'
+IFS= read -r mode || exit 1
+printf '%s\n' "$mode" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":null}}'
+while IFS= read -r ignored; do :; done
+"#,
+                invocation_log.display(),
+                home_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+            ),
+        );
+        let builtin_tools = exact_builtin_tools(&root);
+        let frozen = frozen_kimi_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let attachment_root = exact_attachment_root(&root);
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(
+            AgentRuntimeFleetConfig::default(),
+        ));
+        let private_runtime_dir = root.join("private");
+        let adapter = AcpCliRuntimeAdapter::new(
+            AdapterKind::KimiCodeCli,
+            incoming,
+            private_runtime_dir.clone(),
+            fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        )
+        .unwrap();
+
+        let first = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-one",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &BTreeMap::new(),
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        let first_host = first.host_instance_id().to_string();
+        let session_id = first
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities {
+                    can_resume: true,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(session_id, "session-kimi");
+        adapter.complete_agent_run("agent-run-one", 1).await;
+
+        let scope = kimi_private_session_scope("camp-one", "agent-one", &frozen)
+            .unwrap()
+            .unwrap();
+        let persistent_home = private_runtime_dir.join("session-homes").join(scope);
+        assert_eq!(
+            std::fs::read_to_string(persistent_home.join("session-id"))
+                .unwrap()
+                .trim(),
+            session_id
+        );
+
+        let second = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-two",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &BTreeMap::new(),
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        assert_ne!(second.host_instance_id(), first_host);
+        let successor_session = second
+            .start_or_resume_session(
+                Some(&session_id),
+                AcpSessionCapabilities {
+                    can_resume: true,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(successor_session, session_id);
+        adapter.complete_agent_run("agent-run-two", 1).await;
+        fleet.shutdown_all().await;
+
+        let invocations = std::fs::read_to_string(&invocation_log).unwrap();
+        assert_eq!(invocations.lines().count(), 2);
+        let homes = std::fs::read_to_string(&home_log).unwrap();
+        let homes = homes.lines().collect::<Vec<_>>();
+        assert_eq!(homes.len(), 2);
+        assert_eq!(homes[0], homes[1]);
+        assert_eq!(Path::new(homes[0]), persistent_home);
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert_eq!(protocol.matches("\"method\":\"session/new\"").count(), 1);
+        assert_eq!(protocol.matches("\"method\":\"session/resume\"").count(), 1);
+        assert!(!protocol.contains("\"method\":\"session/load\""));
+        assert!(persistent_home.exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -5408,6 +5648,50 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
+    fn private_host_config_rotates_kiro_but_keeps_scoped_kimi_home() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-private-host-config-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let scope_a = "a".repeat(64);
+        let scope_b = "b".repeat(64);
+
+        let kiro_one = prepare_private_host_config(&root, AdapterKind::KiroCli, None)
+            .unwrap()
+            .unwrap();
+        let kiro_two = prepare_private_host_config(&root, AdapterKind::KiroCli, None)
+            .unwrap()
+            .unwrap();
+        assert_ne!(kiro_one.root, kiro_two.root);
+        assert!(kiro_one.remove_on_shutdown);
+        assert!(kiro_two.remove_on_shutdown);
+
+        let kimi_one = prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_a))
+            .unwrap()
+            .unwrap();
+        let kimi_successor =
+            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_a))
+                .unwrap()
+                .unwrap();
+        let kimi_other =
+            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_b))
+                .unwrap()
+                .unwrap();
+        assert_eq!(kimi_one.root, kimi_successor.root);
+        assert_ne!(kimi_one.root, kimi_other.root);
+        assert!(!kimi_one.remove_on_shutdown);
+        assert!(kimi_one.root.ends_with(scope_a));
+        assert!(
+            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, None)
+                .unwrap_err()
+                .to_string()
+                .contains("scope is missing")
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn prompt_identity_is_unique_across_isolated_hosts() {
         assert_ne!(
             acp_prompt_id("host-a", 1),
@@ -5458,6 +5742,24 @@ while IFS= read -r ignored; do :; done
         assert_eq!(
             select_acp_session_continuation(
                 AdapterKind::CopilotCli,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::HistoryRestore
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::KimiCodeCli,
+                false,
+                Some("session-1"),
+                resume_and_load,
+            ),
+            AcpSessionContinuation::Resume
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::KimiCodeCli,
                 false,
                 Some("session-1"),
                 load_only,

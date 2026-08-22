@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 ---
 
 # 长期接口合同
@@ -43,7 +43,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [Runtime Launch and Verification v20（当前）](runtime-launch-and-verification-v20.md) | v19 launch/Ready/Cursor 边界不变；加入 Kimi identity、MiniMax 私有 provider 配置、推理隔离与保守平台准入 |
+| [Runtime Launch and Verification v21（当前）](runtime-launch-and-verification-v21.md) | v20 Kimi provider 边界不变；稳定私有 Session home、跨新 Host exact resume/load，并以完整 Built-in matrix 准入 macOS arm64 |
+| [Runtime Launch and Verification v20（历史）](runtime-launch-and-verification-v20.md) | v19 launch/Ready/Cursor 边界不变；加入 Kimi identity、MiniMax 私有 provider 配置、推理隔离与保守平台准入；其每 Host 新 home/new-only 语义已由 v21 替代 |
 | [Runtime Launch and Verification v19（历史）](runtime-launch-and-verification-v19.md) | v18 launch/Ready/LKG 边界不变；加入 Cursor identity、vendor ACP、保守能力与逐平台未准入合同 |
 | [Runtime Launch and Verification v18（历史）](runtime-launch-and-verification-v18.md) | v17 wire/LKG 边界不变；Adapter Deep Probe 统一覆盖 version、一次重新绑定与三秒 Execution cooldown 自动恢复 |
 | [Runtime Launch and Verification v17（历史）](runtime-launch-and-verification-v17.md) | v16 启动/命令边界不变；完整 Probe identity 前后复核、一次重新绑定、三态 deferred 与 stale LKG/当前 Ready evidence 分离；Execution deferred 仍需显式动作解锁 |

@@ -371,14 +371,16 @@ try {
         if (error?.code === 'ENOENT') return null
         throw error
       })
-      const requiresNativeSessionContinuation = specification.adapterKind !== 'kimi-code-cli'
+      const requiresNativeSessionContinuation = true
       if (writeRun?.status !== 'succeeded'
           || written !== `${writeToken}\n`
           || !writeActions.some((action) => action.status === 'succeeded')
           || (requiresNativeSessionContinuation
             && writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId)
           || (specification.adapterKind === 'trae-cn-cli'
-            && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)) {
+            && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)
+          || (specification.adapterKind === 'kimi-code-cli'
+            && writeStart?.params?.hostInstanceId === results.at(-1).hostInstanceId)) {
         throw new Error(`ACP approved write did not converge: ${JSON.stringify({
           writeRun,
           writeActions,

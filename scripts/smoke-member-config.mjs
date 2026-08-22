@@ -101,7 +101,7 @@ try {
       || unqualifiedCursor.code !== 'runtime_platform_not_qualified') {
     throw new Error(`Unqualified Cursor configuration was not rejected atomically: ${JSON.stringify(unqualifiedCursor)}`)
   }
-  const unqualifiedKimi = await first.request('members.runtime.set', {
+  const unavailableKimi = await first.request('members.runtime.set', {
     commandId: crypto.randomUUID(),
     command: {
       agentId,
@@ -115,9 +115,9 @@ try {
       }
     }
   })
-  if (unqualifiedKimi.status !== 'rejected'
-      || unqualifiedKimi.code !== 'runtime_platform_not_qualified') {
-    throw new Error(`Unqualified Kimi configuration was not rejected atomically: ${JSON.stringify(unqualifiedKimi)}`)
+  if (unavailableKimi.status !== 'rejected'
+      || unavailableKimi.code !== 'runtime_configuration_unavailable') {
+    throw new Error(`Missing Kimi configuration was not rejected atomically: ${JSON.stringify(unavailableKimi)}`)
   }
   const unresolvedProfile = await first.request('members.get', { agentId })
   const unresolvedInstallations = await first.request('runtime.installations.list')
@@ -169,7 +169,7 @@ try {
       .filter((member) => !member.runtimeConfigured).length,
     noRuntimeFallback: true,
     cursorPlatformAdmissionBlocked: true,
-    kimiPlatformAdmissionBlocked: true,
+    kimiMissingRuntimeRejected: true,
     noEmptyCampOnStartup: true,
     restartPersistence: true
   }, null, 2))

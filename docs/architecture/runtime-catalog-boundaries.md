@@ -14,7 +14,7 @@ last_updated: 2026-08-22
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)。实测版本和能力只由
+[Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -151,7 +151,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)。
+[Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -213,7 +213,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
-Cursor。字段级行为见 [Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)，
+Cursor。字段级行为见 [Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Kimi Code 当前边界
@@ -224,22 +224,25 @@ Cursor。字段级行为见 [Runtime Launch and Verification v20](../contracts/r
 Rovai 不强制关闭 Kimi/MiniMax thinking。未知、重复、缺失、格式错误或权限过宽均在 launch 前
 fail closed；秘密不进入数据库、Evidence、diagnostics 或公开 command。
 
-每个 Host 使用隔离 `KIMI_CODE_HOME`，AgentRun 结束即停止；当前 Session strategy 为 `new_only`。真实原始
-ACP Probe 已证明同一 home 下 `session/resume` 与 `session/load` 都保持精确 Session ID 和上下文，换用新的
-隔离 home 则返回 `Unknown sessionId`。snapshot 因而不声明 `session.resume`，也不跨私有 home 尝试 native
-continuation；Rovai portable context 仍按既有合同进入新 Session。
+Kimi AgentRun 结束仍停止 Host，但 `KIMI_CODE_HOME` 不再按 Host 轮换：Core 在 Rovai data-dir 内按
+Camp、成员、Runtime installation 与 auth scope 的 canonical digest 建立稳定私有 Session home，不修改通用
+`HOME`，也不与其他逻辑会话共享。后继兼容 Run 在新 Host 上优先 exact `session/resume`，只有没有 resume
+能力时才用带 replay quarantine 的 `session/load`；返回 Session ID 必须与原 ID 完全相同。snapshot 保留真实
+`session.resume/load`，但这不等于 warm Host reuse。
 
 Kimi/MiniMax 可能在普通文本中返回 `<think>` 块，因此 Kimi streamed text 只作为私有 observation；只有 terminal
 候选完成推理清洗后才能进入公开输出，未闭合块 fail closed。原始 ACP `mcpServers` stdio happy path 与相邻
 Session 隔离已经实测，但 Rovai External MCP projection 仍缺完整 precedence/compatibility 准入；External MCP、
-Usage/Cost、Compaction、warm reuse 和 History Restore 保持 Disabled。Rovai managed Skill 投影目标为
+Usage/Cost、Compaction、warm reuse 保持 Disabled；History Restore 仅作为 load-only fallback。Rovai managed Skill 投影目标为
 `.kimi-code/skills`。
 
 本机 `kimi 0.32.0` 使用 MiniMax M3 在 macOS arm64 完成真实 prompt、Shell allow/deny、六类 terminal output、
-Missing-Send、cancel 与 cleanup；但完整 Built-in CLI matrix 一次超时、两次为 `0/15`，因此不声明 built-in
-transport capability，该平台保持 `not_qualified / runtime_platform.builtin_transport_unqualified`。macOS x64
-与 Windows x64 没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
-[Runtime Launch and Verification v20](../contracts/runtime-launch-and-verification-v20.md)，证据状态见
+Missing-Send、cancel 与 cleanup。早期 Built-in CLI `0/15` 是 fixture 在第一项 canonical operation 前错误检查
+legacy stdin 非法输入退出码；改为当前 CLI 合同的 `2` 后，十五项 operation、三种输入、Gather、conflict、
+lease fencing、exact successor read 与 logical/native continuation 全部通过，共产生 56 条 full-run evidence。
+因此 snapshot 声明 built-in transport，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64
+没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
+[Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认

@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:3e74f23f9e5176476e680ce95c41648d3723a930b4e017f0c47975d63973a72e";
+    "sha256:88f3dba7becbe5609a3103cbb54f4b0d18b77d3022dc3734577fae255ec9f89e";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -221,15 +221,12 @@ mod tests {
         }
         let kimi_arm =
             registry.platform_admission(AdapterKind::KimiCodeCli, HostPlatformKey::MacosArm64);
+        assert!(kimi_arm.is_qualified());
+        assert_eq!(kimi_arm.reason_code(), None);
         assert_eq!(
-            kimi_arm.status(),
-            RuntimePlatformAdmissionStatus::NotQualified
+            kimi_arm.evidence_revision(),
+            Some(MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION)
         );
-        assert_eq!(
-            kimi_arm.reason_code(),
-            Some(RuntimePlatformAdmissionReasonCode::BuiltinTransportUnqualified)
-        );
-        assert_eq!(kimi_arm.evidence_revision(), None);
         let kimi_x64 =
             registry.platform_admission(AdapterKind::KimiCodeCli, HostPlatformKey::MacosX64);
         assert_eq!(

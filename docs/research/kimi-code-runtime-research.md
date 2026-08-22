@@ -4,7 +4,7 @@ runtime: kimi-code-cli
 upstream: MoonshotAI/kimi-code
 authority: research-evidence-only
 status: implemented
-admission: not_qualified
+admission: macos_arm64_qualified
 last_updated: 2026-08-22
 ---
 
@@ -23,8 +23,8 @@ Runtime: Kimi Code CLI
 建议接入形态: vendor_extended_acp
 Exact launch command: kimi acp
 Transport: stdio / JSON-RPC 2.0 / ACP v1
-当前 Admission: macOS arm64 / macOS x64 / Windows x64 均为 not_qualified
-一句话结论: ACP 基础 AgentRun 已用 Kimi 0.32.0 + MiniMax M3 完成隔离诊断，但 Built-in CLI 完整矩阵一次超时、两次为 0/15，macOS arm64 因 hard gate 失败不能准入。
+当前 Admission: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
+一句话结论: Kimi 0.32.0 + MiniMax M3 已完成 ACP 与 Built-in CLI 十五项完整矩阵，macOS arm64 准入；其他平台仍需独立取证。
 最接近的现有 Adapter: TRAE/Kiro ACP Host，加上 Kimi 私有 Session、Skill catalog 与交互扩展处理。
 ```
 
@@ -300,9 +300,10 @@ Shell override: KIMI_SHELL_PATH
   不进入仓库、数据库或 Evidence；
 - Rovai 不强制关闭 Kimi/MiniMax thinking；完整 `<think>` reasoning block 不进入最终公开消息，未闭合块
   fail closed，执行过程仍可留在私有 observation/执行台；
-- 每个 Run 使用隔离 `KIMI_CODE_HOME` 并在 terminal 后停止 Host。原始 ACP Probe 证明同一 home 的新进程可
-  exact resume/load 并保留上下文，而新的隔离 home 对旧 ID 返回 `Unknown sessionId`；因而产品 continuation
-  仍固定 `new_only`，snapshot 不声明 `session.resume`；
+- 每个 Run 在 terminal 后仍停止 Host，但同一 Camp/成员/installation/auth scope 使用稳定的 Rovai 私有
+  `KIMI_CODE_HOME`。原始 ACP Probe 证明同一 home 的新进程可 exact resume/load 并保留上下文；产品级 fake
+  Runtime 回归进一步证明两个不同 Host 依次执行 `session/new` 与 exact `session/resume`，Session ID 不变。
+  snapshot 因而保留真实 `session.resume/load`；load 只作为带 replay quarantine 的 fallback；
 - `.kimi-code/skills` 已进入 Rovai managed projection，真实调用两次都返回唯一 Skill marker，并正确选择
   canonical `--to-principal` 且不触发当前用户注意力；原始 ACP stdio MCP 调用及相邻空 Session 隔离通过，
   但 Rovai External MCP projection 因完整 precedence/compatibility 矩阵未完成而继续 Disabled；
@@ -310,23 +311,26 @@ Shell override: KIMI_SHELL_PATH
   与手动 `/compact` 没有产生结构化 `usage_update` 或 compaction lifecycle，Usage/Cost 与 Compaction Disabled；
 - Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景通过，Kimi private stream 未进入
   公共 protocol fixture；
-- 完整十五项 Built-in CLI matrix 一次等待 12 分钟没有 execution evidence，随后两次模型均跳过 shell 并以
-  `0/15` operation evidence 结束。这是资格 hard failure，不再通过重复采样把偶然服从当成 transport 资格。
+- 早期完整十五项 Built-in CLI matrix 的 `0/15` 并非模型跳过 Shell：保留 fixture 证明 Kimi 已执行验收脚本，
+  但脚本在第一项 canonical operation 前把 legacy stdin 非法输入的当前退出码 `2` 错误期待为 `1`。修正该
+  过期断言后，十五项 operation、三种输入、Gather capture、精确后继寻址、stale-version conflict、
+  initial/resumed lease fencing、logical conversation 与 native Session continuation 全部通过，产生 56 条
+  full-run evidence。
 
-基于以上证据，macOS arm64 为
-`not_qualified / runtime_platform.builtin_transport_unqualified`；macOS x64 与 Windows x64 保持
-`not_qualified / runtime_platform.qualification_evidence_missing`。三个平台均不发布 qualified evidence revision。
+基于以上证据，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64 保持
+`not_qualified / runtime_platform.qualification_evidence_missing`。
 
 ## 最终决定
 
 ```text
-Qualified capabilities: 无；基础 ACP、Approval、command output、Missing-Send、cancel/cleanup 与 managed Skill 只形成诊断 evidence，不等于平台资格
-Disabled capabilities: External MCP、Compaction detector、Usage/Cost monitoring、History Restore、native resume、warm Host reuse
-Verified upstream-only boundaries: 同 Host 并发 Session 隔离、同 home exact resume/load、跨隔离 home Unknown session、ACP stdio MCP happy path 与相邻 Session 隔离
-Unverified capabilities: macOS x64、Windows x64、External MCP 同名 precedence/完整定义/Host compatibility
+Qualified capabilities on macOS arm64: ACP AgentRun、Approval、command output、Missing-Send、cancel/cleanup、managed Skill、Built-in CLI、cold Host native resume
+Product continuation: stable scoped private home + cold Host exact resume；load-only 时使用 History Restore quarantine
+Disabled capabilities: External MCP、Compaction detector、Usage/Cost monitoring、warm Host reuse
+Verified upstream-only boundaries: 同 Host 并发 Session 隔离、跨隔离 home Unknown session、ACP stdio MCP happy path 与相邻 Session 隔离
+Unverified capabilities: macOS x64、Windows x64、External MCP 同名 precedence/完整定义/Host compatibility、scoped home 的长期垃圾回收
 Known boundary: Client fs write 需要 Core one-time authorization；Runtime 预拒绝不得伪造用户 deny
-Blocking issues: 完整 Built-in CLI matrix 一次超时、两次 0/15
-Admission decision: macOS arm64 / macOS x64 / Windows x64 均为 not_qualified
+Non-blocking gaps: 产品权威 async command catalog snapshot、Usage/Cost、Compaction、External MCP、scoped home 长期垃圾回收
+Admission decision: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
 ```
 
 ## 上游来源

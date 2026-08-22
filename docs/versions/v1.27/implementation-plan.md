@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.27
 authority: implementation-and-acceptance-status
-status: in_progress
+status: complete
 last_updated: 2026-08-22
 ---
 
@@ -20,7 +20,8 @@ last_updated: 2026-08-22
 
 - [x] 扩展 Rust/TypeScript Adapter closed set、Skill group、discovery、health、monitoring 与 shutdown；
 - [x] Migration 105 扩展 closed kinds 和系统 Skill assignment，升级 Data Contract v1.19 / schema 60；
-- [x] Kimi Host 使用隔离 home、严格 provider 环境和 `new_only` continuation；
+- [x] Kimi Host 使用按兼容逻辑会话稳定寻址的隔离 home、严格 provider 环境和跨新 Host exact
+  continuation；
 - [x] Renderer catalog、成员参数、Onboarding、侧栏、监控和官方来源图标覆盖 Kimi。
 
 ## 3. ACP、安全与真实验收
@@ -29,17 +30,20 @@ last_updated: 2026-08-22
 - [x] 真实 Shell allow-once、pending→in_progress→completed、固定 command output 通过；
 - [x] 真实 `session/cancel` 在有界时间内返回 cancelled，未留下目标进程；
 - [x] `<think>` 块不会进入公开输出，未闭合推理 fail closed；
-- [x] External MCP、Usage/Cost、Compaction 与 session resume 不出现在 Kimi capability snapshot；
+- [x] External MCP、Usage/Cost 与 Compaction 不出现在 Kimi capability snapshot；真实 `session.resume/load`
+  保留，Built-in transport 在完整资格矩阵通过后声明；
 - [x] ACP Client 文件写入无授权时 fail closed；危险写入无 Tool/Approval/文件副作用时如实记录 Runtime 预拒绝。
 - [x] 真实 deny Approval roundtrip 返回 `rovai_approval_denied`，目标 Tool `not_executed` 且没有文件副作用；
 - [x] stdout、stderr、mixed、empty、nonzero 与 large output 六类终态 command Evidence 通过；
 - [x] Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景通过；
-- [x] 原始 ACP 同 Host 多 Session 隔离、同 home exact resume/load、跨隔离 home 失败边界通过；产品继续
-  `new_only`，不把上游能力冒充 Rovai continuation；
+- [x] 原始 ACP 同 Host 多 Session 隔离、同 home exact resume/load、跨隔离 home 失败边界通过；产品级回归
+  证明两个不同 Host 使用同一 scoped home，依次执行 `session/new` 与 exact `session/resume` 且 Session ID 不变；
 - [x] 原始 ACP stdio MCP happy path 与相邻空 MCP Session 隔离通过；Rovai projection 因完整
   precedence/definition/compatibility 矩阵未完成而继续 Disabled；
 - [x] 多轮 Prompt、resume/load、MCP 与手动 `/compact` 未产生可消费的结构化 Usage/Compaction 事件；
-- [ ] 完整十五项 Built-in CLI matrix 通过。当前一次超时、两次 `0/15`，平台资格因此保持阻断。
+- [x] 完整十五项 Built-in CLI matrix 通过。早期 `0/15` 是验收脚本把 legacy stdin 非法输入退出码错误期待
+  为 `1`，Kimi 实际在第一项 operation 前因断言停止；修正为当前契约退出码 `2` 后，十五项 operation、
+  56 条 full-run evidence、三种输入、Gather、conflict、lease fencing 与 logical/native continuation 全部通过。
 
 ## 4. 最终门禁
 
@@ -48,7 +52,6 @@ last_updated: 2026-08-22
 - [x] docs test/check、benchmark contract 与敏感信息扫描通过；
 - [x] 使用持久私有配置重新运行项目级真实 Kimi smoke，并核对配置权限与进程清理。
 
-验收不包含 macOS x64、Windows x64 的平台资格，也没有开启 External MCP、native resume、History Restore、
-Usage/Cost 或 Compaction；原始 Runtime Probe 只记录能力与失败边界，这些产品能力继续保持未声明或 Disabled。
-十五项 Built-in CLI matrix 是 macOS arm64 的必过资格门槛，已经执行并失败，不能从基础 prompt/Tool 成功
-推断平台已准入。
+验收不包含 macOS x64、Windows x64 的平台资格，也没有开启 External MCP、warm Host、Usage/Cost 或
+Compaction；native resume 已进入产品，History Restore 只在 load-only 时作为既有 quarantine fallback。
+十五项 Built-in CLI matrix 已在 macOS arm64 完整通过，该平台已准入；其他平台仍需独立完成同等级证据。
