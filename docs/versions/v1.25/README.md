@@ -11,8 +11,9 @@ last_updated: 2026-08-22
 
 # Rovai-ai v1.25：Codex 最终 Camp 答案发布指导
 
-> 当前状态：[模型上下文变更 revision 1](model-context-change-codex-final-camp-answer.md) 已由开发者二次确认，
-> 可以严格按冻结文本、Codex-only compatibility rotation 与验证矩阵实施。
+> 当前状态：[模型上下文变更 revision 1](model-context-change-codex-final-camp-answer.md) 已由开发者二次确认并
+> 按冻结文本实现；提交 `1f37b49e` 已进入 `main`，新包已安装到 `/Applications/Rovai AI.app`。版本仍保持
+> `in_progress`，等待用户稍后退出当前旧进程、从规范路径启动新版本后完成多次真实 Codex 行为观察。
 >
 > 前置版本：[v1.24 Runtime Probe 完整边界与自动恢复](../v1.24/README.md)已按完成事实冻结为
 > historical；其 Runtime Launch and Verification v18 与已安装结果继续作为本版基线。

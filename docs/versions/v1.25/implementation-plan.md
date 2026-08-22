@@ -29,9 +29,12 @@ last_updated: 2026-08-22
 - [x] exact Charter snapshot 覆盖 Codex inclusion、单次出现与所有非 Codex omission；
 - [x] Bootstrap Evidence blob/digest 覆盖新句，Codex legacy/current Binding digest 不同且非 Codex digest 不变；
 - [x] start/resume/replacement request 验证 `developerInstructions` 与 prepared payload 一致，无调用点 suffix；
-- [ ] Rust fmt、定向单元测试、PR Rust gate、Clippy、文档门禁与 Desktop build 通过；
+- [x] Rust fmt、定向单元测试、PR Rust gate、严格 library Clippy、文档门禁与 Desktop build 通过；
+- [ ] workspace all-targets Clippy 恢复绿色；当前仅被未改动的 `antigravity.rs` 既有
+  `large_enum_variant` 与 `collapsible_if` lint 阻塞；
 - [ ] 使用隔离 `userData` 运行多次真实 Codex AgentRun，记录 Camp final 的 Markdown 质量观察；
-- [ ] 验收后按本地工作流构建、验签、隔离验证并以非终止方式交接 macOS App。
+- [x] 按本地工作流构建、验签、隔离启动验证并以非终止方式交接 macOS App；当前旧日常进程未重启，
+  新版本将在用户稍后从规范安装路径启动时生效。
 
 ## References
 

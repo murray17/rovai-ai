@@ -204,6 +204,32 @@ authority: confirmed-model-input-change-statement
   记录其段落、列表、inline code 等 Markdown 质量及与 Runtime final 的实质完整性。真实模型观察是概率性补充，
   不替代 exact Charter、Evidence 与 Binding rotation 测试。
 
+## 实施结果
+
+revision 1 已由 `main@1f37b49e` 实现：
+
+- `ContextService` 在 Charter Evidence blob/digest 创建前从 frozen `runtimeAdapter` 选择 guidance；Codex exact
+  Charter 只出现一次新句，全部九个非 Codex Adapter 的 Charter 与共享正文逐字节相同；
+- Codex Binding compatibility input 新增 `codexSessionGuidanceRevision: 1`，共享
+  `sessionCharterRevision: 2` 与其余 Bootstrap/Formatter/Manifest/Profile/Transport/Send 版本保持不变；
+- Codex Charter Managed Blob 包含完整新句且持久 digest 与 bytes 一致；已有 Binding/generation 继续复用冻结
+  Evidence，不重写历史记录，无 Migration、backfill、legacy reader 或 dual write；
+- 正常 start/resume 与 resume failure replacement 继续原样传递 `PreparedSessionBootstrap.payload`；`main.rs` 与
+  Codex request transport 没有第二个 suffix；
+- 定向测试、Rust PR gate（299 fast library、20 CLI、273 slow）、`cargo fmt --all --check`、严格 library
+  Clippy、`pnpm docs:test`、`pnpm docs:check`、真实 base 的 `docs:check:ci`、Desktop build 与 diff check 通过；
+- workspace all-targets Clippy 仍被未改动的 `antigravity.rs` 两个既有 lint 阻塞：`large_enum_variant` 与
+  `collapsible_if`。本版未扩大范围修改该基线问题；
+- `pnpm package:mac` 通过 source/binary release gate 与 732-file legal payload gate。隔离 App 使用
+  `/tmp/rovai-v125-acceptance.tjw7id/user-data` 启动并确认独立 Core、SQLite 与 managed Skill Library 后受控退出；
+- 新 arm64 App 已非终止安装到 `/Applications/Rovai AI.app`；Core UUID 为
+  `C5099B58-F6F0-3815-BC9B-50869BA9D431`，CLI UUID 为 `C690023D-7E54-3D36-90DD-9B9DA45021FD`。被替换安装保存在
+  `/Applications/Rovai AI.backup-before-v1.25-20260822-1159.app`；当前日常进程仍映射到旧 bundle，未被终止或
+  热升级。
+
+多次真实 Codex AgentRun 的概率性行为观察须等待用户稍后退出当前旧进程，并从规范安装路径启动新版本后完成；
+在此之前版本状态保持 `in_progress`。
+
 ## References
 
 - [v1.25 版本概览](README.md)
