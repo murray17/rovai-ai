@@ -217,16 +217,16 @@ depending on the team.
 
 | Agent Runtime | MCP support | Skill support | Identity continuity |
 |---|---|---|---|
-| [**Claude Code**](https://code.claude.com/docs/en/installation) | Added alongside native | Added alongside native | Native support |
-| [**Codex CLI**](https://developers.openai.com/codex/cli/) | Added alongside native | Added alongside native | Native support |
-| [**OpenCode**](https://opencode.ai/docs/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [**GitHub Copilot CLI**](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [**Antigravity**](https://www.antigravity.google/docs/cli-getting-started) | Runtime-native only | Added alongside native | Based on Runtime capabilities |
-| [**Kiro CLI**](https://kiro.dev/docs/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [**Qoder CLI**](https://docs.qoder.com/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [**CodeBuddy**](https://www.codebuddy.ai/docs/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [**Qwen Code**](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [**TRAE CLI CN**](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
+| [Claude Code](https://code.claude.com/docs/en/installation) | Added alongside native | Added alongside native | Native support |
+| [Codex CLI](https://developers.openai.com/codex/cli/) | Added alongside native | Added alongside native | Native support |
+| [OpenCode](https://opencode.ai/docs/) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | Runtime-native only | Added alongside native | Based on Runtime capabilities |
+| [Kiro CLI](https://kiro.dev/docs/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [Qoder CLI](https://docs.qoder.com/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [CodeBuddy](https://www.codebuddy.ai/docs/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [TRAE CLI CN](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
 
 For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.

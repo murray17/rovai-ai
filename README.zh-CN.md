@@ -206,16 +206,16 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 
 | Agent Runtime | MCP 支持 | Skill 支持 | 队员身份保持 |
 |---|---|---|---|
-| [**Claude Code**](https://code.claude.com/docs/en/installation) | 兼容追加 | 兼容追加 | 原生方式支持 |
-| [**Codex CLI**](https://developers.openai.com/codex/cli/) | 兼容追加 | 兼容追加 | 原生方式支持 |
-| [**OpenCode**](https://opencode.ai/docs/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [**GitHub Copilot CLI**](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [**Antigravity**](https://www.antigravity.google/docs/cli-getting-started) | 支持 Runtime 原生 MCP | 兼容追加 | 基于 Runtime 能力 |
-| [**Kiro CLI**](https://kiro.dev/docs/cli/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [**Qoder CLI**](https://docs.qoder.com/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [**CodeBuddy**](https://www.codebuddy.ai/docs/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [**Qwen Code**](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [**TRAE CLI CN**](https://www.trae.cn/) | 兼容追加 | 兼容追加 | 基于 Runtime 能力 |
+| [Claude Code](https://code.claude.com/docs/en/installation) | 兼容追加 | 兼容追加 | 原生方式支持 |
+| [Codex CLI](https://developers.openai.com/codex/cli/) | 兼容追加 | 兼容追加 | 原生方式支持 |
+| [OpenCode](https://opencode.ai/docs/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | 支持 Runtime 原生 MCP | 兼容追加 | 基于 Runtime 能力 |
+| [Kiro CLI](https://kiro.dev/docs/cli/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [Qoder CLI](https://docs.qoder.com/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [CodeBuddy](https://www.codebuddy.ai/docs/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [TRAE CLI CN](https://www.trae.cn/) | 兼容追加 | 兼容追加 | 基于 Runtime 能力 |
 
 具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
 
