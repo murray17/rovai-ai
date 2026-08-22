@@ -305,7 +305,8 @@ Shell override: KIMI_SHELL_PATH
   Host/Session；正式 AgentRun 不覆盖 `HOME` / `KIMI_CODE_HOME`，继承用户原生状态根，Deep Probe 仍使用
   一次性临时 Home。原始 ACP Probe 证明同一 Home 的新进程可 exact resume/load 并保留上下文；产品级回归又
   证明显式停止后新 Host exact resume、Session ID 不变。snapshot 因而保留真实 `session.resume/load`；load
-  只作为带 replay quarantine 的 fallback；
+  只作为带 replay quarantine 的 fallback。真实 Core smoke 还定位并修复 Run-local MCP projection digest
+  误入 Host compatibility；完整 Server 集合不变的连续 Run 现复用同一 Host/Session；
 - `.kimi-code/skills` 已进入 Rovai managed projection，真实调用两次都返回唯一 Skill marker，并正确选择
   canonical `--to-principal` 且不触发当前用户注意力；External MCP 的原始 ACP stdio/相邻空 Session 隔离
   通过，产品 smoke 又经 Core、Assignment、AgentRun Projection、ContextManifest 与 MiniMax M3 真实 Tool

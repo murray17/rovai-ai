@@ -2710,16 +2710,19 @@ pub(crate) fn runtime_compatibility_digest(
             )
         })?;
     // TRAE's first real AgentRun upgrades an installed-unverified snapshot to
-    // Ready and therefore changes the full frozen config digest. Its MCP
-    // projection file digest is also Run-local because the file includes the
-    // AgentRun ID. Neither value is a Host launch input. Keep TRAE warm
-    // compatibility on the dedicated Host digest and the concrete resolved MCP
-    // server set below.
-    let excludes_run_local_digests = frozen_runtime.adapter_kind == AdapterKind::TraeCnCli;
+    // Ready and therefore changes the full frozen config digest. TRAE and Kimi
+    // MCP projection digests are also Run-local because their evidence includes
+    // the AgentRun identity. Those values are not Host launch inputs. The
+    // concrete resolved MCP server set below remains compatibility-authoritative.
+    let excludes_runtime_config_digest = frozen_runtime.adapter_kind == AdapterKind::TraeCnCli;
+    let excludes_mcp_projection_digest = matches!(
+        frozen_runtime.adapter_kind,
+        AdapterKind::TraeCnCli | AdapterKind::KimiCodeCli
+    );
     let runtime_config_digest =
-        (!excludes_run_local_digests).then_some(frozen_runtime.config_digest.as_str());
+        (!excludes_runtime_config_digest).then_some(frozen_runtime.config_digest.as_str());
     let mcp_projection_compatibility_digest =
-        (!excludes_run_local_digests).then_some(mcp_projection_digest);
+        (!excludes_mcp_projection_digest).then_some(mcp_projection_digest);
     canonical_json_digest(&json!({
         "schemaVersion": 3,
         "adapterKind": frozen_runtime.adapter_kind,
@@ -6109,7 +6112,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn trae_warm_compatibility_ignores_live_snapshot_upgrade_but_not_host_inputs() {
+    fn warm_compatibility_ignores_run_local_projection_but_not_host_inputs() {
         let root =
             std::env::temp_dir().join(format!("rovai-trae-compatibility-{}", uuid::Uuid::new_v4()));
         let attachments = root.join("attachments");
@@ -6172,6 +6175,52 @@ while IFS= read -r ignored; do :; done
                 headers: BTreeMap::new(),
             },
         );
+
+        let kimi = frozen_kimi_runtime(&executable);
+        let kimi_first = runtime_compatibility_digest(
+            &kimi,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:kimi-run-one-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        let kimi_next_run_projection = runtime_compatibility_digest(
+            &kimi,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:kimi-run-two-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        assert_eq!(kimi_next_run_projection, kimi_first);
+
+        let kimi_changed_mcp = runtime_compatibility_digest(
+            &kimi,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &changed_servers,
+            "sha256:kimi-run-three-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        assert_ne!(kimi_changed_mcp, kimi_first);
+
+        let mut kimi_changed_config = kimi.clone();
+        kimi_changed_config.config_digest = "sha256:kimi-changed-config".to_string();
+        let kimi_changed_config = runtime_compatibility_digest(
+            &kimi_changed_config,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:kimi-run-four-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        assert_ne!(kimi_changed_config, kimi_first);
+
         let changed_mcp = runtime_compatibility_digest(
             &upgraded,
             &workspace,

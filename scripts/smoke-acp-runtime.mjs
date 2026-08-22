@@ -275,9 +275,15 @@ try {
           && ['completed', 'failed'].includes(event.params?.payload?.status)
           && String(event.params?.payload?.output ?? '').includes(commandMarker)
       )
-      if (commandRun?.status !== 'succeeded' || !commandOutputEvent) {
+      const commandStart = events.find((event) =>
+        event.method === 'agent_run.started' && event.params?.agentRunId === commandRunId
+      )
+      if (commandRun?.status !== 'succeeded'
+          || !commandOutputEvent
+          || commandStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId) {
         throw new Error(`${specification.adapterKind} fixed printf output was not projected: ${JSON.stringify({
           commandRun,
+          commandStart,
           marker: commandMarker,
           runtimeActions: events.filter((event) =>
             event.method === 'runtime.action' && event.params?.agentRunId === commandRunId
@@ -287,7 +293,10 @@ try {
       results.at(-1).commandOutput = {
         marker: commandMarker,
         output: commandOutputEvent.params.payload.output,
-        approvalCount: commandApprovals.size
+        approvalCount: commandApprovals.size,
+        nativeSessionContinued: commandStart.params.nativeThreadId === results.at(-1).nativeSessionId,
+        warmHostReused: commandStart.params.hostInstanceId === results.at(-1).hostInstanceId,
+        hostInstanceId: commandStart.params.hostInstanceId
       }
       if (fullCommandOutputMatrix) {
         results.at(-1).commandOutputMatrix = await runCommandOutputMatrix({
@@ -367,6 +376,8 @@ try {
       const writeStart = events.find((event) =>
         event.method === 'agent_run.started' && event.params?.agentRunId === writeRunId
       )
+      const immediatelyPreviousHostInstanceId = commandStart?.params?.hostInstanceId
+        ?? results.at(-1).hostInstanceId
       const written = await readFile(writePath, 'utf8').catch((error) => {
         if (error?.code === 'ENOENT') return null
         throw error
@@ -377,15 +388,13 @@ try {
           || !writeActions.some((action) => action.status === 'succeeded')
           || (requiresNativeSessionContinuation
             && writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId)
-          || (specification.adapterKind === 'trae-cn-cli'
-            && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)
           || (['trae-cn-cli', 'kimi-code-cli'].includes(specification.adapterKind)
-            && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)) {
+            && writeStart?.params?.hostInstanceId !== immediatelyPreviousHostInstanceId)) {
         throw new Error(`ACP approved write did not converge: ${JSON.stringify({
           writeRun,
           writeActions,
           writeStart,
-          expectedHostInstanceId: results.at(-1).hostInstanceId,
+          expectedHostInstanceId: immediatelyPreviousHostInstanceId,
           expectedNativeSessionId: results.at(-1).nativeSessionId,
           written,
           hostLogs: events.filter((event) => event.method === 'runtime.host.log'),
@@ -397,7 +406,7 @@ try {
         actionKinds: writeActions.map((action) => action.actionKind),
         nativeSessionContinued: writeStart?.params?.nativeThreadId === results.at(-1).nativeSessionId,
         continuationStrategy: requiresNativeSessionContinuation ? 'native_session' : 'new_only',
-        warmHostReused: writeStart?.params?.hostInstanceId === results.at(-1).hostInstanceId,
+        warmHostReused: writeStart?.params?.hostInstanceId === immediatelyPreviousHostInstanceId,
         written
       }
 

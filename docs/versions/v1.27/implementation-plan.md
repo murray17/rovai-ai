@@ -22,7 +22,8 @@ last_updated: 2026-08-23
 - [x] Migration 105 扩展 Runtime closed kinds 和系统 Skill assignment；Migration 106 扩展 Compaction policy、
   Observer 与 Requirement closed kinds，升级 Data Contract v1.20 / schema 61；
 - [x] 正式 Kimi Host 继承用户原生 Home，Deep Probe 使用一次性临时 Home；严格 provider 环境、兼容 warm
-  Host/Session reuse 和跨新 Host exact continuation 保持不变；
+  Host/Session reuse 和跨新 Host exact continuation 保持不变；含 AgentRun identity 的 MCP projection/evidence
+  digest 不进入 Host compatibility，完整 Server 定义仍进入；
 - [x] Renderer catalog、成员参数、Onboarding、侧栏、监控和官方来源图标覆盖 Kimi。
 
 ## 3. ACP、安全与真实验收
@@ -42,7 +43,8 @@ last_updated: 2026-08-23
   证明正常完成后复用同一 Host/Session 且不调用 resume/load，并证明显式停止后不同 Host 在继承相同用户
   `KIMI_CODE_HOME`/unset 状态时执行 exact `session/resume`、Session ID 不变；
 - [x] External MCP 经真实 Core、Assignment、AgentRun Projection、ContextManifest 与模型 Tool call 验证
-  stdio、Streamable HTTP、`RovaiWins` 同名整项优先和完整定义投递；
+  stdio、Streamable HTTP、`RovaiWins` 同名整项优先和完整定义投递；真实 Core smoke 证明连续兼容 Run 在
+  Run-local projection digest 变化时仍复用同一 Kimi Host/Session；
 - [x] 异步 command/config advertisement 保持私有安全路由；当前产品不消费该 catalog，不列为遗留项；
 - [x] 复核 Kimi `0.32.0` 安装包、官方 `main` 与 E2E：内部 `compaction.completed` 会确定性转为一个固定四行
   `agent_message_chunk`；Rovai 严格 parser、idle/detached warm-Host route、policy/admission 与普通文本负向
@@ -58,7 +60,7 @@ last_updated: 2026-08-23
 - [x] Rust fmt/check、Kimi 配置/ACP/Health/Migration/Platform Admission 回归通过；
 - [x] TypeScript typecheck、Renderer 定向测试、Impeccable detector 与 legal asset gate 通过；
 - [x] docs test/check、benchmark contract 与敏感信息扫描通过；
-- [ ] 使用持久私有 provider 配置重新运行项目级真实 Kimi smoke，并核对正式 AgentRun 继承用户原生 Home、
+- [x] 使用持久私有 provider 配置重新运行项目级真实 Kimi smoke，并核对正式 AgentRun 继承用户原生 Home、
   Probe 临时隔离、配置权限与进程清理。
 
 验收不包含 macOS x64、Windows x64 的平台资格，也没有开启 Usage/Cost；Kimi Compaction compatibility

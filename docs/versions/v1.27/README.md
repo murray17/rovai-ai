@@ -42,7 +42,8 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   `<think>...</think>` 推理块不进入公开消息，完整闭合块被剥离，未闭合块 fail closed；
 - Kimi Skill 投影到 `.kimi-code/skills`；External MCP 通过标准 ACP Session `mcpServers` 以
   `AdditivePerRun / RovaiWins` 启用，stdio、Streamable HTTP 与真实模型 Tool call 已通过；warm Host/Session
-  reuse 已启用；Usage/Cost 保持 Disabled。Compaction 通过 Kimi-only idle ACP completion frame 以
+  reuse 已启用；Run-local MCP projection/evidence digest 不参与 Host compatibility，完整 Server 定义仍参与。
+  Usage/Cost 保持 Disabled。Compaction 通过 Kimi-only idle ACP completion frame 以
   `best_effort` 启用，不安装 Hook 或修改用户配置。capability snapshot 保留真实 `session.resume/load`，
   Host 停止或淘汰后由新 Host 优先精确 resume，load 只作 replay-quarantined fallback；
 - macOS arm64 声明 Built-in transport 并进入普通 discovery、检查、成员配置和执行路径；macOS x64 与
@@ -67,6 +68,8 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   后继新 Host 精确 resume；load 仅作为带 quarantine 的 fallback。v22 旧私有 Home 不自动迁移或删除；
 - 产品级 External MCP smoke 经 Core、Assignment、AgentRun Projection、ContextManifest 与真实模型 Tool call
   同时验证 stdio、Streamable HTTP 和 `RovaiWins` 同名整项优先；未写 Runtime 用户级配置；
+- 真实用户原生 Home smoke 定位并修复 Kimi Run-local MCP projection digest 误入 Host compatibility：同一完整
+  Server 集合的连续 Run 现在复用同一 Host/Session，Server 定义变化仍通过完整结构改变 compatibility digest；
 - Kimi 异步 command/config advertisement 只作为私有 metadata 安全路由。当前产品不消费该 catalog，因此
   不再把“缺少权威 async catalog snapshot”列为遗留问题；
 - Kimi `0.32.0` 与官方 `main` 都把内部 `compaction.completed` 转为固定四行

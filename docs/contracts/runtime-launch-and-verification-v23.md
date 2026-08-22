@@ -58,7 +58,9 @@ Kimi 的 External MCP 使用标准 ACP Session 字段，不写 Runtime 用户级
 - Projection 为 `AdditivePerRun`，同名策略为 `RovaiWins`；
 - `session/new`、`session/resume` 和 `session/load` 都接收本次冻结的 `mcpServers` 完整定义；
 - stdio 与 Streamable HTTP 均受支持，环境引用在投影冻结阶段解析；
-- MCP Server 集合与 projection digest 继续进入 Runtime compatibility digest；不兼容集合不得复用 Host；
+- 完整解析后的 MCP Server 集合继续进入 Runtime compatibility digest；Kimi 的 projection/evidence digest 含
+  AgentRun identity，属于 Run-local 证据，不进入 Host compatibility。Server 定义发生变化仍必须改变 digest，
+  不兼容集合不得复用 Host；
 - ContextManifest 保存 Server logical name、runtime name、transport、状态与同名策略，不保存解析后的秘密值；
 - 未分配或未配置 Server 的相邻 AgentRun 不继承前一 Run 的投影。
 
@@ -82,6 +84,8 @@ discovery、检查和 AgentRun 均不准入。Settings 的 Agent Runtime 目录�
 - Kimi Deep Probe 使用独立临时 Home，结束后不留下正式 Binding 或持久 Probe Session；
 - 两个兼容且正常完成的连续 AgentRun 使用相同 Host instance 与 Native Session ID，协议只有一次
   `session/new`，不得出现 `session/resume/load`；
+- 两个 AgentRun 的 projection/evidence digest 不同、但完整 MCP Server 集合相同时仍可 warm reuse；任一
+  Server 完整定义变化时不得复用旧 Host；
 - 显式停止首个 Host 后，兼容后继 AgentRun 在同一用户原生 Home 下使用不同 Host instance，执行 exact
   `session/resume` 并保持 Native Session ID 不变；
 - v22 旧私有 Home 中的 Session 不可见时只触发一次既有 continuity-lost replacement，不复制或删除用户数据；
