@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -70,12 +70,13 @@ Windows lane 使用与生产 `%LOCALAPPDATA%\Rovai AI` 同构但完全隔离的�
 User Data、Session Data、Logs、CrashDumps 和 Skill Library；它必须拒绝日常目录、junction/symlink 别名、UNC、
 network/removable/non-NTFS 目标。验收覆盖 unpacked App 与 installed App，且不能共享 fixture。
 
-自动化至少证明 native frame 下不存在 Renderer drag region、平台快捷键/Explorer 文案、Runtime Platform
-Admission 与 Availability 正交、历史 Runtime 子对象精确保留、Forced Colors DOM/CSS 和 IME composition
-不误提交。真实客户端 OS 另外覆盖：
+自动化至少证明 hidden title strip、四个顶层菜单入口与受限 native submenu 路由、WCO/rail 双主题同色、
+受控 Renderer drag region、8px Windows 侧栏顶部留白、平台快捷键/Explorer 文案、Runtime Platform Admission
+与 Availability 正交、历史 Runtime 子对象精确保留、Forced Colors DOM/CSS 和 IME composition 不误提交。
+真实客户端 OS 另外覆盖：
 
 - Windows 10 22H2、Windows 11，`1040×700`、`1440×920`，100/125/150/200% display scale 与 200% page zoom；
-- Snap、最大化/还原、Alt+Space、多屏不同 DPI、Day/Night/System、High Contrast/Forced Colors；
+- 顶层菜单与原生 submenu、Snap、最大化/还原、Alt+Space、多屏不同 DPI、Day/Night/System、High Contrast/Forced Colors；
 - keyboard-only、NVDA、中文 IME、Explorer、local NTFS storage blocker；
 - clean install、运行中 App upgrade、schema-incompatible downgrade、默认保留数据和显式删除数据的 uninstall。
 

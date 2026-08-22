@@ -1922,7 +1922,17 @@ export interface OnboardingApi {
 export interface WindowControlsApi {
   getResetCapability(): Promise<WindowResetCapability>
   resetBounds(): Promise<WindowResetResult>
+  popupApplicationMenu(request: WindowsApplicationMenuPopupRequest): Promise<boolean>
   onPageZoomChanged(listener: (percentage: number) => void): () => void
+}
+
+export type WindowsApplicationMenuSection = 'file' | 'edit' | 'view' | 'window'
+
+export interface WindowsApplicationMenuPopupRequest {
+  section: WindowsApplicationMenuSection
+  x: number
+  y: number
+  sourceType: 'mouse' | 'keyboard'
 }
 
 export interface NavigationPin {

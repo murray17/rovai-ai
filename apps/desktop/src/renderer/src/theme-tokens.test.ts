@@ -210,7 +210,7 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.project-heading-row\.current-project\s*\{[^}]*background: var\(--surface-selected\)/)
   })
 
-  it('gives Members and Memory the same full-width 50px window drag strip as other pages', () => {
+  it('gives every page a controlled drag region and compacts only the Windows sidebar inset', () => {
     expect(css).toContain(`.content.compose-content,
 .content.settings-content,
 .content.members-content,
@@ -227,9 +227,16 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
     expect(css).toMatch(/\.member-detail-header\s*\{(?![^}]*-webkit-app-region: drag)[^}]*\}/)
     expect(css).toMatch(/\.member-sidebar-actions\s*\{[^}]*position: relative[^}]*z-index: 3[^}]*-webkit-app-region: no-drag/)
     expect(css).toMatch(/\.member-detail-actions\s*\{[^}]*position: relative[^}]*z-index: 3/)
-    expect(css).toMatch(
-      /html\[data-rovai-platform="win32"\] \*,\s*html\[data-rovai-platform="win32"\] \*::before,\s*html\[data-rovai-platform="win32"\] \*::after\s*\{[^}]*-webkit-app-region: no-drag !important;/
-    )
+    expect(css).toMatch(/\.unified-sidebar-drag\s*\{[^}]*flex: 0 0 38px[^}]*-webkit-app-region: drag/)
+    expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.unified-sidebar-drag\s*\{[^}]*flex: 0 0 8px/)
+    expect(css).not.toContain('html[data-rovai-platform="win32"] *')
+  })
+
+  it('keeps the Windows menu projection on the rail token outside page layout', () => {
+    expect(css).toMatch(/html\[data-rovai-platform="win32"\] #root\s*\{[^}]*grid-template-rows: env\(titlebar-area-height, 32px\) minmax\(0, 1fr\)[^}]*background: var\(--rail\)/)
+    expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.windows-application-menu\s*\{[^}]*width: env\(titlebar-area-width, calc\(100% - 138px\)\)[^}]*background: var\(--rail\)[^}]*-webkit-app-region: drag/)
+    expect(css).toMatch(/\.windows-application-menu-item\s*\{[^}]*font: 400 12px\/1 "Segoe UI", sans-serif[^}]*-webkit-app-region: no-drag/)
+    expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.app-shell\s*\{[^}]*grid-row: 2[^}]*height: auto/)
   })
 
   it('uses solid, rule-free headers for the approved Memory, Appearance, and Reminder pages', () => {
