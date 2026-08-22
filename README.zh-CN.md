@@ -115,7 +115,7 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 
 ### 接下来，他们这样一起工作
 
-<table align="center">
+<table align="center" width="900">
   <tr>
     <td align="center" width="33%">
       <a href="docs/assets/readme/recruit-member.png">
