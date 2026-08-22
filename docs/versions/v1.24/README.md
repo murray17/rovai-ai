@@ -1,12 +1,12 @@
 ---
 document_type: version-overview
 version: v1.24
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: accepted
 implementation_status: implemented
 model_context_change: false
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 ---
 
 # Rovai-ai v1.24：Runtime Probe 完整边界与自动恢复
@@ -16,6 +16,8 @@ last_updated: 2026-08-21
 >
 > 前置版本：[v1.23 按需 Built-in CLI Help 与 Charter 精简](../v1.23/README.md)已按完成事实冻结为
 > historical；其 Built-in Transport v20、Session Charter revision 2 与安装事实继续作为本版基线。
+>
+> 后续版本：[v1.25 Codex 最终 Camp 答案发布指导](../v1.25/README.md)。
 
 ## 版本目标
 

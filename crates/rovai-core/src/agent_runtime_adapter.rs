@@ -20,7 +20,7 @@ use crate::{
         BUILTIN_TOOL_CONTRACT_VERSION, BUILTIN_TOOL_RUNTIME_CAPABILITY, builtin_tool_catalog_digest,
     },
     command::canonical_json_digest,
-    context_contract::native_binding_context_contract,
+    context_contract::{CODEX_SESSION_GUIDANCE_REVISION, native_binding_context_contract},
     mcp::McpServerDefinition,
     platform::HostPlatformKey,
     runtime_platform_admission::{
@@ -1048,6 +1048,7 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
             "permissionSchemaVersion": input.permissions.schema_version,
             "sessionPermissions": scoped_values(RuntimeOptionScope::Session)?,
             "contextContract": native_binding_context_contract(),
+            "codexSessionGuidanceRevision": CODEX_SESSION_GUIDANCE_REVISION,
         }))?;
         let host_config_digest = canonical_json_digest(&json!({
             "adapterKind": self.kind(),
@@ -2415,6 +2416,36 @@ mod tests {
         assert_eq!(
             resolved.binding_compatibility_digest, changed_session_key.binding_compatibility_digest,
             "the Adapter session key is persisted and evaluated independently"
+        );
+        let current_contract_digest = canonical_json_digest(&json!({
+            "adapterKind": AdapterKind::CodexCli,
+            "installationId": "codex-local",
+            "protocolVersion": "codex-app-server-v2",
+            "permissionSchemaVersion": 1,
+            "sessionPermissions": {"sandbox_mode": "value"},
+            "contextContract": native_binding_context_contract(),
+            "codexSessionGuidanceRevision": CODEX_SESSION_GUIDANCE_REVISION,
+        }))
+        .unwrap();
+        let legacy_contract_digest = canonical_json_digest(&json!({
+            "adapterKind": AdapterKind::CodexCli,
+            "installationId": "codex-local",
+            "protocolVersion": "codex-app-server-v2",
+            "permissionSchemaVersion": 1,
+            "sessionPermissions": {"sandbox_mode": "value"},
+            "contextContract": native_binding_context_contract(),
+        }))
+        .unwrap();
+        assert_eq!(
+            resolved.binding_compatibility_digest,
+            current_contract_digest
+        );
+        assert_ne!(current_contract_digest, legacy_contract_digest);
+        assert!(
+            native_binding_context_contract()
+                .get("codexSessionGuidanceRevision")
+                .is_none(),
+            "Codex guidance revision must not enter the shared Adapter context contract"
         );
     }
 

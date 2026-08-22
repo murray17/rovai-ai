@@ -1,8 +1,8 @@
 ---
 document_type: version-decisions
 version: v1.24
-lifecycle: current
-last_updated: 2026-08-21
+lifecycle: historical
+last_updated: 2026-08-22
 ---
 
 # v1.24 决定记录
