@@ -80,17 +80,11 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 以及谁适合先开口。
 
 <p align="center">
-  <a href="docs/assets/readme/camp-conversation.png">
-    <img
-      src="docs/assets/readme/camp-conversation.png"
-      alt="游学者叮叮、雪豹芝士、猫头鹰咕咕和绘画师小兔第一次在 Rovai AI Camp 中会合"
-      width="100%"
-    >
-  </a>
-</p>
-
-<p align="center">
-  <sub>叮叮、芝士、咕咕和小兔第一次在 Camp 中会合。点击图片查看完整截图。</sub>
+  <img
+    src="docs/assets/readme/camp-conversation.png"
+    alt="Rovai AI Camp 会话视图，包含会话区、执行台、队员与任务区域"
+    width="800"
+  >
 </p>
 
 <details>
@@ -123,56 +117,40 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 
 <table>
   <tr>
-    <td width="33%" valign="top">
+    <td align="center" width="33%">
       <a href="docs/assets/readme/recruit-member.png">
         <img
           src="docs/assets/readme/recruit-member.png"
-          alt="Rovai AI 队员招募流程"
-          width="100%"
+          alt="Rovai AI 招募伙伴"
+          width="250"
         >
       </a>
-      <p align="center">
-        <strong>招募伙伴</strong><br>
-        <sub>Member Studio</sub>
-      </p>
-      <p>
-        队员不是模型列表里的另一个名字。你先描述想遇见怎样的伙伴，
-        再确认他的身份、性格、职责、头像与 Runtime。
-      </p>
+      <br>
+      <strong>招募伙伴</strong>
     </td>
-    <td width="33%" valign="top">
+
+    <td align="center" width="33%">
       <a href="docs/assets/readme/grill-duo.png">
         <img
           src="docs/assets/readme/grill-duo.png"
-          alt="Rovai AI grill-duo 双人追问"
-          width="100%"
+          alt="Rovai AI 双人追问"
+          width="250"
         >
       </a>
-      <p align="center">
-        <strong>把问题问到底</strong><br>
-        <sub>grill-duo</sub>
-      </p>
-      <p>
-        一个队员负责追问，另一个负责反驳。两种视角互相较劲，
-        直到模糊的想法被磨成能够行动的决定。
-      </p>
+      <br>
+      <strong>双人追问</strong>
     </td>
-    <td width="33%" valign="top">
+
+    <td align="center" width="33%">
       <a href="docs/assets/readme/campfire.png">
         <img
           src="docs/assets/readme/campfire.png"
-          alt="Rovai AI campfire 篝火会议"
-          width="100%"
+          alt="Rovai AI 篝火会议"
+          width="250"
         >
       </a>
-      <p align="center">
-        <strong>围着篝火形成方向</strong><br>
-        <sub>campfire</sub>
-      </p>
-      <p>
-        遇到需要整支队伍判断的问题，伙伴们先独立表达观点，
-        再把共识、分歧和证据缺口放到一起，由 Principal 决定下一步。
-      </p>
+      <br>
+      <strong>篝火会议</strong>
     </td>
   </tr>
 </table>
