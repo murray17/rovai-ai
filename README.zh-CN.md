@@ -218,9 +218,9 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 
 具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
 
-Kimi Code 当前仅完成 macOS arm64 准入；macOS x64 与 Windows x64 尚未准入。
-Windows x64 Preview 当前只有 Claude Code 完成资格准入；其他 Runtime 目录项仍会显示，但在各自 Windows
-证据完整前不可检查、不可选择。
+Kimi Code 当前已完成 macOS arm64 与 Windows x64 准入；macOS x64 尚未准入。
+Windows x64 Preview 当前设置页展示的十一种 Runtime 均已完成资格准入；Cursor Agent 不在当前设置页范围，
+并继续保持 Windows 未准入。
 
 ---
 

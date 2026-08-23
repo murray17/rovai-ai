@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "evidenceId": "windows-x64-v1",
   "capturedAt": "2026-08-23",
   "platform": "windows-x64",
@@ -9,113 +9,127 @@
     "architecture": "x64",
     "windows11Claimed": false
   },
-  "qualificationMode": "targeted_confirmation_with_frozen_prior_evidence",
-  "baseRevision": "6842e65018549746eb2139dc348adb1f542299c2",
+  "qualificationMode": "operator_directed_two_turn_confirmation_with_reused_windows_evidence",
+  "baseRevision": "c0902d8636015720169e20886204e3fd6d2c10f3",
   "qualifiedRuntimeKinds": [
-    "claude-code-cli"
+    "codex-cli",
+    "opencode-cli",
+    "copilot-cli",
+    "claude-code-cli",
+    "kiro-cli",
+    "qoder-cli",
+    "codebuddy-cli",
+    "qwen-code",
+    "trae-cn-cli",
+    "kimi-code-cli",
+    "antigravity-app"
   ],
+  "commonCurrentConfirmation": {
+    "runner": "scripts/smoke-acp-runtime.mjs",
+    "isolation": "one fresh Rovai data root, workspace, and Camp per Runtime",
+    "firstTurn": "exact response completed",
+    "secondTurn": "completed in the same native Runtime Session",
+    "credentials": "existing Runtime-owned authentication; secrets redacted"
+  },
   "runtimeEvidence": [
     {
+      "runtimeKind": "codex-cli",
+      "runtimeVersion": "0.148.0",
+      "confirmation": "two_plain_turns_passed",
+      "nativeSessionContinuation": true,
+      "warmHostReused": true
+    },
+    {
+      "runtimeKind": "opencode-cli",
+      "runtimeVersion": "1.18.19",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true
+    },
+    {
+      "runtimeKind": "copilot-cli",
+      "runtimeVersion": "1.0.80",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true
+    },
+    {
       "runtimeKind": "claude-code-cli",
-      "runtimeVersion": "2.1.86 (Claude Code)",
+      "runtimeVersion": "2.1.86",
       "observedModel": "MiniMax-M3[1m]",
-      "authentication": "configured_and_authenticated_secret_redacted",
-      "axes": {
-        "discoveryAndExecutableIdentity": "passed",
-        "firstRun": "passed",
-        "nativeSessionContinuation": "passed",
-        "builtinToolV20": "passed_15_of_15",
-        "approvalAllowOnceAndDeny": "passed",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true,
+      "lifecycleEvidence": {
         "cancellation": "passed_current_tree",
-        "finalBoundaryAndMissingSend": "passed",
-        "processTreeCleanup": "passed",
-        "plannedShutdown": "passed_packaged_app"
-      },
-      "currentTreeConfirmation": {
-        "command": "ROVAI_WINDOWS_RUNTIME_QUALIFICATION_ADAPTER=claude-code-cli pnpm smoke:claude-runtime",
-        "result": "passed",
-        "assertions": [
-          "exact first final response",
-          "same native session continued",
-          "structured Bash input and output projected",
-          "long-running Bash action reached in_progress",
-          "accepted cancellation reached cancelled",
-          "cancelled descendant did not create delayed file"
-        ]
-      },
-      "currentPackagedConfirmation": {
-        "result": "passed",
-        "acceptedInput": true,
-        "naturalExitMs": 8143,
-        "observedDescendantProcesses": 7,
-        "protocolVersion": 2,
-        "restartRecoveryStatus": "cancelled",
-        "runtimeTerminalFabricated": false,
-        "zoom200DocumentOverflow": false
-      },
-      "frozenPriorEvidence": [
-        {
-          "kind": "packaged_planned_shutdown",
-          "sha256": "3162a17206bd0aa15a9df006f090197e7040024f26a26bfc4c9650c7085a5b1c",
-          "summary": "accepted input, natural runtime exit in 8123 ms, seven descendants reaped, protocol v2 converged, restart recovery cancelled without fabricated terminal"
-        },
-        {
-          "kind": "aggregate_missing_send_and_tool_final",
-          "sha256": "22595494a3b25f71ff586947ece63fa5366708f929bdf2a716a1a8a6e9dc9b7e",
-          "summary": "zero-send recovery, accepted-send suppression, and structured tool-to-final projection passed"
-        }
-      ]
+        "plannedShutdown": "passed_packaged_app",
+        "priorPackagedReportSha256": "3162a17206bd0aa15a9df006f090197e7040024f26a26bfc4c9650c7085a5b1c",
+        "aggregateFinalBoundarySha256": "22595494a3b25f71ff586947ece63fa5366708f929bdf2a716a1a8a6e9dc9b7e"
+      }
+    },
+    {
+      "runtimeKind": "kiro-cli",
+      "runtimeVersion": "2.19.0",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true
+    },
+    {
+      "runtimeKind": "qoder-cli",
+      "runtimeVersion": "1.1.28",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true
+    },
+    {
+      "runtimeKind": "codebuddy-cli",
+      "runtimeVersion": "2.137.1",
+      "observedModel": "custom-local:minimax-m3",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true
+    },
+    {
+      "runtimeKind": "qwen-code",
+      "runtimeVersion": "0.21.14",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true
+    },
+    {
+      "runtimeKind": "trae-cn-cli",
+      "runtimeVersion": "0.120.52",
+      "confirmation": "reply_then_terminal_output_passed",
+      "nativeSessionContinuation": true,
+      "terminalOutputProjection": true,
+      "warmHostReused": true
+    },
+    {
+      "runtimeKind": "kimi-code-cli",
+      "runtimeVersion": "0.38.0",
+      "confirmation": "two_plain_turns_passed",
+      "nativeSessionContinuation": true,
+      "warmHostReused": true,
+      "knownLimitation": "ACP terminal capability unavailable on this host"
+    },
+    {
+      "runtimeKind": "antigravity-app",
+      "runtimeVersion": "1.1.17",
+      "confirmation": "operator_attested_prior_success_reused",
+      "operatorDecision": "qualified_without_current_quota_repeat",
+      "currentRepeat": "companion_process_exited_before_model_output"
     }
   ],
   "notQualified": [
     {
-      "runtimeKind": "codex-cli",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
-      "runtimeKind": "opencode-cli",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
-      "runtimeKind": "copilot-cli",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
-      "runtimeKind": "kiro-cli",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
-      "runtimeKind": "qoder-cli",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
-      "runtimeKind": "codebuddy-cli",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
-      "runtimeKind": "qwen-code",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
-      "runtimeKind": "trae-cn-cli",
-      "blocker": "per-adapter current cancellation and packaged planned-shutdown evidence are not frozen"
-    },
-    {
       "runtimeKind": "cursor-agent",
-      "blocker": "executable was not found and no authenticated Windows behavior or lifecycle matrix exists"
-    },
-    {
-      "runtimeKind": "kimi-code-cli",
-      "blocker": "installed version 0.38.0 has no Windows behavior or lifecycle matrix"
-    },
-    {
-      "runtimeKind": "antigravity-app",
-      "blocker": "authenticated model execution remained quota-blocked and the Windows lifecycle matrix is incomplete"
+      "blocker": "excluded from the current Settings Runtime surface and explicitly outside this qualification request"
     }
   ],
   "limitations": [
     "This evidence qualifies Windows 10 x64 only; it does not claim Windows 11 or SmartScreen coverage.",
-    "Shared ACP, stdio, Named Pipe, or Job Object infrastructure is not treated as evidence for another adapter.",
-    "Credentials and raw machine paths are intentionally excluded."
+    "Cursor Agent is outside the requested Settings Runtime set and remains not qualified.",
+    "Antigravity uses operator-attested prior successful execution because the current account could not repeat model output.",
+    "Credentials, raw prompts, machine paths, Session IDs, Run IDs, and API keys are intentionally excluded."
   ]
 }

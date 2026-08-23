@@ -22,8 +22,9 @@ Rovai AI 可以通过桌面安装包使用，也可以从源码启动开发版�
 
 每个 Release 实际提供哪些平台，以该版本页面中的下载文件为准。
 Windows x64 Preview 当前未签名，SmartScreen 可能显示“未知发布者”；请只从 Rovai AI 官方 GitHub Release
-下载安装包。Windows Preview 当前只有 Claude Code 完成 Runtime 平台准入，其他目录项在各自证据完整前显示
-“Windows 尚未验证不可检查”。
+下载安装包。Windows Preview 当前设置页展示的十一种 Runtime 均已完成平台准入；Cursor Agent 不在当前
+设置页范围，并继续保持 Windows 未准入。Windows 安装向导会显示安装目录选择页；默认使用当前用户目录，
+也可以改为其他当前用户可写目录。该 Preview 安装器不会请求管理员权限，因此不要选择需要管理员写入权限的系统目录。
 
 ## 第一次启动
 
@@ -66,7 +67,7 @@ Windows x64 Preview 当前未签名，SmartScreen 可能显示“未知发布者
 | 未安装 | 没有找到对应可执行程序 | 按该 Runtime 的官方文档安装 |
 | 需要处理 | 版本、环境或启动检查存在问题 | 打开详情，根据提示处理后重新检查 |
 | 暂时未知 | 当前证据不足，不能确认是否可用 | 重新扫描，或执行一次显式可用性检查 |
-| Windows 尚未验证不可检查 | 该 Runtime 尚未完成独立 Windows x64 资格，不是安装、登录或扫描故障 | 改用已准入的 Claude Code，或等待该 Runtime 完成 Windows 资格 |
+| Windows 尚未验证不可检查 | 该 Runtime 尚未完成独立 Windows x64 资格，不是安装、登录或扫描故障 | 当前仅适用于设置页范围外的 Cursor Agent |
 
 模型目录和完整能力可能要在显式检查或第一次真实任务前确认。只看到 Runtime 已安装，并不等于所有模型和权限能力都已经准备完成。
 

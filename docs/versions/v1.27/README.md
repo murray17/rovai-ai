@@ -23,8 +23,9 @@ last_updated: 2026-08-23
 >
 > Windows x64 证据复核采用逐 Adapter 门禁：Claude Code `2.1.86` 在 Windows 10 x64 以 MiniMax M3 1M 完成
 > 当前树 cancellation 目标确认，并复用同版本已冻结的 Built-in、Approval、final boundary、进程树回收与
-> packaged planned-shutdown 证据，成为首个 Windows `qualified` Runtime。其他十一种 Runtime 不借用共享
-> 基础设施或 Claude 证据，继续保持 `not_qualified`。同一 packaged 验收还修复 Windows titlebar overlay
+> packaged planned-shutdown 证据，成为首个 Windows `qualified` Runtime。随后按操作员要求为设置页范围内每种
+> Runtime 建立独立两轮 Camp 目标确认；十一种设置页 Runtime 均为 `qualified`，只有范围外 Cursor 保持
+> `not_qualified`。同一 packaged 验收还修复 Windows titlebar overlay
 > 宽度在 200% zoom 下撑大根 grid 的问题，1040×700 Day/Night 与 200% zoom 均无文档级横向溢出。
 >
 > 前置版本：[v1.26 Cursor Agent Catalog 接入](../v1.26/README.md)已按冻结时事实转为 historical。

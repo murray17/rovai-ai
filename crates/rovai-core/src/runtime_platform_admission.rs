@@ -8,13 +8,13 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:0146387938ae8f8ae0307fd08bee7f0d734cceb03f22e00106628503a75e38c1";
+    "sha256:6a1a11634d38a5ef03767c68b49eebd9a0883cb7c54250acfa7fd60dfb27bad6";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
 /// Windows process infrastructure cannot promote any other Adapter.
 pub const WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:200b79edb09a0751a767d3c1a16a1422b8424ffa3200c56d43f36c4f20f8abd9";
+    "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -185,7 +185,7 @@ mod tests {
 
         for runtime_kind in AdapterKind::ALL {
             let admission = registry.platform_admission(runtime_kind, HostPlatformKey::WindowsX64);
-            if runtime_kind == AdapterKind::ClaudeCodeCli {
+            if runtime_kind != AdapterKind::CursorAgent {
                 assert!(admission.is_qualified());
                 assert_eq!(admission.reason_code(), None);
                 assert_eq!(
@@ -262,10 +262,10 @@ mod tests {
     fn wire_projection_uses_contract_field_and_enum_names() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let blocked = serde_json::to_value(
-            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
+            registry.platform_admission(AdapterKind::CursorAgent, HostPlatformKey::WindowsX64),
         )
         .unwrap();
-        assert_eq!(blocked["runtimeKind"], "codex-cli");
+        assert_eq!(blocked["runtimeKind"], "cursor-agent");
         assert_eq!(blocked["platform"], "windows-x64");
         assert_eq!(blocked["status"], "not_qualified");
         assert_eq!(
@@ -275,10 +275,10 @@ mod tests {
         assert!(blocked["evidenceRevision"].is_null());
 
         let qualified = serde_json::to_value(
-            registry.platform_admission(AdapterKind::ClaudeCodeCli, HostPlatformKey::WindowsX64),
+            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
         )
         .unwrap();
-        assert_eq!(qualified["runtimeKind"], "claude-code-cli");
+        assert_eq!(qualified["runtimeKind"], "codex-cli");
         assert_eq!(qualified["platform"], "windows-x64");
         assert_eq!(qualified["status"], "qualified");
         assert!(qualified["reasonCode"].is_null());

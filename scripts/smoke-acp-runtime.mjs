@@ -18,6 +18,7 @@ const commandOutputOnly = process.env.ROVAI_ACP_COMMAND_OUTPUT_ONLY === '1'
 const keepFixture = process.env.ROVAI_KEEP_ACP_RUNTIME_FIXTURE === '1'
 const fullCommandOutputMatrix = process.env.ROVAI_ACP_FULL_COMMAND_MATRIX === '1'
 const useProductPermissionDefaults = process.env.ROVAI_ACP_USE_PRODUCT_PERMISSION_DEFAULTS === '1'
+const plainTwoTurn = process.env.ROVAI_ACP_PLAIN_TWO_TURN === '1'
 let core
 let shuttingDown = false
 
@@ -90,6 +91,11 @@ try {
   // use each Adapter's verified native maximum, including Kimi `yolo`.
   const specifications = [
     {
+      adapterKind: 'codex-cli',
+      permissionValues: { sandbox_mode: 'danger-full-access', approval_policy: 'never' },
+      token: 'ROVAI_CODEX_TWO_TURN_OK'
+    },
+    {
       adapterKind: 'opencode-cli',
       permissionValues: { permission: process.env.ROVAI_OPENCODE_PERMISSION ?? 'ask' },
       token: 'ROVAI_OPENCODE_ACP_OK'
@@ -98,6 +104,11 @@ try {
       adapterKind: 'copilot-cli',
       permissionValues: { allow_all: process.env.ROVAI_COPILOT_ALLOW_ALL ?? 'off' },
       token: 'ROVAI_COPILOT_ACP_OK'
+    },
+    {
+      adapterKind: 'claude-code-cli',
+      permissionValues: { permission_mode: 'bypassPermissions' },
+      token: 'ROVAI_CLAUDE_TWO_TURN_OK'
     },
     {
       adapterKind: 'kiro-cli',
@@ -125,9 +136,23 @@ try {
       token: 'ROVAI_TRAE_ACP_OK'
     },
     {
+      adapterKind: 'cursor-agent',
+      permissionValues: { execution_mode: 'agent', approval_policy: 'force' },
+      token: 'ROVAI_CURSOR_TWO_TURN_OK'
+    },
+    {
       adapterKind: 'kimi-code-cli',
       permissionValues: { permission_mode: process.env.ROVAI_KIMI_PERMISSION_MODE ?? 'default' },
       token: 'ROVAI_KIMI_ACP_OK'
+    },
+    {
+      adapterKind: 'antigravity-app',
+      permissionValues: {
+        mode: 'accept-edits',
+        sandbox: 'off',
+        dangerously_skip_permissions: 'on'
+      },
+      token: 'ROVAI_ANTIGRAVITY_TWO_TURN_OK'
     }
   ].filter((specification) => !process.env.ROVAI_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.ROVAI_ACP_SMOKE_ADAPTER)
   const results = []
@@ -267,10 +292,13 @@ try {
 
     if (specifications.some(({ adapterKind }) => adapterKind === specification.adapterKind)) {
       const commandMarker = `ROVAI_${specification.adapterKind.replaceAll('-', '_').toUpperCase()}_PRINTF_OK`
+      const secondTurnToken = `ROVAI_${specification.adapterKind.replaceAll('-', '_').toUpperCase()}_SECOND_TURN_OK`
       const commandRequest = await sendExistingCampMessage(
         request,
         camp.id,
-        `Use the Bash or terminal tool exactly once to run this cross-platform command without changing files: echo ${commandMarker}. Do not call any other tool. Then immediately reply exactly ACP_COMMAND_OUTPUT_OK.`,
+        plainTwoTurn
+          ? `Do not call tools or inspect files. Reply with exactly ${secondTurnToken} and nothing else.`
+          : `Use the Bash or terminal tool exactly once to run this cross-platform command without changing files: echo ${commandMarker}. Do not call any other tool. Then immediately reply exactly ACP_COMMAND_OUTPUT_OK.`,
         {
           taskId: null,
           purpose: 'Verify fixed command output enters Runtime Evidence',
@@ -330,8 +358,14 @@ try {
       const commandStart = events.find((event) =>
         event.method === 'agent_run.started' && event.params?.agentRunId === commandRunId
       )
+      const commandOutputMessage = commandSnapshot?.messages.find((message) =>
+        message.sourceAgentRunId === commandRunId
+      )
+      const secondTurnObserved = plainTwoTurn
+        ? commandOutputMessage?.body.includes(secondTurnToken)
+        : Boolean(commandOutputEvent)
       if (commandRun?.status !== 'succeeded'
-          || !commandOutputEvent
+          || !secondTurnObserved
           || commandStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId) {
         throw new Error(`${specification.adapterKind} fixed printf output was not projected: ${JSON.stringify({
           commandRun,
@@ -349,11 +383,13 @@ try {
         })}`)
       }
       results.at(-1).commandOutput = {
-        marker: commandMarker,
-        output: commandOutputEvent.params.payload.output
-          ?? commandOutputEvent.params.canonical?.presentationHint,
-        outcome: commandOutputEvent.params.canonical?.outcome ?? 'observed',
-        rawOutputDigest: commandOutputEvent.params.payload.rawOutputDigest ?? null,
+        marker: plainTwoTurn ? secondTurnToken : commandMarker,
+        output: plainTwoTurn
+          ? commandOutputMessage.body
+          : commandOutputEvent.params.payload.output
+            ?? commandOutputEvent.params.canonical?.presentationHint,
+        outcome: plainTwoTurn ? 'succeeded' : commandOutputEvent.params.canonical?.outcome ?? 'observed',
+        rawOutputDigest: plainTwoTurn ? null : commandOutputEvent.params.payload.rawOutputDigest ?? null,
         approvalCount: commandApprovals.size,
         nativeSessionContinued: commandStart.params.nativeThreadId === results.at(-1).nativeSessionId,
         warmHostReused: commandStart.params.hostInstanceId === results.at(-1).hostInstanceId,
