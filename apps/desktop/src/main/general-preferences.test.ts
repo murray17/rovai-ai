@@ -32,6 +32,18 @@ describe('general preferences', () => {
 
   it('accepts only the exact schema and finite enums', () => {
     expect(parseGeneralPreferences({
+      schemaVersion: 3,
+      startupLocationMode: 'last_location',
+      lastSettingsSection: 'about',
+      executionConsolePlacement: 'bottom',
+      newConversationDefaults: null,
+      newConversationDefaultsRequireConfirmation: false,
+      oneClickNewConversationEnabled: false
+    })).toEqual({
+      ...DEFAULT_GENERAL_PREFERENCES,
+      lastSettingsSection: 'about'
+    })
+    expect(parseGeneralPreferences({
       schemaVersion: 1,
       startupLocationMode: 'quick_chat',
       lastSettingsSection: 'diagnostics'

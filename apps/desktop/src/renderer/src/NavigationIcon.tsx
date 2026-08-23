@@ -5,6 +5,7 @@ export type NavigationIconName =
   | 'brain'
   | 'chart-line'
   | 'cpu'
+  | 'info'
   | 'settings'
   | 'sliders-horizontal'
   | 'sparkles'
@@ -57,6 +58,8 @@ function navigationIconPaths(name: NavigationIconName): React.JSX.Element {
       return <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="8.5" y="14" width="7" height="7" rx="1.5" /><path d="M6.5 10v2h11v-2" /><path d="M12 12v2" /></>
     case 'cpu':
       return <><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" rx="1" /><path d="M9 1v3" /><path d="M15 1v3" /><path d="M9 20v3" /><path d="M15 20v3" /><path d="M20 9h3" /><path d="M20 14h3" /><path d="M1 9h3" /><path d="M1 14h3" /></>
+    case 'info':
+      return <><circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><path d="M12 7.25h.01" /></>
     case 'stethoscope':
       return <><path d="M5 3v5a4 4 0 0 0 8 0V3" /><path d="M5 3H4" /><path d="M13 3h1" /><path d="M9 12v3a4 4 0 0 0 4 4h1" /><circle cx="17" cy="17" r="3" /></>
   }

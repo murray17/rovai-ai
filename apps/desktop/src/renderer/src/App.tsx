@@ -66,6 +66,7 @@ import { NewConversationDialog } from './NewConversationDialog'
 import { openRuntimeModelCatalog } from './runtime-check'
 import { PanelToggleIcon } from './PanelToggleIcon'
 import { AppearanceSettings } from './AppearanceSettings'
+import { AboutUpdatesSettings } from './AboutUpdatesSettings'
 import {
   NotificationAttentionController,
   type NotificationNavigationResult
@@ -3117,6 +3118,9 @@ export function SettingsView({
         )}
         {section === 'diagnostics' && (
           <DiagnosticsCenter onNavigate={onDiagnosticsNavigate} platform={platform} />
+        )}
+        {section === 'about' && (
+          <AboutUpdatesSettings />
         )}
       </div>
     </div>
