@@ -219,7 +219,7 @@ depending on the team.
 | [Claude Code](https://code.claude.com/docs/en/installation) | Added alongside native | Added alongside native | Native support |
 | [Codex CLI](https://developers.openai.com/codex/cli/) | Added alongside native | Added alongside native | Native support |
 | [OpenCode](https://opencode.ai/docs/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | Runtime-native only | Added alongside native | Based on Runtime capabilities |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Qoder CLI](https://docs.qoder.com/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
@@ -230,10 +230,6 @@ depending on the team.
 
 For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.
-
-Kimi Code is qualified on macOS arm64 and Windows x64; macOS x64 remains not qualified.
-On Windows x64, all eleven Runtimes exposed by Settings are qualified. Cursor Agent remains
-outside the current Settings scope and is not qualified on Windows.
 
 ---
 

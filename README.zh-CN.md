@@ -9,9 +9,11 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 属于这支队伍的默契与协作记忆。
 
 <p>
-  <img src="https://img.shields.io/badge/platform-macOS-111111?logo=apple&logoColor=white" alt="macOS">
-  <img src="https://img.shields.io/badge/Windows_x64-unsigned-4b8f77?logo=windows11&logoColor=white" alt="Windows x64 unsigned">
+  <a href="https://github.com/murray17/rovai-ai/releases"><img src="https://img.shields.io/badge/macOS-arm64%20%2B%20x64-111111?logo=apple&logoColor=white" alt="macOS arm64 + x64"></a>
+  <a href="https://github.com/murray17/rovai-ai/releases"><img src="https://img.shields.io/badge/Windows-x64-0078D4?logo=windows11&logoColor=white" alt="Windows x64"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4b8f77" alt="MIT License"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.85%2B-000000?logo=rust&logoColor=white" alt="Rust 1.85+"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white" alt="Node.js 24+"></a>
 </p>
 
 <p>
@@ -206,7 +208,7 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 | [Claude Code](https://code.claude.com/docs/en/installation) | 兼容追加 | 兼容追加 | 原生方式支持 |
 | [Codex CLI](https://developers.openai.com/codex/cli/) | 兼容追加 | 兼容追加 | 原生方式支持 |
 | [OpenCode](https://opencode.ai/docs/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
 | [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | 支持 Runtime 原生 MCP | 兼容追加 | 基于 Runtime 能力 |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
 | [Qoder CLI](https://docs.qoder.com/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
@@ -216,10 +218,6 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 | [Kimi Code](https://github.com/MoonshotAI/kimi-code) | 兼容追加 | 兼容追加 | 原生续接；压缩后重投递 |
 
 具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
-
-Kimi Code 当前已完成 macOS arm64 与 Windows x64 准入；macOS x64 尚未准入。
-Windows x64 当前设置页展示的十一种 Runtime 均已完成资格准入；Cursor Agent 不在当前设置页范围，
-并继续保持 Windows 未准入。
 
 ---
 
@@ -242,7 +240,7 @@ Windows x64 当前设置页展示的十一种 Runtime 均已完成资格准入�
 <p align="center">
   <img
     src="docs/assets/readme/rovai-architecture.png"
-    alt="Rovai AI architecture showing Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and runtime-native capabilities"
+    alt="Rovai AI architecture showing Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and Runtime-native capabilities"
     width="100%"
   >
 </p>
