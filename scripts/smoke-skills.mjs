@@ -20,7 +20,7 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-'))
+const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-skills-smoke-')))
 const projectRoot = join(fixtureRoot, 'project')
 const sourceRoot = join(fixtureRoot, 'imports')
 const sourceSkill = join(sourceRoot, 'rovai-skill-smoke')
@@ -39,7 +39,8 @@ const requestedAdapters = adapterSelection === 'all'
       'qoder-cli',
       'codebuddy-cli',
       'qwen-code',
-      'trae-cn-cli'
+      'trae-cn-cli',
+      'kimi-code-cli'
     ]
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
@@ -52,7 +53,8 @@ const supportedAdapters = new Set([
   'qoder-cli',
   'codebuddy-cli',
   'qwen-code',
-  'trae-cn-cli'
+  'trae-cn-cli',
+  'kimi-code-cli'
 ])
 const allDeliveryGroups = [
   'antigravity',
@@ -60,6 +62,8 @@ const allDeliveryGroups = [
   'codebuddy',
   'codex',
   'copilot',
+  'cursor',
+  'kimi',
   'kiro',
   'opencode',
   'qoder',
@@ -612,6 +616,7 @@ function groupRoot(groupKey) {
   if (groupKey === 'codebuddy') return '.codebuddy/skills'
   if (groupKey === 'qwen') return '.qwen/skills'
   if (groupKey === 'trae') return '.trae/skills'
+  if (groupKey === 'kimi') return '.kimi-code/skills'
   throw new Error(`Unknown Skill delivery group: ${groupKey}`)
 }
 
@@ -626,6 +631,7 @@ function deliveryGroup(adapterKind) {
   if (adapterKind === 'codebuddy-cli') return 'codebuddy'
   if (adapterKind === 'qwen-code') return 'qwen'
   if (adapterKind === 'trae-cn-cli') return 'trae'
+  if (adapterKind === 'kimi-code-cli') return 'kimi'
   throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
 }
 

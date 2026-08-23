@@ -30,6 +30,8 @@ export type AdapterKind =
   | 'codebuddy-cli'
   | 'qwen-code'
   | 'trae-cn-cli'
+  | 'cursor-agent'
+  | 'kimi-code-cli'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'
@@ -1920,7 +1922,17 @@ export interface OnboardingApi {
 export interface WindowControlsApi {
   getResetCapability(): Promise<WindowResetCapability>
   resetBounds(): Promise<WindowResetResult>
+  popupApplicationMenu(request: WindowsApplicationMenuPopupRequest): Promise<boolean>
   onPageZoomChanged(listener: (percentage: number) => void): () => void
+}
+
+export type WindowsApplicationMenuSection = 'file' | 'edit' | 'view' | 'window'
+
+export interface WindowsApplicationMenuPopupRequest {
+  section: WindowsApplicationMenuSection
+  x: number
+  y: number
+  sourceType: 'mouse' | 'keyboard'
 }
 
 export interface NavigationPin {
@@ -2009,6 +2021,8 @@ export type SkillDeliveryGroupKey =
   | 'codebuddy'
   | 'qwen'
   | 'trae'
+  | 'cursor'
+  | 'kimi'
 
 export interface SkillRiskSummary {
   executableFileCount: number

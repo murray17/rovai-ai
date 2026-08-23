@@ -859,11 +859,11 @@ export function verifySource(root = process.cwd()) {
   const logoNotice = readFileSync(join(root, 'apps/desktop/src/renderer/src/assets/runtime-logos/ASSET-NOTICE.md'), 'utf8')
   const logos = readdirSync(join(root, 'apps/desktop/src/renderer/src/assets/runtime-logos'))
     .filter((name) => name.endsWith('.svg')).sort()
-  assert(logos.length === 11, 'runtime logo directory must contain eleven SVGs')
+  assert(logos.length === 13, 'runtime logo directory must contain thirteen SVGs')
   for (const logo of logos) assert(logoNotice.includes(`\`${logo}\``), `runtime logo notice misses ${logo}`)
-  assert((logoNotice.match(/\| `[^`]+\.svg` \| `BYTE_IDENTICAL` \|/g) ?? []).length === 9, 'runtime logo notice must record nine byte-identical files')
+  assert((logoNotice.match(/\| `[^`]+\.svg` \| `BYTE_IDENTICAL` \|/g) ?? []).length === 10, 'runtime logo notice must record ten byte-identical files')
   assert((logoNotice.match(/\| `[^`]+\.svg` \| `FORMAT_ONLY_TRAILING_NEWLINE` \|/g) ?? []).length === 2, 'runtime logo notice must record two trailing-newline-only files')
-  assert(logoNotice.includes('Material SVG changes: `0`'), 'runtime logo notice must record zero material changes')
+  assert(logoNotice.includes('Material SVG changes: `1`'), 'runtime logo notice must record one material change')
 
   for (const skill of SKILLS) {
     assert(existsSync(join(root, `skills/${skill}/NOTICE`)), `missing Skill NOTICE: ${skill}`)

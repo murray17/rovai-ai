@@ -28,7 +28,9 @@ import claudeCodeLogo from './assets/runtime-logos/claudecode-color.svg'
 import codeBuddyLogo from './assets/runtime-logos/codebuddy-color.svg'
 import codexLogo from './assets/runtime-logos/codex-color.svg'
 import copilotLogo from './assets/runtime-logos/copilot-color.svg'
+import cursorLogo from './assets/runtime-logos/cursor.svg'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
+import kimiLogo from './assets/runtime-logos/kimi.svg'
 import openCodeLogo from './assets/runtime-logos/opencode.svg'
 import qoderLogo from './assets/runtime-logos/qoder-color.svg'
 import qwenLogo from './assets/runtime-logos/qwen-color.svg'
@@ -52,6 +54,8 @@ export const ONBOARDING_PRODUCT_RUNTIMES: readonly AdapterKind[] = [
   'codebuddy-cli',
   'qwen-code',
   'trae-cn-cli',
+  'cursor-agent',
+  'kimi-code-cli',
   'antigravity-app'
 ]
 
@@ -65,6 +69,8 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'codebuddy-cli': codeBuddyLogo,
   'qwen-code': qwenLogo,
   'trae-cn-cli': traeLogo,
+  'cursor-agent': cursorLogo,
+  'kimi-code-cli': kimiLogo,
   'antigravity-app': antigravityLogo
 }
 
@@ -78,6 +84,8 @@ const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'codebuddy-cli': 'CodeBuddy',
   'qwen-code': 'Qwen Code',
   'trae-cn-cli': 'TRAE CLI',
+  'cursor-agent': 'Cursor Agent',
+  'kimi-code-cli': 'Kimi Code',
   'antigravity-app': 'Antigravity'
 }
 

@@ -17,7 +17,7 @@ use rovai_core::{
     managed_process::{ManagedChildStdin, ManagedChildStdout},
     runtime_discovery::{
         RuntimeLaunchPurpose, configure_active_runtime_command, discover_static_runtime_version,
-        is_executable_file, runtime_launch_allowed,
+        is_cursor_agent_version, is_executable_file, runtime_launch_allowed,
     },
     runtime_failure::{
         RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
@@ -1066,6 +1066,8 @@ async fn acp_probe_at(
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
+            | AdapterKind::CursorAgent
+            | AdapterKind::KimiCodeCli
     ) {
         return AcpCapabilityProbe {
             result: agent_probe_result(
@@ -1164,6 +1166,27 @@ async fn acp_probe_at(
     };
     let reported_version =
         first_nonempty_line(&version_output.stdout.bytes, &version_output.stderr.bytes);
+    if kind == AdapterKind::CursorAgent
+        && reported_version
+            .as_deref()
+            .is_none_or(|version| !is_cursor_agent_version(version))
+    {
+        return AcpCapabilityProbe {
+            result: agent_probe_result(
+                kind.as_str(),
+                Some(path_text),
+                reported_version,
+                fingerprint,
+                AgentRuntimeProbeStatus::MissingCapabilities,
+                Vec::new(),
+                required_capabilities.clone(),
+                Some("The executable did not report a Cursor Agent build identity.".to_string()),
+                probed_at,
+            ),
+            initialize_result: None,
+            session_result: None,
+        };
+    }
     let probe = run_acp_probe(&canonical, kind, include_session, purpose).await;
     match probe {
         Ok((initialize_result, session_result)) => {
@@ -1260,6 +1283,10 @@ async fn run_acp_probe(
             command.arg("--model").arg(model);
         }
     }
+    if kind == AdapterKind::KimiCodeCli {
+        command.env("KIMI_CODE_HOME", probe_root.join("kimi-code-home"));
+        crate::acp::configure_kimi_model_environment(&mut command)?;
+    }
     if kind == AdapterKind::TraeCnCli {
         command.args(["--permission-mode", "default"]);
     }
@@ -1309,17 +1336,35 @@ async fn run_acp_probe(
             if !include_session {
                 return Ok::<_, anyhow::Error>((initialize, None));
             }
+            let session_request_id = if kind == AdapterKind::CursorAgent {
+                write_json_line(
+                    stdin,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "authenticate",
+                        "params": {"methodId": "cursor_login"}
+                    }),
+                )
+                .await?;
+                timeout(Duration::from_secs(15), read_rpc_result(lines, 2))
+                    .await
+                    .context("Cursor authentication required or did not complete")??;
+                3
+            } else {
+                2
+            };
             write_json_line(
                 stdin,
                 &json!({
                     "jsonrpc": "2.0",
-                    "id": 2,
+                    "id": session_request_id,
                     "method": "session/new",
                     "params": {"cwd": probe_root, "mcpServers": []}
                 }),
             )
             .await?;
-            let session = read_rpc_result(lines, 2).await?;
+            let session = read_rpc_result(lines, session_request_id).await?;
             let session_id = session
                 .get("sessionId")
                 .and_then(Value::as_str)
@@ -1346,7 +1391,7 @@ async fn run_acp_probe(
                     stdin,
                     &json!({
                         "jsonrpc": "2.0",
-                        "id": 3,
+                        "id": session_request_id + 1,
                         "method": "session/set_model",
                         "params": {
                             "sessionId": session_id,
@@ -1355,7 +1400,7 @@ async fn run_acp_probe(
                     }),
                 )
                 .await?;
-                read_rpc_result(lines, 3).await?;
+                read_rpc_result(lines, session_request_id + 1).await?;
             }
             Ok((initialize, Some(session)))
         };
@@ -1737,6 +1782,12 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::TraeCnCli => {
             command.args(["acp", "serve"]);
         }
+        AdapterKind::CursorAgent => {
+            command.arg("acp");
+        }
+        AdapterKind::KimiCodeCli => {
+            command.arg("acp");
+        }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {}
     }
 }
@@ -1760,20 +1811,26 @@ fn acp_observed_capabilities(
     } else {
         vec!["acp.initialize".to_string()]
     };
-    if initialize
-        .pointer("/agentCapabilities/loadSession")
-        .and_then(Value::as_bool)
-        == Some(true)
+    if kind == AdapterKind::CursorAgent && session.is_some() {
+        capabilities.push("cursor.authenticate".to_string());
+        capabilities.push("session.new".to_string());
+    }
+    if kind != AdapterKind::KimiCodeCli
+        && initialize
+            .pointer("/agentCapabilities/loadSession")
+            .and_then(Value::as_bool)
+            == Some(true)
     {
         capabilities.push("session.load".to_string());
     }
-    if initialize
-        .pointer("/agentCapabilities/sessionCapabilities/resume")
-        .is_some_and(Value::is_object)
+    if kind != AdapterKind::KimiCodeCli
+        && initialize
+            .pointer("/agentCapabilities/sessionCapabilities/resume")
+            .is_some_and(Value::is_object)
     {
         capabilities.push("session.resume".to_string());
     }
-    if session.is_some() && kind != AdapterKind::TraeCnCli {
+    if session.is_some() && !matches!(kind, AdapterKind::TraeCnCli | AdapterKind::CursorAgent) {
         capabilities.push("session.new".to_string());
         capabilities.extend(
             [
@@ -1801,6 +1858,27 @@ fn acp_observed_capabilities(
 fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
     if kind == AdapterKind::TraeCnCli {
         return trae_machine_ready_requirements();
+    }
+    if kind == AdapterKind::CursorAgent {
+        return ["acp.initialize", "cursor.authenticate", "session.new"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+    }
+    if kind == AdapterKind::KimiCodeCli {
+        return [
+            "acp.initialize",
+            "session.new",
+            "session.prompt",
+            "session.cancel",
+            "session.update",
+            "structured_permission_request",
+            "workspace.additional_roots",
+            "session.set_config_option",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
     }
     let mut capabilities = [
         "acp.initialize",
@@ -2522,6 +2600,8 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
             ][..],
             "traecli",
         ),
+        AdapterKind::CursorAgent => (&["ROVAI_CURSOR_BIN"][..], "cursor-agent"),
+        AdapterKind::KimiCodeCli => (&["ROVAI_KIMI_BIN"][..], "kimi"),
         AdapterKind::AntigravityApp => (
             &[
                 "ROVAI_ANTIGRAVITY_BIN",
@@ -2630,6 +2710,8 @@ mod tests {
         assert_eq!(arguments(AdapterKind::CodebuddyCli), ["--acp"]);
         assert_eq!(arguments(AdapterKind::QwenCode), ["--acp"]);
         assert_eq!(arguments(AdapterKind::TraeCnCli), ["acp", "serve"]);
+        assert_eq!(arguments(AdapterKind::CursorAgent), ["acp"]);
+        assert_eq!(arguments(AdapterKind::KimiCodeCli), ["acp"]);
         assert_eq!(
             arguments(AdapterKind::KiroCli),
             ["acp", "--agent", KIRO_ADDITIVE_AGENT_NAME]

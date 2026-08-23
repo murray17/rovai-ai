@@ -153,6 +153,15 @@
       "status": "APPROVED_FOR_SOURCE_ONLY"
     },
     {
+      "path": "docs/assets/readme/rovai-architecture.png",
+      "sha256": "69891cccf7c2fbf18d2c9cba7ed08b2ada44c78c94f3982c5c45dfaa887586b7",
+      "role": "readme-screenshot",
+      "source_classification": "FIRST_PARTY_PROJECT_SCREENSHOT",
+      "source_distribution": "APPROVED",
+      "binary_distribution": "NOT_INCLUDED",
+      "status": "APPROVED_FOR_SOURCE_ONLY"
+    },
+    {
       "path": "docs/prototypes/conversation-drop-zone/acceptance/conversation-drop-zone-day-1040x700.png",
       "sha256": "d698c6e16d251395f6875e70740e66bf3ba8a1a5b027f7090f8ca9a5a9b1cbe3",
       "role": "prototype-screenshot",

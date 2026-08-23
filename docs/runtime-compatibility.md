@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 ---
 
 # Agent Runtime 兼容性清单
@@ -20,10 +20,69 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十种可执行 Runtime：Codex CLI、OpenCode、GitHub Copilot、
-Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code 与 TRAE CLI CN。设置页的
+当前 closed `AdapterKind` 包含十二种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
+Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
+Cursor 在三个目标平台均为 `not_qualified`。Kimi 的 macOS arm64 完整资格矩阵已通过并为
+digest-bound `qualified`；macOS x64 与 Windows x64 仍为 `not_qualified`。
+设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
+
+### 2026-08-22 Kimi Code `0.32.0` + MiniMax M3 macOS arm64 完整资格复核
+
+本机 `/opt/homebrew/bin/kimi` 报告 `0.32.0`。Rovai 没有改写用户 `~/.kimi/config.toml`，而是从
+权限 `0600` 的仓库外私有文件向目标子进程注入 MiniMax provider。真实 token 未进入仓库、fixture、数据库、
+diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Plan；国际 endpoint 对同一 token 返回
+未认证，因此本次只使用国内 OpenAI-compatible endpoint。
+
+`KIMI_MODEL_CAPABILITIES=thinking` 只声明 provider 能力；Rovai 不强制关闭 Kimi/MiniMax thinking。执行过程可
+保留在私有 observation/执行台，最终公开候选会剥离完整 `<think>...</think>` 块，未闭合推理块 fail closed。
+
+| 能力轴 | 本次证据 | 当前产品边界 |
+| --- | --- | --- |
+| Identity / launch | `kimi --version` 为 `0.32.0`；`kimi acp` 完成 ACP v1 initialize/session-new | canonical executable 为 `kimi`，wire identity 为 `kimi-code-cli`，覆盖键为 `ROVAI_KIMI_BIN` |
+| Provider / model | 私有配置注入 `MiniMax-M3`、`openai` provider、国内 endpoint；真实 Prompt `end_turn` 成功 | 六个 `KIMI_MODEL_*` 键严格 allowlist；Unix group/other 可访问、未知/重复/缺失键均 fail closed |
+| Prompt / final | 隔离 ACP 和项目级 Core AgentRun 都返回固定公开答案 | Kimi streamed text 保持私有；terminal 与 Missing-Send candidate 先清洗 reasoning block |
+| Tool / permission | Shell allow-once 真实通过；stdout、stderr、mixed、empty、nonzero 与 128 KiB large output 六类均产生唯一 stable Tool ID 和 terminal Evidence | 只以 terminal phase 判定真实 command output；large output 有界截断并保留首部 marker，nonzero 保持 Tool failed |
+| Deny / filesystem | 独立 Camp 中真实 deny Approval 返回 `rovai_approval_denied`，Tool 为 `failed/not_executed`，目标文件不存在 | ACP Client fs write 没有匹配 one-time authorization 时由 Core 拒绝；Runtime Tool 前预拒绝仍可单独如实记录 |
+| Cancel / cleanup | `sleep 30` 获准后发送 `session/cancel`，约 6 ms 返回 `cancelled`，无目标残留进程 | cancel、terminal、planned shutdown、Camp 删除与 App shutdown 都停止私有 Host/进程树 |
+| Session | 同 Host 同 Session 多轮精确回忆通过；同 Host 两个 Session 的 marker 无串话；新进程复用同一 `KIMI_CODE_HOME` 时，`session/resume` 与 `session/load` 都保持精确 Session ID 并回忆 marker；换用隔离 home 后 resume 返回 `-32602 Unknown sessionId`；产品级 fake Runtime 回归证明不同 Host 复用 scoped home，协议为 new→resume 且 Session ID 不变 | Kimi AgentRun 仍逐 Run 停止 Host；Rovai 按 Camp/成员/installation/auth scope 稳定保留私有 home，snapshot 声明真实 resume/load，新 Host 优先 exact resume，load-only 时进入 replay quarantine |
+| Catalog | `session/new.configOptions` 报告 synthetic env model、thinking `on/off` 与四种 mode；Idle `available_commands_update` 报告内建 command 和 Skill command | Runtime advertisement 为 Verified；Host 已安全路由 async metadata。尚未维护产品权威 async catalog snapshot 是功能空缺，不是启动、Session continuation 或平台准入硬阻断 |
+| Skill | `.kimi-code/skills` 两次都被发现并返回唯一 marker，且正确选择 canonical `--to-principal` 但不触发当前用户注意力 | managed Skill discovery/invocation 与消息局部注意力教学均为 Verified |
+| External MCP | 原始 ACP `session/new.mcpServers` 注入 stdio echo Server 后，真实 Tool pending→in-progress→completed、Tool result 与最终 marker 均通过；紧邻空 MCP Session 看不到该 Tool | Runtime 原始 happy path 与相邻 Session 隔离为 Verified；Rovai projection 仍 Disabled，尚缺同名 precedence、完整定义矩阵与 Host compatibility 准入 |
+| Missing-Send | zero-send publication、accepted-send suppression、ACP tool→final 三场景通过；Kimi private stream 未进入公共 fixture | `IfNoAcceptedSend` candidate 经过 thinking 清洗、terminal record 与既有 suppression gate |
+| Usage / compaction | 多轮 Prompt、resume/load 与 MCP 调用均未观察到 `usage_update`；命令目录存在 `usage`/`compact`，手动 `/compact` 只产生普通 agent text，没有结构化 compaction lifecycle | Usage/Cost、Compaction Disabled；command advertisement 不能冒充结构化 telemetry |
+| Built-in CLI | 早期 `0/15` fixture 把 legacy stdin 非法输入的当前退出码 `2` 错写为 `1`，Kimi 实际已执行 Shell 并在首项 canonical operation 前退出；修正后十五项 operation、三种输入、Gather、exact successor read、conflict、initial/resumed lease fencing、logical/native continuation 全部通过，共 56 条 full-run evidence | macOS arm64 Built-in transport 为 Verified；snapshot 声明 capability，默认 Built-in 与 Skill 资格集合包含 Kimi |
+
+项目级最终固定输出为 `ROVAI_KIMI_ACP_OK`，命令 output marker 为
+`ROVAI_KIMI_CODE_CLI_PRINTF_OK`，allow 与 deny 都完成真实 Approval roundtrip。基础 AgentRun 可用于隔离诊断，
+修正过期 fixture 后 Built-in hard gate 已通过，所以 macOS arm64 为 digest-bound `qualified`；snapshot 声明
+Built-in transport，普通产品与默认资格 Smoke 包含 Kimi。该结论不扩大为 External MCP、Usage、Compaction、
+warm Host、macOS x64 或 Windows x64 产品资格。native resume 已按 scoped home 进入产品，History Restore 只
+作为 load-only fallback；异步 command catalog snapshot 尚未实现是独立功能空缺，不是当前平台硬阻断。
+
+### 2026-08-22 Cursor Agent `2026.08.11-e8db854` 隔离探测与未准入记录
+
+本机 `/opt/homebrew/bin/agent` 实际是 Grok Build `0.2.118`，不是 Cursor；用户现有
+`~/.local/bin/cursor-agent` 为 `2025.09.18-7ae6800` 且没有 ACP 子命令。为避免修改用户安装与认证状态，
+本轮只把 Cursor 最新候选下载到临时隔离目录，记录版本 `2026.08.11-e8db854`，没有安装到 PATH、没有运行
+login、没有发送模型 Prompt，也没有读写日常数据库。
+
+| 能力轴 | 本次证据 | 当前产品边界 |
+| --- | --- | --- |
+| Executable identity | 通用 `agent` 存在真实产品碰撞；Cursor build 使用 `YYYY.MM.DD-<build>` shape | canonical command 为 `cursor-agent`；`agent` 只有严格版本 identity 通过后接受，无关同名程序返回 `runtime_identity_mismatch` |
+| Protocol | 临时候选的 `<executable> acp` 完成 ACP v1 initialize，stdout 为逐行 JSON-RPC | 复用 ACP Host；只把 `acp.initialize` 作为已观察 handshake，不升级平台 qualification |
+| Authentication / Session | `authenticate(cursor_login)` 在 15 秒内未完成；跳过认证的 `session/new` 返回 Authentication required | Ready validator 要求 authenticate + 非空 Session；当前没有 Ready evidence |
+| Cursor extensions | 官方文档列出 ask/create-plan requests 与 todo/task/image notifications | 唯一 Active Prompt 路由、skip/reject 与 private notification 隔离已由 fixture 实现；没有真实 Agent 行为 Smoke |
+| Permission / workspace | 官方文档提供 agent/plan/ask 与 auto-review/force | 静态配置已实现；read-only 强制 plan 并移除高权限 flag；尚无 allow/deny 副作用证据 |
+| Skill | 官方文档列出项目 `.cursor/skills` 与 `.agents/skills` | Rovai 只拥有 `.cursor/skills` projection；Runtime load/invocation 为 DocumentationOnly |
+| MCP / continuation | 官方文档只确认 Cursor 配置面；本轮未获得 authenticated Session | External MCP、session/load/resume、warm reuse 均 Disabled；完成 Run 后停止 Host |
+| Activity / final / usage | 无 authenticated Prompt、Tool 或 terminal transcript | Activity baseline 为 `run_level`；Missing-Send、Usage/Cost、Compaction 均 Disabled |
+
+本轮不满足 checklist 的 First run、Command output、Approval、Cancellation、Private request、Built-in CLI、
+Process cleanup 与 continuation 必过 Smoke。macOS arm64、macOS x64、Windows x64 因而全部保持
+`not_qualified / runtime_platform.qualification_evidence_missing`，qualified evidence revision 为空。
+完整研究与后续 Probe 清单见 [Cursor Agent Runtime Research](research/cursor-agent-runtime-research.md)。
 
 ### 2026-08-20 TRAE `0.120.52` asynchronous catalog、Skill 与 Ready 复核
 
@@ -111,6 +170,8 @@ Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。下表是证据缺�
 | `codebuddy-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
 | `qwen-code` | `not_qualified` | — | 未完成 Windows 全矩阵 |
 | `trae-cn-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `cursor-agent` | `not_qualified` | — | 尚无 authenticated Session 与 Windows 行为矩阵 |
+| `kimi-code-cli` | `not_qualified` | — | 尚无 Windows 身份、启动、行为与清理矩阵 |
 | `antigravity-app` | `not_qualified` | — | 未完成 Windows 全矩阵 |
 
 公共 Named Pipe、Job Object 或三类 execution-shape 测试只能证明平台基础设施。任一行提升为 `qualified` 前，
@@ -205,7 +266,7 @@ Rovai smoke 通过；此前手写的无效重复 custom model 已从用户配置
 
 ### Camp Published Attachment View visibility 基线
 
-当前十个 Adapter 在所有已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把
+当前十二个 Adapter 在各自已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把
 旧 generation 的 Host/Binding 视为不兼容，并在 mutation gate 内停止或 fence；下一次 dispatch 仍只授权同一
 Camp 的精确 `attachments` root。该实现选择是保守 fallback，不是 Runtime snapshot 行为的实测结论。
 
@@ -655,6 +716,8 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | Qwen Code | `AdditivePerRun` / `RovaiWins` | native `--mcp-config`，不使用 allowlist | 待 v0.43 矩阵 |
 | TRAE CLI CN | `AdditivePerRun` / `RovaiWins` | 首次 ACP `session/new.mcpServers`；后续只有 compatibility digest 相同时复用 warm Host/Session | `0.120.52` 原生 Session A/B 追加与不泄漏 Probe、正式 Core smoke 均通过 |
 | Antigravity | `Unsupported` | 无不修改 Global/Workspace 文件的逐 Run 动态通道 | 诊断披露；配置页保持中立 |
+| Cursor Agent | `Unsupported` | 当前未准入，不注入 External MCP | 完整 authenticated Session 与 same-name matrix 前保持 Disabled |
+| Kimi Code | `Unsupported` | 当前产品不向 `session/new` 注入 External MCP | 上游能力不替代 additive isolation/same-name 真实矩阵；当前保持 Disabled |
 
 ## 历史：内置 MCP / Antigravity 专项复核
 
@@ -684,7 +747,6 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 
 | Runtime | 调研版本 / 状态 | 观察结果 | 当前边界 / 未接入原因 | 复核条件 |
 |---|---:|---|---|---|
-| Kimi CLI | 0.29.2 | ACP 可初始化；调用方 `mcpServers` 会与用户、项目、项目本地及插件 MCP 合并 | 尚未进入 Product Runtime Catalog，也没有 additive 同名与恢复矩阵 | 完成登录、真实 turn、恢复/取消、native preservation 与 same-name policy 复核 |
 | Grok CLI | 0.2.112；本机未登录 | ACP 可初始化；初始化阶段可观察到个人 MCP | 缺少登录后的完整 Session、工具与 additive precedence 证据 | 完成登录、真实 turn、恢复/取消与 MCP 行为复核 |
 | Cursor Agent | 2025.09.18-7ae6800 | 支持 headless 与 resume；已验证入口会读取项目 `.cursor/mcp.json` | 尚无稳定的逐 Run additive channel 与同名证据 | 上游提供动态追加入口并完成 native preservation、同名与恢复复核 |
 | DeepSeek Harness | Settings Preview；未实现 | 仅显示名称、图标、`待支持` 与 disabled 状态；没有 executable、Adapter、Probe 或 capability 结论 | Renderer-only preview，不属于 Product Runtime Catalog | 取得明确入口和协议后，完成 Adapter、认证、Session、终态、取消、Approval、Tool ID、MCP、Activity、Migration 与真实 AgentRun 准入 |

@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 pub const NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION: &str = "native_session_bootstrap_v3";
 pub const BOOTSTRAP_FORMATTER_VERSION: i64 = 3;
 pub const SESSION_CHARTER_REVISION: i64 = 2;
+pub const CODEX_SESSION_GUIDANCE_REVISION: i64 = 1;
 pub const AGENT_RUN_CONTEXT_FORMATTER_VERSION: i64 = 21;
 pub const CONTEXT_MANIFEST_VERSION: i64 = 21;
 

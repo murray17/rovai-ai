@@ -241,11 +241,55 @@ input::placeholder, textarea::placeholder { color: var(--faint); }
 button:active:not(:disabled) { transform: translateY(1px); }
 button:disabled { opacity: 0.52; cursor: default; }
 
+.windows-application-menu { display: none; }
+
+html[data-rovai-platform="win32"] #root {
+  display: grid;
+  grid-template-rows: env(titlebar-area-height, 32px) minmax(0, 1fr);
+  background: var(--rail);
+}
+
+html[data-rovai-platform="win32"] .windows-application-menu {
+  display: flex;
+  grid-row: 1;
+  width: env(titlebar-area-width, calc(100% - 138px));
+  height: env(titlebar-area-height, 32px);
+  min-width: 0;
+  align-items: center;
+  justify-self: start;
+  margin-left: env(titlebar-area-x, 0px);
+  padding: 0 6px;
+  color: var(--ink);
+  background: var(--rail);
+  user-select: none;
+  -webkit-app-region: drag;
+}
+
+.windows-application-menu-item {
+  height: calc(100% - 6px);
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  color: inherit;
+  background: transparent;
+  font: 400 12px/1 "Segoe UI", sans-serif;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+.windows-application-menu-item:hover { background: var(--surface-selected); }
+.windows-application-menu-item:focus-visible { outline-offset: -2px; }
+
 .app-shell {
   display: grid;
   grid-template-columns: 270px minmax(0, 1fr);
   grid-template-rows: 50px minmax(0, 1fr);
   height: 100%;
+}
+
+html[data-rovai-platform="win32"] .app-shell {
+  grid-row: 2;
+  min-height: 0;
+  height: auto;
 }
 
 .topbar {
@@ -349,10 +393,8 @@ button:disabled { opacity: 0.52; cursor: default; }
   -webkit-app-region: drag;
 }
 
-html[data-rovai-platform="win32"] *,
-html[data-rovai-platform="win32"] *::before,
-html[data-rovai-platform="win32"] *::after {
-  -webkit-app-region: no-drag !important;
+html[data-rovai-platform="win32"] .unified-sidebar-drag {
+  flex: 0 0 8px;
 }
 .unified-brand { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px 14px; }
 .rail-logo { display: flex; min-width: 0; height: 38px; align-items: center; gap: 10px; color: var(--rail-logo); }

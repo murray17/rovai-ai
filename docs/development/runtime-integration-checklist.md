@@ -2,7 +2,7 @@
 document_type: development-checklist
 authority: development-procedure
 status: proposed
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 ---
 
 # Agent Runtime 接入与准入 Checklist
@@ -16,7 +16,7 @@ last_updated: 2026-08-21
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v18.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v20.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
 
@@ -44,6 +44,8 @@ last_updated: 2026-08-21
 - [ ] Availability Check 写入 `ready` 与 Scheduler/Dispatch Preflight 接受 `ready` 使用同一证据合同和
       同一校验函数；不得由较弱检查写入 `ready` 后跳过较强门禁。
 - [ ] stdout、stderr、临时目录和私有配置目录均有界且可清理。
+- [ ] Provider secret 只来自仓库外权限收窄的私有配置或系统凭据存储；真实 key 不进入数据库、fixture、
+      argv、日志、Evidence、diagnostics、Crash report 或 Git，验收输出只报告存在性与权限。
 - [ ] Runtime 及其后代进程受进程组或 Job Object 管理。
 - [ ] completion、failure、cancel、Probe timeout 和 App shutdown 后无残留进程。
 

@@ -219,6 +219,10 @@ function runtimeParametersFor(
       return <QwenRuntimeParameters {...props} />
     case 'trae-cn-cli':
       return <TraeRuntimeParameters {...props} />
+    case 'cursor-agent':
+      return <CursorRuntimeParameters {...props} />
+    case 'kimi-code-cli':
+      return <KimiRuntimeParameters {...props} />
     case 'antigravity-app':
       return <AntigravityRuntimeParameters {...props} />
   }
@@ -306,6 +310,25 @@ function TraeRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element 
   )
 }
 
+function CursorRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
+  return (
+    <div className="runtime-parameter-form">
+      {modelFieldsFor('cursor-agent', props)}
+      <PermissionSelect {...props} fieldKey="execution_mode" label="执行模式" />
+      <PermissionSelect {...props} fieldKey="approval_policy" label="审批策略" />
+    </div>
+  )
+}
+
+function KimiRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
+  return (
+    <div className="runtime-parameter-form">
+      {modelFieldsFor('kimi-code-cli', props)}
+      <PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" />
+    </div>
+  )
+}
+
 function AntigravityRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
@@ -337,6 +360,8 @@ function modelFieldsFor(
       return <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
     case 'kiro-cli':
     case 'trae-cn-cli':
+    case 'cursor-agent':
+    case 'kimi-code-cli':
     case 'antigravity-app':
       return <ModelFields {...props} />
   }

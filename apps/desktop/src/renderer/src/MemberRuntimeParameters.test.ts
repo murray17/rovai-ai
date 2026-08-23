@@ -348,6 +348,10 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
       return { approval_mode: 'yolo' }
     case 'trae-cn-cli':
       return { permission_mode: 'bypass_permissions' }
+    case 'cursor-agent':
+      return { execution_mode: 'agent', approval_policy: 'force' }
+    case 'kimi-code-cli':
+      return { permission_mode: 'default' }
     case 'antigravity-app':
       return {
         mode: 'accept-edits',

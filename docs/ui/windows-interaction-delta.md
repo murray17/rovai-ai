@@ -3,7 +3,7 @@ document_type: ui-platform-contract
 authority: renderer-windows-interaction-delta
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-18
+last_updated: 2026-08-22
 ---
 
 # Windows Interaction Delta
@@ -12,9 +12,9 @@ last_updated: 2026-08-18
 Renderer 继续使用同一组件树、信息架构、Porcelain Day / Steel Night Token、领域动作和持久状态。平台差异由
 只读 `HostPlatformKey` 投影到展示层，不复制业务状态机，也不允许 Renderer 自行推断安全或 Runtime 准入。
 
-生产实现状态由 [v1.05 实施计划](../versions/v1.05/implementation-plan.md)与代码证据决定；本文 `accepted`
-不表示 Windows UI 已完成。配套 [HTML 交互稿](../prototypes/windows-interaction-delta/index.html)是评审载体，
-不能成为第三份组件、文案或状态真源。
+生产实现状态由代码、自动化和真实 Windows 证据决定；本文 `accepted` 不表示 Windows UI 已完成。原
+[v1.05 HTML 交互稿](../prototypes/windows-interaction-delta/index.html)只保留历史评审上下文，不代表当前
+Windows chrome，也不能成为第三份组件、文案或状态真源。
 
 ## 1. 保持不变的产品结构
 
@@ -33,8 +33,8 @@ Renderer 继续使用同一组件树、信息架构、Porcelain Day / Steel Nigh
 
 | 交互面 | macOS | Windows x64 | 不变量 |
 | --- | --- | --- | --- |
-| Window frame | hidden title bar、系统 traffic lights | Electron native frame 与系统 caption buttons | Renderer 不伪造关闭/最大化/最小化 |
-| Drag region | 已有受控 `-webkit-app-region` | 所有 Renderer drag region 关闭 | 顶行仍是 App context，不冒充标题栏 |
+| Window frame | hidden title bar、系统 traffic lights | hidden title strip、rail-colored 顶层菜单投影与 Window Controls Overlay caption buttons | Renderer 不伪造关闭/最大化/最小化 |
+| Drag region | 已有受控 `-webkit-app-region` | 复用同一组受控 drag region | 顶行仍是 App context，不冒充标题栏 |
 | Window behavior | 系统全屏/窗口管理 | Snap Layout、Alt+Space、双击标题栏、系统阴影 | 行为归宿主 OS；自动化不能替代真机 |
 | 字体 | 系统 SF 优先 | `Segoe UI` 系统字体优先 | 不引入 Windows 专属品牌字体 |
 | 快捷键 | `⌘` 展示 | `Ctrl` 展示；实现使用 `CommandOrControl` | 动作、禁用原因与焦点返回相同 |
@@ -49,13 +49,19 @@ Renderer 只能消费 Desktop bridge 已投影的平台枚举。不得通过 Use
 
 ## 3. Window、App Shell 与全局动作
 
-Windows `BrowserWindow` 使用 native frame，不设置 `titleBarStyle: hidden`、`trafficLightPosition` 或自定义 caption
-button。Renderer 的 `.window-drag-strip`、`.unified-sidebar-drag` 及其他 `-webkit-app-region: drag` 在 `win32`
-必须失效；交互控件也不需要用 `no-drag` 修补一个不存在的自绘标题栏。
+Windows `BrowserWindow` 保留系统 frame，但以 `titleBarStyle: hidden` 隐去包含 App 图标与 `Rovai AI` 的标题文字层，
+同时启用 Window Controls Overlay。Electron application menu model、command、accelerator 与原生 submenu 保持权威；
+系统 menu bar 呈现被隐藏，Renderer 只投影 `File / Edit / View / Window` 四个顶层入口并按受限 IPC 打开
+对应原生 submenu，不复制或重建 submenu command。
 
-Windows 系统标题栏之下才开始 50px App 顶行。顶行保留 Project / Camp context 和已有动作，不能再次显示 App
-名称、窗口按钮或可拖动空白条。关闭按钮继续进入 Planned Shutdown；Renderer 不劫持 Alt+F4、caption close
-或系统关机来显示另一套关闭流程。
+顶层菜单行与 Window Controls Overlay 的 Day / Night 背景都使用 `--rail` 对应颜色，图标使用对应 `--ink`，
+主题切换时同步更新。高度读取 WCO CSS environment value，不写死覆盖值，继续采用系统默认值适配多屏 DPI。
+隐藏标题文字层后，Windows 复用既有 `.topbar`、
+`.window-drag-strip` 与 `.unified-sidebar-drag` 受控拖拽区；既有按钮继续保持 `no-drag`。
+
+Windows 的统一侧栏只把 traffic-light 预留从 38px 收至 8px；品牌、一级导航、Project / Camp、设置和所有右侧
+页面结构、内容与尺寸不变。关闭按钮继续进入 Planned Shutdown；Renderer 不劫持 Alt+F4、caption close 或系统关机
+来显示另一套关闭流程。
 
 全局快捷键由一个平台文案映射提供。例如 Command Palette 在 macOS 显示 `⌘K`、Windows 显示 `Ctrl+K`；页面
 缩放继续执行 `CommandOrControl + / - / 0`。可访问名称描述动作，不把符号作为唯一名称。
@@ -105,7 +111,8 @@ Windows 安装器属于独立系统流程，不嵌入 App Shell：per-user 安�
 
 ## 7. 可访问性与真机矩阵
 
-自动化应覆盖 DOM 语义、平台文案映射、无 Windows drag region、Admission/Availability 正交状态、历史配置精确保留、
+自动化应覆盖 DOM 语义、四个顶层菜单入口、受限 native submenu 路由、平台文案映射、Windows chrome 主题同步与
+8px 侧栏顶部留白、Admission/Availability 正交状态、历史配置精确保留、
 Forced Colors CSS 与 IME composition 不触发提交。真实 Windows 验收至少覆盖：
 
 - Windows 10 22H2 与 Windows 11；100%、125%、150%、200% display scale；
@@ -114,7 +121,7 @@ Forced Colors CSS 与 IME composition 不触发提交。真实 Windows 验收至
 - keyboard-only、NVDA 浏览/表单模式、中文 IME 组合/候选/提交；
 - Explorer、local NTFS blocker、clean install、running-App upgrade、保留/删除数据的 uninstall。
 
-固定 Windows Server CI 只证明构建、打包和自动化行为，不证明客户端标题栏、Snap、DPI、NVDA、IME、SmartScreen 或
+固定 Windows Server CI 只证明构建、打包和自动化行为，不证明客户端标题栏、原生 submenu、Snap、DPI、NVDA、IME、SmartScreen 或
 Installer UX。缺少真机证据时，对应 Checkpoint 保持未完成。
 
 ## References

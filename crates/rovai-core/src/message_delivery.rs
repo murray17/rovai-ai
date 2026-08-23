@@ -2405,7 +2405,9 @@ fn process_dispatch_attempt(
         | AdapterKind::QoderCli
         | AdapterKind::CodebuddyCli
         | AdapterKind::QwenCode
-        | AdapterKind::TraeCnCli => CharterDeliveryMode::FirstPayload,
+        | AdapterKind::TraeCnCli
+        | AdapterKind::CursorAgent
+        | AdapterKind::KimiCodeCli => CharterDeliveryMode::FirstPayload,
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli => CharterDeliveryMode::NativeAppend,
     };
     let frozen_snapshot: String = transaction.query_row(

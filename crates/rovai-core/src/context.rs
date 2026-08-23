@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 const BUILTIN_CLI_CHARTER: &str = include_str!("../resources/charter-rovai-cli.md");
+const CODEX_FINAL_CAMP_ANSWER_GUIDANCE: &str = "When publishing the Camp-visible final answer with `rovai send`, use the complete final response in polished Markdown; do not send a compressed one-line summary and then write a richer Runtime final.";
 
 use crate::{
     agent_profile::{AdapterKind, validate_stored_member_identity},
@@ -250,7 +251,7 @@ impl ContextService {
     ) -> Result<String> {
         let snapshot = load_run_snapshot(database, agent_run_id, execution_epoch)?
             .context("AgentRun is not active for Session Charter materialization")?;
-        Ok(build_session_charter(&snapshot))
+        build_session_charter(&snapshot)
     }
 
     pub fn prepare_session_bootstrap(
@@ -2195,8 +2196,12 @@ fn run_snapshot_adapter_kind(snapshot: &RunSnapshot) -> Result<AdapterKind> {
         .parse::<AdapterKind>()
 }
 
-fn build_session_charter(_snapshot: &RunSnapshot) -> String {
-    format!(
+fn build_session_charter(snapshot: &RunSnapshot) -> Result<String> {
+    let adapter_guidance = match run_snapshot_adapter_kind(snapshot)? {
+        AdapterKind::CodexCli => format!("\n- {CODEX_FINAL_CAMP_ANSWER_GUIDANCE}"),
+        _ => String::new(),
+    };
+    Ok(format!(
         "Rovai-ai Session Charter\n\n\
          Authority boundaries\n\
          - MEMBER_IDENTITY is the sole self-identity projection for this Native Session. COLLABORATION_STATE describes peers only and never updates, patches, or overrides self identity.\n\
@@ -2207,9 +2212,10 @@ fn build_session_charter(_snapshot: &RunSnapshot) -> String {
          - Current user instructions, current Core authorization and Run facts, and current tool, repository, and filesystem evidence outrank identity, Memory, history, and cached context.\n\
          - Core reauthorizes every operation at invocation; projected IDs and facts are not authorization tokens.\n\
          - Preserve existing user work. Do not infer omitted content; retrieve it only when the current work requires it. Memory indexes and retrieval keys are discovery hints; read a Memory before relying on it.\n\
-         - In SHARED_CONVERSATION, the top-level campId applies to every projected message; nextBodyOffset is the Unicode-scalar bodyOffset for a camp.read item; omitted sequence bounds may contain gaps and are not executable ranges.\n\n{}",
-        BUILTIN_CLI_CHARTER.trim()
-    )
+         - In SHARED_CONVERSATION, the top-level campId applies to every projected message; nextBodyOffset is the Unicode-scalar bodyOffset for a camp.read item; omitted sequence bounds may contain gaps and are not executable ranges.\n\n{}{}",
+        BUILTIN_CLI_CHARTER.trim(),
+        adapter_guidance,
+    ))
 }
 
 #[derive(Debug, Clone)]
@@ -2282,7 +2288,7 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         });
     }
 
-    let charter = build_session_charter(snapshot);
+    let charter = build_session_charter(snapshot)?;
     let (entrypoint, observed, authorization_basis_digest) =
         build_memory_entrypoint(database, snapshot)?;
     let charter_digest = sha256_text(&charter);
@@ -8177,7 +8183,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.17".to_string(), 58, 1));
+        assert_eq!(contract, ("v1.19".to_string(), 60, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -11344,22 +11350,34 @@ mod slow_tests {
             )
             .unwrap();
         assert!(initial_bootstrap.payload.contains("\"name\": \"叮叮\""));
-        let evidence: (String, i64, String, String) = fixture
+        let evidence: (String, i64, String, String, String) = fixture
             .database
             .connection()
             .query_row(
                 r#"
                 SELECT contract_version, bootstrap_formatter_version,
-                       session_charter_blob_id, memory_entrypoint_blob_id
+                       session_charter_blob_id, memory_entrypoint_blob_id,
+                       session_charter_digest
                 FROM native_session_bootstrap_evidence
                 WHERE id = ?1
                 "#,
                 [&initial_bootstrap.evidence_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(evidence.0, NATIVE_SESSION_BOOTSTRAP_CONTRACT_VERSION);
         assert_eq!(evidence.1, BOOTSTRAP_FORMATTER_VERSION);
+        let charter_component = store.read_text(&fixture.database, &evidence.2).unwrap();
+        assert!(charter_component.contains(CODEX_FINAL_CAMP_ANSWER_GUIDANCE));
+        assert_eq!(sha256_text(&charter_component), evidence.4);
         for blob_id in [&evidence.2, &evidence.3] {
             let component = store.read_text(&fixture.database, blob_id).unwrap();
             assert!(!component.contains("[MEMBER_IDENTITY]"));
@@ -11989,11 +12007,26 @@ mod slow_tests {
     #[test]
     fn session_charter_publishes_one_cli_only_builtin_contract() {
         let fixture = fixture();
-        let snapshot =
+        let mut snapshot =
             load_run_snapshot(&fixture.database, &fixture.run_id, fixture.execution_epoch)
                 .unwrap()
                 .unwrap();
-        let charter = build_session_charter(&snapshot);
+        let charter = build_session_charter(&snapshot).unwrap();
+        assert!(charter.ends_with(&format!("\n- {CODEX_FINAL_CAMP_ANSWER_GUIDANCE}")));
+        assert_eq!(charter.matches(CODEX_FINAL_CAMP_ANSWER_GUIDANCE).count(), 1);
+        let shared_charter = charter
+            .strip_suffix(&format!("\n- {CODEX_FINAL_CAMP_ANSWER_GUIDANCE}"))
+            .unwrap()
+            .to_string();
+        for adapter_kind in AdapterKind::ALL
+            .into_iter()
+            .filter(|adapter_kind| *adapter_kind != AdapterKind::CodexCli)
+        {
+            snapshot.effective_config["runtimeAdapter"] = json!(adapter_kind.as_str());
+            let other_charter = build_session_charter(&snapshot).unwrap();
+            assert_eq!(other_charter, shared_charter, "{adapter_kind:?}");
+            assert!(!other_charter.contains(CODEX_FINAL_CAMP_ANSWER_GUIDANCE));
+        }
         assert!(BUILTIN_CLI_CHARTER.len() <= 2_560);
         assert!(
             charter

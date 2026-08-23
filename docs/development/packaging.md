@@ -164,7 +164,7 @@ ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
 如果刚完成重新打包，正在运行的旧进程不会自动切换到新 bundle。不要通过打开 `dist` 覆盖日常
 进程；只停止本次隔离验收实例后，再用新的隔离目录启动。
 
-打包 App 自身不要求系统安装 Node.js、pnpm 或 Rust。普通启动也不要求十个 Runtime
+打包 App 自身不要求系统安装 Node.js、pnpm 或 Rust。普通启动也不要求所有 Product Runtime
 全部存在。只有实际启动对应 AgentRun 时，才要求所选 Runtime 已安装、认证且探测
 Ready。
 

@@ -81,6 +81,16 @@ const runtimes = [
   runtime('codebuddy', 'codebuddy-cli', 'CodeBuddy', 'mcp_call', acp('mcp_tool_call', 'mcp_call', 'tool', 'tool.call')),
   runtime('qwen', 'qwen-code', 'Qwen Code', 'write_file', acp('write_file', 'write_file', 'file', 'file.write')),
   runtime('trae', 'trae-cn-cli', 'TRAE CLI', 'edit_file', acp('edit_file', 'edit_file', 'file', 'file.write')),
+  runtime('cursor', 'cursor-agent', 'Cursor Agent', null, {
+    protocol: 'acp-v1', domain: 'runtime', semantic: 'runtime.run',
+    evidenceKind: 'runtime_activity', eventType: 'activity.completed',
+    runLevelOnly: true, expectedToolDisclosure: false, payload: { kind: 'runtime' }
+  }),
+  runtime('kimi', 'kimi-code-cli', 'Kimi Code', null, {
+    protocol: 'acp-v1', domain: 'runtime', semantic: 'runtime.run',
+    evidenceKind: 'runtime_activity', eventType: 'activity.completed',
+    runLevelOnly: true, expectedToolDisclosure: false, payload: { kind: 'runtime' }
+  }),
   runtime('claude', 'claude-code-cli', 'Claude Code', claudeExpectedCommand, {
     protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {
@@ -847,7 +857,7 @@ function runtimeModelFixture(key) {
   if (key === 'copilot') {
     return { modelSelectionSource: 'explicit', observedModelId: null }
   }
-  if (key === 'kiro') {
+  if (key === 'kiro' || key === 'cursor' || key === 'kimi') {
     return { modelSelectionSource: 'runtime_default', observedModelId: null }
   }
   const modelIds = {
@@ -864,7 +874,10 @@ function runtimeModelFixture(key) {
 }
 
 function runtimesLengthHint(key) {
-  return ['codex', 'opencode', 'copilot', 'kiro', 'qoder', 'codebuddy', 'qwen', 'claude', 'antigravity'].indexOf(key)
+  return [
+    'codex', 'opencode', 'copilot', 'kiro', 'qoder', 'codebuddy',
+    'qwen', 'trae', 'cursor', 'kimi', 'claude', 'antigravity'
+  ].indexOf(key)
 }
 
 function acp(kind, toolName, domain, semantic, output = 'fixture completed') {

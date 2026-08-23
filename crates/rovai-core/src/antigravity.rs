@@ -430,7 +430,7 @@ impl AntigravityAppRuntimeAdapter {
                     runtime_events.as_ref(),
                 )
                 .await
-                .map(AntigravityStdoutCapture::Structured)
+                .map(|capture| AntigravityStdoutCapture::Structured(Box::new(capture)))
             })
         } else {
             tokio::spawn(async move {
@@ -605,6 +605,7 @@ impl AntigravityAppRuntimeAdapter {
         }
         let final_output = match stdout {
             AntigravityStdoutCapture::Structured(capture) => {
+                let capture = *capture;
                 let result = match capture.final_result {
                     Some(result) => result,
                     None => {
@@ -915,7 +916,7 @@ fn antigravity_runtime_visible_path(path: PathBuf) -> PathBuf {
 
 #[derive(Debug)]
 enum AntigravityStdoutCapture {
-    Structured(AntigravityStreamCapture),
+    Structured(Box<AntigravityStreamCapture>),
     Legacy(CapturedBytes),
 }
 
@@ -926,6 +927,7 @@ struct AntigravityStreamCapture {
     model_observation_emitted: bool,
     started_tools: HashSet<String>,
     terminal_tools: HashSet<String>,
+    started_shell_commands: HashMap<String, String>,
 }
 
 #[derive(Debug)]
@@ -1156,6 +1158,17 @@ fn normalize_antigravity_tool_step(
         "FAILED" | "ERROR" | "CANCELLED" | "CANCELED" => "failed",
         _ => "in_progress",
     };
+    let shell_tool = antigravity_command_tool(tool_name);
+    let observed_command = shell_tool
+        .then(|| public_antigravity_shell_command(tool_info))
+        .flatten();
+    if status == "in_progress"
+        && let Some(command) = observed_command.as_ref()
+    {
+        capture
+            .started_shell_commands
+            .insert(tool_call_id.clone(), command.clone());
+    }
     let newly_observed = if status == "in_progress" {
         capture.started_tools.insert(tool_call_id.clone())
     } else {
@@ -1164,9 +1177,18 @@ fn normalize_antigravity_tool_step(
     if !newly_observed {
         return Ok(None);
     }
-    let output = antigravity_command_tool(tool_name)
+    let output = shell_tool
         .then(|| public_antigravity_command_output(tool_info))
         .flatten();
+    let command = if !shell_tool {
+        None
+    } else if status == "in_progress" {
+        observed_command
+    } else {
+        let cached_command = capture.started_shell_commands.remove(&tool_call_id);
+        observed_command.or(cached_command)
+    };
+    let input = command.map(|command| serde_json::json!({"command": command}));
     Ok(Some(AntigravityRuntimeEvent {
         event_type: "runtime.action",
         payload: serde_json::json!({
@@ -1174,7 +1196,7 @@ fn normalize_antigravity_tool_step(
             "toolName": tool_name,
             "status": status,
             "kind": antigravity_tool_kind(tool_name),
-            "title": tool_name,
+            "input": input,
             "output": output,
         }),
     }))
@@ -1196,6 +1218,14 @@ fn antigravity_command_tool(tool_name: &str) -> bool {
         tool_name.to_ascii_lowercase().as_str(),
         "run_command" | "bash" | "terminal"
     )
+}
+
+fn public_antigravity_shell_command(tool_info: &Value) -> Option<String> {
+    tool_info
+        .pointer("/parameters/CommandLine")
+        .and_then(Value::as_str)
+        .filter(|command| !command.trim().is_empty())
+        .map(str::to_string)
 }
 
 fn public_antigravity_command_output(tool_info: &Value) -> Option<String> {
@@ -1894,8 +1924,13 @@ echo "Created conversation $session_id" >> "$log_file"
 echo "Forwarding user message to conversation $session_id" >> "$log_file"
 echo "I0811 streamGenerateContent?alt=sse request completed ResponseID: response-1" >> "$log_file"
 printf '%s\n' '{"event":"init","conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","init":{"tools":["run_command"]}}'
-printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"RUNNING","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"private command"}}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"RUNNING","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"Cwd":"/private/workspace","privateToken":"AGY_FIRST_RUNNING_MUST_NOT_LEAK"}}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"RUNNING","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"pnpm test","Cwd":"/private/workspace","privateToken":"AGY_LATE_RUNNING_MUST_NOT_LEAK"}}}}'
 printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":4,"state":"DONE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","output":"AGY_PRINTF_OK","privateToken":"AGY_MUST_NOT_LEAK"}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":5,"state":"RUNNING","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file","parameters":{"CommandLine":"cat /private/secret","Cwd":"/private/workspace"}}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":5,"state":"DONE","step_type":"tool","tool_name":"read_file","tool_info":{"name":"read_file"}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":6,"state":"RUNNING","step_type":"tool","tool_name":"terminal","tool_info":{"name":"terminal","parameters":{"CommandLine":"cached command","Cwd":"/private/workspace"}}}}'
+printf '%s\n' '{"event":"step_update","step_update":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","step_index":6,"state":"DONE","step_type":"tool","tool_name":"terminal","tool_info":{"name":"terminal","parameters":{"CommandLine":"terminal command","privateToken":"AGY_TERMINAL_MUST_NOT_LEAK"}}}}'
 printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6-94be-70b93eb290c5","status":"SUCCESS","response":"structured final"}}'
 "#,
         )
@@ -1932,6 +1967,18 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
         let completed = runtime_event_receiver
             .try_recv()
             .expect("structured tool result should be emitted");
+        let read_started = runtime_event_receiver
+            .try_recv()
+            .expect("structured non-Shell tool start should be emitted");
+        let read_completed = runtime_event_receiver
+            .try_recv()
+            .expect("structured non-Shell tool result should be emitted");
+        let terminal_override_started = runtime_event_receiver
+            .try_recv()
+            .expect("structured terminal start should be emitted");
+        let terminal_override_completed = runtime_event_receiver
+            .try_recv()
+            .expect("structured terminal result should be emitted");
         assert_eq!(
             started.payload["toolCallId"],
             completed.payload["toolCallId"]
@@ -1939,15 +1986,54 @@ printf '%s\n' '{"event":"result","result":{"conversation_id":"0bdd2166-d420-40c6
         assert_eq!(started.payload["status"], "in_progress");
         assert_eq!(completed.payload["status"], "completed");
         assert_eq!(completed.payload["kind"], "execute");
-        assert_eq!(completed.payload["output"], "AGY_PRINTF_OK");
-        assert!(
-            !serde_json::to_string(&completed.payload)
-                .expect("normalized event should serialize")
-                .contains("AGY_MUST_NOT_LEAK")
+        assert_eq!(started.payload["toolName"], "run_command");
+        assert!(started.payload["input"].is_null());
+        assert_eq!(
+            completed.payload["input"],
+            serde_json::json!({"command": "pnpm test"})
         );
+        assert!(started.payload.get("title").is_none());
+        assert!(completed.payload.get("title").is_none());
+        assert_eq!(completed.payload["output"], "AGY_PRINTF_OK");
+        assert_eq!(read_started.payload["kind"], "read");
+        assert!(read_started.payload["input"].is_null());
+        assert!(read_completed.payload["input"].is_null());
+        assert_eq!(
+            terminal_override_started.payload["input"],
+            serde_json::json!({"command": "cached command"})
+        );
+        assert_eq!(
+            terminal_override_completed.payload["input"],
+            serde_json::json!({"command": "terminal command"})
+        );
+        let normalized_events = serde_json::to_string(&serde_json::json!([
+            started.payload,
+            completed.payload,
+            read_started.payload,
+            read_completed.payload,
+            terminal_override_started.payload,
+            terminal_override_completed.payload,
+        ]))
+        .expect("normalized events should serialize");
+        for private_value in [
+            "AGY_FIRST_RUNNING_MUST_NOT_LEAK",
+            "AGY_LATE_RUNNING_MUST_NOT_LEAK",
+            "AGY_MUST_NOT_LEAK",
+            "AGY_TERMINAL_MUST_NOT_LEAK",
+            "/private/workspace",
+            "cat /private/secret",
+            "CommandLine",
+            "parameters",
+        ] {
+            assert!(!normalized_events.contains(private_value));
+        }
         let arguments = std::fs::read_to_string(workspace.join(".agy-args"))
             .expect("structured fixture should record its arguments");
         assert!(arguments.contains("--output-format\nstream-json"));
+        for tool_name in ["run_command", "bash", "terminal"] {
+            assert_eq!(antigravity_tool_kind(tool_name), "execute");
+            assert!(antigravity_command_tool(tool_name));
+        }
         assert_eq!(antigravity_tool_kind("read_file"), "read");
         assert_eq!(antigravity_tool_kind("write_to_file"), "write");
         assert_eq!(antigravity_tool_kind("future_tool"), "tool");

@@ -50,8 +50,12 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.17";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 58;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.19";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 60;
+const V104_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.17";
+const V104_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 58;
+const V105_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.18";
+const V105_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 59;
 const V103_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.17";
 const V103_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 57;
 const V102_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.15";
@@ -154,6 +158,8 @@ struct CurrentMigrationState {
     v101: bool,
     v102: bool,
     v103: bool,
+    v104: bool,
+    v105: bool,
 }
 
 impl CurrentMigrationState {
@@ -163,6 +169,83 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105;
+        }
+        if self.v105 {
+            return false;
+        }
+        if contract == V105_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V105_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104;
+        }
+        if self.v104 {
+            return false;
+        }
+        if contract == V104_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V104_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -954,7 +1037,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 100),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 101),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 102),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 103)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 103),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 104),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 105)
         "#,
         [],
         |row| {
@@ -993,6 +1078,8 @@ fn load_current_migration_state(
                 v101: row.get(31)?,
                 v102: row.get(32)?,
                 v103: row.get(33)?,
+                v104: row.get(34)?,
+                v105: row.get(35)?,
             })
         },
     )
@@ -2429,6 +2516,12 @@ impl Database {
             if !self.schema_migration_applied(103)? {
                 self.migrate_trae_skill_delivery_group_v103()?;
             }
+            if !self.schema_migration_applied(104)? {
+                self.migrate_cursor_runtime_catalog_v104()?;
+            }
+            if !self.schema_migration_applied(105)? {
+                self.migrate_kimi_runtime_catalog_v105()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2787,6 +2880,12 @@ impl Database {
         }
         if !self.schema_migration_applied(103)? {
             self.migrate_trae_skill_delivery_group_v103()?;
+        }
+        if !self.schema_migration_applied(104)? {
+            self.migrate_cursor_runtime_catalog_v104()?;
+        }
+        if !self.schema_migration_applied(105)? {
+            self.migrate_kimi_runtime_catalog_v105()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -13976,6 +14075,650 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_cursor_runtime_catalog_v104(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE adapter_installation_v104 (
+                    id TEXT PRIMARY KEY,
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'codex-cli', 'opencode-cli', 'copilot-cli',
+                        'claude-code-cli', 'antigravity-app', 'kiro-cli',
+                        'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli',
+                        'cursor-agent'
+                    )),
+                    executable_path TEXT NOT NULL,
+                    command_name TEXT NOT NULL,
+                    installation_class TEXT NOT NULL
+                        CHECK(installation_class IN ('managed_default', 'custom')),
+                    source TEXT NOT NULL CHECK(source IN (
+                        'manual', 'env', 'inherited_path', 'login_shell',
+                        'known_location', 'custom'
+                    )),
+                    auth_scope TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                    generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+                    path_state TEXT NOT NULL DEFAULT 'valid'
+                        CHECK(path_state IN ('valid', 'path_missing')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO adapter_installation_v104(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled, generation,
+                    path_state, version, created_at, updated_at
+                )
+                SELECT id, adapter_kind, executable_path, command_name,
+                       installation_class, source, auth_scope, enabled, generation,
+                       path_state, version, created_at, updated_at
+                FROM adapter_installation;
+
+                CREATE TABLE agent_profile_v104 (
+                    uuid TEXT PRIMARY KEY,
+                    id TEXT NOT NULL UNIQUE,
+                    slug TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    accent TEXT NOT NULL,
+                    runtime_enabled INTEGER NOT NULL DEFAULT 0,
+                    visual_state_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    avatar_ref TEXT,
+                    default_capabilities_json TEXT NOT NULL DEFAULT '[]',
+                    default_provider TEXT,
+                    default_model TEXT,
+                    profile_status TEXT NOT NULL DEFAULT 'present',
+                    version INTEGER NOT NULL DEFAULT 1,
+                    archived_at TEXT,
+                    handle TEXT,
+                    default_runtime_installation_id TEXT REFERENCES adapter_installation(id),
+                    default_model_selection_json TEXT,
+                    default_permission_config_json TEXT,
+                    member_order INTEGER NOT NULL DEFAULT 0,
+                    removed_at TEXT,
+                    selected_runtime_adapter_kind TEXT CHECK(
+                        selected_runtime_adapter_kind IS NULL OR
+                        selected_runtime_adapter_kind IN (
+                            'codex-cli', 'opencode-cli', 'copilot-cli',
+                            'claude-code-cli', 'antigravity-app', 'kiro-cli',
+                            'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli',
+                            'cursor-agent'
+                        )
+                    ),
+                    team_role TEXT NOT NULL DEFAULT '',
+                    professional_responsibilities TEXT NOT NULL DEFAULT '',
+                    personality_traits_json TEXT NOT NULL DEFAULT '[]',
+                    working_principles TEXT NOT NULL DEFAULT '',
+                    growth_topic TEXT NOT NULL DEFAULT ''
+                );
+
+                INSERT INTO agent_profile_v104(
+                    uuid, id, slug, display_name, accent, runtime_enabled,
+                    visual_state_json, created_at, updated_at, avatar_ref,
+                    default_capabilities_json, default_provider, default_model,
+                    profile_status, version, archived_at, handle,
+                    default_runtime_installation_id, default_model_selection_json,
+                    default_permission_config_json, member_order, removed_at,
+                    selected_runtime_adapter_kind, team_role,
+                    professional_responsibilities, personality_traits_json,
+                    working_principles, growth_topic
+                )
+                SELECT uuid, id, slug, display_name, accent, runtime_enabled,
+                       visual_state_json, created_at, updated_at, avatar_ref,
+                       default_capabilities_json, default_provider, default_model,
+                       profile_status, version, archived_at, handle,
+                       default_runtime_installation_id, default_model_selection_json,
+                       default_permission_config_json, member_order, removed_at,
+                       selected_runtime_adapter_kind, team_role,
+                       professional_responsibilities, personality_traits_json,
+                       working_principles, growth_topic
+                FROM agent_profile;
+
+                CREATE TABLE skill_group_assignment_v104 (
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae',
+                        'cursor'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE skill_projection_observation_v104 (
+                    execution_root TEXT NOT NULL,
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae',
+                        'cursor'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    entry_path TEXT NOT NULL,
+                    delivered_via_group_key TEXT CHECK(
+                        delivered_via_group_key IS NULL OR delivered_via_group_key IN (
+                            'codex', 'opencode', 'copilot', 'claude_compatible',
+                            'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae',
+                            'cursor'
+                        )
+                    ),
+                    duplicate_visible INTEGER NOT NULL DEFAULT 0
+                        CHECK(duplicate_visible IN (0, 1)),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'ready', 'stale', 'shadowed', 'pending_removal', 'error'
+                    )),
+                    last_error_code TEXT,
+                    last_observed_at TEXT NOT NULL,
+                    operation_id TEXT CHECK(
+                        operation_id IS NULL OR length(operation_id) = 36
+                    ),
+                    entry_identity TEXT CHECK(
+                        entry_identity IS NULL OR length(entry_identity) = 49
+                    ),
+                    PRIMARY KEY(execution_root, group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+
+                INSERT INTO skill_group_assignment_v104(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                )
+                SELECT group_key, skill_id, revision_id, created_at, updated_at
+                FROM skill_group_assignment;
+
+                INSERT INTO skill_projection_observation_v104(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at, operation_id, entry_identity
+                )
+                SELECT execution_root, group_key, skill_id, revision_id, entry_path,
+                       delivered_via_group_key, duplicate_visible, state,
+                       last_error_code, last_observed_at, operation_id, entry_identity
+                FROM skill_projection_observation;
+
+                DROP TABLE skill_projection_observation;
+                DROP TABLE skill_group_assignment;
+                DROP TABLE agent_profile;
+                DROP TABLE adapter_installation;
+                ALTER TABLE adapter_installation_v104 RENAME TO adapter_installation;
+                ALTER TABLE agent_profile_v104 RENAME TO agent_profile;
+                ALTER TABLE skill_group_assignment_v104 RENAME TO skill_group_assignment;
+                ALTER TABLE skill_projection_observation_v104
+                    RENAME TO skill_projection_observation;
+
+                CREATE UNIQUE INDEX adapter_installation_managed_default_unique
+                    ON adapter_installation(adapter_kind, auth_scope)
+                    WHERE installation_class = 'managed_default';
+                CREATE UNIQUE INDEX adapter_installation_custom_path_unique
+                    ON adapter_installation(adapter_kind, executable_path, auth_scope)
+                    WHERE installation_class = 'custom';
+                CREATE INDEX adapter_installation_kind_idx
+                    ON adapter_installation(
+                        adapter_kind, installation_class, enabled, created_at
+                    );
+                CREATE UNIQUE INDEX agent_profile_handle_unique
+                    ON agent_profile(handle) WHERE handle IS NOT NULL;
+                CREATE INDEX agent_profile_member_order_idx
+                    ON agent_profile(profile_status, member_order, id);
+                CREATE INDEX agent_profile_status_order_idx
+                    ON agent_profile(profile_status, member_order, id);
+                CREATE INDEX skill_group_assignment_skill_idx
+                    ON skill_group_assignment(skill_id, group_key);
+                CREATE INDEX skill_projection_issue_idx
+                    ON skill_projection_observation(state, last_observed_at DESC);
+                CREATE UNIQUE INDEX skill_projection_operation_unique
+                    ON skill_projection_observation(operation_id)
+                    WHERE operation_id IS NOT NULL;
+
+                CREATE TRIGGER agent_profile_presence_insert_guard
+                BEFORE INSERT ON agent_profile
+                WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                  OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                  OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                END;
+
+                CREATE TRIGGER agent_profile_presence_update_guard
+                BEFORE UPDATE OF profile_status, removed_at ON agent_profile
+                WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                  OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                  OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                  OR (OLD.profile_status = 'removed' AND NEW.profile_status <> 'removed')
+                  OR (OLD.profile_status = 'removed' AND NEW.removed_at <> OLD.removed_at)
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                END;
+
+                CREATE TRIGGER agent_profile_runtime_configuration_insert
+                BEFORE INSERT ON agent_profile
+                WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                        + (NEW.default_runtime_installation_id IS NOT NULL)
+                        + (NEW.default_model_selection_json IS NOT NULL)
+                        + (NEW.default_permission_config_json IS NOT NULL))
+                     NOT IN (0, 4)
+                BEGIN
+                    SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+                END;
+
+                CREATE TRIGGER agent_profile_runtime_configuration_update
+                BEFORE UPDATE OF selected_runtime_adapter_kind,
+                                 default_runtime_installation_id,
+                                 default_model_selection_json,
+                                 default_permission_config_json
+                ON agent_profile
+                WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                        + (NEW.default_runtime_installation_id IS NOT NULL)
+                        + (NEW.default_model_selection_json IS NOT NULL)
+                        + (NEW.default_permission_config_json IS NOT NULL))
+                     NOT IN (0, 4)
+                BEGIN
+                    SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+                END;
+
+                UPDATE skill
+                SET version = version + 1, updated_at = datetime('now')
+                WHERE current_revision_id IS NOT NULL
+                  AND lifecycle_status = 'active'
+                  AND (
+                        (origin = 'official' AND name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 10 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae'
+                              )
+                        )
+                  );
+
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                )
+                SELECT 'cursor', skill.id, skill.current_revision_id,
+                       datetime('now'), datetime('now')
+                FROM skill
+                WHERE skill.current_revision_id IS NOT NULL
+                  AND skill.lifecycle_status = 'active'
+                  AND (
+                        (skill.origin = 'official' AND skill.name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 10 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae'
+                              )
+                        )
+                  );
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.18', projection_schema_version = 59,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (104, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v104 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_kimi_runtime_catalog_v105(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TABLE adapter_installation_v105 (
+                    id TEXT PRIMARY KEY,
+                    adapter_kind TEXT NOT NULL CHECK(adapter_kind IN (
+                        'codex-cli', 'opencode-cli', 'copilot-cli',
+                        'claude-code-cli', 'antigravity-app', 'kiro-cli',
+                        'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli',
+                        'cursor-agent', 'kimi-code-cli'
+                    )),
+                    executable_path TEXT NOT NULL,
+                    command_name TEXT NOT NULL,
+                    installation_class TEXT NOT NULL
+                        CHECK(installation_class IN ('managed_default', 'custom')),
+                    source TEXT NOT NULL CHECK(source IN (
+                        'manual', 'env', 'inherited_path', 'login_shell',
+                        'known_location', 'custom'
+                    )),
+                    auth_scope TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0, 1)),
+                    generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+                    path_state TEXT NOT NULL DEFAULT 'valid'
+                        CHECK(path_state IN ('valid', 'path_missing')),
+                    version INTEGER NOT NULL DEFAULT 1 CHECK(version >= 1),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                INSERT INTO adapter_installation_v105(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled, generation,
+                    path_state, version, created_at, updated_at
+                )
+                SELECT id, adapter_kind, executable_path, command_name,
+                       installation_class, source, auth_scope, enabled, generation,
+                       path_state, version, created_at, updated_at
+                FROM adapter_installation;
+
+                CREATE TABLE agent_profile_v105 (
+                    uuid TEXT PRIMARY KEY,
+                    id TEXT NOT NULL UNIQUE,
+                    slug TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    accent TEXT NOT NULL,
+                    runtime_enabled INTEGER NOT NULL DEFAULT 0,
+                    visual_state_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    avatar_ref TEXT,
+                    default_capabilities_json TEXT NOT NULL DEFAULT '[]',
+                    default_provider TEXT,
+                    default_model TEXT,
+                    profile_status TEXT NOT NULL DEFAULT 'present',
+                    version INTEGER NOT NULL DEFAULT 1,
+                    archived_at TEXT,
+                    handle TEXT,
+                    default_runtime_installation_id TEXT REFERENCES adapter_installation(id),
+                    default_model_selection_json TEXT,
+                    default_permission_config_json TEXT,
+                    member_order INTEGER NOT NULL DEFAULT 0,
+                    removed_at TEXT,
+                    selected_runtime_adapter_kind TEXT CHECK(
+                        selected_runtime_adapter_kind IS NULL OR
+                        selected_runtime_adapter_kind IN (
+                            'codex-cli', 'opencode-cli', 'copilot-cli',
+                            'claude-code-cli', 'antigravity-app', 'kiro-cli',
+                            'qoder-cli', 'codebuddy-cli', 'qwen-code', 'trae-cn-cli',
+                            'cursor-agent', 'kimi-code-cli'
+                        )
+                    ),
+                    team_role TEXT NOT NULL DEFAULT '',
+                    professional_responsibilities TEXT NOT NULL DEFAULT '',
+                    personality_traits_json TEXT NOT NULL DEFAULT '[]',
+                    working_principles TEXT NOT NULL DEFAULT '',
+                    growth_topic TEXT NOT NULL DEFAULT ''
+                );
+
+                INSERT INTO agent_profile_v105(
+                    uuid, id, slug, display_name, accent, runtime_enabled,
+                    visual_state_json, created_at, updated_at, avatar_ref,
+                    default_capabilities_json, default_provider, default_model,
+                    profile_status, version, archived_at, handle,
+                    default_runtime_installation_id, default_model_selection_json,
+                    default_permission_config_json, member_order, removed_at,
+                    selected_runtime_adapter_kind, team_role,
+                    professional_responsibilities, personality_traits_json,
+                    working_principles, growth_topic
+                )
+                SELECT uuid, id, slug, display_name, accent, runtime_enabled,
+                       visual_state_json, created_at, updated_at, avatar_ref,
+                       default_capabilities_json, default_provider, default_model,
+                       profile_status, version, archived_at, handle,
+                       default_runtime_installation_id, default_model_selection_json,
+                       default_permission_config_json, member_order, removed_at,
+                       selected_runtime_adapter_kind, team_role,
+                       professional_responsibilities, personality_traits_json,
+                       working_principles, growth_topic
+                FROM agent_profile;
+
+                CREATE TABLE skill_group_assignment_v105 (
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae',
+                        'cursor', 'kimi'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY(group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE skill_projection_observation_v105 (
+                    execution_root TEXT NOT NULL,
+                    group_key TEXT NOT NULL CHECK(group_key IN (
+                        'codex', 'opencode', 'copilot', 'claude_compatible',
+                        'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae',
+                        'cursor', 'kimi'
+                    )),
+                    skill_id TEXT NOT NULL REFERENCES skill(id) ON DELETE CASCADE,
+                    revision_id TEXT NOT NULL,
+                    entry_path TEXT NOT NULL,
+                    delivered_via_group_key TEXT CHECK(
+                        delivered_via_group_key IS NULL OR delivered_via_group_key IN (
+                            'codex', 'opencode', 'copilot', 'claude_compatible',
+                            'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen', 'trae',
+                            'cursor', 'kimi'
+                        )
+                    ),
+                    duplicate_visible INTEGER NOT NULL DEFAULT 0
+                        CHECK(duplicate_visible IN (0, 1)),
+                    state TEXT NOT NULL CHECK(state IN (
+                        'ready', 'stale', 'shadowed', 'pending_removal', 'error'
+                    )),
+                    last_error_code TEXT,
+                    last_observed_at TEXT NOT NULL,
+                    operation_id TEXT CHECK(
+                        operation_id IS NULL OR length(operation_id) = 36
+                    ),
+                    entry_identity TEXT CHECK(
+                        entry_identity IS NULL OR length(entry_identity) = 49
+                    ),
+                    PRIMARY KEY(execution_root, group_key, skill_id),
+                    FOREIGN KEY(revision_id, skill_id)
+                        REFERENCES skill_revision(id, skill_id) ON DELETE CASCADE
+                );
+
+                INSERT INTO skill_group_assignment_v105(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                )
+                SELECT group_key, skill_id, revision_id, created_at, updated_at
+                FROM skill_group_assignment;
+
+                INSERT INTO skill_projection_observation_v105(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at, operation_id, entry_identity
+                )
+                SELECT execution_root, group_key, skill_id, revision_id, entry_path,
+                       delivered_via_group_key, duplicate_visible, state,
+                       last_error_code, last_observed_at, operation_id, entry_identity
+                FROM skill_projection_observation;
+
+                DROP TABLE skill_projection_observation;
+                DROP TABLE skill_group_assignment;
+                DROP TABLE agent_profile;
+                DROP TABLE adapter_installation;
+                ALTER TABLE adapter_installation_v105 RENAME TO adapter_installation;
+                ALTER TABLE agent_profile_v105 RENAME TO agent_profile;
+                ALTER TABLE skill_group_assignment_v105 RENAME TO skill_group_assignment;
+                ALTER TABLE skill_projection_observation_v105
+                    RENAME TO skill_projection_observation;
+
+                CREATE UNIQUE INDEX adapter_installation_managed_default_unique
+                    ON adapter_installation(adapter_kind, auth_scope)
+                    WHERE installation_class = 'managed_default';
+                CREATE UNIQUE INDEX adapter_installation_custom_path_unique
+                    ON adapter_installation(adapter_kind, executable_path, auth_scope)
+                    WHERE installation_class = 'custom';
+                CREATE INDEX adapter_installation_kind_idx
+                    ON adapter_installation(
+                        adapter_kind, installation_class, enabled, created_at
+                    );
+                CREATE UNIQUE INDEX agent_profile_handle_unique
+                    ON agent_profile(handle) WHERE handle IS NOT NULL;
+                CREATE INDEX agent_profile_member_order_idx
+                    ON agent_profile(profile_status, member_order, id);
+                CREATE INDEX agent_profile_status_order_idx
+                    ON agent_profile(profile_status, member_order, id);
+                CREATE INDEX skill_group_assignment_skill_idx
+                    ON skill_group_assignment(skill_id, group_key);
+                CREATE INDEX skill_projection_issue_idx
+                    ON skill_projection_observation(state, last_observed_at DESC);
+                CREATE UNIQUE INDEX skill_projection_operation_unique
+                    ON skill_projection_observation(operation_id)
+                    WHERE operation_id IS NOT NULL;
+
+                CREATE TRIGGER agent_profile_presence_insert_guard
+                BEFORE INSERT ON agent_profile
+                WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                  OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                  OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                END;
+
+                CREATE TRIGGER agent_profile_presence_update_guard
+                BEFORE UPDATE OF profile_status, removed_at ON agent_profile
+                WHEN NEW.profile_status NOT IN ('present', 'away', 'removed')
+                  OR (NEW.profile_status = 'removed' AND NEW.removed_at IS NULL)
+                  OR (NEW.profile_status <> 'removed' AND NEW.removed_at IS NOT NULL)
+                  OR (OLD.profile_status = 'removed' AND NEW.profile_status <> 'removed')
+                  OR (OLD.profile_status = 'removed' AND NEW.removed_at <> OLD.removed_at)
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid agent_profile presence');
+                END;
+
+                CREATE TRIGGER agent_profile_runtime_configuration_insert
+                BEFORE INSERT ON agent_profile
+                WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                        + (NEW.default_runtime_installation_id IS NOT NULL)
+                        + (NEW.default_model_selection_json IS NOT NULL)
+                        + (NEW.default_permission_config_json IS NOT NULL))
+                     NOT IN (0, 4)
+                BEGIN
+                    SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+                END;
+
+                CREATE TRIGGER agent_profile_runtime_configuration_update
+                BEFORE UPDATE OF selected_runtime_adapter_kind,
+                                 default_runtime_installation_id,
+                                 default_model_selection_json,
+                                 default_permission_config_json
+                ON agent_profile
+                WHEN ((NEW.selected_runtime_adapter_kind IS NOT NULL)
+                        + (NEW.default_runtime_installation_id IS NOT NULL)
+                        + (NEW.default_model_selection_json IS NOT NULL)
+                        + (NEW.default_permission_config_json IS NOT NULL))
+                     NOT IN (0, 4)
+                BEGIN
+                    SELECT RAISE(ABORT, 'Member Runtime Configuration must be complete or absent');
+                END;
+
+                UPDATE skill
+                SET version = version + 1, updated_at = datetime('now')
+                WHERE current_revision_id IS NOT NULL
+                  AND lifecycle_status = 'active'
+                  AND (
+                        (origin = 'official' AND name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 11 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen',
+                                  'trae', 'cursor'
+                              )
+                        )
+                  );
+
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                )
+                SELECT 'kimi', skill.id, skill.current_revision_id,
+                       datetime('now'), datetime('now')
+                FROM skill
+                WHERE skill.current_revision_id IS NOT NULL
+                  AND skill.lifecycle_status = 'active'
+                  AND (
+                        (skill.origin = 'official' AND skill.name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 11 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen',
+                                  'trae', 'cursor'
+                              )
+                        )
+                  );
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.19', projection_schema_version = 60,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (105, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v105 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -18502,6 +19245,8 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 56
             WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 105;
+            DELETE FROM schema_migration WHERE version = 104;
             DELETE FROM schema_migration WHERE version = 103;
             DELETE FROM schema_migration WHERE version = 102;
             PRAGMA foreign_keys = ON;
@@ -19037,6 +19782,8 @@ mod tests {
             v101: version >= 101,
             v102: version >= 102,
             v103: version >= 103,
+            v104: version >= 104,
+            v105: version >= 105,
         }
     }
 
@@ -19047,6 +19794,18 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                105,
+            ),
+            (
+                "v1.18/schema-59",
+                V105_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V105_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                104,
+            ),
+            (
+                "v1.17/schema-58",
+                V104_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V104_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 103,
             ),
             (
@@ -19301,7 +20060,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(103));
+        assert_eq!(state, migration_state_through(105));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -20406,6 +21165,8 @@ mod tests {
                     datetime('now'), datetime('now'), NULL, NULL, 'legacy-trae-ready'
                 );
 
+                DELETE FROM schema_migration WHERE version = 105;
+                DELETE FROM schema_migration WHERE version = 104;
                 DELETE FROM schema_migration WHERE version = 103;
                 UPDATE rovai_data_contract
                 SET contract_version = 'v1.17', projection_schema_version = 57
@@ -20414,10 +21175,14 @@ mod tests {
             )
             .unwrap();
         let now = chrono::Utc::now().to_rfc3339();
-        for group in SkillDeliveryGroupKey::ALL
-            .into_iter()
-            .filter(|group| *group != SkillDeliveryGroupKey::Trae)
-        {
+        for group in SkillDeliveryGroupKey::ALL.into_iter().filter(|group| {
+            !matches!(
+                *group,
+                SkillDeliveryGroupKey::Trae
+                    | SkillDeliveryGroupKey::Cursor
+                    | SkillDeliveryGroupKey::Kimi
+            )
+        }) {
             for (skill_id, revision_id) in [
                 ("v103-full", "v103-full-revision"),
                 ("v103-required", "v103-required-revision"),
@@ -20555,6 +21320,354 @@ mod tests {
                 [&now],
             )
             .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v104_adds_cursor_catalog_and_delivery_without_expanding_custom_skills() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v104-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO skill(
+                    id, name, origin, enabled, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES
+                    ('v104-full', 'v104-full', 'imported', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now')),
+                    ('v104-custom', 'v104-custom', 'imported', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now')),
+                    ('v104-required', 'cli-operations', 'official', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now'));
+
+                INSERT INTO skill_revision(
+                    id, skill_id, revision, name, description, source_type,
+                    source_metadata_json, content_digest, risk_summary_json,
+                    file_count, total_bytes, installed_at
+                ) VALUES
+                    ('v104-full-revision', 'v104-full', 1, 'v104-full', 'full',
+                     'local_folder', '{}', 'sha256:v104-full',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v104-custom-revision', 'v104-custom', 1, 'v104-custom', 'custom',
+                     'local_folder', '{}', 'sha256:v104-custom',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v104-required-revision', 'v104-required', 1, 'cli-operations', 'required',
+                     'bundled', '{}', 'sha256:v104-required',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now'));
+
+                UPDATE skill
+                SET current_revision_id = CASE id
+                    WHEN 'v104-full' THEN 'v104-full-revision'
+                    WHEN 'v104-custom' THEN 'v104-custom-revision'
+                    ELSE 'v104-required-revision'
+                END
+                WHERE id IN ('v104-full', 'v104-custom', 'v104-required');
+
+                DELETE FROM schema_migration WHERE version = 105;
+                DELETE FROM schema_migration WHERE version = 104;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.17', projection_schema_version = 58
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for group in SkillDeliveryGroupKey::ALL.into_iter().filter(|group| {
+            !matches!(
+                group,
+                SkillDeliveryGroupKey::Cursor | SkillDeliveryGroupKey::Kimi
+            )
+        }) {
+            for (skill_id, revision_id) in [
+                ("v104-full", "v104-full-revision"),
+                ("v104-required", "v104-required-revision"),
+            ] {
+                database
+                    .connection()
+                    .execute(
+                        r#"
+                        INSERT INTO skill_group_assignment(
+                            group_key, skill_id, revision_id, created_at, updated_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?4)
+                        "#,
+                        params![group.as_str(), skill_id, revision_id, now],
+                    )
+                    .unwrap();
+            }
+        }
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                ) VALUES ('codex', 'v104-custom', 'v104-custom-revision', ?1, ?1)
+                "#,
+                [&now],
+            )
+            .unwrap();
+
+        database.migrate_cursor_runtime_catalog_v104().unwrap();
+
+        let migrated: (i64, i64, i64, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v104-full'),
+                    (SELECT version FROM skill WHERE id = 'v104-full'),
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v104-custom'),
+                    (SELECT version FROM skill WHERE id = 'v104-custom'),
+                    (SELECT COUNT(*) FROM skill_group_assignment
+                     WHERE skill_id = 'v104-required'),
+                    (SELECT version FROM skill WHERE id = 'v104-required')
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(migrated, (11, 2, 1, 1, 11, 2));
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'v104-cursor-installation', 'cursor-agent', '/tmp/v104-cursor-agent',
+                    'cursor-agent', 'managed_default', 'manual', 'default', 1,
+                    1, 'valid', 1, datetime('now'), datetime('now')
+                );
+                "#,
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO skill_projection_observation(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at
+                ) VALUES (
+                    '/tmp/v104-root', 'cursor', 'v104-full', 'v104-full-revision',
+                    '/tmp/v104-root/.cursor/skills/v104-full', 'cursor', 0,
+                    'ready', NULL, ?1
+                )
+                "#,
+                [&now],
+            )
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.18".to_string(), 59)
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v105_adds_kimi_catalog_and_delivery_without_expanding_custom_skills() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v105-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO skill(
+                    id, name, origin, enabled, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES
+                    ('v105-full', 'v105-full', 'imported', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now')),
+                    ('v105-custom', 'v105-custom', 'imported', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now')),
+                    ('v105-required', 'cli-operations', 'official', 1, 'active', NULL, 1,
+                     datetime('now'), datetime('now'));
+
+                INSERT INTO skill_revision(
+                    id, skill_id, revision, name, description, source_type,
+                    source_metadata_json, content_digest, risk_summary_json,
+                    file_count, total_bytes, installed_at
+                ) VALUES
+                    ('v105-full-revision', 'v105-full', 1, 'v105-full', 'full',
+                     'local_folder', '{}', 'sha256:v105-full',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v105-custom-revision', 'v105-custom', 1, 'v105-custom', 'custom',
+                     'local_folder', '{}', 'sha256:v105-custom',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v105-required-revision', 'v105-required', 1, 'cli-operations', 'required',
+                     'bundled', '{}', 'sha256:v105-required',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now'));
+
+                UPDATE skill
+                SET current_revision_id = CASE id
+                    WHEN 'v105-full' THEN 'v105-full-revision'
+                    WHEN 'v105-custom' THEN 'v105-custom-revision'
+                    ELSE 'v105-required-revision'
+                END
+                WHERE id IN ('v105-full', 'v105-custom', 'v105-required');
+
+                DELETE FROM schema_migration WHERE version = 105;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.18', projection_schema_version = 59
+                WHERE singleton = 1;
+                "#,
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for group in SkillDeliveryGroupKey::ALL
+            .into_iter()
+            .filter(|group| *group != SkillDeliveryGroupKey::Kimi)
+        {
+            for (skill_id, revision_id) in [
+                ("v105-full", "v105-full-revision"),
+                ("v105-required", "v105-required-revision"),
+            ] {
+                database
+                    .connection()
+                    .execute(
+                        r#"
+                        INSERT INTO skill_group_assignment(
+                            group_key, skill_id, revision_id, created_at, updated_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?4)
+                        "#,
+                        params![group.as_str(), skill_id, revision_id, now],
+                    )
+                    .unwrap();
+            }
+        }
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                ) VALUES ('codex', 'v105-custom', 'v105-custom-revision', ?1, ?1)
+                "#,
+                [&now],
+            )
+            .unwrap();
+
+        database.migrate_kimi_runtime_catalog_v105().unwrap();
+
+        let migrated: (i64, i64, i64, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM skill_group_assignment WHERE skill_id = 'v105-full'),
+                    (SELECT version FROM skill WHERE id = 'v105-full'),
+                    (SELECT COUNT(*) FROM skill_group_assignment WHERE skill_id = 'v105-custom'),
+                    (SELECT version FROM skill WHERE id = 'v105-custom'),
+                    (SELECT COUNT(*) FROM skill_group_assignment WHERE skill_id = 'v105-required'),
+                    (SELECT version FROM skill WHERE id = 'v105-required')
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(migrated, (12, 2, 1, 1, 12, 2));
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'v105-kimi-installation', 'kimi-code-cli', '/tmp/v105-kimi',
+                    'kimi', 'managed_default', 'manual', 'default', 1,
+                    1, 'valid', 1, datetime('now'), datetime('now')
+                );
+                "#,
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                r#"
+                INSERT INTO skill_projection_observation(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at
+                ) VALUES (
+                    '/tmp/v105-root', 'kimi', 'v105-full', 'v105-full-revision',
+                    '/tmp/v105-root/.kimi-code/skills/v105-full', 'kimi', 0,
+                    'ready', NULL, ?1
+                )
+                "#,
+                [&now],
+            )
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.19".to_string(), 60)
+        );
         assert_eq!(
             database
                 .connection()
@@ -25982,9 +27095,39 @@ mod tests {
             connection,
             &[
                 58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
-                102,
+                102, 103, 104, 105,
             ],
         );
+        for table in [
+            "adapter_installation",
+            "agent_profile",
+            "skill_group_assignment",
+            "skill_projection_observation",
+        ] {
+            let schema: String = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert!(
+                schema.contains(if table.starts_with("skill_") {
+                    "'cursor'"
+                } else {
+                    "'cursor-agent'"
+                }),
+                "{table} does not admit the Cursor catalog identity"
+            );
+            assert!(
+                schema.contains(if table.starts_with("skill_") {
+                    "'kimi'"
+                } else {
+                    "'kimi-code-cli'"
+                }),
+                "{table} does not admit the Kimi catalog identity"
+            );
+        }
         assert_schema_objects(
             connection,
             "table",

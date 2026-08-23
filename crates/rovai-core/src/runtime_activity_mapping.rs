@@ -18,7 +18,7 @@ pub struct RuntimeActivityMappingDescriptor {
     pub registry_entry: &'static str,
 }
 
-pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 10] = [
+pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 12] = [
     descriptor(
         AdapterKind::CodexCli,
         "codex-app-server",
@@ -38,6 +38,8 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 10] = [
     descriptor(AdapterKind::CodebuddyCli, "acp-v1", "fine_grained", "acp"),
     descriptor(AdapterKind::QwenCode, "acp-v1", "fine_grained", "acp"),
     descriptor(AdapterKind::TraeCnCli, "acp-v1", "fine_grained", "acp"),
+    descriptor(AdapterKind::CursorAgent, "acp-v1", "run_level", "acp"),
+    descriptor(AdapterKind::KimiCodeCli, "acp-v1", "run_level", "acp"),
     descriptor(
         AdapterKind::AntigravityApp,
         "antigravity-stream-json-or-text",
@@ -284,6 +286,14 @@ mod tests {
         );
         assert_eq!(
             descriptor_for(AdapterKind::AntigravityApp).baseline_coverage,
+            "run_level"
+        );
+        assert_eq!(
+            descriptor_for(AdapterKind::CursorAgent).baseline_coverage,
+            "run_level"
+        );
+        assert_eq!(
+            descriptor_for(AdapterKind::KimiCodeCli).baseline_coverage,
             "run_level"
         );
     }

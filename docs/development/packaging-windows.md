@@ -87,7 +87,7 @@ timestamp 与 release-manifest hash。SmartScreen reputation 与签名有效性�
 Node 26、pnpm 11.20.0、Rust 1.97.1 与 frozen lockfile 生成并上传 unsigned 证据。正式发布另在 Windows 10 22H2 与 Windows 11 客户端环境完成 native
 frame、DPI、Forced Colors/High Contrast、NVDA、中文 IME、Explorer、安装/升级/卸载和 SmartScreen 验收。逐 Runtime
 资格证据仍按 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)独立取得，三类 execution-shape
-基础设施测试不能批量放行十个 Adapter。
+基础设施测试不能批量放行十二个 Adapter。Kimi Code 的 macOS arm64 资格不能外推到 Windows x64。
 
 ## References
 

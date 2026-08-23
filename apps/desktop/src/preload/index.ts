@@ -128,6 +128,9 @@ const api: RovaiApi = {
     resetBounds() {
       return ipcRenderer.invoke('rovai:window-reset-bounds')
     },
+    popupApplicationMenu(request) {
+      return ipcRenderer.invoke('rovai:window-application-menu-popup', request) as Promise<boolean>
+    },
     onPageZoomChanged(listener) {
       const handler = (_event: Electron.IpcRendererEvent, percentage: unknown): void => {
         if (typeof percentage === 'number' && Number.isFinite(percentage)) listener(percentage)

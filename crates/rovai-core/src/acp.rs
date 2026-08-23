@@ -260,6 +260,17 @@ enum AcpSessionMessageRoute {
     Missing,
 }
 
+fn is_cursor_blocking_request(method: &str) -> bool {
+    matches!(method, "cursor/ask_question" | "cursor/create_plan")
+}
+
+fn is_cursor_private_notification(method: &str) -> bool {
+    matches!(
+        method,
+        "cursor/update_todos" | "cursor/task" | "cursor/generate_image"
+    )
+}
+
 fn is_session_catalog_update(message: &Value) -> bool {
     message.get("id").is_none()
         && message.get("method").and_then(Value::as_str) == Some("session/update")
@@ -404,6 +415,8 @@ pub(crate) struct AcpHost {
     initialize_result: RwLock<Option<Value>>,
     startup_diagnostics: Mutex<String>,
     private_config_root: Option<PathBuf>,
+    remove_private_config_root_on_shutdown: bool,
+    session_permission_mode: Option<String>,
     detector_config_root: Option<PathBuf>,
     ephemeral_config: Mutex<Option<EphemeralMcpConfigFile>>,
     executable_path: PathBuf,
@@ -423,6 +436,7 @@ impl AcpHost {
         allow_client_fs: bool,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         private_runtime_dir: &Path,
+        private_session_scope: Option<&str>,
         attachment_access_root: Option<&Path>,
     ) -> Result<Arc<Self>> {
         if !runtime_launch_allowed(
@@ -431,8 +445,25 @@ impl AcpHost {
         ) {
             bail!("Runtime launch policy rejected Agent execution");
         }
-        let private_config_root =
-            prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
+        let private_config = prepare_private_host_config(
+            private_runtime_dir,
+            frozen_runtime.adapter_kind,
+            private_session_scope,
+        )?;
+        let private_config_root = private_config.as_ref().map(|config| config.root.as_path());
+        let session_permission_mode = if frozen_runtime.adapter_kind == AdapterKind::KimiCodeCli {
+            Some(
+                frozen_runtime
+                    .permissions
+                    .values
+                    .get("permission_mode")
+                    .and_then(Value::as_str)
+                    .context("Kimi Code Runtime requires permission_mode")?
+                    .to_string(),
+            )
+        } else {
+            None
+        };
         let host_instance_id = uuid::Uuid::new_v4().to_string();
         let mut command = Command::new(&frozen_runtime.executable_path);
         configure_active_runtime_command(&mut command);
@@ -447,7 +478,7 @@ impl AcpHost {
             !allow_client_fs,
             external_mcp_servers,
             private_runtime_dir,
-            private_config_root.as_deref(),
+            private_config_root,
             attachment_access_root,
             builtin_tools
                 .as_ref()
@@ -481,9 +512,7 @@ impl AcpHost {
             None
         };
         let process_working_directory = if frozen_runtime.adapter_kind == AdapterKind::KiroCli {
-            private_config_root
-                .as_deref()
-                .context("Kiro Host isolation directory is missing")?
+            private_config_root.context("Kiro Host isolation directory is missing")?
         } else {
             cwd
         };
@@ -523,7 +552,11 @@ impl AcpHost {
             protocol_violated: AtomicBool::new(false),
             initialize_result: RwLock::new(None),
             startup_diagnostics: Mutex::new(String::new()),
-            private_config_root,
+            private_config_root: private_config.as_ref().map(|config| config.root.clone()),
+            remove_private_config_root_on_shutdown: private_config
+                .as_ref()
+                .is_some_and(|config| config.remove_on_shutdown),
+            session_permission_mode,
             detector_config_root,
             ephemeral_config: Mutex::new(ephemeral_config),
             executable_path: PathBuf::from(&frozen_runtime.executable_path),
@@ -554,6 +587,18 @@ impl AcpHost {
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
                 *host.initialize_result.write().await = Some(result);
+                if frozen_runtime.adapter_kind == AdapterKind::CursorAgent
+                    && let Err(error) = host
+                        .rpc_with_timeout(
+                            "authenticate",
+                            json!({"methodId": "cursor_login"}),
+                            Duration::from_secs(15),
+                        )
+                        .await
+                {
+                    host.shutdown().await;
+                    return Err(error.context("Cursor ACP authentication failed"));
+                }
                 if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
                     // Copilot eagerly loads --additional-mcp-config before it
                     // replies to initialize. Preserve the original minimal
@@ -617,16 +662,53 @@ impl AcpHost {
                             }
                             continue;
                         }
-                        let session_id = message
+                        let method = message.get("method").and_then(Value::as_str);
+                        if host.adapter_kind == AdapterKind::CursorAgent
+                            && method.is_some_and(is_cursor_private_notification)
+                        {
+                            // Cursor's non-standard progress notifications do
+                            // not carry ACP Session semantics that Rovai can
+                            // safely publish or use as execution evidence.
+                            continue;
+                        }
+                        if host.adapter_kind == AdapterKind::CursorAgent
+                            && method.is_some_and(|method| {
+                                method.starts_with("cursor/") && !is_cursor_blocking_request(method)
+                            })
+                            && let Some(id) = message.get("id").cloned()
+                        {
+                            let _ = host
+                                .send(json!({
+                                    "jsonrpc": "2.0",
+                                    "id": id,
+                                    "error": {
+                                        "code": -32601,
+                                        "message": "Unsupported Cursor ACP extension request"
+                                    }
+                                }))
+                                .await;
+                            continue;
+                        }
+                        let declared_session_id = message
                             .pointer("/params/sessionId")
                             .and_then(Value::as_str)
                             .map(str::to_string);
-                        let route = match session_id.as_deref() {
-                            Some(session_id) => {
+                        let (session_id, route) = match declared_session_id.as_deref() {
+                            Some(session_id) => (
+                                declared_session_id.clone(),
                                 host.route_session_message(session_id, &message, line.len())
+                                    .await,
+                            ),
+                            None if host.adapter_kind == AdapterKind::CursorAgent
+                                && method.is_some_and(is_cursor_blocking_request) =>
+                            {
+                                host.route_unique_active_prompt_message(&message)
                                     .await
+                                    .map_or((None, AcpSessionMessageRoute::Missing), |value| {
+                                        (Some(value.0), value.1)
+                                    })
                             }
-                            None => AcpSessionMessageRoute::Missing,
+                            None => (None, AcpSessionMessageRoute::Missing),
                         };
                         match route {
                             AcpSessionMessageRoute::Forward {
@@ -1002,6 +1084,35 @@ impl AcpHost {
         }
     }
 
+    async fn route_unique_active_prompt_message(
+        &self,
+        _message: &Value,
+    ) -> Option<(String, AcpSessionMessageRoute)> {
+        let mut routes = self.routes.write().await;
+        let session_ids = routes
+            .iter()
+            .filter(|(_, route)| matches!(route.phase, AcpSessionPhase::PromptActive(_)))
+            .map(|(session_id, _)| session_id.clone())
+            .collect::<Vec<_>>();
+        if session_ids.len() != 1 {
+            return None;
+        }
+        let session_id = session_ids.into_iter().next()?;
+        let route = routes.get_mut(&session_id)?;
+        let AcpSessionPhase::PromptActive(active_prompt) = &route.phase else {
+            return None;
+        };
+        route.sequence = route.sequence.saturating_add(1);
+        Some((
+            session_id,
+            AcpSessionMessageRoute::Forward {
+                owner: route.owner.clone(),
+                active_prompt: active_prompt.clone(),
+                sequence: route.sequence,
+            },
+        ))
+    }
+
     async fn has_loading_replay(&self) -> bool {
         self.routes
             .read()
@@ -1236,7 +1347,9 @@ impl AcpHost {
             let _ = timeout(Duration::from_secs(1), child.wait()).await;
         }
         let _ = child.force_terminate_tree();
-        if let Some(root) = self.private_config_root.as_ref() {
+        if self.remove_private_config_root_on_shutdown
+            && let Some(root) = self.private_config_root.as_ref()
+        {
             let _ = std::fs::remove_dir_all(root);
         }
         if let Some(root) = self.detector_config_root.as_ref() {
@@ -1537,6 +1650,42 @@ impl AcpMissingSendRecoveryCollector {
     }
 }
 
+fn kimi_public_agent_text(text: &str) -> String {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+
+    let mut public = String::new();
+    let mut remaining = text;
+    let mut closed_reasoning_block = false;
+    loop {
+        let Some(open) = remaining.find(OPEN) else {
+            if let Some(close) = remaining.find(CLOSE) {
+                if closed_reasoning_block {
+                    // Some providers have emitted a duplicate close tag after
+                    // already returning to public text. Preserve the public
+                    // prefix while dropping only that redundant delimiter.
+                    public.push_str(&remaining[..close]);
+                }
+                // Without an earlier complete block, a malformed leading
+                // reasoning fragment remains private and its prefix is dropped.
+                remaining = &remaining[close + CLOSE.len()..];
+                continue;
+            }
+            public.push_str(remaining);
+            break;
+        };
+        public.push_str(&remaining[..open]);
+        let after_open = &remaining[open + OPEN.len()..];
+        let Some(close) = after_open.find(CLOSE) else {
+            // Never publish an unterminated reasoning block.
+            break;
+        };
+        remaining = &after_open[close + CLOSE.len()..];
+        closed_reasoning_block = true;
+    }
+    public.trim().to_string()
+}
+
 pub struct AcpRuntime {
     owner: AcpRuntimeOwner,
     host: Arc<AcpHost>,
@@ -1601,6 +1750,7 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
+            | AdapterKind::KimiCodeCli
     )
 }
 
@@ -1671,6 +1821,8 @@ impl AcpRuntime {
                 | AdapterKind::QoderCli
                 | AdapterKind::CodebuddyCli
                 | AdapterKind::QwenCode
+                | AdapterKind::CursorAgent
+                | AdapterKind::KimiCodeCli
         ) {
             external_mcp_servers
                 .iter()
@@ -1706,18 +1858,17 @@ impl AcpRuntime {
                 } else {
                     "session/load"
                 };
+                let mut params = json!({
+                    "sessionId": existing_session_id,
+                    "cwd": cwd,
+                    "mcpServers": mcp_servers,
+                });
+                if self.host.adapter_kind != AdapterKind::CursorAgent {
+                    params["additionalDirectories"] = json!(additional_directories);
+                }
                 let result = match self
                     .host
-                    .rpc_with_timeout(
-                        method,
-                        json!({
-                            "sessionId": existing_session_id,
-                            "cwd": cwd,
-                            "mcpServers": mcp_servers,
-                            "additionalDirectories": additional_directories,
-                        }),
-                        ACP_HISTORY_RESTORE_TIMEOUT,
-                    )
+                    .rpc_with_timeout(method, params, ACP_HISTORY_RESTORE_TIMEOUT)
                     .await
                 {
                     Ok(result) => result,
@@ -1741,17 +1892,14 @@ impl AcpRuntime {
                 (existing_session_id.to_string(), true)
             }
             AcpSessionContinuation::New => {
-                let result = self
-                    .host
-                    .rpc(
-                        "session/new",
-                        json!({
-                            "cwd": cwd,
-                            "mcpServers": mcp_servers,
-                            "additionalDirectories": additional_directories,
-                        }),
-                    )
-                    .await?;
+                let mut params = json!({
+                    "cwd": cwd,
+                    "mcpServers": mcp_servers,
+                });
+                if self.host.adapter_kind != AdapterKind::CursorAgent {
+                    params["additionalDirectories"] = json!(additional_directories);
+                }
+                let result = self.host.rpc("session/new", params).await?;
                 *self.session_result.write().await = Some(result.clone());
                 let session_id = result
                     .get("sessionId")
@@ -1819,6 +1967,20 @@ impl AcpRuntime {
                     self.set_config_option(&session_id, key, value).await?;
                 }
             }
+        }
+        if self.host.adapter_kind == AdapterKind::KimiCodeCli {
+            let configured = self
+                .host
+                .session_permission_mode
+                .as_deref()
+                .context("Kimi Code Runtime has no frozen Session mode")?;
+            let effective = if self.workspace_access == "read_only" {
+                "plan"
+            } else {
+                configured
+            };
+            self.set_config_option(&session_id, "mode", effective)
+                .await?;
         }
         if prebound_session {
             self.host
@@ -2049,17 +2211,30 @@ impl AcpRuntime {
         let observation = observation
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)?;
-        let text = observation.streamed_agent_text.trim().to_string();
+        let text = if self.host.adapter_kind == AdapterKind::KimiCodeCli {
+            kimi_public_agent_text(&observation.streamed_agent_text)
+        } else {
+            observation.streamed_agent_text.trim().to_string()
+        };
         (!text.is_empty()).then_some(text)
     }
 
     pub async fn missing_send_recovery_candidate(&self, native_prompt_id: &str) -> Option<String> {
-        self.active_observation
+        let candidate = self
+            .active_observation
             .lock()
             .await
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)
-            .and_then(|observation| observation.missing_send_recovery.candidate())
+            .and_then(|observation| observation.missing_send_recovery.candidate());
+        candidate.and_then(|text| {
+            let text = if self.host.adapter_kind == AdapterKind::KimiCodeCli {
+                kimi_public_agent_text(&text)
+            } else {
+                text
+            };
+            (!text.is_empty()).then_some(text)
+        })
     }
 
     pub async fn session_id(&self) -> Option<String> {
@@ -2270,6 +2445,7 @@ impl AcpCliRuntimeAdapter {
                 .await;
         }
         let execution_root = PathBuf::from(&workspace.execution_root);
+        let private_session_scope = kimi_private_session_scope(camp_id, agent_id, frozen_runtime)?;
         let fleet_lease = self
             .fleet
             .acquire(
@@ -2295,6 +2471,7 @@ impl AcpCliRuntimeAdapter {
                         true,
                         external_mcp_servers,
                         &self.private_runtime_dir,
+                        private_session_scope.as_deref(),
                         Some(attachment_access_root),
                     )
                     .await?;
@@ -2431,10 +2608,14 @@ impl AcpCliRuntimeAdapter {
 }
 
 fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseDisposition {
-    if adapter_kind == AdapterKind::KiroCli {
+    if matches!(
+        adapter_kind,
+        AdapterKind::KiroCli | AdapterKind::CursorAgent | AdapterKind::KimiCodeCli
+    ) {
         // Kiro keeps a Native Session locked for the lifetime of its ACP
-        // process. Stop the Host here so the successor process can load the
-        // persisted Session without extending locked state across AgentRuns.
+        // process. Cursor Host reuse remains outside the current contract.
+        // Kimi resumes from its scoped persistent home on a successor Host,
+        // so it does not need to retain process state across AgentRuns.
         FleetReleaseDisposition::Stop
     } else {
         FleetReleaseDisposition::Reusable
@@ -2531,16 +2712,52 @@ pub(crate) fn freeze_history_restore_compatibility(
     Ok(frozen_runtime)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PreparedPrivateHostConfig {
+    root: PathBuf,
+    remove_on_shutdown: bool,
+}
+
+fn kimi_private_session_scope(
+    camp_id: &str,
+    agent_id: &str,
+    frozen_runtime: &FrozenAgentRuntimeConfig,
+) -> Result<Option<String>> {
+    if frozen_runtime.adapter_kind != AdapterKind::KimiCodeCli {
+        return Ok(None);
+    }
+    Ok(Some(canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "adapterKind": frozen_runtime.adapter_kind,
+        "campId": camp_id,
+        "agentId": agent_id,
+        "installationId": frozen_runtime.installation_id,
+        "authScope": frozen_runtime.auth_scope,
+    }))?))
+}
+
 fn prepare_private_host_config(
     private_runtime_dir: &Path,
     adapter_kind: AdapterKind,
-) -> Result<Option<PathBuf>> {
-    if adapter_kind != AdapterKind::KiroCli {
-        return Ok(None);
-    }
-    let root = private_runtime_dir
-        .join("acp-host")
-        .join(uuid::Uuid::new_v4().to_string());
+    private_session_scope: Option<&str>,
+) -> Result<Option<PreparedPrivateHostConfig>> {
+    let (root, remove_on_shutdown) = match adapter_kind {
+        AdapterKind::KiroCli => (
+            private_runtime_dir
+                .join("acp-host")
+                .join(uuid::Uuid::new_v4().to_string()),
+            true,
+        ),
+        AdapterKind::KimiCodeCli => {
+            let scope =
+                private_session_scope.context("Kimi Code private Session scope is missing")?;
+            if scope.len() != 64 || !scope.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                bail!("Kimi Code private Session scope is invalid");
+            }
+            (private_runtime_dir.join("session-homes").join(scope), false)
+        }
+        _ => return Ok(None),
+    };
     std::fs::create_dir_all(&root).with_context(|| {
         format!(
             "failed to create private ACP Host directory {}",
@@ -2548,7 +2765,10 @@ fn prepare_private_host_config(
         )
     })?;
     restrict_private_directory(&root)?;
-    Ok(Some(root))
+    Ok(Some(PreparedPrivateHostConfig {
+        root,
+        remove_on_shutdown,
+    }))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2719,11 +2939,169 @@ fn configure_runtime_command(
             // TRAE receives Rovai MCP definitions through session/new or
             // session/load. Native MCP configuration remains untouched.
         }
+        AdapterKind::CursorAgent => {
+            if !external_mcp_servers.is_empty() {
+                bail!("Cursor Agent external MCP projection is not verified");
+            }
+            let execution_mode = values
+                .get("execution_mode")
+                .and_then(Value::as_str)
+                .context("Cursor Agent Runtime requires execution_mode")?;
+            let approval_policy = values
+                .get("approval_policy")
+                .and_then(Value::as_str)
+                .context("Cursor Agent Runtime requires approval_policy")?;
+            health::configure_acp_command(command, runtime.adapter_kind, false);
+            let read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && workspace.access == "read_only";
+            let mode = if read_only { "plan" } else { execution_mode };
+            if mode != "agent" {
+                command.arg("--mode").arg(mode);
+            }
+            if !read_only {
+                match approval_policy {
+                    "default" => {}
+                    "auto_review" => {
+                        command.arg("--auto-review");
+                    }
+                    "force" => {
+                        command.arg("--force");
+                    }
+                    _ => bail!("Cursor Agent approval_policy is invalid"),
+                }
+            }
+            if let Some(root) = attachment_access_root {
+                command.arg("--add-dir").arg(root);
+            }
+            if let Some(root) = run_tmp {
+                command.arg("--add-dir").arg(root);
+            }
+        }
+        AdapterKind::KimiCodeCli => {
+            if !external_mcp_servers.is_empty() {
+                bail!("Kimi Code external MCP projection is not verified");
+            }
+            let private_config_root =
+                private_config_root.context("Kimi Code Host isolation directory is missing")?;
+            let permission_mode = values
+                .get("permission_mode")
+                .and_then(Value::as_str)
+                .context("Kimi Code Runtime requires permission_mode")?;
+            if !matches!(permission_mode, "default" | "plan" | "auto" | "yolo") {
+                bail!("Kimi Code permission_mode is invalid");
+            }
+            health::configure_acp_command(command, runtime.adapter_kind, false);
+            // Keep Kimi's ordinary user config and credentials untouched. A
+            // provider can be injected process-locally through KIMI_MODEL_*;
+            // Kimi explicitly treats that synthetic provider as memory-only.
+            command.env("KIMI_CODE_HOME", private_config_root);
+            configure_kimi_model_environment(command)?;
+        }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
             bail!("Runtime is not implemented through ACP")
         }
     }
     Ok(None)
+}
+
+const KIMI_MODEL_ENVIRONMENT_KEYS: [&str; 6] = [
+    "KIMI_MODEL_NAME",
+    "KIMI_MODEL_PROVIDER_TYPE",
+    "KIMI_MODEL_API_KEY",
+    "KIMI_MODEL_BASE_URL",
+    "KIMI_MODEL_MAX_CONTEXT_SIZE",
+    "KIMI_MODEL_CAPABILITIES",
+];
+
+fn kimi_model_environment_path() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("ROVAI_KIMI_CONFIG") {
+        return Ok(PathBuf::from(path));
+    }
+    Ok(dirs::home_dir()
+        .context("could not determine the user home directory for Kimi Code configuration")?
+        .join(".config/rovai/kimi-code.env"))
+}
+
+pub(crate) fn configure_kimi_model_environment(command: &mut Command) -> Result<()> {
+    let path = kimi_model_environment_path()?;
+    if !path.exists() {
+        return Ok(());
+    }
+    configure_kimi_model_environment_from_path(command, &path)
+}
+
+fn configure_kimi_model_environment_from_path(command: &mut Command, path: &Path) -> Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mode = std::fs::metadata(path)
+            .with_context(|| format!("failed to inspect {}", path.display()))?
+            .permissions()
+            .mode();
+        if mode & 0o077 != 0 {
+            bail!(
+                "Kimi Code provider configuration {} must not be accessible by group or others",
+                path.display()
+            );
+        }
+    }
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut values = BTreeMap::new();
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (key, value) = line.split_once('=').with_context(|| {
+            format!(
+                "invalid Kimi Code provider configuration at {}:{}",
+                path.display(),
+                index + 1
+            )
+        })?;
+        let key = key.trim();
+        let value = value.trim();
+        if !KIMI_MODEL_ENVIRONMENT_KEYS.contains(&key) {
+            bail!(
+                "unsupported Kimi Code provider configuration key {key} at {}:{}",
+                path.display(),
+                index + 1
+            );
+        }
+        if value.is_empty() {
+            bail!(
+                "empty Kimi Code provider configuration value at {}:{}",
+                path.display(),
+                index + 1
+            );
+        }
+        if values.insert(key.to_string(), value.to_string()).is_some() {
+            bail!(
+                "duplicate Kimi Code provider configuration key {key} at {}:{}",
+                path.display(),
+                index + 1
+            );
+        }
+    }
+    for required in [
+        "KIMI_MODEL_NAME",
+        "KIMI_MODEL_PROVIDER_TYPE",
+        "KIMI_MODEL_API_KEY",
+        "KIMI_MODEL_BASE_URL",
+    ] {
+        if !values.contains_key(required) {
+            bail!(
+                "Kimi Code provider configuration {} is missing {required}",
+                path.display()
+            );
+        }
+    }
+    for (key, value) in values {
+        command.env(key, value);
+    }
+    Ok(())
 }
 
 fn configure_compaction_detector_command(
@@ -3952,6 +4330,382 @@ mod tests {
         }
     }
 
+    fn frozen_cursor_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
+        FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::CursorAgent,
+            installation_id: "installation-cursor".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "default".to_string(),
+            reported_version: Some("2026.08.11-e8db854".to_string()),
+            executable_fingerprint: "sha256:cursor".to_string(),
+            capabilities: vec![
+                "acp.initialize".to_string(),
+                "cursor.authenticate".to_string(),
+                "session.new".to_string(),
+            ],
+            protocol_version: "acp-v1".to_string(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: "cursor-agent://runtime-default".to_string(),
+                options: json!({}),
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: AdapterKind::CursorAgent,
+                schema_version: 1,
+                values: json!({
+                    "execution_mode": "agent",
+                    "approval_policy": "force"
+                }),
+            },
+            native_session_compatibility_key: Some("cursor-agent:acp-v1:sha256:cursor".to_string()),
+            binding_compatibility_digest: "sha256:binding".to_string(),
+            host_config_digest: "sha256:host".to_string(),
+            config_digest: "sha256:config".to_string(),
+        }
+    }
+
+    fn frozen_kimi_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
+        FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::KimiCodeCli,
+            installation_id: "installation-kimi".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "default".to_string(),
+            reported_version: Some("0.32.0".to_string()),
+            executable_fingerprint: "sha256:kimi".to_string(),
+            capabilities: vec!["session.load".to_string(), "session.resume".to_string()],
+            protocol_version: "acp-v1".to_string(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: "runtime_default".to_string(),
+                options: json!({}),
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: AdapterKind::KimiCodeCli,
+                schema_version: 1,
+                values: json!({"permission_mode": "default"}),
+            },
+            native_session_compatibility_key: Some("kimi-code-cli:acp-v1".to_string()),
+            binding_compatibility_digest: "sha256:binding".to_string(),
+            host_config_digest: "sha256:host".to_string(),
+            config_digest: "sha256:config".to_string(),
+        }
+    }
+
+    #[test]
+    fn kimi_provider_configuration_is_allowlisted_and_process_local() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-kimi-provider-config-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("kimi-code.env");
+        std::fs::write(
+            &path,
+            concat!(
+                "KIMI_MODEL_NAME=MiniMax-M3\n",
+                "KIMI_MODEL_PROVIDER_TYPE=openai\n",
+                "KIMI_MODEL_API_KEY=test-plan-key\n",
+                "KIMI_MODEL_BASE_URL=https://api.minimaxi.com/v1\n",
+                "KIMI_MODEL_MAX_CONTEXT_SIZE=204800\n",
+                "KIMI_MODEL_CAPABILITIES=thinking\n",
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let mut command = Command::new("/usr/bin/true");
+        configure_kimi_model_environment_from_path(&mut command, &path).unwrap();
+        let environment = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().to_string(),
+                    value.unwrap().to_string_lossy().to_string(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(environment.len(), KIMI_MODEL_ENVIRONMENT_KEYS.len());
+        assert_eq!(environment["KIMI_MODEL_NAME"], "MiniMax-M3");
+        assert_eq!(
+            environment["KIMI_MODEL_BASE_URL"],
+            "https://api.minimaxi.com/v1"
+        );
+        assert_eq!(environment["KIMI_MODEL_API_KEY"], "test-plan-key");
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn kimi_provider_configuration_rejects_unknown_keys() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-kimi-provider-config-invalid-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("kimi-code.env");
+        std::fs::write(
+            &path,
+            concat!(
+                "KIMI_MODEL_NAME=MiniMax-M3\n",
+                "KIMI_MODEL_PROVIDER_TYPE=openai\n",
+                "KIMI_MODEL_API_KEY=test-plan-key\n",
+                "KIMI_MODEL_BASE_URL=https://api.minimaxi.com/v1\n",
+                "UNSCOPED_SECRET=must-not-pass\n",
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+
+        let mut command = Command::new("/usr/bin/true");
+        let error = configure_kimi_model_environment_from_path(&mut command, &path)
+            .expect_err("unknown provider keys must fail closed");
+        assert!(error.to_string().contains("unsupported"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn kimi_provider_configuration_rejects_group_readable_secrets() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-kimi-provider-config-permissions-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("kimi-code.env");
+        std::fs::write(&path, "KIMI_MODEL_NAME=MiniMax-M3\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).unwrap();
+
+        let mut command = Command::new("/usr/bin/true");
+        let error = configure_kimi_model_environment_from_path(&mut command, &path)
+            .expect_err("group-readable provider secrets must fail closed");
+        assert!(error.to_string().contains("group or others"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cursor_effective_launch_preserves_native_permissions_and_narrows_read_only() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-cursor-launch-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let runtime = frozen_cursor_runtime(Path::new("/usr/bin/true"));
+        let attachment_root = exact_attachment_root(&root);
+        let run_tmp = root.join("run-tmp");
+        std::fs::create_dir_all(&run_tmp).unwrap();
+        let configure = |workspace: &AgentRunWorkspace| {
+            let mut command = Command::new("/usr/bin/true");
+            configure_runtime_command(
+                &mut command,
+                workspace,
+                PermissionSemantics::CoreEnforcedV1,
+                &runtime,
+                true,
+                &BTreeMap::new(),
+                &root,
+                None,
+                Some(&attachment_root),
+                Some(&run_tmp),
+            )
+            .unwrap();
+            command
+                .as_std()
+                .get_args()
+                .map(|value| value.to_string_lossy().to_string())
+                .collect::<Vec<_>>()
+        };
+        let writable = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let mut read_only = writable.clone();
+        read_only.access = "read_only".to_string();
+
+        let writable_arguments = configure(&writable);
+        assert_eq!(writable_arguments[0], "acp");
+        assert!(
+            writable_arguments
+                .iter()
+                .any(|argument| argument == "--force")
+        );
+        assert_eq!(
+            writable_arguments
+                .iter()
+                .filter(|argument| argument.as_str() == "--add-dir")
+                .count(),
+            2
+        );
+        let read_only_arguments = configure(&read_only);
+        assert!(
+            read_only_arguments
+                .windows(2)
+                .any(|arguments| arguments == ["--mode", "plan"])
+        );
+        assert!(
+            !read_only_arguments
+                .iter()
+                .any(|argument| argument == "--force")
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cursor_private_requests_route_to_the_unique_prompt_and_notifications_stay_private() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-cursor-private-routing-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("cursor-agent");
+        let protocol_log = root.join("protocol");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r authenticate || exit 1
+printf '%s\n' "$authenticate" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":null}}'
+IFS= read -r session || exit 1
+printf '%s\n' "$session" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"sessionId":"cursor-session"}}}}'
+IFS= read -r prompt || exit 1
+printf '%s\n' "$prompt" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"cursor/update_todos","params":{{"todos":[]}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":91,"method":"cursor/unknown","params":{{}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":90,"method":"cursor/ask_question","params":{{"toolCallId":"tool-1","questions":[]}}}}'
+IFS= read -r unknown_response || exit 1
+printf '%s\n' "$unknown_response" >> '{}'
+IFS= read -r question_response || exit 1
+printf '%s\n' "$question_response" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+            ),
+        );
+
+        let frozen = frozen_cursor_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let builtin_tools = exact_builtin_tools(&root);
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(builtin_tools),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-cursor-private".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "runtime_managed".to_string(),
+        );
+        let session_id = runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                "cursor-agent://runtime-default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(session_id, "cursor-session");
+
+        let prompt_id = runtime
+            .start_prompt("delivery-cursor-private", "continue")
+            .await
+            .unwrap();
+        let request = receiver
+            .recv()
+            .await
+            .expect("Cursor question was not routed");
+        let request_id = match request {
+            AcpIncoming::Message {
+                native_session_id,
+                native_prompt_id,
+                delivery_id,
+                sequence: 1,
+                message,
+                ..
+            } => {
+                assert_eq!(native_session_id, "cursor-session");
+                assert_eq!(native_prompt_id, prompt_id);
+                assert_eq!(delivery_id, "delivery-cursor-private");
+                assert_eq!(
+                    message.get("method").and_then(Value::as_str),
+                    Some("cursor/ask_question")
+                );
+                message.get("id").cloned().unwrap()
+            }
+            other => panic!("unexpected Cursor private message: {other:?}"),
+        };
+        runtime
+            .respond(request_id, json!({"outcome": {"outcome": "skipped"}}))
+            .await
+            .unwrap();
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AcpIncoming::InputAccepted { native_prompt_id, .. })
+                if native_prompt_id == prompt_id
+        ));
+        assert!(matches!(
+            receiver.recv().await,
+            Some(AcpIncoming::Message { message, .. })
+                if message.get("method").and_then(Value::as_str)
+                    == Some("rovai/acp_prompt_completed")
+        ));
+        assert!(receiver.try_recv().is_err());
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
+        host.shutdown().await;
+
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert!(protocol.contains("\"method\":\"authenticate\""));
+        assert!(protocol.contains("\"methodId\":\"cursor_login\""));
+        assert!(protocol.contains("\"code\":-32601"));
+        assert!(protocol.contains("\"outcome\":\"skipped\""));
+        assert!(!protocol.contains("cursor/update_todos\"}"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn kiro_effective_launch_trusts_all_only_for_non_legacy_read_only_runs() {
         let root = std::env::temp_dir().join(format!("rovai-kiro-launch-{}", uuid::Uuid::new_v4()));
@@ -4050,6 +4804,7 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -4137,6 +4892,7 @@ while IFS= read -r ignored; do :; done
             true,
             &BTreeMap::new(),
             &root.join("private"),
+            None,
             None,
         )
         .await
@@ -4232,6 +4988,7 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
+            None,
         )
         .await
         .unwrap();
@@ -4320,6 +5077,7 @@ while IFS= read -r ignored; do :; done
             true,
             &BTreeMap::new(),
             &root.join("private"),
+            None,
             None,
         )
         .await
@@ -4446,6 +5204,7 @@ while IFS= read -r ignored; do :; done
                 true,
                 &BTreeMap::new(),
                 &root.join("private"),
+                None,
                 None,
             )
             .await
@@ -4647,10 +5406,175 @@ while IFS= read -r ignored; do :; done
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[tokio::test]
+    async fn kimi_completed_run_starts_a_new_host_and_exactly_resumes_the_scoped_session() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-kimi-cold-resume-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("kimi");
+        let protocol_log = root.join("protocol.jsonl");
+        let invocation_log = root.join("invocations");
+        let home_log = root.join("homes");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+printf '%s\n' "$KIMI_CODE_HOME" >> '{}'
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' "$session" >> '{}'
+case "$session" in
+  *'"method":"session/new"'*)
+    printf '%s\n' 'session-kimi' > "$KIMI_CODE_HOME/session-id"
+    ;;
+  *'"method":"session/resume"'*)
+    test "$(cat "$KIMI_CODE_HOME/session-id")" = 'session-kimi' || exit 2
+    ;;
+  *) exit 3 ;;
+esac
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-kimi","configOptions":[{{"id":"model","currentValue":"runtime_default","options":[{{"value":"runtime_default","name":"Runtime Default"}}]}},{{"id":"mode","currentValue":"default","options":[{{"value":"default","name":"Default"}}]}}]}}}}'
+IFS= read -r mode || exit 1
+printf '%s\n' "$mode" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":null}}'
+while IFS= read -r ignored; do :; done
+"#,
+                invocation_log.display(),
+                home_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+            ),
+        );
+        let builtin_tools = exact_builtin_tools(&root);
+        let frozen = frozen_kimi_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let attachment_root = exact_attachment_root(&root);
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(
+            AgentRuntimeFleetConfig::default(),
+        ));
+        let private_runtime_dir = root.join("private");
+        let adapter = AcpCliRuntimeAdapter::new(
+            AdapterKind::KimiCodeCli,
+            incoming,
+            private_runtime_dir.clone(),
+            fleet.clone(),
+            CompactionDetectorPolicy::Disabled,
+        )
+        .unwrap();
+
+        let first = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-one",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &BTreeMap::new(),
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        let first_host = first.host_instance_id().to_string();
+        let session_id = first
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities {
+                    can_resume: true,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(session_id, "session-kimi");
+        adapter.complete_agent_run("agent-run-one", 1).await;
+
+        let scope = kimi_private_session_scope("camp-one", "agent-one", &frozen)
+            .unwrap()
+            .unwrap();
+        let persistent_home = private_runtime_dir.join("session-homes").join(scope);
+        assert_eq!(
+            std::fs::read_to_string(persistent_home.join("session-id"))
+                .unwrap()
+                .trim(),
+            session_id
+        );
+
+        let second = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-two",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &BTreeMap::new(),
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        assert_ne!(second.host_instance_id(), first_host);
+        let successor_session = second
+            .start_or_resume_session(
+                Some(&session_id),
+                AcpSessionCapabilities {
+                    can_resume: true,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(successor_session, session_id);
+        adapter.complete_agent_run("agent-run-two", 1).await;
+        fleet.shutdown_all().await;
+
+        let invocations = std::fs::read_to_string(&invocation_log).unwrap();
+        assert_eq!(invocations.lines().count(), 2);
+        let homes = std::fs::read_to_string(&home_log).unwrap();
+        let homes = homes.lines().collect::<Vec<_>>();
+        assert_eq!(homes.len(), 2);
+        assert_eq!(homes[0], homes[1]);
+        assert_eq!(Path::new(homes[0]), persistent_home);
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert_eq!(protocol.matches("\"method\":\"session/new\"").count(), 1);
+        assert_eq!(protocol.matches("\"method\":\"session/resume\"").count(), 1);
+        assert!(!protocol.contains("\"method\":\"session/load\""));
+        assert!(persistent_home.exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn completed_run_disposition_preserves_adapter_reuse_evidence() {
         assert_eq!(
             completed_run_release_disposition(AdapterKind::KiroCli),
+            FleetReleaseDisposition::Stop
+        );
+        assert_eq!(
+            completed_run_release_disposition(AdapterKind::CursorAgent),
+            FleetReleaseDisposition::Stop
+        );
+        assert_eq!(
+            completed_run_release_disposition(AdapterKind::KimiCodeCli),
             FleetReleaseDisposition::Stop
         );
         for adapter_kind in [
@@ -4680,6 +5604,31 @@ while IFS= read -r ignored; do :; done
         collector.observe_assistant_chunk(Some("message-2"), "final ");
         collector.observe_assistant_chunk(Some("message-2"), "answer");
         assert_eq!(collector.candidate().as_deref(), Some("final answer"));
+    }
+
+    #[test]
+    fn kimi_public_text_removes_reasoning_blocks_and_fails_closed_when_unterminated() {
+        assert_eq!(
+            kimi_public_agent_text("<think>private reasoning</think>\n\nPUBLIC"),
+            "PUBLIC"
+        );
+        assert_eq!(
+            kimi_public_agent_text("prefix<think>private</think>suffix"),
+            "prefixsuffix"
+        );
+        assert_eq!(kimi_public_agent_text("<think>unterminated"), "");
+        assert_eq!(
+            kimi_public_agent_text("<think>private</think>ROV</think>AI_KIMI_ACP_OK"),
+            "ROVAI_KIMI_ACP_OK"
+        );
+        assert_eq!(
+            kimi_public_agent_text("private fragment</think>PUBLIC"),
+            "PUBLIC"
+        );
+        assert_eq!(
+            kimi_public_agent_text("plain public answer"),
+            "plain public answer"
+        );
     }
 
     #[test]
@@ -4840,6 +5789,50 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
+    fn private_host_config_rotates_kiro_but_keeps_scoped_kimi_home() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-private-host-config-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let scope_a = "a".repeat(64);
+        let scope_b = "b".repeat(64);
+
+        let kiro_one = prepare_private_host_config(&root, AdapterKind::KiroCli, None)
+            .unwrap()
+            .unwrap();
+        let kiro_two = prepare_private_host_config(&root, AdapterKind::KiroCli, None)
+            .unwrap()
+            .unwrap();
+        assert_ne!(kiro_one.root, kiro_two.root);
+        assert!(kiro_one.remove_on_shutdown);
+        assert!(kiro_two.remove_on_shutdown);
+
+        let kimi_one = prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_a))
+            .unwrap()
+            .unwrap();
+        let kimi_successor =
+            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_a))
+                .unwrap()
+                .unwrap();
+        let kimi_other =
+            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_b))
+                .unwrap()
+                .unwrap();
+        assert_eq!(kimi_one.root, kimi_successor.root);
+        assert_ne!(kimi_one.root, kimi_other.root);
+        assert!(!kimi_one.remove_on_shutdown);
+        assert!(kimi_one.root.ends_with(scope_a));
+        assert!(
+            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, None)
+                .unwrap_err()
+                .to_string()
+                .contains("scope is missing")
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn prompt_identity_is_unique_across_isolated_hosts() {
         assert_ne!(
             acp_prompt_id("host-a", 1),
@@ -4890,6 +5883,24 @@ while IFS= read -r ignored; do :; done
         assert_eq!(
             select_acp_session_continuation(
                 AdapterKind::CopilotCli,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::HistoryRestore
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::KimiCodeCli,
+                false,
+                Some("session-1"),
+                resume_and_load,
+            ),
+            AcpSessionContinuation::Resume
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::KimiCodeCli,
                 false,
                 Some("session-1"),
                 load_only,

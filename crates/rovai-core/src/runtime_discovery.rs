@@ -329,20 +329,20 @@ impl RuntimeSearchEnvironment {
     ) -> Vec<RuntimeExecutableCandidate> {
         let mut candidates = Vec::new();
         for path in manual_candidates {
-            push_candidates(
+            push_candidates_for_kind(
                 &mut candidates,
                 path,
                 InstallationSource::Manual,
-                kind.command_name(),
+                kind,
                 &self.executable_suffixes,
             );
         }
         if let Some(path) = override_path {
-            push_candidates(
+            push_candidates_for_kind(
                 &mut candidates,
                 path,
                 InstallationSource::Env,
-                kind.command_name(),
+                kind,
                 &self.executable_suffixes,
             );
         }
@@ -353,11 +353,11 @@ impl RuntimeSearchEnvironment {
                 .copied()
                 .unwrap_or(SearchPathSource::KnownLocation)
                 .installation_source();
-            push_candidates(
+            push_candidates_for_kind(
                 &mut candidates,
                 entry.path.clone(),
                 source,
-                kind.command_name(),
+                kind,
                 &self.executable_suffixes,
             );
         }
@@ -463,7 +463,16 @@ pub async fn discover_runtime_version(
     )
     .await
     {
-        Ok(version) if !version.is_empty() => observation.reported_version = Some(version),
+        Ok(version)
+            if !version.is_empty()
+                && (observation.runtime_kind != AdapterKind::CursorAgent
+                    || is_cursor_agent_version(&version)) =>
+        {
+            observation.reported_version = Some(version)
+        }
+        Ok(_) if observation.runtime_kind == AdapterKind::CursorAgent => {
+            observation.diagnostic_code = Some("runtime_identity_mismatch".to_string())
+        }
         Ok(_) => observation.diagnostic_code = Some("runtime_version_empty".to_string()),
         Err(error) => observation.diagnostic_code = Some(format!("{error:#}")),
     }
@@ -796,6 +805,53 @@ fn push_candidates(
         return;
     }
     push_concrete_candidate(candidates, path_or_directory, source);
+}
+
+fn push_candidates_for_kind(
+    candidates: &mut Vec<RuntimeExecutableCandidate>,
+    path_or_directory: PathBuf,
+    source: InstallationSource,
+    kind: AdapterKind,
+    executable_suffixes: &[OsString],
+) {
+    if path_or_directory.is_dir() {
+        for command_name in kind.command_names() {
+            push_candidates(
+                candidates,
+                path_or_directory.clone(),
+                source,
+                command_name,
+                executable_suffixes,
+            );
+        }
+        return;
+    }
+    push_concrete_candidate(candidates, path_or_directory, source);
+}
+
+/// Cursor's current CLI reports a date-based build such as
+/// `2026.08.11-e8db854`. Requiring this product-owned shape prevents the
+/// generic `agent` alias from binding Grok Build or another unrelated CLI.
+pub fn is_cursor_agent_version(version: &str) -> bool {
+    let Some((date, build)) = version.trim().split_once('-') else {
+        return false;
+    };
+    let mut parts = date.split('.');
+    let valid_date = matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some(year), Some(month), Some(day), None)
+            if year.len() == 4
+                && month.len() == 2
+                && day.len() == 2
+                && year.bytes().all(|value| value.is_ascii_digit())
+                && month.bytes().all(|value| value.is_ascii_digit())
+                && day.bytes().all(|value| value.is_ascii_digit())
+    );
+    valid_date
+        && !build.is_empty()
+        && build
+            .bytes()
+            .all(|value| value.is_ascii_alphanumeric() || value == b'.')
 }
 
 fn push_concrete_candidate(
@@ -1198,12 +1254,17 @@ mod tests {
         fs::create_dir_all(&directory).unwrap();
         let marker = directory.join("invocations");
         for kind in AdapterKind::ALL {
+            let version = if kind == AdapterKind::CursorAgent {
+                "2026.08.11-e8db854"
+            } else {
+                "1.2.3"
+            };
             executable(
                 &directory.join(kind.command_name()),
                 &format!(
-                    "#!/bin/sh\nprintf '%s\\n' \"$0:$*\" >> '{}'\nprintf '{} 1.2.3\\n'\n",
+                    "#!/bin/sh\nprintf '%s\\n' \"$0:$*\" >> '{}'\nprintf '{}\\n'\n",
                     marker.display(),
-                    kind.command_name()
+                    version
                 ),
             );
         }
@@ -1224,6 +1285,34 @@ mod tests {
         assert!(lines.iter().all(|line| line.ends_with(":--version")));
         assert!(!invocations.contains("acp"));
         assert!(!invocations.contains("session"));
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cursor_agent_alias_rejects_an_unrelated_agent_binary() {
+        let directory =
+            env::temp_dir().join(format!("rovai-cursor-agent-collision-{}", Uuid::new_v4()));
+        fs::create_dir_all(&directory).unwrap();
+        executable(
+            &directory.join("agent"),
+            "#!/bin/sh\nprintf 'grok 0.2.118\\n'\n",
+        );
+        let search = test_search(vec![SearchPathEntry {
+            path: directory.clone(),
+            sources: vec![SearchPathSource::InheritedPath],
+        }]);
+
+        let mut observation = discover_runtime_path(AdapterKind::CursorAgent, &search);
+        assert_eq!(observation.discovery_status, RuntimeDiscoveryStatus::Found);
+        discover_runtime_version(&mut observation, &search).await;
+        assert_eq!(observation.reported_version, None);
+        assert_eq!(
+            observation.diagnostic_code.as_deref(),
+            Some("runtime_identity_mismatch")
+        );
+        assert!(is_cursor_agent_version("2026.08.11-e8db854"));
+        assert!(!is_cursor_agent_version("grok 0.2.118"));
+
         fs::remove_dir_all(directory).unwrap();
     }
 

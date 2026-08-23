@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-22
 ---
 
 # Windows Desktop Platform
@@ -15,8 +15,8 @@ Architecture 持有。
 ## 1. Supported host envelope
 
 v1.05 目标为 Windows 10 22H2+ 与 Windows 11 native x64、MSVC、per-user、non-admin、local NTFS、Electron
-native frame 和 NSIS。Windows ARM64、x86、WSL Core、MSIX/Store、企业 MSI、系统服务、UNC/network/removable
-workspace 与 non-NTFS 不在首版准入。
+system frame + hidden title strip + Window Controls Overlay 和 NSIS。Windows ARM64、x86、WSL Core、MSIX/Store、
+企业 MSI、系统服务、UNC/network/removable workspace 与 non-NTFS 不在首版准入。
 
 Host envelope 通过不等于 Runtime 可选。每个 Adapter 还必须通过
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)。
@@ -32,7 +32,7 @@ Host envelope 通过不等于 Runtime 可选。每个 Adapter 还必须通过
 | Private storage | create-new + 0700/0600 | creation-time protected DACL | private create/atomic write helpers |
 | Attachment traversal | `openat`/no-follow | handle-relative reparse-safe traversal | bounded immutable snapshot |
 | SkillProjection | managed native links | copy + journal + root gate | reconcile/verify/Snapshot |
-| Window chrome | hidden titlebar + traffic lights | native frame | platform presentation only |
+| Window chrome | hidden titlebar + traffic lights | hidden title strip + top-level menu projection + native submenu/WCO | platform presentation only |
 
 These are real two-adapter seams. Domain callers do not select OS implementations or import `windows-sys`; Windows API
 use remains inside the corresponding adapter.
@@ -78,9 +78,12 @@ inside Runtime-visible Skill content.
 
 ## 6. Desktop and packaging
 
-Windows uses the native frame. Renderer removes every custom drag region on `win32`, while Snap Layout, Alt+Space,
-double-click maximize/restore, native window buttons and multi-monitor DPI remain OS-owned. Preload's existing platform
-projection is presentation-only and does not decide Core security.
+Windows keeps the system frame while hiding its App icon/title strip and native menu-bar presentation. The Renderer projects
+only four fixed top-level menu labels on the rail-colored WCO row; a closed preload/Main request maps each label back to the
+existing Electron application-menu role and opens that native submenu. Submenu commands and accelerators remain Electron-owned.
+Renderer reuses its controlled drag regions and shortens only the Windows sidebar's top spacer from 38px to 8px; it does not
+fork page structure or content. Snap Layout, Alt+Space, double-click maximize/restore, native window buttons and multi-monitor
+DPI remain OS-owned. Preload's platform projection is presentation-only and does not decide Core security.
 
 Packaging stages `rovai-core.exe` and `rovai.exe` per target without sharing dirty sidecar output with macOS. Formal
 release separately Authenticode-signs Electron EXE, both sidecars and installer with SHA-256/RFC 3161 timestamp; the
@@ -94,7 +97,7 @@ must not run concurrently. Schema-incompatible downgrade is blocked explicitly.
 
 [Windows Interaction Delta](../ui/windows-interaction-delta.md) owns cross-platform presentation differences without
 creating a second product surface. Automated checks cover contracts and DOM behavior; real Windows 10/11 acceptance owns
-native frame, DPI, High Contrast/Forced Colors, NVDA, IME, Explorer, installer, SmartScreen and upgrade behavior.
+native submenu/controls, DPI, High Contrast/Forced Colors, NVDA, IME, Explorer, installer, SmartScreen and upgrade behavior.
 
 CI uses a fixed Windows Server runner for compile/package evidence and never presents it as Windows 10/11 UX evidence.
 Signed release qualification requires real Windows 10 22H2 and Windows 11 machines or equivalent managed images.

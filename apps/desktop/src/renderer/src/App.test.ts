@@ -4119,7 +4119,7 @@ describe('task event projections', () => {
     expect(failedMarkup).toContain('aria-label="失败"')
   })
 
-  it('uses truthful Codex command previews without changing the other Runtime adapters', () => {
+  it('uses truthful public Shell command previews across Runtime adapters', () => {
     const genericShell = canonicalActivity('shell-command', {
       activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null,
       presentationHint: '执行 Shell 命令', phase: 'started', outcome: 'unknown'
@@ -4157,8 +4157,8 @@ describe('task event projections', () => {
       {
         adapter: 'antigravity-app',
         canonical: { ...genericShell, toolName: 'run_command', presentationHint: 'run_command' },
-        payload: {},
-        expected: 'run_command'
+        payload: { input: { command: 'pnpm test' } },
+        expected: 'pnpm test'
       }
     ]
 
@@ -4169,6 +4169,57 @@ describe('task event projections', () => {
         testCase.adapter
       ).toBe(testCase.expected)
     }
+    for (const toolName of [
+      'run_command',
+      'exec_command',
+      'execute_command',
+      'bash',
+      'execute',
+      'shell',
+      'terminal'
+    ]) {
+      expect(executionActivityTitle({
+        ...genericShell,
+        toolName,
+        presentationHint: toolName
+      }, {})).toBe('终端操作')
+    }
+    const agySensitive = executionActivityTitle({
+      ...genericShell,
+      toolName: 'run_command'
+    }, {
+      input: {
+        command: 'OPENAI_API_KEY=sk-agy-secret pnpm test -- --password agy-password --token agy-token'
+      }
+    })
+    expect(agySensitive).toContain('OPENAI_API_KEY=[已隐藏]')
+    expect(agySensitive).toContain('--password [已隐藏]')
+    expect(agySensitive).toContain('--token [已隐藏]')
+    expect(agySensitive).not.toContain('sk-agy-secret')
+    expect(agySensitive).not.toContain('agy-password')
+    expect(agySensitive).not.toContain('agy-token')
+    const reopenedAgyProgress = buildLiveExecutionProgress([{
+      id: 'agy-command-completed', agentRunId: 'run-agy', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'agy:conversation:step:4', status: 'completed', kind: 'execute',
+        toolName: 'run_command', input: { command: 'pnpm test' }, output: 'tests passed'
+      },
+      canonical: canonicalActivity('agy:conversation:step:4', {
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'run_command',
+        phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-08-21T00:00:00Z'
+    }], 'run-agy')
+    expect(reopenedAgyProgress.items[0]).toMatchObject({
+      kind: 'tool',
+      step: {
+        title: 'pnpm test',
+        detail: '命令\npnpm test\n\n输出\ntests passed',
+        status: 'completed',
+        activityDomain: 'shell',
+        toolName: 'run_command'
+      }
+    })
     expect(executionActivityTitle(genericShell, codexPayload(
       `/bin/zsh -lc "rovai send --public-only --body 'TOP_SECRET_ARGUMENT'"`
     ))).toBe('rovai send --public-only --body [已隐藏]')
@@ -4688,6 +4739,8 @@ describe('task event projections', () => {
     expect(markup).toContain('Codex CLI')
     expect(markup).toContain('Antigravity')
     expect(markup).toContain('TRAE CLI')
+    expect(markup).toContain('Cursor Agent')
+    expect(markup).toContain('Kimi Code')
     expect(markup).not.toContain('正在检测')
     expect(markup).not.toContain('已找到')
     expect(markup).not.toContain('尚未检查')
@@ -4807,9 +4860,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
-    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(11)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(11)
-    expect(markup.match(/检查可用性/g)).toHaveLength(10)
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(13)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(13)
+    expect(markup.match(/检查可用性/g)).toHaveLength(11)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
     expect(markup).not.toContain('九种已支持产品')
@@ -4848,8 +4901,8 @@ describe('task event projections', () => {
       onReload: async () => undefined
     }))
 
-    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(10)
-    expect(markup.match(/不可检查/g)).toHaveLength(10)
+    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(12)
+    expect(markup.match(/不可检查/g)).toHaveLength(12)
     expect(markup).not.toContain('检查可用性')
     expect(markup).toContain('当前平台尚无可检测 Runtime')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
@@ -4976,15 +5029,24 @@ function runtimeAdmissionRows(
     'codebuddy-cli',
     'qwen-code',
     'trae-cn-cli',
+    'cursor-agent',
+    'kimi-code-cli',
     'antigravity-app'
   ]
-  return runtimeKinds.map((runtimeKind) => ({
-    runtimeKind,
-    platform,
-    status,
-    reasonCode: status === 'qualified'
-      ? null
-      : 'runtime_platform.qualification_evidence_missing',
-    evidenceRevision: status === 'qualified' ? 'sha256:test-macos-evidence' : null
-  }))
+  return runtimeKinds.map((runtimeKind) => {
+    const requiresQualification = runtimeKind === 'cursor-agent'
+      || (runtimeKind === 'kimi-code-cli' && platform !== 'macos-arm64')
+    const effectiveStatus = requiresQualification && status === 'qualified'
+      ? 'not_qualified'
+      : status
+    return {
+      runtimeKind,
+      platform,
+      status: effectiveStatus,
+      reasonCode: effectiveStatus === 'qualified'
+        ? null
+        : 'runtime_platform.qualification_evidence_missing',
+      evidenceRevision: effectiveStatus === 'qualified' ? 'sha256:test-macos-evidence' : null
+    }
+  })
 }

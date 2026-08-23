@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, screen, shell } from 'electron'
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeTheme, screen, shell } from 'electron'
 import { isCampId } from '@contracts'
 import type {
   AppearanceSnapshot,
@@ -52,7 +52,12 @@ import { DesktopSessionRegistry } from './desktop-session'
 import { parseClipboardWriteRequest } from './clipboard-write'
 import { OnboardingStore } from './onboarding-preferences'
 import { nextPageZoomPercentage, pageZoomAction, pageZoomPercentage } from './page-zoom'
-import { windowChromeOptions } from './window-chrome'
+import { applyWindowChromeAppearance, windowChromeOptions } from './window-chrome'
+import {
+  parseWindowsApplicationMenuPopupRequest,
+  prepareWindowsApplicationMenu,
+  windowsApplicationSubmenu
+} from './windows-application-menu'
 import {
   UserAutomationError,
   UserAutomationServer,
@@ -251,7 +256,10 @@ function appearanceSnapshot(): AppearanceSnapshot {
 function publishAppearance(): AppearanceSnapshot {
   const snapshot = appearanceSnapshot()
   const signature = `${snapshot.preference}:${snapshot.resolvedTheme}`
-  mainWindow?.setBackgroundColor(themeBackground(snapshot.resolvedTheme))
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setBackgroundColor(themeBackground(snapshot.resolvedTheme))
+    applyWindowChromeAppearance(mainWindow, process.platform, snapshot.resolvedTheme)
+  }
   if (signature !== lastAppearanceSignature) {
     lastAppearanceSignature = signature
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -292,6 +300,7 @@ function createWindow(): void {
     MIN_WINDOW_HEIGHT,
     screen.getPrimaryDisplay().workArea
   )
+  if (process.platform === 'win32') prepareWindowsApplicationMenu(Menu.getApplicationMenu())
   const window = new BrowserWindow({
     width: savedState.width,
     height: savedState.height,
@@ -301,7 +310,7 @@ function createWindow(): void {
     minHeight: MIN_WINDOW_HEIGHT,
     show: false,
     title: APP_NAME,
-    ...windowChromeOptions(process.platform),
+    ...windowChromeOptions(process.platform, theme),
     backgroundColor: themeBackground(theme),
     webPreferences: {
       preload: join(import.meta.dirname, '../preload/index.js'),
@@ -311,6 +320,7 @@ function createWindow(): void {
     }
   })
   const webContentsId = window.webContents.id
+  if (process.platform === 'win32') window.setMenuBarVisibility(false)
   mainWindow = window
   desktopSessions.create(
     webContentsId,
@@ -515,6 +525,28 @@ ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   themePreference = preference
   nativeTheme.themeSource = nativeThemeSource(preference)
   return publishAppearance()
+})
+
+ipcMain.handle('rovai:window-application-menu-popup', (event, input: unknown) => {
+  if (process.platform !== 'win32') return false
+  const request = parseWindowsApplicationMenuPopupRequest(input)
+  if (!request) throw new Error('Unsupported Windows application menu request')
+
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!window || window.isDestroyed() || window !== mainWindow) return false
+  const submenu = windowsApplicationSubmenu(Menu.getApplicationMenu(), request.section)
+  if (!submenu) return false
+
+  const bounds = window.getContentBounds()
+  const maximumX = Math.max(0, bounds.width - 1)
+  const maximumY = Math.max(0, bounds.height - 1)
+  submenu.popup({
+    window,
+    x: Math.max(0, Math.min(request.x, maximumX)),
+    y: Math.max(0, Math.min(request.y, maximumY)),
+    sourceType: request.sourceType
+  })
+  return true
 })
 
 ipcMain.handle('rovai:desktop-session-get-startup', (event) => {

@@ -750,8 +750,8 @@ export function executionActivityTitle(
     }
     const commandLabel = command ? shellCommandLabel(command) : null
     if (commandLabel) return commandLabel
-    if (canonical?.toolName) return canonical.toolName
-    if (presentationHint) return presentationHint
+    if (canonical?.toolName && !genericShellTitle(canonical.toolName)) return canonical.toolName
+    if (presentationHint && !genericShellTitle(presentationHint)) return presentationHint
   } else {
     if (canonical?.toolName) return canonical.toolName
     if (presentationHint) return presentationHint
@@ -772,7 +772,10 @@ export function executionActivityTitle(
 const GENERIC_SHELL_TITLES = new Set([
   'bash',
   'execute',
+  'exec_command',
+  'execute_command',
   'run command',
+  'run_command',
   'shell',
   'terminal',
   '执行 shell 命令',

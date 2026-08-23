@@ -44,7 +44,7 @@ const STATUS_LABELS: Record<RuntimeUserStatus, string> = {
   not_installed: '未安装',
   version_unsupported: '版本不支持',
   unavailable: '不可用',
-  not_qualified: 'Windows 尚未验证',
+  not_qualified: '当前平台尚未验证',
   unsupported: '此平台不支持',
   unknown: '暂时无法确认'
 }
@@ -152,10 +152,14 @@ export function runtimeProductPresentation(
       : presentation('unknown', '尚无当前平台的 Runtime 准入信息。')
   }
   if (admission.status === 'not_qualified') {
-    return presentation(
-      'not_qualified',
-      '该 Agent 运行时尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。'
-    )
+    const windows = admission.platform === 'windows-x64'
+    return {
+      status: 'not_qualified',
+      label: windows ? 'Windows 尚未验证' : '当前平台尚未验证',
+      detail: windows
+        ? '该 Agent 运行时尚未完成 Windows 资格验证；这不是本机安装、登录或扫描故障。'
+        : '该 Agent 运行时尚未完成当前平台资格验证；这不是本机安装、登录或扫描故障。'
+    }
   }
   if (admission.status === 'unsupported') {
     return presentation('unsupported', '该 Agent 运行时不支持当前平台。')

@@ -6,7 +6,7 @@ last_updated: 2026-08-15
 
 # Runtime Activity Mapping 维护指南
 
-本目录长期管理十个 Agent Runtime 的“结构化事件如何进入 Canonical Runtime Activity”。它回答
+本目录长期管理十二个 Agent Runtime 的“结构化事件如何进入 Canonical Runtime Activity”。它回答
 “当前有哪些规则、证据来自哪里、怎样安全修改”，不替代 Architecture 的架构边界，也不冒充代码实施事实。
 
 ## 权威关系
@@ -43,5 +43,5 @@ last_updated: 2026-08-15
 
 ## 防漂移门禁
 
-Core 单测必须证明 `AdapterKind::ALL` 恰好覆盖一次。Registry 文档必须逐行列出相同十个
+Core 单测必须证明 `AdapterKind::ALL` 恰好覆盖一次。Registry 文档必须逐行列出相同十二个
 Adapter kind；发布验收再用机器可读报告比对显示名称、coverage、期望 tool label 和来源身份。

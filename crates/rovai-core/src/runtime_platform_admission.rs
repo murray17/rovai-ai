@@ -3,11 +3,12 @@ use serde::Serialize;
 use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 
 /// Immutable digest of the current compatibility register revision. The
-/// register preserves the existing macOS qualification evidence and records
-/// the generation-fenced Attachment View fallback without claiming a new
-/// live-append Probe. Every register revision receives a new digest.
+/// register preserves the existing macOS qualification evidence. Runtime rows
+/// that have not completed their own qualification matrix remain excluded from
+/// that evidence even when their Adapter identity exists in the Product Catalog.
+/// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:a0c55b167bd9ecb9a50af1db3cceaba3435cb058406197b02e818e155fd8ccf1";
+    "sha256:dcd309b074a358ebb54011e46356fc4b636478c13e4a5fcdee100f9dc6245326";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -191,7 +192,10 @@ mod tests {
     fn existing_macos_catalog_rows_remain_qualified_with_digest_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
 
-        for runtime_kind in AdapterKind::ALL {
+        for runtime_kind in AdapterKind::ALL
+            .into_iter()
+            .filter(|kind| !matches!(kind, AdapterKind::CursorAgent | AdapterKind::KimiCodeCli))
+        {
             for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
                 let admission = registry.platform_admission(runtime_kind, platform);
                 assert!(admission.is_qualified());
@@ -203,6 +207,32 @@ mod tests {
                 assert_eq!(admission.blocker_code(), None);
             }
         }
+        for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
+            let admission = registry.platform_admission(AdapterKind::CursorAgent, platform);
+            assert_eq!(
+                admission.status(),
+                RuntimePlatformAdmissionStatus::NotQualified
+            );
+            assert_eq!(
+                admission.reason_code(),
+                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+            );
+            assert_eq!(admission.evidence_revision(), None);
+        }
+        let kimi_arm =
+            registry.platform_admission(AdapterKind::KimiCodeCli, HostPlatformKey::MacosArm64);
+        assert!(kimi_arm.is_qualified());
+        assert_eq!(kimi_arm.reason_code(), None);
+        assert_eq!(
+            kimi_arm.evidence_revision(),
+            Some(MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION)
+        );
+        let kimi_x64 =
+            registry.platform_admission(AdapterKind::KimiCodeCli, HostPlatformKey::MacosX64);
+        assert_eq!(
+            kimi_x64.status(),
+            RuntimePlatformAdmissionStatus::NotQualified
+        );
     }
 
     #[test]

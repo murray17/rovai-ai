@@ -156,6 +156,20 @@ describe('Runtime user status projection', () => {
     )).toEqual(admission)
   })
 
+  it('does not describe an unqualified macOS runtime as Windows-only', () => {
+    expect(runtimeProductPresentation({
+      runtimeKind: 'cursor-agent',
+      platform: 'macos-arm64',
+      status: 'not_qualified',
+      reasonCode: 'runtime_platform.qualification_evidence_missing',
+      evidenceRevision: null
+    }, null)).toEqual({
+      status: 'not_qualified',
+      label: '当前平台尚未验证',
+      detail: '该 Agent 运行时尚未完成当前平台资格验证；这不是本机安装、登录或扫描故障。'
+    })
+  })
+
   it('does not let persisted ready evidence override a denied platform row', () => {
     const result = memberRuntimePresentation(
       profile({ status: 'ready', blockers: [] }),
