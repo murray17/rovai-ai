@@ -230,9 +230,9 @@ depending on the team.
 For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.
 
-Kimi Code is currently qualified on macOS arm64 only. macOS x64 and Windows x64 remain not qualified.
-On Windows x64 Preview, only Claude Code is currently qualified. Other Runtime catalog entries remain
-visible but cannot be checked or selected until their own Windows evidence is complete.
+Kimi Code is qualified on macOS arm64 and Windows x64; macOS x64 remains not qualified.
+On Windows x64 Preview, all eleven Runtimes exposed by Settings are qualified. Cursor Agent remains
+outside the current Settings scope and is not qualified on Windows.
 
 ---
 

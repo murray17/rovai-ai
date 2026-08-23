@@ -504,7 +504,7 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             );
         }
-        if kind == AdapterKind::ClaudeCodeCli && platform == HostPlatformKey::WindowsX64 {
+        if platform == HostPlatformKey::WindowsX64 {
             return RuntimePlatformAdmission::qualified(
                 kind,
                 platform,

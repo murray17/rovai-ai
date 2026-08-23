@@ -77,7 +77,8 @@ last_updated: 2026-08-23
   Probe 临时隔离、配置权限与进程清理。
 - [x] 审计 Windows 历史证据并在当前树对 Claude Code `2.1.86` + MiniMax M3 1M 定向重跑 Session continuation、
   structured Bash 与 cancellation/descendant cleanup；将同版本 Built-in、Approval、final boundary 与 packaged
-  planned-shutdown 证据冻结为独立 digest-bound Windows revision，只晋升 `claude-code-cli`。
+  planned-shutdown 与逐 Runtime 两轮 Camp 证据冻结为独立 digest-bound Windows revision，晋升设置页范围内
+  十一种 Runtime；范围外 `cursor-agent` 保持 `not_qualified`。
 - [x] 修复 Windows titlebar overlay 的未缩放 `env(titlebar-area-width)` 在 200% zoom 下撑大根 grid；packaged
   planned-shutdown 的 1040×700 Day/Night 与 200% zoom 对话框、文档尺寸、自然退出和恢复矩阵通过。
 

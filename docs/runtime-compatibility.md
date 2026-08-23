@@ -22,8 +22,8 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 当前 closed `AdapterKind` 包含十二种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
-Cursor 在三个目标平台均为 `not_qualified`。Kimi 的 macOS arm64 完整资格矩阵已通过并为
-digest-bound `qualified`；macOS x64 与 Windows x64 仍为 `not_qualified`。
+Cursor 在三个目标平台均为 `not_qualified`。Kimi 的 macOS arm64 与 Windows x64 资格均为
+digest-bound `qualified`；macOS x64 仍为 `not_qualified`。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
@@ -159,33 +159,34 @@ implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史�
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
 Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核既有 Windows 证据并在当前源码树完成
-目标确认后，仅 `claude-code-cli` 达到 Adapter 独立的完整门槛。下表是当前资格状态，不是本机
+逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已准入；明确不在本轮设置页范围的
+`cursor-agent` 仍不准入。下表是当前资格状态，不是本机
 `not_installed`、Probe 失败、上游不支持或 Renderer allowlist；唯一产品真源是 Rust Registry 的
 [Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)投影。
 
 | AdapterKind | `windows-x64` admission | evidence revision | 说明 |
 | --- | --- | --- | --- |
-| `codex-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `opencode-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `copilot-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `claude-code-cli` | `qualified` | `sha256:200b79edb09a0751a767d3c1a16a1422b8424ffa3200c56d43f36c4f20f8abd9` | Windows 10 x64 Adapter 独立证据完整 |
-| `kiro-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `qoder-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `codebuddy-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `qwen-code` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `trae-cn-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `cursor-agent` | `not_qualified` | — | 尚无 authenticated Session 与 Windows 行为矩阵 |
-| `kimi-code-cli` | `not_qualified` | — | 尚无 Windows 身份、启动、行为与清理矩阵 |
-| `antigravity-app` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `codex-cli` | `qualified` | `sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054` | 两轮纯消息与 Native Session 延续通过 |
+| `opencode-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
+| `copilot-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
+| `claude-code-cli` | `qualified` | 同上 | 两轮、取消与 packaged planned-shutdown 证据通过 |
+| `kiro-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
+| `qoder-cli` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
+| `codebuddy-cli` | `qualified` | 同上 | MiniMax M3 回复、终端输出与 Native Session 延续通过 |
+| `qwen-code` | `qualified` | 同上 | 回复、终端输出与 Native Session 延续通过 |
+| `trae-cn-cli` | `qualified` | 同上 | 回复、终端输出、Session 与 warm host 延续通过 |
+| `cursor-agent` | `not_qualified` | — | 不在当前设置页范围，且本轮明确排除 |
+| `kimi-code-cli` | `qualified` | 同上 | 两轮纯消息与 Native Session 延续通过；本机 ACP terminal 不可用 |
+| `antigravity-app` | `qualified` | 同上 | 复用操作员确认的既有成功；当前额度下未重复模型输出 |
 
 公共 Named Pipe、Job Object 或三类 execution-shape 测试只能证明平台基础设施。任一行提升为 `qualified` 前，
 必须独立覆盖 discovery、executable identity、authentication、first run、Session continuation、Built-in Tool
 v20、Approval、cancellation、final boundary、process cleanup 与 planned shutdown；证据 revision 必须不可变且
 digest-bound。
 
-#### 2026-08-23 Claude Code Windows x64 正式资格
+#### 2026-08-23 Windows x64 十一种设置页 Runtime 资格
 
-本轮采用 `targeted_confirmation_with_frozen_prior_evidence`，不是机械重跑全部历史矩阵。冻结的脱敏证据为
+本轮采用 `operator_directed_two_turn_confirmation_with_reused_windows_evidence`，不是机械重跑全部历史矩阵。冻结的脱敏证据为
 [`windows-x64-v1.json`](../qualification/runtime-platform/windows-x64-v1.json)，其字节 SHA-256 即上表的
 evidence revision。当前源码基线为 `6842e65018549746eb2139dc348adb1f542299c2`；本机为 Windows 10 Pro
 22H2 x64、`10.0.19045`，因此不声明 Windows 11 或 SmartScreen 覆盖。
@@ -198,12 +199,10 @@ accepted-send suppression、tool→final 与打包 App planned shutdown。当前
 在 8143ms 自然退出、Job 回收 7 个后代进程、协议 v2 收敛，重启后 fenced Run 恢复为 cancelled 且没有伪造
 terminal。凭据、原始 Prompt、本机用户路径、Session/Run ID 均未进入冻结文件。
 
-其余十一行继续 `not_qualified`：Codex、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE 尚未冻结
-各自当前 cancellation 与 packaged planned-shutdown 证据；Cursor executable 未发现且没有 authenticated
-Windows 矩阵；Kimi 本机 `0.38.0` 没有 Windows 行为/生命周期矩阵；Antigravity 虽完成账号认证，但模型执行
-仍受 quota 阻断且生命周期矩阵不完整。共享 ACP/stdio、Named Pipe、Job Object 或 Claude 证据不外推到这些
-Adapter。产品结果是 Claude 可检查、配置和执行；其余 Runtime 继续显示“Windows 尚未验证不可检查”，直到
-各自完成同等级证据，而不是通过放宽门禁消除提示。
+Codex、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen、TRAE 与 Kimi 都在各自隔离 Rovai Camp 完成两轮；
+第二轮与第一轮绑定同一 Native Session。除 Codex、Kimi 使用两轮纯消息外，其余当前可重复 Runtime 还确认了
+终端输出投影。Antigravity 按操作员明确确认复用此前成功运行，本次 companion 在当前额度状态下未返回模型
+输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，仍为唯一 Windows `not_qualified` 行。
 
 ### 2026-08-21 Windows 10 22H2 本机实施复核
 
