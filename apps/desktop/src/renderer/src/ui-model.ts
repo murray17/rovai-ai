@@ -409,6 +409,7 @@ export function buildLiveExecutionProgress(
       rememberItem(`tool:${itemId}`)
       const nativeStatus = stringField(item, 'status')
       const title = executionActivityTitle(canonical, payload)
+      const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
       const command = stringField(item, 'command')
       const rawOutput = stringField(item, 'aggregatedOutput')
         ?? stringField(item, 'output')
@@ -427,11 +428,12 @@ export function buildLiveExecutionProgress(
           ?? runtimeToolDetail(item, nativeType)
           ?? nativeStatus
           ?? ''
+      if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
         id: itemId,
         title,
         detail,
-        status: canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType)),
+        status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown'
@@ -446,11 +448,13 @@ export function buildLiveExecutionProgress(
       rememberItem(`tool:${itemId}`)
       const title = executionActivityTitle(canonical, payload)
       const nativeStatus = stringField(payload, 'status')
+      const status = canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType))
+      if (shouldDeferUnresolvedShellActivity(canonical, title, status)) continue
       upsertStep({
         id: itemId,
         title,
         detail: runtimeActionEvidenceText(payload) ?? '',
-        status: canonicalActivityStatus(canonical, activityStatus(nativeStatus, event.eventType)),
+        status,
         activityDomain: canonical?.activityDomain ?? 'unknown',
         toolName: canonical?.toolName ?? null,
         credibility: canonical?.credibility ?? 'unknown'
@@ -784,6 +788,16 @@ const GENERIC_SHELL_TITLES = new Set([
 
 function genericShellTitle(title: string): boolean {
   return GENERIC_SHELL_TITLES.has(title.toLocaleLowerCase())
+}
+
+function shouldDeferUnresolvedShellActivity(
+  canonical: CanonicalRuntimeActivityView | null | undefined,
+  title: string,
+  status: ActivityStatus
+): boolean {
+  return canonical?.activityDomain === 'shell'
+    && status === 'running'
+    && genericShellTitle(title)
 }
 
 const CODEX_STRUCTURED_COMMAND_ACTIONS = new Set(['read', 'listFiles', 'search'])
