@@ -75,8 +75,14 @@ last_updated: 2026-08-23
 - [x] docs test/check、benchmark contract 与敏感信息扫描通过；
 - [x] 使用持久私有 provider 配置重新运行项目级真实 Kimi smoke，并核对正式 AgentRun 继承用户原生 Home、
   Probe 临时隔离、配置权限与进程清理。
+- [x] 审计 Windows 历史证据并在当前树对 Claude Code `2.1.86` + MiniMax M3 1M 定向重跑 Session continuation、
+  structured Bash 与 cancellation/descendant cleanup；将同版本 Built-in、Approval、final boundary 与 packaged
+  planned-shutdown 证据冻结为独立 digest-bound Windows revision，只晋升 `claude-code-cli`。
+- [x] 修复 Windows titlebar overlay 的未缩放 `env(titlebar-area-width)` 在 200% zoom 下撑大根 grid；packaged
+  planned-shutdown 的 1040×700 Day/Night 与 200% zoom 对话框、文档尺寸、自然退出和恢复矩阵通过。
 
-验收不包含 macOS x64、Windows x64 的平台资格，也没有开启 Usage/Cost；Kimi Compaction compatibility
+Kimi 验收不包含 macOS x64、Windows x64 的平台资格，也没有开启 Usage/Cost；Claude Code 的 Windows x64
+资格使用独立 Adapter 证据，不改变 Kimi 或其他 Runtime 的平台状态。Kimi Compaction compatibility
 detector 已进入代码和定向 Rust 验证，真实自动/手动完整 Core smoke 仍待执行。warm Host、External MCP 与
 native resume 已进入产品，History Restore 只在 load-only 时作为既有 quarantine fallback。
 十五项 Built-in CLI matrix 已在 macOS arm64 完整通过，该平台已准入；其他平台仍需独立完成同等级证据。

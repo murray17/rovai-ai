@@ -11,6 +11,7 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 <p>
   <img src="https://img.shields.io/badge/status-preview-7c6f64" alt="Preview">
   <img src="https://img.shields.io/badge/platform-macOS-111111?logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Windows_x64-Preview_unsigned-4b8f77?logo=windows11&logoColor=white" alt="Windows x64 Preview unsigned">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4b8f77" alt="MIT License"></a>
 </p>
 
@@ -170,7 +171,10 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 |---|---|---|
 | **macOS · Apple Silicon** | 文件名标记为 `arm64` 的 `.dmg` | 打开 DMG，将 Rovai AI 拖入 `Applications`，再从应用程序目录启动 |
 | **macOS · Intel** | 文件名标记为 `x64` 的 `.dmg` | 打开 DMG，将 Rovai AI 拖入 `Applications`，再从应用程序目录启动 |
-| **Windows · x64** | Release 中明确标记为 Windows x64 的 `.exe` 安装包 | 运行安装程序并按照向导完成安装 |
+| **Windows · x64 Preview — unsigned** | Release 中明确标记为 Windows x64 的 `.exe` 安装包 | 运行当前用户安装程序并按照向导完成安装 |
+
+Windows x64 Preview 当前未签名，Windows SmartScreen 可能显示“未知发布者”警告。请只从 Rovai AI 官方
+GitHub Release 下载安装包。
 
 #### 从源码运行（开发者）
 
@@ -215,6 +219,8 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
 
 Kimi Code 当前仅完成 macOS arm64 准入；macOS x64 与 Windows x64 尚未准入。
+Windows x64 Preview 当前只有 Claude Code 完成资格准入；其他 Runtime 目录项仍会显示，但在各自 Windows
+证据完整前不可检查、不可选择。
 
 ---
 

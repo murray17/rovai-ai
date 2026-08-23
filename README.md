@@ -12,6 +12,7 @@ team chemistry and collaborative memory along the way.
 <p>
   <img src="https://img.shields.io/badge/status-preview-7c6f64" alt="Preview">
   <img src="https://img.shields.io/badge/platform-macOS-111111?logo=apple&logoColor=white" alt="macOS">
+  <img src="https://img.shields.io/badge/Windows_x64-Preview_unsigned-4b8f77?logo=windows11&logoColor=white" alt="Windows x64 Preview unsigned">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4b8f77" alt="MIT License"></a>
 </p>
 
@@ -177,7 +178,10 @@ Download the installer for your device from
 |---|---|---|
 | **macOS · Apple Silicon** | A `.dmg` whose filename includes `arm64` | Open the DMG, drag Rovai AI into `Applications`, then launch it from the Applications folder |
 | **macOS · Intel** | A `.dmg` whose filename includes `x64` | Open the DMG, drag Rovai AI into `Applications`, then launch it from the Applications folder |
-| **Windows · x64** | An `.exe` installer explicitly labeled for Windows x64 | Run the installer and follow the setup wizard |
+| **Windows · x64 Preview — unsigned** | An `.exe` installer explicitly labeled for Windows x64 | Run the per-user installer and follow the setup wizard |
+
+The Windows x64 Preview is currently unsigned. Windows SmartScreen may show an unknown publisher
+warning. Download the installer only from the official Rovai AI GitHub Release.
 
 #### Run from source (for developers)
 
@@ -227,6 +231,8 @@ For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.
 
 Kimi Code is currently qualified on macOS arm64 only. macOS x64 and Windows x64 remain not qualified.
+On Windows x64 Preview, only Claude Code is currently qualified. Other Runtime catalog entries remain
+visible but cannot be checked or selected until their own Windows evidence is complete.
 
 ---
 
