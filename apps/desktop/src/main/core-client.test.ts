@@ -22,10 +22,16 @@ import {
 } from './core-client'
 
 const temporaryRoots: string[] = []
+const originalPlatform = process.platform
+
+function useSupportedPosixHost(): void {
+  Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' })
+}
 
 afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
+  Object.defineProperty(process, 'platform', { configurable: true, value: originalPlatform })
   delete process.env.ROVAI_CORE_BIN
   delete process.env.ROVAI_CORE_TEST_USER_DATA
   for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
@@ -96,6 +102,7 @@ describe('CoreClient planned shutdown', () => {
   it.runIf(process.platform !== 'win32')(
     'reuses one Promise, keeps shutdown Main-only, and waits for the child exit',
     async () => {
+      useSupportedPosixHost()
       const root = mkdtempSync(join(tmpdir(), 'rovai-core-client-shutdown-'))
       temporaryRoots.push(root)
       const fakeCore = join(root, 'fake-core.sh')
@@ -154,6 +161,7 @@ done
   it.runIf(process.platform !== 'win32')(
     'uses SIGTERM only after the Core deadline and outer grace expire',
     async () => {
+      useSupportedPosixHost()
       vi.useFakeTimers()
       vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const root = mkdtempSync(join(tmpdir(), 'rovai-core-client-sigterm-'))
@@ -190,6 +198,7 @@ done
   it.runIf(process.platform !== 'win32')(
     'escalates to SIGKILL when the child ignores SIGTERM',
     async () => {
+      useSupportedPosixHost()
       vi.useFakeTimers()
       vi.spyOn(console, 'error').mockImplementation(() => undefined)
       const root = mkdtempSync(join(tmpdir(), 'rovai-core-client-sigkill-'))
