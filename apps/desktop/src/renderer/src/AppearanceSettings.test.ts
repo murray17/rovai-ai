@@ -14,7 +14,7 @@ describe('appearance settings', () => {
     expect(markup).toContain('跟随系统')
     expect(markup).toContain('Porcelain Day')
     expect(markup).toContain('Steel Night')
-    expect(markup).toContain('随系统外观自动使用瓷灰日间或 Steel Night')
+    expect(markup).not.toContain('随系统外观自动使用瓷灰日间或 Steel Night')
     expect(markup).not.toContain('冷瓷灰与克制的 Steel 强调')
     expect(markup).not.toContain('冷石墨表面')
     expect(markup).not.toContain('选择偏好不会生成对话事件、消息或审计记录')
