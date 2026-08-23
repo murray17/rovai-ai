@@ -219,9 +219,6 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 
 具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
 
-Windows x64 当前设置页展示的十一种 Runtime 均已完成资格准入；Cursor Agent 不在当前设置页范围，
-并继续保持 Windows 未准入。
-
 ---
 
 ## 核心能力
@@ -243,7 +240,7 @@ Windows x64 当前设置页展示的十一种 Runtime 均已完成资格准入�
 <p align="center">
   <img
     src="docs/assets/readme/rovai-architecture.png"
-    alt="Rovai AI architecture showing Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and runtime-native capabilities"
+    alt="Rovai AI architecture showing Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and Runtime-native capabilities"
     width="100%"
   >
 </p>
