@@ -220,7 +220,7 @@ depending on the team.
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | Runtime-native only | Added alongside native | Based on Runtime capabilities |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [Qoder CLI](https://docs.qoder.com/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [Qoder CLI](https://docs.qoder.com/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [CodeBuddy](https://www.codebuddy.ai/docs/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [TRAE CLI CN](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
