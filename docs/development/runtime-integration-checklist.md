@@ -173,6 +173,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] ACP v1 `session/load` response 前的 history replay、response 后迟到 replay 与稳定 quiet boundary。
 - [ ] ACP v1 `session/resume` response 前后的 metadata/extension；不得预设 conversation history replay。
 - [ ] `session/cancel` 后直到可靠 terminal/cleanup 的消息。
+- [ ] Runtime 自有 lifecycle 在 `PromptActive`、Prompt terminal response 前后、`Ready` 和 owner detach 后的
+      实际到达顺序分别取证；不得从一次 happy-path E2E 推断 lifecycle 只会在 Idle 到达。
 
 每条消息必须先归入 `PromptOutput | SessionMetadata | LifecycleExtension | Replay | UnknownExtension | Unknown`，
 再决定公开、隔离、内部消费或 fail closed；“没有 Active Prompt”本身不是 metadata 违规依据。
@@ -293,10 +295,19 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] 先检查 Runtime advertised commands 中是否存在 `compact`、`compress` 或等价入口，并优先通过该入口
       分别触发 manual 与 auto 场景。
 - [ ] 记录所有 ACP method、`sessionUpdate` variant、Runtime 私有 notification 与 Hook source；普通 assistant
-      文本不能充当 signal。
+      文本本身不能充当 signal。若上游把原生 lifecycle 降格成与 assistant chunk 同形的文本，必须由目标版本
+      源码和真实 wire 固定完整 frame，并以 Runtime-only、Prompt-scoped lifecycle correlation 准入；单个完成
+      文本不得在 Active Prompt 中直接触发 observation。
 - [ ] signal 必须提供至少一个明确、结构化且可稳定准入的 lifecycle edge，并把 phase 标为
       `imminent_edge | started | completed`；同时具有明确 source、准入边界、稳定 occurrence ID 或其他可证明
       的去重依据，才可接入 detector。
+- [ ] 对 `started/completed/cancelled/blocked/failed` 的 settle 语义逐项读取目标版本实现并做状态机 fixture；不得
+      按事件名称猜测终态。特别验证中间态不会提前清除 pending，真正终态会清除 pending。
+- [ ] lifecycle compatibility frame 被内部消费，不进入 narration、streamed agent text、Runtime final 或
+      Missing-Send candidate；普通包含 compact/compress 字样的回复不被消费。
+- [ ] 若 wire 没有 source tag、occurrence ID 或 message provenance，必须把 detector 标为 `best_effort` 并记录
+      剩余歧义；不能声称可严格区分模型逐字复现整套 lifecycle frame。格式不匹配或 correlation 缺失时宁可
+      不产生 observation，不使用时间窗口或 token-drop heuristic 补猜。
 - [ ] `imminent_edge` 允许后续 compaction 失败或取消，Bootstrap redelivery 必须保守、幂等且可重复；
       `completed` 必须证明事件位于压缩完成之后，并处理重复发送、replay 和 Session resume。
 - [ ] Hook 必须在实际 Adapter launch 方式下可达；文档声明或普通 CLI/TUI 可达不等于 ACP Host 可达。

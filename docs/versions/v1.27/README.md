@@ -43,8 +43,9 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 - Kimi Skill 投影到 `.kimi-code/skills`；External MCP 通过标准 ACP Session `mcpServers` 以
   `AdditivePerRun / RovaiWins` 启用，stdio、Streamable HTTP 与真实模型 Tool call 已通过；warm Host/Session
   reuse 已启用；Run-local MCP projection/evidence digest 不参与 Host compatibility，完整 Server 定义仍参与。
-  Usage/Cost 保持 Disabled。Compaction 通过 Kimi-only idle ACP completion frame 以
-  `best_effort` 启用，不安装 Hook 或修改用户配置。capability snapshot 保留真实 `session.resume/load`，
+  Usage/Cost 保持 Disabled。Compaction 通过 Kimi-only Prompt lifecycle correlation 与 idle/detached exact
+  completion frame 以 `best_effort` 启用，不安装 Hook 或修改用户配置。capability snapshot 保留真实
+  `session.resume/load`，
   Host 停止或淘汰后由新 Host 优先精确 resume，load 只作 replay-quarantined fallback；
 - macOS arm64 声明 Built-in transport 并进入普通 discovery、检查、成员配置和执行路径；macOS x64 与
   Windows x64 仍保持准入阻断，不从 arm64 证据外推。
@@ -72,11 +73,11 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   Server 集合的连续 Run 现在复用同一 Host/Session，Server 定义变化仍通过完整结构改变 compatibility digest；
 - Kimi 异步 command/config advertisement 只作为私有 metadata 安全路由。当前产品不消费该 catalog，因此
   不再把“缺少权威 async catalog snapshot”列为遗留问题；
-- Kimi `0.32.0` 与官方 `main` 都把内部 `compaction.completed` 转为固定四行
-  `agent_message_chunk`。Rovai 只在 Prompt 已结束的 Kimi Session metadata route，或 observer 仍绑定于同一
-  warm Host/Session 的 detached AgentRun route，完整匹配该格式并产生 authoritative Compaction Observation；
-  active Prompt 文本、started/cancelled/blocked、宽泛关键词和 token-drop 均不参与。源码、现有真实手动
-  `/compact` wire 与 detached warm-Host Rust seam 已核对，真实自动 compact 的完整 Core smoke 尚未执行；
+- Kimi `0.32.0` 与官方 `main` 把内部 compact lifecycle 降格为同形 `agent_message_chunk`。Active Prompt 使用
+  Kimi-only exact state correlation：started 建立 pending，blocked 保持 pending，completed 产生 observation 并
+  清除，cancelled 只清除；这些 frame 不进入 final 或 Missing-Send。PromptCompleted/Ready/detached warm Host
+  保留 exact 四行 completion detector；宽泛关键词和 token-drop 不参与。确定性 Host 回归已覆盖
+  started→blocked→completed、单次 observation 与公开文本隔离；真实自动/手动完整 Core smoke 尚未执行；
 - macOS x64 与 Windows x64 没有从 arm64 结论外推资格。
 
 ## 跨版本文档影响
@@ -84,7 +85,7 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.26 冻结为 historical；本概览、计划、决定和版本索引建立唯一 current v1.27。 |
-| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录 Kimi idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home，并保留 Probe 临时隔离。 |
+| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation 与 blocked pending 语义。 |
 | Contracts | 已更新 | [Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)继承用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP 与十二种 Runtime 原生最高权限默认，并冻结 Cursor 在 Settings 与普通成员 Runtime selector 中的隐藏边界。 |
 | User Automation | 已更新 | [User Automation v1](../../contracts/user-automation-v1.md)补齐 `runtime check/models` 与成员 create/runtime set/clear 的封闭 App CLI；所有写入复用既有 Core Domain Command、显式版本 fence 与幂等 command ID，不开放 generic invoke。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector 与无 Hook 边界。 |

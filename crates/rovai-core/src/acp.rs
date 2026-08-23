@@ -231,6 +231,22 @@ struct AcpActivePrompt {
     prompt_id: String,
     delivery_id: String,
     acceptance_emitted: bool,
+    kimi_compaction_lifecycle: KimiCompactionLifecycle,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+enum KimiCompactionLifecycle {
+    #[default]
+    Idle,
+    Pending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum KimiCompactionLifecycleFrame {
+    Started,
+    Completed,
+    Cancelled,
+    Blocked,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,7 +319,11 @@ fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Val
 }
 
 fn is_kimi_compaction_completed_frame(message: &Value) -> bool {
-    message.get("id").is_none()
+    kimi_compaction_lifecycle_frame(message) == Some(KimiCompactionLifecycleFrame::Completed)
+}
+
+fn kimi_compaction_lifecycle_frame(message: &Value) -> Option<KimiCompactionLifecycleFrame> {
+    if !(message.get("id").is_none()
         && message.get("method").and_then(Value::as_str) == Some("session/update")
         && message
             .pointer("/params/update/sessionUpdate")
@@ -312,11 +332,64 @@ fn is_kimi_compaction_completed_frame(message: &Value) -> bool {
         && message
             .pointer("/params/update/content/type")
             .and_then(Value::as_str)
-            == Some("text")
-        && message
-            .pointer("/params/update/content/text")
-            .and_then(Value::as_str)
-            .is_some_and(is_kimi_compaction_completed_text)
+            == Some("text"))
+    {
+        return None;
+    }
+    let text = message
+        .pointer("/params/update/content/text")
+        .and_then(Value::as_str)?;
+    if is_kimi_compaction_started_text(text) {
+        Some(KimiCompactionLifecycleFrame::Started)
+    } else if is_kimi_compaction_completed_text(text) {
+        Some(KimiCompactionLifecycleFrame::Completed)
+    } else if text == "Compaction cancelled." {
+        Some(KimiCompactionLifecycleFrame::Cancelled)
+    } else if text == "Compaction is blocked by the current turn; retry when the turn is idle." {
+        Some(KimiCompactionLifecycleFrame::Blocked)
+    } else {
+        None
+    }
+}
+
+fn is_kimi_compaction_started_text(text: &str) -> bool {
+    text == "Compacting conversation context…"
+        || text
+            .strip_prefix("Compacting conversation context with instruction: ")
+            .is_some_and(|instruction| {
+                !instruction.is_empty()
+                    && !instruction.contains('\n')
+                    && !instruction.contains('\r')
+            })
+}
+
+fn consume_kimi_prompt_compaction_lifecycle_frame(
+    state: &mut KimiCompactionLifecycle,
+    message: &Value,
+) -> bool {
+    let Some(frame) = kimi_compaction_lifecycle_frame(message) else {
+        return false;
+    };
+    match (frame, *state) {
+        (KimiCompactionLifecycleFrame::Started, _) => {
+            *state = KimiCompactionLifecycle::Pending;
+            true
+        }
+        (KimiCompactionLifecycleFrame::Blocked, KimiCompactionLifecycle::Pending) => true,
+        (
+            KimiCompactionLifecycleFrame::Completed | KimiCompactionLifecycleFrame::Cancelled,
+            KimiCompactionLifecycle::Pending,
+        ) => {
+            *state = KimiCompactionLifecycle::Idle;
+            true
+        }
+        (
+            KimiCompactionLifecycleFrame::Completed
+            | KimiCompactionLifecycleFrame::Cancelled
+            | KimiCompactionLifecycleFrame::Blocked,
+            KimiCompactionLifecycle::Idle,
+        ) => false,
+    }
 }
 
 fn is_kimi_compaction_completed_text(text: &str) -> bool {
@@ -1082,6 +1155,14 @@ impl AcpHost {
         };
         match &mut route.phase {
             AcpSessionPhase::PromptActive(active_prompt) => {
+                if self.adapter_kind == AdapterKind::KimiCodeCli
+                    && consume_kimi_prompt_compaction_lifecycle_frame(
+                        &mut active_prompt.kimi_compaction_lifecycle,
+                        message,
+                    )
+                {
+                    return AcpSessionMessageRoute::SessionMetadata;
+                }
                 if is_session_catalog_update(message)
                     || is_known_session_lifecycle_extension(self.adapter_kind, message)
                 {
@@ -1140,7 +1221,15 @@ impl AcpHost {
                 self.protocol_violated.store(true, Ordering::Release);
                 AcpSessionMessageRoute::Quarantined(reason)
             }
-            AcpSessionPhase::PromptCompleted(_) => {
+            AcpSessionPhase::PromptCompleted(active_prompt) => {
+                if self.adapter_kind == AdapterKind::KimiCodeCli
+                    && consume_kimi_prompt_compaction_lifecycle_frame(
+                        &mut active_prompt.kimi_compaction_lifecycle,
+                        message,
+                    )
+                {
+                    return AcpSessionMessageRoute::SessionMetadata;
+                }
                 if is_idle_session_metadata(self.adapter_kind, message) {
                     return AcpSessionMessageRoute::SessionMetadata;
                 }
@@ -1511,6 +1600,7 @@ impl AcpHost {
                 prompt_id: prompt_id.clone(),
                 delivery_id: delivery_id.to_string(),
                 acceptance_emitted: false,
+                kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
             });
         }
         self.pending.lock().await.insert(
@@ -5832,6 +5922,170 @@ while IFS= read -r ignored; do :; done
         std::fs::remove_dir_all(root).unwrap();
     }
 
+    #[tokio::test]
+    async fn kimi_active_prompt_compaction_is_observed_without_polluting_public_text() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-kimi-active-prompt-compaction-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("kimi");
+        make_executable(
+            &executable,
+            r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{}}}'
+IFS= read -r session_new || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-kimi-active","configOptions":[{"id":"mode","currentValue":"default","options":[{"value":"default","name":"Default"}]}]}}'
+IFS= read -r mode || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":null}'
+IFS= read -r prompt || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-kimi-active","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compacting conversation context…"}}}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-kimi-active","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compaction is blocked by the current turn; retry when the turn is idle."}}}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-kimi-active","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Compaction completed.\n- Messages compacted: 12\n- Tokens before: 34,567\n- Tokens after: 8,901"}}}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-kimi-active","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"The compact implementation is complete."}}}}'
+printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"stopReason":"end_turn"}}'
+while IFS= read -r ignored; do :; done
+"#,
+        );
+
+        let frozen = frozen_kimi_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let builtin_tools = exact_builtin_tools(&root);
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(builtin_tools),
+            CompactionDetectorPolicy::BestEffort,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-kimi-active-compaction".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "runtime_managed".to_string(),
+        );
+        let session_id = runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        runtime
+            .install_compaction_observer(CompactionObserverLease {
+                id: "observer-kimi-active".to_string(),
+                conversation_id: "conversation-kimi-active".to_string(),
+                adapter_installation_id: frozen.installation_id.clone(),
+                adapter_kind: AdapterKind::KimiCodeCli,
+                host_instance_id: runtime.host_instance_id().to_string(),
+                relay_process_id: "relay-kimi-active".to_string(),
+                native_session_id: session_id.clone(),
+                native_binding_id: "binding-kimi-active".to_string(),
+                native_binding_generation: 1,
+                detector_policy_epoch: 1,
+            })
+            .await
+            .unwrap();
+
+        let prompt_id = runtime
+            .start_prompt("delivery-kimi-active", "continue")
+            .await
+            .unwrap();
+        let mut observation_count = 0;
+        let mut forwarded_chunks = Vec::new();
+        loop {
+            let incoming = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+                .await
+                .expect("Kimi active compaction fixture timed out")
+                .expect("Kimi active compaction fixture stopped early");
+            match incoming {
+                AcpIncoming::CompactionObservation {
+                    adapter_kind: AdapterKind::KimiCodeCli,
+                    observer_lease_id,
+                    native_session_id,
+                    source_signal,
+                    admission_point,
+                    ..
+                } => {
+                    assert_eq!(observer_lease_id, "observer-kimi-active");
+                    assert_eq!(native_session_id, session_id);
+                    assert_eq!(source_signal, "kimi.acp.compaction.completed_text.v1");
+                    assert_eq!(admission_point, "completed");
+                    observation_count += 1;
+                }
+                AcpIncoming::Message {
+                    native_prompt_id,
+                    message,
+                    ..
+                } => {
+                    let method = message.get("method").and_then(Value::as_str).unwrap_or("");
+                    if method == "rovai/acp_prompt_completed" {
+                        break;
+                    }
+                    if method == "session/update" {
+                        if let Some(text) = message
+                            .pointer("/params/update/content/text")
+                            .and_then(Value::as_str)
+                        {
+                            forwarded_chunks.push(text.to_string());
+                        }
+                        runtime
+                            .observe_message(
+                                &native_prompt_id,
+                                method,
+                                message.get("params").unwrap_or(&Value::Null),
+                            )
+                            .await
+                            .unwrap();
+                    }
+                }
+                AcpIncoming::InputAccepted { .. } => {}
+                other => panic!("unexpected Kimi active compaction event: {other:?}"),
+            }
+        }
+
+        assert_eq!(observation_count, 1);
+        assert_eq!(
+            forwarded_chunks,
+            ["The compact implementation is complete."]
+        );
+        assert_eq!(
+            runtime.final_agent_message(&prompt_id).await.as_deref(),
+            Some("The compact implementation is complete.")
+        );
+        assert_eq!(
+            runtime
+                .missing_send_recovery_candidate(&prompt_id)
+                .await
+                .as_deref(),
+            Some("The compact implementation is complete.")
+        );
+        assert!(!host.protocol_violated.load(Ordering::Acquire));
+
+        host.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn completed_run_disposition_preserves_adapter_reuse_evidence() {
         assert_eq!(
@@ -6029,6 +6283,67 @@ while IFS= read -r ignored; do :; done
                 "Kimi compaction completion parsing must fail closed for {ordinary_or_malformed:?}"
             );
         }
+    }
+
+    #[test]
+    fn kimi_prompt_compaction_lifecycle_keeps_blocked_pending_and_clears_only_on_terminal() {
+        let frame = |text: &str| {
+            json!({
+                "method": "session/update",
+                "params": {
+                    "sessionId": "session-kimi",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": text}
+                    }
+                }
+            })
+        };
+        let started = frame("Compacting conversation context…");
+        let instructed_started =
+            frame("Compacting conversation context with instruction: preserve tool evidence");
+        let blocked =
+            frame("Compaction is blocked by the current turn; retry when the turn is idle.");
+        let completed = frame(
+            "Compaction completed.\n- Messages compacted: 12\n- Tokens before: 34,567\n- Tokens after: 8,901",
+        );
+        let cancelled = frame("Compaction cancelled.");
+        let ordinary = frame("The compact implementation is complete.");
+        let mut state = KimiCompactionLifecycle::Idle;
+
+        assert!(!consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state, &completed
+        ));
+        assert!(!consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state, &ordinary
+        ));
+        assert_eq!(state, KimiCompactionLifecycle::Idle);
+
+        assert!(consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state, &started
+        ));
+        assert_eq!(state, KimiCompactionLifecycle::Pending);
+        assert!(consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state, &blocked
+        ));
+        assert_eq!(state, KimiCompactionLifecycle::Pending);
+        assert!(consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state, &completed
+        ));
+        assert_eq!(state, KimiCompactionLifecycle::Idle);
+
+        assert!(consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state,
+            &instructed_started,
+        ));
+        assert_eq!(state, KimiCompactionLifecycle::Pending);
+        assert!(consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state, &cancelled
+        ));
+        assert_eq!(state, KimiCompactionLifecycle::Idle);
+        assert!(!consume_kimi_prompt_compaction_lifecycle_frame(
+            &mut state, &blocked
+        ));
     }
 
     #[test]

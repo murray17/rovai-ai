@@ -287,3 +287,53 @@ provider secret 的最小暴露由权限收窄的外部文件、严格 `KIMI_MOD
 - **自动复制或合并旧私有 Home 到用户 Home：** 会修改用户配置/认证目录，冲突处理和回滚边界不明确；
 - **只把用户配置软链接进私有 Home：** 形成部分共享、部分隔离的双重状态根，恢复和清理语义更难解释；
 - **让 Probe 也使用用户 Home：** 会把一次性认证/Session 检查写入日常状态，降低测试隔离性。
+
+<a id="v1-27-d07"></a>
+## V1.27-D07：Kimi Active Prompt 以 exact lifecycle correlation 补齐 Compaction Observation
+
+### 背景
+
+D05 根据当时 E2E 解读，把 Kimi completion frame 限定在 Prompt 已结束后的 idle compatibility route。重新核对
+Kimi `0.32.0` 安装包和官方 ACP adapter 后确认，自动 compaction 可以在 turn 执行期间发出
+`compaction.started` 和 `compaction.completed`；ACP server 又把 started、completed、cancelled 与 blocked 都
+降格为同形的 `agent_message_chunk`。现有 PromptActive 路由因此既漏掉真实 completed observation，也会把这些
+本地 lifecycle 文本追加到 streamed agent text、Runtime final 和 Missing-Send candidate。
+
+Kimi 的 blocked 实现只设置 `blockedByTurn`、发出事件并继续等待当前 compaction promise；只有 completed 和
+cancelled settle 这次等待。把 blocked 当终态会提前清除 pending，使随后真实 completed 再次漏记。
+
+### 决定
+
+1. 本决定纠正并替代 D05 第 3、4 项关于 Active Prompt 与 started 的边界；D05 的 exact completed formatter、
+   `best_effort` policy、idle/detached detector、无 Hook/用户配置/heuristic 和无一分钟抑制窗口结论保持有效；
+2. `AcpActivePrompt` 保存 Kimi-only compact lifecycle：exact official started 建立 pending；blocked 在 pending 时
+   只被消费且保持 pending；cancelled 清除 pending 但不产生 observation；completed 仅在 pending 时产生现有
+   `CompactionObservation` 并清除 pending；
+3. 相关 lifecycle frame 走 Session metadata 内部路由，不进入 streamed agent text、Runtime final 或
+   Missing-Send。普通包含 `compact` 的文本和没有 pending 的 Active Prompt completed 继续作为普通 assistant
+   output，不产生 observation；
+4. PromptCompleted、Ready 与 detached warm-Host 的既有 exact completion detector 保留；本次只补齐生命周期
+   与当前 Prompt 重叠的漏记，不改变现有 requested revision、prepare cutoff 或下一次 Runtime input 的 Bootstrap
+   redelivery 机制；
+5. ACP wire 没有 lifecycle source tag、occurrence ID 或 message provenance。因此 exact correlation 能排除单个
+   completion 文本误判，却不能严格证明模型不会逐字生成 started→completed 整套 frame；能力继续明确标为
+   `best_effort`，格式或 correlation 不满足时 fail closed，不补猜。
+
+当前规范见 [Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)、
+[Session 与 Bootstrap 不变量](../../architecture/foundational-invariants.md#context-session-bootstrap)与
+[Runtime 接入 Checklist](../../development/runtime-integration-checklist.md#8-compaction-信号)。
+
+### 后果
+
+- 自动或手动 compaction 在 Active Prompt 内完成时会产生一次 observation，当前 AgentRun 正常继续；
+- blocked 不再打断 pending correlation，后续 completed 仍能推进 durable requested revision；
+- lifecycle 文本不会污染公开回答或 Missing-Send，redelivery 仍只发生在下一条尚未跨过 prepare cutoff 的输入；
+- wire provenance 缺失造成的整套 frame 复现歧义被如实保留，不宣称结构化 ACP lifecycle 权威性。
+
+### 被拒绝方案
+
+- **blocked 清除 pending：** 与 Kimi 的等待实现冲突，会漏掉随后 completed；
+- **Active Prompt 单独匹配 completed：** 模型输出同一四行文本时会产生更宽的误判；
+- **一分钟内合并 observation：** 会吞掉两次真实快速 compaction，且不能解决 source provenance 缺失；
+- **修改当前 Prompt 立即重投 Bootstrap：** 会破坏 prepare cutoff 与输入不重入边界，现有下一输入 redelivery
+  已拥有正确时序。

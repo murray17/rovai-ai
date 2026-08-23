@@ -35,8 +35,8 @@ last_updated: 2026-08-23
 - [x] 真实 `session/cancel` 在有界时间内返回 cancelled，未留下目标进程；
 - [x] `<think>` 块不会进入公开输出，未闭合推理 fail closed；
 - [x] External MCP 通过标准 ACP Session 字段进入 Kimi capability snapshot；Usage/Cost 保持 Disabled；
-  Compaction 通过 Kimi-only idle ACP exact completion frame 以 `best_effort` 接入；真实 `session.resume/load`
-  与 Built-in transport 保留；
+  Compaction 通过 Kimi-only Prompt lifecycle correlation 与 idle/detached exact completion frame 以
+  `best_effort` 接入；真实 `session.resume/load` 与 Built-in transport 保留；
 - [x] ACP Client 文件写入无授权时 fail closed；危险写入无 Tool/Approval/文件副作用时如实记录 Runtime 预拒绝。
 - [x] 真实 writable Kimi smoke 直接读取 Core `memberRuntimeDefaults` 得到 `permission_mode=yolo`，固定 Prompt、
   Shell command 和文件写入均完成且没有交互式 Approval；资格用 `permission_mode=default` 的 allow/deny
@@ -54,6 +54,9 @@ last_updated: 2026-08-23
 - [x] 复核 Kimi `0.32.0` 安装包、官方 `main` 与 E2E：内部 `compaction.completed` 会确定性转为一个固定四行
   `agent_message_chunk`；Rovai 严格 parser、idle/detached warm-Host route、policy/admission 与普通文本负向
   Rust 验证通过；
+- [x] Active Prompt 的 exact Kimi lifecycle 状态机与 Host 级回归通过：started 建立 pending，blocked 保持，
+  completed 产生一次 observation 并清除，cancelled 清除且不 observation；lifecycle frame 不进入公开 stream、
+  Runtime final 或 Missing-Send，普通 compact 文本不误消费；
 - [ ] 在隔离真实 Core 链路分别触发手动 `/compact` 与自动 compact，确认各产生一次 authoritative observation，
   且不触发 ACP protocol violation；
 - [x] 完整十五项 Built-in CLI matrix 通过。早期 `0/15` 是验收脚本把 legacy stdin 非法输入退出码错误期待

@@ -244,7 +244,8 @@ Kimi/MiniMax 可能在普通文本中返回 `<think>` 块，因此 Kimi streamed
 配置；完整解析后的 Server 集合进入 Host compatibility，含 AgentRun identity 的 Run-local projection/evidence
 digest 不进入，Server 定义变化仍 fence 旧 Host。stdio、Streamable HTTP、同名整项优先、ContextManifest 和
 真实模型 Tool call 均已验证。Usage/Cost
-保持 Disabled；Compaction 只通过 Kimi-only idle ACP completion frame 以 `best_effort` 接入。History Restore
+保持 Disabled；Compaction 通过 Kimi-only Prompt lifecycle correlation 与 idle/detached exact completion frame
+以 `best_effort` 接入。History Restore
 仅作为 load-only fallback。异步 command/config
 advertisement 只安全路由为私有 metadata，当前没有产品消费者，不作为遗留项。Rovai managed Skill 投影目标为
 `.kimi-code/skills`。

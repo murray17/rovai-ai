@@ -315,10 +315,11 @@ Shell override: KIMI_SHELL_PATH
   通过，产品 smoke 又经 Core、Assignment、AgentRun Projection、ContextManifest 与 MiniMax M3 真实 Tool
   call 同时验证 stdio、Streamable HTTP、额外 stdio 和 `RovaiWins` 同名整项优先；
 - 同 Host 两个 Session 使用不同 marker 并交错回到第一个 Session 后无串话；多轮 Prompt、resume/load 与 MCP
-  没有产生结构化 `usage_update`，Usage/Cost Disabled。手动 `/compact` 的普通完成文本后来由安装包与官方
-  `main` 源码定位到内部 `compaction.completed` 的固定四行 formatter；Rovai 已增加 Kimi-only idle ACP exact
-  frame detector，policy 为 `best_effort`，不安装 Hook 或修改用户配置。真实自动/手动完整 Core observation
-  smoke 尚待执行；
+  没有产生结构化 `usage_update`，Usage/Cost Disabled。安装包与官方 `main` 证明 compact lifecycle 被降格为
+  同形 `agent_message_chunk`，自动 compact 可与 Active Prompt 重叠；Rovai 已增加 Kimi-only exact lifecycle
+  correlation，started 建 pending、blocked 保持、cancelled 清除、completed observation 后清除，并保留
+  idle/detached completion detector。Host fixture 已验证 lifecycle frame 不进入 final/Missing-Send；真实
+  自动/手动完整 Core observation smoke 尚待执行；
 - Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景通过，Kimi private stream 未进入
   公共 protocol fixture；
 - 早期完整十五项 Built-in CLI matrix 的 `0/15` 并非模型跳过 Shell：保留 fixture 证明 Kimi 已执行验收脚本，
@@ -336,7 +337,7 @@ Shell override: KIMI_SHELL_PATH
 Qualified capabilities on macOS arm64: ACP AgentRun、Approval、command output、Missing-Send、cancel/cleanup、managed Skill、Built-in CLI、warm Host/Session reuse、cold Host native resume
 Product continuation: compatible warm Host/Session + user-native Kimi Home；停止/淘汰后 cold exact resume；load-only 时使用 History Restore quarantine；Probe only 使用临时 Home
 External MCP: AdditivePerRun / RovaiWins；ACP session/new/resume/load.mcpServers；stdio 与 Streamable HTTP Verified
-Best-effort capabilities: Kimi-only idle ACP `compaction.completed` exact-frame detector
+Best-effort capabilities: Kimi-only Prompt lifecycle correlation + idle/detached ACP `compaction.completed` exact-frame detector
 Disabled capabilities: Usage/Cost monitoring
 Verified upstream-only boundaries: 同 Host 并发 Session 隔离、跨隔离 home Unknown session、ACP stdio MCP happy path 与相邻 Session 隔离
 Unverified capabilities: macOS x64、Windows x64

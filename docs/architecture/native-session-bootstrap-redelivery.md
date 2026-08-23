@@ -68,7 +68,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | GitHub Copilot | `preCompact` / `imminent_edge` | 隔离官方 Plugin `preCompact` Hook | 目标 CLI 没有对等 completed Hook；该 edge 一次性推进 revision，accepted redelivery 后即结束，不等待 post event |
 | OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
 | Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；忽略 started 与 summary |
-| Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only ACP idle metadata compatibility route | Kimi native ACP server 把内部 `compaction.completed` 确定性格式化为单个四行 `agent_message_chunk`；只接受完整官方格式，active Prompt 文本、started/cancelled/blocked 和宽泛关键词均不准入 |
+| Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only Prompt lifecycle correlation + idle/detached completion compatibility route | Kimi native ACP server 把内部 lifecycle 降格为同形 `agent_message_chunk`；Active Prompt 只有 exact started 建立 pending 后的 exact completed 才准入，blocked 保持 pending，cancelled 清除 pending；idle/detached 保留 exact completion detector |
 | Qoder | `PostCompact` / `completed` | 隔离 `--settings` Hook | 目标版本真实 `/compact` 完成态可靠 |
 | CodeBuddy | `SessionStart(source=compact)` / `completed` | 隔离 `--plugin-dir` Plugin Hook | `2.133.1` emergency auto compaction 完成后真实触发；CLI additional settings 未注册 lifecycle Hook。该版本 pre-message compaction 绕过全部相关 Hook，故 detector 仍是有明确 coverage gap 的 `best_effort`，不做 token 推断 |
 | Qwen Code | `PostCompact` / `completed` | 私有 `QWEN_HOME` user Hook | 上游 HookRegistry 不读取 system Hook；私有 user settings 保留原配置且不修改用户文件。trigger matcher 为 exact match，使用 `*` 后由 relay 校验 `manual|auto` |
@@ -80,12 +80,19 @@ Hook relay command 冻结 adapter、Host 与 expected source signal，不信任 
 尤其必要。relay 只持久化 lifecycle metadata 的 digest，不把 compact summary、prompt、Bootstrap 或
 identity-derived bytes 写入 observation evidence。
 
-Kimi detector 不安装 Hook、不修改用户 `KIMI_CODE_HOME/config.toml`，也不建立额外 side-channel。官方完成帧
-固定为 `Compaction completed.` 及 messages/tokens before/after 三行 en-US 整数；它只在 Prompt 已结束的
-Session metadata route，或正常 AgentRun 已 detach 但 observer 仍绑定于同一 warm Host/Session 时拥有资格。
-模型在 active Prompt 中生成相同或相近文本不产生 observation。Kimi 内部事件不带 occurrence ID，当前 ACP
-stdio 对每个 `compaction.completed` 发出一次完成帧，Rovai 因而沿用 Host instance 内单调 observation
-sequence；不使用一分钟窗口或 token-drop heuristic 合并事件。
+Kimi detector 不安装 Hook、不修改用户 `KIMI_CODE_HOME/config.toml`，也不建立额外 side-channel。官方 started
+帧为 `Compacting conversation context…` 或带 instruction 的同一模板；completed 固定为
+`Compaction completed.` 及 messages/tokens before/after 三行 en-US 整数，cancelled 与 blocked 也只接受目标
+版本的完整固定文本。Prompt 内由 Kimi-only 状态机相关：started 建立 pending；blocked 只说明当前 turn 正在
+等待 compaction，保持 pending；completed 产生一次 observation 并清除 pending；cancelled 只清除 pending。
+这些已相关的 lifecycle frame 作为 Session metadata 内部消费，不进入 streamed agent text、Runtime final 或
+Missing-Send。没有 pending 的 Active Prompt completed 保持普通 assistant output，不产生 observation。
+
+Prompt 已结束或正常 AgentRun 已 detach、但 observer 仍绑定于同一 warm Host/Session 时，保留既有 exact
+completed compatibility route。Kimi ACP wire 没有 lifecycle source tag、occurrence ID 或 message provenance；
+因此 Prompt 状态机只能把单帧误判收窄为 exact started→completed 组合，无法在 wire 层证明模型不会逐字生成
+同一整套 frame。该残余歧义是 `best_effort` 能力边界，不使用一分钟窗口、token-drop heuristic 或宽泛关键词
+补猜；Rovai 沿用 Host instance 内单调 observation sequence 形成本地 occurrence。
 
 Copilot 的一次 `preCompact` 只产生一个 requirement revision。目标版本后台 compaction 会 snapshot
 已有历史并保留其间新增消息；真实 smoke 也确认 Hook 后下一 ACP 输入可 accepted。因此 v0.48 选择

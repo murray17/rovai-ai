@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:0e229d06b0af72a0a1d867bd87372aa7792e3a70e5ab8f51657aabb6c122fbe2";
+    "sha256:c55ea5ccf0f5bf81c4d71b66ff998abfa15b47dc6b33f57a8eb941bf1e04a865";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
