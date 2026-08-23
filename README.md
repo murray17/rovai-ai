@@ -231,9 +231,6 @@ depending on the team.
 For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.
 
-On Windows x64, all eleven Runtimes exposed by Settings are qualified. Cursor Agent remains
-outside the current Settings scope and is not qualified on Windows.
-
 ---
 
 ## Core Capabilities
