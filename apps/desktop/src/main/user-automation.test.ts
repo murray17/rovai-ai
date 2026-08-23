@@ -119,6 +119,125 @@ describe('User Automation transport', () => {
     )).rejects.toBeInstanceOf(UserAutomationError)
   })
 
+  it('maps Runtime inspection and member configuration to the closed Core methods', async () => {
+    const calls: Array<{ method: CoreMethod; params: unknown }> = []
+    const core = {
+      async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
+        calls.push({ method, params })
+        return { status: 'applied' } as T
+      }
+    }
+    const dependencies = {
+      core,
+      openCamp: async (campId: string) => ({ campId, opened: true as const }),
+      appVersion: 'test'
+    }
+
+    await dispatchUserAutomation('runtime.check', { adapterKind: 'opencode-cli' }, dependencies)
+    await dispatchUserAutomation('runtime.models', { adapterKind: 'kiro-cli' }, dependencies)
+    await dispatchUserAutomation('member.create', {
+      commandId: 'create-command',
+      displayName: '开栈',
+      avatarRef: null,
+      teamRole: 'Runtime 验证员',
+      professionalResponsibilities: '验证 OpenCode Runtime。',
+      personalityTraits: ['严谨', '直接'],
+      workingPrinciples: '先取证，再下结论。',
+      growthTopic: ''
+    }, dependencies)
+    await dispatchUserAutomation('member.runtime.set', {
+      commandId: 'runtime-command',
+      agentId: 'agent_12',
+      expectedVersion: 1,
+      adapterKind: 'opencode-cli',
+      model: { mode: 'explicit', modelId: 'minimax/MiniMax-M3', options: {} },
+      permissions: {
+        adapterKind: 'opencode-cli',
+        schemaVersion: 1,
+        values: { permission_mode: 'allow' }
+      }
+    }, dependencies)
+    await dispatchUserAutomation('member.runtime.clear', {
+      commandId: 'clear-command',
+      agentId: 'agent_12',
+      expectedVersion: 2
+    }, dependencies)
+
+    expect(calls).toEqual([
+      {
+        method: 'runtime.product.check',
+        params: { runtimeKind: 'opencode-cli' }
+      },
+      {
+        method: 'runtime.modelCatalog.open',
+        params: { runtimeKind: 'kiro-cli' }
+      },
+      {
+        method: 'members.create',
+        params: {
+          commandId: 'create-command',
+          command: {
+            displayName: '开栈',
+            avatarRef: null,
+            teamRole: 'Runtime 验证员',
+            professionalResponsibilities: '验证 OpenCode Runtime。',
+            personalityTraits: ['严谨', '直接'],
+            workingPrinciples: '先取证，再下结论。',
+            growthTopic: ''
+          }
+        }
+      },
+      {
+        method: 'members.runtime.set',
+        params: {
+          commandId: 'runtime-command',
+          command: {
+            agentId: 'agent_12',
+            expectedVersion: 1,
+            adapterKind: 'opencode-cli',
+            model: { mode: 'explicit', modelId: 'minimax/MiniMax-M3', options: {} },
+            permissions: {
+              adapterKind: 'opencode-cli',
+              schemaVersion: 1,
+              values: { permission_mode: 'allow' }
+            }
+          }
+        }
+      },
+      {
+        method: 'members.runtime.clear',
+        params: {
+          commandId: 'clear-command',
+          command: { agentId: 'agent_12', expectedVersion: 2 }
+        }
+      }
+    ])
+  })
+
+  it('rejects mismatched Runtime permission adapters before calling Core', async () => {
+    const calls: CoreMethod[] = []
+    const core = {
+      async request<T>(method: CoreMethod): Promise<T> {
+        calls.push(method)
+        return {} as T
+      }
+    }
+
+    await expect(dispatchUserAutomation('member.runtime.set', {
+      commandId: 'runtime-command',
+      agentId: 'agent_12',
+      expectedVersion: 1,
+      adapterKind: 'opencode-cli',
+      model: { mode: 'runtime_default' },
+      permissions: { adapterKind: 'kiro-cli', schemaVersion: 1, values: {} }
+    }, {
+      core,
+      openCamp: async (campId) => ({ campId, opened: true }),
+      appVersion: 'test'
+    })).rejects.toMatchObject({ code: 'automation_invalid_input' })
+    expect(calls).toEqual([])
+  })
+
   it('keeps Desktop available when the optional Automation server cannot start', async () => {
     const unavailable = new Error('injected endpoint bind failure')
     const diagnostics: unknown[] = []

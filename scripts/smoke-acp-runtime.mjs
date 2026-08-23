@@ -17,6 +17,7 @@ const dataDir = join(fixtureRoot, 'data')
 const commandOutputOnly = process.env.ROVAI_ACP_COMMAND_OUTPUT_ONLY === '1'
 const keepFixture = process.env.ROVAI_KEEP_ACP_RUNTIME_FIXTURE === '1'
 const fullCommandOutputMatrix = process.env.ROVAI_ACP_FULL_COMMAND_MATRIX === '1'
+const useProductPermissionDefaults = process.env.ROVAI_ACP_USE_PRODUCT_PERMISSION_DEFAULTS === '1'
 let core
 let shuttingDown = false
 
@@ -84,6 +85,9 @@ try {
   // read-only AgentRun into a writer.
   const agentId = 'agent_2'
 
+  // Qualification deliberately opts into prompt-capable permission values so
+  // the allow/deny matrix remains observable. Product memberRuntimeDefaults
+  // use each Adapter's verified native maximum, including Kimi `yolo`.
   const specifications = [
     {
       adapterKind: 'opencode-cli',
@@ -139,6 +143,15 @@ try {
         && (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length)) {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
+    const permissionValues = useProductPermissionDefaults
+      ? installation.memberRuntimeDefaults?.permissions?.values
+      : specification.permissionValues
+    if (!permissionValues || typeof permissionValues !== 'object' || Array.isArray(permissionValues)) {
+      throw new Error(`ACP smoke has no Product permission defaults: ${JSON.stringify({
+        adapterKind: specification.adapterKind,
+        memberRuntimeDefaults: installation.memberRuntimeDefaults
+      })}`)
+    }
 
     let profile = await request('members.get', { agentId })
     const explicitModelId = specification.adapterKind === 'codebuddy-cli'
@@ -156,7 +169,7 @@ try {
         permissions: {
           adapterKind: specification.adapterKind,
           schemaVersion: installation.snapshot.permissionSchemaVersion,
-          values: specification.permissionValues
+          values: permissionValues
         }
       }
     })
@@ -176,10 +189,10 @@ try {
       })}`)
     }
     if (JSON.stringify(profile.runtimeConfiguration?.permissions?.values)
-        !== JSON.stringify(specification.permissionValues)) {
+        !== JSON.stringify(permissionValues)) {
       throw new Error(`ACP smoke permissions drifted: ${JSON.stringify({
         adapterKind: specification.adapterKind,
-        expected: specification.permissionValues,
+        expected: permissionValues,
         actual: profile.runtimeConfiguration?.permissions
       })}`)
     }
@@ -314,11 +327,25 @@ try {
           ? canonical.phase === 'terminal' && canonical.outcome === 'succeeded'
           : !/exit code [1-9]\d*/i.test(output))
       })
-      if (commandRun?.status !== 'succeeded' || !commandOutputEvent) {
-        throw new Error(`${specification.adapterKind} fixed command output was not projected: ${JSON.stringify({
+      const commandStart = events.find((event) =>
+        event.method === 'agent_run.started' && event.params?.agentRunId === commandRunId
+      )
+      if (commandRun?.status !== 'succeeded'
+          || !commandOutputEvent
+          || commandStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId) {
+        throw new Error(`${specification.adapterKind} fixed printf output was not projected: ${JSON.stringify({
           commandRun,
+          commandStart,
           marker: commandMarker,
           runtimeActions: commandRuntimeActions
+        })}`)
+      }
+      if (specification.adapterKind === 'kimi-code-cli'
+          && permissionValues.permission_mode === 'yolo'
+          && commandApprovals.size !== 0) {
+        throw new Error(`Kimi yolo command unexpectedly required interactive Approval: ${JSON.stringify({
+          approvalCount: commandApprovals.size,
+          permissionValues
         })}`)
       }
       results.at(-1).commandOutput = {
@@ -327,7 +354,10 @@ try {
           ?? commandOutputEvent.params.canonical?.presentationHint,
         outcome: commandOutputEvent.params.canonical?.outcome ?? 'observed',
         rawOutputDigest: commandOutputEvent.params.payload.rawOutputDigest ?? null,
-        approvalCount: commandApprovals.size
+        approvalCount: commandApprovals.size,
+        nativeSessionContinued: commandStart.params.nativeThreadId === results.at(-1).nativeSessionId,
+        warmHostReused: commandStart.params.hostInstanceId === results.at(-1).hostInstanceId,
+        hostInstanceId: commandStart.params.hostInstanceId
       }
       if (fullCommandOutputMatrix) {
         results.at(-1).commandOutputMatrix = await runCommandOutputMatrix({
@@ -421,6 +451,8 @@ try {
       const writeStart = events.find((event) =>
         event.method === 'agent_run.started' && event.params?.agentRunId === writeRunId
       )
+      const immediatelyPreviousHostInstanceId = commandStart?.params?.hostInstanceId
+        ?? results.at(-1).hostInstanceId
       const written = await readFile(writePath, 'utf8').catch((error) => {
         if (error?.code === 'ENOENT') return null
         throw error
@@ -433,15 +465,13 @@ try {
           || !writeActions.some((action) => action.status === 'succeeded')
           || (requiresNativeSessionContinuation
             && writeStart?.params?.nativeThreadId !== results.at(-1).nativeSessionId)
-          || (specification.adapterKind === 'trae-cn-cli'
-            && writeStart?.params?.hostInstanceId !== results.at(-1).hostInstanceId)
-          || (specification.adapterKind === 'kimi-code-cli'
-            && writeStart?.params?.hostInstanceId === results.at(-1).hostInstanceId)) {
+          || (['trae-cn-cli', 'kimi-code-cli'].includes(specification.adapterKind)
+            && writeStart?.params?.hostInstanceId !== immediatelyPreviousHostInstanceId)) {
         throw new Error(`ACP approved write did not converge: ${JSON.stringify({
           writeRun,
           writeActions,
           writeStart,
-          expectedHostInstanceId: results.at(-1).hostInstanceId,
+          expectedHostInstanceId: immediatelyPreviousHostInstanceId,
           expectedNativeSessionId: results.at(-1).nativeSessionId,
           written,
           hostLogs: events.filter((event) => event.method === 'runtime.host.log').slice(-30),
@@ -450,20 +480,28 @@ try {
           ).slice(-30)
         })}`)
       }
+      if (specification.adapterKind === 'kimi-code-cli'
+          && permissionValues.permission_mode === 'yolo'
+          && resolvedApprovals.size !== 0) {
+        throw new Error(`Kimi yolo write unexpectedly required interactive Approval: ${JSON.stringify({
+          approvalCount: resolvedApprovals.size,
+          permissionValues
+        })}`)
+      }
       results.at(-1).approval = {
         resolved: resolvedApprovals.size,
         actionKinds: writeActions.map((action) => action.actionKind),
         nativeSessionContinued: writeStart?.params?.nativeThreadId === results.at(-1).nativeSessionId,
         continuationStrategy: requiresNativeSessionContinuation ? 'native_session' : 'new_only',
-        warmHostReused: writeStart?.params?.hostInstanceId === results.at(-1).hostInstanceId,
+        warmHostReused: writeStart?.params?.hostInstanceId === immediatelyPreviousHostInstanceId,
         written
       }
 
-      const approvalExpected = specification.permissionValues.permission === 'ask'
-        || specification.permissionValues.allow_all === 'off'
-        || specification.permissionValues.trust_all_tools === 'off'
-        || specification.permissionValues.permission_mode === 'default'
-        || specification.permissionValues.approval_mode === 'default'
+      const approvalExpected = permissionValues.permission === 'ask'
+        || permissionValues.allow_all === 'off'
+        || permissionValues.trust_all_tools === 'off'
+        || permissionValues.permission_mode === 'default'
+        || permissionValues.approval_mode === 'default'
       if (approvalExpected) {
         // Keep the requested content semantically neutral. Some Runtime models
         // interpret a file or payload literally named DENIED as an instruction

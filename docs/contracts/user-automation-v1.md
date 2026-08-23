@@ -4,7 +4,7 @@ contract: user-automation
 version: 1
 authority: desktop-user-automation-transport-and-diagnostic-trial
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-23
 ---
 
 # User Automation v1
@@ -79,8 +79,19 @@ V1 只提供以下普通用户命令：
 ```text
 rovai app status
 rovai app runtime list
+rovai app runtime check --adapter <adapter>
+rovai app runtime models --adapter <adapter>
 rovai app member list
-rovai app member show --member-id <id>
+rovai app member show --agent-id <id>
+rovai app member create --display-name <name> [--avatar-ref <ref>] [--team-role <role>]
+                        [--professional-responsibilities <text>]
+                        [--personality-trait <trait> ...] [--working-principles <text>]
+                        [--growth-topic <text>]
+rovai app member runtime set --agent-id <id> --expected-version <version> --adapter <adapter>
+                             (--runtime-default | --model <model-id>)
+                             --permission-schema-version <version> --permissions-json <object>
+                             [--model-options-json <object>]
+rovai app member runtime clear --agent-id <id> --expected-version <version>
 rovai app camp create [--name <name>] (--workspace <directory> | --quick-chat)
                       --member <id> [--member <id> ...] [--lead <id>]
 rovai app camp send --camp-id <id> --agent-id <id> (--body <text> | --body-file <path>) [budget]
@@ -93,10 +104,22 @@ rovai app trial run --agent-id <id> --workspace <directory> --task-file <file> [
                     [--wait | --no-wait] [--export <directory>] [--open]
 ```
 
+`runtime check` 复用产品的显式可用性检查；`runtime models` 打开对应 Runtime 的受控模型目录 Read Model，并按
+现有缓存策略等待、加入或安排刷新。二者都只接受封闭 `AdapterKind`，不能接收 binary path、环境变量、provider
+secret 或任意 Core method。`runtime list` 仍可读取缓存，但自动配置显式模型前应以 `runtime models` 返回的当前
+目录为准，不能猜测模型 ID。
+
+`member create` 复用 `members.create` Domain Command；除 `displayName` 外的身份字段可以省略并以空值提交。
+`member runtime set/clear` 分别复用 `members.runtime.set/clear`，必须显式提交当前正整数
+`expectedVersion`、幂等 `commandId` 与完整 Runtime 配置。显式模型必须带模型 ID 和对象形态的 options；权限必须
+带与目标 Runtime 相同的 adapter、当前正整数 schema version 和对象形态 values。Main 只构造这三个固定 Core
+command，不读取或写入 SQLite，也不自动选择模型、权限或覆盖版本冲突。CLI 生成的 command ID 可由
+`--command-id` 固定，以便调用方在结果不明时通过 read command 复核后安全重放。
+
 `camp send` 的 budget 可以使用单一 `--timeout`，或完整地给出 Core 当前接受的执行预算字段；不能静默混合
-不完整预算。`member show`、`runtime list` 与 workspace inspection 是 Trial admission 使用的安全 read model，
-不会修改成员 Runtime。V1 不提供成员 Runtime mutation、Camp delete、AgentRun list、任意 Evidence/raw input
-导出或 generic invoke。
+不完整预算。`member show`、`runtime list`、`runtime check/models` 与 workspace inspection 是 Trial admission
+和配置编排使用的安全 read model。V1 不提供成员身份更新/删除、Camp delete、AgentRun list、任意
+Evidence/raw input 导出或 generic invoke。
 
 `camp open` 先由 Main 向 Core 验证 canonical Camp ID 当前存在，再创建、恢复或聚焦 Desktop window，并沿现有
 Renderer Camp activation 路径导航。它不得启动未运行的 Desktop，也不得接受 URL、路由字符串或任意 path。
@@ -142,7 +165,7 @@ Trial 是 CLI-owned 的一次性 Runtime 诊断编排，不在 Core 新增 Trial
 1. 验证目标成员存在、未移除、Runtime 已配置且当前可用；
 2. 检查 workspace 为真实目录并记录只读 Git baseline；
 3. 在第一次 Core mutation 前创建私有 durable journal，记录 `trialId`、phase、幂等 command IDs 与预定导出目录；
-4. 创建一个隔离、单成员、lead-coordinated Camp；
+4. 创建一个隔离、单成员、`peer` Camp；该成员仍是 Default Lead，`lead_coordinated` 在当前 Camp 创建合同中尚未开放；
 5. 以显式目标成员和冻结 timeout/budget 发送 task file 原文；
 6. 接受且只接受一个 root AgentRun；按选择等待、导出和打开 Camp。
 
@@ -227,5 +250,5 @@ Shell 退出码闭集为：
 `trial run --wait` 与 `agent-run watch` 必须把最终 AgentRun `failed`/`cancelled` 映射为 `1`；settlement deadline
 后仍非终态映射为 `3`。打印 JSON 不得把失败降级为 shell success。
 
-V1 明确延后 Windows User Automation transport、App launch、成员 Runtime mutation、Camp delete、通用
+V1 明确延后 Windows User Automation transport、App launch、成员身份更新/删除、Camp delete、通用
 AgentRun/Evidence 浏览、input export、pending execution、正式 Benchmark/Eval、远程 automation 和 daemon。

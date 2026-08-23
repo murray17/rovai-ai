@@ -23,6 +23,20 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const SETTLEMENT_GRACE: Duration = Duration::from_secs(5);
 const CONTEXT_ENV: &str = "ROVAI_APP_AUTOMATION_CONTEXT";
+const ADAPTER_KINDS: [&str; 12] = [
+    "codex-cli",
+    "opencode-cli",
+    "copilot-cli",
+    "claude-code-cli",
+    "kiro-cli",
+    "qoder-cli",
+    "codebuddy-cli",
+    "qwen-code",
+    "trae-cn-cli",
+    "cursor-agent",
+    "kimi-code-cli",
+    "antigravity-app",
+];
 
 #[derive(Debug)]
 struct CliError {
@@ -223,6 +237,21 @@ async fn execute(args: &[String]) -> Result<u8> {
         return Ok(0);
     }
     let (command, action, rest) = match args {
+        [command, namespace, member_action, rest @ ..]
+            if command == "member"
+                && namespace == "runtime"
+                && matches!(member_action.as_str(), "set" | "clear") =>
+        {
+            (
+                command.as_str(),
+                Some(match member_action.as_str() {
+                    "set" => "runtime.set",
+                    "clear" => "runtime.clear",
+                    _ => unreachable!(),
+                }),
+                rest,
+            )
+        }
         [command, action, rest @ ..]
             if matches!(
                 command.as_str(),
@@ -249,6 +278,14 @@ async fn execute(args: &[String]) -> Result<u8> {
             runtime_list(&flags).await?;
             0
         }
+        ("runtime", Some("check")) => {
+            runtime_check(&flags).await?;
+            0
+        }
+        ("runtime", Some("models")) => {
+            runtime_models(&flags).await?;
+            0
+        }
         ("member", Some("list")) => {
             member_list(&flags).await?;
             0
@@ -257,6 +294,9 @@ async fn execute(args: &[String]) -> Result<u8> {
             member_show(&flags).await?;
             0
         }
+        ("member", Some("create")) => member_create(&flags).await?,
+        ("member", Some("runtime.set")) => member_runtime_set(&flags).await?,
+        ("member", Some("runtime.clear")) => member_runtime_clear(&flags).await?,
         ("camp", Some("create")) => camp_create(&flags).await?,
         ("camp", Some("send")) => camp_send(&flags).await?,
         ("camp", Some("open")) => {
@@ -287,7 +327,7 @@ async fn execute(args: &[String]) -> Result<u8> {
 
 fn print_help() {
     println!(
-        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list\n  rovai app member list|show\n  rovai app camp create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n\nThe Desktop App must already be running. V1 never launches it automatically."
+        "Rovai User Automation CLI\n\nOperations:\n  rovai app status\n  rovai app runtime list|check|models\n  rovai app member list|show|create\n  rovai app member runtime set|clear\n  rovai app camp create|send|open\n  rovai app agent-run show|watch|export|cancel\n  rovai app trial run\n\nThe Desktop App must already be running. V1 never launches it automatically."
     );
 }
 
@@ -295,8 +335,19 @@ fn print_command_help(command: &str, action: Option<&str>) -> Result<()> {
     let usage = match (command, action) {
         ("status", None) => "rovai app status [--json]",
         ("runtime", Some("list")) => "rovai app runtime list [--ready-only] [--json]",
+        ("runtime", Some("check")) => "rovai app runtime check --adapter <adapter> [--json]",
+        ("runtime", Some("models")) => "rovai app runtime models --adapter <adapter> [--json]",
         ("member", Some("list")) => "rovai app member list [--runtime <adapter>] [--json]",
         ("member", Some("show")) => "rovai app member show --agent-id <id> [--json]",
+        ("member", Some("create")) => {
+            "rovai app member create --display-name <name> [--avatar-ref <ref>] [--team-role <role>] [--professional-responsibilities <text>] [--personality-trait <trait> ...] [--working-principles <text>] [--growth-topic <text>] [--command-id <id>] [--json]"
+        }
+        ("member", Some("runtime.set")) => {
+            "rovai app member runtime set --agent-id <id> --expected-version <version> --adapter <adapter> (--runtime-default | --model <model-id>) --permission-schema-version <version> --permissions-json <object> [--model-options-json <object>] [--command-id <id>] [--json]"
+        }
+        ("member", Some("runtime.clear")) => {
+            "rovai app member runtime clear --agent-id <id> --expected-version <version> [--command-id <id>] [--json]"
+        }
         ("camp", Some("create")) => {
             "rovai app camp create [--name <name>] (--workspace <path> | --quick-chat) --member <id> [--member <id> ...] [--lead <id>] [--json]"
         }
@@ -338,6 +389,32 @@ async fn runtime_list(flags: &Flags) -> Result<()> {
     )
 }
 
+async fn runtime_check(flags: &Flags) -> Result<()> {
+    flags
+        .validate(&["adapter"], &["json"])
+        .map_err(anyhow::Error::new)?;
+    print_json(
+        &invoke(
+            "runtime.check",
+            json!({ "adapterKind": adapter_kind(flags, "adapter")? }),
+        )
+        .await?,
+    )
+}
+
+async fn runtime_models(flags: &Flags) -> Result<()> {
+    flags
+        .validate(&["adapter"], &["json"])
+        .map_err(anyhow::Error::new)?;
+    print_json(
+        &invoke(
+            "runtime.models",
+            json!({ "adapterKind": adapter_kind(flags, "adapter")? }),
+        )
+        .await?,
+    )
+}
+
 async fn member_list(flags: &Flags) -> Result<()> {
     flags
         .validate(&["runtime"], &["json"])
@@ -374,6 +451,158 @@ async fn member_show(flags: &Flags) -> Result<()> {
     )
 }
 
+fn member_create_params(flags: &Flags) -> Result<Value> {
+    flags
+        .validate(
+            &[
+                "display-name",
+                "avatar-ref",
+                "team-role",
+                "professional-responsibilities",
+                "personality-trait",
+                "working-principles",
+                "growth-topic",
+                "command-id",
+            ],
+            &["json"],
+        )
+        .map_err(anyhow::Error::new)?;
+    Ok(json!({
+        "commandId": flags.one("command-id").map_err(anyhow::Error::new)?
+            .map(str::to_string).unwrap_or_else(command_id),
+        "displayName": flags.required("display-name").map_err(anyhow::Error::new)?,
+        "avatarRef": flags.one("avatar-ref").map_err(anyhow::Error::new)?,
+        "teamRole": flags.one("team-role").map_err(anyhow::Error::new)?.unwrap_or(""),
+        "professionalResponsibilities": flags.one("professional-responsibilities")
+            .map_err(anyhow::Error::new)?.unwrap_or(""),
+        "personalityTraits": flags.repeated("personality-trait"),
+        "workingPrinciples": flags.one("working-principles")
+            .map_err(anyhow::Error::new)?.unwrap_or(""),
+        "growthTopic": flags.one("growth-topic").map_err(anyhow::Error::new)?.unwrap_or("")
+    }))
+}
+
+async fn member_create(flags: &Flags) -> Result<u8> {
+    let result = invoke("member.create", member_create_params(flags)?).await?;
+    print_json(&result)?;
+    Ok(command_result_exit_code(&result))
+}
+
+fn member_runtime_set_params(flags: &Flags) -> Result<Value> {
+    flags
+        .validate(
+            &[
+                "agent-id",
+                "expected-version",
+                "adapter",
+                "model",
+                "model-options-json",
+                "permission-schema-version",
+                "permissions-json",
+                "command-id",
+            ],
+            &["runtime-default", "json"],
+        )
+        .map_err(anyhow::Error::new)?;
+    let model_id = flags.one("model").map_err(anyhow::Error::new)?;
+    if flags.has("runtime-default") == model_id.is_some() {
+        return Err(CliError::new(
+            "automation_invalid_input",
+            "Choose exactly one of --runtime-default or --model",
+        )
+        .into());
+    }
+    let model_options = flags
+        .one("model-options-json")
+        .map_err(anyhow::Error::new)?;
+    if model_options.is_some() && model_id.is_none() {
+        return Err(CliError::new(
+            "automation_invalid_input",
+            "--model-options-json requires --model",
+        )
+        .into());
+    }
+    let model = match model_id {
+        Some(model_id) => json!({
+            "mode": "explicit",
+            "modelId": model_id,
+            "options": model_options
+                .map(|value| parse_json_object(value, "model-options-json"))
+                .transpose()?
+                .unwrap_or_else(|| json!({}))
+        }),
+        None => json!({ "mode": "runtime_default" }),
+    };
+    let adapter_kind = adapter_kind(flags, "adapter")?;
+    Ok(json!({
+        "commandId": flags.one("command-id").map_err(anyhow::Error::new)?
+            .map(str::to_string).unwrap_or_else(command_id),
+        "agentId": flags.required("agent-id").map_err(anyhow::Error::new)?,
+        "expectedVersion": parse_positive_i64(
+            flags.required("expected-version").map_err(anyhow::Error::new)?,
+            "expected-version"
+        )?,
+        "adapterKind": adapter_kind,
+        "model": model,
+        "permissions": {
+            "adapterKind": adapter_kind,
+            "schemaVersion": parse_positive_i64(
+                flags.required("permission-schema-version").map_err(anyhow::Error::new)?,
+                "permission-schema-version"
+            )?,
+            "values": parse_json_object(
+                flags.required("permissions-json").map_err(anyhow::Error::new)?,
+                "permissions-json"
+            )?
+        }
+    }))
+}
+
+async fn member_runtime_set(flags: &Flags) -> Result<u8> {
+    let result = invoke("member.runtime.set", member_runtime_set_params(flags)?).await?;
+    print_json(&result)?;
+    Ok(command_result_exit_code(&result))
+}
+
+async fn member_runtime_clear(flags: &Flags) -> Result<u8> {
+    flags
+        .validate(&["agent-id", "expected-version", "command-id"], &["json"])
+        .map_err(anyhow::Error::new)?;
+    let result = invoke(
+        "member.runtime.clear",
+        json!({
+            "commandId": flags.one("command-id").map_err(anyhow::Error::new)?
+                .map(str::to_string).unwrap_or_else(command_id),
+            "agentId": flags.required("agent-id").map_err(anyhow::Error::new)?,
+            "expectedVersion": parse_positive_i64(
+                flags.required("expected-version").map_err(anyhow::Error::new)?,
+                "expected-version"
+            )?
+        }),
+    )
+    .await?;
+    print_json(&result)?;
+    Ok(command_result_exit_code(&result))
+}
+
+fn camp_create_params(
+    command_id: String,
+    name: Option<String>,
+    workspace: Option<Value>,
+    member_agent_ids: Vec<String>,
+    default_lead_agent_id: String,
+) -> Value {
+    json!({
+        "commandId": command_id,
+        "name": name,
+        "workspace": workspace,
+        "memberAgentIds": member_agent_ids,
+        "defaultLeadAgentId": default_lead_agent_id,
+        "collaborationMode": "peer",
+        "activationState": "active"
+    })
+}
+
 async fn camp_create(flags: &Flags) -> Result<u8> {
     flags
         .validate(
@@ -401,26 +630,28 @@ async fn camp_create(flags: &Flags) -> Result<u8> {
     let lead = flags
         .one("lead")
         .map_err(anyhow::Error::new)?
-        .unwrap_or(&members[0]);
-    if !members.iter().any(|member| member == lead) {
+        .unwrap_or(&members[0])
+        .to_string();
+    if !members.iter().any(|member| member == &lead) {
         return Err(
             CliError::new("automation_invalid_input", "--lead must also be a --member").into(),
         );
     }
-    let result = invoke(
-        "camp.create",
-        json!({
-            "commandId": flags.one("command-id").map_err(anyhow::Error::new)?
-                .map(str::to_string).unwrap_or_else(command_id),
-            "name": flags.one("name").map_err(anyhow::Error::new)?,
-            "workspace": workspace.map(|project_path| json!({ "projectPath": project_path })),
-            "memberAgentIds": members,
-            "defaultLeadAgentId": lead,
-            "collaborationMode": "lead_coordinated",
-            "activationState": "active"
-        }),
-    )
-    .await?;
+    let params = camp_create_params(
+        flags
+            .one("command-id")
+            .map_err(anyhow::Error::new)?
+            .map(str::to_string)
+            .unwrap_or_else(command_id),
+        flags
+            .one("name")
+            .map_err(anyhow::Error::new)?
+            .map(str::to_string),
+        workspace.map(|project_path| json!({ "projectPath": project_path })),
+        members,
+        lead,
+    );
+    let result = invoke("camp.create", params).await?;
     print_json(&result)?;
     Ok(command_result_exit_code(&result))
 }
@@ -626,15 +857,13 @@ async fn trial_run(flags: &Flags) -> Result<u8> {
         .unwrap_or_else(|| format!("Runtime Diagnostic {trial_id}"));
     let created = invoke(
         "camp.create",
-        json!({
-            "commandId": create_command_id,
-            "name": camp_name,
-            "workspace": { "projectPath": workspace },
-            "memberAgentIds": [agent_id],
-            "defaultLeadAgentId": agent_id,
-            "collaborationMode": "lead_coordinated",
-            "activationState": "active"
-        }),
+        camp_create_params(
+            create_command_id,
+            Some(camp_name),
+            Some(json!({ "projectPath": workspace })),
+            vec![agent_id.to_string()],
+            agent_id.to_string(),
+        ),
     )
     .await?;
     let camp_id = applied_camp_id(&created)?;
@@ -1217,6 +1446,35 @@ fn parse_nonnegative_i64(value: &str, label: &str) -> Result<i64> {
     Ok(parsed)
 }
 
+fn adapter_kind<'a>(flags: &'a Flags, key: &str) -> Result<&'a str> {
+    let value = flags.required(key).map_err(anyhow::Error::new)?;
+    if !ADAPTER_KINDS.contains(&value) {
+        return Err(CliError::new(
+            "automation_invalid_input",
+            format!("--{key} is not a supported Runtime"),
+        )
+        .into());
+    }
+    Ok(value)
+}
+
+fn parse_json_object(value: &str, label: &str) -> Result<Value> {
+    let parsed: Value = serde_json::from_str(value).map_err(|_| {
+        CliError::new(
+            "automation_invalid_input",
+            format!("--{label} must be a valid JSON object"),
+        )
+    })?;
+    if !parsed.is_object() {
+        return Err(CliError::new(
+            "automation_invalid_input",
+            format!("--{label} must be a JSON object"),
+        )
+        .into());
+    }
+    Ok(parsed)
+}
+
 fn read_body(flags: &Flags, inline: &str, files: &[&str]) -> Result<String> {
     let inline_value = flags.one(inline).map_err(anyhow::Error::new)?;
     let mut file_values = Vec::new();
@@ -1468,7 +1726,8 @@ fn restrict_private_file(_path: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        Flags, command_result_exit_code, event_belongs_to_run, launch_result_exit_code,
+        Flags, camp_create_params, command_result_exit_code, event_belongs_to_run,
+        launch_result_exit_code, member_create_params, member_runtime_set_params,
         parse_duration_seconds, terminal_exit_code, terminal_status,
     };
     use serde_json::json;
@@ -1491,6 +1750,107 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(flags.repeated("member"), ["agent_1", "agent_2"]);
+    }
+
+    #[test]
+    fn automation_camp_creation_uses_the_supported_peer_mode() {
+        let params = camp_create_params(
+            "command-1".to_string(),
+            Some("TRAE Command View".to_string()),
+            Some(json!({ "projectPath": "/tmp/workspace" })),
+            vec!["agent_8".to_string()],
+            "agent_8".to_string(),
+        );
+
+        assert_eq!(params["collaborationMode"], "peer");
+    }
+
+    #[test]
+    fn member_creation_defaults_optional_identity_fields_without_open_core_params() {
+        let flags = Flags::parse(&[
+            "--display-name".into(),
+            "开栈".into(),
+            "--personality-trait".into(),
+            "严谨".into(),
+            "--command-id".into(),
+            "command-create".into(),
+        ])
+        .unwrap();
+        let params = member_create_params(&flags).unwrap();
+
+        assert_eq!(params["commandId"], "command-create");
+        assert_eq!(params["displayName"], "开栈");
+        assert_eq!(params["teamRole"], "");
+        assert_eq!(params["personalityTraits"], json!(["严谨"]));
+    }
+
+    #[test]
+    fn member_runtime_configuration_freezes_model_permissions_and_version_fence() {
+        let flags = Flags::parse(&[
+            "--agent-id".into(),
+            "agent_12".into(),
+            "--expected-version".into(),
+            "1".into(),
+            "--adapter".into(),
+            "opencode-cli".into(),
+            "--model".into(),
+            "minimax/MiniMax-M3".into(),
+            "--model-options-json".into(),
+            r#"{"effort":"high"}"#.into(),
+            "--permission-schema-version".into(),
+            "1".into(),
+            "--permissions-json".into(),
+            r#"{"permission_mode":"allow"}"#.into(),
+            "--command-id".into(),
+            "command-runtime".into(),
+        ])
+        .unwrap();
+        let params = member_runtime_set_params(&flags).unwrap();
+
+        assert_eq!(params["commandId"], "command-runtime");
+        assert_eq!(params["expectedVersion"], 1);
+        assert_eq!(params["model"]["mode"], "explicit");
+        assert_eq!(params["model"]["modelId"], "minimax/MiniMax-M3");
+        assert_eq!(params["model"]["options"]["effort"], "high");
+        assert_eq!(params["permissions"]["adapterKind"], "opencode-cli");
+        assert_eq!(params["permissions"]["values"]["permission_mode"], "allow");
+    }
+
+    #[test]
+    fn member_runtime_configuration_rejects_ambiguous_or_non_object_inputs() {
+        let ambiguous = Flags::parse(&[
+            "--agent-id".into(),
+            "agent_12".into(),
+            "--expected-version".into(),
+            "1".into(),
+            "--adapter".into(),
+            "opencode-cli".into(),
+            "--model".into(),
+            "minimax/MiniMax-M3".into(),
+            "--runtime-default".into(),
+            "--permission-schema-version".into(),
+            "1".into(),
+            "--permissions-json".into(),
+            "{}".into(),
+        ])
+        .unwrap();
+        assert!(member_runtime_set_params(&ambiguous).is_err());
+
+        let array_permissions = Flags::parse(&[
+            "--agent-id".into(),
+            "agent_12".into(),
+            "--expected-version".into(),
+            "1".into(),
+            "--adapter".into(),
+            "opencode-cli".into(),
+            "--runtime-default".into(),
+            "--permission-schema-version".into(),
+            "1".into(),
+            "--permissions-json".into(),
+            "[]".into(),
+        ])
+        .unwrap();
+        assert!(member_runtime_set_params(&array_permissions).is_err());
     }
 
     #[test]

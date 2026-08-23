@@ -1,9 +1,3 @@
-<!--
-Before landing this README:
-1. After the first public Release, update the installer names and platform availability to match the actual assets.
-2. Mark Windows x64 as "available" only after a corresponding Release installer exists and platform qualification is complete.
--->
-
 <div align="center">
 
 # Rovai AI
@@ -227,9 +221,12 @@ depending on the team.
 | [CodeBuddy](https://www.codebuddy.ai/docs/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [TRAE CLI CN](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
+| [Kimi Code](https://www.kimi.com/code/docs/) | Added alongside native | Added alongside native | Native resume; re-delivered after compaction |
 
 For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.
+
+Kimi Code is currently qualified on macOS arm64 only. macOS x64 and Windows x64 remain not qualified.
 
 ---
 

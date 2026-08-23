@@ -3,11 +3,17 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { chmod, lstat, mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type {
+  AdapterKind,
+  AdapterPermissionConfig,
   AgentProfile,
   AgentRunDiagnosticView,
   AdapterInstallation,
+  ClearMemberRuntimeConfigurationCommand,
   CoreMethod,
+  CreateAgentProfileCommand,
+  ModelSelection,
   SendCampMessageResult,
+  SetMemberRuntimeConfigurationCommand,
   StoredCommandResult
 } from '@contracts'
 
@@ -45,6 +51,21 @@ type AutomationContext = {
 
 type RecordValue = Record<string, unknown>
 
+const ADAPTER_KINDS: readonly AdapterKind[] = [
+  'codex-cli',
+  'opencode-cli',
+  'copilot-cli',
+  'claude-code-cli',
+  'kiro-cli',
+  'qoder-cli',
+  'codebuddy-cli',
+  'qwen-code',
+  'trae-cn-cli',
+  'cursor-agent',
+  'kimi-code-cli',
+  'antigravity-app'
+]
+
 export class UserAutomationError extends Error {
   constructor(readonly code: string, message: string) {
     super(message)
@@ -73,6 +94,108 @@ function optionalBoolean(value: RecordValue, key: string): boolean {
     throw new UserAutomationError('automation_invalid_input', `${key} must be a boolean`)
   }
   return field
+}
+
+function optionalStringField(value: RecordValue, key: string): string | null {
+  const field = value[key]
+  if (field === undefined || field === null) return null
+  if (typeof field !== 'string') {
+    throw new UserAutomationError('automation_invalid_input', `${key} must be a string or null`)
+  }
+  return field
+}
+
+function integerField(value: RecordValue, key: string): number {
+  const field = value[key]
+  if (!Number.isSafeInteger(field) || (field as number) < 1) {
+    throw new UserAutomationError(
+      'automation_invalid_input',
+      `${key} must be a positive safe integer`
+    )
+  }
+  return field as number
+}
+
+function stringArrayField(value: RecordValue, key: string): string[] {
+  const field = value[key]
+  if (!Array.isArray(field) || field.some((item) => typeof item !== 'string')) {
+    throw new UserAutomationError('automation_invalid_input', `${key} must be an array of strings`)
+  }
+  return field
+}
+
+function adapterKindField(value: RecordValue, key: string): AdapterKind {
+  const field = stringField(value, key)
+  if (!ADAPTER_KINDS.includes(field as AdapterKind)) {
+    throw new UserAutomationError('automation_invalid_input', `${key} is not a supported Runtime`)
+  }
+  return field as AdapterKind
+}
+
+function modelSelectionField(value: RecordValue, key: string): ModelSelection {
+  const model = record(value[key], key)
+  const mode = stringField(model, 'mode')
+  if (mode === 'runtime_default') return { mode }
+  if (mode !== 'explicit') {
+    throw new UserAutomationError('automation_invalid_input', `${key}.mode is not supported`)
+  }
+  return {
+    mode,
+    modelId: stringField(model, 'modelId'),
+    options: record(model.options, `${key}.options`)
+  }
+}
+
+function permissionConfigField(
+  value: RecordValue,
+  key: string,
+  adapterKind: AdapterKind
+): AdapterPermissionConfig {
+  const permissions = record(value[key], key)
+  const permissionAdapterKind = adapterKindField(permissions, 'adapterKind')
+  if (permissionAdapterKind !== adapterKind) {
+    throw new UserAutomationError(
+      'automation_invalid_input',
+      `${key}.adapterKind must match adapterKind`
+    )
+  }
+  return {
+    adapterKind: permissionAdapterKind,
+    schemaVersion: integerField(permissions, 'schemaVersion'),
+    values: record(permissions.values, `${key}.values`)
+  }
+}
+
+function createMemberCommand(input: RecordValue): CreateAgentProfileCommand {
+  return {
+    displayName: stringField(input, 'displayName'),
+    avatarRef: optionalStringField(input, 'avatarRef'),
+    teamRole: optionalStringField(input, 'teamRole') ?? '',
+    professionalResponsibilities: optionalStringField(input, 'professionalResponsibilities') ?? '',
+    personalityTraits: input.personalityTraits === undefined
+      ? []
+      : stringArrayField(input, 'personalityTraits'),
+    workingPrinciples: optionalStringField(input, 'workingPrinciples') ?? '',
+    growthTopic: optionalStringField(input, 'growthTopic') ?? ''
+  }
+}
+
+function setMemberRuntimeCommand(input: RecordValue): SetMemberRuntimeConfigurationCommand {
+  const adapterKind = adapterKindField(input, 'adapterKind')
+  return {
+    agentId: stringField(input, 'agentId'),
+    expectedVersion: integerField(input, 'expectedVersion'),
+    adapterKind,
+    model: modelSelectionField(input, 'model'),
+    permissions: permissionConfigField(input, 'permissions', adapterKind)
+  }
+}
+
+function clearMemberRuntimeCommand(input: RecordValue): ClearMemberRuntimeConfigurationCommand {
+  return {
+    agentId: stringField(input, 'agentId'),
+    expectedVersion: integerField(input, 'expectedVersion')
+  }
 }
 
 function launchResult(result: SendCampMessageResult): RecordValue {
@@ -207,11 +330,34 @@ export async function dispatchUserAutomation(
         && installation.snapshot?.probeStatus === 'ready'
       )
     }
+    case 'runtime.check':
+      return dependencies.core.request('runtime.product.check', {
+        runtimeKind: adapterKindField(input, 'adapterKind')
+      })
+    case 'runtime.models':
+      return dependencies.core.request('runtime.modelCatalog.open', {
+        runtimeKind: adapterKindField(input, 'adapterKind')
+      })
     case 'member.list':
       return dependencies.core.request<AgentProfile[]>('members.list')
     case 'member.show':
       return dependencies.core.request<AgentProfile>('members.get', {
         agentId: stringField(input, 'agentId')
+      })
+    case 'member.create':
+      return dependencies.core.request<StoredCommandResult>('members.create', {
+        commandId: stringField(input, 'commandId'),
+        command: createMemberCommand(input)
+      })
+    case 'member.runtime.set':
+      return dependencies.core.request<StoredCommandResult>('members.runtime.set', {
+        commandId: stringField(input, 'commandId'),
+        command: setMemberRuntimeCommand(input)
+      })
+    case 'member.runtime.clear':
+      return dependencies.core.request<StoredCommandResult>('members.runtime.clear', {
+        commandId: stringField(input, 'commandId'),
+        command: clearMemberRuntimeCommand(input)
       })
     case 'workspace.inspect':
       return dependencies.core.request('workspaces.inspect', { path: stringField(input, 'path') })

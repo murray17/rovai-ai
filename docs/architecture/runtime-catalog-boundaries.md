@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # Runtime Catalog Boundaries
@@ -14,7 +14,7 @@ last_updated: 2026-08-22
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)。实测版本和能力只由
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -28,7 +28,9 @@ last_updated: 2026-08-22
 
 Product Runtime Catalog 当前包含十二种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
-成员选项始终只来自 `AdapterKind`，但在当前主机上还必须先经过 Runtime Platform Admission。
+普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
+Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
+selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
 `qualified` 是进入 Product Runtime Availability 的前置条件；`not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，
 `unsupported` 显示平台不支持。两者都不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
@@ -151,7 +153,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)。
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -213,7 +215,8 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
-Cursor。字段级行为见 [Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)，
+Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
+字段级行为见 [Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Kimi Code 当前边界
@@ -224,16 +227,26 @@ Cursor。字段级行为见 [Runtime Launch and Verification v21](../contracts/r
 Rovai 不强制关闭 Kimi/MiniMax thinking。未知、重复、缺失、格式错误或权限过宽均在 launch 前
 fail closed；秘密不进入数据库、Evidence、diagnostics 或公开 command。
 
-Kimi AgentRun 结束仍停止 Host，但 `KIMI_CODE_HOME` 不再按 Host 轮换：Core 在 Rovai data-dir 内按
-Camp、成员、Runtime installation 与 auth scope 的 canonical digest 建立稳定私有 Session home，不修改通用
-`HOME`，也不与其他逻辑会话共享。后继兼容 Run 在新 Host 上优先 exact `session/resume`，只有没有 resume
-能力时才用带 replay quarantine 的 `session/load`；返回 Session ID 必须与原 ID 完全相同。snapshot 保留真实
-`session.resume/load`，但这不等于 warm Host reuse。
+Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时
+由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session；`KIMI_MODEL_*`
+provider overlay 仍只存在于目标子进程。显式 Deep Probe 可以使用一次性临时 Home，但不得把 Probe Session
+写入正式 Binding，且其行为不能外推为产品 continuation 证据。
+
+Kimi AgentRun 正常结束后，健康、quiescent 且 compatibility digest 完全一致的 Host 进入 warm LRU；后继兼容
+Run 直接复用同一 Host/Session。Host 被停止、淘汰或失效后，后继兼容 Run 在继承同一用户原生 Home 的新 Host
+上优先 exact `session/resume`，只有没有 resume 能力时才用带 replay quarantine 的 `session/load`；返回
+Session ID 必须与原 ID 完全相同。v22 创建的 Rovai 私有 Home 不再被新 Host 使用，也不自动迁移或删除；旧
+Binding 不可见时沿用一次 continuity-lost replacement。
 
 Kimi/MiniMax 可能在普通文本中返回 `<think>` 块，因此 Kimi streamed text 只作为私有 observation；只有 terminal
-候选完成推理清洗后才能进入公开输出，未闭合块 fail closed。原始 ACP `mcpServers` stdio happy path 与相邻
-Session 隔离已经实测，但 Rovai External MCP projection 仍缺完整 precedence/compatibility 准入；External MCP、
-Usage/Cost、Compaction、warm reuse 保持 Disabled；History Restore 仅作为 load-only fallback。Rovai managed Skill 投影目标为
+候选完成推理清洗后才能进入公开输出，未闭合块 fail closed。External MCP 以
+`AdditivePerRun / RovaiWins` 经标准 ACP `session/new/resume/load.mcpServers` 投递，不写用户级 Runtime
+配置；完整解析后的 Server 集合进入 Host compatibility，含 AgentRun identity 的 Run-local projection/evidence
+digest 不进入，Server 定义变化仍 fence 旧 Host。stdio、Streamable HTTP、同名整项优先、ContextManifest 和
+真实模型 Tool call 均已验证。Usage/Cost
+保持 Disabled；Compaction 只通过 Kimi-only idle ACP completion frame 以 `best_effort` 接入。History Restore
+仅作为 load-only fallback。异步 command/config
+advertisement 只安全路由为私有 metadata，当前没有产品消费者，不作为遗留项。Rovai managed Skill 投影目标为
 `.kimi-code/skills`。
 
 本机 `kimi 0.32.0` 使用 MiniMax M3 在 macOS arm64 完成真实 prompt、Shell allow/deny、六类 terminal output、
@@ -242,7 +255,7 @@ legacy stdin 非法输入退出码；改为当前 CLI 合同的 `2` 后，十五
 lease fencing、exact successor read 与 logical/native continuation 全部通过，共产生 56 条 full-run evidence。
 因此 snapshot 声明 built-in transport，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64
 没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
-[Runtime Launch and Verification v21](../contracts/runtime-launch-and-verification-v21.md)，证据状态见
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -261,6 +274,12 @@ Kiro 暴露 Host-scoped `trust_all_tools=off|on`，新 draft 默认 `on`；真�
 `CoreEnforcedV1 + read_only Workspace` 的 effective launch 也会收窄为不传该 flag。既有成员配置不由
 discovery 或迁移扩权；permission schema digest
 变化时不能保留旧 Ready，用户必须通过既有 drift 流程显式重存。
+
+Kimi 暴露 Session-scoped `permission_mode=default|plan|auto|yolo`，新 draft 默认原生最高权限 `yolo`；
+writable AgentRun 通过标准 ACP `session/set_config_option` 投递 `mode=yolo`，read-only AgentRun 强制
+`plan`。descriptor 的 `recommendedValue=default` 只是保守提示，不改变 Product default；已有成员保存的
+`default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
 
 ## Preview 呈现与晋升
 

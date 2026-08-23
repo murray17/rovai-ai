@@ -5,7 +5,7 @@ upstream: MoonshotAI/kimi-code
 authority: research-evidence-only
 status: implemented
 admission: macos_arm64_qualified
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # Kimi Code CLI Runtime 接入研究
@@ -286,10 +286,14 @@ Shell override: KIMI_SHELL_PATH
 本机实际安装版本为 Kimi Code `0.32.0`，早于研究时 main/package `0.38.0`；本节只记录该目标安装的真实
 行为，不能由新源码文档反向补全。
 
-- 已建立 `kimi-code-cli` Adapter、`kimi` Skill group、Migration 105、Data Contract v1.19 / schema 60、
+- 已建立 `kimi-code-cli` Adapter、`kimi` Skill group、Migration 105；Compaction detector 的 closed-table
+  扩展由 Migration 106 升级到 Data Contract v1.20 / schema 61；
   Renderer identity、Runtime Activity、Health、shutdown 与逐平台 Admission；
 - `kimi acp` 完成 initialize、session/new、MiniMax M3 prompt 和 `end_turn`；项目级 Core Smoke 的公开最终
   文本为 `ROVAI_KIMI_ACP_OK`；
+- Core-owned 新队员默认从 `permission_mode=default` 修正为 Kimi 原生最高权限 `yolo`；真实 writable Core
+  smoke 直接读取 Installation 的 `memberRuntimeDefaults`，固定 Prompt、Shell command 与文件写入均在无交互式
+  Approval 下完成。已有保存值不迁移，read-only effective mode 仍强制 `plan`；
 - Shell allow-once permission 真实通过；stdout、stderr、mixed、empty、nonzero 与 128 KiB large output 六类均
   保留唯一 stable Tool ID 与 terminal Evidence，公开 output marker 为 `ROVAI_KIMI_CODE_CLI_PRINTF_OK`；
 - 独立 Camp 中 deny Approval 返回 `rovai_approval_denied`，目标 Tool 为 `failed/not_executed` 且文件不存在；
@@ -300,15 +304,21 @@ Shell override: KIMI_SHELL_PATH
   不进入仓库、数据库或 Evidence；
 - Rovai 不强制关闭 Kimi/MiniMax thinking；完整 `<think>` reasoning block 不进入最终公开消息，未闭合块
   fail closed，执行过程仍可留在私有 observation/执行台；
-- 每个 Run 在 terminal 后仍停止 Host，但同一 Camp/成员/installation/auth scope 使用稳定的 Rovai 私有
-  `KIMI_CODE_HOME`。原始 ACP Probe 证明同一 home 的新进程可 exact resume/load 并保留上下文；产品级 fake
-  Runtime 回归进一步证明两个不同 Host 依次执行 `session/new` 与 exact `session/resume`，Session ID 不变。
-  snapshot 因而保留真实 `session.resume/load`；load 只作为带 replay quarantine 的 fallback；
+- 正常完成后，健康、quiescent 且 compatibility key 完全一致的 Host 进入 warm LRU，后继 Run 复用同一
+  Host/Session；正式 AgentRun 不覆盖 `HOME` / `KIMI_CODE_HOME`，继承用户原生状态根，Deep Probe 仍使用
+  一次性临时 Home。原始 ACP Probe 证明同一 Home 的新进程可 exact resume/load 并保留上下文；产品级回归又
+  证明显式停止后新 Host exact resume、Session ID 不变。snapshot 因而保留真实 `session.resume/load`；load
+  只作为带 replay quarantine 的 fallback。真实 Core smoke 还定位并修复 Run-local MCP projection digest
+  误入 Host compatibility；完整 Server 集合不变的连续 Run 现复用同一 Host/Session；
 - `.kimi-code/skills` 已进入 Rovai managed projection，真实调用两次都返回唯一 Skill marker，并正确选择
-  canonical `--to-principal` 且不触发当前用户注意力；原始 ACP stdio MCP 调用及相邻空 Session 隔离通过，
-  但 Rovai External MCP projection 因完整 precedence/compatibility 矩阵未完成而继续 Disabled；
-- 同 Host 两个 Session 使用不同 marker 并交错回到第一个 Session 后无串话；多轮 Prompt、resume/load、MCP
-  与手动 `/compact` 没有产生结构化 `usage_update` 或 compaction lifecycle，Usage/Cost 与 Compaction Disabled；
+  canonical `--to-principal` 且不触发当前用户注意力；External MCP 的原始 ACP stdio/相邻空 Session 隔离
+  通过，产品 smoke 又经 Core、Assignment、AgentRun Projection、ContextManifest 与 MiniMax M3 真实 Tool
+  call 同时验证 stdio、Streamable HTTP、额外 stdio 和 `RovaiWins` 同名整项优先；
+- 同 Host 两个 Session 使用不同 marker 并交错回到第一个 Session 后无串话；多轮 Prompt、resume/load 与 MCP
+  没有产生结构化 `usage_update`，Usage/Cost Disabled。手动 `/compact` 的普通完成文本后来由安装包与官方
+  `main` 源码定位到内部 `compaction.completed` 的固定四行 formatter；Rovai 已增加 Kimi-only idle ACP exact
+  frame detector，policy 为 `best_effort`，不安装 Hook 或修改用户配置。真实自动/手动完整 Core observation
+  smoke 尚待执行；
 - Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景通过，Kimi private stream 未进入
   公共 protocol fixture；
 - 早期完整十五项 Built-in CLI matrix 的 `0/15` 并非模型跳过 Shell：保留 fixture 证明 Kimi 已执行验收脚本，
@@ -323,13 +333,15 @@ Shell override: KIMI_SHELL_PATH
 ## 最终决定
 
 ```text
-Qualified capabilities on macOS arm64: ACP AgentRun、Approval、command output、Missing-Send、cancel/cleanup、managed Skill、Built-in CLI、cold Host native resume
-Product continuation: stable scoped private home + cold Host exact resume；load-only 时使用 History Restore quarantine
-Disabled capabilities: External MCP、Compaction detector、Usage/Cost monitoring、warm Host reuse
+Qualified capabilities on macOS arm64: ACP AgentRun、Approval、command output、Missing-Send、cancel/cleanup、managed Skill、Built-in CLI、warm Host/Session reuse、cold Host native resume
+Product continuation: compatible warm Host/Session + user-native Kimi Home；停止/淘汰后 cold exact resume；load-only 时使用 History Restore quarantine；Probe only 使用临时 Home
+External MCP: AdditivePerRun / RovaiWins；ACP session/new/resume/load.mcpServers；stdio 与 Streamable HTTP Verified
+Best-effort capabilities: Kimi-only idle ACP `compaction.completed` exact-frame detector
+Disabled capabilities: Usage/Cost monitoring
 Verified upstream-only boundaries: 同 Host 并发 Session 隔离、跨隔离 home Unknown session、ACP stdio MCP happy path 与相邻 Session 隔离
-Unverified capabilities: macOS x64、Windows x64、External MCP 同名 precedence/完整定义/Host compatibility、scoped home 的长期垃圾回收
+Unverified capabilities: macOS x64、Windows x64
 Known boundary: Client fs write 需要 Core one-time authorization；Runtime 预拒绝不得伪造用户 deny
-Non-blocking gaps: 产品权威 async command catalog snapshot、Usage/Cost、Compaction、External MCP、scoped home 长期垃圾回收
+Non-blocking gaps: Usage/Cost、Compaction 自动/手动真实 Core observation smoke
 Admission decision: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
 ```
 

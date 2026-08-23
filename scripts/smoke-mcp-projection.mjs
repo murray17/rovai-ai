@@ -2,6 +2,7 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  realpath,
   rm,
   writeFile
 } from 'node:fs/promises'
@@ -18,7 +19,7 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-'))
+const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-')))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const mcpConfigPath = join(fixtureRoot, 'config', 'mcp.json')
@@ -42,7 +43,8 @@ const allAdapters = [
   'qoder-cli',
   'codebuddy-cli',
   'qwen-code',
-  'trae-cn-cli'
+  'trae-cn-cli',
+  'kimi-code-cli'
 ]
 const adapters = selected.length === 1 && selected[0] === 'all' ? allAdapters : selected
 let core = null
@@ -71,6 +73,12 @@ try {
           `runtime-native:${adapterMarker}-http`,
           `runtime-native-http:${adapterMarker}-stdio`
         ]
+      : adapterKind === 'kimi-code-cli'
+        ? [
+            `rovai-projection:${adapterMarker}`,
+            `rovai-projection-http:${adapterMarker}-http`,
+            `rovai-projection-stdio:${adapterMarker}-stdio`
+          ]
       : [`rovai-projection:${adapterMarker}`]
     const forbidden = adapterKind === 'codex-cli'
       ? [
@@ -78,6 +86,12 @@ try {
           `rovai-projection-http:${adapterMarker}-http`,
           `rovai-projection-stdio:${adapterMarker}-stdio`
         ]
+      : adapterKind === 'kimi-code-cli'
+        ? [
+            `runtime-native:${adapterMarker}`,
+            `runtime-native:${adapterMarker}-http`,
+            `runtime-native-http:${adapterMarker}-stdio`
+          ]
       : [`runtime-native:${adapterMarker}`]
     const startedAt = Date.now()
     const result = await runProjectedTool(
@@ -93,7 +107,7 @@ try {
     for (const marker of forbidden) {
       assert(!result.output.includes(marker), `${adapterKind} silently used the same-name Runtime-native MCP ${marker}: ${JSON.stringify(result)}`)
     }
-    const expectedServers = adapterKind === 'codex-cli'
+    const expectedServers = adapterKind === 'codex-cli' || adapterKind === 'kimi-code-cli'
       ? [serverName, projectedHttpServerName, projectedStdioServerName]
       : [serverName]
     const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
@@ -274,7 +288,14 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
         `Call the Runtime-native MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
         'Return all three tool results. The assigned Rovai definitions have the same names and must be skipped.'
       ]
-    : [
+    : adapterKind === 'kimi-code-cli'
+      ? [
+          `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
+          `Call the assigned HTTP MCP server named \`${projectedHttpServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-http\`.`,
+          `Call the assigned stdio MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
+          'Return all three tool results.'
+        ]
+      : [
         `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
         'Return the tool result.'
       ]

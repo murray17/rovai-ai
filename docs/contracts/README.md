@@ -1,7 +1,7 @@
 ---
 document_type: contracts-index
 authority: protocol-contract-routing
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # 长期接口合同
@@ -43,7 +43,11 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Tool Interaction Measurement v2（当前）](tool-interaction-measurement-v2.md) | v1 的 opportunity/Judge 边界加 runtime catalog/projection 兼容门禁、Memory v3/readback、History Search、Task adapter 与 reply/task Process Evidence |
 | [Tool Interaction Measurement v1（历史）](tool-interaction-measurement-v1.md) | Opportunity-based Camp/Memory/A2A trace、确定性 oracle/coverage 与独立 Tool-Use Judge 初版边界 |
 | [Paired Collaboration Experiment v1（当前）](paired-collaboration-experiment-v1.md) | Team/Solo pre-registration、fresh arms、typed resources 与 outcome-conditioned paired comparison |
-| [Runtime Launch and Verification v21（当前）](runtime-launch-and-verification-v21.md) | v20 Kimi provider 边界不变；稳定私有 Session home、跨新 Host exact resume/load，并以完整 Built-in matrix 准入 macOS arm64 |
+| [Runtime Launch and Verification v25（当前）](runtime-launch-and-verification-v25.md) | v24 的 Kimi `yolo` 与十二种 Runtime 最高权限默认不变；Cursor 在 Settings 与普通成员 Runtime selector 中保持隐藏，历史配置只读保留 |
+| [Runtime Launch and Verification v24（历史）](runtime-launch-and-verification-v24.md) | v23 的 Kimi Home、continuation、External MCP 与 Cursor Settings 边界不变；十二种 Runtime 新队员统一使用已验证的原生最高权限默认，Kimi 为 `yolo` |
+| [Runtime Launch and Verification v23（历史）](runtime-launch-and-verification-v23.md) | Kimi 正式 AgentRun 继承用户原生 Home，Probe 继续临时隔离；其 Kimi 新队员 `default` 权限已由 v24 修正为 `yolo` |
+| [Runtime Launch and Verification v22（历史）](runtime-launch-and-verification-v22.md) | v21 的多 scope home 收敛为唯一 Rovai 私有 home并启用 warm Host 与 External MCP；其私有 Home 语义已由 v23 替代 |
+| [Runtime Launch and Verification v21（历史）](runtime-launch-and-verification-v21.md) | v20 Kimi provider 边界不变；其 scoped Session home 与 External MCP Disabled 语义已由 v22 替代 |
 | [Runtime Launch and Verification v20（历史）](runtime-launch-and-verification-v20.md) | v19 launch/Ready/Cursor 边界不变；加入 Kimi identity、MiniMax 私有 provider 配置、推理隔离与保守平台准入；其每 Host 新 home/new-only 语义已由 v21 替代 |
 | [Runtime Launch and Verification v19（历史）](runtime-launch-and-verification-v19.md) | v18 launch/Ready/LKG 边界不变；加入 Cursor identity、vendor ACP、保守能力与逐平台未准入合同 |
 | [Runtime Launch and Verification v18（历史）](runtime-launch-and-verification-v18.md) | v17 wire/LKG 边界不变；Adapter Deep Probe 统一覆盖 version、一次重新绑定与三秒 Execution cooldown 自动恢复 |

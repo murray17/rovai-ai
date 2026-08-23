@@ -1,15 +1,16 @@
 ---
 document_type: architecture
 authority: native-session-bootstrap-redelivery
-last_updated: 2026-08-09
+last_updated: 2026-08-23
 ---
 
 # Native Session Bootstrap Redelivery
 
 本文维护 Native Session context compaction 后 Bootstrap 补发的长期组件边界、Runtime policy、
-detector transport 与输入时序。detector 基线实施和目标 Runtime smoke 以
-[v0.48](../versions/v0.48/README.md)及[Runtime 兼容性清单](../runtime-compatibility.md)为准；当前
-Redelivery v2 实施状态以 [v0.50](../versions/v0.50/README.md)为准。
+detector transport 与输入时序。detector 基线实施以 [v0.48](../versions/v0.48/README.md)为准，Kimi
+completion-frame 扩展以 [v1.27](../versions/v1.27/README.md)为准；目标 Runtime smoke 见
+[Runtime 兼容性清单](../runtime-compatibility.md)。当前 Redelivery v2 实施状态以
+[v0.50](../versions/v0.50/README.md)为准。
 Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
 [成员投影不变量](foundational-invariants.md#member-projection)与
 [Collaboration State v2](../contracts/collaboration-state-v2.md)。Redelivery Envelope/Formatter v2 和
@@ -37,11 +38,12 @@ pending。
 
 内部环境变量只接受 `disabled | best_effort`，由 Rovai 版本维护，不是客户设置：
 
-| Runtime | Bootstrap class | v0.48 policy | 环境变量 |
+| Runtime | Bootstrap class | 当前 policy | 环境变量 |
 | --- | --- | --- | --- |
 | GitHub Copilot | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_COPILOT_COMPACTION_DETECTOR_POLICY` |
 | OpenCode | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_OPENCODE_COMPACTION_DETECTOR_POLICY` |
 | Kiro | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIRO_COMPACTION_DETECTOR_POLICY` |
+| Kimi Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY` |
 | Qoder | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QODER_COMPACTION_DETECTOR_POLICY` |
 | CodeBuddy | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_CODEBUDDY_COMPACTION_DETECTOR_POLICY` |
 | Qwen Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY` |
@@ -66,6 +68,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | GitHub Copilot | `preCompact` / `imminent_edge` | 隔离官方 Plugin `preCompact` Hook | 目标 CLI 没有对等 completed Hook；该 edge 一次性推进 revision，accepted redelivery 后即结束，不等待 post event |
 | OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
 | Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；忽略 started 与 summary |
+| Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only ACP idle metadata compatibility route | Kimi native ACP server 把内部 `compaction.completed` 确定性格式化为单个四行 `agent_message_chunk`；只接受完整官方格式，active Prompt 文本、started/cancelled/blocked 和宽泛关键词均不准入 |
 | Qoder | `PostCompact` / `completed` | 隔离 `--settings` Hook | 目标版本真实 `/compact` 完成态可靠 |
 | CodeBuddy | `SessionStart(source=compact)` / `completed` | 隔离 `--plugin-dir` Plugin Hook | `2.133.1` emergency auto compaction 完成后真实触发；CLI additional settings 未注册 lifecycle Hook。该版本 pre-message compaction 绕过全部相关 Hook，故 detector 仍是有明确 coverage gap 的 `best_effort`，不做 token 推断 |
 | Qwen Code | `PostCompact` / `completed` | 私有 `QWEN_HOME` user Hook | 上游 HookRegistry 不读取 system Hook；私有 user settings 保留原配置且不修改用户文件。trigger matcher 为 exact match，使用 `*` 后由 relay 校验 `manual|auto` |
@@ -76,6 +79,13 @@ Hook relay command 冻结 adapter、Host 与 expected source signal，不信任 
 若携带 event name 必须完全匹配。Copilot 目标版本 payload 不带 event name，因此 command-side source
 尤其必要。relay 只持久化 lifecycle metadata 的 digest，不把 compact summary、prompt、Bootstrap 或
 identity-derived bytes 写入 observation evidence。
+
+Kimi detector 不安装 Hook、不修改用户 `KIMI_CODE_HOME/config.toml`，也不建立额外 side-channel。官方完成帧
+固定为 `Compaction completed.` 及 messages/tokens before/after 三行 en-US 整数；它只在 Prompt 已结束的
+Session metadata route，或正常 AgentRun 已 detach 但 observer 仍绑定于同一 warm Host/Session 时拥有资格。
+模型在 active Prompt 中生成相同或相近文本不产生 observation。Kimi 内部事件不带 occurrence ID，当前 ACP
+stdio 对每个 `compaction.completed` 发出一次完成帧，Rovai 因而沿用 Host instance 内单调 observation
+sequence；不使用一分钟窗口或 token-drop heuristic 合并事件。
 
 Copilot 的一次 `preCompact` 只产生一个 requirement revision。目标版本后台 compaction 会 snapshot
 已有历史并保留其间新增消息；真实 smoke 也确认 Hook 后下一 ACP 输入可 accepted。因此 v0.48 选择

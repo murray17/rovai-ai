@@ -341,6 +341,7 @@ Implemented but not behavior-qualified: identity/discovery、ACP auth flow、pri
 Unverified capabilities: authenticated session、Tool output、model catalog、Approval/cancel、session/load、per-Run MCP、Skill invocation、Windows
 Blocking issues: 当前候选 authenticate 超时；尚无 authenticated Session 与完整行为 Smoke
 Admission decision: macOS arm64、macOS x64、Windows x64 全部 not_qualified
+Product presentation: 保留 closed identity 与历史 reader；默认不接入，也不在 Settings Agent Runtime 目录展示
 ```
 
 ## 上游来源

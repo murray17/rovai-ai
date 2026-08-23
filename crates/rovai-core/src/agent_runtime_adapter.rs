@@ -587,7 +587,7 @@ impl AgentRuntimeAdapterRegistry {
                 "approval_policy": "force",
             }),
             AdapterKind::KimiCodeCli => json!({
-                "permission_mode": "default",
+                "permission_mode": "yolo",
             }),
             AdapterKind::AntigravityApp => json!({
                 "mode": "accept-edits",
@@ -667,12 +667,11 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::QoderCli
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
-            | AdapterKind::TraeCnCli => {
+            | AdapterKind::TraeCnCli
+            | AdapterKind::KimiCodeCli => {
                 additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
             }
-            AdapterKind::CursorAgent | AdapterKind::KimiCodeCli => {
-                unsupported_external_mcp_projection()
-            }
+            AdapterKind::CursorAgent => unsupported_external_mcp_projection(),
         }
     }
 
@@ -1597,10 +1596,7 @@ fn acp_capability_snapshot(
         if adapter_kind != AdapterKind::CursorAgent {
             capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
         }
-        if !matches!(
-            adapter_kind,
-            AdapterKind::CursorAgent | AdapterKind::KimiCodeCli
-        ) {
+        if adapter_kind != AdapterKind::CursorAgent {
             append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
         }
     }
@@ -2393,7 +2389,7 @@ mod tests {
     use crate::agent_profile::{PermissionOptionDescriptor, ValueChoice};
 
     #[test]
-    fn member_permission_defaults_preserve_each_runtime_native_shape() {
+    fn member_permission_defaults_use_each_runtime_native_maximum() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let expected = [
             (
@@ -2427,10 +2423,7 @@ mod tests {
                 AdapterKind::CursorAgent,
                 json!({"execution_mode": "agent", "approval_policy": "force"}),
             ),
-            (
-                AdapterKind::KimiCodeCli,
-                json!({"permission_mode": "default"}),
-            ),
+            (AdapterKind::KimiCodeCli, json!({"permission_mode": "yolo"})),
             (
                 AdapterKind::AntigravityApp,
                 json!({
@@ -2755,7 +2748,7 @@ mod tests {
     }
 
     #[test]
-    fn kimi_snapshot_keeps_native_continuation_without_claiming_external_mcp() {
+    fn kimi_snapshot_keeps_native_continuation_and_claims_verified_external_mcp() {
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .acp_capability_snapshot(AcpProbeObservation {
                 adapter_kind: AdapterKind::KimiCodeCli,
@@ -2791,7 +2784,16 @@ mod tests {
                 .capabilities
                 .contains(&"session.resume".to_string())
         );
-        assert!(!snapshot.capabilities.contains(&"mcp.additive".to_string()));
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"mcp.external_projection.additive_per_run".to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"mcp.same_name_policy.rovai_wins".to_string())
+        );
         assert!(
             snapshot
                 .capabilities
@@ -3354,6 +3356,7 @@ mod tests {
             AdapterKind::CodebuddyCli,
             AdapterKind::QwenCode,
             AdapterKind::TraeCnCli,
+            AdapterKind::KimiCodeCli,
         ] {
             let capability = registry.mcp_projection(kind);
             assert!(capability.supports_stdio);

@@ -144,7 +144,8 @@ import {
   liveRuntimeEventFromCore,
   liveRuntimeEventFromExecutionEvidence,
   parseGitStatus,
-  selectCompleteExecutionEvidence
+  selectCompleteExecutionEvidence,
+  type LiveRuntimeEvent
 } from './ui-model'
 
 const TEST_EXECUTION_BUDGET = {
@@ -2050,6 +2051,7 @@ describe('task event projections', () => {
     expect(rescan).toBeLessThan(headerEnd)
     expect(headerEnd).toBeLessThan(directory)
     expect(markup).toContain('管理本机 Agent 运行时及其可用状态。')
+    expect(markup).not.toContain('Cursor Agent')
     expect(markup).not.toContain('高级诊断与自定义启动入口')
   })
 
@@ -4119,6 +4121,76 @@ describe('task event projections', () => {
     expect(failedMarkup).toContain('aria-label="失败"')
   })
 
+  it('defers a generic running Shell row until its concrete command is available', () => {
+    const pending: LiveRuntimeEvent = {
+      id: 'kimi-bash-pending', agentRunId: 'run-kimi', eventType: 'runtime.action',
+      payload: {
+        toolCallId: 'kimi:tool:1', status: 'pending', kind: 'execute',
+        toolName: 'Bash', title: 'Bash', output: '{"command": "pwd"'
+      },
+      canonical: canonicalActivity('kimi:tool:1', {
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'Bash',
+        presentationHint: 'Bash', phase: 'progress', outcome: 'unknown'
+      }),
+      createdAt: '2026-08-23T00:00:00Z'
+    }
+
+    expect(buildLiveExecutionProgress([pending], 'run-kimi').items).toEqual([])
+
+    const completed: LiveRuntimeEvent = {
+      ...pending,
+      id: 'kimi-bash-completed',
+      payload: {
+        toolCallId: 'kimi:tool:1', status: 'completed', kind: 'execute',
+        toolName: 'Bash', title: 'Bash', input: 'pwd', output: '/repo\n'
+      },
+      canonical: canonicalActivity('kimi:tool:1', {
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'Bash',
+        presentationHint: 'Bash', phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-08-23T00:00:01Z'
+    }
+    const progress = buildLiveExecutionProgress([pending, completed], 'run-kimi')
+
+    expect(progress.items).toHaveLength(1)
+    expect(progress.items[0]).toMatchObject({
+      key: 'tool:kimi:tool:1',
+      kind: 'tool',
+      step: {
+        title: 'pwd',
+        detail: '命令\npwd\n\n输出\n/repo\n',
+        status: 'completed'
+      }
+    })
+  })
+
+  it('still shows concrete running commands and terminal generic Shell evidence', () => {
+    const concreteRunning: LiveRuntimeEvent = {
+      id: 'shell-concrete', agentRunId: 'run-shell', eventType: 'runtime.action',
+      payload: { status: 'pending', kind: 'execute', toolName: 'Bash', input: 'git status' },
+      canonical: canonicalActivity('shell-concrete', {
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'Bash',
+        presentationHint: 'Bash', phase: 'started', outcome: 'unknown'
+      }),
+      createdAt: '2026-08-23T00:00:00Z'
+    }
+    const genericTerminal: LiveRuntimeEvent = {
+      id: 'shell-generic-terminal', agentRunId: 'run-shell', eventType: 'runtime.action',
+      payload: { status: 'completed', kind: 'execute', toolName: 'Bash' },
+      canonical: canonicalActivity('shell-generic-terminal', {
+        activityDomain: 'shell', semanticKind: 'shell.execute', toolName: 'Bash',
+        presentationHint: 'Bash', phase: 'terminal', outcome: 'succeeded'
+      }),
+      createdAt: '2026-08-23T00:00:01Z'
+    }
+    const progress = buildLiveExecutionProgress([concreteRunning, genericTerminal], 'run-shell')
+
+    expect(progress.items).toMatchObject([
+      { kind: 'tool', step: { title: 'git status', status: 'running' } },
+      { kind: 'tool', step: { title: '终端操作', status: 'completed' } }
+    ])
+  })
+
   it('uses truthful public Shell command previews across Runtime adapters', () => {
     const genericShell = canonicalActivity('shell-command', {
       activityDomain: 'shell', semanticKind: 'shell.execute', toolName: null,
@@ -4628,7 +4700,7 @@ describe('task event projections', () => {
     expect(hasDuplicateMemberDisplayName('洛可', null, [existing])).toBe(false)
   })
 
-  it('always offers the complete Product Runtime catalog without exposing paths', () => {
+  it('offers the selectable Product Runtime catalog without exposing hidden products or paths', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: agentProfile(),
       installations: [codexInstallation()],
@@ -4650,6 +4722,7 @@ describe('task event projections', () => {
     expect(markup).toContain('>Qwen Code</option>')
     expect(markup).toContain('>TRAE CLI</option>')
     expect(markup).toContain('>Antigravity</option>')
+    expect(markup).not.toContain('>Cursor Agent</option>')
     expect(markup).not.toContain('>DeepSeek Harness</option>')
     expect(markup).toContain('未配置 Agent 运行时')
     expect(markup).not.toContain('已找到')
@@ -4739,7 +4812,7 @@ describe('task event projections', () => {
     expect(markup).toContain('Codex CLI')
     expect(markup).toContain('Antigravity')
     expect(markup).toContain('TRAE CLI')
-    expect(markup).toContain('Cursor Agent')
+    expect(markup).not.toContain('Cursor Agent')
     expect(markup).toContain('Kimi Code')
     expect(markup).not.toContain('正在检测')
     expect(markup).not.toContain('已找到')
@@ -4860,8 +4933,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
-    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(13)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(13)
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(12)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(12)
     expect(markup.match(/检查可用性/g)).toHaveLength(11)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
@@ -4901,8 +4974,8 @@ describe('task event projections', () => {
       onReload: async () => undefined
     }))
 
-    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(12)
-    expect(markup.match(/不可检查/g)).toHaveLength(12)
+    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(11)
+    expect(markup.match(/不可检查/g)).toHaveLength(11)
     expect(markup).not.toContain('检查可用性')
     expect(markup).toContain('当前平台尚无可检测 Runtime')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')

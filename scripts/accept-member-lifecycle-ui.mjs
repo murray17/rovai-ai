@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
@@ -114,9 +114,13 @@ try {
 
   await openNewConversation(running.cdp)
   const freshPreflight = await request(running.cdp, 'camps.creationPreflight')
+  const freshLead = freshPreflight.presentMembers.find(
+    (member) => member.agentId === freshPreflight.initialLeadAgentId
+  )
   assert(
     freshPreflight.admissible
       && freshPreflight.initialLeadAgentId === 'agent_1'
+      && freshLead
       && freshPreflight.presentMembers.length === 4
       && freshPreflight.presentMembers.every((member) => !member.runtimeConfigured),
     `Fresh no-Runtime preflight is unexpected: ${JSON.stringify(freshPreflight)}`
@@ -124,13 +128,13 @@ try {
   const freshDialog = await evaluate(running.cdp, `({
     createEnabled: document.querySelector('.new-camp-dialog .primary-button')?.disabled === false,
     memberSummary: document.querySelector('.new-camp-picker-trigger.member-trigger strong')?.textContent,
-    lead: document.querySelector('.new-camp-lead-field select')?.value,
+    lead: document.querySelector('.new-camp-lead-trigger strong')?.textContent,
     collaborationRemoved: !document.querySelector('.new-camp-dialog')?.textContent?.includes('协作方式')
   })`)
   assert(
     freshDialog.createEnabled
       && freshDialog.memberSummary === '已选择 4 位队员'
-      && freshDialog.lead === 'agent_1'
+      && freshDialog.lead === freshLead.displayName
       && freshDialog.collaborationRemoved,
     `Fresh configured-Camp Dialog defaults are unexpected: ${JSON.stringify(freshDialog)}`
   )
@@ -509,7 +513,7 @@ try {
     }
   })()`)
   assert(
-    runtimeSettingsState.rowCount === 11
+    runtimeSettingsState.rowCount === 12
       && runtimeSettingsState.labels.includes('Codex CLI')
       && runtimeSettingsState.labels.includes('Antigravity')
       && runtimeSettingsState.labels.includes('TRAE CLI')
@@ -519,14 +523,14 @@ try {
       && !runtimeSettingsState.hasAdvancedDiagnostics
       && !runtimeSettingsState.explainsShell
       && !runtimeSettingsState.exposesMemberPathPicker,
-    `Runtime settings did not preserve ten managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
+    `Runtime settings did not preserve eleven managed products plus one pending preview: ${JSON.stringify(runtimeSettingsState)}`
   )
   await setViewport(running.cdp, 1040, 700)
   await setTheme(running.cdp, 'night')
   await assertNoHorizontalOverflow(running.cdp, 'Runtime settings at 1040×700 Night')
   captures.runtimeSettings = join(
     outputDir,
-    'runtime-settings-ten-products-one-preview-night-1040x700.png'
+    'runtime-settings-eleven-products-one-preview-night-1040x700.png'
   )
   await capture(running.cdp, captures.runtimeSettings)
   const discoveredCodex = (await request(running.cdp, 'runtime.installations.list'))
@@ -545,6 +549,39 @@ try {
         permissionOptions: discoveredCodex.snapshot.permissionOptions
       }
     : fallbackAcceptanceRuntime
+  const fixtureMemberAgentIds = freshPreflight.presentMembers.map((member) => member.agentId)
+  campTitle = 'Camp 生命周期验收'
+  const createdQuickChatCamp = await request(running.cdp, 'camps.create', {
+    commandId: randomUUID(),
+    name: campTitle,
+    workspace: null,
+    memberAgentIds: fixtureMemberAgentIds,
+    defaultLeadAgentId: freshPreflight.initialLeadAgentId,
+    collaborationMode: 'peer',
+    activationState: 'active'
+  })
+  campId = createdQuickChatCamp.payload?.campId
+  assert(
+    createdQuickChatCamp.status === 'applied' && campId,
+    `Could not create lifecycle acceptance Camp through Core: ${JSON.stringify(createdQuickChatCamp)}`
+  )
+  projectCampTitle = '项目会话返回验收 · 一个用于确认成员名册单行截断的超长对话标题'
+  projectCampPath = join(fixtureRoot, 'project-return')
+  await mkdir(projectCampPath, { recursive: true })
+  const createdProjectCamp = await request(running.cdp, 'camps.create', {
+    commandId: randomUUID(),
+    name: projectCampTitle,
+    workspace: { projectPath: projectCampPath },
+    memberAgentIds: fixtureMemberAgentIds,
+    defaultLeadAgentId: freshPreflight.initialLeadAgentId,
+    collaborationMode: 'peer',
+    activationState: 'active'
+  })
+  projectCampId = createdProjectCamp.payload?.campId
+  assert(
+    createdProjectCamp.status === 'applied' && projectCampId,
+    `Could not create project-return acceptance Camp through Core: ${JSON.stringify(createdProjectCamp)}`
+  )
   await closeApp(running)
   running = null
 
@@ -553,26 +590,8 @@ try {
     ['agent_1', 'agent_3', 'agent_4'],
     acceptanceRuntime
   )
-  await mkdir(join(freshDataDir, 'quick-chat'), { recursive: true })
-  campId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec0'
-  campTitle = 'Camp 生命周期验收'
-  await createCampFixture(
-    join(freshDataDir, 'rovai.sqlite'),
-    campId,
-    campTitle,
-    join(freshDataDir, 'quick-chat')
-  )
-  projectCampId = 'rvcamp_01h47kvsy5fk1shh6w1g60eec1'
-  projectCampTitle = '项目会话返回验收 · 一个用于确认成员名册单行截断的超长对话标题'
-  projectCampPath = join(freshDataDir, 'project-return')
-  await mkdir(projectCampPath, { recursive: true })
-  await createCampFixture(
-    join(freshDataDir, 'rovai.sqlite'),
-    projectCampId,
-    projectCampTitle,
-    projectCampPath,
-    'directory'
-  )
+  await seedCampFixtureContent(join(freshDataDir, 'rovai.sqlite'), campId)
+  await seedCampFixtureContent(join(freshDataDir, 'rovai.sqlite'), projectCampId)
   running = await launchApp(freshDataDir, firstPort + 1, 1040, 700)
   const configuredPreflight = await request(running.cdp, 'camps.creationPreflight')
   assert(
@@ -625,10 +644,9 @@ try {
   await waitForText(running.cdp, '.member-runtime-parameters', '模型策略')
   await selectFieldValue(
     running.cdp,
-    '.member-section',
+    '.member-runtime-section',
     'Agent 运行时',
-    'qoder-cli',
-    'Agent 运行时'
+    'qoder-cli'
   )
   await waitForExpression(running.cdp, `(() => {
     const text = document.querySelector('.member-runtime-parameters')?.textContent ?? ''
@@ -636,10 +654,9 @@ try {
   })()`)
   await selectFieldValue(
     running.cdp,
-    '.member-section',
+    '.member-runtime-section',
     'Agent 运行时',
-    'codex-cli',
-    'Agent 运行时'
+    'codex-cli'
   )
   const switchedRuntimeDefaults = await runtimeParameterValues(running.cdp)
   const codexRuntimeLabels = await evaluate(running.cdp,
@@ -717,9 +734,7 @@ try {
     `Member Runtime configuration was not saved atomically: ${JSON.stringify(configuredRuntime.runtimeConfiguration)}`
   )
   await waitForExpression(running.cdp, `(() => {
-    const section = [...document.querySelectorAll('.member-section')]
-      .find((candidate) =>
-        candidate.querySelector('.member-section-heading h3')?.textContent?.trim() === 'Agent 运行时')
+    const section = document.querySelector('.member-runtime-section')
     const save = [...(section?.querySelectorAll('.member-form-actions button') ?? [])]
       .find((button) => button.textContent?.trim() === '保存运行配置')
     return section?.querySelector('.field-label select')?.disabled === false
@@ -751,10 +766,9 @@ try {
   )
   await selectFieldValue(
     running.cdp,
-    '.member-section',
+    '.member-runtime-section',
     'Agent 运行时',
-    '',
-    'Agent 运行时'
+    ''
   )
   await mouseClick(running.cdp, '.member-form-actions button', '保存运行配置')
   await waitForText(running.cdp, '.app-toast', 'Agent 运行时已清除。')
@@ -1163,7 +1177,7 @@ try {
       memberOrderLeadInheritance: 'agent_2',
       restartPersistence: true,
       dayAndNightWideCompactMatrix: true,
-      runtimeSettingsTenProductsAndPendingPreviewBoundary: true,
+      runtimeSettingsElevenProductsAndPendingPreviewBoundary: true,
       horizontalOverflow: false
     },
     captures
@@ -1287,30 +1301,13 @@ function canonicalizeJson(value) {
   )
 }
 
-async function createCampFixture(
-  databasePath,
-  id,
-  title,
-  projectPath,
-  projectBindingKind = 'quick_chat'
-) {
+async function seedCampFixtureContent(databasePath, id) {
   const conversationPrefix = `${id}-conversation-`
   const messageId = `${id}-message-user`
   await runSql(databasePath, `
-    INSERT INTO camp(
-      id, title, project_binding_kind, project_path, default_lead_agent_id,
-      last_message_sequence, version, created_at, updated_at
-    ) VALUES (
-      ${sqlLiteral(id)}, ${sqlLiteral(title)}, ${sqlLiteral(projectBindingKind)}, ${sqlLiteral(projectPath)},
-      'agent_1', 1, 1, datetime('now'), datetime('now')
-    );
-    INSERT INTO camp_member(
-      camp_id, agent_id, status, capability_overrides_json,
-      version, joined_at
-    )
-    SELECT ${sqlLiteral(id)}, id, 'active', '{}', 1, datetime('now')
-    FROM agent_profile
-    WHERE id IN ('agent_1', 'agent_2', 'agent_3', 'agent_4');
+    UPDATE camp
+    SET last_message_sequence = 1, updated_at = datetime('now')
+    WHERE id = ${sqlLiteral(id)};
     INSERT INTO conversation(
       id, camp_id, agent_id, version, created_at, updated_at
     )

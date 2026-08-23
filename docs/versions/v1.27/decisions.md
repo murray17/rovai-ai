@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.27
 lifecycle: current
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # v1.27 决策记录
@@ -140,3 +140,150 @@ lease fencing、logical conversation 与跨新 Host native Session continuation 
 - **只把 15/15 写入文档而不进入默认矩阵：** 会让未来回归不再覆盖刚建立的资格；
 - **同时开启 External MCP 或 telemetry：** Built-in CLI 证据不证明这些独立能力轴；
 - **把 macOS arm64 结果外推到 x64/Windows：** 违反逐 Adapter、逐平台资格合同。
+
+<a id="v1-27-d04"></a>
+## V1.27-D04：Kimi 使用全局私有 home、兼容 warm Host，并以标准 ACP 启用 External MCP
+
+### 背景
+
+D02 为了保存 Kimi Native Session，把私有 home 细分到 Camp、成员、Installation 和 auth scope。该分区并非
+Kimi 的存储模型要求：Kimi 本来就在一个 home 内按 Session ID 管理多个会话，Rovai 的冻结 Runtime 与 Binding
+compatibility 已决定某个逻辑会话能否恢复。多 scope 目录重复实现会话隔离，还产生无绑定目录的垃圾回收问题。
+
+Kimi `0.32.0` 的原始 ACP Probe 已证明 `session/new.mcpServers` 可真实调用 stdio Server，但这还不足以建立
+产品资格。本轮把标准 ACP Session 字段接入正式投影后，真实 Core 链路进一步通过 Assignment、AgentRun
+Projection、ContextManifest 与 MiniMax M3 Tool call，同时验证 stdio、Streamable HTTP 和同名整项优先。
+
+通用 ACP Host 已具备 compatibility-keyed warm LRU、quiescence 检查和同 Host 已知 Session 复用路径；Kimi
+原始 Probe 也已证明同 Host 多 Session 无串话。产品级回归进一步证明正常完成后同一 Host/Session 可直接
+续接，而显式停止后仍能从全局私有 home 在新 Host exact resume。继续逐 Run 停止只增加启动延迟，不再提供
+额外隔离收益。
+
+### 决定
+
+1. 本决定替代 D02 第 2、3 项的 home scope；所有 Kimi Host 使用唯一
+   `<data-dir>/runtime/kimi-code/home`，不改变通用 `HOME`，也不读写用户 `~/.kimi/config.toml`；
+2. 物理 home 只负责保存 Kimi Native Session。Installation、auth、model、permission、workspace、MCP 与
+   attachment 仍由 Frozen Runtime、Binding 和 Session compatibility 门禁决定，不从共享目录推导复用资格；
+3. Kimi External MCP 为 `AdditivePerRun / RovaiWins`，通过 `session/new`、`session/resume` 或
+   `session/load` 的标准 `mcpServers` 字段传入，不写用户级 Runtime 配置；支持 stdio 与 Streamable HTTP；
+4. 本决定替代 D02 第 5 项和 D03 第 1 项的 warm Host 边界：正常完成后，只有健康、quiescent 且 Camp、成员和
+   完整 Runtime compatibility key 一致的 Kimi Host 才进入 warm LRU；同 Host 已知 Session 直接复用，显式
+   停止、淘汰或失效后仍走 cold exact resume；
+5. D03 第 1、3 项中 External MCP Disabled 的结论由本决定替代。Usage/Cost、Compaction、macOS x64 和
+   Windows x64 的边界不变；
+6. 异步 command/config advertisement 继续安全路由为私有 metadata。当前产品没有消费它的需求，因此不维护
+   产品权威 async catalog snapshot 是有意边界，不再作为遗留功能问题；
+7. Cursor 保留 closed identity 和历史 reader，但当前没有真实产品资格，Settings Agent Runtime 目录默认隐藏。
+
+当前规范见 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与
+[Runtime Launch and Verification v22](../../contracts/runtime-launch-and-verification-v22.md)。
+
+### 后果
+
+- Kimi 不再因 Rovai 人工分区生成多个 Session home，也没有 scoped-home 垃圾回收债务；
+- 兼容后继 Run 避免重复进程启动和 initialize/resume；冷 Host exact resume 的 Session ID 与 fail-closed 语义不变；
+- External MCP 使用 Run 冻结定义和既有 compatibility digest，不污染用户配置；
+- 产品文档不再把未消费的异步 catalog 投影写成待实现问题；
+- Cursor 仍可读取历史配置，但不会在 Runtime 设置目录制造“已经接入”的预期。
+
+### 被拒绝方案
+
+- **继续按 Camp/成员派生 home：** 与 Kimi 自己的多 Session 存储重复，并引入额外生命周期和 GC；
+- **使用用户 `~/.kimi`：** 会污染日常配置并扩大 provider secret 与原生状态边界；
+- **只保留原始 ACP MCP Probe：** 没有证明 Core Assignment、Manifest、同名策略或真实产品 Tool call；
+- **把 MCP 写入 Kimi 用户级配置：** 不能保证只对当前 AgentRun 生效；
+- **正常完成后仍逐 Run 停止 Host：** cold exact resume 能保持正确性，但会产生不必要的进程启动与握手延迟；
+- **为当前未消费的 async catalog 建立产品 snapshot：** 没有用户表面或下游合同，增加状态机却不解决当前需求。
+
+<a id="v1-27-d05"></a>
+## V1.27-D05：Kimi 原生完成帧只在 idle ACP compatibility route 驱动 Compaction Observation
+
+### 背景
+
+早期 Probe 只看到普通 `agent_message_chunk`，因此把 Kimi Compaction 保持为 Disabled。后续对 Kimi `0.32.0`
+安装包和官方 `main` 源码的交叉核对确认：native ACP Session 订阅内部 `compaction.started/completed/cancelled/blocked`，
+并且仅在 `compaction.completed` 时把结果确定性格式化为一个固定四行完成帧。官方 E2E 同时证明手动 `/compact`
+先结束 Prompt，再由后台 compaction 补发该完成帧；自动 compaction 使用相同完成路径。
+
+ACP wire 没有暴露原始 event type 或 occurrence ID。直接匹配任意包含 `compact` 的 assistant 文本会误判；为了
+获得内部事件而安装 Hook、修改用户配置或增加 side-channel 又会扩大 Runtime 隔离与秘密边界。另一个候选方案
+是按一分钟窗口合并，但它无法区分短时间内两次真实完成事件。
+
+### 决定
+
+1. 本决定替代 D04 第 5 项中 Compaction 保持原边界的结论；Kimi Compaction policy 设为 `best_effort`，唯一 admission 为
+   `kimi.acp.compaction.completed_text.v1 / completed`；
+2. 只完整匹配官方四行格式及 en-US 非负整数，不接受前后缀、额外换行、宽泛关键词、started、cancelled 或
+   blocked 文本；格式变化时 fail closed；
+3. 完成帧只在 Kimi Prompt 已结束后的 Session metadata compatibility route，或 observer 仍绑定于同一 warm
+   Host/Session 的正常 detached AgentRun route 准入。active Prompt 中的模型文本即使逐字相同也不产生
+   observation；
+4. started 不驱动 Context Epoch，也不用于完成态猜测；Kimi 官方每个内部 completed 事件发出一次 frame，Rovai
+   使用现有 Host 单调 occurrence sequence，不增加一分钟抑制窗口；
+5. detector 不安装 Hook、不修改用户 `KIMI_CODE_HOME/config.toml`、不增加 side-channel，也不使用 usage/token
+   下降或历史长度 heuristic。
+
+当前规范见 [Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)与
+[Session 与 Bootstrap 不变量](../../architecture/foundational-invariants.md#context-session-bootstrap)。
+
+### 后果
+
+- 自动 compaction 和手动 `/compact` 收敛到同一个 Rovai authoritative Compaction Observation 入口；
+- Kimi 官方完成格式若改变，detector 会停止产生 observation，但不会阻断 Runtime、Prompt 或 Session；
+- observation 的权威性来自 Kimi-only idle route、官方精确 frame 与 Core Observer Lease 准入组合，不代表 ACP
+  标准新增了结构化 `compaction_completed` event；
+- Usage/Cost 监控仍保持 Disabled，与 Compaction detector 相互独立。
+
+### 被拒绝方案
+
+- **匹配包含 `compact` 的普通文本：** 无法区分模型回复和 lifecycle 输出；
+- **一分钟内只记一次：** 会吞掉两次真实、合法的快速 compaction；
+- **安装 Hook 或改写 Kimi 用户配置：** 没有必要，并扩大配置污染和生命周期复杂度；
+- **使用 token/usage 下降补猜：** 不能证明完成边界，也违反现有 fail-closed 规则。
+
+<a id="v1-27-d06"></a>
+## V1.27-D06：正式 Kimi AgentRun 继承用户原生 Home，Probe 保持一次性隔离
+
+### 背景
+
+D01、D02 与 D04 逐步把 Kimi 从每 Host 临时 Home 收敛到全局 Rovai 私有 Home，解决了当时人为轮换目录导致的
+resume 失败，却仍保留了一个未经产品需求证明的差异：正式 Kimi AgentRun 看不到用户日常 Kimi 的配置、认证和
+原生 Session。对十二种 Product Runtime 的生产 launch path 复核后，Codex、Claude、Antigravity 及其余 ACP
+Runtime 都默认继承用户原生状态根；个别 Runtime 使用临时 cwd、配置 overlay 或 Probe Home，但不把正式 state
+Home 换成独立 Rovai 目录。
+
+provider secret 的最小暴露由权限收窄的外部文件、严格 `KIMI_MODEL_*` allowlist 和 process-local 注入保证，
+不要求同时隔离 Kimi state Home。继续使用全局私有 Home 会让用户已有 Kimi 配置与 Session 无法复用，也让
+“尽量 warm reuse、冷 Host exact resume”的现有产品原则依赖 Rovai 自己维护第二套状态目录。
+
+### 决定
+
+1. 本决定替代 D04 第 1、2 项及“拒绝使用用户 `~/.kimi`”的结论；正式 Kimi AgentRun 不设置、删除或重写
+   `HOME` / `KIMI_CODE_HOME`，父进程已设置时原样继承，未设置时由 Kimi 解析原生默认 Home；
+2. Core 不复制、合并或改写用户 Kimi Home 内的配置、认证、Session、Skill 或日志。D01 的 provider 文件、
+   allowlist、secret 不落库和 thinking 边界保持有效，process-local provider overlay 不构成 Home 隔离；
+3. 显式 Deep Probe 继续使用 Probe-owned 临时 `KIMI_CODE_HOME`，不写正式 Binding，结束后清理。Probe 与 fixture
+   的隔离不能进入正式 AgentRun，也不能替代产品 Home/continuation 验证；
+4. D04 的 compatibility-keyed warm Host、同 Host 已知 Session 直接复用、停止/淘汰后的 exact resume、load-only
+   replay quarantine、External MCP、Cursor 隐藏与 async catalog 边界保持有效。普通 resume Smoke 使用正常用户
+   Home，不再把“新进程 + 人为不同 Home”列为必过产品场景；
+5. v22 创建的 `<data-dir>/runtime/kimi-code/home` 不再用于新 Host，Core 不自动合并或删除其中数据。旧 Binding
+   在用户原生 Home 不可见时按既有合同记录 continuity lost，并至多创建一个新 Session；
+6. 当前字段级规范切换到 [Runtime Launch and Verification v23](../../contracts/runtime-launch-and-verification-v23.md)。
+
+### 后果
+
+- Rovai 内启动的 Kimi 与用户直接启动的 Kimi 使用同一原生配置、认证和 Session 状态根；
+- warm Host 与 cold exact resume 的优先级不变，但不再依赖 Rovai 专属 state Home；
+- provider key 仍只进入目标进程，External MCP 仍只进入当前 AgentRun，不写用户配置；
+- 已有 v22 Native Session 可能在升级后的首次 continuation 中发生一次诚实的 continuity lost；旧目录保持可恢复，
+  不由升级自动删除；
+- 健康探针仍不会污染用户日常 Kimi Session。
+
+### 被拒绝方案
+
+- **继续使用唯一 Rovai 私有 Home：** 没有用户隔离需求，且与其他正式 Runtime 的默认行为不一致；
+- **自动复制或合并旧私有 Home 到用户 Home：** 会修改用户配置/认证目录，冲突处理和回滚边界不明确；
+- **只把用户配置软链接进私有 Home：** 形成部分共享、部分隔离的双重状态根，恢复和清理语义更难解释；
+- **让 Probe 也使用用户 Home：** 会把一次性认证/Session 检查写入日常状态，降低测试隔离性。

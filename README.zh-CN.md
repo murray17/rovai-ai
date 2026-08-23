@@ -1,9 +1,3 @@
-<!--
-落地前检查：
-1. 首个公开 Release 发布后，按真实资产名称补充下载链接与签名说明。
-2. Windows x64 只有在对应 Release 真实提供安装包并完成平台验收后，才标记为“可用”。
--->
-
 <div align="center">
 
 # Rovai AI
@@ -216,8 +210,11 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 | [CodeBuddy](https://www.codebuddy.ai/docs/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
 | [TRAE CLI CN](https://www.trae.cn/) | 兼容追加 | 兼容追加 | 基于 Runtime 能力 |
+| [Kimi Code](https://github.com/MoonshotAI/kimi-code) | 兼容追加 | 兼容追加 | 原生续接；压缩后重投递 |
 
 具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
+
+Kimi Code 当前仅完成 macOS arm64 准入；macOS x64 与 Windows x64 尚未准入。
 
 ---
 

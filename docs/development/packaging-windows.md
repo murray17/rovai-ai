@@ -3,7 +3,7 @@ document_type: development-guide
 authority: windows-desktop-build-packaging-routing
 status: implemented-pending-release-qualification
 source_version: v1.15
-last_updated: 2026-08-21
+last_updated: 2026-08-23
 ---
 
 # Windows x64 构建、打包与发布
@@ -35,9 +35,8 @@ pnpm accept:planned-shutdown
 pnpm accept:windows:installer
 ```
 
-`package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer。两条命令都先
-生成并校验外置 legal payload，再验证 App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract、
-隔离 Core health 与包内法律文件完整性。`accept:windows:installer`
+`package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer。两条命令都验证
+App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与隔离 Core health。`accept:windows:installer`
 执行 per-user clean install、已安装 App Onboarding、同版本 upgrade、默认卸载和数据保留，并把报告与截图写入
 `dist/windows-installation-acceptance/`。`accept:planned-shutdown` 默认使用 `dist/win-unpacked/Rovai-ai.exe`，
 在隔离 `userData` 中验证真实 Runtime 运行期间的受控退出、子进程回收和重启恢复。正式签名构建使用

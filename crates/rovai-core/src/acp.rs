@@ -302,9 +302,63 @@ fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Val
         )
 }
 
+fn is_kimi_compaction_completed_frame(message: &Value) -> bool {
+    message.get("id").is_none()
+        && message.get("method").and_then(Value::as_str) == Some("session/update")
+        && message
+            .pointer("/params/update/sessionUpdate")
+            .and_then(Value::as_str)
+            == Some("agent_message_chunk")
+        && message
+            .pointer("/params/update/content/type")
+            .and_then(Value::as_str)
+            == Some("text")
+        && message
+            .pointer("/params/update/content/text")
+            .and_then(Value::as_str)
+            .is_some_and(is_kimi_compaction_completed_text)
+}
+
+fn is_kimi_compaction_completed_text(text: &str) -> bool {
+    let mut lines = text.split('\n');
+    lines.next() == Some("Compaction completed.")
+        && lines
+            .next()
+            .and_then(|line| line.strip_prefix("- Messages compacted: "))
+            .is_some_and(is_en_us_unsigned_integer)
+        && lines
+            .next()
+            .and_then(|line| line.strip_prefix("- Tokens before: "))
+            .is_some_and(is_en_us_unsigned_integer)
+        && lines
+            .next()
+            .and_then(|line| line.strip_prefix("- Tokens after: "))
+            .is_some_and(is_en_us_unsigned_integer)
+        && lines.next().is_none()
+}
+
+fn is_en_us_unsigned_integer(value: &str) -> bool {
+    if value == "0" {
+        return true;
+    }
+    let mut groups = value.split(',');
+    let Some(first) = groups.next() else {
+        return false;
+    };
+    if first.is_empty()
+        || first.len() > 3
+        || first.starts_with('0')
+        || !first.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return false;
+    }
+    groups.all(|group| group.len() == 3 && group.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
 fn is_idle_session_metadata(adapter_kind: AdapterKind, message: &Value) -> bool {
     is_session_catalog_update(message)
         || is_known_session_lifecycle_extension(adapter_kind, message)
+        || (adapter_kind == AdapterKind::KimiCodeCli && is_kimi_compaction_completed_frame(message))
         || (message.get("id").is_none()
             && message.get("method").and_then(Value::as_str) == Some("session/update")
             && message
@@ -436,7 +490,6 @@ impl AcpHost {
         allow_client_fs: bool,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
         private_runtime_dir: &Path,
-        private_session_scope: Option<&str>,
         attachment_access_root: Option<&Path>,
     ) -> Result<Arc<Self>> {
         if !runtime_launch_allowed(
@@ -445,11 +498,8 @@ impl AcpHost {
         ) {
             bail!("Runtime launch policy rejected Agent execution");
         }
-        let private_config = prepare_private_host_config(
-            private_runtime_dir,
-            frozen_runtime.adapter_kind,
-            private_session_scope,
-        )?;
+        let private_config =
+            prepare_private_host_config(private_runtime_dir, frozen_runtime.adapter_kind)?;
         let private_config_root = private_config.as_ref().map(|config| config.root.as_path());
         let session_permission_mode = if frozen_runtime.adapter_kind == AdapterKind::KimiCodeCli {
             Some(
@@ -719,8 +769,12 @@ impl AcpHost {
                                 let session_id = session_id
                                     .as_deref()
                                     .expect("forwarded ACP route has Session ID");
-                                host.forward_compaction_observation(session_id, &message)
-                                    .await;
+                                host.forward_compaction_observation(
+                                    session_id,
+                                    &message,
+                                    AcpCompactionSignalSurface::ActivePrompt,
+                                )
+                                .await;
                                 let _ = host.incoming.send(owner.message(
                                     host.adapter_kind,
                                     &host.host_instance_id,
@@ -734,8 +788,12 @@ impl AcpHost {
                                 let session_id = session_id
                                     .as_deref()
                                     .expect("Session metadata route has Session ID");
-                                host.forward_compaction_observation(session_id, &message)
-                                    .await;
+                                host.forward_compaction_observation(
+                                    session_id,
+                                    &message,
+                                    AcpCompactionSignalSurface::SessionMetadata,
+                                )
+                                .await;
                             }
                             AcpSessionMessageRoute::ReplayQuarantined => {
                                 if message.get("id").is_some() {
@@ -1005,6 +1063,21 @@ impl AcpHost {
     ) -> AcpSessionMessageRoute {
         let mut routes = self.routes.write().await;
         let Some(route) = routes.get_mut(session_id) else {
+            drop(routes);
+            if self.adapter_kind == AdapterKind::KimiCodeCli
+                && is_kimi_compaction_completed_frame(message)
+                && self
+                    .compaction_observers
+                    .read()
+                    .await
+                    .contains_key(session_id)
+            {
+                // Kimi compaction finishes outside the Prompt. A normally
+                // completed AgentRun may already have detached its owner while
+                // the compatibility-keyed Host remains warm, so the Session
+                // observer is the surviving authoritative route.
+                return AcpSessionMessageRoute::SessionMetadata;
+            }
             return AcpSessionMessageRoute::Missing;
         };
         match &mut route.phase {
@@ -1192,8 +1265,14 @@ impl AcpHost {
         Ok(())
     }
 
-    async fn forward_compaction_observation(&self, session_id: &str, message: &Value) {
-        let Some(detected) = detect_acp_compaction_signal(self.adapter_kind, message) else {
+    async fn forward_compaction_observation(
+        &self,
+        session_id: &str,
+        message: &Value,
+        surface: AcpCompactionSignalSurface,
+    ) {
+        let Some(detected) = detect_acp_compaction_signal(self.adapter_kind, message, surface)
+        else {
             return;
         };
         let route = self
@@ -1526,9 +1605,16 @@ struct DetectedAcpCompactionSignal {
     runtime_occurrence_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AcpCompactionSignalSurface {
+    ActivePrompt,
+    SessionMetadata,
+}
+
 fn detect_acp_compaction_signal(
     adapter_kind: AdapterKind,
     message: &Value,
+    surface: AcpCompactionSignalSurface,
 ) -> Option<DetectedAcpCompactionSignal> {
     let method = message.get("method").and_then(Value::as_str)?;
     let runtime_occurrence_id = message
@@ -1557,6 +1643,16 @@ fn detect_acp_compaction_signal(
                 source_signal: "_kiro.dev/compaction/status",
                 admission_point: "completed",
                 runtime_occurrence_id,
+            })
+        }
+        AdapterKind::KimiCodeCli
+            if surface == AcpCompactionSignalSurface::SessionMetadata
+                && is_kimi_compaction_completed_frame(message) =>
+        {
+            Some(DetectedAcpCompactionSignal {
+                source_signal: "kimi.acp.compaction.completed_text.v1",
+                admission_point: "completed",
+                runtime_occurrence_id: None,
             })
         }
         _ => None,
@@ -1822,7 +1918,6 @@ impl AcpRuntime {
                 | AdapterKind::CodebuddyCli
                 | AdapterKind::QwenCode
                 | AdapterKind::CursorAgent
-                | AdapterKind::KimiCodeCli
         ) {
             external_mcp_servers
                 .iter()
@@ -2445,7 +2540,6 @@ impl AcpCliRuntimeAdapter {
                 .await;
         }
         let execution_root = PathBuf::from(&workspace.execution_root);
-        let private_session_scope = kimi_private_session_scope(camp_id, agent_id, frozen_runtime)?;
         let fleet_lease = self
             .fleet
             .acquire(
@@ -2471,7 +2565,6 @@ impl AcpCliRuntimeAdapter {
                         true,
                         external_mcp_servers,
                         &self.private_runtime_dir,
-                        private_session_scope.as_deref(),
                         Some(attachment_access_root),
                     )
                     .await?;
@@ -2610,12 +2703,10 @@ impl AcpCliRuntimeAdapter {
 fn completed_run_release_disposition(adapter_kind: AdapterKind) -> FleetReleaseDisposition {
     if matches!(
         adapter_kind,
-        AdapterKind::KiroCli | AdapterKind::CursorAgent | AdapterKind::KimiCodeCli
+        AdapterKind::KiroCli | AdapterKind::CursorAgent
     ) {
         // Kiro keeps a Native Session locked for the lifetime of its ACP
         // process. Cursor Host reuse remains outside the current contract.
-        // Kimi resumes from its scoped persistent home on a successor Host,
-        // so it does not need to retain process state across AgentRuns.
         FleetReleaseDisposition::Stop
     } else {
         FleetReleaseDisposition::Reusable
@@ -2639,16 +2730,19 @@ pub(crate) fn runtime_compatibility_digest(
             )
         })?;
     // TRAE's first real AgentRun upgrades an installed-unverified snapshot to
-    // Ready and therefore changes the full frozen config digest. Its MCP
-    // projection file digest is also Run-local because the file includes the
-    // AgentRun ID. Neither value is a Host launch input. Keep TRAE warm
-    // compatibility on the dedicated Host digest and the concrete resolved MCP
-    // server set below.
-    let excludes_run_local_digests = frozen_runtime.adapter_kind == AdapterKind::TraeCnCli;
+    // Ready and therefore changes the full frozen config digest. TRAE and Kimi
+    // MCP projection digests are also Run-local because their evidence includes
+    // the AgentRun identity. Those values are not Host launch inputs. The
+    // concrete resolved MCP server set below remains compatibility-authoritative.
+    let excludes_runtime_config_digest = frozen_runtime.adapter_kind == AdapterKind::TraeCnCli;
+    let excludes_mcp_projection_digest = matches!(
+        frozen_runtime.adapter_kind,
+        AdapterKind::TraeCnCli | AdapterKind::KimiCodeCli
+    );
     let runtime_config_digest =
-        (!excludes_run_local_digests).then_some(frozen_runtime.config_digest.as_str());
+        (!excludes_runtime_config_digest).then_some(frozen_runtime.config_digest.as_str());
     let mcp_projection_compatibility_digest =
-        (!excludes_run_local_digests).then_some(mcp_projection_digest);
+        (!excludes_mcp_projection_digest).then_some(mcp_projection_digest);
     canonical_json_digest(&json!({
         "schemaVersion": 3,
         "adapterKind": frozen_runtime.adapter_kind,
@@ -2718,28 +2812,9 @@ struct PreparedPrivateHostConfig {
     remove_on_shutdown: bool,
 }
 
-fn kimi_private_session_scope(
-    camp_id: &str,
-    agent_id: &str,
-    frozen_runtime: &FrozenAgentRuntimeConfig,
-) -> Result<Option<String>> {
-    if frozen_runtime.adapter_kind != AdapterKind::KimiCodeCli {
-        return Ok(None);
-    }
-    Ok(Some(canonical_json_digest(&json!({
-        "schemaVersion": 1,
-        "adapterKind": frozen_runtime.adapter_kind,
-        "campId": camp_id,
-        "agentId": agent_id,
-        "installationId": frozen_runtime.installation_id,
-        "authScope": frozen_runtime.auth_scope,
-    }))?))
-}
-
 fn prepare_private_host_config(
     private_runtime_dir: &Path,
     adapter_kind: AdapterKind,
-    private_session_scope: Option<&str>,
 ) -> Result<Option<PreparedPrivateHostConfig>> {
     let (root, remove_on_shutdown) = match adapter_kind {
         AdapterKind::KiroCli => (
@@ -2748,14 +2823,6 @@ fn prepare_private_host_config(
                 .join(uuid::Uuid::new_v4().to_string()),
             true,
         ),
-        AdapterKind::KimiCodeCli => {
-            let scope =
-                private_session_scope.context("Kimi Code private Session scope is missing")?;
-            if scope.len() != 64 || !scope.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                bail!("Kimi Code private Session scope is invalid");
-            }
-            (private_runtime_dir.join("session-homes").join(scope), false)
-        }
         _ => return Ok(None),
     };
     std::fs::create_dir_all(&root).with_context(|| {
@@ -2978,11 +3045,6 @@ fn configure_runtime_command(
             }
         }
         AdapterKind::KimiCodeCli => {
-            if !external_mcp_servers.is_empty() {
-                bail!("Kimi Code external MCP projection is not verified");
-            }
-            let private_config_root =
-                private_config_root.context("Kimi Code Host isolation directory is missing")?;
             let permission_mode = values
                 .get("permission_mode")
                 .and_then(Value::as_str)
@@ -2991,10 +3053,9 @@ fn configure_runtime_command(
                 bail!("Kimi Code permission_mode is invalid");
             }
             health::configure_acp_command(command, runtime.adapter_kind, false);
-            // Keep Kimi's ordinary user config and credentials untouched. A
-            // provider can be injected process-locally through KIMI_MODEL_*;
-            // Kimi explicitly treats that synthetic provider as memory-only.
-            command.env("KIMI_CODE_HOME", private_config_root);
+            // Formal AgentRun hosts inherit the user's KIMI_CODE_HOME, or
+            // Kimi's native default when it is unset. The provider overlay is
+            // process-local and must not replace Kimi's state/config home.
             configure_kimi_model_environment(command)?;
         }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
@@ -3112,9 +3173,13 @@ fn configure_compaction_detector_command(
     private_runtime_dir: &Path,
     runtime_cwd: &Path,
 ) -> Result<Option<PathBuf>> {
-    if adapter_kind == AdapterKind::KiroCli {
-        // Kiro emits its structured compaction lifecycle notification directly
-        // on the ACP transport, so it needs no Runtime-side Hook installation.
+    if matches!(
+        adapter_kind,
+        AdapterKind::KiroCli | AdapterKind::KimiCodeCli
+    ) {
+        // Kiro emits a structured lifecycle notification and Kimi emits its
+        // native completed event as a strict ACP-local text frame. Neither
+        // detector needs Runtime-side Hook installation or user configuration.
         return Ok(None);
     }
     if !matches!(
@@ -4621,7 +4686,6 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
-            None,
         )
         .await
         .unwrap();
@@ -4804,7 +4868,6 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
-            None,
         )
         .await
         .unwrap();
@@ -4892,7 +4955,6 @@ while IFS= read -r ignored; do :; done
             true,
             &BTreeMap::new(),
             &root.join("private"),
-            None,
             None,
         )
         .await
@@ -4988,7 +5050,6 @@ while IFS= read -r ignored; do :; done
             &BTreeMap::new(),
             &root.join("private"),
             None,
-            None,
         )
         .await
         .unwrap();
@@ -5077,7 +5138,6 @@ while IFS= read -r ignored; do :; done
             true,
             &BTreeMap::new(),
             &root.join("private"),
-            None,
             None,
         )
         .await
@@ -5204,7 +5264,6 @@ while IFS= read -r ignored; do :; done
                 true,
                 &BTreeMap::new(),
                 &root.join("private"),
-                None,
                 None,
             )
             .await
@@ -5407,7 +5466,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[tokio::test]
-    async fn kimi_completed_run_starts_a_new_host_and_exactly_resumes_the_scoped_session() {
+    async fn kimi_stopped_host_inherits_native_home_and_exactly_resumes() {
         let root =
             std::env::temp_dir().join(format!("rovai-kimi-cold-resume-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
@@ -5415,12 +5474,15 @@ while IFS= read -r ignored; do :; done
         let protocol_log = root.join("protocol.jsonl");
         let invocation_log = root.join("invocations");
         let home_log = root.join("homes");
+        let native_state_home = root.join("user-kimi-home");
         make_executable(
             &executable,
             &format!(
                 r#"#!/bin/sh
 printf '%s\n' "$*" >> '{}'
-printf '%s\n' "$KIMI_CODE_HOME" >> '{}'
+printf '%s\n' "${{KIMI_CODE_HOME-__UNSET__}}" >> '{}'
+native_state_home='{}'
+mkdir -p "$native_state_home"
 IFS= read -r initialize || exit 1
 printf '%s\n' "$initialize" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
@@ -5428,10 +5490,10 @@ IFS= read -r session || exit 1
 printf '%s\n' "$session" >> '{}'
 case "$session" in
   *'"method":"session/new"'*)
-    printf '%s\n' 'session-kimi' > "$KIMI_CODE_HOME/session-id"
+    printf '%s\n' 'session-kimi' > "$native_state_home/session-id"
     ;;
   *'"method":"session/resume"'*)
-    test "$(cat "$KIMI_CODE_HOME/session-id")" = 'session-kimi' || exit 2
+    test "$(cat "$native_state_home/session-id")" = 'session-kimi' || exit 2
     ;;
   *) exit 3 ;;
 esac
@@ -5443,6 +5505,7 @@ while IFS= read -r ignored; do :; done
 "#,
                 invocation_log.display(),
                 home_log.display(),
+                native_state_home.display(),
                 protocol_log.display(),
                 protocol_log.display(),
                 protocol_log.display(),
@@ -5452,6 +5515,15 @@ while IFS= read -r ignored; do :; done
         let frozen = frozen_kimi_runtime(&executable);
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let attachment_root = exact_attachment_root(&root);
+        let external_mcp_servers = BTreeMap::from([(
+            "rovai-test".to_string(),
+            McpServerDefinition::Stdio {
+                command: "/usr/bin/printf".to_string(),
+                args: vec!["mcp".to_string()],
+                cwd: Some(root.to_string_lossy().to_string()),
+                env: BTreeMap::new(),
+            },
+        )]);
         let (incoming, _receiver) = mpsc::unbounded_channel();
         let fleet = Arc::new(AgentRuntimeFleetManager::new(
             AgentRuntimeFleetConfig::default(),
@@ -5476,7 +5548,7 @@ while IFS= read -r ignored; do :; done
                 PermissionSemantics::RuntimeManagedV2,
                 &frozen,
                 &builtin_tools,
-                &BTreeMap::new(),
+                &external_mcp_servers,
                 "sha256:mcp",
                 &attachment_root,
                 "sha256:compatibility",
@@ -5494,19 +5566,15 @@ while IFS= read -r ignored; do :; done
                 "runtime_default",
                 "runtime_default",
                 &json!({}),
-                &BTreeMap::new(),
+                &external_mcp_servers,
             )
             .await
             .unwrap();
         assert_eq!(session_id, "session-kimi");
-        adapter.complete_agent_run("agent-run-one", 1).await;
+        adapter.forget_agent_run("agent-run-one", 1).await;
 
-        let scope = kimi_private_session_scope("camp-one", "agent-one", &frozen)
-            .unwrap()
-            .unwrap();
-        let persistent_home = private_runtime_dir.join("session-homes").join(scope);
         assert_eq!(
-            std::fs::read_to_string(persistent_home.join("session-id"))
+            std::fs::read_to_string(native_state_home.join("session-id"))
                 .unwrap()
                 .trim(),
             session_id
@@ -5522,7 +5590,7 @@ while IFS= read -r ignored; do :; done
                 PermissionSemantics::RuntimeManagedV2,
                 &frozen,
                 &builtin_tools,
-                &BTreeMap::new(),
+                &external_mcp_servers,
                 "sha256:mcp",
                 &attachment_root,
                 "sha256:compatibility",
@@ -5540,7 +5608,7 @@ while IFS= read -r ignored; do :; done
                 "runtime_default",
                 "runtime_default",
                 &json!({}),
-                &BTreeMap::new(),
+                &external_mcp_servers,
             )
             .await
             .unwrap();
@@ -5552,14 +5620,215 @@ while IFS= read -r ignored; do :; done
         assert_eq!(invocations.lines().count(), 2);
         let homes = std::fs::read_to_string(&home_log).unwrap();
         let homes = homes.lines().collect::<Vec<_>>();
+        let inherited_kimi_home = std::env::var_os("KIMI_CODE_HOME")
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "__UNSET__".to_string());
         assert_eq!(homes.len(), 2);
-        assert_eq!(homes[0], homes[1]);
-        assert_eq!(Path::new(homes[0]), persistent_home);
+        assert_eq!(homes, vec![inherited_kimi_home.as_str(); 2]);
         let protocol = std::fs::read_to_string(&protocol_log).unwrap();
         assert_eq!(protocol.matches("\"method\":\"session/new\"").count(), 1);
         assert_eq!(protocol.matches("\"method\":\"session/resume\"").count(), 1);
+        assert_eq!(protocol.matches("\"name\":\"rovai-test\"").count(), 2);
         assert!(!protocol.contains("\"method\":\"session/load\""));
-        assert!(persistent_home.exists());
+        assert!(native_state_home.exists());
+        assert!(!private_runtime_dir.join("home").exists());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn kimi_completed_run_keeps_the_warm_session_and_idle_compaction_observer() {
+        let root =
+            std::env::temp_dir().join(format!("rovai-kimi-warm-lru-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("kimi");
+        let protocol_log = root.join("protocol.jsonl");
+        let invocation_log = root.join("invocations");
+        let home_log = root.join("homes");
+        let emit_completion = root.join("emit-compaction-completion");
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> '{}'
+printf '%s\n' "${{KIMI_CODE_HOME-__UNSET__}}" >> '{}'
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"loadSession":true,"sessionCapabilities":{{"resume":{{}}}}}}}}}}'
+IFS= read -r session_new || exit 1
+printf '%s\n' "$session_new" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-kimi-warm","configOptions":[{{"id":"model","currentValue":"runtime_default","options":[{{"value":"runtime_default","name":"Runtime Default"}}]}},{{"id":"mode","currentValue":"default","options":[{{"value":"default","name":"Default"}}]}}]}}}}'
+IFS= read -r mode_one || exit 1
+printf '%s\n' "$mode_one" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":null}}'
+while [ ! -f '{}' ]; do sleep 0.01; done
+printf '%s\n' '{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"session-kimi-warm","update":{{"sessionUpdate":"agent_message_chunk","content":{{"type":"text","text":"Compaction completed.\n- Messages compacted: 12\n- Tokens before: 34,567\n- Tokens after: 8,901"}}}}}}}}'
+IFS= read -r mode_two || exit 1
+printf '%s\n' "$mode_two" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":null}}'
+while IFS= read -r ignored; do :; done
+"#,
+                invocation_log.display(),
+                home_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                emit_completion.display(),
+                protocol_log.display(),
+            ),
+        );
+        let builtin_tools = exact_builtin_tools(&root);
+        let frozen = frozen_kimi_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let attachment_root = exact_attachment_root(&root);
+        let external_mcp_servers = BTreeMap::from([(
+            "rovai-test".to_string(),
+            McpServerDefinition::Stdio {
+                command: "/usr/bin/printf".to_string(),
+                args: vec!["mcp".to_string()],
+                cwd: Some(root.to_string_lossy().to_string()),
+                env: BTreeMap::new(),
+            },
+        )]);
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let fleet = Arc::new(AgentRuntimeFleetManager::new(
+            AgentRuntimeFleetConfig::default(),
+        ));
+        let private_runtime_dir = root.join("private");
+        let adapter = AcpCliRuntimeAdapter::new(
+            AdapterKind::KimiCodeCli,
+            incoming,
+            private_runtime_dir.clone(),
+            fleet.clone(),
+            CompactionDetectorPolicy::BestEffort,
+        )
+        .unwrap();
+
+        let first = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-one",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &external_mcp_servers,
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        let first_host = first.host_instance_id().to_string();
+        let session_id = first
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities {
+                    can_resume: true,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &external_mcp_servers,
+            )
+            .await
+            .unwrap();
+        first
+            .install_compaction_observer(CompactionObserverLease {
+                id: "observer-kimi-warm".to_string(),
+                conversation_id: "conversation-kimi-warm".to_string(),
+                adapter_installation_id: frozen.installation_id.clone(),
+                adapter_kind: AdapterKind::KimiCodeCli,
+                host_instance_id: first.host_instance_id().to_string(),
+                relay_process_id: "relay-kimi-warm".to_string(),
+                native_session_id: session_id.clone(),
+                native_binding_id: "binding-kimi-warm".to_string(),
+                native_binding_generation: 1,
+                detector_policy_epoch: 1,
+            })
+            .await
+            .unwrap();
+        adapter.complete_agent_run("agent-run-one", 1).await;
+        std::fs::write(&emit_completion, b"ready").unwrap();
+        let observation = tokio::time::timeout(Duration::from_secs(2), receiver.recv())
+            .await
+            .expect("detached warm Kimi completion observation timed out")
+            .expect("detached warm Kimi completion observation missing");
+        assert!(matches!(
+            observation,
+            AcpIncoming::CompactionObservation {
+                adapter_kind: AdapterKind::KimiCodeCli,
+                observer_lease_id,
+                native_session_id,
+                source_signal,
+                admission_point,
+                ..
+            } if observer_lease_id == "observer-kimi-warm"
+                && native_session_id == session_id
+                && source_signal == "kimi.acp.compaction.completed_text.v1"
+                && admission_point == "completed"
+        ));
+
+        let second = adapter
+            .ensure_agent_run_runtime(
+                "agent-run-two",
+                1,
+                "camp-one",
+                "agent-one",
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                &builtin_tools,
+                &external_mcp_servers,
+                "sha256:mcp",
+                &attachment_root,
+                "sha256:compatibility",
+            )
+            .await
+            .unwrap();
+        assert_eq!(second.host_instance_id(), first_host);
+        let successor_session = second
+            .start_or_resume_session(
+                Some(&session_id),
+                AcpSessionCapabilities {
+                    can_resume: true,
+                    can_load_history: true,
+                },
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &external_mcp_servers,
+            )
+            .await
+            .unwrap();
+        assert_eq!(successor_session, session_id);
+        assert!(second.verification_evidence().await.is_some());
+        adapter.complete_agent_run("agent-run-two", 1).await;
+        fleet.shutdown_all().await;
+
+        let invocations = std::fs::read_to_string(&invocation_log).unwrap();
+        assert_eq!(invocations.lines().count(), 1);
+        let homes = std::fs::read_to_string(&home_log).unwrap();
+        let inherited_kimi_home = std::env::var_os("KIMI_CODE_HOME")
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "__UNSET__".to_string());
+        assert_eq!(
+            homes.lines().collect::<Vec<_>>(),
+            [inherited_kimi_home.as_str()]
+        );
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        assert_eq!(protocol.matches("\"method\":\"session/new\"").count(), 1);
+        assert_eq!(
+            protocol
+                .matches("\"method\":\"session/set_config_option\"")
+                .count(),
+            2
+        );
+        assert!(!protocol.contains("\"method\":\"session/load\""));
+        assert!(!protocol.contains("\"method\":\"session/resume\""));
+        assert!(!private_runtime_dir.join("home").exists());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -5573,10 +5842,6 @@ while IFS= read -r ignored; do :; done
             completed_run_release_disposition(AdapterKind::CursorAgent),
             FleetReleaseDisposition::Stop
         );
-        assert_eq!(
-            completed_run_release_disposition(AdapterKind::KimiCodeCli),
-            FleetReleaseDisposition::Stop
-        );
         for adapter_kind in [
             AdapterKind::OpencodeCli,
             AdapterKind::CopilotCli,
@@ -5584,6 +5849,7 @@ while IFS= read -r ignored; do :; done
             AdapterKind::CodebuddyCli,
             AdapterKind::QwenCode,
             AdapterKind::TraeCnCli,
+            AdapterKind::KimiCodeCli,
         ] {
             assert_eq!(
                 completed_run_release_disposition(adapter_kind),
@@ -5672,6 +5938,7 @@ while IFS= read -r ignored; do :; done
                     "method": "session.compacted",
                     "params": {"sessionId": "session-1"}
                 }),
+                AcpCompactionSignalSurface::ActivePrompt,
             )
             .is_none(),
             "OpenCode's ACP server does not expose its native event stream; the isolated Runtime plugin owns this signal"
@@ -5687,6 +5954,7 @@ while IFS= read -r ignored; do :; done
                     "summary": "must not participate in signal admission"
                 }
             }),
+            AcpCompactionSignalSurface::SessionMetadata,
         )
         .expect("Kiro completed status should be detected");
         assert_eq!(kiro.admission_point, "completed");
@@ -5697,9 +5965,70 @@ while IFS= read -r ignored; do :; done
                     "method": "_kiro.dev/compaction/status",
                     "params": {"sessionId": "session-2", "status": {"type": "started"}}
                 }),
+                AcpCompactionSignalSurface::SessionMetadata,
             )
             .is_none()
         );
+
+        let kimi_completed = json!({
+            "method": "session/update",
+            "params": {
+                "sessionId": "session-kimi",
+                "update": {
+                    "sessionUpdate": "agent_message_chunk",
+                    "content": {
+                        "type": "text",
+                        "text": "Compaction completed.\n- Messages compacted: 1,234\n- Tokens before: 12,345\n- Tokens after: 6,789"
+                    }
+                }
+            }
+        });
+        let kimi = detect_acp_compaction_signal(
+            AdapterKind::KimiCodeCli,
+            &kimi_completed,
+            AcpCompactionSignalSurface::SessionMetadata,
+        )
+        .expect("Kimi's exact idle completion frame should be detected");
+        assert_eq!(kimi.source_signal, "kimi.acp.compaction.completed_text.v1");
+        assert_eq!(kimi.admission_point, "completed");
+        assert!(kimi.runtime_occurrence_id.is_none());
+        assert!(is_idle_session_metadata(
+            AdapterKind::KimiCodeCli,
+            &kimi_completed
+        ));
+        assert!(!is_idle_session_metadata(
+            AdapterKind::TraeCnCli,
+            &kimi_completed
+        ));
+        assert!(
+            detect_acp_compaction_signal(
+                AdapterKind::KimiCodeCli,
+                &kimi_completed,
+                AcpCompactionSignalSurface::ActivePrompt,
+            )
+            .is_none(),
+            "model output inside an active prompt is not Kimi lifecycle metadata"
+        );
+
+        for ordinary_or_malformed in [
+            "The compact implementation is complete.",
+            "Compaction completed.",
+            "Compaction completed.\n- Messages compacted: 1234\n- Tokens before: 12,345\n- Tokens after: 6,789",
+            "Compaction completed.\n- Messages compacted: 1,234\n- Tokens before: 12,345\n- Tokens after: 6,789\n",
+        ] {
+            let mut message = kimi_completed.clone();
+            message["params"]["update"]["content"]["text"] =
+                Value::String(ordinary_or_malformed.to_string());
+            assert!(
+                detect_acp_compaction_signal(
+                    AdapterKind::KimiCodeCli,
+                    &message,
+                    AcpCompactionSignalSurface::SessionMetadata,
+                )
+                .is_none(),
+                "Kimi compaction completion parsing must fail closed for {ordinary_or_malformed:?}"
+            );
+        }
     }
 
     #[test]
@@ -5789,45 +6118,27 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn private_host_config_rotates_kiro_but_keeps_scoped_kimi_home() {
+    fn private_host_config_is_created_only_for_kiro() {
         let root = std::env::temp_dir().join(format!(
             "rovai-private-host-config-{}",
             uuid::Uuid::new_v4()
         ));
-        let scope_a = "a".repeat(64);
-        let scope_b = "b".repeat(64);
-
-        let kiro_one = prepare_private_host_config(&root, AdapterKind::KiroCli, None)
+        let kiro_one = prepare_private_host_config(&root, AdapterKind::KiroCli)
             .unwrap()
             .unwrap();
-        let kiro_two = prepare_private_host_config(&root, AdapterKind::KiroCli, None)
+        let kiro_two = prepare_private_host_config(&root, AdapterKind::KiroCli)
             .unwrap()
             .unwrap();
         assert_ne!(kiro_one.root, kiro_two.root);
         assert!(kiro_one.remove_on_shutdown);
         assert!(kiro_two.remove_on_shutdown);
 
-        let kimi_one = prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_a))
-            .unwrap()
-            .unwrap();
-        let kimi_successor =
-            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_a))
-                .unwrap()
-                .unwrap();
-        let kimi_other =
-            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, Some(&scope_b))
-                .unwrap()
-                .unwrap();
-        assert_eq!(kimi_one.root, kimi_successor.root);
-        assert_ne!(kimi_one.root, kimi_other.root);
-        assert!(!kimi_one.remove_on_shutdown);
-        assert!(kimi_one.root.ends_with(scope_a));
         assert!(
-            prepare_private_host_config(&root, AdapterKind::KimiCodeCli, None)
-                .unwrap_err()
-                .to_string()
-                .contains("scope is missing")
+            prepare_private_host_config(&root, AdapterKind::KimiCodeCli)
+                .unwrap()
+                .is_none()
         );
+        assert!(!root.join("home").exists());
 
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -5942,7 +6253,7 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn trae_warm_compatibility_ignores_live_snapshot_upgrade_but_not_host_inputs() {
+    fn warm_compatibility_ignores_run_local_projection_but_not_host_inputs() {
         let root =
             std::env::temp_dir().join(format!("rovai-trae-compatibility-{}", uuid::Uuid::new_v4()));
         let attachments = root.join("attachments");
@@ -6005,6 +6316,52 @@ while IFS= read -r ignored; do :; done
                 headers: BTreeMap::new(),
             },
         );
+
+        let kimi = frozen_kimi_runtime(&executable);
+        let kimi_first = runtime_compatibility_digest(
+            &kimi,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:kimi-run-one-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        let kimi_next_run_projection = runtime_compatibility_digest(
+            &kimi,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:kimi-run-two-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        assert_eq!(kimi_next_run_projection, kimi_first);
+
+        let kimi_changed_mcp = runtime_compatibility_digest(
+            &kimi,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &changed_servers,
+            "sha256:kimi-run-three-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        assert_ne!(kimi_changed_mcp, kimi_first);
+
+        let mut kimi_changed_config = kimi.clone();
+        kimi_changed_config.config_digest = "sha256:kimi-changed-config".to_string();
+        let kimi_changed_config = runtime_compatibility_digest(
+            &kimi_changed_config,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &BTreeMap::new(),
+            "sha256:kimi-run-four-projection",
+            &attachment_authorization,
+        )
+        .unwrap();
+        assert_ne!(kimi_changed_config, kimi_first);
+
         let changed_mcp = runtime_compatibility_digest(
             &upgraded,
             &workspace,

@@ -15,15 +15,16 @@ use crate::{
 
 pub const BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_FORMATTER_VERSION: i64 = 2;
-pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v0.48";
+pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v1.27";
 
-const POLICY_ADAPTERS: [AdapterKind; 7] = [
+const POLICY_ADAPTERS: [AdapterKind; 8] = [
     AdapterKind::CopilotCli,
     AdapterKind::OpencodeCli,
     AdapterKind::KiroCli,
     AdapterKind::QoderCli,
     AdapterKind::CodebuddyCli,
     AdapterKind::QwenCode,
+    AdapterKind::KimiCodeCli,
     AdapterKind::AntigravityApp,
 ];
 
@@ -115,13 +116,13 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::KiroCli
         | AdapterKind::QoderCli
         | AdapterKind::CodebuddyCli
-        | AdapterKind::QwenCode => CompactionDetectorPolicy::BestEffort,
+        | AdapterKind::QwenCode
+        | AdapterKind::KimiCodeCli => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
         | AdapterKind::CodexCli
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
-        | AdapterKind::CursorAgent
-        | AdapterKind::KimiCodeCli => CompactionDetectorPolicy::Disabled,
+        | AdapterKind::CursorAgent => CompactionDetectorPolicy::Disabled,
     }
 }
 
@@ -133,12 +134,12 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         AdapterKind::QoderCli => "ROVAI_INTERNAL_QODER_COMPACTION_DETECTOR_POLICY",
         AdapterKind::CodebuddyCli => "ROVAI_INTERNAL_CODEBUDDY_COMPACTION_DETECTOR_POLICY",
         AdapterKind::QwenCode => "ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY",
+        AdapterKind::KimiCodeCli => "ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY",
         AdapterKind::AntigravityApp => "ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY",
         AdapterKind::CodexCli
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
-        | AdapterKind::CursorAgent
-        | AdapterKind::KimiCodeCli => "ROVAI_INTERNAL_UNUSED_COMPACTION_DETECTOR_POLICY",
+        | AdapterKind::CursorAgent => "ROVAI_INTERNAL_UNUSED_COMPACTION_DETECTOR_POLICY",
     }
 }
 
@@ -889,12 +890,15 @@ fn qualified_admission(
         AdapterKind::CodebuddyCli => {
             source_signal == "SessionStart" && admission_point == "completed"
         }
+        AdapterKind::KimiCodeCli => {
+            source_signal == "kimi.acp.compaction.completed_text.v1"
+                && admission_point == "completed"
+        }
         AdapterKind::CodexCli
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp
         | AdapterKind::TraeCnCli
-        | AdapterKind::CursorAgent
-        | AdapterKind::KimiCodeCli => false,
+        | AdapterKind::CursorAgent => false,
     }
 }
 
@@ -951,6 +955,10 @@ mod tests {
             CompactionDetectorPolicy::BestEffort
         );
         assert_eq!(
+            release_default_policy(AdapterKind::KimiCodeCli),
+            CompactionDetectorPolicy::BestEffort
+        );
+        assert_eq!(
             release_default_policy(AdapterKind::CodexCli),
             CompactionDetectorPolicy::Disabled
         );
@@ -1004,6 +1012,16 @@ mod tests {
             AdapterKind::CodebuddyCli,
             "PostCompact",
             "completed"
+        ));
+        assert!(qualified_admission(
+            AdapterKind::KimiCodeCli,
+            "kimi.acp.compaction.completed_text.v1",
+            "completed"
+        ));
+        assert!(!qualified_admission(
+            AdapterKind::KimiCodeCli,
+            "kimi.acp.compaction.started_text.v1",
+            "started"
         ));
     }
 
