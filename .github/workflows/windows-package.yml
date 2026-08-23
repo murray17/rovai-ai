@@ -39,10 +39,14 @@ concurrency:
 jobs:
   unsigned-package:
     name: Windows x64 unsigned package
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-2022
+    timeout-minutes: 120
     steps:
       - name: Check out repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
@@ -64,6 +68,7 @@ jobs:
         run: pnpm dist:windows:x64
 
       - name: Upload unsigned package evidence
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: rovai-windows-x64-unsigned-${{ github.sha }}
@@ -74,3 +79,4 @@ jobs:
             dist/windows-verification-report.txt
             dist/win-unpacked/**
           if-no-files-found: error
+          retention-days: 7
