@@ -8,7 +8,17 @@ last_updated: 2026-08-23
 
 本文件定义 `docs/` 的职责、权威边界和读取顺序。人和 AI 在处理架构、实现、规划或文档任务前，应先从这里判断需要读取哪些资料，而不是默认加载全部历史文档。
 
-## 按任务读取
+## 从这里开始
+
+| 你想做什么 | 入口 |
+|---|---|
+| 安装和使用 Rovai | [用户指南](guides/README.md) |
+| 参与开发 | [开发者指南](development/README.md) |
+| 理解当前架构 | [长期架构](architecture/README.md) |
+| 查看当前决策 | [当前决定](decisions/CURRENT.md) |
+| 查看当前版本 | [版本记录](versions/README.md) |
+
+## 维护者与 Coding Agent 按任务读取
 
 | 任务 | 必读资料 |
 |---|---|
