@@ -217,7 +217,7 @@
       "perMachine": false,
       "allowElevation": false,
       "packElevateHelper": false,
-      "allowToChangeInstallationDirectory": false,
+      "allowToChangeInstallationDirectory": true,
       "runAfterFinish": false,
       "deleteAppDataOnUninstall": false,
       "include": "build/installer.nsh",
