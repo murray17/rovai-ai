@@ -121,7 +121,7 @@ jobs:
           EXPECTED_FINGERPRINT="875C6F486E223AB1889A2AD63860FBE48F7E8C0E4D94832656896BA5DA4EF82E"
           test "$ACTUAL_FINGERPRINT" = "$EXPECTED_FINGERPRINT"
 
-          sudo security add-trusted-cert \
+          sudo -n security add-trusted-cert \
             -d \
             -r trustRoot \
             -p codeSign \
@@ -141,32 +141,40 @@ jobs:
       - name: Verify signed DMG
         run: node scripts/verify-macos-release.mjs ${{ matrix.arch }}
 
-      - name: Clean signing material
+      - name: Clean sensitive signing material
         if: always()
+        shell: bash
         run: |
           set +x
+          set +e
+
           P12_PATH="$RUNNER_TEMP/rovai-release-signing.p12"
           CERT_PEM="$RUNNER_TEMP/rovai-release-signing.pem"
           CERT_DER="$RUNNER_TEMP/rovai-release-signing.cer"
           KEYCHAIN_PATH="$RUNNER_TEMP/rovai-signing.keychain-db"
           TRUST_MARKER="$RUNNER_TEMP/rovai-system-trust-added"
-          DEFAULT_KEYCHAIN="$(security default-keychain -d user | tr -d '"')"
+          DEFAULT_KEYCHAIN="$(
+            security default-keychain -d user 2>/dev/null |
+              tr -d '"'
+          )"
 
-          if test -f "$TRUST_MARKER" && test -f "$CERT_DER"; then
-            sudo security remove-trusted-cert -d "$CERT_DER" || true
-            sudo security delete-certificate \
-              -Z 465802DA7386E9676668078E7D44704CBBEADD1E \
-              /Library/Keychains/System.keychain || true
+          if test -n "$DEFAULT_KEYCHAIN"; then
+            security list-keychains \
+              -d user \
+              -s "$DEFAULT_KEYCHAIN" >/dev/null 2>&1 || true
           fi
 
-          security list-keychains -d user -s "$DEFAULT_KEYCHAIN" || true
-          security delete-keychain "$KEYCHAIN_PATH" || true
+          security delete-keychain \
+            "$KEYCHAIN_PATH" >/dev/null 2>&1 || true
+
           rm -f \
             "$P12_PATH" \
             "$CERT_PEM" \
             "$CERT_DER" \
             "$KEYCHAIN_PATH" \
             "$TRUST_MARKER"
+
+          exit 0
 
       - name: Upload signed artifacts
         if: success()
