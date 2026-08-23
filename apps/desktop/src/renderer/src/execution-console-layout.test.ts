@@ -10,6 +10,9 @@ function styleBlock(selector: string): string | null {
 
 describe('execution console layout', () => {
   it('keeps the avatar-to-name spacing equal in the bottom dock and right sidecar', () => {
+    expect(styleBlock('.run-pulse-chip')).toMatch(/(?:^|;)\s*gap:\s*6px/)
+    expect(styleBlock('.run-pulse-inspector .run-pulse-chip') ?? '')
+      .not.toMatch(/(?:^|;)\s*gap:/)
     expect(styleBlock('.run-pulse-chip-copy')).toMatch(/margin-inline-start:\s*4px/)
     expect(styleBlock('.run-pulse-inspector .run-pulse-chip-copy') ?? '')
       .not.toMatch(/margin(?:-inline-start)?:/)
