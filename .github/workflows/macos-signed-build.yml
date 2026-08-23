@@ -69,6 +69,7 @@ jobs:
         env:
           MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          MAC_CSC_CERT_SHA256: ${{ secrets.MAC_CSC_CERT_SHA256 }}
         run: |
           set +x
           set -euo pipefail
@@ -76,6 +77,7 @@ jobs:
 
           : "${MAC_CSC_LINK:?MAC_CSC_LINK is required}"
           : "${MAC_CSC_KEY_PASSWORD:?MAC_CSC_KEY_PASSWORD is required}"
+          : "${MAC_CSC_CERT_SHA256:?MAC_CSC_CERT_SHA256 is required}"
 
           P12_PATH="$RUNNER_TEMP/rovai-release-signing.p12"
           CERT_PEM="$RUNNER_TEMP/rovai-release-signing.pem"
@@ -118,7 +120,15 @@ jobs:
               | tr -d ':\r\n' \
               | tr '[:lower:]' '[:upper:]'
           )"
-          EXPECTED_FINGERPRINT="875C6F486E223AB1889A2AD63860FBE48F7E8C0E4D94832656896BA5DA4EF82E"
+          EXPECTED_FINGERPRINT="$(
+            printf '%s' "$MAC_CSC_CERT_SHA256" \
+              | tr -d ':\r\n ' \
+              | tr '[:lower:]' '[:upper:]'
+          )"
+          test "${#EXPECTED_FINGERPRINT}" -eq 64
+          case "$EXPECTED_FINGERPRINT" in
+            *[!0-9A-F]*) echo "MAC_CSC_CERT_SHA256 has an invalid format." >&2; exit 1 ;;
+          esac
           test "$ACTUAL_FINGERPRINT" = "$EXPECTED_FINGERPRINT"
 
           sudo security add-trusted-cert \
@@ -154,9 +164,19 @@ jobs:
 
           if test -f "$TRUST_MARKER" && test -f "$CERT_DER"; then
             sudo security remove-trusted-cert -d "$CERT_DER" || true
-            sudo security delete-certificate \
-              -Z 465802DA7386E9676668078E7D44704CBBEADD1E \
-              /Library/Keychains/System.keychain || true
+            if test -f "$CERT_PEM"; then
+              CERT_SHA1="$(
+                openssl x509 -in "$CERT_PEM" -noout -fingerprint -sha1 \
+                  | cut -d= -f2 \
+                  | tr -d ':\r\n' \
+                  | tr '[:lower:]' '[:upper:]'
+              )"
+              if test -n "$CERT_SHA1"; then
+                sudo security delete-certificate \
+                  -Z "$CERT_SHA1" \
+                  /Library/Keychains/System.keychain || true
+              fi
+            fi
           fi
 
           security list-keychains -d user -s "$DEFAULT_KEYCHAIN" || true
