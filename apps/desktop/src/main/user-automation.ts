@@ -19,6 +19,8 @@ import type {
 
 export const USER_AUTOMATION_CONTRACT_VERSION = 1
 export const USER_AUTOMATION_CONTEXT_ENV = 'ROVAI_APP_AUTOMATION_CONTEXT'
+export const WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV =
+  'ROVAI_WINDOWS_USER_AUTOMATION_QUALIFICATION'
 const MAX_FRAME_BYTES = 4 * 1024 * 1024
 const REQUEST_TIMEOUT_MILLISECONDS = 60_000
 
@@ -45,7 +47,9 @@ type AutomationContext = {
   contractVersion: 1
   instanceId: string
   pid: number
-  endpoint: { transport: 'unix_socket'; path: string }
+  endpoint:
+    | { transport: 'unix_socket'; path: string }
+    | { transport: 'windows_named_pipe'; name: string }
   credential: string
 }
 
@@ -70,6 +74,13 @@ export class UserAutomationError extends Error {
   constructor(readonly code: string, message: string) {
     super(message)
   }
+}
+
+export function userAutomationAvailableOnPlatform(
+  platform: NodeJS.Platform,
+  windowsQualification: string | undefined
+): boolean {
+  return platform !== 'win32' || windowsQualification === '1'
 }
 
 function record(value: unknown, label: string): RecordValue {
@@ -454,10 +465,13 @@ export class UserAutomationServer {
   }
 
   async start(): Promise<void> {
-    if (process.platform === 'win32') {
+    if (!userAutomationAvailableOnPlatform(
+      process.platform,
+      process.env[WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV]
+    )) {
       throw new UserAutomationError(
         'automation_platform_unsupported',
-        'User Automation V1 currently requires a Unix-domain socket.'
+        'Windows User Automation is available only in an explicit local qualification run.'
       )
     }
     await mkdir(this.rootPath, { recursive: true, mode: 0o700 })
@@ -469,13 +483,17 @@ export class UserAutomationServer {
       )
     }
     await chmod(this.rootPath, 0o700)
-    const endpointPath = join(this.rootPath, 'app.sock')
-    await removeStaleSocket(endpointPath)
+    const endpointPath = process.platform === 'win32'
+      ? `\\\\.\\pipe\\rovai-ai-${process.pid}-${randomUUID()}`
+      : join(this.rootPath, 'app.sock')
+    if (process.platform !== 'win32') await removeStaleSocket(endpointPath)
     const context: AutomationContext = {
       contractVersion: USER_AUTOMATION_CONTRACT_VERSION,
       instanceId: randomUUID(),
       pid: process.pid,
-      endpoint: { transport: 'unix_socket', path: endpointPath },
+      endpoint: process.platform === 'win32'
+        ? { transport: 'windows_named_pipe', name: endpointPath }
+        : { transport: 'unix_socket', path: endpointPath },
       credential: randomBytes(32).toString('hex')
     }
     const server = createServer((socket) => this.#handle(socket, context))
@@ -489,11 +507,11 @@ export class UserAutomationServer {
       })
     })
     try {
-      await chmod(endpointPath, 0o600)
+      if (process.platform !== 'win32') await chmod(endpointPath, 0o600)
       await atomicWritePrivateJson(this.contextPath, context)
     } catch (error) {
       await new Promise<void>((resolve) => server.close(() => resolve()))
-      await unlink(endpointPath).catch(() => undefined)
+      if (process.platform !== 'win32') await unlink(endpointPath).catch(() => undefined)
       throw error
     }
     this.#server = server
@@ -509,7 +527,9 @@ export class UserAutomationServer {
       await new Promise<void>((resolve) => server.close(() => resolve()))
     }
     if (context) {
-      await unlink(context.endpoint.path).catch(() => undefined)
+      if (context.endpoint.transport === 'unix_socket') {
+        await unlink(context.endpoint.path).catch(() => undefined)
+      }
       try {
         const published = JSON.parse(await readFile(this.contextPath, 'utf8')) as AutomationContext
         if (published.instanceId === context.instanceId) await unlink(this.contextPath)

@@ -8,7 +8,9 @@ import {
   dispatchUserAutomation,
   startUserAutomationOptional,
   UserAutomationError,
-  UserAutomationServer
+  UserAutomationServer,
+  userAutomationAvailableOnPlatform,
+  WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV
 } from './user-automation'
 
 async function socketRequest(path: string, request: unknown): Promise<Record<string, unknown>> {
@@ -255,10 +257,14 @@ describe('User Automation transport', () => {
     expect(diagnostics).toEqual([unavailable])
   })
 
-  it.runIf(process.platform !== 'win32')(
-    'binds each socket request to the published App instance and removes discovery on stop',
+  it(
+    'binds each local IPC request to the published App instance and removes discovery on stop',
     async () => {
       const root = await mkdtemp(join(tmpdir(), 'rovai-automation-'))
+      const previousQualification = process.env[WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV]
+      if (process.platform === 'win32') {
+        process.env[WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV] = '1'
+      }
       const core = {
         async request<T>(method: CoreMethod): Promise<T> {
           if (method === 'app.info') return { version: 'core-test' } as T
@@ -276,9 +282,11 @@ describe('User Automation transport', () => {
           contractVersion: number
           instanceId: string
           credential: string
-          endpoint: { path: string }
+          endpoint: { path?: string; name?: string }
         }
-        const accepted = await socketRequest(context.endpoint.path, {
+        const endpoint = context.endpoint.path ?? context.endpoint.name
+        expect(endpoint).toBeTruthy()
+        const accepted = await socketRequest(endpoint!, {
           contractVersion: context.contractVersion,
           instanceId: context.instanceId,
           credential: context.credential,
@@ -292,7 +300,7 @@ describe('User Automation transport', () => {
           result: { appRunning: true, instanceId: context.instanceId }
         })
 
-        const rejected = await socketRequest(context.endpoint.path, {
+        const rejected = await socketRequest(endpoint!, {
           contractVersion: context.contractVersion,
           instanceId: 'another-instance',
           credential: context.credential,
@@ -309,28 +317,19 @@ describe('User Automation transport', () => {
         await server.stop()
         await expect(readFile(server.contextPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
         await rm(root, { recursive: true, force: true })
+        if (previousQualification === undefined) {
+          delete process.env[WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV]
+        } else {
+          process.env[WINDOWS_USER_AUTOMATION_QUALIFICATION_ENV] = previousQualification
+        }
       }
     }
   )
 
-  it.runIf(process.platform === 'win32')(
-    'fails closed before publishing discovery when Unix-domain automation is unavailable',
-    async () => {
-      const root = await mkdtemp(join(tmpdir(), 'rovai-automation-windows-'))
-      const server = new UserAutomationServer(root, {
-        core: { request: async <T>() => ({} as T) },
-        openCamp: async (campId) => ({ campId, opened: true }),
-        appVersion: 'app-test'
-      })
-      try {
-        await expect(server.start()).rejects.toMatchObject({
-          code: 'automation_platform_unsupported'
-        })
-        await expect(readFile(server.contextPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
-      } finally {
-        await server.stop()
-        await rm(root, { recursive: true, force: true })
-      }
-    }
-  )
+  it('keeps Windows Automation behind the explicit local qualification gate', () => {
+    expect(userAutomationAvailableOnPlatform('win32', undefined)).toBe(false)
+    expect(userAutomationAvailableOnPlatform('win32', '0')).toBe(false)
+    expect(userAutomationAvailableOnPlatform('win32', '1')).toBe(true)
+    expect(userAutomationAvailableOnPlatform('darwin', undefined)).toBe(true)
+  })
 })
