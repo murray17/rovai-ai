@@ -10,9 +10,8 @@ Together, they explore, discuss, and act on real tasks — building<br>
 team chemistry and collaborative memory along the way.
 
 <p>
-  <img src="https://img.shields.io/badge/status-preview-7c6f64" alt="Preview">
   <img src="https://img.shields.io/badge/platform-macOS-111111?logo=apple&logoColor=white" alt="macOS">
-  <img src="https://img.shields.io/badge/Windows_x64-Preview_unsigned-4b8f77?logo=windows11&logoColor=white" alt="Windows x64 Preview unsigned">
+  <img src="https://img.shields.io/badge/Windows_x64-unsigned-4b8f77?logo=windows11&logoColor=white" alt="Windows x64 unsigned">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4b8f77" alt="MIT License"></a>
 </p>
 
@@ -178,9 +177,9 @@ Download the installer for your device from
 |---|---|---|
 | **macOS · Apple Silicon** | A `.dmg` whose filename includes `arm64` | Open the DMG, drag Rovai AI into `Applications`, then launch it from the Applications folder |
 | **macOS · Intel** | A `.dmg` whose filename includes `x64` | Open the DMG, drag Rovai AI into `Applications`, then launch it from the Applications folder |
-| **Windows · x64 Preview — unsigned** | An `.exe` installer explicitly labeled for Windows x64 | Run the per-user installer and follow the setup wizard |
+| **Windows · x64 — unsigned** | An `.exe` installer explicitly labeled for Windows x64 | Run the per-user installer and follow the setup wizard |
 
-The Windows x64 Preview is currently unsigned. Windows SmartScreen may show an unknown publisher
+The Windows x64 installer is currently unsigned. Windows SmartScreen may show an unknown publisher
 warning. Download the installer only from the official Rovai AI GitHub Release.
 
 #### Run from source (for developers)
@@ -221,7 +220,7 @@ depending on the team.
 | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | Runtime-native only | Added alongside native | Based on Runtime capabilities |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
-| [Qoder CLI](https://docs.qoder.com/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
+| [Qoder CLI](https://docs.qoder.com/cli/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [CodeBuddy](https://www.codebuddy.ai/docs/cli/installation) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [TRAE CLI CN](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
@@ -231,7 +230,7 @@ For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.
 
 Kimi Code is qualified on macOS arm64 and Windows x64; macOS x64 remains not qualified.
-On Windows x64 Preview, all eleven Runtimes exposed by Settings are qualified. Cursor Agent remains
+On Windows x64, all eleven Runtimes exposed by Settings are qualified. Cursor Agent remains
 outside the current Settings scope and is not qualified on Windows.
 
 ---
