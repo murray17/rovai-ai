@@ -2,7 +2,7 @@
 document_type: architecture
 authority: desktop-first-run-component-boundary
 status: accepted
-last_updated: 2026-08-17
+last_updated: 2026-08-23
 ---
 
 # First-run Onboarding
@@ -13,7 +13,7 @@ last_updated: 2026-08-17
 | --- | --- |
 | Electron Main | Determines fresh install versus upgrade before Core creates SQLite, owns the private state machine, validates closed snapshots and serializes atomic writes. |
 | Preload bridge | Exposes typed reads and transitions; it does not expose initialization or direct file access. |
-| Renderer onboarding gate | Replaces the normal App shell while a mandatory page is unfinished, performs real Runtime discovery/health checks and persists each user choice through Main. |
+| Renderer onboarding gate | Replaces the normal App shell while a page is unfinished, performs real Runtime discovery/health checks, projects either configured selection or the zero-usable empty page, and persists user choices through Main. |
 | Provisioning saga | Converts the saved selection into idempotent existing Core commands, records stage checkpoints and commits the Camp restore target before completion. |
 | Core member/runtime services | Retain or create the selected profile and apply the selected model plus Adapter-owned default permissions with normal command/version rules. |
 | Core Camp service | Creates the durable Active Quick Chat Camp and remains the sole authority for membership, Default Lead and messages. |
@@ -29,17 +29,23 @@ Electron ready
      -> fresh install: in_progress(welcome)
   -> start Core and Renderer
      -> welcome -> member -> runtime
-     -> persist provisioning command IDs + normalized Runtime permissions
-     -> retain/create member
-     -> configure Runtime/model/default permissions
-     -> create Active Quick Chat Camp "初次集结"
-     -> commit Camp restorable location
-     -> completed(onboarding)
-     -> render the real Camp with draft-only starter rows
+        -> usable Runtime exists:
+           -> persist provisioning command IDs + normalized Runtime permissions
+           -> retain/create member
+           -> configure Runtime/model/default permissions
+           -> create Active Quick Chat Camp "初次集结"
+           -> commit Camp restorable location
+           -> completed(onboarding)
+           -> render the real Camp with draft-only starter rows
+        -> usable Runtime count = 0 or scan produced no reliable result:
+           -> rescan, or completed(runtime_deferred)
+           -> render the normal App shell without onboarding product mutations
 ```
 
 The state file intentionally stays outside Core. It is Desktop admission and progress metadata, while every product
-object produced by onboarding is created through existing Core authority and remains after onboarding finishes.
+object produced by the configured path is created through existing Core authority and remains after onboarding
+finishes. The deferred path creates no onboarding-owned product object and therefore has no partial Core state to
+reconcile.
 
 ## Recovery boundary
 
@@ -53,12 +59,22 @@ The fourth page is optional in lifecycle terms but durable in product terms. It 
 Navigation and normal Composer Draft. The only onboarding-specific Renderer projection is the empty-Camp greeting and
 starter row presentation; after the user sends a message, the Camp behaves like any other Quick Chat.
 
+`runtime_deferred` is a second completed lifecycle outcome, not a fourth page and not a paused onboarding state. It is
+available only before provisioning begins. Its three product identities are null, it commits no Camp restore target,
+and normal startup never routes it back into training. A later Runtime install or login is handled by normal Settings
+and member configuration surfaces.
+
 ## Invariants
 
 - Core SQLite existence is sampled before Core startup can create a fresh database.
 - An unfinished mandatory page is never represented only in React or browser storage.
+- Valid schema 1 state is normalized to schema 2 without losing an unfinished page or provisioning checkpoint.
 - Permissions are copied once from the selected Adapter Installation, frozen with the command IDs and never invented
   or subsequently reinterpreted by onboarding UI.
+- The empty Runtime page is shown only after scanning settles without a directly continuable Runtime; a scan error is
+  an honest no-result input to that page, not a fabricated Runtime failure category.
+- Deferring Runtime setup is terminal, requires `provisioning = null`, and cannot issue member, Runtime, Camp or
+  restorable-location mutations.
 - `初次集结` contains exactly the selected member and makes that member Default Lead.
 - Completion happens after the real Camp and its restore target exist, not after starter interaction.
 - A starter choice is a durable Draft mutation and cannot produce execution side effects.
@@ -67,7 +83,7 @@ starter row presentation; after the user sends a message, the Camp behaves like 
 ## References
 
 - [Camp 资源不变量](foundational-invariants.md#camp-resources)
-- [First-run Onboarding v1](../contracts/first-run-onboarding-v1.md)
+- [First-run Onboarding v2](../contracts/first-run-onboarding-v2.md)
 - [Camp Activation Lifecycle](camp-activation-lifecycle.md)
 - [Camp Composer Draft](camp-composer-draft.md)
 - [Runtime Catalog Boundaries](runtime-catalog-boundaries.md)

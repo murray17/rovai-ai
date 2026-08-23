@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -124,12 +124,15 @@ pnpm accept:onboarding-ui
 ```
 
 脚本必须使用全新隔离 `userData` 和 packaged App，在 `1040×700` 下证明：欢迎页无 Skip/步骤导航；
-队员页只有一张当前半身像与四条文字选择；重启分别恢复未完成的队员页和 Runtime 页；真实 Runtime
-状态与模型默认值可用；第三页完成后创建 Active Quick Chat `初次集结`，Camp 只有所选成员且同一成员
-是 Default Lead。第四页必须默认显示会话中的三条 `A/B/C` starter，不得被地图偏好遮住或产生横向
+队员页只有一张当前半身像与四条文字选择；重启分别恢复未完成的队员页和 Runtime 页。Configured 分支
+必须证明真实 Runtime 状态与模型默认值可用，第三页完成后创建 Active Quick Chat `初次集结`，Camp 只有
+所选成员且同一成员是 Default Lead；第四页默认显示三条 `A/B/C` starter，不得被地图偏好遮住或横向
 滚动。点击 starter 后持久 Draft、Composer 焦点与末尾光标正确，CampMessage/AgentRun 数量保持不变；
-再次重启仍保留 completed 状态、同一 Camp 和未发送草稿。Day/Night 截图与 JSON report 输出到脚本
-报告的隔离目录。
+再次重启仍保留 completed、同一 Camp 和未发送草稿。Deferred 分支必须使用确定性零 Runtime 隔离环境，
+证明第三页显示三项结果边界、可展开安装说明、“重新扫描 / 进入 Rovai”，Day/Night 无溢出；重新扫描
+返回真实进度，“进入 Rovai”落盘 `completed(runtime_deferred)` 且三个产品身份为空，不新增 onboarding
+成员配置、Camp、Run 或 restore target，重启直接进入普通 App。两分支截图与 JSON report 输出到脚本报告的
+隔离目录。
 
 ### 计划内关闭真实 Runtime 门禁
 

@@ -1880,11 +1880,11 @@ export interface OnboardingProvisioningOperation {
 
 export type OnboardingSnapshot =
   | {
-      schemaVersion: 1
+      schemaVersion: 2
       status: 'uninitialized'
     }
   | {
-      schemaVersion: 1
+      schemaVersion: 2
       status: 'in_progress'
       step: OnboardingStep
       selectedMemberRole: BuiltinMemberAvatarRole | null
@@ -1892,9 +1892,9 @@ export type OnboardingSnapshot =
       provisioning: OnboardingProvisioningOperation | null
     }
   | {
-      schemaVersion: 1
+      schemaVersion: 2
       status: 'completed'
-      origin: 'onboarding' | 'existing_installation'
+      origin: 'onboarding' | 'runtime_deferred' | 'existing_installation'
       completedAt: string
       selectedMemberRole: BuiltinMemberAvatarRole | null
       memberAgentId: string | null
@@ -1909,6 +1909,7 @@ export interface OnboardingApi {
   showMemberSelection(): Promise<OnboardingSnapshot>
   completeMemberSelection(): Promise<OnboardingSnapshot>
   setRuntimeSelection(selection: OnboardingRuntimeSelection | null): Promise<OnboardingSnapshot>
+  deferRuntimeSetup(): Promise<OnboardingSnapshot>
   beginProvisioning(
     selection: OnboardingRuntimeSelection,
     runtimePermissions: AdapterPermissionConfig

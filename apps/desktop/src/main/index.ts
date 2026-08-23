@@ -617,6 +617,10 @@ ipcMain.handle('rovai:onboarding-set-runtime-selection', (_event, selection: unk
   return requireOnboarding().setRuntimeSelection(selection)
 })
 
+ipcMain.handle('rovai:onboarding-defer-runtime', () => {
+  return requireOnboarding().deferRuntimeSetup()
+})
+
 ipcMain.handle('rovai:onboarding-begin-provisioning', (
   _event,
   selection: unknown,

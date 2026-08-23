@@ -54,7 +54,6 @@ export const ONBOARDING_PRODUCT_RUNTIMES: readonly AdapterKind[] = [
   'codebuddy-cli',
   'qwen-code',
   'trae-cn-cli',
-  'cursor-agent',
   'kimi-code-cli',
   'antigravity-app'
 ]
@@ -114,6 +113,7 @@ export function OnboardingFlow({
   onRefreshRuntime,
   onOpenModelCatalog,
   onRuntimeSelectionChange,
+  onDeferRuntime,
   onComplete
 }: {
   snapshot: InProgressOnboarding
@@ -132,6 +132,7 @@ export function OnboardingFlow({
   onRefreshRuntime(): void
   onOpenModelCatalog(runtimeKind: AdapterKind): Promise<RuntimeModelCatalogView>
   onRuntimeSelectionChange(selection: OnboardingRuntimeSelection | null): void
+  onDeferRuntime(): void
   onComplete(): void
 }): React.JSX.Element {
   const selectedMember = BUILTIN_MEMBER_PRESETS.find(
@@ -194,6 +195,7 @@ export function OnboardingFlow({
             onRefresh={onRefreshRuntime}
             onOpenModelCatalog={onOpenModelCatalog}
             onSelectionChange={onRuntimeSelectionChange}
+            onDefer={onDeferRuntime}
             onComplete={onComplete}
           />
         )}
@@ -318,6 +320,7 @@ function RuntimeStep({
   onRefresh,
   onOpenModelCatalog,
   onSelectionChange,
+  onDefer,
   onComplete
 }: {
   member: BuiltinMemberPreset
@@ -331,6 +334,7 @@ function RuntimeStep({
   onRefresh(): void
   onOpenModelCatalog(runtimeKind: AdapterKind): Promise<RuntimeModelCatalogView>
   onSelectionChange(selection: OnboardingRuntimeSelection | null): void
+  onDefer(): void
   onComplete(): void
 }): React.JSX.Element {
   const availability = health?.runtimeAvailability ?? []
@@ -360,6 +364,8 @@ function RuntimeStep({
     selectedAdmission
   )
   const scanning = phase !== 'ready' && phase !== 'error'
+  const hasUsableRuntime = onboardingHasUsableRuntime(phase, health, installations)
+  const showingEmpty = !provisioning && !scanning && !hasUsableRuntime
   const hasQualifiedRuntime = health?.runtimePlatformAdmission.some((row) => (
     row.platform === health.hostPlatform && row.status === 'qualified'
   )) ?? false
@@ -369,9 +375,11 @@ function RuntimeStep({
       <header className="onboarding-page-heading onboarding-runtime-heading">
         <div>
           <h1 id="onboarding-runtime-title">为{member.displayName}准备运行环境</h1>
-          <p>Rovai 会检查本机。找到可用的 Agent 运行时后，再选择模型。</p>
+          <p>{showingEmpty
+            ? 'Rovai 会检查这台电脑上已经安装的 Agent 运行时。找到可用入口后，你可以选择模型；也可以先进入 Rovai，稍后再配置。'
+            : 'Rovai 会检查本机。找到可用的 Agent 运行时后，再选择模型。'}</p>
         </div>
-        {!scanning && hasQualifiedRuntime && (
+        {!scanning && !showingEmpty && hasQualifiedRuntime && (
           <button className="quiet-button" type="button" disabled={busy} onClick={onRefresh}>重新扫描</button>
         )}
       </header>
@@ -390,11 +398,21 @@ function RuntimeStep({
             <p>{member.professionalResponsibilities}</p>
             <dl>
               <div><dt>名册状态</dt><dd>已选定</dd></div>
-              <div><dt>运行配置</dt><dd>{canContinue || provisioning ? '已准备' : '未完成'}</dd></div>
+              <div><dt>运行配置</dt><dd>{showingEmpty ? '未配置' : canContinue || provisioning ? '已准备' : '未完成'}</dd></div>
             </dl>
           </div>
         </aside>
         <div className="onboarding-runtime-workspace">
+          {showingEmpty
+            ? (
+                <RuntimeEmptyState
+                  busy={busy}
+                  onRefresh={onRefresh}
+                  onDefer={onDefer}
+                />
+              )
+            : (
+                <>
           <section className="onboarding-runtime-panel">
             <header>
               <span><strong>本机 Agent 运行时</strong><small>{scanning ? '正在读取本机环境' : hasQualifiedRuntime ? '选择一个可用的运行入口' : '当前平台的 Runtime 资格状态'}</small></span>
@@ -479,10 +497,109 @@ function RuntimeStep({
               {!busy && <ForwardIcon />}
             </button>
           </footer>
+                </>
+              )}
         </div>
       </div>
     </section>
   )
+}
+
+function RuntimeEmptyState({
+  busy,
+  onRefresh,
+  onDefer
+}: {
+  busy: boolean
+  onRefresh(): void
+  onDefer(): void
+}): React.JSX.Element {
+  return (
+    <>
+      <section
+        className="onboarding-runtime-panel onboarding-runtime-empty-panel"
+        aria-labelledby="onboarding-runtime-empty-title"
+      >
+        <header>
+          <span><strong>本机 Agent 运行时</strong><small>当前没有可以直接使用的入口</small></span>
+          <span className="onboarding-runtime-state status-unavailable"><i aria-hidden="true" />无可用入口</span>
+        </header>
+        <div className="onboarding-runtime-empty">
+          <div className="onboarding-runtime-empty-visual" aria-hidden="true">
+            <svg viewBox="0 0 100 100">
+              <rect x="17" y="18" width="66" height="46" rx="5" />
+              <path d="M33 79h34M40 64v15M60 64v15" />
+              <circle cx="35" cy="40" r="4" />
+              <circle cx="50" cy="40" r="4" />
+              <circle cx="65" cy="40" r="4" />
+              <path d="M31 53h38" />
+            </svg>
+          </div>
+          <div className="onboarding-runtime-empty-copy">
+            <h2 id="onboarding-runtime-empty-title">当前没有可用的 Agent 运行时</h2>
+            <p>可能尚未安装、未完成登录、版本不满足要求，或本次检查没有得到可用结果。你仍然可以进入 Rovai；训练营会在这里正式结束。</p>
+            <div className="onboarding-runtime-evidence-list" aria-label="当前结果边界">
+              <div>
+                <strong><EvidenceInstallIcon />安装入口</strong>
+                <small>未形成可用入口</small>
+              </div>
+              <div>
+                <strong><EvidenceClockIcon />登录与版本</strong>
+                <small>可能需要处理或重试</small>
+              </div>
+              <div>
+                <strong><EvidenceModelIcon />模型目录</strong>
+                <small>尚未选择，因此未读取</small>
+              </div>
+            </div>
+            <details className="onboarding-runtime-install-guide">
+              <summary>查看安装说明</summary>
+              <div>
+                <p>安装或登录任一支持的 Runtime 后，可以在设置页重新扫描。以下仅是入口示例：</p>
+                <div className="onboarding-runtime-install-options">
+                  <span><strong>Codex CLI</strong><code>设置 → Agent 运行时</code></span>
+                  <span><strong>Claude Code</strong><code>设置 → Agent 运行时</code></span>
+                  <span><strong>Antigravity</strong><code>设置 → Agent 运行时</code></span>
+                </div>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+      <footer className="onboarding-runtime-footer onboarding-runtime-empty-footer">
+        <span>
+          <strong>结束训练营并进入 Rovai</strong>
+          <small>以后不会再次自动进入训练营；需要执行 Agent 工作时，从设置页配置 Runtime。</small>
+        </span>
+        <span className="onboarding-runtime-empty-actions">
+          <button
+            className="quiet-button onboarding-runtime-empty-secondary"
+            type="button"
+            disabled={busy}
+            onClick={onRefresh}
+          >
+            重新扫描
+          </button>
+          <button className="primary-button onboarding-primary" type="button" disabled={busy} onClick={onDefer}>
+            {busy ? '正在进入 Rovai…' : '进入 Rovai'}
+            {!busy && <ForwardIcon />}
+          </button>
+        </span>
+      </footer>
+    </>
+  )
+}
+
+function EvidenceInstallIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.75v10.5M2.75 8h10.5" /></svg>
+}
+
+function EvidenceClockIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.25" /><path d="M8 5.2v3.2l2 1.3" /></svg>
+}
+
+function EvidenceModelIcon(): React.JSX.Element {
+  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4.5h8v7H4z" /></svg>
 }
 
 function RuntimeScanProgress({ phase }: { phase: OnboardingRuntimePhase }): React.JSX.Element {
@@ -576,6 +693,32 @@ export function onboardingRuntimeCanContinue(
     && installation.memberRuntimeDefaults.adapterKind === selection.adapterKind
     && installation.memberRuntimeDefaults.permissions.adapterKind === selection.adapterKind
     && runtimeModelSelectionAvailable(installation, selection.model)
+}
+
+export function onboardingHasUsableRuntime(
+  phase: OnboardingRuntimePhase,
+  health: HealthStatus | null,
+  installations: AdapterInstallation[]
+): boolean {
+  if (phase !== 'ready' || !health) return false
+  return ONBOARDING_PRODUCT_RUNTIMES.some((kind) => {
+    const admission = runtimePlatformAdmissionFor(
+      health.hostPlatform,
+      health.runtimePlatformAdmission,
+      kind
+    )
+    const availability = health.runtimeAvailability.find(
+      (candidate) => candidate.runtimeKind === kind
+    ) ?? null
+    const installation = runtimeEditorInstallation(installations, kind)
+    return onboardingRuntimeCanContinue(
+      phase,
+      onboardingRuntimeSelectionFor(kind, installations),
+      availability,
+      installation,
+      admission
+    )
+  })
 }
 
 function runtimeRowDetail(presentation: RuntimeStatusPresentation): string {

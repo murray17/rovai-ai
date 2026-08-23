@@ -27,6 +27,8 @@ last_updated: 2026-08-23
 - [x] 复核十二种 Product Runtime 的 Core-owned permission default matrix；Kimi 新队员默认由 `default`
   修正为原生最高权限 `yolo`，已有成员不自动扩权，read-only effective mode 仍为 `plan`；
 - [x] Renderer catalog、成员参数、Onboarding、侧栏、监控和官方来源图标覆盖 Kimi。
+- [x] First-run Desktop 状态升级到 schema 2 并兼容读取 schema 1；零可用 Runtime 或扫描无可靠结果时展示
+  统一空结果页，`runtime_deferred` 在 provisioning 前无产品副作用地结束训练，正常配置路径保持原 saga。
 
 ## 3. ACP、安全与真实验收
 
@@ -67,6 +69,9 @@ last_updated: 2026-08-23
 
 - [x] Rust fmt/check、Kimi 配置/ACP/Health/Migration/Platform Admission 回归通过；
 - [x] TypeScript typecheck、Renderer 定向测试、Impeccable detector 与 legal asset gate 通过；
+- [x] Onboarding 定向测试覆盖 schema v1→v2、deferred 落盘、provisioning fence、零可用结果面和正常 Runtime
+  选择面；本地 `file://` 原型因 Browser 安全策略未直接渲染，已用隔离 packaged App 的真实扫描失败分支完成
+  `1040×700` Day/Night、安装说明展开、无横向溢出、deferred 落盘与重启不再进入训练营的专项验收；
 - [x] docs test/check、benchmark contract 与敏感信息扫描通过；
 - [x] 使用持久私有 provider 配置重新运行项目级真实 Kimi smoke，并核对正式 AgentRun 继承用户原生 Home、
   Probe 临时隔离、配置权限与进程清理。
