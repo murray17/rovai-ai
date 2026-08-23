@@ -44,8 +44,8 @@ coordinates them while preserving which facts came from Rovai Core and which cam
   retained but are not backfilled or included in current Usage denominators.
 - Runtime-reported cost, public-price estimates and Provider billing buckets remain distinct grains.
 - User workspaces, Runtime-native configuration and credentials remain user-owned and local.
-- The product is pre-release; compatibility labels describe Rovai's verified evidence, not upstream
-  support promises.
+- Rovai AI publishes versioned public releases; compatibility labels describe Rovai's verified evidence,
+  not upstream support promises.
 
 ## Brand Commitments
 
