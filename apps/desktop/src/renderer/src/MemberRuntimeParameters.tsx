@@ -419,7 +419,8 @@ function ModelFields({
       />
 
       {explicit && option && optionKey && (
-        <label className="field-label">{optionLabel ?? option.label}
+        <label className="field-label">
+          <span>{optionLabel ?? option.label}</span>
           <select
             value={optionValue}
             disabled={disabled}
@@ -730,7 +731,8 @@ function PermissionSelect({
   const invalid = Boolean(currentValue)
     && !descriptor.choices.some((choice) => choice.value === currentValue)
   return (
-    <label className="field-label">{label}
+    <label className="field-label">
+      <span>{label}</span>
       <select
         value={currentValue}
         disabled={disabled}
@@ -760,22 +762,25 @@ function PermissionSwitch({
   const descriptor = permissionDescriptor(snapshot.permissionOptions, fieldKey)
   const checked = draft.permissions.values[fieldKey] === 'on'
   return (
-    <label className="runtime-parameter-switch">
-      <span>
-        <strong>{label}</strong>
-        <small>{checked ? '开启' : '关闭'}</small>
+    <label className="field-label runtime-parameter-switch-field">
+      <span>{label}</span>
+      <span className="runtime-parameter-switch">
+        <span className="runtime-parameter-switch-state" aria-hidden="true">
+          {checked ? '开启' : '关闭'}
+        </span>
+        <input
+          type="checkbox"
+          aria-label={label}
+          checked={checked}
+          disabled={disabled || !descriptor}
+          onChange={(event) => updatePermission(
+            draft,
+            fieldKey,
+            event.target.checked ? 'on' : 'off',
+            onChange
+          )}
+        />
       </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled || !descriptor}
-        onChange={(event) => updatePermission(
-          draft,
-          fieldKey,
-          event.target.checked ? 'on' : 'off',
-          onChange
-        )}
-      />
     </label>
   )
 }
