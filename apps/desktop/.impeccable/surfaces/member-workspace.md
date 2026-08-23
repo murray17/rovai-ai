@@ -84,9 +84,10 @@ configuration shows frozen historical values but no Runtime/model/permission mut
 Name, role, portrait and other unrelated edits remain available and save while preserving the Runtime
 subobject exactly; the Renderer must not manufacture a default or require users to discard that history.
 
-The same admission-first behavior applies to Cursor Agent on macOS, where the label is “当前平台尚未验证”.
-Cursor remains in the complete product selector but disabled until Core returns a qualified row; do not
-manufacture its `execution_mode` or `approval_policy` defaults while the platform is unqualified.
+Cursor Agent remains a closed identity and does not enter the ordinary member Runtime selector until a
+future contract explicitly opens it. A historically persisted Cursor configuration stays frozen and readable;
+unrelated member edits preserve that Runtime subobject exactly, while the Renderer must not manufacture its
+`execution_mode` or `approval_policy` defaults or offer a new Cursor selection.
 
 Kimi Code follows the same admission-first rule. macOS arm64 currently remains not qualified because its
 Built-in CLI qualification matrix did not produce operation evidence; therefore its model and

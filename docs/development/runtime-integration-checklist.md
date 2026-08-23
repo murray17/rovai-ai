@@ -16,7 +16,7 @@ last_updated: 2026-08-23
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v23.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v25.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
 
@@ -46,6 +46,7 @@ last_updated: 2026-08-23
 | warm Host 与同 Host Session | | | |
 | cold exact resume / history restore | | | |
 | provider、MCP、Skill overlay | | | |
+| 新队员 Product permission default / read-only narrowing | | | |
 | Built-in CLI 当前 catalog / help / charter revision | | | |
 | Settings、成员选择与平台准入可见性 | | | |
 
@@ -62,6 +63,9 @@ last_updated: 2026-08-23
       `--to-principal` 等拼写。fixture 在执行首个 operation 前失败时，先定位过期断言，不能先归因于模型。
 - [ ] 未完成真实产品资格的 Runtime 默认不进入 Settings Runtime 目录、成员选择、自动检查或普通 AgentRun；
       保留 closed identity 或历史 reader 不等于对用户展示“已接入”。
+- [ ] 新队员 `memberRuntimeDefaults` 使用该 Runtime 已验证的原生最高权限；descriptor 的保守
+      `recommendedValue`、Probe 模式或上游默认值不得替代 Product default。既有成员配置不由 discovery、
+      migration 或升级静默扩权，read-only Run 仍按 Adapter 规则收窄 effective 权限。
 - [ ] 对现有基线的每个差异都已明确分类为：上游协议必需、用户明确需求、安全合同要求或暂不实现；没有
       依据的差异必须删除。
 
@@ -69,6 +73,8 @@ last_updated: 2026-08-23
 
 - [ ] Runtime 名称及稳定 `AdapterKind` / wire identity
 - [ ] 上游版本、build/commit、模型和账号类型
+- [ ] 通过当前版本的 `--help`、配置 schema、上游源码或官方文档完整枚举权限档位，记录语义上最宽松的
+      exact 原生值及证据来源；无法可靠确定最高权限时阻断 Product default 和正式接入。
 - [ ] 可执行文件 canonical path 与 fingerprint
 - [ ] 协议族：ACP / JSON-RPC / stream-json / one-shot / 其他
 - [ ] 目标平台：macOS arm64 / macOS x64 / Windows x64
@@ -229,7 +235,9 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 
 ## 5. 权限、Approval 与 MCP
 
-- [ ] 权限默认值映射到 Runtime 的精确原生值。
+- [ ] 十二种 Product Runtime 的新队员默认都映射到各自已验证的原生最高权限值；新增 Runtime 必须把 exact
+      值加入 Core-owned closed matrix，并验证 Renderer 直接复制 `memberRuntimeDefaults`。
+- [ ] 保守 `recommendedValue`、Probe/Check 权限与 Product default 分开；已有较窄保存值不会自动扩权。
 - [ ] 静态 permission descriptor 不冒充登录或动态能力证据。
 - [ ] permission schema drift 会使旧 Ready 失效，不会静默扩大既有成员权限。
 - [ ] read-only 或 Core-enforced 工作区会收窄高权限启动参数。
@@ -302,6 +310,7 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 | Case | 通过条件 |
 | --- | --- |
 | First run | 建立登录、模型、权限和唯一 Session/final |
+| Product permission default | 新 draft 选择已验证的原生最高权限；真实 writable Run 收到该值，read-only 收窄 |
 | Public narration | 普通无 Tool 回复可见，terminal 不重复 |
 | Command output | 固定 marker 进入对应 Action output |
 | Empty output | 命令仍可检查，且无私有字段泄漏 |
@@ -325,6 +334,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] 新 Runtime 纳入 Runtime Activity、诊断、planned shutdown 和 Built-in CLI 验收。
 - [ ] 使用代码搜索审计所有 `HOME` / Runtime-specific Home override，并把正式运行、Probe、fixture 三类结果
       分开记录；不能只检查新 Adapter 的一个 launch function。
+- [ ] 对 `AdapterKind::ALL` 审计 Core default matrix、descriptor choices、Renderer draft 与真实 launch 映射；
+      不只验证新增 Runtime 自己的一行。
 - [ ] 运行 `pnpm typecheck`、`pnpm test` 和适用的 Rust 门禁。
 - [ ] 记录 Runtime 版本、模型、平台、fingerprint、日期和仓库 revision。
 - [ ] 一次实测不外推为其他版本、模型或账号均兼容。
@@ -348,6 +359,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] 浅检成功被当成认证、模型、Session 或完整协议 Ready。
 - [ ] 旧 Probe 失败覆盖当前成功证据。
 - [ ] permission schema 改变后静默保留 Ready 或扩权。
+- [ ] 新队员权限回落到 Runtime/descriptor 的保守默认，或者 Renderer 自行重建而未使用 Core
+      `memberRuntimeDefaults`。
 - [ ] final 依赖进程退出、最后 stdout 或语义猜测。
 - [ ] 原始日志、路径、凭据、Prompt 或私有字段进入公开事件。
 - [ ] Usage 缺少来源、scope、counter mode 或版本证据却被声明为支持。

@@ -14,7 +14,7 @@ last_updated: 2026-08-23
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v23](../contracts/runtime-launch-and-verification-v23.md)。实测版本和能力只由
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -29,8 +29,8 @@ last_updated: 2026-08-23
 Product Runtime Catalog 当前包含十二种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
 普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
-Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。
-成员选项始终只来自 `AdapterKind`，但在当前主机上还必须先经过 Runtime Platform Admission。
+Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
+selector 同样不展示 Cursor；其他成员选项来自 `AdapterKind`，并在当前主机上继续经过 Runtime Platform Admission。
 
 `qualified` 是进入 Product Runtime Availability 的前置条件；`not_qualified` 按目标平台显示“Windows 尚未验证”或“当前平台尚未验证”，
 `unsupported` 显示平台不支持。两者都不产生 discovery、Installation、Probe 或普通机器状态。既有未准入配置
@@ -153,7 +153,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v23](../contracts/runtime-launch-and-verification-v23.md)。
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -216,7 +216,7 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v23](../contracts/runtime-launch-and-verification-v23.md)，
+字段级行为见 [Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Kimi Code 当前边界
@@ -255,7 +255,7 @@ legacy stdin 非法输入退出码；改为当前 CLI 合同的 `2` 后，十五
 lease fencing、exact successor read 与 logical/native continuation 全部通过，共产生 56 条 full-run evidence。
 因此 snapshot 声明 built-in transport，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64
 没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
-[Runtime Launch and Verification v23](../contracts/runtime-launch-and-verification-v23.md)，证据状态见
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -274,6 +274,12 @@ Kiro 暴露 Host-scoped `trust_all_tools=off|on`，新 draft 默认 `on`；真�
 `CoreEnforcedV1 + read_only Workspace` 的 effective launch 也会收窄为不传该 flag。既有成员配置不由
 discovery 或迁移扩权；permission schema digest
 变化时不能保留旧 Ready，用户必须通过既有 drift 流程显式重存。
+
+Kimi 暴露 Session-scoped `permission_mode=default|plan|auto|yolo`，新 draft 默认原生最高权限 `yolo`；
+writable AgentRun 通过标准 ACP `session/set_config_option` 投递 `mode=yolo`，read-only AgentRun 强制
+`plan`。descriptor 的 `recommendedValue=default` 只是保守提示，不改变 Product default；已有成员保存的
+`default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
+[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
 
 ## Preview 呈现与晋升
 

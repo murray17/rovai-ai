@@ -875,6 +875,10 @@ const PRODUCT_RUNTIMES: AdapterKind[] = [
   'antigravity-app'
 ]
 
+const VISIBLE_PRODUCT_RUNTIMES = PRODUCT_RUNTIMES.filter(
+  (runtimeKind) => runtimeKind !== 'cursor-agent'
+)
+
 const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'claude-code-cli': claudeCodeLogo,
   'codex-cli': codexLogo,
@@ -901,8 +905,7 @@ type RuntimeCatalogEntry =
     }
 
 const RUNTIME_CATALOG: RuntimeCatalogEntry[] = [
-  ...PRODUCT_RUNTIMES
-    .filter((runtimeKind) => runtimeKind !== 'cursor-agent')
+  ...VISIBLE_PRODUCT_RUNTIMES
     .map((runtimeKind) => ({ state: 'supported' as const, runtimeKind })),
   {
     state: 'pending',
@@ -1120,7 +1123,7 @@ export const MemberRuntimeForm = forwardRef<MemberRuntimeFormHandle, {
             }}
           >
             <option value="">不选择 Agent 运行时</option>
-            {PRODUCT_RUNTIMES.map((kind) => (
+            {VISIBLE_PRODUCT_RUNTIMES.map((kind) => (
               <option
                 key={kind}
                 value={kind}

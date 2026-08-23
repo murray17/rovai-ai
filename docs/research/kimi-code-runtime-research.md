@@ -291,6 +291,9 @@ Shell override: KIMI_SHELL_PATH
   Renderer identity、Runtime Activity、Health、shutdown 与逐平台 Admission；
 - `kimi acp` 完成 initialize、session/new、MiniMax M3 prompt 和 `end_turn`；项目级 Core Smoke 的公开最终
   文本为 `ROVAI_KIMI_ACP_OK`；
+- Core-owned 新队员默认从 `permission_mode=default` 修正为 Kimi 原生最高权限 `yolo`；真实 writable Core
+  smoke 直接读取 Installation 的 `memberRuntimeDefaults`，固定 Prompt、Shell command 与文件写入均在无交互式
+  Approval 下完成。已有保存值不迁移，read-only effective mode 仍强制 `plan`；
 - Shell allow-once permission 真实通过；stdout、stderr、mixed、empty、nonzero 与 128 KiB large output 六类均
   保留唯一 stable Tool ID 与 terminal Evidence，公开 output marker 为 `ROVAI_KIMI_CODE_CLI_PRINTF_OK`；
 - 独立 Camp 中 deny Approval 返回 `rovai_approval_denied`，目标 Tool 为 `failed/not_executed` 且文件不存在；

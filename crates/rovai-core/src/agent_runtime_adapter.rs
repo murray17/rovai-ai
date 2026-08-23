@@ -587,7 +587,7 @@ impl AgentRuntimeAdapterRegistry {
                 "approval_policy": "force",
             }),
             AdapterKind::KimiCodeCli => json!({
-                "permission_mode": "default",
+                "permission_mode": "yolo",
             }),
             AdapterKind::AntigravityApp => json!({
                 "mode": "accept-edits",
@@ -2388,7 +2388,7 @@ mod tests {
     use crate::agent_profile::{PermissionOptionDescriptor, ValueChoice};
 
     #[test]
-    fn member_permission_defaults_preserve_each_runtime_native_shape() {
+    fn member_permission_defaults_use_each_runtime_native_maximum() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let expected = [
             (
@@ -2422,10 +2422,7 @@ mod tests {
                 AdapterKind::CursorAgent,
                 json!({"execution_mode": "agent", "approval_policy": "force"}),
             ),
-            (
-                AdapterKind::KimiCodeCli,
-                json!({"permission_mode": "default"}),
-            ),
+            (AdapterKind::KimiCodeCli, json!({"permission_mode": "yolo"})),
             (
                 AdapterKind::AntigravityApp,
                 json!({

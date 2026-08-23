@@ -44,7 +44,7 @@ diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Pla
 | Identity / launch | `kimi --version` 为 `0.32.0`；`kimi acp` 完成 ACP v1 initialize/session-new | canonical executable 为 `kimi`，wire identity 为 `kimi-code-cli`，覆盖键为 `ROVAI_KIMI_BIN` |
 | Provider / model | 私有配置注入 `MiniMax-M3`、`openai` provider、国内 endpoint；真实 Prompt `end_turn` 成功 | 六个 `KIMI_MODEL_*` 键严格 allowlist；Unix group/other 可访问、未知/重复/缺失键均 fail closed |
 | Prompt / final | 隔离 ACP 和项目级 Core AgentRun 都返回固定公开答案 | Kimi streamed text 保持私有；terminal 与 Missing-Send candidate 先清洗 reasoning block |
-| Tool / permission | Shell allow-once 真实通过；stdout、stderr、mixed、empty、nonzero 与 128 KiB large output 六类均产生唯一 stable Tool ID 和 terminal Evidence | 只以 terminal phase 判定真实 command output；large output 有界截断并保留首部 marker，nonzero 保持 Tool failed |
+| Tool / permission | 显式 `permission_mode=default` 的 Shell allow-once、deny 与六类 terminal output 矩阵通过；另一个真实 smoke 直接读取 Core `memberRuntimeDefaults` 得到 `permission_mode=yolo`，固定 Prompt、Shell command 和文件写入均成功且产生 0 次交互式 Approval | 新队员默认原生最高权限 `yolo`，descriptor recommendation 保持 `default`，已有保存值不自动扩权，read-only effective mode 强制 `plan`；最高 Runtime 权限不绕过 Core 自有路径、凭据、Binding 与 execution fence |
 | Deny / filesystem | 独立 Camp 中真实 deny Approval 返回 `rovai_approval_denied`，Tool 为 `failed/not_executed`，目标文件不存在 | ACP Client fs write 没有匹配 one-time authorization 时由 Core 拒绝；Runtime Tool 前预拒绝仍可单独如实记录 |
 | Cancel / cleanup | `sleep 30` 获准后发送 `session/cancel`，约 6 ms 返回 `cancelled`，无目标残留进程 | cancel、terminal、planned shutdown、Camp 删除与 App shutdown 都停止私有 Host/进程树 |
 | Session / Home | 同 Host 同 Session 多轮精确回忆通过；同 Host 两个 Session 的 marker 无串话；新进程复用同一 `KIMI_CODE_HOME` 时，`session/resume` 与 `session/load` 都保持精确 Session ID 并回忆 marker；换用隔离 Home 后 resume 返回 `-32602 Unknown sessionId`；用户原生 Home 的真实 Core smoke 证明固定 command、allow 写入与 deny 三个连续兼容 Run 复用同一 Host/Session，显式停止后新 Host exact resume 且 Session ID 不变 | 正式 AgentRun 不设置 `HOME` / `KIMI_CODE_HOME`，继承用户原生状态根；Deep Probe 使用一次性临时 Home。含 AgentRun identity 的 Run-local MCP projection/evidence digest 不进入 Host compatibility，完整 Server 定义仍进入；停止或淘汰后新 Host 优先 exact resume，load-only 时进入 replay quarantine；v22 旧私有 Home 不自动迁移或删除 |
@@ -60,8 +60,8 @@ diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Pla
 修正过期 fixture 后 Built-in hard gate 已通过，所以 macOS arm64 为 digest-bound `qualified`；snapshot 声明
 Built-in transport，普通产品与默认资格 Smoke 包含 Kimi。External MCP 与兼容 warm Host 已由独立产品矩阵
 启用；Kimi Compaction compatibility detector 独立以 `best_effort` 启用，该结论不扩大为 Usage、macOS x64
-或 Windows x64 产品资格。native resume 使用唯一全局
-私有 home，History Restore 只作为 load-only fallback。异步 command catalog 没有当前产品消费者，不再作为
+或 Windows x64 产品资格。native resume 使用用户原生 Kimi Home，History Restore 只作为 load-only
+fallback。异步 command catalog 没有当前产品消费者，不再作为
 功能空缺跟踪。
 
 ### 2026-08-22 Cursor Agent `2026.08.11-e8db854` 隔离探测与未准入记录

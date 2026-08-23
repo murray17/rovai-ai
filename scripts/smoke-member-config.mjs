@@ -111,7 +111,7 @@ try {
       permissions: {
         adapterKind: 'kimi-code-cli',
         schemaVersion: 1,
-        values: { permission_mode: 'default' }
+        values: { permission_mode: 'yolo' }
       }
     }
   })

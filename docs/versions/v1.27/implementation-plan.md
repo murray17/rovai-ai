@@ -24,6 +24,8 @@ last_updated: 2026-08-23
 - [x] 正式 Kimi Host 继承用户原生 Home，Deep Probe 使用一次性临时 Home；严格 provider 环境、兼容 warm
   Host/Session reuse 和跨新 Host exact continuation 保持不变；含 AgentRun identity 的 MCP projection/evidence
   digest 不进入 Host compatibility，完整 Server 定义仍进入；
+- [x] 复核十二种 Product Runtime 的 Core-owned permission default matrix；Kimi 新队员默认由 `default`
+  修正为原生最高权限 `yolo`，已有成员不自动扩权，read-only effective mode 仍为 `plan`；
 - [x] Renderer catalog、成员参数、Onboarding、侧栏、监控和官方来源图标覆盖 Kimi。
 
 ## 3. ACP、安全与真实验收
@@ -36,6 +38,9 @@ last_updated: 2026-08-23
   Compaction 通过 Kimi-only idle ACP exact completion frame 以 `best_effort` 接入；真实 `session.resume/load`
   与 Built-in transport 保留；
 - [x] ACP Client 文件写入无授权时 fail closed；危险写入无 Tool/Approval/文件副作用时如实记录 Runtime 预拒绝。
+- [x] 真实 writable Kimi smoke 直接读取 Core `memberRuntimeDefaults` 得到 `permission_mode=yolo`，固定 Prompt、
+  Shell command 和文件写入均完成且没有交互式 Approval；资格用 `permission_mode=default` 的 allow/deny
+  矩阵继续独立覆盖审批边界；
 - [x] 真实 deny Approval roundtrip 返回 `rovai_approval_denied`，目标 Tool `not_executed` 且没有文件副作用；
 - [x] stdout、stderr、mixed、empty、nonzero 与 large output 六类终态 command Evidence 通过；
 - [x] Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景通过；

@@ -16,6 +16,7 @@ const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
 const commandOutputOnly = process.env.ROVAI_ACP_COMMAND_OUTPUT_ONLY === '1'
 const fullCommandOutputMatrix = process.env.ROVAI_ACP_FULL_COMMAND_MATRIX === '1'
+const useProductPermissionDefaults = process.env.ROVAI_ACP_USE_PRODUCT_PERMISSION_DEFAULTS === '1'
 let core
 let shuttingDown = false
 
@@ -83,6 +84,9 @@ try {
   // read-only AgentRun into a writer.
   const agentId = 'agent_2'
 
+  // Qualification deliberately opts into prompt-capable permission values so
+  // the allow/deny matrix remains observable. Product memberRuntimeDefaults
+  // use each Adapter's verified native maximum, including Kimi `yolo`.
   const specifications = [
     {
       adapterKind: 'opencode-cli',
@@ -118,6 +122,15 @@ try {
         && (installation?.snapshot?.probeStatus !== 'ready' || !installation.snapshot.models.length)) {
       throw new Error(`Capability snapshot is not ready: ${JSON.stringify(installation)}`)
     }
+    const permissionValues = useProductPermissionDefaults
+      ? installation.memberRuntimeDefaults?.permissions?.values
+      : specification.permissionValues
+    if (!permissionValues || typeof permissionValues !== 'object' || Array.isArray(permissionValues)) {
+      throw new Error(`ACP smoke has no Product permission defaults: ${JSON.stringify({
+        adapterKind: specification.adapterKind,
+        memberRuntimeDefaults: installation.memberRuntimeDefaults
+      })}`)
+    }
 
     let profile = await request('members.get', { agentId })
     const permissionsConfigured = await request('members.runtime.set', {
@@ -130,7 +143,7 @@ try {
         permissions: {
           adapterKind: specification.adapterKind,
           schemaVersion: installation.snapshot.permissionSchemaVersion,
-          values: specification.permissionValues
+          values: permissionValues
         }
       }
     })
@@ -142,10 +155,10 @@ try {
     }
     profile = await request('members.get', { agentId })
     if (JSON.stringify(profile.runtimeConfiguration?.permissions?.values)
-        !== JSON.stringify(specification.permissionValues)) {
+        !== JSON.stringify(permissionValues)) {
       throw new Error(`ACP smoke permissions drifted: ${JSON.stringify({
         adapterKind: specification.adapterKind,
-        expected: specification.permissionValues,
+        expected: permissionValues,
         actual: profile.runtimeConfiguration?.permissions
       })}`)
     }
@@ -290,6 +303,14 @@ try {
           )
         })}`)
       }
+      if (specification.adapterKind === 'kimi-code-cli'
+          && permissionValues.permission_mode === 'yolo'
+          && commandApprovals.size !== 0) {
+        throw new Error(`Kimi yolo command unexpectedly required interactive Approval: ${JSON.stringify({
+          approvalCount: commandApprovals.size,
+          permissionValues
+        })}`)
+      }
       results.at(-1).commandOutput = {
         marker: commandMarker,
         output: commandOutputEvent.params.payload.output,
@@ -401,6 +422,14 @@ try {
           events: events.filter((event) => event.params?.agentRunId === writeRunId).slice(-30)
         })}`)
       }
+      if (specification.adapterKind === 'kimi-code-cli'
+          && permissionValues.permission_mode === 'yolo'
+          && resolvedApprovals.size !== 0) {
+        throw new Error(`Kimi yolo write unexpectedly required interactive Approval: ${JSON.stringify({
+          approvalCount: resolvedApprovals.size,
+          permissionValues
+        })}`)
+      }
       results.at(-1).approval = {
         resolved: resolvedApprovals.size,
         actionKinds: writeActions.map((action) => action.actionKind),
@@ -410,9 +439,9 @@ try {
         written
       }
 
-      const approvalExpected = specification.permissionValues.permission === 'ask'
-        || specification.permissionValues.allow_all === 'off'
-        || specification.permissionValues.permission_mode === 'default'
+      const approvalExpected = permissionValues.permission === 'ask'
+        || permissionValues.allow_all === 'off'
+        || permissionValues.permission_mode === 'default'
       if (approvalExpected) {
         const deniedPath = join(projectRoot, `ACP_DENIED_${adapterFileStem}.txt`)
         const deniedBody = specification.adapterKind === 'kimi-code-cli'

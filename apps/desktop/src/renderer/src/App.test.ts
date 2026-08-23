@@ -4697,7 +4697,7 @@ describe('task event projections', () => {
     expect(hasDuplicateMemberDisplayName('洛可', null, [existing])).toBe(false)
   })
 
-  it('always offers the complete Product Runtime catalog without exposing paths', () => {
+  it('offers the selectable Product Runtime catalog without exposing hidden products or paths', () => {
     const markup = renderToStaticMarkup(createElement(MemberRuntimeForm, {
       agent: agentProfile(),
       installations: [codexInstallation()],
@@ -4719,6 +4719,7 @@ describe('task event projections', () => {
     expect(markup).toContain('>Qwen Code</option>')
     expect(markup).toContain('>TRAE CLI</option>')
     expect(markup).toContain('>Antigravity</option>')
+    expect(markup).not.toContain('>Cursor Agent</option>')
     expect(markup).not.toContain('>DeepSeek Harness</option>')
     expect(markup).toContain('未配置 Agent 运行时')
     expect(markup).not.toContain('已找到')
@@ -4808,7 +4809,7 @@ describe('task event projections', () => {
     expect(markup).toContain('Codex CLI')
     expect(markup).toContain('Antigravity')
     expect(markup).toContain('TRAE CLI')
-    expect(markup).toContain('Cursor Agent')
+    expect(markup).not.toContain('Cursor Agent')
     expect(markup).toContain('Kimi Code')
     expect(markup).not.toContain('正在检测')
     expect(markup).not.toContain('已找到')
