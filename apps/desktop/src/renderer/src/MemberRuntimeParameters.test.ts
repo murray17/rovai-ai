@@ -1,4 +1,5 @@
 import { createElement } from 'react'
+import { readFileSync } from 'node:fs'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type {
@@ -14,6 +15,8 @@ import {
   runtimeDraftForMember,
   runtimeEditorInstallation
 } from './MemberRuntimeParameters'
+
+const styles = readFileSync(new URL('./styles.css', import.meta.url), 'utf8')
 
 describe('member runtime parameters', () => {
   it('presents a superseded refresh as a temporary Runtime update, not a failure', () => {
@@ -188,7 +191,20 @@ describe('member runtime parameters', () => {
       }))
       expect(markup).toContain('type="checkbox"')
       expect(markup).toContain('checked=""')
+      expect(markup).toContain('field-label runtime-parameter-switch-field')
+      expect(markup).toContain('class="runtime-parameter-switch-state" aria-hidden="true">开启')
     }
+  })
+
+  it('keeps model, select, and switch control faces on one 44px height contract', () => {
+    expect(styles).toContain('--runtime-parameter-control-height: 44px')
+    const controlContract = styles.match(
+      /\.member-runtime-parameters \.runtime-model-picker-trigger,[\s\S]*?\.member-runtime-parameters \.runtime-parameter-switch \{[\s\S]*?\n\}/
+    )?.[0]
+
+    expect(controlContract).toContain('.member-runtime-parameters .field-label > select')
+    expect(controlContract).toContain('height: var(--runtime-parameter-control-height)')
+    expect(controlContract).toContain('min-height: var(--runtime-parameter-control-height)')
   })
 
   it('shows Kiro model selection and native trust-all permission', () => {

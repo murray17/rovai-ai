@@ -4966,12 +4966,21 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .runtime-user-status.status-unsupported,
 .runtime-user-status.status-unknown { color: var(--neutral); }
 .runtime-status-detail { line-height: 1.5; white-space: pre-line; }
-.member-runtime-parameters { margin-top: 9px; padding-top: 20px; border-top: 1px solid var(--line); background: transparent; }
+.member-runtime-parameters { --runtime-parameter-control-height: 44px; margin-top: 9px; padding-top: 20px; border-top: 1px solid var(--line); background: transparent; }
 .member-runtime-parameters-heading { display: grid; min-width: 0; gap: 4px; }
 .member-runtime-parameters-heading strong { font-size: 14px; font-weight: 700; }
 .member-runtime-parameters-heading small { color: var(--muted); font-size: 10.5px; font-weight: 500; }
 .member-runtime-parameters-body { margin-top: 14px; padding: 0 0 4px; border: 0; }
 .runtime-parameter-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
+.member-runtime-parameters .runtime-parameter-form { align-items: start; gap: 14px; }
+.member-runtime-parameters .runtime-parameter-form > .field-label { min-width: 0; margin-top: 0; }
+.member-runtime-parameters .runtime-model-picker-trigger,
+.member-runtime-parameters .field-label > select,
+.member-runtime-parameters .runtime-parameter-switch {
+  height: var(--runtime-parameter-control-height);
+  min-height: var(--runtime-parameter-control-height);
+}
+.member-runtime-parameters .field-label > select { padding-block: 0; }
 .runtime-model-field { min-width: 0; }
 .runtime-model-picker-trigger {
   display: flex;
@@ -5039,20 +5048,17 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .runtime-parameter-unavailable { margin: 12px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .runtime-parameter-switch {
   display: flex;
-  min-height: 58px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-top: 14px;
-  padding: 8px 10px;
+  padding: 0 10px;
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   background: var(--input);
   cursor: pointer;
 }
-.runtime-parameter-switch > span { display: grid; gap: 3px; }
-.runtime-parameter-switch strong { font-size: 12px; }
-.runtime-parameter-switch small { color: var(--muted); font-size: 10px; }
+.runtime-parameter-switch-state { color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.runtime-parameter-switch:has(input:disabled) { cursor: not-allowed; }
 .runtime-parameter-switch input {
   position: relative;
   width: 34px;

@@ -697,6 +697,32 @@ try {
     '审批策略',
     'never'
   )
+  const runtimeControlGeometry = await evaluate(running.cdp, `(() => {
+    const controls = [...document.querySelectorAll(
+      '.member-runtime-parameters .runtime-model-picker-trigger, '
+        + '.member-runtime-parameters .field-label > select, '
+        + '.member-runtime-parameters .runtime-parameter-switch'
+    )]
+    const fields = [...document.querySelectorAll(
+      '.member-runtime-parameters .runtime-parameter-form > .field-label'
+    )]
+    const form = document.querySelector('.member-runtime-parameters .runtime-parameter-form')
+    const formStyle = form ? getComputedStyle(form) : null
+    return {
+      heights: controls.map((control) => control.getBoundingClientRect().height),
+      fieldMargins: fields.map((field) => getComputedStyle(field).marginTop),
+      rowGap: formStyle?.rowGap,
+      columnGap: formStyle?.columnGap
+    }
+  })()`)
+  assert(
+    runtimeControlGeometry.heights.length === 4
+      && runtimeControlGeometry.heights.every((height) => Math.abs(height - 44) <= 0.5)
+      && runtimeControlGeometry.fieldMargins.every((margin) => margin === '0px')
+      && runtimeControlGeometry.rowGap === '14px'
+      && runtimeControlGeometry.columnGap === '14px',
+    `Member Runtime controls are not aligned to the 44px field contract: ${JSON.stringify(runtimeControlGeometry)}`
+  )
   await mouseClick(running.cdp, '.unified-sidebar button[aria-label="记忆"]')
   await waitForSelector(running.cdp, '.member-leave-dialog')
   await waitForExpression(running.cdp,
