@@ -1690,6 +1690,7 @@ fn atomic_write_private_json(path: &Path, value: &Value) -> Result<()> {
     write_private(&temporary, &bytes)?;
     fs::rename(&temporary, path)?;
     restrict_private_file(path)?;
+    #[cfg(unix)]
     if let Some(parent) = path.parent() {
         OpenOptions::new().read(true).open(parent)?.sync_all()?;
     }
@@ -1725,12 +1726,31 @@ fn restrict_private_file(_path: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    use super::atomic_write_private_json;
     use super::{
         Flags, camp_create_params, command_result_exit_code, event_belongs_to_run,
         launch_result_exit_code, member_create_params, member_runtime_set_params,
         parse_duration_seconds, terminal_exit_code, terminal_status,
     };
     use serde_json::json;
+
+    #[cfg(windows)]
+    #[test]
+    fn atomic_private_journal_write_does_not_open_a_windows_directory_as_a_file() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-automation-journal-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("trial.journal.json");
+
+        atomic_write_private_json(&path, &json!({ "phase": "prepared" })).unwrap();
+
+        assert!(path.is_file());
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
 
     #[test]
     fn duration_parser_freezes_supported_units_and_caps_at_one_day() {

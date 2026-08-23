@@ -474,16 +474,14 @@ if (primaryInstance) void app.whenReady().then(async () => {
       process.platform
     ) ?? undefined
   })
-  if (process.platform !== 'win32') {
-    userAutomation = await startUserAutomationOptional(
-      () => new UserAutomationServer(
-        userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
-        { core, openCamp: openCampFromAutomation, appVersion: app.getVersion() }
-      )
+  userAutomation = await startUserAutomationOptional(
+    () => new UserAutomationServer(
+      userAutomationRoot(app.getPath('appData'), userDataPath, hasExplicitUserDataDirectory),
+      { core, openCamp: openCampFromAutomation, appVersion: app.getVersion() }
     )
-    if (userAutomation) {
-      console.info('[startup] stage=user_automation_ready contract_version=1')
-    }
+  )
+  if (userAutomation) {
+    console.info('[startup] stage=user_automation_ready contract_version=1')
   }
 
   app.on('activate', () => {
