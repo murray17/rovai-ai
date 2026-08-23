@@ -17488,14 +17488,14 @@ while IFS= read -r _ignored; do :; done
     fn local_windows_qualification_updates_the_projected_admission_only_when_allowed() {
         let registry = AgentRuntimeAdapterRegistry::default();
         let denied = apply_windows_runtime_qualification_override(
-            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
+            registry.platform_admission(AdapterKind::CursorAgent, HostPlatformKey::WindowsX64),
             false,
         );
         assert!(!denied.is_qualified());
         assert_eq!(denied.evidence_revision(), None);
 
         let qualified = apply_windows_runtime_qualification_override(
-            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
+            registry.platform_admission(AdapterKind::CursorAgent, HostPlatformKey::WindowsX64),
             true,
         );
         assert!(qualified.is_qualified());
