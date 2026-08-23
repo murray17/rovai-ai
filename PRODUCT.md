@@ -4,24 +4,25 @@
 
 ## Platform
 
-web
+desktop
 
 ## Users
 
-Rovai AI serves developers who coordinate local coding agents on their desktop. They need to assign work,
+Rovai AI serves developers who coordinate coding agents on their desktop. They need to assign work,
 inspect what each agent did, intervene when approval or recovery is required, and keep collaboration
 state understandable across long-running projects.
 
 ## Product Purpose
 
-Rovai AI is a local-first multi-agent development workspace. It organizes durable teammates, Camps,
-tasks, execution, approvals, evidence and recovery while driving coding-agent CLIs already installed
-on the user's machine. Success means the user can understand and control collaborative agent work
-without surrendering ownership of the workspace, Runtime configuration or credentials.
+Rovai AI is a desktop workspace for long-lived agent teams. It organizes members, Camps, tasks,
+execution, approvals, evidence, recovery and collaborative memory while driving coding-agent
+Runtimes already installed on the user's machine. Success means the user can understand and control
+collaborative agent work without surrendering ownership of the workspace, Runtime configuration or
+credentials.
 
 ## Positioning
 
-The product combines durable local collaboration state with Runtime-native execution and explicit
+The product combines durable collaboration state with Runtime-native execution and explicit
 evidence boundaries. It does not replace supported coding-agent products with a hosted proxy; it
 coordinates them while preserving which facts came from Rovai Core and which came from each Runtime.
 
@@ -29,7 +30,7 @@ coordinates them while preserving which facts came from Rovai Core and which cam
 
 - A desktop Electron application operates alongside local Git workspaces and coding-agent CLIs; platform-specific
   support and qualification remain explicit for macOS and Windows rather than being inferred from a shared UI.
-- Users move between Camps, teammates, memory, settings, approvals, diagnostics and execution detail.
+- Users move between Camps, members, memory, settings, approvals, diagnostics and execution detail.
 - Runtime availability, model capabilities and usage reporting vary by installed product and version.
 - Monitoring is a compact Usage read surface: users compare recent Runtime-reported Token, Cache,
   attributable Cost and Coverage without exposing prompts, completions, tool output or credentials.
@@ -66,7 +67,7 @@ next available action are stated plainly rather than hidden behind optimistic st
 
 1. Preserve provenance: every operational claim names its authority and quality.
 2. Make uncertainty useful: unknown and partial states show coverage and a concrete explanation.
-3. Keep local ownership explicit: coordination must not silently take over workspaces or credentials.
+3. Keep ownership boundaries explicit: coordination must not silently take over workspaces or credentials.
 4. Prefer durable, inspectable state over transient inference.
 5. Keep dense operational surfaces calm, navigable and honest.
 
