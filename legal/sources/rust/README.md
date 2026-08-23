@@ -5,7 +5,6 @@
 - License: MPL-2.0
 - SHA-256: `04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d`
 - Repository path: `legal/sources/rust/option-ext-0.2.0.crate`
-- Packaged application path: `Contents/Resources/legal/rust/sources/option-ext-0.2.0.crate`
 
 `option-ext-0.2.0.crate` is the exact, unmodified source archive published by
 crates.io. The archive contains the complete source, its Cargo manifests, and

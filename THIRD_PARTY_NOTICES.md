@@ -1,6 +1,6 @@
 # Rovai AI Third-Party Notices and Source Record
 
-This file is the entry point for source and packaged-desktop legal materials.
+This file is the entry point for source-repository legal materials.
 Machine-readable exact-version lists and SHA-256 values live under `legal/`.
 
 ## 1. Rovai AI License
@@ -56,7 +56,7 @@ claim ownership of those marks.
 
 ## 5. Codex Schema
 
-`schemas/codex-app-server/0.144.5` derives from OpenAI Codex tag
+`docs/versions/v0.01/schemas/codex-app-server/0.144.5` derives from OpenAI Codex tag
 `rust-v0.144.5`, peeled commit
 `87db9bc18ba5bc82c1cb4e4381b44f693ee35623`, under Apache-2.0. The local 267
 files contain formatting-only JSON serialization differences and zero
@@ -74,10 +74,11 @@ license-file source, and SHA-256 values are in
 `legal/manifests/javascript-source-dependencies.json` and
 `legal/licenses/javascript/`.
 
-All 144 bundled instances have directly distributed legal files: 143 use the
-exact package files and one uses the curated clarification below. The collector
-retains every matched LICENSE, COPYING, NOTICE, COPYRIGHT, UNLICENSE, and
-PATENT-family regular file rather than stopping after the first license text.
+All 144 bundled instances have corresponding repository legal files: 143 use
+the exact package files and one uses the curated clarification below. The
+archived records retain every matched LICENSE, COPYING, NOTICE, COPYRIGHT,
+UNLICENSE, and PATENT-family regular file rather than stopping after the first
+license text.
 
 `react-remove-scroll-bar 2.3.8` declares MIT in its exact npm metadata and
 README but omits a license file from the tarball. Its manifest entry records
@@ -97,8 +98,7 @@ license evidence. Multi-license packages retain every packaged alternative.
 
 For example, `anyhow 1.0.103` declares `MIT OR Apache-2.0`; its exact
 `LICENSE-MIT` and `LICENSE-APACHE` files are retained under
-`legal/licenses/rust/anyhow@1.0.103/` and packaged under
-`Contents/Resources/legal/rust/licenses/anyhow@1.0.103/`.
+`legal/licenses/rust/anyhow@1.0.103/`.
 
 `rusqlite 0.38.0` and `libsqlite3-sys 0.36.0` are MIT-licensed Rust crates.
 The enabled `bundled` feature compiles SQLite 3.51.1. SQLite is public-domain
@@ -107,16 +107,13 @@ quotes the amalgamation's dedication and links the canonical SQLite record.
 
 `option-ext 0.2.0` is unchanged transitive Covered Software under MPL-2.0.
 The complete MPL text is retained at
-`legal/licenses/rust/option-ext@0.2.0/LICENSE.txt` and packaged at
-`Contents/Resources/legal/rust/licenses/option-ext@0.2.0/LICENSE.txt`. The exact
-unmodified crates.io source archive is retained at
-`legal/sources/rust/option-ext-0.2.0.crate` and packaged at
-`Contents/Resources/legal/rust/sources/option-ext-0.2.0.crate`; its SHA-256 is
+`legal/licenses/rust/option-ext@0.2.0/LICENSE.txt`. The exact unmodified
+crates.io source archive is retained at
+`legal/sources/rust/option-ext-0.2.0.crate`; its SHA-256 is
 `04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d`.
 Recipients may directly copy, inspect, extract, and modify that archive subject
-to MPL-2.0. `legal/sources/rust/README.md` and the packaged
-`rust/sources/README.md` explain source availability and future-modification
-policy.
+to MPL-2.0. `legal/sources/rust/README.md` explains source availability and
+future-modification policy.
 
 Independently authored Rovai files remain under their respective licenses. The
 MPL-2.0 obligations are preserved for `option-ext` Covered Software; its
@@ -124,12 +121,9 @@ inclusion does not relicense every file in the larger work.
 
 ## 8. Electron and Chromium
 
-The legal payload preparation step reads Electron `43.1.1` from the frozen
-installation, verifies the platform release archive against Electron's exact
-`checksums.json` entry, and copies its root `LICENSE` and unmodified
-`LICENSES.chromium.html` to `Contents/Resources/legal/electron/`. Both remain
-directly readable outside `app.asar`; the generated Electron manifest records
-their hashes without timestamps or machine-local paths.
+The desktop build uses Electron `43.1.1`. Electron and Chromium retain their
+upstream licenses; the repository does not run a separate legal preparation or
+package-verification step for the Electron distribution.
 
 ## 9. Product Names and Trademarks
 

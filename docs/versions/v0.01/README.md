@@ -3,7 +3,7 @@ document_type: version-overview
 version: v0.01
 lifecycle: historical
 authority: historical-context
-last_updated: 2026-07-18
+last_updated: 2026-08-23
 ---
 
 # Lumen AI v0.01 版本架构记录
@@ -32,6 +32,7 @@ v0.01 验证一条本地、可审计、可恢复的单 Agent 闭环：用户通�
 
 - [architecture.md](architecture.md)：系统结构、边界、主要流程、风险和演进约束；
 - [implementation-status.md](implementation-status.md)：当前代码已经实现的能力清单；
+- [Codex app-server 0.144.5 Schema 快照](schemas/codex-app-server/0.144.5/codex_app_server_protocol.schemas.json)：v0.01 固定上游实验协议参考；
 - [开发者指南](../../development/README.md)：开发、测试、Smoke Test 和 macOS 构建命令；
 - [../../ui/README.md](../../ui/README.md)：Renderer 视觉与交互规范。
 

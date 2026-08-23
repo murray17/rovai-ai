@@ -12,9 +12,8 @@
 
 The exact source is the crates.io `option-ext-0.2.0.crate` archive retained at
 `legal/sources/rust/option-ext-0.2.0.crate`; its SHA-256 is the Cargo checksum
-above. The same unmodified archive is distributed to binary recipients at
-`Contents/Resources/legal/rust/sources/option-ext-0.2.0.crate`. The archive
-contains the full source, Cargo manifests, and `LICENSE.txt`, whose SHA-256 is
+above. The archive contains the full source, Cargo manifests, and
+`LICENSE.txt`, whose SHA-256 is
 `66a3107d5ad6a058aab753eaac2047ccb2ed0e39465dd0fe5844da3e300d5172`.
 
 The archive's `.cargo_vcs_info.json` names commit
@@ -26,9 +25,8 @@ source authority.
 
 Rovai AI builds the crate unchanged from Cargo's registry source. The full
 MPL-2.0 text is retained at
-`legal/licenses/rust/option-ext@0.2.0/LICENSE.txt` and distributed at
-`Contents/Resources/legal/rust/licenses/option-ext@0.2.0/LICENSE.txt` together
-with this source record and the exact source archive.
+`legal/licenses/rust/option-ext@0.2.0/LICENSE.txt` together with this source
+record and the exact source archive.
 
 The Rovai AI project owner approved this conservative compliance plan. It
 covers `option-ext 0.2.0` only and is not a claim of external-counsel review.

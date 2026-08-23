@@ -55,7 +55,7 @@ Electron Main 是桌面父进程。Rust Core 是随 App 打包并由 Main 启动
 | Electron Main | `apps/desktop/src/main/` | IPC Allowlist、系统能力、Core 监管 |
 | Shared contracts | `packages/contracts/` | Renderer/Main 使用的 TypeScript 业务协议 |
 | Rust Core | `crates/rovai-core/` | 领域状态、持久化、Git、Runtime、审批、恢复 |
-| Codex schemas | `schemas/codex-app-server/0.144.5/` | 固定上游实验协议的参考 Schema |
+| Codex schemas | [`schemas/codex-app-server/0.144.5/`](schemas/codex-app-server/0.144.5/codex_app_server_protocol.schemas.json) | 固定上游实验协议的参考 Schema |
 | Build scripts | `scripts/` | Core 构建、Smoke、Recovery、自举与视觉捕获 |
 
 关键所有权规则：
@@ -187,7 +187,7 @@ Event Sequence 使用每个 Task 当前最大序号加一。该实现依赖当�
 - 传输：`codex app-server --listen stdio://`；
 - 兼容基线：严格固定 `0.144.5`；
 - 策略：`workspace-write`、`on-request`、`approvalsReviewer = user`；
-- 参考 Schema：`schemas/codex-app-server/0.144.5/`。
+- 参考 Schema：[`schemas/codex-app-server/0.144.5/`](schemas/codex-app-server/0.144.5/codex_app_server_protocol.schemas.json)。
 
 升级 Codex 基线必须作为显式兼容性变更，同时更新版本常量、Schema、事件映射、审批映射、健康检查、Smoke Test 和版本文档。
 

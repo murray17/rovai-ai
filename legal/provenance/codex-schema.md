@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Local path | `schemas/codex-app-server/0.144.5` |
+| Local path | `docs/versions/v0.01/schemas/codex-app-server/0.144.5` |
 | Upstream | `https://github.com/openai/codex` |
 | Version/tag | `rust-v0.144.5` |
 | Annotated tag object | `efea0e66996d4e7f4f805f3df32a169d327f2f73` |

@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-20
+last_updated: 2026-08-23
 ---
 
 # Rovai-ai 开发者指南
@@ -102,7 +102,6 @@ pnpm build:desktop
 | 编写或更新仓库 Skill、触发 `description`、正文分层、references 或界面元数据 | [Skill 编写与 description 路由规范](skill-authoring.md) |
 | 修改 Native Session Bootstrap、AgentRun Dynamic Context、模型可见 section/字段/语义或其证据与 formatter 版本 | [核心模型上下文变更治理](model-context-change-governance.md) |
 | 构建 Release Core、App、DMG，检查签名 | [macOS 构建与打包](packaging.md) |
-| 更新第三方依赖、素材来源、法律清单或验证 App 外置 legal payload | [macOS 构建与打包](packaging.md#法律来源门与外置-payload) |
 | 实现或验收 Windows x64 sidecar、NSIS、签名与升级 | [Windows x64 构建、打包与发布设计](packaging-windows.md) |
 | 使用隔离 `userData` 运行真实 App、截图或桌面验收 | [桌面 UI 验收](ui-acceptance.md) |
 | 为 Coding Agent 安装本地 Impeccable、更新设计上下文或维护 UI 文档分类 | [Coding Agent Impeccable 与 UI 文档工作流](coding-agent-impeccable-ui-workflow.md) |
@@ -143,7 +142,6 @@ pnpm build:desktop
 | `resources/bin/` | 复制后供 Electron 使用的 Rust Core 与 Agent CLI |
 | `out/` | Electron Vite 构建结果 |
 | `dist/` | 当前 macOS App/DMG，以及未来由目标隔离流程生成的 Windows package 输出 |
-| `.legal-payload/` | 由 `pnpm legal:prepare` 确定性生成、供 Electron Builder 外置复制的法律文件 staging |
 
 不同 worktree 默认各自拥有这些生成目录。开发工作已完成时，应按
 [Worktree 清理流程](worktrees.md#工作收口与安全清理)删除整个 worktree；仍在开发的 worktree
