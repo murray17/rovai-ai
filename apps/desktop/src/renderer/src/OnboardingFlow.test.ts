@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type {
   AdapterInstallation,
+  HealthStatus,
   OnboardingSnapshot,
   ProductRuntimeAvailability,
   RuntimePlatformAdmission,
@@ -10,6 +11,7 @@ import type {
 } from '@contracts'
 import {
   OnboardingFlow,
+  onboardingHasUsableRuntime,
   onboardingRuntimeCanContinue,
   onboardingRuntimeSelectionFor
 } from './OnboardingFlow'
@@ -45,6 +47,41 @@ describe('first-run onboarding flow', () => {
     expect(markup).toContain('检查登录与版本')
     expect(markup).toContain('读取模型目录')
     expect(markup).not.toContain('跳过')
+  })
+
+  it('shows the deferred Runtime page when a completed scan has no usable Runtime', () => {
+    const markup = renderOnboarding({
+      ...snapshot('runtime'),
+      selectedMemberRole: 'luoke'
+    }, 'ready', emptyHealth())
+    expect(markup).toContain('当前没有可用的 Agent 运行时')
+    expect(markup).toContain('查看安装说明')
+    expect(markup).toContain('重新扫描')
+    expect(markup).toContain('进入 Rovai')
+    expect(markup).toContain('quiet-button onboarding-runtime-empty-secondary')
+    expect(markup).toContain('Codex CLI')
+    expect(markup).toContain('Claude Code')
+    expect(markup).toContain('Antigravity')
+    expect(markup).not.toContain('Kimi Code')
+    expect(markup).not.toContain('OpenCode')
+    expect(markup).not.toContain('onboarding-runtime-list')
+    expect(markup).not.toContain('onboarding-model-panel')
+  })
+
+  it('keeps the normal Runtime selection when at least one Runtime can continue', () => {
+    const installation = codexInstallation()
+    const health = healthWithRuntime(readyAvailability(), qualifiedAdmission())
+    const markup = renderOnboarding({
+      ...snapshot('runtime'),
+      selectedMemberRole: 'luoke'
+    }, 'ready', health, [installation])
+    expect(markup).toContain('onboarding-runtime-list')
+    expect(markup).toContain('onboarding-model-panel')
+    expect(markup).not.toContain('当前没有可用的 Agent 运行时')
+    expect(markup).not.toContain('Cursor Agent')
+    expect(onboardingHasUsableRuntime('ready', health, [installation])).toBe(true)
+    expect(onboardingHasUsableRuntime('error', health, [installation])).toBe(false)
+    expect(onboardingHasUsableRuntime('ready', emptyHealth(), [])).toBe(false)
   })
 
   it('continues only with a usable Runtime, a model, and matching adapter defaults', () => {
@@ -88,7 +125,9 @@ function windowsNotQualifiedAdmission(): RuntimePlatformAdmission {
 
 function renderOnboarding(
   value: InProgress,
-  runtimePhase: 'idle' | 'discovering' | 'checking' | 'models' | 'ready' | 'error' = 'idle'
+  runtimePhase: 'idle' | 'discovering' | 'checking' | 'models' | 'ready' | 'error' = 'idle',
+  health: HealthStatus | null = null,
+  installations: AdapterInstallation[] = []
 ): string {
   return renderToStaticMarkup(createElement(OnboardingFlow, {
     snapshot: value,
@@ -96,8 +135,8 @@ function renderOnboarding(
       preference: 'system',
       resolvedTheme: 'day'
     },
-    health: null,
-    installations: [],
+    health,
+    installations,
     runtimePhase,
     busy: false,
     error: null,
@@ -121,18 +160,60 @@ function renderOnboarding(
       diagnosticCode: null
     }),
     onRuntimeSelectionChange: () => undefined,
+    onDeferRuntime: () => undefined,
     onComplete: () => undefined
   }))
 }
 
 function snapshot(step: InProgress['step']): InProgress {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: 'in_progress',
     step,
     selectedMemberRole: step === 'welcome' ? null : 'luoke',
     runtimeSelection: null,
     provisioning: null
+  }
+}
+
+function emptyHealth(): HealthStatus {
+  return healthWithRuntime(null, null)
+}
+
+function healthWithRuntime(
+  availability: ProductRuntimeAvailability | null,
+  admission: RuntimePlatformAdmission | null
+): HealthStatus {
+  return {
+    core: { ok: true, version: 'test', dataDir: '/tmp/rovai' },
+    database: { ok: true, path: '/tmp/rovai/rovai.sqlite' },
+    git: { installed: false, version: null },
+    hostPlatform: 'macos-arm64',
+    runtimeCatalog: [],
+    runtimePlatformAdmission: admission ? [admission] : [],
+    runtimeAvailability: availability ? [availability] : [],
+    searchEnvironment: {
+      generation: 1,
+      createdAt: '2026-08-23T00:00:00.000Z',
+      pathEntryCount: 0,
+      shell: {
+        status: 'captured',
+        interactive: true,
+        shellName: 'zsh',
+        entryCount: 0,
+        elapsedMillis: 0
+      }
+    }
+  }
+}
+
+function qualifiedAdmission(): RuntimePlatformAdmission {
+  return {
+    runtimeKind: 'codex-cli',
+    platform: 'macos-arm64',
+    status: 'qualified',
+    reasonCode: null,
+    evidenceRevision: 'test'
   }
 }
 

@@ -87,7 +87,7 @@ last_updated: 2026-08-23
 - 同一 Authority instance/Camp 的 root 权限切换、child create/remove、Agent/Composer ingress、失败清理和 Camp removal 必须经过跨 Store 实例共享的 per-Camp admission；已持有者不得重入。不同 Camp 可并行，且该 admission 不得把文件 copy/hash 带入 Database mutex 或 built-in invocation guard。
 - Runtime 不读取 Authority Camp tree，只获得实例隔离、可重建的 Published Attachment View 精确 `attachments` 根。只有 `runtime_projection_state = available` 的公共附件属于 Runtime Desired Catalog；`pending | recovery_required` 阻断新 Runtime admission，`failed` 保留公共/UI 事实但只有 resolution tombstone、没有 Runtime path。
 - Composer 与 Agent ingress 共享统一 publication coordinator：短事务先提交公共语义、revision、reservation、writer intent 与 gate，Worker 再按 Camp FIFO 在数据库锁外 copy/verify/fsync。Scheduler 必须先取得一次 read admission，再在同一数据库临界区确认无 writer intent并 Claim；完整 Run 复用该 admission。成功和 terminal failure 都推进 contiguous resolved revision，failed 不得被 rebuild 静默复活。
-- 首次安装 admission 与训练进度由 Electron Main 在 Core 启动前以私有版本化 Desktop 状态拥有；产品数据库存在性参与 clean/fail-closed 判定。Provisioning 通过可重试 checkpoint 幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成。
+- 首次安装 admission 与训练进度由 Electron Main 在 Core 启动前以私有版本化 Desktop 状态拥有；产品数据库存在性参与 clean/fail-closed 判定。正常 Provisioning 通过可重试 checkpoint 幂等创建首个成员、Runtime 选择和“初次集结”Camp/Draft，不把半完成状态伪装为已完成；无可用 Runtime 且 provisioning 尚未开始时可以原子完成为 `runtime_deferred`，但不得创建成员、Runtime 配置、Camp、Run 或 onboarding restore target，也不得在以后启动时重新打开训练营。
 - Camp 永久删除保持 User-only、exact-version 和单事务聚合删除。普通模式要求 quiescent；用户明确确认的 force 模式先持久化停止/隔离边界，再删除 Camp 聚合并异步清理受管资源，不能把未知 Runtime 外部效果宣称为已撤销。
 
 ## 成员身份、生命周期与投影

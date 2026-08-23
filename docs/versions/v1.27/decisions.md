@@ -337,3 +337,52 @@ cancelled settle 这次等待。把 blocked 当终态会提前清除 pending，�
 - **一分钟内合并 observation：** 会吞掉两次真实快速 compaction，且不能解决 source provenance 缺失；
 - **修改当前 Prompt 立即重投 Bootstrap：** 会破坏 prepare cutoff 与输入不重入边界，现有下一输入 redelivery
   已拥有正确时序。
+
+<a id="v1-27-d08"></a>
+## V1.27-D08：无可用 Runtime 时以无产品副作用终态结束首次训练
+
+### 背景
+
+First-run v1 把 Welcome、Member 与 Runtime 都定义为不可跳过的 mandatory gate，并只允许在成员 Runtime、
+“初次集结”Camp 和 restore target 全部落盘后完成。该边界保证了正常配置不会产生半完成产品对象，却也让
+一台没有安装、登录或通过平台准入的 Runtime 的电脑永久停在第三页：用户既不能执行 Agent，也不能进入
+正常 App 查看设置和其他能力。
+
+另一个方案是把扫描失败单独做成错误页并继续阻断，但“未安装”“未登录”“版本不支持”“平台未准入”和
+“本轮检查没有可靠结果”对首次训练的可执行结论相同：都没有一个可以安全写入成员配置并开始 Run 的入口。
+为了仅解除训练阻断，又不能用一个不可运行 Runtime 创建虚假的成员配置或 Camp。
+
+### 决定
+
+1. First-run 当前合同切换到 [v2](../../contracts/first-run-onboarding-v2.md)，Desktop `onboarding.json` 当前写入
+   schema 2；合法 schema 1 状态确定性规范化，保留页、选择和 provisioning checkpoint；
+2. schema 2 完成来源增加 `runtime_deferred`。该来源要求 `selectedMemberRole`、`memberAgentId` 和
+   `quickChatCampId` 全部为 null；
+3. Runtime 扫描结束且没有任何可直接继续的 Runtime，或本轮扫描失败/超时没有形成可靠可用结果时，Renderer
+   使用同一空结果页，不建立独立“扫描失败”产品状态；用户可以重新扫描或选择“进入 Rovai”；
+4. 延后配置只允许在 `in_progress(runtime)` 且 `provisioning = null` 时提交。它不调用成员、Runtime、Camp、
+   Conversation、Message、Turn、Run 或 restorable-location mutation；
+5. `runtime_deferred` 是训练终态，不是暂停。以后启动直接进入普通 App，Runtime 安装、登录与成员配置使用
+   正常 Settings/成员工作区，不重新开启 onboarding；
+6. 正常配置路径、冻结权限、幂等 checkpoint、“初次集结”和 Draft-only starter 语义保持不变；一旦
+   provisioning 开始，不能切换到 deferred 路径。
+
+当前规范见 [First-run Onboarding 架构](../../architecture/first-run-onboarding.md)、
+[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)与
+[首次训练 UI](../../ui/components/first-run-onboarding.md)。
+
+### 后果
+
+- 没有 Runtime 的新用户可以进入正常 App，并在以后自行完成 Runtime 配置；
+- 解除阻断不会制造一个不可运行成员、空壳“初次集结”或虚假的 Runtime readiness；
+- `runtime_deferred` 没有 onboarding 第四页，普通 App 空状态与设置入口负责后续体验；
+- 旧 schema 1 的未完成 provisioning 仍只能恢复原 saga，不能借升级绕过已发生的副作用；
+- 完整桌面验收需要同时覆盖 configured 与 deferred 两种第三页终态。
+
+### 被拒绝方案
+
+- **继续强制安装 Runtime 才能进入 App：** 把缺少外部依赖变成永久产品导航阻断；
+- **选择任意未验证 Runtime 并创建成员/Camp：** 会把不可执行状态伪装成已配置，破坏 Runtime fail-closed；
+- **只在 React 内隐藏 onboarding：** 重启会恢复旧持久状态，不能真正解除卡死；
+- **允许 provisioning 中途延后：** 可能留下已经创建的成员或配置，却把完成态声明为无产品身份；
+- **新增独立扫描失败页：** 不改变用户可执行选择，只增加一个与零可用结果同义的产品状态。

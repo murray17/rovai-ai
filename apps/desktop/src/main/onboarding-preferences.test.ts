@@ -36,7 +36,7 @@ describe('onboarding preferences', () => {
     const store = await OnboardingStore.load(filePath)
     const completed = await store.initialize(true)
     expect(completed).toMatchObject({
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'completed',
       origin: 'existing_installation',
       selectedMemberRole: null,
@@ -163,6 +163,43 @@ describe('onboarding preferences', () => {
     expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(completed)
   })
 
+  it('durably ends onboarding without product identities when Runtime setup is deferred', async () => {
+    const filePath = await temporaryFile()
+    const store = await OnboardingStore.load(filePath)
+    await store.initialize(false)
+    await store.completeWelcome()
+    await store.selectMember('qilu')
+    await store.completeMemberSelection()
+
+    const completed = await store.deferRuntimeSetup()
+    expect(completed).toMatchObject({
+      schemaVersion: 2,
+      status: 'completed',
+      origin: 'runtime_deferred',
+      selectedMemberRole: null,
+      memberAgentId: null,
+      quickChatCampId: null
+    })
+    expect(JSON.parse(await readFile(filePath, 'utf8'))).toEqual(completed)
+
+    const restored = await OnboardingStore.load(filePath)
+    expect(restored.get()).toEqual(completed)
+  })
+
+  it('allows Runtime deferral only on the Runtime page before provisioning starts', async () => {
+    const filePath = await temporaryFile()
+    const store = await OnboardingStore.load(filePath)
+    await store.initialize(false)
+    await expect(store.deferRuntimeSetup()).rejects.toThrow('运行时配置页')
+    await store.completeWelcome()
+    await store.completeMemberSelection()
+    await store.beginProvisioning({
+      adapterKind: 'codex-cli',
+      model: { mode: 'runtime_default' }
+    }, codexPermissions())
+    await expect(store.deferRuntimeSetup()).rejects.toThrow('初始化已经开始')
+  })
+
   it('rejects skipped pages, changed provisioning input, and incomplete completion', async () => {
     const filePath = await temporaryFile()
     const store = await OnboardingStore.load(filePath)
@@ -209,7 +246,7 @@ describe('onboarding preferences', () => {
       provisioning: null
     })).toBeNull()
     expect(parseOnboardingSnapshot({
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'completed',
       origin: 'onboarding',
       completedAt: 'not-a-date',
@@ -217,6 +254,35 @@ describe('onboarding preferences', () => {
       memberAgentId: 'agent-1',
       quickChatCampId: 'camp-1'
     })).toBeNull()
+    expect(parseOnboardingSnapshot({
+      schemaVersion: 2,
+      status: 'completed',
+      origin: 'runtime_deferred',
+      completedAt: '2026-08-23T00:00:00.000Z',
+      selectedMemberRole: 'luoke',
+      memberAgentId: null,
+      quickChatCampId: null
+    })).toBeNull()
+  })
+
+  it('normalizes valid schema v1 snapshots to schema v2', () => {
+    expect(parseOnboardingSnapshot({
+      schemaVersion: 1,
+      status: 'completed',
+      origin: 'existing_installation',
+      completedAt: '2026-08-23T00:00:00.000Z',
+      selectedMemberRole: null,
+      memberAgentId: null,
+      quickChatCampId: null
+    })).toEqual({
+      schemaVersion: 2,
+      status: 'completed',
+      origin: 'existing_installation',
+      completedAt: '2026-08-23T00:00:00.000Z',
+      selectedMemberRole: null,
+      memberAgentId: null,
+      quickChatCampId: null
+    })
   })
 })
 

@@ -142,7 +142,7 @@ function onboardingHarness(
     ...checkpoints
   }
   let current: OnboardingSnapshot = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: 'in_progress',
     step: 'runtime',
     selectedMemberRole: 'luoke',
@@ -203,7 +203,7 @@ function onboardingHarness(
           throw new Error('incomplete')
         }
         current = {
-          schemaVersion: 1,
+          schemaVersion: 2,
           status: 'completed',
           origin: 'onboarding',
           completedAt: '2026-08-17T00:00:00.000Z',

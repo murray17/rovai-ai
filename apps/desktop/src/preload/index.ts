@@ -101,6 +101,9 @@ const api: RovaiApi = {
     setRuntimeSelection(selection) {
       return ipcRenderer.invoke('rovai:onboarding-set-runtime-selection', selection)
     },
+    deferRuntimeSetup() {
+      return ipcRenderer.invoke('rovai:onboarding-defer-runtime')
+    },
     beginProvisioning(selection, runtimePermissions) {
       return ipcRenderer.invoke(
         'rovai:onboarding-begin-provisioning',

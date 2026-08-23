@@ -2638,6 +2638,9 @@ export function App(): React.JSX.Element {
               () => window.rovai.onboarding.setRuntimeSelection(selection)
             )
           }}
+          onDeferRuntime={() => void runOnboardingMutation(
+            () => window.rovai.onboarding.deferRuntimeSetup()
+          )}
           onComplete={() => void completeOnboarding()}
         />
         {shuttingDown && <ControlledShutdownOverlay />}

@@ -33,12 +33,17 @@ const STABLE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/
 const MAX_MODEL_OPTIONS_BYTES = 16_384
 
 export const DEFAULT_ONBOARDING_SNAPSHOT: OnboardingSnapshot = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   status: 'uninitialized'
 }
 
 export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | null {
-  if (!isRecord(value) || value.schemaVersion !== 1 || typeof value.status !== 'string') return null
+  if (
+    !isRecord(value)
+    || (value.schemaVersion !== 1 && value.schemaVersion !== 2)
+    || typeof value.status !== 'string'
+  ) return null
+  const sourceSchemaVersion = value.schemaVersion
   if (value.status === 'uninitialized') {
     return hasExactKeys(value, ['schemaVersion', 'status'])
       ? { ...DEFAULT_ONBOARDING_SNAPSHOT }
@@ -73,7 +78,7 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       || provisioning.runtimePermissions.adapterKind !== runtimeSelection.adapterKind
     )) return null
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'in_progress',
       step: value.step as OnboardingStep,
       selectedMemberRole,
@@ -91,7 +96,12 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       'memberAgentId',
       'quickChatCampId'
     ])) return null
-    if (value.origin !== 'onboarding' && value.origin !== 'existing_installation') return null
+    if (
+      value.origin !== 'onboarding'
+      && value.origin !== 'runtime_deferred'
+      && value.origin !== 'existing_installation'
+    ) return null
+    if (value.origin === 'runtime_deferred' && sourceSchemaVersion !== 2) return null
     if (!isTimestamp(value.completedAt)) return null
     if (value.selectedMemberRole !== null && !isMemberRole(value.selectedMemberRole)) return null
     if (value.memberAgentId !== null && !isStableId(value.memberAgentId)) return null
@@ -101,13 +111,13 @@ export function parseOnboardingSnapshot(value: unknown): OnboardingSnapshot | nu
       || value.memberAgentId === null
       || value.quickChatCampId === null
     )) return null
-    if (value.origin === 'existing_installation' && (
+    if ((value.origin === 'existing_installation' || value.origin === 'runtime_deferred') && (
       value.selectedMemberRole !== null
       || value.memberAgentId !== null
       || value.quickChatCampId !== null
     )) return null
     return {
-      schemaVersion: 1,
+      schemaVersion: 2,
       status: 'completed',
       origin: value.origin,
       completedAt: value.completedAt,
@@ -151,7 +161,7 @@ export class OnboardingStore {
       if (this.#snapshot.status !== 'uninitialized') return this.get()
       const next: OnboardingSnapshot = hasExistingProductData
         ? {
-            schemaVersion: 1,
+            schemaVersion: 2,
             status: 'completed',
             origin: 'existing_installation',
             completedAt: new Date().toISOString(),
@@ -224,6 +234,27 @@ export class OnboardingStore {
       if (current.step !== 'runtime') throw new Error('当前不在 Agent 运行时配置页')
       if (current.provisioning) throw new Error('首次引导初始化已经开始，不能修改运行配置')
       return { ...current, runtimeSelection: parsed }
+    })
+  }
+
+  deferRuntimeSetup(): Promise<OnboardingSnapshot> {
+    return this.#enqueue(async () => {
+      const current = requireInProgress(this.#snapshot)
+      if (current.step !== 'runtime') {
+        throw new Error('当前不在 Agent 运行时配置页')
+      }
+      if (current.provisioning) {
+        throw new Error('首次引导初始化已经开始，不能跳过运行配置')
+      }
+      return this.#commit({
+        schemaVersion: 2,
+        status: 'completed',
+        origin: 'runtime_deferred',
+        completedAt: new Date().toISOString(),
+        selectedMemberRole: null,
+        memberAgentId: null,
+        quickChatCampId: null
+      })
     })
   }
 
@@ -322,7 +353,7 @@ export class OnboardingStore {
         || !operation.quickChatCampId
       ) throw new Error('首次引导初始化尚未完成')
       return this.#commit({
-        schemaVersion: 1,
+        schemaVersion: 2,
         status: 'completed',
         origin: 'onboarding',
         completedAt: new Date().toISOString(),
@@ -363,7 +394,7 @@ export class OnboardingStore {
 
 function inProgress(step: OnboardingStep): Extract<OnboardingSnapshot, { status: 'in_progress' }> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     status: 'in_progress',
     step,
     selectedMemberRole: null,
