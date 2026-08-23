@@ -1789,6 +1789,38 @@ export interface AppearanceApi {
   onChanged(listener: (snapshot: AppearanceSnapshot) => void): () => void
 }
 
+export type AppUpdateStatus =
+  | 'idle'
+  | 'up_to_date'
+  | 'update_available'
+  | 'no_release'
+  | 'check_failed'
+
+export type AppUpdateFailureReason =
+  | 'network'
+  | 'rate_limited'
+  | 'github_unavailable'
+  | 'invalid_release'
+
+export interface AppUpdateSnapshot {
+  currentVersion: string
+  status: AppUpdateStatus
+  latestVersion: string | null
+  releaseName: string | null
+  releaseNotesSummary: string | null
+  publishedAt: string | null
+  releasePageAvailable: boolean
+  checkedAt: string | null
+  failureReason: AppUpdateFailureReason | null
+  retryAt: string | null
+}
+
+export interface AppUpdatesApi {
+  get(): Promise<AppUpdateSnapshot>
+  check(): Promise<AppUpdateSnapshot>
+  openReleasePage(): Promise<boolean>
+}
+
 export type StartupLocationMode = 'last_location' | 'quick_chat'
 
 export type ExecutionConsolePlacement = 'bottom' | 'inspector'
@@ -1802,6 +1834,7 @@ export type SettingsSection =
   | 'notifications'
   | 'monitoring'
   | 'diagnostics'
+  | 'about'
 
 export type MemberWorkspaceLocationTab = 'identity' | 'runtime'
 
@@ -2542,6 +2575,7 @@ export interface RovaiApi {
     onOpenCamp(listener: (request: { campId: string }) => void): () => void
   }
   appearance: AppearanceApi
+  appUpdates: AppUpdatesApi
   desktopSession: DesktopSessionApi
   generalPreferences: GeneralPreferencesApi
   onboarding: OnboardingApi

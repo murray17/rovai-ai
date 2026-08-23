@@ -8,6 +8,7 @@ related_targets:
   - "apps/desktop/src/renderer/src/NotificationSettings.tsx"
   - "apps/desktop/src/renderer/src/SkillSettings.tsx"
   - "apps/desktop/src/renderer/src/McpSettings.tsx"
+  - "apps/desktop/src/renderer/src/AboutUpdatesSettings.tsx"
 ---
 
 # Settings workspace surface brief
@@ -156,6 +157,24 @@ rechecked after action. v5 export remains allowlisted/redacted and uses an expli
 Runtime monitoring follows its dedicated [`runtime-monitoring.md`](runtime-monitoring.md) surface
 brief. It shares this workspace's borderless header and content track while keeping sparse Usage,
 Coverage, clean-break and freshness semantics local to that page.
+
+## 关于与更新
+
+About & Updates belongs to the Support group and extends the same borderless `1040px` settings track,
+two-column section rhythm and quiet raised rows used by reviewed settings pages. The first viewport
+shows the installed Rovai AI version and one primary “检查更新” action. It is an inspect-and-handoff
+surface, not an updater dashboard or installation wizard.
+
+Checking is always a user action. One click requests the latest published full release from the public
+official `murray17/rovai-ai` GitHub Releases API, compares its semantic version with the packaged App
+version and presents a bounded plain-text Release Notes summary. When a trusted release page is
+available, a secondary action opens that exact page in the system browser. The Renderer never accepts
+or renders remote HTML and never receives an arbitrary URL.
+
+The page keeps the installed version visible through idle, checking, up-to-date, update-available,
+no-release, network failure, GitHub unavailable, rate-limited and invalid-release states. A failure
+keeps the manual action recoverable and never retries automatically. This first version has no
+background request, timer, GitHub token, automatic download, overwrite, restart or `electron-updater`.
 
 ## Inheritance and hard boundaries
 

@@ -3087,6 +3087,51 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .general-settings-section .section-heading { align-self: start; align-items: flex-start; margin: 0; }
 .general-settings-section .section-heading h2 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 620; }
 .general-settings-section .section-heading p { margin: 6px 0 0; color: var(--faint); font-size: 10px; line-height: 1.45; }
+.about-updates-settings { display: grid; width: min(1040px, 100%); max-width: 1040px; padding-bottom: 24px; }
+.about-updates-body { display: grid; }
+.about-updates-section { display: grid; grid-template-columns: minmax(98px, 132px) minmax(0, 1fr); align-items: start; gap: clamp(22px, 4vw, 42px); margin: 0; padding: 30px 0; border: 0; border-bottom: 1px solid var(--line); }
+.about-updates-section:last-child { border-bottom: 0; }
+.about-updates-section .section-heading { align-self: start; align-items: flex-start; margin: 0; }
+.about-updates-section .section-heading h2 { margin: 0; color: var(--ink); font-size: 15px; font-weight: 620; }
+.about-updates-section .section-heading p { margin: 6px 0 0; color: var(--faint); font-size: 10px; line-height: 1.45; }
+.about-version-row { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 24px; padding: 15px 17px; border-radius: 10px; background: var(--workspace-surface-raised); }
+.about-product-name { display: grid; min-width: 0; gap: 4px; }
+.about-product-name strong { color: var(--ink); font-size: 13px; font-weight: 650; }
+.about-product-name small { color: var(--muted); font-size: 10.5px; }
+.about-version-value { display: grid; flex: 0 0 auto; justify-items: end; gap: 5px; }
+.about-version-value span { color: var(--faint); font-size: 9.5px; }
+.about-version-value code { color: var(--ink); font: 650 12px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.about-update-body { display: grid; min-width: 0; gap: 10px; }
+.about-update-control { display: flex; min-height: 76px; align-items: center; justify-content: space-between; gap: 22px; padding: 15px 17px; border-radius: 10px; background: var(--workspace-surface-raised); }
+.about-update-control > div { display: grid; min-width: 0; gap: 5px; }
+.about-update-control strong { color: var(--ink); font-size: 12.5px; font-weight: 650; }
+.about-update-control p { max-width: 560px; margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
+.about-update-control > button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; justify-content: center; }
+.about-update-control > .primary-button[aria-disabled="true"],
+.about-update-control > .primary-button[aria-disabled="true"]:hover { border-color: var(--brand); background: var(--brand); cursor: wait; opacity: .76; }
+.about-update-control > .primary-button[aria-disabled="true"]:active { transform: none; }
+.about-update-status { display: grid; min-height: 54px; grid-template-columns: 8px minmax(0, 1fr); align-items: start; gap: 10px; padding: 11px 13px; border-radius: 9px; color: var(--muted); background: var(--workspace-surface-subtle); }
+.about-update-status-mark { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; color: var(--neutral); background: currentColor; }
+.about-update-status > div { display: grid; min-width: 0; gap: 3px; }
+.about-update-status strong { color: var(--ink); font-size: 11px; font-weight: 650; }
+.about-update-status p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.about-update-status.is-success .about-update-status-mark { color: var(--success); }
+.about-update-status.is-attention .about-update-status-mark { color: var(--attention); }
+.about-update-status.is-error { background: var(--danger-soft); }
+.about-update-status.is-error .about-update-status-mark,
+.about-update-status.is-error strong,
+.about-update-status.is-error p { color: var(--danger); }
+.about-release-notes { display: grid; gap: 12px; margin-top: 3px; padding: 16px 17px; border-radius: 10px; background: var(--workspace-surface-subtle); }
+.about-release-notes-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.about-release-notes-heading > div { display: grid; min-width: 0; gap: 4px; }
+.about-release-notes-heading h3 { margin: 0; color: var(--ink); font-size: 12px; font-weight: 650; }
+.about-release-notes-heading p { overflow: hidden; margin: 0; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
+.about-release-notes-heading > span { flex: 0 0 auto; color: var(--faint); font: 550 9.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.about-release-notes-copy { max-width: 76ch; margin: 0; white-space: pre-line; overflow-wrap: anywhere; color: var(--muted); font-size: 10.5px; line-height: 1.65; }
+.about-release-notes-action { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding-top: 1px; }
+.about-release-notes-action > span { color: var(--danger); font-size: 10.5px; line-height: 1.45; }
+.about-update-spinner { width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, currentColor 36%, transparent); border-top-color: currentColor; border-radius: 50%; animation: about-update-spin 650ms linear infinite; }
+@keyframes about-update-spin { to { transform: rotate(360deg); } }
 .general-section-body { min-width: 0; }
 .general-save-state { display: inline-flex; align-items: center; gap: 7px; color: var(--success); font-size: 10.5px; white-space: nowrap; }
 .general-save-state::before { width: 7px; height: 7px; border-radius: 50%; background: currentColor; content: ""; }
@@ -3673,7 +3718,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .skill-eyebrow { margin: 0; color: var(--brand-ink); font-size: 9px; font-weight: 750; letter-spacing: 0.13em; text-transform: uppercase; }
 .settings-page-note, .skill-section-count { flex: 0 0 auto; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface); font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
 .settings-page-note { border-color: color-mix(in srgb, var(--brand) 32%, var(--line)); color: var(--brand-ink); background: var(--brand-soft); }
-.settings-content .settings-panel:is(.settings-panel-general, .settings-panel-appearance, .settings-panel-notifications, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics) {
+.settings-content .settings-panel:is(.settings-panel-general, .settings-panel-appearance, .settings-panel-notifications, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) {
   border-top: 0;
   background: var(--surface);
 }
@@ -3682,7 +3727,8 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-mcp > .mcp-settings,
 .settings-panel-runtime > *,
 .settings-panel-monitoring > .runtime-monitoring,
-.settings-panel-diagnostics > .diagnostics-center {
+.settings-panel-diagnostics > .diagnostics-center,
+.settings-panel-about > .about-updates-settings {
   width: min(1040px, 100%);
   max-width: 1040px;
 }
@@ -3692,6 +3738,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-runtime > .settings-page-heading,
 .settings-panel-monitoring > .runtime-monitoring > .settings-page-heading,
 .settings-panel-diagnostics > .diagnostics-center > .settings-page-heading,
+.settings-panel-about > .about-updates-settings > .settings-page-heading,
 .settings-panel:is(.settings-panel-appearance, .settings-panel-notifications) > .settings-page-heading {
   padding-bottom: 24px;
   border-bottom: 0;
@@ -3702,6 +3749,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-runtime > .settings-page-heading .settings-page-heading-copy,
 .settings-panel-monitoring > .runtime-monitoring > .settings-page-heading .settings-page-heading-copy,
 .settings-panel-diagnostics > .diagnostics-center > .settings-page-heading .settings-page-heading-copy,
+.settings-panel-about > .about-updates-settings > .settings-page-heading .settings-page-heading-copy,
 .settings-panel:is(.settings-panel-appearance, .settings-panel-notifications) > .settings-page-heading .settings-page-heading-copy {
   padding-left: 0;
 }
@@ -3711,6 +3759,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-runtime > .settings-page-heading .settings-page-heading-copy::before,
 .settings-panel-monitoring > .runtime-monitoring > .settings-page-heading .settings-page-heading-copy::before,
 .settings-panel-diagnostics > .diagnostics-center > .settings-page-heading .settings-page-heading-copy::before,
+.settings-panel-about > .about-updates-settings > .settings-page-heading .settings-page-heading-copy::before,
 .settings-panel:is(.settings-panel-appearance, .settings-panel-notifications) > .settings-page-heading .settings-page-heading-copy::before {
   content: none;
 }
@@ -3720,16 +3769,17 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .settings-panel-runtime > .settings-page-heading h1,
 .settings-panel-monitoring > .runtime-monitoring > .settings-page-heading h1,
 .settings-panel-diagnostics > .diagnostics-center > .settings-page-heading h1,
+.settings-panel-about > .about-updates-settings > .settings-page-heading h1,
 .settings-panel:is(.settings-panel-appearance, .settings-panel-notifications) > .settings-page-heading h1 {
   font-weight: 620;
 }
-.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics) :is(.section-heading, .skill-section-heading) {
+.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading) {
   padding-left: 0;
 }
-.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics) :is(.section-heading, .skill-section-heading)::before {
+.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading)::before {
   content: none;
 }
-.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics) :is(.section-heading, .skill-section-heading) h2 {
+.settings-panel:is(.settings-panel-general, .settings-panel-skills, .settings-panel-mcp, .settings-panel-runtime, .settings-panel-monitoring, .settings-panel-diagnostics, .settings-panel-about) :is(.section-heading, .skill-section-heading) h2 {
   color: var(--ink);
   font-weight: 620;
 }
@@ -6223,6 +6273,13 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .settings-page-heading-aside { width: 100%; flex-wrap: wrap; }
   .general-settings-section { grid-template-columns: minmax(0, 1fr); gap: 13px; padding: 23px 0; }
   .general-settings-section .section-heading p { display: none; }
+  .about-updates-section { grid-template-columns: minmax(0, 1fr); gap: 13px; padding: 23px 0; }
+  .about-updates-section .section-heading p { display: none; }
+  .about-version-row,
+  .about-update-control { align-items: flex-start; flex-direction: column; gap: 13px; }
+  .about-version-value { justify-items: start; }
+  .about-update-control > button { width: fit-content; }
+  .about-release-notes-heading { flex-direction: column; gap: 7px; }
   .startup-location-options { grid-template-columns: minmax(0, 1fr); }
   .general-default-member-list { grid-template-columns: minmax(0, 1fr); }
   .general-default-lead { grid-template-columns: minmax(0, 1fr); gap: 8px; }

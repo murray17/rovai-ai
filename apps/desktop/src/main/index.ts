@@ -76,6 +76,7 @@ import {
   prepareWindowsDataRoot,
   resolveWindowsDataRoot
 } from './windows-data-root'
+import { AppUpdatesService } from './app-updates'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -218,6 +219,10 @@ const isolatedAcceptanceInstance =
 const primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
 const core = new CoreClient(coreDataPath)
+const appUpdates = new AppUpdatesService({
+  currentVersion: () => app.getVersion(),
+  openExternal: (url) => shell.openExternal(url)
+})
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
@@ -523,6 +528,21 @@ ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
   themePreference = preference
   nativeTheme.themeSource = nativeThemeSource(preference)
   return publishAppearance()
+})
+
+ipcMain.handle('rovai:app-updates-get', (event) => {
+  requireMainWindow(event.sender)
+  return appUpdates.get()
+})
+
+ipcMain.handle('rovai:app-updates-check', (event) => {
+  requireMainWindow(event.sender)
+  return appUpdates.check()
+})
+
+ipcMain.handle('rovai:app-updates-open-release', (event) => {
+  requireMainWindow(event.sender)
+  return appUpdates.openReleasePage()
 })
 
 ipcMain.handle('rovai:window-application-menu-popup', (event, input: unknown) => {

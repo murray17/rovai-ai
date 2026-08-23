@@ -822,7 +822,8 @@ const SETTINGS_SIDEBAR_GROUPS: SettingsSidebarGroup[] = [
     label: '支持',
     items: [
       { key: 'monitoring', icon: 'chart-line', label: '运行监控' },
-      { key: 'diagnostics', icon: 'stethoscope', label: '诊断与修复' }
+      { key: 'diagnostics', icon: 'stethoscope', label: '诊断与修复' },
+      { key: 'about', icon: 'info', label: '关于与更新' }
     ]
   }
 ]

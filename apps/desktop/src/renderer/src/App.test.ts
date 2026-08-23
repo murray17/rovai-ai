@@ -1949,11 +1949,14 @@ describe('task event projections', () => {
     expect(capabilitiesGroup.indexOf('<strong>MCP</strong>')).toBeLessThan(capabilitiesGroup.indexOf('<strong>Agent 运行时</strong>'))
     expect(supportGroup).toContain('<strong>诊断与修复</strong>')
     expect(supportGroup).toContain('<strong>运行监控</strong>')
+    expect(supportGroup).toContain('<strong>关于与更新</strong>')
     expect(supportGroup).toContain('data-navigation-icon="chart-line"')
     expect(supportGroup).toContain('data-navigation-icon="stethoscope"')
+    expect(supportGroup).toContain('data-navigation-icon="info"')
+    expect(supportGroup.indexOf('<strong>运行监控</strong>')).toBeLessThan(supportGroup.indexOf('<strong>诊断与修复</strong>'))
+    expect(supportGroup.indexOf('<strong>诊断与修复</strong>')).toBeLessThan(supportGroup.indexOf('<strong>关于与更新</strong>'))
     expect(markup).toContain('data-navigation-icon="arrow-left"')
     expect(markup).toContain('class="active" type="button" aria-current="page"')
-    expect(markup).not.toContain('关于与更新')
     expect(markup).not.toContain('新对话')
     expect(markup).not.toContain('快速对话')
     expect(markup).not.toContain('Core')
@@ -1978,7 +1981,8 @@ describe('task event projections', () => {
       appearance: '外观',
       notifications: '提醒',
       monitoring: '运行监控',
-      diagnostics: '诊断与修复'
+      diagnostics: '诊断与修复',
+      about: '关于与更新'
     }
     for (const [section, heading] of Object.entries(contentBySection) as Array<[NavigationSettingsSection, string]>) {
       const markup = renderToStaticMarkup(createElement(SettingsView, { ...baseProps, section }))

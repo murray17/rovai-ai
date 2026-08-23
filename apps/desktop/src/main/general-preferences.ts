@@ -19,7 +19,8 @@ const SETTINGS_SECTIONS = new Set<SettingsSection>([
   'appearance',
   'notifications',
   'monitoring',
-  'diagnostics'
+  'diagnostics',
+  'about'
 ])
 
 export const DEFAULT_GENERAL_PREFERENCES: GeneralPreferencesSnapshot = {

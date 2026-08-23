@@ -48,6 +48,17 @@ const api: RovaiApi = {
       return () => ipcRenderer.removeListener('rovai:appearance-changed', handler)
     }
   },
+  appUpdates: {
+    get() {
+      return ipcRenderer.invoke('rovai:app-updates-get')
+    },
+    check() {
+      return ipcRenderer.invoke('rovai:app-updates-check')
+    },
+    openReleasePage() {
+      return ipcRenderer.invoke('rovai:app-updates-open-release')
+    }
+  },
   desktopSession: {
     getStartupSnapshot() {
       return ipcRenderer.invoke('rovai:desktop-session-get-startup')
