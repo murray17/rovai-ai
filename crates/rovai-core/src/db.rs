@@ -23850,7 +23850,9 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert!(run_schema.contains("terminal_resolution_source = 'runtime_terminal'"));
+        assert!(
+            run_schema.contains("terminal_resolution_source IN ('runtime_terminal', 'migration')")
+        );
         assert!(run_schema.contains("planned_shutdown_completed"));
         assert!(run_schema.contains("planned_shutdown_failed"));
         assert!(run_schema.contains("planned_shutdown_cancelled"));

@@ -1363,22 +1363,27 @@ mod tests {
     #[test]
     fn trae_static_version_accepts_bundle_and_go_module_metadata_only() {
         let directory = env::temp_dir().join(format!("rovai-trae-version-{}", Uuid::new_v4()));
-        let executable = directory.join("TRAE.app/Contents/MacOS/traecli");
-        fs::create_dir_all(executable.parent().unwrap()).unwrap();
-        fs::write(&executable, b"not launched").unwrap();
-        fs::write(
-            directory.join("TRAE.app/Contents/Info.plist"),
-            br#"<?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-            <plist version="1.0"><dict>
-              <key>CFBundleShortVersionString</key><string>0.120.99</string>
-            </dict></plist>"#,
-        )
-        .unwrap();
-        assert_eq!(
-            discover_static_runtime_version(AdapterKind::TraeCnCli, &executable).as_deref(),
-            Some("0.120.99")
-        );
+        fs::create_dir_all(&directory).unwrap();
+
+        #[cfg(target_os = "macos")]
+        {
+            let executable = directory.join("TRAE.app/Contents/MacOS/traecli");
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(&executable, b"not launched").unwrap();
+            fs::write(
+                directory.join("TRAE.app/Contents/Info.plist"),
+                br#"<?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                <plist version="1.0"><dict>
+                  <key>CFBundleShortVersionString</key><string>0.120.99</string>
+                </dict></plist>"#,
+            )
+            .unwrap();
+            assert_eq!(
+                discover_static_runtime_version(AdapterKind::TraeCnCli, &executable).as_deref(),
+                Some("0.120.99")
+            );
+        }
 
         let go_binary = directory.join("trae-go");
         let mut build_info = Vec::from(GO_BUILD_INFO_MAGIC);
