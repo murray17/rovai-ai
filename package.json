@@ -4,7 +4,7 @@
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "A local-first workspace for durable agent teams.",
+  "description": "A desktop workspace for long-lived agent teams, shared Camps, visible execution, and collaborative memory.",
   "author": "murray17",
   "license": "MIT",
   "packageManager": "pnpm@11.20.0",
