@@ -155,11 +155,12 @@ Compaction 仍为 `CompactionDetectorPolicy::Disabled`。`compact` 虽在 advert
 未触发。当前结论是 Runtime structured completion signal evidence `NotObserved`、Rovai detector
 implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史长度和模型正文均不参与推断。
 
-### Windows x64 平台准入基线
+### Windows x64 平台准入
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
-Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。下表是证据缺口，不是本机 `not_installed`、Probe 失败、
-上游不支持或 Renderer allowlist；实现后唯一产品真源必须是 Rust Registry 的
+Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核既有 Windows 证据并在当前源码树完成
+目标确认后，仅 `claude-code-cli` 达到 Adapter 独立的完整门槛。下表是当前资格状态，不是本机
+`not_installed`、Probe 失败、上游不支持或 Renderer allowlist；唯一产品真源是 Rust Registry 的
 [Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)投影。
 
 | AdapterKind | `windows-x64` admission | evidence revision | 说明 |
@@ -167,7 +168,7 @@ Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。下表是证据缺�
 | `codex-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
 | `opencode-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
 | `copilot-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
-| `claude-code-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
+| `claude-code-cli` | `qualified` | `sha256:200b79edb09a0751a767d3c1a16a1422b8424ffa3200c56d43f36c4f20f8abd9` | Windows 10 x64 Adapter 独立证据完整 |
 | `kiro-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
 | `qoder-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
 | `codebuddy-cli` | `not_qualified` | — | 未完成 Windows 全矩阵 |
@@ -181,6 +182,28 @@ Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。下表是证据缺�
 必须独立覆盖 discovery、executable identity、authentication、first run、Session continuation、Built-in Tool
 v20、Approval、cancellation、final boundary、process cleanup 与 planned shutdown；证据 revision 必须不可变且
 digest-bound。
+
+#### 2026-08-23 Claude Code Windows x64 正式资格
+
+本轮采用 `targeted_confirmation_with_frozen_prior_evidence`，不是机械重跑全部历史矩阵。冻结的脱敏证据为
+[`windows-x64-v1.json`](../qualification/runtime-platform/windows-x64-v1.json)，其字节 SHA-256 即上表的
+evidence revision。当前源码基线为 `6842e65018549746eb2139dc348adb1f542299c2`；本机为 Windows 10 Pro
+22H2 x64、`10.0.19045`，因此不声明 Windows 11 或 SmartScreen 覆盖。
+
+Claude Code `2.1.86` 在国内 MiniMax Anthropic-compatible endpoint 使用 `MiniMax-M3[1m]` 完成当前树目标确认：
+静态 discovery/identity、已配置且已认证的 secret-redacted 凭据、首轮精确回复、同一 Native Session 延续、
+结构化 Bash input/output，以及长时 Bash 达到 `in_progress` 后由 `agentRuns.cancel` 进入 `cancelled`；取消后
+延迟文件没有创建。既有同版本证据继续覆盖 15/15 Built-in Tool v20、Approval allow-once/deny、zero-send、
+accepted-send suppression、tool→final 与打包 App planned shutdown。当前打包候选的计划关机报告记录已接受输入后 Runtime
+在 8143ms 自然退出、Job 回收 7 个后代进程、协议 v2 收敛，重启后 fenced Run 恢复为 cancelled 且没有伪造
+terminal。凭据、原始 Prompt、本机用户路径、Session/Run ID 均未进入冻结文件。
+
+其余十一行继续 `not_qualified`：Codex、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen 与 TRAE 尚未冻结
+各自当前 cancellation 与 packaged planned-shutdown 证据；Cursor executable 未发现且没有 authenticated
+Windows 矩阵；Kimi 本机 `0.38.0` 没有 Windows 行为/生命周期矩阵；Antigravity 虽完成账号认证，但模型执行
+仍受 quota 阻断且生命周期矩阵不完整。共享 ACP/stdio、Named Pipe、Job Object 或 Claude 证据不外推到这些
+Adapter。产品结果是 Claude 可检查、配置和执行；其余 Runtime 继续显示“Windows 尚未验证不可检查”，直到
+各自完成同等级证据，而不是通过放宽门禁消除提示。
 
 ### 2026-08-21 Windows 10 22H2 本机实施复核
 

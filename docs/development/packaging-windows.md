@@ -9,8 +9,9 @@ last_updated: 2026-08-23
 # Windows x64 构建、打包与发布
 
 本文路由 Windows x64 的实现、命令与验收边界。v1.15 已实现 native x64 Core/CLI/Desktop、per-user NSIS、
-PE resource/manifest verifier 和隔离安装验收；unsigned 构建仍只是测试 artifact。Windows 11 client OS、逐 Runtime
-资格、正式 Authenticode/RFC 3161 签名和 SmartScreen 证据尚未完成，因此不得宣称 Windows 已发布。
+PE resource/manifest verifier 和隔离安装验收。Windows 10 x64 上 Claude Code 已完成独立 Runtime 资格；其余
+Runtime、Windows 11 client OS、正式 Authenticode/RFC 3161 签名和 SmartScreen reputation 证据仍未完成。
+当前对外口径只能是 `Windows x64 Preview — unsigned`，不得宣称 Windows 全面支持或所有 Runtime 已支持。
 
 ## 目标与前置条件
 
@@ -58,8 +59,10 @@ hash/PE/manifest 检查的 `rovai-core.exe` 与 `rovai.exe`；不得复用未清
 服务，不创建 login-start task，不更改 long-path policy。CI 使用固定 `windows-2022`（或仓库锁定的精确 image
 revision）完成 compile、test、unpacked/NSIS build 和 unsigned verifier；不使用浮动 `windows-latest` 作为可复现证据。
 
-Unsigned CI artifact 仅供测试。它必须标注 source commit、toolchain、lockfile、三个 PE hash、installer hash、架构、
-manifest 与 verifier 版本，不能与正式签名发布混用，也不能用 Windows Server UI 结果替代 Windows 10/11 验收。
+Unsigned CI artifact 必须标注 source commit、toolchain、lockfile、三个 PE hash、installer hash、架构、manifest 与
+verifier 版本，不能与正式签名发布混用，也不能用 Windows Server UI 结果替代 Windows 10/11 验收。只有在真实
+客户端完成相应验收后，才允许以 `Windows x64 Preview — unsigned` 发布；公开说明必须包含 SmartScreen 可能显示
+未知发布者，并要求用户只从官方 GitHub Release 下载。
 
 ## 安装、升级与卸载
 
@@ -86,7 +89,8 @@ timestamp 与 release-manifest hash。SmartScreen reputation 与签名有效性�
 Node 26、pnpm 11.20.0、Rust 1.97.1 与 frozen lockfile 生成并上传 unsigned 证据。正式发布另在 Windows 10 22H2 与 Windows 11 客户端环境完成 native
 frame、DPI、Forced Colors/High Contrast、NVDA、中文 IME、Explorer、安装/升级/卸载和 SmartScreen 验收。逐 Runtime
 资格证据仍按 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)独立取得，三类 execution-shape
-基础设施测试不能批量放行十二个 Adapter。Kimi Code 的 macOS arm64 资格不能外推到 Windows x64。
+基础设施测试不能批量放行十二个 Adapter。当前 Windows 10 x64 只有 Claude Code 携带独立 digest-bound evidence
+revision；其他十一种 Runtime 继续 `not_qualified`。Kimi Code 的 macOS arm64 资格不能外推到 Windows x64。
 
 ## References
 

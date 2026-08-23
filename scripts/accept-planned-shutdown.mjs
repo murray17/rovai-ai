@@ -427,6 +427,20 @@ async function collectShutdownOverlay(cdp, theme, viewportWidth, viewportHeight,
       viewport: { width: innerWidth, height: innerHeight, deviceScaleFactor: devicePixelRatio },
       documentScrollWidth: document.documentElement.scrollWidth,
       documentScrollHeight: document.documentElement.scrollHeight,
+      overflowCandidates: [...document.querySelectorAll('body *')]
+        .map((element) => {
+          const rect = element.getBoundingClientRect()
+          return {
+            tag: element.tagName.toLowerCase(),
+            className: typeof element.className === 'string' ? element.className : '',
+            left: rect.left,
+            right: rect.right,
+            width: rect.width
+          }
+        })
+        .filter((candidate) => candidate.left < -1 || candidate.right > innerWidth + 1)
+        .sort((left, right) => right.right - left.right)
+        .slice(0, 12),
       reducedMotionAnimationIterations: progressStyle?.animationIterationCount ?? null,
       reducedMotionAnimationDuration: progressStyle?.animationDuration ?? null
     } : null

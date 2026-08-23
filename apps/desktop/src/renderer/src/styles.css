@@ -245,7 +245,9 @@ button:disabled { opacity: 0.52; cursor: default; }
 
 html[data-rovai-platform="win32"] #root {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: env(titlebar-area-height, 32px) minmax(0, 1fr);
+  overflow: hidden;
   background: var(--rail);
 }
 
@@ -253,6 +255,7 @@ html[data-rovai-platform="win32"] .windows-application-menu {
   display: flex;
   grid-row: 1;
   width: env(titlebar-area-width, calc(100% - 138px));
+  max-width: calc(100vw - 138px);
   height: env(titlebar-area-height, 32px);
   min-width: 0;
   align-items: center;
@@ -288,6 +291,8 @@ html[data-rovai-platform="win32"] .windows-application-menu {
 
 html[data-rovai-platform="win32"] .app-shell {
   grid-row: 2;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   height: auto;
 }

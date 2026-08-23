@@ -233,10 +233,10 @@ describe('Porcelain Day + Steel Night theme tokens', () => {
   })
 
   it('keeps the Windows menu projection on the rail token outside page layout', () => {
-    expect(css).toMatch(/html\[data-rovai-platform="win32"\] #root\s*\{[^}]*grid-template-rows: env\(titlebar-area-height, 32px\) minmax\(0, 1fr\)[^}]*background: var\(--rail\)/)
-    expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.windows-application-menu\s*\{[^}]*width: env\(titlebar-area-width, calc\(100% - 138px\)\)[^}]*background: var\(--rail\)[^}]*-webkit-app-region: drag/)
+    expect(css).toMatch(/html\[data-rovai-platform="win32"\] #root\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)[^}]*grid-template-rows: env\(titlebar-area-height, 32px\) minmax\(0, 1fr\)[^}]*overflow: hidden[^}]*background: var\(--rail\)/)
+    expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.windows-application-menu\s*\{[^}]*width: env\(titlebar-area-width, calc\(100% - 138px\)\)[^}]*max-width: calc\(100vw - 138px\)[^}]*background: var\(--rail\)[^}]*-webkit-app-region: drag/)
     expect(css).toMatch(/\.windows-application-menu-item\s*\{[^}]*font: 400 12px\/1 "Segoe UI", sans-serif[^}]*-webkit-app-region: no-drag/)
-    expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.app-shell\s*\{[^}]*grid-row: 2[^}]*height: auto/)
+    expect(css).toMatch(/html\[data-rovai-platform="win32"\] \.app-shell\s*\{[^}]*grid-row: 2[^}]*width: 100%[^}]*min-width: 0[^}]*height: auto/)
   })
 
   it('keeps focus, selection, and unread state visible in Windows Forced Colors', () => {

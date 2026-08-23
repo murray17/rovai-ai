@@ -8,7 +8,13 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:c55ea5ccf0f5bf81c4d71b66ff998abfa15b47dc6b33f57a8eb941bf1e04a865";
+    "sha256:0146387938ae8f8ae0307fd08bee7f0d734cceb03f22e00106628503a75e38c1";
+
+/// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
+/// The source qualifies only the Runtime rows named in that evidence; shared
+/// Windows process infrastructure cannot promote any other Adapter.
+pub const WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
+    "sha256:200b79edb09a0751a767d3c1a16a1422b8424ffa3200c56d43f36c4f20f8abd9";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -134,11 +140,18 @@ mod tests {
     use crate::agent_runtime_adapter::AgentRuntimeAdapterRegistry;
 
     #[test]
-    fn compatibility_evidence_revision_binds_the_frozen_register_bytes() {
-        let digest = Sha256::digest(include_bytes!("../../../docs/runtime-compatibility.md"));
+    fn platform_evidence_revisions_bind_their_frozen_source_bytes() {
+        let macos_digest = Sha256::digest(include_bytes!("../../../docs/runtime-compatibility.md"));
         assert_eq!(
             MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-            format!("sha256:{digest:x}")
+            format!("sha256:{macos_digest:x}")
+        );
+        let windows_digest = Sha256::digest(include_bytes!(
+            "../../../qualification/runtime-platform/windows-x64-v1.json"
+        ));
+        assert_eq!(
+            WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+            format!("sha256:{windows_digest:x}")
         );
     }
 
@@ -167,24 +180,34 @@ mod tests {
     }
 
     #[test]
-    fn windows_catalog_is_not_qualified_and_has_no_machine_evidence() {
+    fn windows_catalog_qualifies_only_adapter_scoped_frozen_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
 
         for runtime_kind in AdapterKind::ALL {
             let admission = registry.platform_admission(runtime_kind, HostPlatformKey::WindowsX64);
-            assert_eq!(
-                admission.status(),
-                RuntimePlatformAdmissionStatus::NotQualified
-            );
-            assert_eq!(
-                admission.reason_code(),
-                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
-            );
-            assert_eq!(admission.evidence_revision(), None);
-            assert_eq!(
-                admission.blocker_code(),
-                Some("runtime_platform_not_qualified")
-            );
+            if runtime_kind == AdapterKind::ClaudeCodeCli {
+                assert!(admission.is_qualified());
+                assert_eq!(admission.reason_code(), None);
+                assert_eq!(
+                    admission.evidence_revision(),
+                    Some(WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION)
+                );
+                assert_eq!(admission.blocker_code(), None);
+            } else {
+                assert_eq!(
+                    admission.status(),
+                    RuntimePlatformAdmissionStatus::NotQualified
+                );
+                assert_eq!(
+                    admission.reason_code(),
+                    Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+                );
+                assert_eq!(admission.evidence_revision(), None);
+                assert_eq!(
+                    admission.blocker_code(),
+                    Some("runtime_platform_not_qualified")
+                );
+            }
         }
     }
 
@@ -237,18 +260,31 @@ mod tests {
 
     #[test]
     fn wire_projection_uses_contract_field_and_enum_names() {
-        let value = serde_json::to_value(
-            AgentRuntimeAdapterRegistry::default()
-                .platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let blocked = serde_json::to_value(
+            registry.platform_admission(AdapterKind::CodexCli, HostPlatformKey::WindowsX64),
         )
         .unwrap();
-        assert_eq!(value["runtimeKind"], "codex-cli");
-        assert_eq!(value["platform"], "windows-x64");
-        assert_eq!(value["status"], "not_qualified");
+        assert_eq!(blocked["runtimeKind"], "codex-cli");
+        assert_eq!(blocked["platform"], "windows-x64");
+        assert_eq!(blocked["status"], "not_qualified");
         assert_eq!(
-            value["reasonCode"],
+            blocked["reasonCode"],
             "runtime_platform.qualification_evidence_missing"
         );
-        assert!(value["evidenceRevision"].is_null());
+        assert!(blocked["evidenceRevision"].is_null());
+
+        let qualified = serde_json::to_value(
+            registry.platform_admission(AdapterKind::ClaudeCodeCli, HostPlatformKey::WindowsX64),
+        )
+        .unwrap();
+        assert_eq!(qualified["runtimeKind"], "claude-code-cli");
+        assert_eq!(qualified["platform"], "windows-x64");
+        assert_eq!(qualified["status"], "qualified");
+        assert!(qualified["reasonCode"].is_null());
+        assert_eq!(
+            qualified["evidenceRevision"],
+            WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION
+        );
     }
 }

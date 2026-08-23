@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -105,6 +105,13 @@ try {
   const nativeSessionId = firstBinding?.params?.nativeThreadId
   if (!isUuid(nativeSessionId)) {
     throw new Error(`Claude Code Native Session was not bound: ${JSON.stringify(firstBinding)}`)
+  }
+  const observedRuntimeModel = core.events.find((event) =>
+    event.method === 'agent_run.runtime_model_observed'
+      && event.params?.agentRunId === firstRun.id
+  )?.params?.modelId
+  if (typeof observedRuntimeModel !== 'string' || observedRuntimeModel.length === 0) {
+    throw new Error('Claude Code did not report the model used by the first AgentRun')
   }
 
   const followUp = await sendCampMessage(
@@ -221,9 +228,99 @@ try {
     })}`)
   }
 
+  const cancellationPath = join(projectRoot, 'CLAUDE_CANCEL_SHOULD_NOT_EXIST.txt')
+  const cancellationScriptName = process.platform === 'win32'
+    ? 'rovai-cancel-probe.ps1'
+    : 'rovai-cancel-probe.sh'
+  await writeFile(
+    join(projectRoot, cancellationScriptName),
+    process.platform === 'win32'
+      ? "Start-Sleep -Seconds 45\r\nSet-Content -LiteralPath 'CLAUDE_CANCEL_SHOULD_NOT_EXIST.txt' -Value 'late'\r\n"
+      : "sleep 45\nprintf '%s\\n' 'late' > CLAUDE_CANCEL_SHOULD_NOT_EXIST.txt\n"
+  )
+  const cancellationCommand = process.platform === 'win32'
+    ? `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./${cancellationScriptName}`
+    : `sh ./${cancellationScriptName}`
+  const cancellationRequest = await createConfiguredCampAndSend(core.request, {
+    commandId: crypto.randomUUID(),
+    workspace,
+    memberAgentIds: ['agent_1'],
+    defaultLeadAgentId: 'agent_1',
+    body: `Use the Bash tool exactly once to run exactly this command and do nothing else: ${cancellationCommand}`,
+    purpose: 'Verify Claude Code cancellation and descendant cleanup.'
+  })
+  const cancellationCampId = cancellationRequest.payload?.campId
+  const cancellationRunId = cancellationRequest.payload?.agentRunIds?.[0]
+  if (cancellationRequest.status !== 'accepted' || !cancellationCampId || !cancellationRunId) {
+    throw new Error(`Claude Code cancellation intake failed: ${JSON.stringify(cancellationRequest)}`)
+  }
+  const cancellationStarted = await waitFor(async () => {
+    const event = core.events.find((candidate) =>
+      candidate.method === 'runtime.action'
+        && candidate.params?.agentRunId === cancellationRunId
+        && candidate.params?.payload?.status === 'in_progress'
+        && String(candidate.params?.payload?.input ?? '').includes(cancellationScriptName)
+    )
+    if (event) return event
+    const unexpectedAction = core.events.find((candidate) =>
+      candidate.method === 'runtime.action'
+        && candidate.params?.agentRunId === cancellationRunId
+        && candidate.params?.payload?.status === 'in_progress'
+    )
+    if (unexpectedAction) {
+      throw new Error(`Claude Code started an unexpected cancellation action: ${JSON.stringify(unexpectedAction)}`)
+    }
+    const value = await core.request('camps.snapshot', { campId: cancellationCampId })
+    const run = value.agentRuns.find((agentRun) => agentRun.id === cancellationRunId)
+    if (run && ['succeeded', 'failed', 'cancelled'].includes(run.status)) {
+      throw new Error(`Claude Code cancellation target became ${run.status} before the Bash start event: ${JSON.stringify({
+        run,
+        actions: value.actions.filter((action) => action.agentRunId === cancellationRunId),
+        events: core.events.filter((candidate) => candidate.params?.agentRunId === cancellationRunId).slice(-30)
+      })}`)
+    }
+    return null
+  }, 'Claude Code cancellable Bash action')
+  camp = await core.request('camps.snapshot', { campId: cancellationCampId })
+  const cancellationRun = camp.agentRuns.find((agentRun) => agentRun.id === cancellationRunId)
+  if (!cancellationRun || !['queued', 'running', 'waiting_approval'].includes(cancellationRun.status)) {
+    throw new Error(`Claude Code cancellation target was not active: ${JSON.stringify({
+      cancellationRun,
+      cancellationStarted
+    })}`)
+  }
+  const cancellationResult = await core.request('agentRuns.cancel', {
+    commandId: crypto.randomUUID(),
+    command: {
+      campId: cancellationCampId,
+      agentRunId: cancellationRunId,
+      expectedVersion: cancellationRun.version
+    }
+  })
+  if (cancellationResult.status === 'rejected') {
+    throw new Error(`Claude Code cancellation was rejected: ${JSON.stringify(cancellationResult)}`)
+  }
+  camp = await waitFor(async () => {
+    const value = await core.request('camps.snapshot', { campId: cancellationCampId })
+    const run = value.agentRuns.find((agentRun) => agentRun.id === cancellationRunId)
+    if (run?.status === 'failed' || run?.status === 'succeeded') {
+      throw new Error(`Claude Code cancellation target entered ${run.status}: ${JSON.stringify({
+        run,
+        actions: value.actions.filter((action) => action.agentRunId === cancellationRunId),
+        events: core.events.filter((event) => event.params?.agentRunId === cancellationRunId).slice(-30)
+      })}`)
+    }
+    return run?.status === 'cancelled' ? value : null
+  }, 'cancelled Claude Code AgentRun')
+  await new Promise((resolveWait) => setTimeout(resolveWait, 1_500))
+  if (await pathExists(cancellationPath)) {
+    throw new Error('Claude Code cancelled Bash descendant still created its delayed file')
+  }
+
   console.log(JSON.stringify({
     ok: true,
     runtime: snapshot.reportedVersion,
+    observedRuntimeModel,
     modelAliases: snapshot.models
       .filter((model) => !model.id.endsWith('://runtime-default'))
       .map((model) => model.id),
@@ -237,6 +334,11 @@ try {
       input: commandInputEvent.params.payload.input,
       toolName: commandOutputEvent.params.payload.toolName,
       toolCallId: commandOutputEvent.params.payload.toolCallId
+    },
+    cancellation: {
+      status: camp.agentRuns.find((agentRun) => agentRun.id === cancellationRunId)?.status,
+      actionStarted: true,
+      delayedFileCreated: false
     },
     teamToolAdvertised: true
   }, null, 2))
@@ -305,6 +407,16 @@ async function waitFor(probe, label) {
 function isUuid(value) {
   return typeof value === 'string'
     && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+async function pathExists(path) {
+  try {
+    await access(path)
+    return true
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false
+    throw error
+  }
 }
 
 function runtimeNarration(events, agentRunId) {

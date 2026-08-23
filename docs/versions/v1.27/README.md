@@ -21,6 +21,12 @@ last_updated: 2026-08-23
 > `runtime_deferred` 无产品副作用终态和对应第三页空结果 UI；正常 Runtime provisioning 与“初次集结”路径
 > 保持不变。
 >
+> Windows x64 证据复核采用逐 Adapter 门禁：Claude Code `2.1.86` 在 Windows 10 x64 以 MiniMax M3 1M 完成
+> 当前树 cancellation 目标确认，并复用同版本已冻结的 Built-in、Approval、final boundary、进程树回收与
+> packaged planned-shutdown 证据，成为首个 Windows `qualified` Runtime。其他十一种 Runtime 不借用共享
+> 基础设施或 Claude 证据，继续保持 `not_qualified`。同一 packaged 验收还修复 Windows titlebar overlay
+> 宽度在 200% zoom 下撑大根 grid 的问题，1040×700 Day/Night 与 200% zoom 均无文档级横向溢出。
+>
 > 前置版本：[v1.26 Cursor Agent Catalog 接入](../v1.26/README.md)已按冻结时事实转为 historical。
 
 ## 版本目标
@@ -53,6 +59,8 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   Host 停止或淘汰后由新 Host 优先精确 resume，load 只作 replay-quarantined fallback；
 - macOS arm64 声明 Built-in transport 并进入普通 discovery、检查、成员配置和执行路径；macOS x64 与
   Windows x64 仍保持准入阻断，不从 arm64 证据外推。
+- Windows x64 的 Claude Code 使用独立 digest-bound 证据进入普通 discovery、检查、成员配置和执行路径；
+  该结论不改变 Kimi 的 Windows 阻断，也不外推到其他 Runtime。
 - 首次训练扫描结束或失败后没有可直接继续的 Runtime 时，显示统一空结果页；用户可重新扫描，或在尚未
   provisioning 时结束训练并进入普通 App。该终态不创建成员配置、Camp、Run 或 onboarding restore target，
   以后从正常 Settings/成员工作区配置 Runtime。
@@ -98,7 +106,7 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector；[First-run Onboarding](../../architecture/first-run-onboarding.md)增加 configured/deferred 分支。 |
 | UI | 已更新 | Settings Agent Runtime 目录继续展示已接入 Kimi并隐藏 Cursor；首次训练 Runtime 页增加零可用结果面、重新扫描和无副作用“进入 Rovai”。 |
 | Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)加入 Kimi ACP `run_level` baseline 与真实 Shell Evidence。 |
-| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 `0.32.0`、MiniMax M3、用户原生 Home、Probe 隔离、warm/cold continuation、External MCP、Built-in 15/15、Kimi Compaction detector 与平台边界。 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 `0.32.0`、MiniMax M3、用户原生 Home、Probe 隔离、warm/cold continuation、External MCP、Built-in 15/15、Kimi Compaction detector 与平台边界；另冻结 Claude Code Windows x64 独立资格 revision。 |
 | Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航路由到 Runtime Launch v25、本版本与 Kimi Research。 |
 | Root README | 已更新 | 常青能力更新为十二种 Product Runtime identity。 |
 

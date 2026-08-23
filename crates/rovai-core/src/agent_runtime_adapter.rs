@@ -25,7 +25,7 @@ use crate::{
     platform::HostPlatformKey,
     runtime_platform_admission::{
         MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION, RuntimePlatformAdmission,
-        RuntimePlatformAdmissionReasonCode,
+        RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
     },
 };
 
@@ -502,6 +502,13 @@ impl AgentRuntimeAdapterRegistry {
                 kind,
                 platform,
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            );
+        }
+        if kind == AdapterKind::ClaudeCodeCli && platform == HostPlatformKey::WindowsX64 {
+            return RuntimePlatformAdmission::qualified(
+                kind,
+                platform,
+                WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
             );
         }
         if kind == AdapterKind::KimiCodeCli {

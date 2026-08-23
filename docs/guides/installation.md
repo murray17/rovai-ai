@@ -1,7 +1,7 @@
 ---
 document_type: user-guide
 authority: installation-guide
-last_updated: 2026-08-22
+last_updated: 2026-08-23
 ---
 
 # 安装指南
@@ -18,9 +18,12 @@ Rovai AI 可以通过桌面安装包使用，也可以从源码启动开发版�
 |---|---|---|
 | macOS · Apple Silicon | 文件名标记为 `arm64` 的 `.dmg` | 打开 DMG，将 Rovai AI 拖入 `Applications` |
 | macOS · Intel | 文件名标记为 `x64` 的 `.dmg` | 打开 DMG，将 Rovai AI 拖入 `Applications` |
-| Windows · x64 | Release 中提供的 Windows x64 `.exe` | 运行安装程序并按照向导完成安装 |
+| Windows · x64 Preview — unsigned | Release 中提供的 Windows x64 `.exe` | 运行当前用户安装程序并按照向导完成安装 |
 
 每个 Release 实际提供哪些平台，以该版本页面中的下载文件为准。
+Windows x64 Preview 当前未签名，SmartScreen 可能显示“未知发布者”；请只从 Rovai AI 官方 GitHub Release
+下载安装包。Windows Preview 当前只有 Claude Code 完成 Runtime 平台准入，其他目录项在各自证据完整前显示
+“Windows 尚未验证不可检查”。
 
 ## 第一次启动
 
@@ -63,12 +66,14 @@ Rovai AI 可以通过桌面安装包使用，也可以从源码启动开发版�
 | 未安装 | 没有找到对应可执行程序 | 按该 Runtime 的官方文档安装 |
 | 需要处理 | 版本、环境或启动检查存在问题 | 打开详情，根据提示处理后重新检查 |
 | 暂时未知 | 当前证据不足，不能确认是否可用 | 重新扫描，或执行一次显式可用性检查 |
+| Windows 尚未验证不可检查 | 该 Runtime 尚未完成独立 Windows x64 资格，不是安装、登录或扫描故障 | 改用已准入的 Claude Code，或等待该 Runtime 完成 Windows 资格 |
 
 模型目录和完整能力可能要在显式检查或第一次真实任务前确认。只看到 Runtime 已安装，并不等于所有模型和权限能力都已经准备完成。
 
 ## 从源码运行
 
-当前已记录和验证的主要开发环境是 macOS 14 及以上的 Apple Silicon。
+当前已记录和验证的开发环境包括 macOS 14 及以上的 Apple Silicon，以及 Windows 10 Pro 22H2 native x64。
+Windows 11、Windows ARM64 和 x86 不在当前实机资格结论内。
 
 ### 环境要求
 
