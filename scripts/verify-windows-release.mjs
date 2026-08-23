@@ -115,6 +115,29 @@ function verifySignature(label, path) {
   return signature
 }
 
+function verifyInstallerConfiguration() {
+  const nsis = packageMetadata.build?.nsis
+  const expected = {
+    oneClick: false,
+    perMachine: false,
+    allowElevation: false,
+    packElevateHelper: false,
+    allowToChangeInstallationDirectory: true
+  }
+  for (const [key, value] of Object.entries(expected)) {
+    if (nsis?.[key] !== value) {
+      throw new Error(`NSIS ${key} must be ${value} for the selectable per-user installer`)
+    }
+  }
+  report.push('NSIS configuration: assisted per-user install with selectable destination passed')
+  return {
+    assisted: true,
+    perMachine: false,
+    allowElevation: false,
+    selectableInstallationDirectory: true
+  }
+}
+
 async function verifyBinary(label, path) {
   if (!existsSync(path)) throw new Error(`${label} is missing: ${path}`)
   const pe = await inspectPortableExecutable(path)
@@ -208,6 +231,7 @@ function startCore(executable, dataDirectory) {
 }
 
 try {
+  const installerConfiguration = verifyInstallerConfiguration()
   const binaries = {
     app: await verifyBinary('App', appExecutable),
     core: await verifyBinary('rovai-core', coreExecutable),
@@ -265,6 +289,7 @@ try {
       pnpmLockSha256: await sha256(join(root, 'pnpm-lock.yaml'))
     },
     signedReleaseRequired: requireSigned,
+    installerConfiguration,
     files: { ...binaries, installer: installerFile },
     packagedCoreSmoke: {
       isolatedDataRoot: true,

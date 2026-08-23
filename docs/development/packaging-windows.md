@@ -55,8 +55,10 @@ hash/PE/manifest 检查的 `rovai-core.exe` 与 `rovai.exe`；不得复用未清
 
 ## Package 与 unsigned CI artifact
 
-目标 package 为 x64 NSIS per-user installer，同时保留 unpacked App 用于隔离 Smoke。安装器默认不提权，不注册系统
-服务，不创建 login-start task，不更改 long-path policy。CI 使用固定 `windows-2022`（或仓库锁定的精确 image
+目标 package 为 x64 NSIS per-user assisted installer，同时保留 unpacked App 用于隔离 Smoke。安装向导允许用户选择
+安装目录；默认目录仍位于当前用户范围，且因为安装器不提权，自定义目录必须是当前用户可写路径。安装器不注册系统
+服务，不创建 login-start task，不更改 long-path policy。verifier 必须同时锁定 assisted、per-user、不可提权与可选择
+安装目录四项配置。CI 使用固定 `windows-2022`（或仓库锁定的精确 image
 revision）完成 compile、test、unpacked/NSIS build 和 unsigned verifier；不使用浮动 `windows-latest` 作为可复现证据。
 
 Unsigned CI artifact 必须标注 source commit、toolchain、lockfile、三个 PE hash、installer hash、架构、manifest 与
