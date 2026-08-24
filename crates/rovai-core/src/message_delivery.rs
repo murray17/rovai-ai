@@ -891,8 +891,8 @@ pub fn persist_public_a2a_message(
         }
     }
 
-    let now_instant = camp_turn_execution_budget_now();
-    let now = now_instant.to_rfc3339();
+    let budget_now = camp_turn_execution_budget_now();
+    let now = chrono::Utc::now().to_rfc3339();
     let turn = transaction
         .query_row(
             r#"
@@ -973,7 +973,7 @@ pub fn persist_public_a2a_message(
     // Preserve recipient-free public narration after the execution deadline,
     // while keeping both ordinary dispatch and the independently-budgeted
     // Gather capture inside the frozen CampTurn deadline.
-    if now_instant >= deadline && (requested_accepted_a2a > 0 || captured_return_count > 0) {
+    if budget_now >= deadline && (requested_accepted_a2a > 0 || captured_return_count > 0) {
         return Ok(rejected_with_details(
             if is_gather {
                 "gather.execution_budget_exceeded"

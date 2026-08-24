@@ -82,5 +82,5 @@ warm reuse。
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Managed Runtime Process v1](managed-runtime-process-v1.md)
-- [Runtime Launch and Verification v25](runtime-launch-and-verification-v25.md)
-- [V1.27-D10](../versions/v1.27/decisions.md#v1-27-d10)
+- [Runtime Launch and Verification v26](runtime-launch-and-verification-v26.md)
+- [V1.27-D12](../versions/v1.27/decisions.md#v1-27-d12)

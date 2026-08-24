@@ -82,6 +82,7 @@ pub enum AcpIncoming {
         execution_epoch: i64,
         native_prompt_id: String,
         delivery_id: String,
+        native_error_code: Option<i64>,
         error: String,
     },
     Message {
@@ -149,6 +150,7 @@ impl AcpRuntimeOwner {
         adapter_kind: AdapterKind,
         host_instance_id: &str,
         active_prompt: &AcpActivePrompt,
+        native_error_code: Option<i64>,
         error: String,
     ) -> AcpIncoming {
         AcpIncoming::InputNotAccepted {
@@ -158,6 +160,7 @@ impl AcpRuntimeOwner {
             execution_epoch: self.execution_epoch,
             native_prompt_id: active_prompt.prompt_id.clone(),
             delivery_id: active_prompt.delivery_id.clone(),
+            native_error_code,
             error,
         }
     }
@@ -234,6 +237,7 @@ struct AcpActivePrompt {
     prompt_id: String,
     delivery_id: String,
     acceptance_emitted: bool,
+    prompt_activity_observed: bool,
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
 }
 
@@ -1072,6 +1076,32 @@ async fn cleanup_acp_client_terminals(
     settled
 }
 
+#[derive(Debug, Clone)]
+struct AcpRpcError {
+    code: Option<i64>,
+    message: String,
+}
+
+impl AcpRpcError {
+    fn from_response(value: &Value) -> Self {
+        Self {
+            code: value.get("code").and_then(Value::as_i64),
+            message: value
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ACP request failed")
+                .to_string(),
+        }
+    }
+
+    fn diagnostic(&self) -> String {
+        self.code.map_or_else(
+            || self.message.clone(),
+            |code| format!("ACP error {code}: {}", self.message),
+        )
+    }
+}
+
 pub(crate) struct AcpHost {
     adapter_kind: AdapterKind,
     reported_version: Option<String>,
@@ -1527,12 +1557,9 @@ impl AcpHost {
     }
 
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
-        let response = if let Some(error) = message.get("error") {
-            Err(error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("ACP request failed")
-                .to_string())
+        let response_error = message.get("error").map(AcpRpcError::from_response);
+        let response = if let Some(error) = response_error.as_ref() {
+            Err(error.diagnostic())
         } else {
             Ok(message.get("result").cloned().unwrap_or(Value::Null))
         };
@@ -1556,16 +1583,18 @@ impl AcpHost {
                     if route.owner != owner || active_prompt.prompt_id != prompt_id {
                         return;
                     }
-                    let should_emit_acceptance = !active_prompt.acceptance_emitted;
+                    let should_emit_input_disposition = !active_prompt.acceptance_emitted;
                     active_prompt.acceptance_emitted = true;
                     let active_prompt = active_prompt.clone();
                     route.phase = AcpSessionPhase::PromptCompleted(active_prompt.clone());
                     route.sequence = route.sequence.saturating_add(1);
-                    Some((active_prompt, should_emit_acceptance, route.sequence))
+                    Some((active_prompt, should_emit_input_disposition, route.sequence))
                 };
-                if let Some((active_prompt, should_emit_acceptance, sequence)) = active_prompt {
-                    match &response {
-                        Ok(_) if should_emit_acceptance => {
+                if let Some((active_prompt, should_emit_input_disposition, sequence)) =
+                    active_prompt
+                {
+                    match (&response, response_error.as_ref()) {
+                        (Ok(_), _) if should_emit_input_disposition => {
                             let _ = self.incoming.send(owner.input_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -1573,27 +1602,54 @@ impl AcpHost {
                                 &active_prompt,
                             ));
                         }
-                        Err(error) if should_emit_acceptance => {
+                        (Err(_), Some(_))
+                            if should_emit_input_disposition
+                                && active_prompt.prompt_activity_observed =>
+                        {
+                            // A matching terminal response alone may be a pre-execution
+                            // rejection. Prompt-scoped activity observed before that matching
+                            // response proves the current input was processed; terminal failure
+                            // is recorded separately and must never make the input retryable.
+                            let _ = self.incoming.send(owner.input_accepted(
+                                self.adapter_kind,
+                                &self.host_instance_id,
+                                &session_id,
+                                &active_prompt,
+                            ));
+                        }
+                        (Err(error), Some(response_error)) if should_emit_input_disposition => {
                             let _ = self.incoming.send(owner.input_not_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
                                 &active_prompt,
+                                response_error.code,
                                 error.clone(),
                             ));
                         }
                         _ => {}
                     }
-                    let params = match response {
-                        Ok(result) => json!({
+                    let input_disposition =
+                        if response.is_ok() || active_prompt.prompt_activity_observed {
+                            "accepted"
+                        } else {
+                            "not_accepted"
+                        };
+                    let params = match (response, response_error) {
+                        (Ok(result), _) => json!({
                             "sessionId": session_id,
                             "promptId": prompt_id,
+                            "deliveryId": active_prompt.delivery_id,
                             "requestId": id,
+                            "inputDisposition": input_disposition,
                             "result": result
                         }),
-                        Err(error) => json!({
+                        (Err(error), response_error) => json!({
                             "sessionId": session_id,
                             "promptId": prompt_id,
+                            "deliveryId": active_prompt.delivery_id,
                             "requestId": id,
+                            "inputDisposition": input_disposition,
+                            "nativeErrorCode": response_error.and_then(|error| error.code),
                             "error": error
                         }),
                     };
@@ -1863,6 +1919,7 @@ impl AcpHost {
                 {
                     return AcpSessionMessageRoute::SessionMetadata;
                 }
+                active_prompt.prompt_activity_observed = true;
                 route.sequence = route.sequence.saturating_add(1);
                 AcpSessionMessageRoute::Forward {
                     owner: route.owner.clone(),
@@ -1956,9 +2013,10 @@ impl AcpHost {
         }
         let session_id = session_ids.into_iter().next()?;
         let route = routes.get_mut(&session_id)?;
-        let AcpSessionPhase::PromptActive(active_prompt) = &route.phase else {
+        let AcpSessionPhase::PromptActive(active_prompt) = &mut route.phase else {
             return None;
         };
+        active_prompt.prompt_activity_observed = true;
         route.sequence = route.sequence.saturating_add(1);
         Some((
             session_id,
@@ -2309,6 +2367,7 @@ impl AcpHost {
                 prompt_id: prompt_id.clone(),
                 delivery_id: delivery_id.to_string(),
                 acceptance_emitted: false,
+                prompt_activity_observed: false,
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
             });
         }
@@ -3075,9 +3134,12 @@ impl AcpRuntime {
             .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
-            observed.native_kind =
-                Some(effective_action_kind(reported_kind, &raw_input).to_string());
-        } else if public_acp_shell_command(update.get("rawInput")).is_some() {
+            observed.native_kind = Some(
+                effective_action_kind(self.host.adapter_kind, reported_kind, &raw_input)
+                    .to_string(),
+            );
+        } else if public_acp_shell_command(self.host.adapter_kind, update.get("rawInput")).is_some()
+        {
             observed.native_kind = Some("execute".to_string());
         }
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
@@ -3101,10 +3163,11 @@ impl AcpRuntime {
             .observed_tools
             .remove(native_item_id)
             .unwrap_or_default();
-        let Some(mut completion) = completed_action(params)? else {
+        let Some(mut completion) = completed_action(self.host.adapter_kind, params)? else {
             return Ok(None);
         };
-        completion = reconcile_completed_action(update, observed, completion)?;
+        completion =
+            reconcile_completed_action(self.host.adapter_kind, update, observed, completion)?;
         Ok(Some(completion))
     }
 
@@ -4402,6 +4465,7 @@ pub struct InterceptedAcpActionRequest {
 }
 
 pub struct InterceptedAcpActionContext<'a> {
+    pub adapter_kind: AdapterKind,
     pub agent_run_id: &'a str,
     pub execution_epoch: i64,
     pub expected_session_id: &'a str,
@@ -4481,7 +4545,7 @@ pub fn intercepted_action_request(
         object.insert("toolCall".to_string(), effective_tool_call.clone());
     }
     let root = context.execution_root.to_string_lossy().to_string();
-    let kind = effective_action_kind(reported_kind, &raw_input);
+    let kind = effective_action_kind(context.adapter_kind, reported_kind, &raw_input);
     let input = match kind {
         "edit" | "move" => {
             let path = acp_tool_paths(&effective_params)
@@ -4508,16 +4572,19 @@ pub fn intercepted_action_request(
             }
         }
         "execute" => {
-            let argv = match raw_input.get("command") {
-                Some(Value::Array(values)) => values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>(),
-                Some(Value::String(command)) => {
-                    vec!["/bin/zsh".to_string(), "-lc".to_string(), command.clone()]
+            let argv = if let Some(command) =
+                public_acp_shell_command(context.adapter_kind, Some(&raw_input))
+            {
+                vec!["/bin/zsh".to_string(), "-lc".to_string(), command]
+            } else {
+                match raw_input.get("command") {
+                    Some(Value::Array(values)) => values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>(),
+                    _ => Vec::new(),
                 }
-                _ => Vec::new(),
             };
             if argv.is_empty() {
                 CanonicalActionInput::RuntimePermissionGrant {
@@ -4586,12 +4653,16 @@ fn requested_path(context: &InterceptedAcpActionContext<'_>, value: &str) -> Res
     })
 }
 
-fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a str {
+fn effective_action_kind<'a>(
+    adapter_kind: AdapterKind,
+    reported_kind: &'a str,
+    raw_input: &Value,
+) -> &'a str {
     if matches!(reported_kind, "edit" | "move" | "delete" | "execute") {
         return reported_kind;
     }
 
-    if public_acp_shell_command(Some(raw_input)).is_some() {
+    if public_acp_shell_command(adapter_kind, Some(raw_input)).is_some() {
         return "execute";
     }
 
@@ -4769,7 +4840,10 @@ pub struct CompletedAcpAction {
     pub effect_disposition: String,
 }
 
-pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
+pub fn completed_action(
+    adapter_kind: AdapterKind,
+    params: &Value,
+) -> Result<Option<CompletedAcpAction>> {
     let update = match params.get("update") {
         Some(update)
             if update.get("sessionUpdate").and_then(Value::as_str) == Some("tool_call_update") =>
@@ -4791,7 +4865,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .context("ACP tool_call_update has no toolCallId")?
         .to_string();
     let raw_input = update.get("rawInput");
-    let public_command = public_acp_shell_command(raw_input);
+    let public_command = public_acp_shell_command(adapter_kind, raw_input);
     let raw_input_digest = update
         .get("rawInput")
         .map(canonical_json_digest)
@@ -4804,8 +4878,12 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .get("kind")
         .and_then(Value::as_str)
         .unwrap_or("other");
-    let native_kind =
-        effective_action_kind(reported_kind, raw_input.unwrap_or(&Value::Null)).to_string();
+    let native_kind = effective_action_kind(
+        adapter_kind,
+        reported_kind,
+        raw_input.unwrap_or(&Value::Null),
+    )
+    .to_string();
     let status = effective_acp_tool_status(update, &native_kind);
     let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
@@ -4855,6 +4933,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
 }
 
 fn reconcile_completed_action(
+    adapter_kind: AdapterKind,
     update: &Value,
     observed: ObservedToolMetadata,
     mut completion: CompletedAcpAction,
@@ -4865,7 +4944,8 @@ fn reconcile_completed_action(
         .map(canonical_json_digest)
         .transpose()?;
     if completion.public_command.is_none() {
-        completion.public_command = public_acp_shell_command(observed.raw_input.as_ref());
+        completion.public_command =
+            public_acp_shell_command(adapter_kind, observed.raw_input.as_ref());
     }
     if let Some(native_kind) = observed.native_kind {
         completion.native_kind = native_kind;
@@ -4922,22 +5002,36 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     }
 }
 
-pub fn public_acp_shell_command(raw_input: Option<&Value>) -> Option<String> {
-    raw_input?
+pub fn public_acp_shell_command(
+    adapter_kind: AdapterKind,
+    raw_input: Option<&Value>,
+) -> Option<String> {
+    let raw_input = raw_input?;
+    raw_input
         .get("command")
+        .or_else(|| {
+            if adapter_kind == AdapterKind::TraeCnCli {
+                raw_input.get("Command")
+            } else {
+                None
+            }
+        })
         .and_then(Value::as_str)
         .filter(|command| !command.trim().is_empty())
         .map(str::to_string)
 }
 
-pub fn public_acp_tool_kind(update: &Value) -> Option<String> {
+pub fn public_acp_tool_kind(adapter_kind: AdapterKind, update: &Value) -> Option<String> {
     update
         .get("kind")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|kind| !kind.is_empty())
         .map(str::to_string)
-        .or_else(|| public_acp_shell_command(update.get("rawInput")).map(|_| "execute".to_string()))
+        .or_else(|| {
+            public_acp_shell_command(adapter_kind, update.get("rawInput"))
+                .map(|_| "execute".to_string())
+        })
 }
 
 pub fn effective_acp_tool_status(update: &Value, native_kind: &str) -> String {
@@ -6375,6 +6469,124 @@ while IFS= read -r ignored; do :; done
             ) {
                 return;
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn prompt_error_after_activity_keeps_input_accepted_while_early_rejection_does_not() {
+        for (case_name, prompt_activity, error_code, expected_accepted) in [
+            (
+                "activity-before-error",
+                r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-error","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}'"#,
+                -32603,
+                true,
+            ),
+            ("error-before-activity", ":", -32602, false),
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "rovai-acp-prompt-error-{case_name}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("traecli");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-error","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}}}}}}'
+IFS= read -r prompt || exit 1
+{prompt_activity}
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"error":{{"code":{error_code},"message":"Internal error"}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                ),
+            );
+
+            let frozen = frozen_trae_runtime(&executable);
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::Disabled,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
+                None,
+            )
+            .await
+            .unwrap();
+            let runtime = AcpRuntime::from_host(
+                AcpRuntimeOwner {
+                    agent_run_id: format!("run-{case_name}"),
+                    execution_epoch: 1,
+                },
+                host.clone(),
+                "sha256:compatibility".to_string(),
+                "sha256:mcp".to_string(),
+                root.clone(),
+                Some(exact_attachment_root(&root)),
+                "runtime_managed".to_string(),
+            );
+            runtime
+                .start_or_resume_session(
+                    None,
+                    AcpSessionCapabilities::default(),
+                    "runtime_default",
+                    TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                    &json!({}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap();
+            let prompt_id = runtime
+                .start_prompt(&format!("delivery-{case_name}"), "continue")
+                .await
+                .unwrap();
+
+            if expected_accepted {
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::Message { ref message, .. })
+                        if message.pointer("/params/update/content/text").and_then(Value::as_str)
+                            == Some("working")
+                ));
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::InputAccepted { native_prompt_id, .. })
+                        if native_prompt_id == prompt_id
+                ));
+            } else {
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::InputNotAccepted {
+                        native_prompt_id,
+                        native_error_code: Some(-32602),
+                        ..
+                    }) if native_prompt_id == prompt_id
+                ));
+            }
+            assert!(matches!(
+                receiver.recv().await,
+                Some(AcpIncoming::Message { message, .. })
+                    if message.get("method").and_then(Value::as_str)
+                        == Some("rovai/acp_prompt_completed")
+                        && message.pointer("/params/nativeErrorCode").and_then(Value::as_i64)
+                            == Some(error_code)
+                        && message.pointer("/params/inputDisposition").and_then(Value::as_str)
+                            == Some(if expected_accepted { "accepted" } else { "not_accepted" })
+            ));
+
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
         }
     }
 
@@ -8243,6 +8455,7 @@ while IFS= read -r ignored; do :; done
             "options": [{"optionId": "once", "kind": "allow_once"}]
         });
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::OpencodeCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -8288,6 +8501,7 @@ while IFS= read -r ignored; do :; done
             "options": [{"optionId": "once", "kind": "allow_once"}]
         });
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::OpencodeCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -8325,12 +8539,13 @@ while IFS= read -r ignored; do :; done
         let observed = ObservedAcpToolContext {
             native_kind: Some("execute".to_string()),
             raw_input: Some(json!({
-                "command": command,
-                "cwd": root,
+                "Command": command,
+                "Description": "Read the approved fixture",
             })),
             locations: Some(json!([{"path": target}])),
         };
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::TraeCnCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -8351,20 +8566,23 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn completed_action_keeps_only_public_command_and_persists_raw_payload_digests() {
-        let completion = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-1",
-                "status": "completed",
-                "kind": "execute",
-                "title": "Run command",
-                "rawInput": {"command": "echo TOP_SECRET_INPUT"},
-                "rawOutput": {
-                    "stdout": "TOP_SECRET_OUTPUT",
-                    "exitCode": 7
+        let completion = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "completed",
+                    "kind": "execute",
+                    "title": "Run command",
+                    "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                    "rawOutput": {
+                        "stdout": "TOP_SECRET_OUTPUT",
+                        "exitCode": 7
+                    }
                 }
-            }
-        }))
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
 
@@ -8389,15 +8607,19 @@ while IFS= read -r ignored; do :; done
             "status": "completed",
             "rawOutput": {"stdout": "failed output", "exitCode": 7}
         });
-        let sparse = completed_action(&json!({"update": sparse_update.clone()}))
-            .expect("sparse completion should normalize")
-            .expect("sparse terminal update should create a result");
+        let sparse = completed_action(
+            AdapterKind::TraeCnCli,
+            &json!({"update": sparse_update.clone()}),
+        )
+        .expect("sparse completion should normalize")
+        .expect("sparse terminal update should create a result");
         let observed_raw_input = json!({
-            "command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
-            "credential": "SPARSE_PRIVATE_FIELD"
+            "Command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
+            "Description": "SPARSE_PRIVATE_FIELD"
         });
         let observed_raw_input_digest = canonical_json_digest(&observed_raw_input).unwrap();
         let reconciled = reconcile_completed_action(
+            AdapterKind::TraeCnCli,
             &sparse_update,
             ObservedToolMetadata {
                 native_kind: Some("execute".to_string()),
@@ -8428,24 +8650,30 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn failed_side_effects_do_not_claim_that_nothing_happened() {
-        let execute = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-1",
-                "status": "failed",
-                "kind": "execute"
-            }
-        }))
+        let execute = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "failed",
+                    "kind": "execute"
+                }
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
-        let edit = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-2",
-                "status": "failed",
-                "kind": "edit"
-            }
-        }))
+        let edit = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-2",
+                    "status": "failed",
+                    "kind": "edit"
+                }
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
 

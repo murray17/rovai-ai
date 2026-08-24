@@ -433,7 +433,81 @@ D03 正确地拒绝把 Kimi macOS arm64 的资格自动外推到 macOS x64；当
 - **同时修改 Runtime 能力或权限：** 平台准入不提供这些独立语义变化的证据。
 
 <a id="v1-27-d10"></a>
-## V1.27-D10：Runtime-specific policy 选择通用本地 ACP Client Terminal
+## V1.27-D10：ACP matching error 与当前 Prompt activity 组合确认 input accepted
+
+### 背景
+
+ACP v1 的普通 `session/update` 只有 Session ID，旧合同因此只把成功 `session/prompt` response 当作 accepted ACK，
+并把 matching error 一律当作 `not_accepted`。本机 TRAE 运行暴露了反例：同一 active Prompt 已持续产生推理、
+十一次 Tool call 和文件写入，最后才返回 matching `-32603 Internal error`。把这个 Run 标成未接收会开放原输入
+重放，可能重复已经发生的外部效果；只把所有 error 改成 accepted 又会把真正的 Prompt 预拒绝推进水位。
+
+### 决定
+
+1. success response 继续产生 `InputAccepted`；response 前 Host loss 继续产生 `delivery_unknown`；
+2. matching error 到达前，若 Host 已在同一 Run/epoch/Session/Prompt/Delivery fence 下观察到非 metadata Prompt
+   activity，则产生 `InputAccepted`，error 只结算 AgentRun failure；
+3. matching error 前没有当前 Prompt activity 时产生 `InputNotAccepted`；activity 单独出现仍不是早期 ACK；
+4. accepted input 后的失败固定 `manualRetryAllowed=false`，Provider retryability 不能覆盖 Core 防重放门禁；
+5. ACP error 的安全数字 code 和有界 message 进入通用 `RuntimeFailureView`，原始 data、Prompt、Tool payload 和
+   私有日志不公开。
+
+当前规范见 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)、
+[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与
+[Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)。
+
+### 后果
+
+- 已产生可审计 activity/effect 的失败不会再伪装成未投递，也不会提供危险的原 Run 重放；
+- 无 activity 的预拒绝仍可按既有 retry 流程处理，Host loss 仍诚实保留未知；
+- accepted ACK 仍只在 matching response 边界产生，不把普通 Session event 单独提升为 ACK；
+- 所有 Product Runtime 可以复用同一公开 failure shape，历史 null 不回填。
+
+### 被拒绝方案
+
+- **所有 matching error 都是 not accepted：** 与已经产生的 Prompt/Tool activity 和外部效果冲突；
+- **首个 Session event 立即 ACK：** event 缺少 Prompt ID，单独使用会扩大迟到事件误归因窗口；
+- **所有 matching error 都是 accepted：** 会把真正的参数/能力预拒绝错误推进 Context 水位；
+- **只关闭 UI 重试按钮而不修 Delivery：** 持久状态、恢复和后继输入仍会建立错误结论。
+
+<a id="v1-27-d11"></a>
+## V1.27-D11：业务审计时间使用 wall clock，Execution Budget 使用独立非倒退 observation
+
+### 背景
+
+旧实现以进程启动 UTC 加 Rust `Instant::elapsed()` 合成“当前 UTC”，并同时用于 Execution Budget 与
+CampMessage/CampTurn/AgentRun/Conversation 时间。macOS 深度睡眠期间该 awake elapsed 没有完整前进；唤醒后新输入
+实际发生在 20:00，Run 却持久化为 19:16。直接统一改回 wall clock 能修显示和 suspend，但 wall clock 回拨又可能
+延长预算；继续使用合成时间则会污染用户可见审计。
+
+### 决定
+
+1. 所有业务实体与 Domain Event 的 created/started/updated/ended 时间使用调用时 UTC wall clock；
+2. `AgentRun.created_at` 表示触发输入被接受并创建 Run，`started_at` 表示 Scheduler 实际 claim，二者不互相覆盖；
+3. Execution Budget 使用进程内非倒退 observation，取 wall clock、启动 wall anchor 加 awake elapsed、上次值的
+   最大值；系统 suspend 的 wall progress 必须计入，wall 回拨不得延长已观察预算；
+4. Budget deadline comparison 和 lease 可以使用该 observation，预算耗尽等审计字段仍写当时 wall clock；跨进程
+   恢复继续依赖持久 UTC deadline，不迁移历史时间。
+
+当前规范见[协作与执行准入不变量](../../architecture/foundational-invariants.md#collaboration-admission)与
+[Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)。
+
+### 后果
+
+- suspend 后新 Run 时间与用户输入一致，排队时 `started_at` 仍可诚实晚于 `created_at`；
+- Execution Budget 计入睡眠且不因本进程内 wall 回拨延长；
+- 已持久化的错误历史时间不批量重写，避免依据不完整 sleep offset 修改审计证据；
+- 调用点必须显式选择 wall/audit 或 budget clock，不能再用一个“now”同时承担两种语义。
+
+### 被拒绝方案
+
+- **只在 Renderer 加 43 分钟：** offset 随 sleep/dark wake 变化，且不能修预算与数据库事实；
+- **所有时间统一 `Utc::now()`：** suspend 正确，但 wall 回拨可能延长执行预算；
+- **所有时间统一非倒退合成 clock：** 会继续把进程 awake 时间伪装成用户审计 wall time；
+- **批量重写历史记录：** 日常数据库没有每条记录的可靠 suspend offset，迁移会制造新的猜测事实。
+
+<a id="v1-27-d12"></a>
+## V1.27-D12：Runtime-specific policy 选择通用本地 ACP Client Terminal
 
 ### 背景
 

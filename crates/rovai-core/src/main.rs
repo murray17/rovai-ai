@@ -191,6 +191,7 @@ use rovai_core::{
     },
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
+        public_runtime_failure_from_output,
     },
     runtime_platform_admission::RuntimePlatformAdmission,
     runtime_resolution::RuntimeResolutionService,
@@ -1842,6 +1843,7 @@ impl Core {
             ExecutionRuntimeService::default().expire_elapsed_camp_turn_execution_budgets(
                 &mut database,
                 observed_now,
+                chrono::Utc::now(),
                 100,
             )
         };
@@ -11613,6 +11615,7 @@ fn prepare_codex_delta_batch(
 }
 
 fn prepare_acp_delta_batch(
+    adapter_kind: AdapterKind,
     messages: &[AcpRuntimeDeltaMessage],
 ) -> Result<Option<Vec<PreparedRuntimeDeltaMessage>>> {
     let mut total_bytes = 0_usize;
@@ -11625,7 +11628,7 @@ fn prepare_acp_delta_batch(
             .unwrap_or("unknown")
             .to_string();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
-        let (event_type, payload) = normalize_acp_event(&native_method, &params);
+        let (event_type, payload) = normalize_acp_event(adapter_kind, &native_method, &params);
         let Some(evidence) =
             ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
         else {
@@ -11978,6 +11981,7 @@ async fn process_acp_events(
                 execution_epoch,
                 native_prompt_id,
                 delivery_id,
+                native_error_code,
                 error,
             } => {
                 process_acp_input_not_accepted(
@@ -11988,6 +11992,7 @@ async fn process_acp_events(
                     execution_epoch,
                     &native_prompt_id,
                     &delivery_id,
+                    native_error_code,
                     &error,
                 )
                 .await;
@@ -12195,6 +12200,7 @@ async fn process_acp_input_not_accepted(
     execution_epoch: i64,
     native_prompt_id: &str,
     delivery_id: &str,
+    native_error_code: Option<i64>,
     error: &str,
 ) {
     if acp_runtime_on_host(
@@ -12214,7 +12220,10 @@ async fn process_acp_input_not_accepted(
         ContextService.mark_input_delivery_not_accepted(
             &mut database,
             delivery_id,
-            &format!("ACP prompt {native_prompt_id} was rejected: {error}"),
+            &format!(
+                "ACP prompt {native_prompt_id} was rejected{}: {error}",
+                native_error_code.map_or_else(String::new, |code| format!(" ({code})")),
+            ),
         )
     };
     if let Err(mark_error) = result {
@@ -12235,7 +12244,7 @@ async fn process_agent_run_acp_delta_batch(
     messages: Vec<AcpRuntimeDeltaMessage>,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
-    let prepared = match prepare_acp_delta_batch(&messages) {
+    let prepared = match prepare_acp_delta_batch(adapter_kind, &messages) {
         Ok(Some(prepared)) => prepared,
         Ok(None) => {
             for incoming in messages {
@@ -12565,8 +12574,12 @@ async fn process_agent_run_acp_message(
     {
         return;
     }
-    let (event_type, payload) =
-        normalize_acp_event_with_completion(&method, &params, completed_action.as_ref());
+    let (event_type, payload) = normalize_acp_event_with_completion(
+        adapter_kind,
+        &method,
+        &params,
+        completed_action.as_ref(),
+    );
     if event_type == "runtime.usage" {
         return;
     }
@@ -12656,11 +12669,16 @@ async fn process_agent_run_acp_message(
     }
 }
 
-fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
-    normalize_acp_event_with_completion(method, params, None)
+fn normalize_acp_event(
+    adapter_kind: AdapterKind,
+    method: &str,
+    params: &Value,
+) -> (&'static str, Value) {
+    normalize_acp_event_with_completion(adapter_kind, method, params, None)
 }
 
 fn normalize_acp_event_with_completion(
+    adapter_kind: AdapterKind,
     method: &str,
     params: &Value,
     completion: Option<&acp::CompletedAcpAction>,
@@ -12701,9 +12719,10 @@ fn normalize_acp_event_with_completion(
         }
         Some("agent_thought_chunk") => ("agent.thought.delta", update),
         Some("tool_call") | Some("tool_call_update") => {
-            let public_command = acp::public_acp_shell_command(update.get("rawInput"))
-                .or_else(|| completion.and_then(|value| value.public_command.clone()));
-            let public_kind = acp::public_acp_tool_kind(&update).or_else(|| {
+            let public_command =
+                acp::public_acp_shell_command(adapter_kind, update.get("rawInput"))
+                    .or_else(|| completion.and_then(|value| value.public_command.clone()));
+            let public_kind = acp::public_acp_tool_kind(adapter_kind, &update).or_else(|| {
                 completion
                     .map(|value| value.native_kind.as_str())
                     .filter(|kind| *kind != "other")
@@ -13070,6 +13089,7 @@ async fn process_agent_run_acp_approval_request(
     };
     let action_request = match acp::intercepted_action_request(
         &acp::InterceptedAcpActionContext {
+            adapter_kind: runtime.adapter_kind(),
             agent_run_id,
             execution_epoch,
             expected_session_id: &native_session_id,
@@ -13429,6 +13449,47 @@ async fn persist_acp_prompt_completion(
     } else {
         RuntimeTerminalOutcome::Failed
     };
+    let delivery_status = if planned_outcome == RuntimeTerminalOutcome::Failed {
+        let delivery_id = params
+            .get("deliveryId")
+            .and_then(Value::as_str)
+            .context("ACP prompt completion has no deliveryId")?;
+        let database = core.database.lock().await;
+        ContextService.runtime_input_delivery_status(&database, delivery_id)?
+    } else {
+        None
+    };
+    let manual_retry_allowed =
+        acp_prompt_manual_retry_allowed(planned_outcome, delivery_status.as_deref());
+    let base_error_code = if stop_reason == "end_turn" {
+        "runtime_missing_final_output".to_string()
+    } else {
+        format!("runtime_prompt_{stop_reason}")
+    };
+    let error_detail = response_error
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}"));
+    let mut public_failure = response_error.map(|detail| {
+        public_runtime_failure_from_output(
+            adapter_kind,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            &base_error_code,
+            &format!("{} 未能完成运行", runtime_display_name(adapter_kind)),
+            Some(detail),
+            &[(&core.data_dir, "<data-dir>")],
+            manual_retry_allowed,
+        )
+    });
+    if let Some(failure) = public_failure.as_mut() {
+        // Provider retryability never overrides Core's delivery/effect safety. Once the input
+        // was accepted, a successor instruction is required instead of replaying the Run.
+        failure.retryable &= manual_retry_allowed;
+    }
+    let error_code = public_failure
+        .as_ref()
+        .map(|failure| failure.code.clone())
+        .unwrap_or(base_error_code);
     let terminal_discriminator =
         canonical_json_digest(params).unwrap_or_else(|_| format!("{prompt_id}:{stop_reason}"));
     if !core.planned_shutdown.shutdown_started() {
@@ -13473,18 +13534,10 @@ async fn persist_acp_prompt_completion(
                     agent_run_id: agent_run_id.to_string(),
                     execution_epoch,
                     outcome: planned_outcome,
-                    error_code: if stop_reason == "end_turn" {
-                        "runtime_missing_final_output".to_string()
-                    } else {
-                        format!("runtime_prompt_{stop_reason}")
-                    },
-                    error_detail: Some(
-                        response_error
-                            .map(str::to_string)
-                            .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
-                    ),
-                    failure: None,
-                    manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
+                    error_code: error_code.clone(),
+                    error_detail: Some(error_detail.clone()),
+                    failure: public_failure.clone(),
+                    manual_retry_allowed,
                 },
             )
             .await?;
@@ -13579,8 +13632,8 @@ async fn persist_acp_prompt_completion(
                             error_detail: Some(
                                 "ACP Runtime ended the prompt without an Agent message".to_string(),
                             ),
-                            failure: None,
-                            manual_retry_allowed: true,
+                            failure: public_failure.clone(),
+                            manual_retry_allowed,
                             ending_git_observation: ending_git_observation.clone(),
                         },
                     },
@@ -13602,14 +13655,10 @@ async fn persist_acp_prompt_completion(
                         agent_run_id: agent_run_id.to_string(),
                         expected_version: execution.version,
                         execution_epoch,
-                        error_code: format!("runtime_prompt_{stop_reason}"),
-                        error_detail: Some(
-                            response_error
-                                .map(str::to_string)
-                                .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
-                        ),
-                        failure: None,
-                        manual_retry_allowed: stop_reason != "cancelled",
+                        error_code: error_code.clone(),
+                        error_detail: Some(error_detail.clone()),
+                        failure: public_failure.clone(),
+                        manual_retry_allowed,
                         ending_git_observation,
                     },
                 },
@@ -13671,6 +13720,13 @@ async fn persist_acp_prompt_completion(
         }
     }
     Ok(())
+}
+
+fn acp_prompt_manual_retry_allowed(
+    outcome: RuntimeTerminalOutcome,
+    delivery_status: Option<&str>,
+) -> bool {
+    outcome == RuntimeTerminalOutcome::Failed && delivery_status == Some("not_accepted")
 }
 
 async fn process_acp_agent_run_exit(
@@ -15795,6 +15851,24 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     use std::fs;
 
+    #[test]
+    fn acp_prompt_failure_is_retryable_only_when_input_was_not_accepted() {
+        assert!(acp_prompt_manual_retry_allowed(
+            RuntimeTerminalOutcome::Failed,
+            Some("not_accepted")
+        ));
+        for delivery_status in [Some("accepted"), Some("delivery_unknown"), None] {
+            assert!(!acp_prompt_manual_retry_allowed(
+                RuntimeTerminalOutcome::Failed,
+                delivery_status,
+            ));
+        }
+        assert!(!acp_prompt_manual_retry_allowed(
+            RuntimeTerminalOutcome::Cancelled,
+            Some("not_accepted")
+        ));
+    }
+
     #[cfg(feature = "slow-tests")]
     #[tokio::test]
     async fn composer_prepare_releases_database_mutex_during_authority_file_io() {
@@ -16751,13 +16825,16 @@ while IFS= read -r _ignored; do :; done
             unreachable!()
         };
         assert!(
-            prepare_acp_delta_batch(&[AcpRuntimeDeltaMessage {
-                native_session_id,
-                native_prompt_id,
-                delivery_id,
-                sequence,
-                message,
-            }])
+            prepare_acp_delta_batch(
+                AdapterKind::OpencodeCli,
+                &[AcpRuntimeDeltaMessage {
+                    native_session_id,
+                    native_prompt_id,
+                    delivery_id,
+                    sequence,
+                    message,
+                }]
+            )
             .unwrap()
             .is_some()
         );
@@ -16773,13 +16850,16 @@ while IFS= read -r _ignored; do :; done
             unreachable!()
         };
         assert!(
-            prepare_acp_delta_batch(&[AcpRuntimeDeltaMessage {
-                native_session_id,
-                native_prompt_id,
-                delivery_id,
-                sequence,
-                message,
-            }])
+            prepare_acp_delta_batch(
+                AdapterKind::OpencodeCli,
+                &[AcpRuntimeDeltaMessage {
+                    native_session_id,
+                    native_prompt_id,
+                    delivery_id,
+                    sequence,
+                    message,
+                }]
+            )
             .unwrap()
             .is_none()
         );
@@ -17609,6 +17689,7 @@ while IFS= read -r _ignored; do :; done
     #[test]
     fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
         let (_, payload) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "update": {
@@ -17641,6 +17722,37 @@ while IFS= read -r _ignored; do :; done
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
 
+        let trae_params = json!({
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "trae-bash-1",
+                "status": "in_progress",
+                "title": "bash",
+                "rawInput": {
+                    "Command": "printf 'TRAE_PUBLIC_COMMAND_OK\\n'",
+                    "Description": "TRAE_PRIVATE_DESCRIPTION_MUST_NOT_LEAK"
+                }
+            }
+        });
+        let (_, trae_payload) =
+            normalize_acp_event(AdapterKind::TraeCnCli, "session/update", &trae_params);
+        let serialized =
+            serde_json::to_string(&trae_payload).expect("TRAE event payload should serialize");
+        assert_eq!(trae_payload["input"], "printf 'TRAE_PUBLIC_COMMAND_OK\\n'");
+        assert_eq!(trae_payload["kind"], "execute");
+        assert!(trae_payload["rawInputDigest"].is_string());
+        assert!(!serialized.contains("TRAE_PRIVATE_DESCRIPTION_MUST_NOT_LEAK"));
+
+        let (_, foreign_payload) =
+            normalize_acp_event(AdapterKind::OpencodeCli, "session/update", &trae_params);
+        assert!(foreign_payload["input"].is_null());
+        assert!(foreign_payload["kind"].is_null());
+        assert!(
+            !serde_json::to_string(&foreign_payload)
+                .expect("foreign event payload should serialize")
+                .contains("TRAE_PRIVATE_DESCRIPTION_MUST_NOT_LEAK")
+        );
+
         let terminal_params = json!({
             "update": {
                 "sessionUpdate": "tool_call_update",
@@ -17652,7 +17764,7 @@ while IFS= read -r _ignored; do :; done
                 }
             }
         });
-        let mut completion = acp::completed_action(&terminal_params)
+        let mut completion = acp::completed_action(AdapterKind::OpencodeCli, &terminal_params)
             .expect("terminal update should normalize")
             .expect("terminal update should create a completion");
         completion.native_kind = "execute".to_string();
@@ -17660,6 +17772,7 @@ while IFS= read -r _ignored; do :; done
         completion.result_data["status"] = json!("failed");
         completion.result_data["rawInputDigest"] = payload["rawInputDigest"].clone();
         let (_, terminal_payload) = normalize_acp_event_with_completion(
+            AdapterKind::OpencodeCli,
             "session/update",
             &terminal_params,
             Some(&completion),
@@ -17718,6 +17831,7 @@ while IFS= read -r _ignored; do :; done
 
         for (adapter_kind, fixture, expected_output, secret) in fixtures {
             let (_, payload) = normalize_acp_event(
+                adapter_kind.parse::<AdapterKind>().unwrap(),
                 "session/update",
                 &json!({
                     "update": {
@@ -17741,6 +17855,7 @@ while IFS= read -r _ignored; do :; done
     #[test]
     fn acp_terminal_content_is_never_misrepresented_as_command_output() {
         let (_, payload) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "update": {
@@ -17766,6 +17881,7 @@ while IFS= read -r _ignored; do :; done
     #[test]
     fn acp_agent_message_events_preserve_only_safe_message_identity_metadata() {
         let (_, update_identity) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",
@@ -17780,6 +17896,7 @@ while IFS= read -r _ignored; do :; done
         assert_eq!(update_identity["messageIdSource"], "update");
 
         let (_, content_identity) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",
@@ -17793,6 +17910,7 @@ while IFS= read -r _ignored; do :; done
         assert_eq!(content_identity["messageIdSource"], "content");
 
         let (_, anonymous) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",
@@ -17806,6 +17924,7 @@ while IFS= read -r _ignored; do :; done
         assert!(anonymous["messageIdSource"].is_null());
 
         let (_, invalid_identity) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",

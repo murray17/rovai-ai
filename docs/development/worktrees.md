@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-worktree-lifecycle
-last_updated: 2026-08-16
+last_updated: 2026-08-24
 ---
 
 # Git Worktree 生命周期与清理
@@ -79,10 +79,12 @@ Next: <next concrete step>
 主线，则在创建编码 worktree 前完成：
 
 1. 在干净的主 checkout 确认并按仓库规则同步 `main`；不覆盖其它未提交工作；
-2. 只更新本次工作需要的治理文档并运行对应文档门禁；
-3. 把治理文档作为独立提交提交到 `main`，按当前工作要求推送；
-4. 记录该提交的不可变 SHA，并从它创建或更新编码 worktree；
-5. 在交接的 `Governance` 字段记录该 SHA。
+2. 从 `origin/main` 创建独立治理分支，只更新本次工作需要的治理文档并运行对应文档门禁；
+3. 把治理文档作为独立提交推送到治理分支，并按
+   [本地开发提交与主线合入流程](local-workflow.md#代码提交与主线合入统一使用-pr)创建 PR；不得先尝试
+   直接推送 `main`；
+4. 等待治理 PR 合入，重新获取 `origin/main`，记录合入后的不可变 SHA，并从它创建或更新编码 worktree；
+5. 在交接的 `Governance` 字段记录该 SHA 和治理 PR。
 
 编码 worktree 已创建但尚未编码时，先快进或按仓库规则更新到该治理提交。已有代码提交或未提交改动时，
 不得自动 reset、rebase 或强制移动分支；应按仓库规则合入治理提交。无权提交主线或主 checkout 无法安全
