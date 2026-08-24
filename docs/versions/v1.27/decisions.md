@@ -505,3 +505,48 @@ CampMessage/CampTurn/AgentRun/Conversation 时间。macOS 深度睡眠期间该 
 - **所有时间统一 `Utc::now()`：** suspend 正确，但 wall 回拨可能延长执行预算；
 - **所有时间统一非倒退合成 clock：** 会继续把进程 awake 时间伪装成用户审计 wall time；
 - **批量重写历史记录：** 日常数据库没有每条记录的可靠 suspend offset，迁移会制造新的猜测事实。
+
+<a id="v1-27-d12"></a>
+## V1.27-D12：Runtime-specific policy 选择通用本地 ACP Client Terminal
+
+### 背景
+
+Rovai 的 ACP Client 一直统一声明 `clientCapabilities.terminal=false`。Kimi Code 0.32.0 在该声明下仍使用内部
+Bash；0.38.x 的实际兼容回归则让 Shell 失败并返回 `ACP terminal capability is unavailable`。其他已资格验证
+ACP Runtime 在 `terminal=false` 下仍能沿原路径执行 Shell，因此全局开启 capability 会无依据地改变所有
+Runtime；为 Kimi 定义私有 Shell RPC 又会复制 ACP 标准和现有本地进程安全边界。
+
+### 决定
+
+1. Adapter compatibility registry 拥有 `AcpClientTerminalMode = Disabled | LocalBridged`；当前 Kimi Code 为
+   `LocalBridged`，其他 Runtime 为 `Disabled`。不按未经验证的版本范围硬编码分支；
+2. initialize 的 `clientCapabilities.terminal` 只由该 policy 导出。`true` 必须和真实的通用标准 ACP Client
+   Terminal callbacks 同时存在，禁止只改 capability bit；
+3. 通用 Bridge 实现 create/output/wait_for_exit/kill/release，且不包含 Kimi-specific wire。Terminal 使用
+   当前 Runtime Host launch snapshot 派生本地 ManagedProcess，继承环境、workspace、平台进程树和
+   protected-tree 边界；
+4. create 绑定当前 Host、Session、AgentRun owner/execution epoch 与 Active Prompt；cwd canonical 后不得逃逸
+   workspace。cancel、detach、EOF、shutdown/reap 清理遗留进程，Host 有 Terminal 时不进入 warm reuse；
+5. stdout/stderr 只进入有界协议 buffer。Terminal output/error 不投影为 Camp message 或 durable Evidence，
+   不增加云端执行路径，不改变其他 Runtime 的内部 Shell。
+
+当前规范见 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与
+[ACP Client Terminal v1](../../contracts/acp-client-terminal-v1.md)。
+
+### 后果
+
+- Kimi 0.38.x 可以按标准 ACP capability 请求 Rovai 本地 Terminal，0.32.0 也能在同一通用能力下保持兼容；
+- 其他 ACP Runtime 继续观测 `terminal=false`，既有 Shell、Session continuation、History Restore 和 Prompt
+  lifecycle 不变；
+- Core 新增 Host-local Terminal map 与有界输出窗口，生命周期必须随 Run/Host 清理；
+- 实际 Kimi Code 0.38.0 npm 发布包的只读复核和隔离 Home initialize 确认 exact standard wire、4 MiB limit、
+  capability failure 分支与 `terminal=true` negotiation；确定性 Host fixture 证明本地生命周期，macOS arm64
+  隔离开发 App 的真实 Camp AgentRun 进一步证明两次 Bash、固定输出、Run success 与进程回收。
+
+### 被拒绝方案
+
+- **全局 `terminal=true`：** 会改变其他已资格验证 Runtime 的 Shell 选择，且 capability bit 不能替代 callbacks；
+- **Kimi 私有 Shell 协议：** 重复标准 ACP wire 和进程设施，长期随 Runtime 版本漂移；
+- **硬编码 `>=0.38`：** 当前没有足够 qualification 证据证明完整版本范围，且旧版本收到标准 capability 无需
+  改变其他 Runtime；
+- **Bridge 自建 subprocess 系统：** 会绕过 ManagedProcess 的环境快照、进程树、Windows Job 与 macOS 本地安全边界。

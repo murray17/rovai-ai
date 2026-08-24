@@ -40,6 +40,19 @@ macOS arm64 一样进入普通 discovery、检查、成员配置和 AgentRun 路
 是 macOS arm64，未在本提交内重跑 x86_64 真实模型 Smoke；x86_64 资格依据是维护者已完成验收后的明确发布
 确认，而不是把 arm64 结果静默外推。Windows x64 已由独立 Windows 资格证据准入，不受本次变更影响。
 
+### 2026-08-24 Kimi Code `0.38.0` ACP Client Terminal macOS arm64 产品 Smoke
+
+本机通过 Homebrew 将 `/opt/homebrew/bin/kimi` 从 `0.32.0` 升级到 `0.38.0`。Rovai 隔离开发 App 使用独立
+`userData` 与 managed Skill Library，Runtime Discovery 解析到 0.38.0 Cellar executable，Deep Probe 返回
+`authenticated / ready`。随后经 User Automation 创建专用 Kimi 成员、directory Camp 并投递真实 AgentRun；
+Runtime 建立新的 ACP Session，两次结构化 Bash 均以 `shell.execute / succeeded` 结束，实际返回 canonical
+workspace cwd 与 `ROVAI_KIMI_038_TERMINAL_OK`，AgentRun 最终为 `succeeded` 并发布 Camp final。
+
+该 workspace 除 Runtime 受管 Skill projection 外没有测试命令产生的写入；Run 结束后进程检查没有 Kimi 或
+Terminal 子进程。Kimi 0.38.0 在 `terminal=false` 时会走已确认的 capability-unavailable 分支，因此本次真实
+Shell 成功与标准 wire fixture 共同证明 `LocalBridged` negotiation 和 Client callbacks 的产品路径。此证据只属于
+macOS arm64，不替代 macOS x64 或 Windows x64 的独立资格证据，也不改变其他 ACP Runtime 的内部 Shell 路径。
+
 ### 2026-08-22 Kimi Code `0.32.0` + MiniMax M3 macOS arm64 完整资格复核
 
 本机 `/opt/homebrew/bin/kimi` 报告 `0.32.0`。Rovai 没有改写用户 `~/.kimi/config.toml`，而是从
