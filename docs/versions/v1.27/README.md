@@ -22,6 +22,10 @@ last_updated: 2026-08-24
 > `runtime_deferred` 无产品副作用终态和对应第三页空结果 UI；正常 Runtime provisioning 与“初次集结”路径
 > 保持不变。
 >
+> 同版本还修复 TRAE CLI CN Bash command 展示：`traecli 0.120.52` 实测使用
+> `rawInput.Command`，Core 现在只在 `trae-cn-cli` Adapter 边界公开该非空字符串，并继续排除相邻
+> `Description`；其他 ACP Adapter 的大写同形字段保持 fail closed。
+>
 > Windows x64 证据复核采用逐 Adapter 门禁：Claude Code `2.1.86` 在 Windows 10 x64 以 MiniMax M3 1M 完成
 > 当前树 cancellation 目标确认，并复用同版本已冻结的 Built-in、Approval、final boundary、进程树回收与
 > packaged planned-shutdown 证据，成为首个 Windows `qualified` Runtime。随后按操作员要求为设置页范围内每种
@@ -104,20 +108,20 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.26 冻结为 historical；本概览、计划、决定和版本索引建立唯一 current v1.27。 |
 | Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation；[V1.27-D08](decisions.md#v1-27-d08)允许零可用 Runtime 无副作用结束首次训练；[V1.27-D09](decisions.md#v1-27-d09)记录 Kimi macOS x64 的独立准入晋升。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)继承用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP 与十二种 Runtime 原生最高权限默认，并冻结 Cursor 隐藏边界；[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)增加 schema 2 与 `runtime_deferred`。 |
+| Contracts | 已更新 | [Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)继承 v25 的用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP、十二种 Runtime 原生最高权限默认与 Cursor 隐藏边界，并增加 TRAE 专属 `rawInput.Command` 公开白名单；[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)增加 schema 2 与 `runtime_deferred`。 |
 | User Automation | 已更新 | [User Automation v1](../../contracts/user-automation-v1.md)补齐 `runtime check/models` 与成员 create/runtime set/clear 的封闭 App CLI；所有写入复用既有 Core Domain Command、显式版本 fence 与幂等 command ID，不开放 generic invoke。 |
-| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity，并记录 Kimi 三个 shipped 平台的当前准入；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector；[First-run Onboarding](../../architecture/first-run-onboarding.md)增加 configured/deferred 分支。 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity，并记录 Kimi 三个 shipped 平台的当前准入；[基础架构不变量](../../architecture/foundational-invariants.md#evidence-canonical-activity)记录 TRAE 专属 command 字段边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector；[First-run Onboarding](../../architecture/first-run-onboarding.md)增加 configured/deferred 分支。 |
 | UI | 已更新 | Settings 与成员工作区继续展示已接入 Kimi并隐藏 Cursor；Kimi macOS x64 进入普通机器可用性与配置流；首次训练 Runtime 页增加零可用结果面、重新扫描和无副作用“进入 Rovai”。 |
-| Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)加入 Kimi ACP `run_level` baseline 与真实 Shell Evidence。 |
+| Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)加入 Kimi ACP `run_level` baseline 与真实 Shell Evidence，并记录 TRAE `Command + Description` 实测 wire、专属公开白名单与稀疏 terminal 继承。 |
 | Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 `0.32.0`、MiniMax M3、用户原生 Home、Probe 隔离、warm/cold continuation、External MCP、Built-in 15/15、Kimi Compaction detector 与 macOS x64 晋升；另冻结 Windows x64 独立资格 revision。 |
-| Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航路由到 Runtime Launch v25、本版本与 Kimi Research。 |
+| Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航路由到 Runtime Launch v26、本版本与 Kimi Research。 |
 | Root README | 已更新 | 常青能力更新为十二种 Product Runtime identity。 |
 
 ## References
 
 - [实施与验收计划](implementation-plan.md)
 - [版本决定](decisions.md)
-- [Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)
+- [Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)
 - [First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)
 - [Kimi Code Runtime Research](../../research/kimi-code-runtime-research.md)
 - [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
