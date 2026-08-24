@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.27
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
@@ -30,6 +30,7 @@ last_updated: 2026-08-24
 > 宽度在 200% zoom 下撑大根 grid 的问题，1040×700 Day/Night 与 200% zoom 均无文档级横向溢出。
 >
 > 前置版本：[v1.26 Cursor Agent Catalog 接入](../v1.26/README.md)已按冻结时事实转为 historical。
+> 后续版本：[v1.28 Pi Coding Agent Runtime 接入](../v1.28/README.md)。
 
 ## 版本目标
 

@@ -151,6 +151,12 @@ pub struct ClaudeCodeCapabilityProbe {
 }
 
 #[derive(Debug, Clone)]
+pub struct PiCapabilityProbe {
+    pub result: AgentRuntimeProbeResult,
+    pub provider_compatibility_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct AntigravityCapabilityProbe {
     pub result: AgentRuntimeProbeResult,
     pub models: Vec<String>,
@@ -215,6 +221,80 @@ pub async fn claude_code_capability_probe_at(path: &Path) -> ClaudeCodeCapabilit
 
 pub async fn antigravity_capability_probe_at(path: &Path) -> AntigravityCapabilityProbe {
     antigravity_probe_at(path).await
+}
+
+pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
+    let probed_at = chrono::Utc::now().to_rfc3339();
+    let path_text = path.to_string_lossy().to_string();
+    if !path.is_file() {
+        return PiCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::Pi.as_str(),
+                Some(path_text),
+                None,
+                None,
+                AgentRuntimeProbeStatus::NotInstalled,
+                Vec::new(),
+                vec!["pi.rpc.agent_settled".to_string()],
+                Some("Configured Pi executable does not exist.".to_string()),
+                probed_at,
+            ),
+            provider_compatibility_key: None,
+        };
+    }
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let fingerprint = executable_fingerprint_async(path.clone()).await;
+    let mut version_command = runtime_command(&path);
+    version_command.arg("--version").stdin(Stdio::null());
+    let version = bounded_output(&mut version_command, Duration::from_secs(5))
+        .await
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout.bytes)
+                .trim()
+                .to_string()
+        })
+        .filter(|value| !value.is_empty());
+    match crate::pi::behavioral_probe(&path).await {
+        Ok(observation) => PiCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::Pi.as_str(),
+                Some(path_text),
+                version,
+                fingerprint,
+                AgentRuntimeProbeStatus::Ready,
+                observation.capabilities,
+                Vec::new(),
+                Some(format!(
+                    "Pi JSONL RPC, managed Approval, final and exact Session identity verified (model {}, session identity retained)",
+                    observation.model_fingerprint
+                )),
+                probed_at,
+            ),
+            provider_compatibility_key: Some(observation.provider_compatibility_key),
+        },
+        Err(_) => PiCapabilityProbe {
+            result: agent_probe_result(
+                AdapterKind::Pi.as_str(),
+                Some(path_text),
+                version,
+                fingerprint,
+                AgentRuntimeProbeStatus::ProbeFailed,
+                Vec::new(),
+                vec![
+                    "pi.rpc.agent_settled".to_string(),
+                    "pi.rpc.extension_approval".to_string(),
+                ],
+                Some(
+                    "Pi could not verify the private Claude MiniMax source and behavioral RPC contract."
+                        .to_string(),
+                ),
+                probed_at,
+            ),
+            provider_compatibility_key: None,
+        },
+    }
 }
 
 async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
@@ -1788,7 +1868,10 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::KimiCodeCli => {
             command.arg("acp");
         }
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {}
+        AdapterKind::CodexCli
+        | AdapterKind::Pi
+        | AdapterKind::ClaudeCodeCli
+        | AdapterKind::AntigravityApp => {}
     }
 }
 
@@ -2551,6 +2634,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
             ][..],
             "opencode",
         ),
+        AdapterKind::Pi => (&["ROVAI_PI_BIN"][..], "pi"),
         AdapterKind::CopilotCli => (
             &[
                 "ROVAI_COPILOT_BIN",

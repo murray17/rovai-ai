@@ -243,6 +243,7 @@ pub struct SucceedAgentRunCommand {
 #[serde(rename_all = "snake_case")]
 pub enum MissingSendRecoveryBoundary {
     CodexCompletedTurn,
+    PiAgentSettled,
     ClaudeSuccessResult,
     AntigravityPrintStdout,
     AcpEndTurnAssistantSuffix,
@@ -252,6 +253,7 @@ impl MissingSendRecoveryBoundary {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::CodexCompletedTurn => "codex_completed_turn",
+            Self::PiAgentSettled => "pi_agent_settled",
             Self::ClaudeSuccessResult => "claude_success_result",
             Self::AntigravityPrintStdout => "antigravity_print_stdout",
             Self::AcpEndTurnAssistantSuffix => "acp_end_turn_assistant_suffix",
@@ -261,6 +263,7 @@ impl MissingSendRecoveryBoundary {
     fn is_compatible_with(self, adapter_kind: AdapterKind) -> bool {
         match self {
             Self::CodexCompletedTurn => matches!(adapter_kind, AdapterKind::CodexCli),
+            Self::PiAgentSettled => matches!(adapter_kind, AdapterKind::Pi),
             Self::ClaudeSuccessResult => matches!(adapter_kind, AdapterKind::ClaudeCodeCli),
             Self::AntigravityPrintStdout => matches!(adapter_kind, AdapterKind::AntigravityApp),
             Self::AcpEndTurnAssistantSuffix => adapter_kind.uses_acp(),
@@ -5621,6 +5624,7 @@ mod tests {
             } else {
                 match adapter_kind {
                     AdapterKind::CodexCli => MissingSendRecoveryBoundary::CodexCompletedTurn,
+                    AdapterKind::Pi => MissingSendRecoveryBoundary::PiAgentSettled,
                     AdapterKind::ClaudeCodeCli => MissingSendRecoveryBoundary::ClaudeSuccessResult,
                     AdapterKind::AntigravityApp => {
                         MissingSendRecoveryBoundary::AntigravityPrintStdout
@@ -5630,6 +5634,7 @@ mod tests {
             };
             for boundary in [
                 MissingSendRecoveryBoundary::CodexCompletedTurn,
+                MissingSendRecoveryBoundary::PiAgentSettled,
                 MissingSendRecoveryBoundary::ClaudeSuccessResult,
                 MissingSendRecoveryBoundary::AntigravityPrintStdout,
                 MissingSendRecoveryBoundary::AcpEndTurnAssistantSuffix,

@@ -46,6 +46,7 @@ const expectedOperations = [
 ]
 const allRuntimeSpecifications = [
   ['codex-cli', 'Codex'],
+  ['pi', 'Pi'],
   ['opencode-cli', 'OpenCode'],
   ['copilot-cli', 'Copilot'],
   ['claude-code-cli', 'Claude'],

@@ -212,6 +212,7 @@ pub struct AdapterRuntimeProjection {
 #[serde(rename_all = "snake_case")]
 pub enum SkillDeliveryGroupKey {
     Codex,
+    Pi,
     Opencode,
     Copilot,
     ClaudeCompatible,
@@ -226,8 +227,9 @@ pub enum SkillDeliveryGroupKey {
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Codex,
+        Self::Pi,
         Self::Opencode,
         Self::Copilot,
         Self::ClaudeCompatible,
@@ -244,6 +246,7 @@ impl SkillDeliveryGroupKey {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Codex => "codex",
+            Self::Pi => "pi",
             Self::Opencode => "opencode",
             Self::Copilot => "copilot",
             Self::ClaudeCompatible => "claude_compatible",
@@ -261,6 +264,7 @@ impl SkillDeliveryGroupKey {
     pub fn relative_path(self) -> &'static Path {
         match self {
             Self::Codex => Path::new(".codex/skills"),
+            Self::Pi => Path::new(".pi/skills"),
             Self::Opencode => Path::new(".opencode/skills"),
             Self::Copilot => Path::new(".github/skills"),
             Self::ClaudeCompatible => Path::new(".claude/skills"),
@@ -282,6 +286,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
     fn from_str(value: &str) -> Result<Self> {
         match value {
             "codex" => Ok(Self::Codex),
+            "pi" => Ok(Self::Pi),
             "opencode" => Ok(Self::Opencode),
             "copilot" => Ok(Self::Copilot),
             "claude_compatible" => Ok(Self::ClaudeCompatible),
@@ -359,7 +364,7 @@ fn unsupported_external_mcp_projection() -> McpProjectionCapability {
         supports_streamable_http: false,
         external_mcp_projection: ExternalMcpProjection::Unsupported,
         same_name_policy: None,
-        approval_control: McpApprovalControl::RuntimeNative,
+        approval_control: McpApprovalControl::Unsupported,
     }
 }
 
@@ -424,11 +429,24 @@ pub struct ClaudeCodeProbeObservation {
     pub last_error: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct PiProbeObservation {
+    pub reported_version: Option<String>,
+    pub executable_fingerprint: Option<String>,
+    pub authentication_status: String,
+    pub probe_status: String,
+    pub capabilities: Vec<String>,
+    pub provider_compatibility_key: Option<String>,
+    pub attempted_at: String,
+    pub last_error: Option<String>,
+}
+
 /// Synthetic catalog entry used to represent Antigravity's own default
 /// selection. It is never passed to `agy --model`; a runtime-default Run
 /// omits that flag.
 pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
 pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
+pub const PI_RUNTIME_DEFAULT_MODEL_ID: &str = "pi://claude-minimax-default";
 /// Frozen model identity used only while TRAE is statically installed but has
 /// not yet exposed its live model catalog. The first real ACP Session leaves
 /// the Runtime's current model untouched.
@@ -497,7 +515,9 @@ impl AgentRuntimeAdapterRegistry {
         kind: AdapterKind,
         platform: HostPlatformKey,
     ) -> RuntimePlatformAdmission {
-        if kind == AdapterKind::CursorAgent {
+        if kind == AdapterKind::CursorAgent
+            || (kind == AdapterKind::Pi && platform != HostPlatformKey::MacosArm64)
+        {
             return RuntimePlatformAdmission::not_qualified(
                 kind,
                 platform,
@@ -551,6 +571,9 @@ impl AgentRuntimeAdapterRegistry {
                 "sandbox_mode": "danger-full-access",
                 "approval_policy": "never",
             }),
+            AdapterKind::Pi => json!({
+                "approval_mode": "managed",
+            }),
             AdapterKind::OpencodeCli => json!({
                 "permission": "allow",
             }),
@@ -597,6 +620,7 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterRuntimeProjection> {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.resolve_runtime(input),
+            AdapterKind::Pi => resolve_pi_runtime(input),
             AdapterKind::OpencodeCli => self.opencode_cli.resolve_runtime(input),
             AdapterKind::CopilotCli => self.copilot_cli.resolve_runtime(input),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.resolve_runtime(input),
@@ -614,6 +638,10 @@ impl AgentRuntimeAdapterRegistry {
     pub fn skill_discovery(&self, kind: AdapterKind) -> SkillDiscoveryCapability {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.skill_discovery(),
+            AdapterKind::Pi => native_skill_discovery(
+                [SkillDeliveryGroupKey::Pi],
+                SkillDiscoveryVerification::Verified,
+            ),
             AdapterKind::OpencodeCli => self.opencode_cli.skill_discovery(),
             AdapterKind::CopilotCli => self.copilot_cli.skill_discovery(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.skill_discovery(),
@@ -652,6 +680,7 @@ impl AgentRuntimeAdapterRegistry {
     pub fn mcp_projection(&self, kind: AdapterKind) -> McpProjectionCapability {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
+            AdapterKind::Pi => unsupported_external_mcp_projection(),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -721,6 +750,7 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterCapabilitySnapshot> {
         let permission_options = match kind {
             AdapterKind::CodexCli => codex_permission_options(),
+            AdapterKind::Pi => pi_permission_options(),
             AdapterKind::OpencodeCli => opencode_permission_options(),
             AdapterKind::CopilotCli => copilot_permission_options(),
             AdapterKind::ClaudeCodeCli => claude_code_permission_options(),
@@ -825,6 +855,70 @@ impl AgentRuntimeAdapterRegistry {
         observation: ClaudeCodeProbeObservation,
     ) -> Result<AdapterCapabilitySnapshot> {
         self.claude_code_cli.capability_snapshot(observation)
+    }
+
+    pub fn pi_capability_snapshot(
+        &self,
+        observation: PiProbeObservation,
+    ) -> Result<AdapterCapabilitySnapshot> {
+        let ready = observation.probe_status == "ready";
+        let mut capabilities = observation.capabilities;
+        if ready {
+            for capability in [
+                "pi.rpc.prompt",
+                "pi.rpc.agent_settled",
+                "pi.rpc.structured_tools",
+                "pi.rpc.extension_approval",
+                "conversation.exact_resume",
+                "process.interrupt",
+                "context.charter.native_append",
+                BUILTIN_TOOL_RUNTIME_CAPABILITY,
+            ] {
+                if !capabilities.iter().any(|value| value == capability) {
+                    capabilities.push(capability.to_string());
+                }
+            }
+        }
+        capabilities.sort();
+        capabilities.dedup();
+        let permission_options = ready.then(pi_permission_options).unwrap_or_default();
+        let permission_schema_digest =
+            canonical_json_digest(&serde_json::to_value(&permission_options)?)?;
+        Ok(AdapterCapabilitySnapshot {
+            reported_version: observation.reported_version,
+            executable_fingerprint: observation.executable_fingerprint,
+            authentication_status: observation.authentication_status,
+            probe_status: observation.probe_status,
+            permission_schema_version: 1,
+            permission_schema_digest,
+            capabilities,
+            protocols: if ready {
+                vec!["pi-jsonl-rpc-v1".to_string()]
+            } else {
+                Vec::new()
+            },
+            models: if ready {
+                vec![ModelDescriptor {
+                    id: PI_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+                    display_name: "Claude local MiniMax default".to_string(),
+                    is_default: true,
+                    hidden: false,
+                    deprecated: false,
+                    options: Vec::new(),
+                }]
+            } else {
+                Vec::new()
+            },
+            permission_options,
+            observed_at: ready.then(|| observation.attempted_at.clone()),
+            last_attempted_at: observation.attempted_at.clone(),
+            last_successful_probe_at: ready.then(|| observation.attempted_at.clone()),
+            stale_at: (!ready).then_some(observation.attempted_at),
+            last_error: (!ready).then_some(observation.last_error).flatten(),
+            native_session_compatibility_key: ready
+                .then_some(observation.provider_compatibility_key)
+                .flatten(),
+        })
     }
 
     pub fn antigravity_capability_snapshot(
@@ -1023,6 +1117,22 @@ fn codex_permission_options() -> Vec<PermissionOptionDescriptor> {
             unsupported_reason: None,
         },
     ]
+}
+
+fn pi_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "approval_mode".to_string(),
+        label: "approval_mode".to_string(),
+        description: "Pi has no native sandbox or permission callback. Rovai's explicitly loaded extension gates every bash/write/edit request through durable Approval.".to_string(),
+        value_type: "enum".to_string(),
+        choices: vec![choice("managed", "managed (Rovai approval)")],
+        recommended_value: json!("managed"),
+        scope: RuntimeOptionScope::Host,
+        risk: "elevated".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
 }
 
 fn choice(value: &str, label: &str) -> ValueChoice {
@@ -2103,6 +2213,56 @@ fn antigravity_permission_options() -> Vec<PermissionOptionDescriptor> {
             unsupported_reason: None,
         },
     ]
+}
+
+fn resolve_pi_runtime(
+    input: AdapterRuntimeResolutionInput<'_>,
+) -> Result<AdapterRuntimeProjection> {
+    if input.permissions.adapter_kind != AdapterKind::Pi {
+        anyhow::bail!("Pi permission configuration belongs to another Adapter");
+    }
+    let protocol_version = input
+        .protocols
+        .iter()
+        .find(|protocol| protocol.as_str() == "pi-jsonl-rpc-v1")
+        .context("Pi installation does not advertise JSONL RPC v1")?
+        .clone();
+    let approval_mode = input
+        .permissions
+        .values
+        .get("approval_mode")
+        .and_then(Value::as_str)
+        .context("Pi permission configuration requires approval_mode")?;
+    if approval_mode != "managed" {
+        anyhow::bail!("Pi only supports the Rovai managed approval mode");
+    }
+    let provider_compatibility_key = input
+        .native_session_compatibility_key
+        .context("Pi Ready evidence has no provider compatibility key")?;
+    let binding_compatibility_digest = canonical_json_digest(&json!({
+        "adapterKind": AdapterKind::Pi,
+        "installationId": input.installation_id,
+        "protocolVersion": protocol_version,
+        "providerCompatibilityKey": provider_compatibility_key,
+        "contextContract": native_binding_context_contract(),
+    }))?;
+    let host_config_digest = canonical_json_digest(&json!({
+        "adapterKind": AdapterKind::Pi,
+        "installationId": input.installation_id,
+        "executablePath": input.executable_path,
+        "executableFingerprint": input.executable_fingerprint,
+        "authScope": input.auth_scope,
+        "protocolVersion": protocol_version,
+        "providerCompatibilityKey": provider_compatibility_key,
+        "permissionSchemaVersion": input.permissions.schema_version,
+        "approvalMode": approval_mode,
+        "managedApprovalExtension": "rovai-pi-approval-v1",
+    }))?;
+    Ok(AdapterRuntimeProjection {
+        protocol_version,
+        binding_compatibility_digest,
+        host_config_digest,
+    })
 }
 
 fn resolve_acp_runtime(
@@ -3257,6 +3417,11 @@ mod tests {
                 SkillDiscoveryVerification::Verified,
             ),
             (
+                AdapterKind::Pi,
+                &[SkillDeliveryGroupKey::Pi],
+                SkillDiscoveryVerification::Verified,
+            ),
+            (
                 AdapterKind::OpencodeCli,
                 &[
                     SkillDeliveryGroupKey::Opencode,
@@ -3371,7 +3536,11 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
-        for kind in [AdapterKind::AntigravityApp, AdapterKind::CursorAgent] {
+        for kind in [
+            AdapterKind::Pi,
+            AdapterKind::AntigravityApp,
+            AdapterKind::CursorAgent,
+        ] {
             let capability = registry.mcp_projection(kind);
             assert!(!capability.supports_stdio);
             assert!(!capability.supports_streamable_http);
@@ -3380,10 +3549,7 @@ mod tests {
                 ExternalMcpProjection::Unsupported
             );
             assert_eq!(capability.same_name_policy, None);
-            assert_eq!(
-                capability.approval_control,
-                McpApprovalControl::RuntimeNative
-            );
+            assert_eq!(capability.approval_control, McpApprovalControl::Unsupported);
         }
     }
 }

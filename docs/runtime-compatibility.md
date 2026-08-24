@@ -20,14 +20,48 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十二种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
+当前 closed `AdapterKind` 包含十三种 Product Runtime：Codex CLI、Pi Coding Agent、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
 Cursor 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。
+Pi 只在 macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64 缺少独立资格证据。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
+
+### 2026-08-24 Pi `0.84.2` + Claude 本机 MiniMax provider macOS arm64 完整资格复核
+
+本机 `/opt/homebrew/bin/pi` 报告 `0.84.2`。Core 只从权限 `0600`、当前用户拥有的
+`~/.claude/settings.json` 读取 exact `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL` 与
+`ANTHROPIC_MODEL`；真实 token 未进入仓库、数据库、argv、Evidence、diagnostics 或本文。正式 Pi Host 保留
+通用 `HOME`，但使用私有 `PI_CODING_AGENT_DIR` 和 env-ref `models.json`，provider identity 为
+`rovai-claude-minimax`、API dialect 为 `anthropic-messages`。该覆盖禁止自动执行用户/项目 Extension，只显式
+加载 Rovai Approval Extension 与 managed Skills；Probe 使用另一组临时 config/session root，结束后已清理。
+
+Pi 不是 ACP Runtime。本轮直接使用官方 LF JSONL RPC，验证 split framing 与 `U+2028/U+2029`，prompt response
+只作为 accepted；最终公开 assistant snapshot 取自 `message_end.message`，成功 terminal 只认
+`agent_settled`。兼容性 fingerprint 为安全、非敏感的 `a8be25ed68ae`，不包含 provider key、原始 URL、Prompt、
+Session UUID 或 Session file。
+
+| 能力轴 | 本次证据 | 当前产品边界 |
+| --- | --- | --- |
+| Identity / launch | `pi --version` 为 `0.84.2`；私有 Host 完成 state、provider/model 与 managed Extension handshake | wire identity `pi`，协议 `pi-jsonl-rpc-v1`，覆盖键 `ROVAI_PI_BIN`；旧 executable/fingerprint/extension schema 不复用 |
+| Provider / secret | Claude 本机 MiniMax Anthropic-compatible 三字段成功完成真实 Prompt；配置普通文件、owner、mode、HTTPS/no-credentials 负向 fixture 通过 | child-only token；私有 models.json 只含 env reference；不复制、合并或改写 Claude/Pi 用户配置 |
+| Prompt / final | first turn 返回固定公开结果；`response`、`message_end`、`agent_settled` 顺序通过，thinking 保持私有 | response 只表示 accepted；`message_end.message` 是权威消息，`agent_settled` 是 final/Missing-Send boundary；process exit 不代替 terminal |
+| Tool / Approval | 受管 Bash Approval roundtrip 通过；allow write 成功，deny write 目标文件不存在；Action output 不含 Extension envelope | 唯一权限为 `approval_mode=managed`；read/search 类不弹 Approval，沿用 OS 用户与既有 Workspace/attachment 边界；`bash/write/edit` 阻塞审批，unknown mutating Tool fail closed；Pi 无 sandbox |
+| Cancel / cleanup | 长时 Bash 进入执行后 cancel；延迟写入没有发生，Extension/Runtime 后代进程由 Fleet Stop 回收 | RPC `abort` 只 flush 不等待潜在迟到 response；cancel、failure、shutdown 都以进程树 stop 为权威 fence |
+| Session / identity | first Session 后兼容 Run 复用同一 Host/Session；Core restart 后新 Host 用 exact canonical Session file 恢复同一 Native Session UUID；删除源 marker 后仍只凭 Session 记忆返回 | 公共 Fleet LRU per-member 20/global 200/idle 30m/sweep 60s；首版一 Host 一 Session；warm → exact cold resume → new，禁止 fuzzy/recent/history replay；locator 私有 |
+| Skill | `.pi/skills` 唯一 marker、CLI help 调用、Core restart 后投影恢复与 lifecycle cleanup 通过 | Session start 以 exact `--skill` 投递；exposure digest 进入 compatibility，未证明 live refresh |
+| External MCP | Pi 核心没有 Product-managed MCP projection；真实资格 smoke 断言 capability projection 为 `unsupported` | `Unsupported`；不投递 Assignment MCP、不写用户配置，第三方 Extension 不自动晋升 |
+| Missing-Send | zero-send publication 与 accepted-send suppression 均通过 | `IfNoAcceptedSend`，final boundary=`pi_agent_settled`；cancel/error 不发布成功候选 |
+| Usage / compaction | 上游 RPC 有候选事件，但本轮未建立 per-Run attribution、occurrence/dedupe 与 resume 证据 | Usage/Cost Disabled；Compaction Disabled；不从 Session totals、文本或 token 差值推断 |
+| Built-in CLI | 十五项 current operation、三种输入、Gather、conflict、initial/resumed lease fencing、successor exact read、logical/native continuation 全部通过 | bundled `rovai` CLI 经 managed Bash Tool；per-Run lease 在 terminal 前解绑，后继 Run 获取新 lease；不是 MCP |
+
+项目级 `smoke:pi-runtime` 还断言公共 trace 不出现 Claude 配置键名或私有 Host log；first/cold resume、allow/deny
+与 cancel 都使用隔离 Core data-dir 和 Git workspace。`smoke:skills`、`smoke:missing-send-recovery` 与
+`smoke:builtin-cli` 的 Pi 定向矩阵分别通过。以上证据足以准入 `pi × macos-arm64`，但不外推 macOS x64 或
+Windows x64；两者继续为 `not_qualified / runtime_platform.qualification_evidence_missing`。
 
 ### 2026-08-24 Kimi Code macOS x64 准入晋升
 
@@ -170,8 +204,9 @@ implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史�
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
 Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核既有 Windows 证据并在当前源码树完成
-逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已准入；明确不在本轮设置页范围的
-`cursor-agent` 仍不准入。下表是当前资格状态，不是本机
+逐 Runtime 两轮 Camp 目标确认后，当时设置页范围内的十一种 Runtime 已准入；`cursor-agent` 被明确排除。
+v1.28 新增的 `pi` 尚未运行独立 Windows Bash/Job Object 与真实模型资格矩阵，因此当前十三行中十一行
+qualified，`cursor-agent` 与 `pi` 不准入。下表是当前资格状态，不是本机
 `not_installed`、Probe 失败、上游不支持或 Renderer allowlist；唯一产品真源是 Rust Registry 的
 [Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)投影。
 
@@ -189,6 +224,7 @@ Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核�
 | `cursor-agent` | `not_qualified` | — | 不在当前设置页范围，且本轮明确排除 |
 | `kimi-code-cli` | `qualified` | 同上 | 两轮纯消息与 Native Session 延续通过；本机 ACP terminal 不可用 |
 | `antigravity-app` | `qualified` | 同上 | 复用操作员确认的既有成功；当前额度下未重复模型输出 |
+| `pi` | `not_qualified` | — | v1.28 没有 Windows x64 独立 Bash、Job Object、Approval、Session 与 cleanup 资格证据 |
 
 公共 Named Pipe、Job Object 或三类 execution-shape 测试只能证明平台基础设施。任一行提升为 `qualified` 前，
 必须独立覆盖 discovery、executable identity、authentication、first run、Session continuation、Built-in Tool
@@ -213,7 +249,8 @@ terminal。凭据、原始 Prompt、本机用户路径、Session/Run ID 均未�
 Codex、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen、TRAE 与 Kimi 都在各自隔离 Rovai Camp 完成两轮；
 第二轮与第一轮绑定同一 Native Session。除 Codex、Kimi 使用两轮纯消息外，其余当前可重复 Runtime 还确认了
 终端输出投影。Antigravity 按操作员明确确认复用此前成功运行，本次 companion 在当前额度状态下未返回模型
-输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，仍为唯一 Windows `not_qualified` 行。
+输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，是该次冻结证据中唯一 Windows
+`not_qualified` 行；v1.28 后新增的 Pi 另因没有 Windows 独立证据保持不准入，不追溯改写旧冻结文件。
 
 ### 2026-08-21 Windows 10 22H2 本机实施复核
 
@@ -302,7 +339,7 @@ Rovai smoke 通过；此前手写的无效重复 custom model 已从用户配置
 
 ### Camp Published Attachment View visibility 基线
 
-当前十二个 Adapter 在各自已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把
+当前十三个 Adapter 在各自已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把
 旧 generation 的 Host/Binding 视为不兼容，并在 mutation gate 内停止或 fence；下一次 dispatch 仍只授权同一
 Camp 的精确 `attachments` root。该实现选择是保守 fallback，不是 Runtime snapshot 行为的实测结论。
 

@@ -158,6 +158,7 @@ describe('member runtime parameters', () => {
   })
 
   it.each([
+    ['pi', '审批模式', 'managed'],
     ['opencode-cli', '工具权限', 'allow'],
     ['claude-code-cli', '权限模式', 'bypassPermissions'],
     ['qoder-cli', '权限模式', 'bypass_permissions'],
@@ -349,6 +350,8 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
   switch (kind) {
     case 'codex-cli':
       return { sandbox_mode: 'danger-full-access', approval_policy: 'never' }
+    case 'pi':
+      return { approval_mode: 'managed' }
     case 'opencode-cli':
       return { permission: 'allow' }
     case 'copilot-cli':

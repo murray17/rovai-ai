@@ -203,6 +203,8 @@ function runtimeParametersFor(
   switch (adapterKind) {
     case 'codex-cli':
       return <CodexRuntimeParameters {...props} />
+    case 'pi':
+      return <PiRuntimeParameters {...props} />
     case 'opencode-cli':
       return <OpenCodeRuntimeParameters {...props} />
     case 'copilot-cli':
@@ -226,6 +228,15 @@ function runtimeParametersFor(
     case 'antigravity-app':
       return <AntigravityRuntimeParameters {...props} />
   }
+}
+
+function PiRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
+  return (
+    <div className="runtime-parameter-form">
+      {modelFieldsFor('pi', props)}
+      <PermissionSelect {...props} fieldKey="approval_mode" label="审批模式" />
+    </div>
+  )
 }
 
 function CodexRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
@@ -359,6 +370,7 @@ function modelFieldsFor(
     case 'qwen-code':
       return <ModelFields {...props} optionKey="reasoning_effort" optionLabel="推理强度" />
     case 'kiro-cli':
+    case 'pi':
     case 'trae-cn-cli':
     case 'cursor-agent':
     case 'kimi-code-cli':

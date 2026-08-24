@@ -19,6 +19,7 @@ const coreExecutable = resolve(
 )
 const allSpecifications = [
   ['codex-cli', 'Codex'],
+  ['pi', 'Pi'],
   ['opencode-cli', 'OpenCode'],
   ['copilot-cli', 'Copilot'],
   ['claude-code-cli', 'Claude'],
@@ -33,7 +34,7 @@ const allSpecifications = [
   adapterKind,
   label,
   slug: adapterKind.replaceAll('-', '_'),
-  acp: !['codex-cli', 'claude-code-cli', 'antigravity-app'].includes(adapterKind)
+  acp: !['codex-cli', 'pi', 'claude-code-cli', 'antigravity-app'].includes(adapterKind)
 }))
 const selected = selectedAdapters()
 const specifications = allSpecifications.filter(({ adapterKind }) => selected.has(adapterKind))
@@ -539,6 +540,7 @@ function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal,
 
 function expectedBoundary(specification) {
   if (specification.acp) return 'acp_end_turn_assistant_suffix'
+  if (specification.adapterKind === 'pi') return 'pi_agent_settled'
   if (specification.adapterKind === 'codex-cli') return 'codex_completed_turn'
   if (specification.adapterKind === 'claude-code-cli') return 'claude_success_result'
   return 'antigravity_print_stdout'

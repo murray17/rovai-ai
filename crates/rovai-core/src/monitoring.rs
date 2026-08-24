@@ -1662,7 +1662,10 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
             mask
         }
         AdapterKind::KiroCli | AdapterKind::QoderCli | AdapterKind::TraeCnCli => ELIGIBLE_COST,
-        AdapterKind::AntigravityApp | AdapterKind::CursorAgent | AdapterKind::KimiCodeCli => 0,
+        AdapterKind::Pi
+        | AdapterKind::AntigravityApp
+        | AdapterKind::CursorAgent
+        | AdapterKind::KimiCodeCli => 0,
     }
 }
 

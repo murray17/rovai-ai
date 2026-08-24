@@ -14,7 +14,7 @@ last_updated: 2026-08-24
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。实测版本和能力只由
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -26,7 +26,7 @@ last_updated: 2026-08-24
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含十二种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前包含十三种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
 普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
@@ -153,7 +153,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -216,8 +216,33 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，
+字段级行为见 [Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
+
+## Pi Coding Agent 当前边界
+
+`pi` 使用独立 `pi-jsonl-rpc-v1` Host，不进入 ACP 路由。正式 AgentRun 保留用户通用 `HOME`，但使用 Rovai
+私有 `PI_CODING_AGENT_DIR`，只显式加载 env-ref MiniMax provider、受管 Approval Extension 与当前 Session 的
+managed Skills。Core 从权限收窄的 `~/.claude/settings.json` 读取 exact Anthropic-compatible 三字段，只把
+token 注入目标子进程；用户 Claude/Pi 配置、秘密和 Session 文件正文都不进入数据库或公开 Evidence。
+
+Pi 上游没有原生 sandbox/permission system，因此唯一产品权限值为 `approval_mode=managed`。受管 Extension
+握手是 Ready 与正式启动硬门：`bash/write/edit` 在执行前桥接 durable Approval，read/search 类 Tool 不弹
+Approval，其可达性仍由 OS 用户、冻结 cwd 与既有 Runtime Workspace/attachment 边界决定；Pi 本身没有 sandbox。
+未知 mutating Tool、Extension error、timeout 或 Core restart 一律阻断。
+`message_end.message` 提供权威 assistant snapshot，`agent_settled` 是唯一成功 terminal 和 Missing-Send final
+boundary；prompt response、`agent_end` 与 process exit 都不能替代。
+
+Pi 参加公共 Runtime Fleet LRU，但首版一 Host 一 Native Session。兼容后继 Run 依次选择 warm Host/Session、
+新 Host 的 exact canonical Session file resume、最后才是新 Session；恢复后必须核对 full UUID、file、provider
+和 model，不做 recent/partial ID、目录扫描或 replay History Restore。`.pi/skills` 在 Session start 以 exact
+`--skill` 投递，exposure digest 参与 compatibility。Built-in `rovai` CLI 经受管 Bash 与 per-Run lease 工作；
+External MCP 为 Unsupported，Usage/Cost 与 Compaction 为 Disabled。
+
+`pi × macos-arm64` 已由真实 first/warm/cold resume、allow/deny、cancel、Missing-Send、Skill 与十五项 Built-in
+CLI matrix 准入。macOS x64 与 Windows x64 缺少独立证据，保持 `not_qualified`。字段级行为见
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)，证据状态见
+[Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Kimi Code 当前边界
 
@@ -257,7 +282,7 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
 `qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，证据状态见
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 队员最高权限默认
@@ -280,8 +305,9 @@ discovery 或迁移扩权；permission schema digest
 Kimi 暴露 Session-scoped `permission_mode=default|plan|auto|yolo`，新 draft 默认原生最高权限 `yolo`；
 writable AgentRun 通过标准 ACP `session/set_config_option` 投递 `mode=yolo`，read-only AgentRun 强制
 `plan`。descriptor 的 `recommendedValue=default` 只是保守提示，不改变 Product default；已有成员保存的
-`default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
+`default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。Pi 只有
+`approval_mode=managed`，不是可切换或可关闭的 Runtime-native permission mode。十三种 Runtime 的 exact 默认矩阵见
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。
 
 ## Preview 呈现与晋升
 

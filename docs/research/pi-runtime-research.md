@@ -3,15 +3,18 @@ document_type: runtime-research
 runtime: pi
 upstream: earendil-works/pi
 authority: research-evidence-only
-status: proposed
-admission: not_qualified
-last_updated: 2026-08-20
+status: implemented
+admission: macos_arm64_qualified
+last_updated: 2026-08-24
 ---
 
 # Pi Runtime 接入研究
 
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
 > Pi 不是 ACP Runtime；应直接接入其官方 JSONL RPC，而不是通过 TUI 抓屏或把第三方 ACP shim 当作上游合同。
+> 第 1–13 节保留接入前研究快照；其 `NotImplemented` / `Blocked` 与未准入结论不能覆盖后续真实证据。
+> 当前实施与准入结论见第 14、15 节、[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)
+> 和 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 基本结论
 
@@ -23,12 +26,12 @@ Runtime: Pi Coding Agent
 Exact launch command:
   pi --mode rpc --session-dir <rovai-managed-session-dir> -e <rovai-managed-approval-extension>
 Transport: strict LF-delimited JSON over stdin/stdout
-当前 Admission: not_qualified
-一句话结论: RPC、Tool、Session、Usage 和 Compaction 信号很强，但上游没有内建权限系统；受管 Approval Extension 是硬阻断项。
+当前 Admission: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
+一句话结论: 独立 JSONL RPC、受管 Approval、warm/cold exact resume、Skill 与 Built-in CLI 已完成；External MCP Unsupported，Usage/Compaction Disabled。
 最接近的现有 Adapter: 新建 Pi RPC Transport；可复用 Runtime Fleet、Event normalization、process cleanup 与 Session fencing。
 ```
 
-### 推荐决定
+### 接入前推荐决定（历史研究快照）
 
 **进入 P0 技术实现原型，但在受管权限扩展和启动隔离完成前保持 `not_qualified`。**
 
@@ -371,7 +374,7 @@ Process cleanup: Windows Job Object 必须覆盖 npm/node/bun/bash/child tools
 - External MCP 首版保持 Disabled；Built-in `rovai` CLI 通过 bash/受管 Tool 验证。
 - 新增 `smoke:pi-runtime`、Runtime Activity、diagnostics、planned shutdown 和 Windows Job tests。
 
-## 最终决定
+## 接入前最终决定（历史研究快照）
 
 ```text
 Qualified capabilities: 无
@@ -380,6 +383,52 @@ Unverified capabilities: managed Approval、exact restore、Usage attribution、
 Blocking issues: 上游无内建权限；Extension isolation；全进程树清理
 Recommended admission decision: not_qualified；完成受管 Approval Extension 原型后再开展平台资格 Smoke
 ```
+
+## 14. 2026-08-24 实施与真实验收回填
+
+研究阶段的硬阻断已经由当前实现闭合：
+
+| 研究问题 | 当前证据 | 实施结论 |
+| --- | --- | --- |
+| 官方协议 | `pi 0.84.2` strict LF JSONL、split read、`U+2028/U+2029`、request correlation 通过 | 独立 `pi-jsonl-rpc-v1`，不复用 ACP，不解析 TUI |
+| Extension 隔离 | 私有 `PI_CODING_AGENT_DIR`，`--no-extensions/--no-skills` 后只 explicit `-e/--skill`；handshake fixture 与真实 Host 通过 | 未授权用户/项目 Extension 不进入正式 Host；Probe 使用另一临时 root |
+| Provider secret | 权限 `0600` 的 Claude settings exact 三字段成功驱动 MiniMax；负向 owner/mode/URL fixture 通过 | env-ref models.json + child-only token；不写 argv、DB、Evidence 或 Pi 用户配置 |
+| Approval | managed Extension 的 Bash allow、write allow、write deny、restart/timeout fail-closed 路由通过 | 唯一权限 `approval_mode=managed`；未知 mutating Tool 阻断 |
+| Final / Tool | 稳定 `toolCallId`、cumulative update、`message_end.message`、`agent_settled` 与 private thinking 通过 | response 只表示 accepted；`agent_settled` 是 final/Missing-Send boundary |
+| Warm / cold Session | 兼容 Run 同 Host/Session；Core restart 后 exact Session file 恢复同 UUID，并在源 marker 删除后回忆 | 公共 LRU；首版一 Host 一 Session；warm → exact resume → new，无 fuzzy/history restore |
+| Skill | `.pi/skills` unique marker、CLI help、restart recovery、Shadowed/delete lifecycle 通过 | Session-scanned explicit `--skill`；exposure digest 进入 compatibility |
+| Built-in | 当前十五项 operation、三种输入、Gather、conflict、lease fence、successor read 与 continuation 通过 | bundled `rovai` CLI 经 managed Bash，不依赖 MCP |
+| MCP | Pi 核心没有 Product-managed external server projection | `Unsupported`，不是 `Disabled but available` |
+| Usage / Compaction | 上游候选存在；本轮没有完成 Run attribution 和 resume dedupe 资格矩阵 | 两者首版 `Disabled`，不阻断基础 Runtime |
+| 平台 | macOS arm64 真实 first/warm/cold、Approval、cancel、Skill、Missing-Send、Built-in 全通过 | macOS arm64 qualified；macOS x64/Windows x64 不外推 |
+
+项目级真实矩阵为：
+
+- `pnpm smoke:pi-runtime`：first、warm reuse、Core restart/cold exact resume、allow/deny、cancel、秘密隔离通过；
+- `ROVAI_SKILL_SMOKE_ADAPTERS=pi pnpm smoke:skills`：managed projection、private marker 与 CLI help 通过；
+- `ROVAI_MISSING_SEND_RECOVERY_ADAPTERS=pi pnpm smoke:missing-send-recovery`：zero-send 与 accepted-send
+  suppression 通过；
+- `ROVAI_BUILTIN_CLI_ADAPTERS=pi pnpm smoke:builtin-cli`：十五项 operation 全部通过。
+
+以上 Smoke 使用隔离 Core data-dir、Session root 与 Git workspace，不启动日常 App，不读写日常数据库。公开报告
+只记录版本、安全 fingerprint 和相等性结论，不记录 token、原始 provider URL、Prompt、Session UUID 或 locator。
+
+## 15. 当前决定
+
+```text
+Qualified platform: macOS arm64
+Protocol: pi-jsonl-rpc-v1
+Permission: managed only
+Continuation: compatible warm host -> exact session-file resume -> new session
+Managed Skill: .pi/skills, explicit at session start
+Built-in CLI: Verified
+External MCP: Unsupported
+Usage / Compaction: Disabled
+Not qualified: macOS x64, Windows x64
+```
+
+当前产品语义由 [Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)拥有；
+本研究只保留证据、初始假设与后续验证轨迹。
 
 ## 上游来源
 

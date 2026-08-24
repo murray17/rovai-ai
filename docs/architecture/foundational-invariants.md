@@ -228,7 +228,7 @@ last_updated: 2026-08-23
 
 ### Runtime 权限与平台准入
 
-- 队员 Runtime 权限默认是 Adapter 明确支持且已验证的产品选择；十二种 Product Runtime 都使用精确合同冻结的原生最高权限 default。Kimi `yolo`、TRAE `bypass_permissions`、Kiro trust-all 及其他 Adapter 的 permission/approval/sandbox 映射和 schema digest 都不能从字符串、descriptor recommendation 或版本猜测。该默认只建立新 draft，Discovery、Probe、migration 与 App upgrade 不得静默扩张已有成员配置。
+- 队员 Runtime 权限默认是 Adapter 明确支持且已验证的产品选择；全部 Product Runtime 都使用精确合同冻结的最高已验证 default。Kimi `yolo`、TRAE `bypass_permissions`、Kiro trust-all、Pi `managed` 及其他 Adapter 的 permission/approval/sandbox 映射和 schema digest 都不能从字符串、descriptor recommendation 或版本猜测。该默认只建立新 draft，Discovery、Probe、migration 与 App upgrade 不得静默扩张已有成员配置。
 - TRAE 的 light check、显式 availability verification、cold resume、HistoryRestore 和 replay quarantine 使用独立的用户授权、Session ID 校验和有界恢复路径；恢复响应 ID 不一致时 fail closed。
 - Product execution qualification 是 `AdapterKind × HostPlatformKey` 的封闭准入。存在安装或能启动进程不等于平台合格；不合格组合保留配置但阻止执行，并提供结构化 reason/evidence。
 - Windows 正式进程必须在创建时原子加入受管 Job 并限制继承 handle；本地 IPC、私有存储、DACL、validated Node shim、长路径和 descendant cleanup 都是平台 admission 的组成部分，不能在进程启动后补偿安全边界。

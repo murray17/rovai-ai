@@ -32,6 +32,7 @@ import cursorLogo from './assets/runtime-logos/cursor.svg'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
 import kimiLogo from './assets/runtime-logos/kimi.svg'
 import openCodeLogo from './assets/runtime-logos/opencode.svg'
+import piLogo from './assets/runtime-logos/pi.svg'
 import qoderLogo from './assets/runtime-logos/qoder-color.svg'
 import qwenLogo from './assets/runtime-logos/qwen-color.svg'
 import traeLogo from './assets/runtime-logos/trae-color.svg'
@@ -46,6 +47,7 @@ export type OnboardingRuntimePhase =
 
 export const ONBOARDING_PRODUCT_RUNTIMES: readonly AdapterKind[] = [
   'claude-code-cli',
+  'pi',
   'codex-cli',
   'copilot-cli',
   'opencode-cli',
@@ -60,6 +62,7 @@ export const ONBOARDING_PRODUCT_RUNTIMES: readonly AdapterKind[] = [
 
 const RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'claude-code-cli': claudeCodeLogo,
+  pi: piLogo,
   'codex-cli': codexLogo,
   'copilot-cli': copilotLogo,
   'opencode-cli': openCodeLogo,
@@ -75,6 +78,7 @@ const RUNTIME_LOGOS: Record<AdapterKind, string> = {
 
 const RUNTIME_LABELS: Record<AdapterKind, string> = {
   'claude-code-cli': 'Claude Code',
+  pi: 'Pi Coding Agent',
   'codex-cli': 'Codex CLI',
   'copilot-cli': 'GitHub Copilot',
   'opencode-cli': 'OpenCode',

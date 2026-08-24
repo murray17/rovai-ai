@@ -120,6 +120,7 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::KimiCodeCli => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
         | AdapterKind::CodexCli
+        | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
         | AdapterKind::CursorAgent => CompactionDetectorPolicy::Disabled,
@@ -137,6 +138,7 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         AdapterKind::KimiCodeCli => "ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY",
         AdapterKind::AntigravityApp => "ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY",
         AdapterKind::CodexCli
+        | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::TraeCnCli
         | AdapterKind::CursorAgent => "ROVAI_INTERNAL_UNUSED_COMPACTION_DETECTOR_POLICY",
@@ -895,6 +897,7 @@ fn qualified_admission(
                 && admission_point == "completed"
         }
         AdapterKind::CodexCli
+        | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp
         | AdapterKind::TraeCnCli

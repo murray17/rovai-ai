@@ -2408,7 +2408,9 @@ fn process_dispatch_attempt(
         | AdapterKind::TraeCnCli
         | AdapterKind::CursorAgent
         | AdapterKind::KimiCodeCli => CharterDeliveryMode::FirstPayload,
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli => CharterDeliveryMode::NativeAppend,
+        AdapterKind::CodexCli | AdapterKind::Pi | AdapterKind::ClaudeCodeCli => {
+            CharterDeliveryMode::NativeAppend
+        }
     };
     let frozen_snapshot: String = transaction.query_row(
         "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",

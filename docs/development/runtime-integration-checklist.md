@@ -16,7 +16,7 @@ last_updated: 2026-08-23
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)
-- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v25.md)
+- [Runtime Launch and Verification](../contracts/runtime-launch-and-verification-v26.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)
 - [`AdapterKind::ALL`](../../crates/rovai-core/src/agent_profile.rs)
 
@@ -237,7 +237,7 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 
 ## 5. 权限、Approval 与 MCP
 
-- [ ] 十二种 Product Runtime 的新队员默认都映射到各自已验证的原生最高权限值；新增 Runtime 必须把 exact
+- [ ] 全部 Product Runtime 的新队员默认都映射到各自已验证的原生最高权限值；新增 Runtime 必须把 exact
       值加入 Core-owned closed matrix，并验证 Renderer 直接复制 `memberRuntimeDefaults`。
 - [ ] 保守 `recommendedValue`、Probe/Check 权限与 Product default 分开；已有较窄保存值不会自动扩权。
 - [ ] 静态 permission descriptor 不冒充登录或动态能力证据。

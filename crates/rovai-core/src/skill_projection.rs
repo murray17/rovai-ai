@@ -798,9 +798,10 @@ impl SkillProjectionReconciler {
         // Claude-compatible discovery is shared by Claude, OpenCode and Copilot. Reconcile it
         // first so the latter groups can reuse a healthy .claude projection without duplicating
         // links in their runtime-specific directories.
-        const RECONCILE_ORDER: [SkillDeliveryGroupKey; 12] = [
+        const RECONCILE_ORDER: [SkillDeliveryGroupKey; 13] = [
             SkillDeliveryGroupKey::ClaudeCompatible,
             SkillDeliveryGroupKey::Codex,
+            SkillDeliveryGroupKey::Pi,
             SkillDeliveryGroupKey::Opencode,
             SkillDeliveryGroupKey::Copilot,
             SkillDeliveryGroupKey::Antigravity,
@@ -1029,9 +1030,10 @@ impl SkillProjectionReconciler {
         database: &Database,
         library: &SkillLibraryService,
     ) -> Result<Vec<SkillProjectionIssue>> {
-        const AUDIT_ORDER: [SkillDeliveryGroupKey; 12] = [
+        const AUDIT_ORDER: [SkillDeliveryGroupKey; 13] = [
             SkillDeliveryGroupKey::ClaudeCompatible,
             SkillDeliveryGroupKey::Codex,
+            SkillDeliveryGroupKey::Pi,
             SkillDeliveryGroupKey::Opencode,
             SkillDeliveryGroupKey::Copilot,
             SkillDeliveryGroupKey::Antigravity,

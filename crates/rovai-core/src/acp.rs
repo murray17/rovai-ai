@@ -3148,7 +3148,10 @@ fn configure_runtime_command(
             // process-local and must not replace Kimi's state/config home.
             configure_kimi_model_environment(command)?;
         }
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {
+        AdapterKind::CodexCli
+        | AdapterKind::Pi
+        | AdapterKind::ClaudeCodeCli
+        | AdapterKind::AntigravityApp => {
             bail!("Runtime is not implemented through ACP")
         }
     }

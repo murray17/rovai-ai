@@ -31,6 +31,7 @@ const explicitModelId = process.env.ROVAI_SKILL_SMOKE_MODEL?.trim() || null
 const requestedAdapters = adapterSelection === 'all'
   ? [
       'codex-cli',
+      'pi',
       'opencode-cli',
       'copilot-cli',
       'claude-code-cli',
@@ -45,6 +46,7 @@ const requestedAdapters = adapterSelection === 'all'
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
   'codex-cli',
+  'pi',
   'opencode-cli',
   'copilot-cli',
   'claude-code-cli',
@@ -66,6 +68,7 @@ const allDeliveryGroups = [
   'kimi',
   'kiro',
   'opencode',
+  'pi',
   'qoder',
   'qwen',
   'trae'
@@ -607,6 +610,7 @@ function startCore() {
 
 function groupRoot(groupKey) {
   if (groupKey === 'codex') return '.codex/skills'
+  if (groupKey === 'pi') return '.pi/skills'
   if (groupKey === 'opencode') return '.opencode/skills'
   if (groupKey === 'copilot') return '.github/skills'
   if (groupKey === 'claude_compatible') return '.claude/skills'
@@ -622,6 +626,7 @@ function groupRoot(groupKey) {
 
 function deliveryGroup(adapterKind) {
   if (adapterKind === 'codex-cli') return 'codex'
+  if (adapterKind === 'pi') return 'pi'
   if (adapterKind === 'opencode-cli') return 'opencode'
   if (adapterKind === 'copilot-cli') return 'copilot'
   if (adapterKind === 'claude-code-cli') return 'claude_compatible'

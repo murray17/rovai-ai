@@ -84,6 +84,7 @@ import deepSeekLogo from './assets/runtime-logos/deepseek-color.svg'
 import kiroLogo from './assets/runtime-logos/kiro-color.svg'
 import kimiLogo from './assets/runtime-logos/kimi.svg'
 import openCodeLogo from './assets/runtime-logos/opencode.svg'
+import piLogo from './assets/runtime-logos/pi.svg'
 import qoderLogo from './assets/runtime-logos/qoder-color.svg'
 import qwenLogo from './assets/runtime-logos/qwen-color.svg'
 import traeLogo from './assets/runtime-logos/trae-color.svg'
@@ -862,6 +863,7 @@ function ExpandableIdentityField({ label, lines, contentKey, children }: {
 
 const PRODUCT_RUNTIMES: AdapterKind[] = [
   'claude-code-cli',
+  'pi',
   'codex-cli',
   'copilot-cli',
   'opencode-cli',
@@ -881,6 +883,7 @@ const VISIBLE_PRODUCT_RUNTIMES = PRODUCT_RUNTIMES.filter(
 
 const PRODUCT_RUNTIME_LOGOS: Record<AdapterKind, string> = {
   'claude-code-cli': claudeCodeLogo,
+  pi: piLogo,
   'codex-cli': codexLogo,
   'copilot-cli': copilotLogo,
   'opencode-cli': openCodeLogo,
@@ -1762,6 +1765,7 @@ function commandCodeLabel(code: string): string {
 function adapterLabel(kind: AdapterKind): string {
   return ({
     'codex-cli': 'Codex CLI',
+    pi: 'Pi Coding Agent',
     'opencode-cli': 'OpenCode',
     'copilot-cli': 'GitHub Copilot',
     'claude-code-cli': 'Claude Code',
@@ -1779,6 +1783,7 @@ function adapterLabel(kind: AdapterKind): string {
 function adapterMaturityLabel(kind: AdapterKind): string {
   return ({
     'codex-cli': '稳定',
+    pi: '实验性',
     'opencode-cli': '测试',
     'copilot-cli': '测试',
     'claude-code-cli': '测试',

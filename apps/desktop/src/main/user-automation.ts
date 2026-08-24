@@ -57,6 +57,7 @@ type RecordValue = Record<string, unknown>
 
 const ADAPTER_KINDS: readonly AdapterKind[] = [
   'codex-cli',
+  'pi',
   'opencode-cli',
   'copilot-cli',
   'claude-code-cli',

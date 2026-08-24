@@ -16,6 +16,7 @@ import { writePrivateJson } from './general-preferences'
 const MEMBER_ROLES = new Set<BuiltinMemberAvatarRole>(['luoke', 'muwa', 'mianzhi', 'qilu'])
 const ADAPTER_KINDS = new Set<AdapterKind>([
   'codex-cli',
+  'pi',
   'opencode-cli',
   'copilot-cli',
   'claude-code-cli',
