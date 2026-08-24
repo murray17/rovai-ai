@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: current-foundational-invariants
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # 当前基础架构不变量
@@ -370,8 +370,10 @@ last_updated: 2026-08-23
 - 每个 operation 的默认 classifier/version 首次建立后固定。新分类器通过显式平行 reprojection 和可追溯迁移产生，不静默改写历史，也不中途改变 live operation 语义。
 - 分类升级生成显式平行 projection/version，携带来源 Evidence set、classifier/mapping digest、输出 digest 和可回滚迁移记录；默认历史读取保持首次建立版本，live operation 不中途换 classifier。当前产品只维护一张 current Canonical Activity Projection 和当前 Mapping Registry；任意历史身份 replay 基础设施未准入前，不伪造已支持的重放能力。
 - 所有已接入 Runtime 共享同一 Activity contract/schema；Coverage level 只描述 Adapter 能实际观测的 `fine_grained | run_level | unknown`，不降级全局合同，也不表示未观测操作未发生。初始分层和每次升级都必须有真实 Runtime evidence、Registry 变更、fixture 与恢复一致性验证。
-- Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，ACP 仅
-  `rawInput.command` 字符串，Antigravity 仅明确 Shell 工具的 `tool_info.parameters.CommandLine` 字符串。
+- Shell command 只有在协议的封闭公共字段中出现时才能进入 Evidence：Claude 仅 Bash command，通用 ACP 仅
+  `rawInput.command` 字符串，TRAE CLI CN 额外仅允许 `rawInput.Command` 字符串，Antigravity 仅明确 Shell
+  工具的 `tool_info.parameters.CommandLine` 字符串。TRAE 的大小写例外必须绑定 `trae-cn-cli` Adapter identity，
+  其他 ACP Adapter 收到同形大写字段时 fail closed。
   相邻 raw object 字段不公开；command 观察必须绑定同一原生 operation identity，terminal 优先采用自身当前的
   公共 command，仅在缺失时回退 started phase 缓存，不能要求 Renderer 从 digest、title、output 或私有
   terminal 还原。

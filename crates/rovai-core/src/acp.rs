@@ -2417,9 +2417,12 @@ impl AcpRuntime {
             .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
-            observed.native_kind =
-                Some(effective_action_kind(reported_kind, &raw_input).to_string());
-        } else if public_acp_shell_command(update.get("rawInput")).is_some() {
+            observed.native_kind = Some(
+                effective_action_kind(self.host.adapter_kind, reported_kind, &raw_input)
+                    .to_string(),
+            );
+        } else if public_acp_shell_command(self.host.adapter_kind, update.get("rawInput")).is_some()
+        {
             observed.native_kind = Some("execute".to_string());
         }
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
@@ -2443,10 +2446,11 @@ impl AcpRuntime {
             .observed_tools
             .remove(native_item_id)
             .unwrap_or_default();
-        let Some(mut completion) = completed_action(params)? else {
+        let Some(mut completion) = completed_action(self.host.adapter_kind, params)? else {
             return Ok(None);
         };
-        completion = reconcile_completed_action(update, observed, completion)?;
+        completion =
+            reconcile_completed_action(self.host.adapter_kind, update, observed, completion)?;
         Ok(Some(completion))
     }
 
@@ -3744,6 +3748,7 @@ pub struct InterceptedAcpActionRequest {
 }
 
 pub struct InterceptedAcpActionContext<'a> {
+    pub adapter_kind: AdapterKind,
     pub agent_run_id: &'a str,
     pub execution_epoch: i64,
     pub expected_session_id: &'a str,
@@ -3823,7 +3828,7 @@ pub fn intercepted_action_request(
         object.insert("toolCall".to_string(), effective_tool_call.clone());
     }
     let root = context.execution_root.to_string_lossy().to_string();
-    let kind = effective_action_kind(reported_kind, &raw_input);
+    let kind = effective_action_kind(context.adapter_kind, reported_kind, &raw_input);
     let input = match kind {
         "edit" | "move" => {
             let path = acp_tool_paths(&effective_params)
@@ -3850,16 +3855,19 @@ pub fn intercepted_action_request(
             }
         }
         "execute" => {
-            let argv = match raw_input.get("command") {
-                Some(Value::Array(values)) => values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>(),
-                Some(Value::String(command)) => {
-                    vec!["/bin/zsh".to_string(), "-lc".to_string(), command.clone()]
+            let argv = if let Some(command) =
+                public_acp_shell_command(context.adapter_kind, Some(&raw_input))
+            {
+                vec!["/bin/zsh".to_string(), "-lc".to_string(), command]
+            } else {
+                match raw_input.get("command") {
+                    Some(Value::Array(values)) => values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>(),
+                    _ => Vec::new(),
                 }
-                _ => Vec::new(),
             };
             if argv.is_empty() {
                 CanonicalActionInput::RuntimePermissionGrant {
@@ -3928,12 +3936,16 @@ fn requested_path(context: &InterceptedAcpActionContext<'_>, value: &str) -> Res
     })
 }
 
-fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a str {
+fn effective_action_kind<'a>(
+    adapter_kind: AdapterKind,
+    reported_kind: &'a str,
+    raw_input: &Value,
+) -> &'a str {
     if matches!(reported_kind, "edit" | "move" | "delete" | "execute") {
         return reported_kind;
     }
 
-    if public_acp_shell_command(Some(raw_input)).is_some() {
+    if public_acp_shell_command(adapter_kind, Some(raw_input)).is_some() {
         return "execute";
     }
 
@@ -4111,7 +4123,10 @@ pub struct CompletedAcpAction {
     pub effect_disposition: String,
 }
 
-pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
+pub fn completed_action(
+    adapter_kind: AdapterKind,
+    params: &Value,
+) -> Result<Option<CompletedAcpAction>> {
     let update = match params.get("update") {
         Some(update)
             if update.get("sessionUpdate").and_then(Value::as_str) == Some("tool_call_update") =>
@@ -4133,7 +4148,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .context("ACP tool_call_update has no toolCallId")?
         .to_string();
     let raw_input = update.get("rawInput");
-    let public_command = public_acp_shell_command(raw_input);
+    let public_command = public_acp_shell_command(adapter_kind, raw_input);
     let raw_input_digest = update
         .get("rawInput")
         .map(canonical_json_digest)
@@ -4146,8 +4161,12 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .get("kind")
         .and_then(Value::as_str)
         .unwrap_or("other");
-    let native_kind =
-        effective_action_kind(reported_kind, raw_input.unwrap_or(&Value::Null)).to_string();
+    let native_kind = effective_action_kind(
+        adapter_kind,
+        reported_kind,
+        raw_input.unwrap_or(&Value::Null),
+    )
+    .to_string();
     let status = effective_acp_tool_status(update, &native_kind);
     let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
@@ -4197,6 +4216,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
 }
 
 fn reconcile_completed_action(
+    adapter_kind: AdapterKind,
     update: &Value,
     observed: ObservedToolMetadata,
     mut completion: CompletedAcpAction,
@@ -4207,7 +4227,8 @@ fn reconcile_completed_action(
         .map(canonical_json_digest)
         .transpose()?;
     if completion.public_command.is_none() {
-        completion.public_command = public_acp_shell_command(observed.raw_input.as_ref());
+        completion.public_command =
+            public_acp_shell_command(adapter_kind, observed.raw_input.as_ref());
     }
     if let Some(native_kind) = observed.native_kind {
         completion.native_kind = native_kind;
@@ -4264,22 +4285,36 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     }
 }
 
-pub fn public_acp_shell_command(raw_input: Option<&Value>) -> Option<String> {
-    raw_input?
+pub fn public_acp_shell_command(
+    adapter_kind: AdapterKind,
+    raw_input: Option<&Value>,
+) -> Option<String> {
+    let raw_input = raw_input?;
+    raw_input
         .get("command")
+        .or_else(|| {
+            if adapter_kind == AdapterKind::TraeCnCli {
+                raw_input.get("Command")
+            } else {
+                None
+            }
+        })
         .and_then(Value::as_str)
         .filter(|command| !command.trim().is_empty())
         .map(str::to_string)
 }
 
-pub fn public_acp_tool_kind(update: &Value) -> Option<String> {
+pub fn public_acp_tool_kind(adapter_kind: AdapterKind, update: &Value) -> Option<String> {
     update
         .get("kind")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|kind| !kind.is_empty())
         .map(str::to_string)
-        .or_else(|| public_acp_shell_command(update.get("rawInput")).map(|_| "execute".to_string()))
+        .or_else(|| {
+            public_acp_shell_command(adapter_kind, update.get("rawInput"))
+                .map(|_| "execute".to_string())
+        })
 }
 
 pub fn effective_acp_tool_status(update: &Value, native_kind: &str) -> String {
@@ -6962,6 +6997,7 @@ while IFS= read -r ignored; do :; done
             "options": [{"optionId": "once", "kind": "allow_once"}]
         });
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::OpencodeCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -7007,6 +7043,7 @@ while IFS= read -r ignored; do :; done
             "options": [{"optionId": "once", "kind": "allow_once"}]
         });
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::OpencodeCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -7044,12 +7081,13 @@ while IFS= read -r ignored; do :; done
         let observed = ObservedAcpToolContext {
             native_kind: Some("execute".to_string()),
             raw_input: Some(json!({
-                "command": command,
-                "cwd": root,
+                "Command": command,
+                "Description": "Read the approved fixture",
             })),
             locations: Some(json!([{"path": target}])),
         };
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::TraeCnCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -7070,20 +7108,23 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn completed_action_keeps_only_public_command_and_persists_raw_payload_digests() {
-        let completion = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-1",
-                "status": "completed",
-                "kind": "execute",
-                "title": "Run command",
-                "rawInput": {"command": "echo TOP_SECRET_INPUT"},
-                "rawOutput": {
-                    "stdout": "TOP_SECRET_OUTPUT",
-                    "exitCode": 7
+        let completion = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "completed",
+                    "kind": "execute",
+                    "title": "Run command",
+                    "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                    "rawOutput": {
+                        "stdout": "TOP_SECRET_OUTPUT",
+                        "exitCode": 7
+                    }
                 }
-            }
-        }))
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
 
@@ -7108,15 +7149,19 @@ while IFS= read -r ignored; do :; done
             "status": "completed",
             "rawOutput": {"stdout": "failed output", "exitCode": 7}
         });
-        let sparse = completed_action(&json!({"update": sparse_update.clone()}))
-            .expect("sparse completion should normalize")
-            .expect("sparse terminal update should create a result");
+        let sparse = completed_action(
+            AdapterKind::TraeCnCli,
+            &json!({"update": sparse_update.clone()}),
+        )
+        .expect("sparse completion should normalize")
+        .expect("sparse terminal update should create a result");
         let observed_raw_input = json!({
-            "command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
-            "credential": "SPARSE_PRIVATE_FIELD"
+            "Command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
+            "Description": "SPARSE_PRIVATE_FIELD"
         });
         let observed_raw_input_digest = canonical_json_digest(&observed_raw_input).unwrap();
         let reconciled = reconcile_completed_action(
+            AdapterKind::TraeCnCli,
             &sparse_update,
             ObservedToolMetadata {
                 native_kind: Some("execute".to_string()),
@@ -7147,24 +7192,30 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn failed_side_effects_do_not_claim_that_nothing_happened() {
-        let execute = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-1",
-                "status": "failed",
-                "kind": "execute"
-            }
-        }))
+        let execute = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "failed",
+                    "kind": "execute"
+                }
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
-        let edit = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-2",
-                "status": "failed",
-                "kind": "edit"
-            }
-        }))
+        let edit = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-2",
+                    "status": "failed",
+                    "kind": "edit"
+                }
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
 

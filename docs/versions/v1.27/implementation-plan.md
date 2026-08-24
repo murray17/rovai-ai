@@ -34,6 +34,10 @@ last_updated: 2026-08-24
 
 - [x] 真实 initialize、session/new、MiniMax M3 prompt 与 `end_turn` 通过；
 - [x] 真实 Shell allow-once、pending→in_progress→completed、固定 command output 通过；
+- [x] `traecli 0.120.52` 实测 Bash `rawInput.Command + Description`；Core 只对白名单 Adapter 公开
+  `Command`，稀疏 terminal 继承相同 command/kind/digest，六类 command 的 started/terminal 展示通过；
+- [ ] TRAE `exit 7` 仍由 Runtime 报告 `completed` 且不含 exit code；正式 full matrix 的既有 status 断言
+  保持失败，不从 `Error:` output 猜测退出码，也不把 command display 通过扩大为 status 通过；
 - [x] 真实 `session/cancel` 在有界时间内返回 cancelled，未留下目标进程；
 - [x] `<think>` 块不会进入公开输出，未闭合推理 fail closed；
 - [x] External MCP 通过标准 ACP Session 字段进入 Kimi capability snapshot；Usage/Cost 保持 Disabled；
