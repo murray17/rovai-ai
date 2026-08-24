@@ -104,7 +104,7 @@ ROVAI_GROK_PERMISSION_MODE=bypassPermissions \
 node scripts/smoke-acp-runtime.mjs
 ```
 
-确定性门禁最终计数：`pnpm test` 通过 76 个 Vitest 文件 / 523 个测试，以及 194 个 Node 测试；
+确定性门禁最终计数：`pnpm test` 通过 76 个 Vitest 文件 / 525 个测试，以及 198 个 Node 测试；
 `pnpm test:rust:pr` 通过 library 310、CLI 25、slow 273 个测试；`pnpm test:rust:core` 通过 156 个测试，
 另有 4 个明确标记的 manual ignored 测试。`cargo fmt --check`、workspace/all-target Clippy `-D warnings`、
 TypeScript typecheck、Desktop build 与文档治理门禁均通过。
@@ -133,13 +133,14 @@ agent-text 原样投影可以同时成立，不需要 MiniMax 专属清洗或解
 
 ## Desktop 包与 AgentRun View 验收
 
-`pnpm package:mac` 已产出 arm64 包 `dist/mac-arm64/Rovai-ai.app`。App、内置 `rovai-core` 与 `rovai` CLI
-均通过 `codesign --verify --deep --strict`；最终合并包 Core UUID 为 `F5270959-9A01-3920-A473-1FC1AF88EE1B`，
-CLI UUID 为 `7816CE01-062B-39E2-88F1-8BD0EFEBB59E`，与 staging release 二进制一致。
+`pnpm package:mac` 已产出 v0.0.2 arm64 包 `dist/mac-arm64/Rovai AI.app`。App、内置 `rovai-core` 与
+`rovai` CLI 均通过 `codesign --verify --deep --strict`；最终合并包 Core UUID 为
+`B20EF850-64A4-35CB-B37D-92EAD6DF7B2C`，CLI UUID 为 `E4D67B75-8034-3291-A144-94C077EC4550`，
+与 staging release 二进制一致。
 验收后同一包已替换 `/Applications/Rovai AI.app`，旧包保留为
-`/Applications/Rovai AI.app.backup-before-grok-v128-main-20260825-005025`，接入前原包另保留在
+`/Applications/Rovai AI.app.backup-before-grok-v128-v002-20260825-010127`，接入前原包另保留在
 `/Applications/Rovai AI.app.backup-before-grok-v128-20260825-002302`。替换没有终止正在运行的日常实例，
-因此当前实例需由用户正常退出并重新打开后才会加载磁盘上的最终合并包。
+因此当前实例需由用户正常退出并重新打开后才会加载磁盘上的 v0.0.2 最终合并包。
 
 验收使用独立 `userData` 启动该包，未复用日常 App 数据。包内 App CLI 的 `runtime check` 返回
 `grok-build / ready`，模型目录返回默认 `minimax-m3` 与可选 `grok-4.5`；随后创建队员“艾达”（Runtime
