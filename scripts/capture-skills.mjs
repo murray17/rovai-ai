@@ -24,7 +24,7 @@ const cssHeight = Math.round(height / zoomFactor)
 const theme = process.env.ROVAI_CAPTURE_THEME ?? 'day'
 
 if (!appPath || !userDataDir) {
-  throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-skills.mjs <Rovai-ai.app> [output.png]')
+  throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-skills.mjs <Rovai AI.app> [output.png]')
 }
 if (!['day', 'night'].includes(theme)) throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${theme}`)
 if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
@@ -32,7 +32,7 @@ if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
 }
 seedCompletedOnboardingForAcceptance(userDataDir)
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`

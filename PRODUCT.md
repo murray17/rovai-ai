@@ -49,9 +49,10 @@ coordinates them while preserving which facts came from Rovai Core and which cam
 
 ## Brand Commitments
 
-The product name is “Rovai AI” in application UI and “Rovai-ai” where existing package/repository
-naming requires it. Copy is calm, direct and evidence-first. Uncertainty, partial coverage and the
-next available action are stated plainly rather than hidden behind optimistic status language.
+The product name, macOS application bundle, macOS executable and Helper names are “Rovai AI”.
+“Rovai-ai” remains only where legacy data, the Windows executable or the repository slug requires it.
+Copy is calm, direct and evidence-first. Uncertainty, partial coverage and the next available action
+are stated plainly rather than hidden behind optimistic status language.
 
 ## Evidence on Hand
 

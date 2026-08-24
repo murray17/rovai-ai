@@ -11,10 +11,16 @@ if (process.platform !== 'win32' || process.arch !== 'x64') {
 
 const root = resolve(import.meta.dirname, '..')
 const packageMetadata = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'))
+const executableName = packageMetadata.build.win.executableName ?? packageMetadata.build.productName
 const installer = join(
   root,
   'dist',
-  `${packageMetadata.build.productName}-${packageMetadata.version}-x64.exe`
+  packageMetadata.build.win.artifactName
+    .replaceAll('${productName}', packageMetadata.build.productName)
+    .replaceAll('${name}', packageMetadata.name)
+    .replaceAll('${version}', packageMetadata.version)
+    .replaceAll('${arch}', 'x64')
+    .replaceAll('${ext}', 'exe')
 )
 if (!existsSync(installer)) throw new Error(`Windows installer is missing: ${installer}`)
 
@@ -105,18 +111,18 @@ async function locateInstallation() {
     .find((value) => typeof value === 'string' && value.length > 0)
   const candidates = registryDirectory ? [registryDirectory, ...installCandidates] : installCandidates
   return candidates.find((candidate) => (
-    existsSync(join(candidate, `${packageMetadata.build.productName}.exe`))
+    existsSync(join(candidate, `${executableName}.exe`))
   )) ?? null
 }
 
 async function installedFileEvidence(directory) {
   const files = {
-    app: join(directory, `${packageMetadata.build.productName}.exe`),
+    app: join(directory, `${executableName}.exe`),
     core: join(directory, 'resources', 'bin', 'rovai-core.exe'),
     cli: join(directory, 'resources', 'bin', 'rovai.exe')
   }
   const unpacked = {
-    app: join(root, 'dist', 'win-unpacked', `${packageMetadata.build.productName}.exe`),
+    app: join(root, 'dist', 'win-unpacked', `${executableName}.exe`),
     core: join(root, 'dist', 'win-unpacked', 'resources', 'bin', 'rovai-core.exe'),
     cli: join(root, 'dist', 'win-unpacked', 'resources', 'bin', 'rovai.exe')
   }
@@ -136,7 +142,7 @@ async function installedFileEvidence(directory) {
 async function waitForUninstall(directory, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (!existsSync(join(directory, `${packageMetadata.build.productName}.exe`))
+    if (!existsSync(join(directory, `${executableName}.exe`))
         && installedRovaiEntries().length === 0) return
     await new Promise((resolveWait) => setTimeout(resolveWait, 200))
   }
@@ -152,7 +158,7 @@ try {
 
   const onboarding = spawnSync(process.execPath, [
     join(root, 'scripts', 'accept-onboarding-ui.mjs'),
-    join(installDirectory, `${packageMetadata.build.productName}.exe`)
+    join(installDirectory, `${executableName}.exe`)
   ], {
     cwd: root,
     env: {
@@ -188,7 +194,7 @@ try {
   if (uninstallers.length !== 1) throw new Error(`expected one uninstaller, found ${uninstallers.length}`)
   run(join(installDirectory, uninstallers[0]), ['/currentuser', '/S'])
   await waitForUninstall(installDirectory)
-  if (existsSync(join(installDirectory, `${packageMetadata.build.productName}.exe`))) {
+  if (existsSync(join(installDirectory, `${executableName}.exe`))) {
     throw new Error('default uninstall left the application executable installed')
   }
   if (installedRovaiEntries().length > 0) throw new Error('default uninstall left its HKCU uninstall registration')

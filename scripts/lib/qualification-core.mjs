@@ -13,7 +13,7 @@ export async function findCompetingRovaiProcesses() {
     const command = process.command
     return /^(?:\S*\/)rovai-core(?:\s|$)/.test(command)
       || /^rovai-core(?:\s|$)/.test(command)
-      || /^\S*Rovai-ai\.app\/Contents\/MacOS\/Rovai-ai(?:\s|$)/.test(command)
+      || /^\S*Rovai(?:-ai| AI)\.app\/Contents\/MacOS\/Rovai(?:-ai| AI)(?:\s|$)/.test(command)
   })
 }
 

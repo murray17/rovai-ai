@@ -88,10 +88,10 @@ startup recovery 前退出，因此不要删除 `.rovai-core-instance.lock`，�
 
 ```bash
 pnpm package:mac
-ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai-ai.app"
+ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai AI.app"
 FIXTURE_ROOT="$(mktemp -d)"
 ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
-"$ROVAI_APP/Contents/MacOS/Rovai-ai" \
+"$ROVAI_APP/Contents/MacOS/Rovai AI" \
   --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
 
@@ -151,11 +151,11 @@ App/Core 是否为旧构建，以及冲突 Core 是否曾在升级前打开过�
 
 ## `codesign` 校验失败
 
-先确认目标是本次生成的 `dist/mac-arm64/Rovai-ai.app`，再运行：
+先确认目标是本次生成的 `dist/mac-arm64/Rovai AI.app`，再运行：
 
 ```bash
-codesign --verify --deep --strict "dist/mac-arm64/Rovai-ai.app"
-codesign -dv --verbose=4 "dist/mac-arm64/Rovai-ai.app"
+codesign --verify --deep --strict "dist/mac-arm64/Rovai AI.app"
+codesign -dv --verbose=4 "dist/mac-arm64/Rovai AI.app"
 ```
 
 本地 `package:mac` 是 ad-hoc 签名，不会产生 Notarization 票据。正式证书或公证问题按

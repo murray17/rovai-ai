@@ -76,7 +76,7 @@ import {
   prepareWindowsDataRoot,
   resolveWindowsDataRoot
 } from './windows-data-root'
-import { AppUpdatesService } from './app-updates'
+import { AppUpdatesService, type DesktopAutoUpdater } from './app-updates'
 
 const mainStartupStartedAt = performance.now()
 console.info('[startup] stage=main_module_loaded elapsed_ms=0.0')
@@ -219,10 +219,7 @@ const isolatedAcceptanceInstance =
 const primaryInstance = isolatedAcceptanceInstance || app.requestSingleInstanceLock()
 if (!primaryInstance) app.quit()
 const core = new CoreClient(coreDataPath)
-const appUpdates = new AppUpdatesService({
-  currentVersion: () => app.getVersion(),
-  openExternal: (url) => shell.openExternal(url)
-})
+let appUpdates: AppUpdatesService | null = null
 let mainWindow: BrowserWindow | null = null
 let themePreference: ThemePreference = 'system'
 let appearanceFilePath = ''
@@ -238,6 +235,31 @@ let quitDrainStarted = false
 let quitDrainCompleted = false
 const desktopSessions = new DesktopSessionRegistry()
 const memberAvatars = new MemberAvatarAssetService(coreDataPath)
+
+async function initializeAppUpdates(): Promise<void> {
+  // electron-updater eagerly touches Electron's native autoUpdater while the
+  // module is evaluated. Loading it before app.whenReady() can stall packaged
+  // macOS startup before our main module runs, so keep it on the ready path.
+  const updaterModule = await import('electron-updater')
+  const autoUpdater = updaterModule.autoUpdater
+    ?? (updaterModule.default as { autoUpdater?: DesktopAutoUpdater } | undefined)?.autoUpdater
+  if (!autoUpdater) throw new Error('electron-updater did not expose autoUpdater')
+  const service = new AppUpdatesService({
+    currentVersion: () => app.getVersion(),
+    isPackaged: () => app.isPackaged,
+    updater: autoUpdater as unknown as DesktopAutoUpdater
+  })
+  service.onChanged((snapshot) => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return
+    mainWindow.webContents.send('rovai:app-updates-changed', snapshot)
+  })
+  appUpdates = service
+}
+
+function requireAppUpdates(): AppUpdatesService {
+  if (!appUpdates) throw new Error('Application updates are not ready')
+  return appUpdates
+}
 
 function removeRetiredLoginItemRegistration(): void {
   if (process.platform !== 'darwin' || !app.isPackaged) return
@@ -434,6 +456,7 @@ if (primaryInstance) void app.whenReady().then(async () => {
   console.info(
     `[startup] stage=electron_ready elapsed_ms=${(performance.now() - mainStartupStartedAt).toFixed(1)}`
   )
+  await initializeAppUpdates()
   removeRetiredLoginItemRegistration()
   await deleteRetiredManagedDirectory(coreDataPath)
   const userDataPath = app.getPath('userData')
@@ -532,17 +555,17 @@ ipcMain.handle('rovai:appearance-set', async (_event, preference: unknown) => {
 
 ipcMain.handle('rovai:app-updates-get', (event) => {
   requireMainWindow(event.sender)
-  return appUpdates.get()
+  return requireAppUpdates().get()
 })
 
 ipcMain.handle('rovai:app-updates-check', (event) => {
   requireMainWindow(event.sender)
-  return appUpdates.check()
+  return requireAppUpdates().check()
 })
 
-ipcMain.handle('rovai:app-updates-open-release', (event) => {
+ipcMain.handle('rovai:app-updates-install', (event) => {
   requireMainWindow(event.sender)
-  return appUpdates.openReleasePage()
+  return requireAppUpdates().install()
 })
 
 ipcMain.handle('rovai:window-application-menu-popup', (event, input: unknown) => {

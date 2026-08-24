@@ -25,7 +25,7 @@ const targetRuntimeLabel = targetRuntimeKind && ({
   'claude-code-cli': 'Claude Code CLI',
   'antigravity-app': 'Antigravity App'
 })[targetRuntimeKind]
-if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Rovai-ai.app> [output-prefix]')
+if (!appPath) throw new Error('Usage: node scripts/capture-desktop.mjs <Rovai AI.app> [output-prefix]')
 const userDataDirectory = assertUserDataIsIsolated(process.env.ROVAI_CAPTURE_USER_DATA_DIR)
 seedCompletedOnboardingForAcceptance(userDataDirectory)
 if (targetRuntimeKind && !targetRuntimeLabel) throw new Error(`Unknown ROVAI_CAPTURE_RUNTIME_KIND: ${targetRuntimeKind}`)
@@ -36,7 +36,7 @@ if (!Number.isFinite(captureScale) || captureScale < 1) {
   throw new Error(`Unknown ROVAI_CAPTURE_SCALE: ${captureScale}`)
 }
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
 const launchArguments = [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDirectory}`

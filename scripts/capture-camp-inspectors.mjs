@@ -32,7 +32,7 @@ const attachmentCampId =
   process.env.ROVAI_CAPTURE_CAMP_ID ?? null
 
 if (!appPath || !userDataDir) {
-  throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-camp-inspectors.mjs <Rovai-ai.app> [output-prefix]')
+  throw new Error('Usage: ROVAI_CAPTURE_USER_DATA_DIR=<data> node scripts/capture-camp-inspectors.mjs <Rovai AI.app> [output-prefix]')
 }
 if (theme && !['system', 'day', 'night'].includes(theme)) {
   throw new Error(`Unknown ROVAI_CAPTURE_THEME: ${theme}`)
@@ -41,7 +41,7 @@ if (!Number.isFinite(zoomFactor) || zoomFactor <= 0) {
   throw new Error(`Invalid ROVAI_CAPTURE_ZOOM_FACTOR: ${zoomFactor}`)
 }
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`
