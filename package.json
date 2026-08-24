@@ -1,7 +1,7 @@
 {
   "name": "rovai-ai",
-  "productName": "Rovai-ai",
-  "version": "0.0.1",
+  "productName": "Rovai AI",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "description": "A desktop workspace for long-lived agent teams, shared Camps, visible execution, and collaborative memory.",
@@ -41,7 +41,7 @@
     "build:macos:x64": "pnpm core:build:macos:x64 && pnpm build:desktop",
     "build:windows:x64": "pnpm core:build:windows:x64 && pnpm build:desktop",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm docs:test && pnpm docs:check && pnpm skills:test && pnpm skills:check && vitest run && node --test scripts/lib/check-rust-staged.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/planned-shutdown-app-quit.test.mjs scripts/lib/sidecar-targets.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs",
+    "test": "pnpm docs:test && pnpm docs:check && pnpm skills:test && pnpm skills:check && vitest run && node --test scripts/lib/check-rust-staged.test.mjs scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs scripts/lib/dev-desktop.test.mjs scripts/lib/macos-update-info.test.mjs scripts/lib/missing-send-recovery-protocol.test.mjs scripts/lib/planned-shutdown-app-quit.test.mjs scripts/lib/sidecar-targets.test.mjs scripts/lib/qualification-acceptance-v034.test.mjs scripts/lib/qualification-acceptance-v036.test.mjs scripts/lib/qualification-artifacts.test.mjs scripts/lib/qualification-bundle.test.mjs scripts/lib/qualification-case-v3.test.mjs scripts/lib/qualification-collaboration.test.mjs scripts/lib/qualification-collaboration-ledger.test.mjs scripts/lib/qualification-core.test.mjs scripts/lib/qualification-demo-cases.test.mjs scripts/lib/qualification-diagnostic-portfolio.test.mjs scripts/lib/qualification-evaluation.test.mjs scripts/lib/qualification-evidence-index.test.mjs scripts/lib/qualification-isolation.test.mjs scripts/lib/qualification-judge-views.test.mjs scripts/lib/qualification-observation.test.mjs scripts/lib/qualification-public-report.test.mjs scripts/lib/qualification-recovery.test.mjs scripts/lib/qualification-schema-validation.test.mjs scripts/lib/qualification-semantic-evidence.test.mjs scripts/lib/qualification-semantic-judge.test.mjs scripts/lib/qualification-tool-evidence.test.mjs scripts/lib/qualification-tool-ledger.test.mjs scripts/lib/qualification-tool-use-judge.test.mjs scripts/lib/qualification-workspace-mutation-ledger.test.mjs scripts/lib/tool-interaction-measurement/index.test.mjs scripts/lib/qualification-tool-measurement-spec.test.mjs scripts/benchmark-paired-collaboration.test.mjs scripts/benchmark/*.test.mjs scripts/benchmark/**/*.test.mjs",
     "smoke:core": "pnpm core:build:debug && node scripts/smoke-core.mjs",
     "smoke:member-config": "pnpm core:build:debug && node scripts/smoke-member-config.mjs",
     "smoke:intake": "pnpm core:build:debug && node scripts/smoke-intake.mjs",
@@ -97,6 +97,7 @@
     "accept:planned-shutdown": "node scripts/accept-planned-shutdown.mjs",
     "accept:windows:installer": "node scripts/accept-windows-installation.mjs",
     "accept:diagnostics-ui": "node scripts/accept-diagnostics-ui.mjs",
+    "accept:app-updates-ui": "node scripts/accept-app-updates-ui.mjs",
     "accept:runtime-monitoring-ui": "node scripts/accept-runtime-monitoring-ui.mjs",
     "accept:onboarding-ui": "node scripts/accept-onboarding-ui.mjs",
     "smoke:recovery": "pnpm core:build:debug && node scripts/smoke-recovery.mjs",
@@ -105,9 +106,9 @@
     "test:p1:copilot-native-turn-evidence": "node --test scripts/lib/copilot-native-turn-reconciliation-evidence.test.mjs",
     "package:mac:unsigned": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=-",
     "package:mac": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64 -c.mac.identity=-",
-    "dist:mac": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg --arm64 -c.mac.identity=-",
-    "dist:mac:release:arm64": "pnpm build:macos:arm64 && electron-builder --mac dmg --arm64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
-    "dist:mac:release:x64": "pnpm build:macos:x64 && electron-builder --mac dmg --x64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
+    "dist:mac": "pnpm build:macos:arm64 && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --arm64 --publish never -c.mac.identity=-",
+    "dist:mac:release:arm64": "pnpm build:macos:arm64 && electron-builder --mac dmg zip --arm64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
+    "dist:mac:release:x64": "pnpm build:macos:x64 && electron-builder --mac dmg zip --x64 --publish never -c.mac.identity=\"Rovai Release Signing\" -c.forceCodeSigning=true",
     "package:windows:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs dir && node scripts/verify-windows-release.mjs --unpacked-only",
     "dist:windows:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs",
     "dist:windows:release:x64": "pnpm build:windows:x64 && node scripts/package-windows.mjs nsis && node scripts/verify-windows-release.mjs --require-signed",
@@ -117,6 +118,7 @@
     "@radix-ui/react-dialog": "1.1.19",
     "@radix-ui/react-dropdown-menu": "2.1.20",
     "@radix-ui/react-tabs": "1.1.17",
+    "electron-updater": "6.8.9",
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "react-markdown": "^10.1.0",
@@ -141,7 +143,7 @@
   },
   "build": {
     "appId": "ai.rovai.desktop",
-    "productName": "Rovai-ai",
+    "productName": "Rovai AI",
     "asar": true,
     "directories": {
       "output": "dist",
@@ -152,6 +154,14 @@
       "package.json"
     ],
     "afterPack": "scripts/after-pack.cjs",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "murray17",
+        "repo": "rovai-ai",
+        "releaseType": "release"
+      }
+    ],
     "mac": {
       "icon": "build/icon.png",
       "extraResources": [
@@ -182,12 +192,14 @@
       "minimumSystemVersion": "14.0",
       "target": [
         "dir",
-        "dmg"
+        "dmg",
+        "zip"
       ],
-      "artifactName": "Rovai-ai-${version}-${arch}.${ext}"
+      "artifactName": "Rovai-AI-${version}-${arch}.${ext}"
     },
     "win": {
       "icon": "build/icon.png",
+      "executableName": "Rovai-ai",
       "target": [
         {
           "target": "nsis",
@@ -210,7 +222,7 @@
           "to": "bin/rovai.exe"
         }
       ],
-      "artifactName": "Rovai-ai-${version}-${arch}.${ext}"
+      "artifactName": "Rovai-AI-${version}-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -224,7 +236,7 @@
       "warningsAsErrors": true
     },
     "dmg": {
-      "title": "Rovai-ai ${version}",
+      "title": "Rovai AI ${version}",
       "window": {
         "width": 540,
         "height": 380

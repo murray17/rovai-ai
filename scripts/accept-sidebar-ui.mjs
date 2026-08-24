@@ -5,7 +5,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
+const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
 const fixtureRoot = process.env.ROVAI_SIDEBAR_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-sidebar-ui-accept-'))
 const dataDir = join(fixtureRoot, 'user-data')
@@ -1293,7 +1293,7 @@ async function setTheme(cdp, preference) {
 }
 
 async function launchApp(port, width, height, reducedMotion) {
-  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
   const child = spawn(executable, [
     `--remote-debugging-port=${port}`,

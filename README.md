@@ -184,6 +184,11 @@ Download the installer for your device from
 The Windows x64 installer is currently unsigned. Windows SmartScreen may show an unknown publisher
 warning. Download the installer only from the official Rovai AI GitHub Release.
 
+Rovai AI v0.0.2 adds manual “检查更新” in Settings → About & Updates. A found update downloads
+immediately, shows progress, and installs only after “安装并重启” is selected. The published v0.0.1
+does not contain the updater metadata or install flow, so moving from v0.0.1 to v0.0.2 remains a
+one-time manual installer upgrade; in-app upgrading starts with releases after v0.0.2.
+
 #### Run from source (for developers)
 
 For source installation, environment setup, isolated data directories, and build instructions,

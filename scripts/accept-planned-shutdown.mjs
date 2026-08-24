@@ -12,7 +12,7 @@ import { querySqliteRows } from './lib/sqlite.mjs'
 const root = resolve(import.meta.dirname, '..')
 const defaultAppPath = process.platform === 'win32'
   ? join(root, 'dist', 'win-unpacked', 'Rovai-ai.exe')
-  : join(root, 'dist', 'mac-arm64', 'Rovai-ai.app')
+  : join(root, 'dist', 'mac-arm64', 'Rovai AI.app')
 const appPath = resolve(process.argv[2] ?? defaultAppPath)
 const fixtureRoot = process.env.ROVAI_PLANNED_SHUTDOWN_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-planned-shutdown-accept-'))
@@ -332,7 +332,7 @@ async function launchApp(port, width, height) {
 function packagedAppExecutable() {
   return process.platform === 'win32'
     ? appPath
-    : join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+    : join(appPath, 'Contents', 'MacOS', 'Rovai AI')
 }
 
 function packagedCoreExecutable() {
