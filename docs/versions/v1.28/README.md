@@ -1,0 +1,91 @@
+---
+document_type: version-overview
+version: v1.28
+lifecycle: current
+authority: version-scope-and-status
+design_status: confirmed
+implementation_status: complete
+model_context_change: true
+last_updated: 2026-08-25
+---
+
+# Rovai-ai v1.28：Grok Build + MiniMax M3 本地 Runtime 接入
+
+> 当前状态：`grok-build` Product Runtime、Data Contract 迁移、官方 provider config、ACP Host、Renderer
+> catalog 和本机 macOS arm64 资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
+> `AdditivePerRun / NativeWinsSkip` External MCP；load-only cold continuation 复用 TRAE 的严格
+> `HistoryRestore` 隔离，但不冒充 `session/resume`。已确认的模型上下文 revision 2 保持 Bootstrap bytes
+> 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
+> 独立 worktree 验收后通过 PR 交付 `main`。
+
+前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
+
+## 版本目标
+
+依据 [Grok Build Runtime Research](../../research/grok-build-runtime-research.md)与
+[Runtime 接入与准入 Checklist](../../development/runtime-integration-checklist.md)，把 xAI Grok Build 作为独立
+Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 custom-model 配置 schema 和原生 Home
+内的权限收窄密钥环境源；不复用 Kimi/Claude 的 Runtime identity、变量或原生状态目录。
+
+## 交付范围
+
+- 新增 `AdapterKind = grok-build`、`SkillDeliveryGroupKey = grok` 与 Migration 107；Migration 108 扩展 Grok
+  compaction closed sets。当前 Data Contract 升级为 `v1.22 / projection schema 63`，既有 Runtime、成员、
+  Skill assignment、detector policy、requirement、observer lease 与 observation 必须无损保留；
+- 发现 `grok`，以 `grok --permission-mode <effective> --no-auto-update agent --no-leader [--plugin-dir
+  <private-root>] stdio` 启动 ACP v1；BYOK overlay 存在时选择 `xai.api_key`，否则只选择 Runtime 广告的安全
+  非交互默认或 `cached_token`，从不由 Probe 启动浏览器/设备登录；
+- 正式 AgentRun 继承用户原生 Grok Home 和官方 `$GROK_HOME/config.toml`；BYOK Probe 把官方配置层复制到
+  临时 `GROK_HOME`，account-auth Probe 为读取既有 cached token 保留原生 Home。当前机器没有 cached token，
+  因此 account-auth 产品路径已实现但未做真实登录验收；
+- 模型/provider 直接使用官方 `[models]`、`[model.<id>]`、`[model_providers.<id>]`。mode `0600` 的
+  `$GROK_HOME/.env` 只向目标子进程提供 TOML `env_key` / `env_http_headers` 明确引用的变量；官方
+  `api_key` 同样兼容，不再存在 Rovai `GROK_MODEL_*` 三字段翻译；
+- 模型目录来自真实 ACP Session，显式模型使用已实测的标准 `session/set_model`，不声明不存在的
+  `session/set_config_option`；权限支持 Grok 原生 `default`、`acceptEdits`、`auto`、`dontAsk`、
+  `bypassPermissions`、`plan`，Product default 为 `bypassPermissions`，Core read-only 强制 `plan`；
+- Kimi/Grok 对 MiniMax 作为普通 ACP `agent_message_chunk` 返回的 `<think>` 或其他文本不做专用清洗、
+  重分类或抑制；内容原样进入执行台 Evidence、terminal final 与 Missing-Send candidate；
+- 完成 Fleet LRU warm Host/同 Session 复用；`grok 0.2.118` 只广告 `loadSession`、不广告 resume，因此新
+  Host 用 exact `session/load` 进入 bounded replay quarantine，失败只记录一次 continuity-lost 后新建 Session；
+- Native Session Bootstrap 的三个 section、顺序和 bytes 不变；新 Grok Session 只在
+  `session/new._meta.rules` 原生追加一次，首轮及后继 user payload 均只含 Dynamic Context，不使用覆盖式
+  `systemPromptOverride`，same-host/load 不重复注入；
+- `best_effort` detector 只接受无 request ID 的 `_x.ai/session_notification`、exact Session ID、
+  `auto_compact_completed` 与非空 event ID。合格完成只推进 durable revision，下一次 Core-controlled input
+  使用既有 Redelivery Envelope v2；真实强制压缩两轮产品 smoke 已通过 revision 1 accepted ACK；
+- Grok Skill 投影到 `.grok/skills` 并完成原生发现实测；External MCP 使用私有临时 Plugin 的进程级
+  `--plugin-dir`，保留原生定义、同名 `NativeWinsSkip`、不同名逐 Run 追加并随 Host 清理；Usage/Cost 保持
+  Disabled，直到字段语义独立验证；
+- macOS arm64 只在本版本冻结的 adapter-scoped 证据通过后进入普通 discovery、检查、成员配置与执行路径；
+  macOS x64、Windows x64 不从本机证据外推。
+
+## 安全与兼容边界
+
+- API Key 不进入仓库、数据库、CLI 参数、日志、diagnostics、qualification artifact 或公开 Evidence；
+- Core 不写 `$GROK_HOME/config.toml` / `.env`，正式 AgentRun 不覆盖 `HOME` / `GROK_HOME`，也不向用户目录安装 Hook 或
+  Plugin；逐 Run MCP Plugin 只存在于 Core 私有 Runtime 目录并由 RAII/Host cleanup 删除；
+- `_x.ai/*` vendor notification 只按已知 Session metadata/lifecycle 路由，不作为公开 assistant 输出；
+- 原生 Session ID 仅保留在既有绑定边界，资格证据不持久化完整 Native ID；
+- Cursor 与 Kimi 的平台准入、provider 和 continuation 结论不因新增 Grok identity 改变。
+
+## 验收
+
+验收状态由 [实施计划](implementation-plan.md)维护。逐项结论见[接入 Checklist 报告](checklist-report.md)。
+交接前至少完成：静态检查、Rust/Renderer 定向测试、
+Migration 保留验证、真实 Deep Probe、两轮 AgentRun、命令与权限、cancel、Missing-Send、Built-in CLI、Skill、
+External MCP 支持性裁决、文档治理与 Impeccable UI detector。
+
+## 跨版本文档影响
+
+| 范围 | 结论 | 证据或理由 |
+| --- | --- | --- |
+| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
+| Decisions | 已更新 | [V1.28-D01](decisions.md#v1-28-d01)冻结 provider/Home/auth 边界，[V1.28-D02](decisions.md#v1-28-d02)冻结公开输出与平台准入，[V1.28-D03](decisions.md#v1-28-d03)冻结 External MCP 的 Plugin 追加边界，[V1.28-D04](decisions.md#v1-28-d04)冻结 load-only HistoryRestore，[V1.28-D05](decisions.md#v1-28-d05)冻结 native rules 与 structured compaction redelivery。 |
+| Contracts | 已更新 | [Runtime Launch and Verification](../../contracts/runtime-launch-and-verification-v26.md)与[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)补充 Grok 行为。 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)补充 Grok identity、provider 与原生状态边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)补充 Grok detector。 |
+| UI | 已更新 | 复用现有 Runtime catalog、状态与成员参数组件；member-workspace brief 明确 generic agent text 可原样进入执行台与 final。 |
+| Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增 Grok ACP run-level 映射。 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)与 adapter-scoped macOS arm64 证据记录实测边界。 |
+| Documentation routing | 确认无需更新 | 既有 Runtime checklist、Research、Architecture、Contract 与 Version 路由足以到达本版本。 |
+| Root README | 确认无需更新 | 本次新增兼容 Runtime，不改变项目定位或常青产品承诺。 |

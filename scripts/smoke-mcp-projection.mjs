@@ -1,12 +1,15 @@
 import {
+  access,
   chmod,
+  copyFile,
   mkdir,
   mkdtemp,
+  readFile,
   realpath,
   rm,
   writeFile
 } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
@@ -22,6 +25,10 @@ const root = resolve(import.meta.dirname, '..')
 const fixtureRoot = await realpath(await mkdtemp(join(tmpdir(), 'rovai-mcp-projection-smoke-')))
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
+const grokHome = join(fixtureRoot, 'grok-home')
+const grokSourceHome = process.env.GROK_HOME?.trim() || join(homedir(), '.grok')
+const grokNativeStdioMarker = join(fixtureRoot, 'grok-native-stdio-started')
+const grokNativeHttpNameMarker = join(fixtureRoot, 'grok-native-http-name-started')
 const mcpConfigPath = join(fixtureRoot, 'config', 'mcp.json')
 const fixture = join(root, 'crates/rovai-core/tests/fixtures/mcp-smoke-server.mjs')
 const serverId = '6f589c15-bba8-42e5-a20a-cd6749824207'
@@ -34,6 +41,7 @@ const selected = (process.env.ROVAI_MCP_PROJECTION_SMOKE_ADAPTERS ?? 'all')
   .split(',')
   .map((value) => value.trim())
   .filter(Boolean)
+const debugGrokProjection = process.env.ROVAI_MCP_PROJECTION_DEBUG_GROK === '1'
 const allAdapters = [
   'codex-cli',
   'claude-code-cli',
@@ -44,9 +52,11 @@ const allAdapters = [
   'codebuddy-cli',
   'qwen-code',
   'trae-cn-cli',
-  'kimi-code-cli'
+  'kimi-code-cli',
+  'grok-build'
 ]
 const adapters = selected.length === 1 && selected[0] === 'all' ? allAdapters : selected
+const grokOnly = adapters.length === 1 && adapters[0] === 'grok-build'
 let core = null
 let projectedHttp = null
 let nativeHttp = null
@@ -58,6 +68,7 @@ try {
   projectedHttp = await startMcpHttpServer('rovai-projection-http')
   nativeHttp = await startMcpHttpServer('runtime-native-http')
   await prepareProject(nativeHttp.url)
+  await prepareGrokHome()
   await prepareRovaiConfig(projectedHttp.url)
   core = startCore()
   await core.request('health.check')
@@ -67,12 +78,15 @@ try {
   for (const adapterKind of adapters) {
     const runtime = await configureRuntime(core.request, adapterKind)
     const adapterMarker = adapterName(adapterKind)
-    const expected = adapterKind === 'codex-cli'
+    const nativeWins = adapterKind === 'codex-cli'
+    const expected = nativeWins
       ? [
           `runtime-native:${adapterMarker}`,
           `runtime-native:${adapterMarker}-http`,
           `runtime-native-http:${adapterMarker}-stdio`
         ]
+      : adapterKind === 'grok-build'
+        ? [`rovai-projection-stdio:${adapterMarker}-stdio`]
       : adapterKind === 'kimi-code-cli'
         ? [
             `rovai-projection:${adapterMarker}`,
@@ -80,12 +94,18 @@ try {
             `rovai-projection-stdio:${adapterMarker}-stdio`
           ]
       : [`rovai-projection:${adapterMarker}`]
-    const forbidden = adapterKind === 'codex-cli'
+    const forbidden = nativeWins
       ? [
           `rovai-projection:${adapterMarker}`,
           `rovai-projection-http:${adapterMarker}-http`,
           `rovai-projection-stdio:${adapterMarker}-stdio`
         ]
+      : adapterKind === 'grok-build'
+        ? [
+            `rovai-projection:${adapterMarker}`,
+            `rovai-projection-http:${adapterMarker}-http`,
+            `runtime-native-http:${adapterMarker}-stdio`
+          ]
       : adapterKind === 'kimi-code-cli'
         ? [
             `runtime-native:${adapterMarker}`,
@@ -107,12 +127,20 @@ try {
     for (const marker of forbidden) {
       assert(!result.output.includes(marker), `${adapterKind} silently used the same-name Runtime-native MCP ${marker}: ${JSON.stringify(result)}`)
     }
-    const expectedServers = adapterKind === 'codex-cli' || adapterKind === 'kimi-code-cli'
+    if (adapterKind === 'grok-build') {
+      assert(await pathExists(grokNativeStdioMarker), 'grok-build did not preserve the first native same-name MCP server')
+      assert(await pathExists(grokNativeHttpNameMarker), 'grok-build did not preserve the second native same-name MCP server')
+    }
+    const expectedServers = adapterKind === 'codex-cli'
+      || ['kimi-code-cli', 'grok-build'].includes(adapterKind)
       ? [serverName, projectedHttpServerName, projectedStdioServerName]
       : [serverName]
     const exposures = expectedServers.map((name) => result.exposure?.servers?.find((server) => server.name === name))
     for (const exposure of exposures) {
-      const expectedStatus = adapterKind === 'codex-cli' ? 'skipped_native_name_conflict' : 'ready'
+      const expectedStatus = nativeWins
+        || (adapterKind === 'grok-build' && exposure?.name !== projectedStdioServerName)
+        ? 'skipped_native_name_conflict'
+        : 'ready'
       assert(exposure?.status === expectedStatus, `${adapterKind} did not freeze the expected MCP exposure status: ${JSON.stringify(result.exposure)}`)
       assert(
         exposure.runtimeName === exposure.name,
@@ -132,7 +160,7 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    semantics: 'Runtime-native config is preserved; Codex skips collisions and other additive adapters give Rovai the whole-definition precedence',
+    semantics: 'Runtime-native config is preserved; Codex skips collisions, Grok skips active native collisions and adds distinct per-Run servers, while other additive adapters give Rovai the whole-definition precedence',
     results
   }, null, 2))
 } finally {
@@ -159,9 +187,11 @@ async function prepareProject(nativeHttpUrl) {
     [projectedStdioServerName]: { url: nativeHttpUrl }
   }
   await writeFile(join(projectRoot, 'README.md'), '# Rovai-ai same-name MCP Projection smoke\n')
-  await writeFile(join(projectRoot, '.mcp.json'), `${JSON.stringify({
-    mcpServers: nativeServers
-  }, null, 2)}\n`)
+  if (!grokOnly) {
+    await writeFile(join(projectRoot, '.mcp.json'), `${JSON.stringify({
+      mcpServers: nativeServers
+    }, null, 2)}\n`)
+  }
   await writeFile(join(projectRoot, '.kiro', 'settings', 'mcp.json'), `${JSON.stringify({
     mcpServers: nativeServers
   }, null, 2)}\n`)
@@ -206,6 +236,33 @@ async function prepareProject(nativeHttpUrl) {
   await run('git', ['config', 'user.email', 'mcp-projection-smoke@rovai.local'], projectRoot)
   await run('git', ['add', '.'], projectRoot)
   await run('git', ['commit', '-m', 'same-name Runtime-native MCP fixture'], projectRoot)
+}
+
+async function prepareGrokHome() {
+  await mkdir(grokHome, { recursive: true, mode: 0o700 })
+  await chmod(grokHome, 0o700)
+  const nativeConfiguration = await readFile(join(grokSourceHome, 'config.toml'), 'utf8')
+  await writeFile(join(grokHome, 'config.toml'), [
+    nativeConfiguration.trimEnd(),
+    '',
+    `[mcp_servers.${serverName}]`,
+    `command = ${JSON.stringify(process.execPath)}`,
+    `args = [${JSON.stringify(fixture)}]`,
+    `env = { ROVAI_MCP_SMOKE_SOURCE = "runtime-native", ROVAI_MCP_SMOKE_STARTUP_MARKER = ${JSON.stringify(grokNativeStdioMarker)} }`,
+    '',
+    `[mcp_servers.${projectedHttpServerName}]`,
+    `command = ${JSON.stringify(process.execPath)}`,
+    `args = [${JSON.stringify(fixture)}]`,
+    `env = { ROVAI_MCP_SMOKE_SOURCE = "runtime-native", ROVAI_MCP_SMOKE_STARTUP_MARKER = ${JSON.stringify(grokNativeHttpNameMarker)} }`,
+    ''
+  ].join('\n'), { mode: 0o600 })
+  await chmod(join(grokHome, 'config.toml'), 0o600)
+  try {
+    await copyFile(join(grokSourceHome, '.env'), join(grokHome, '.env'))
+    await chmod(join(grokHome, '.env'), 0o600)
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error
+  }
 }
 
 async function prepareRovaiConfig(projectedHttpUrl) {
@@ -288,6 +345,11 @@ async function runProjectedTool(request, workspace, adapterKind, adapterMarker, 
         `Call the Runtime-native MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
         'Return all three tool results. The assigned Rovai definitions have the same names and must be skipped.'
       ]
+    : adapterKind === 'grok-build'
+      ? [
+          `Call the assigned MCP server named \`${projectedStdioServerName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}-stdio\`.`,
+          'Return exactly that tool result. The other two assigned definitions collide with active native servers and must remain skipped.'
+        ]
     : adapterKind === 'kimi-code-cli'
       ? [
           `Call the assigned MCP server named \`${serverName}\` and its \`echo\` tool exactly once with text \`${adapterMarker}\`.`,
@@ -450,13 +512,17 @@ function startCore() {
   const coreExecutable = process.env.ROVAI_CORE_EXECUTABLE
     ? resolve(process.env.ROVAI_CORE_EXECUTABLE)
     : join(root, 'target', 'debug', 'rovai-core')
+  const coreEnvironment = {
+    ...process.env,
+    GROK_HOME: grokHome
+  }
   const child = spawn(coreExecutable, [
     ...coreDataDirectoryArguments(dataDir),
     '--skill-library-root', join(dataDir, 'managed-skill-library'),
     '--mcp-config-path', mcpConfigPath
   ], {
     cwd: root,
-    env: process.env,
+    env: coreEnvironment,
     stdio: ['pipe', 'pipe', 'pipe']
   })
   child.stderr.pipe(process.stderr)
@@ -467,6 +533,12 @@ function startCore() {
     const message = JSON.parse(line)
     if (message.method) {
       events.push(message)
+      if (debugGrokProjection
+          && message.method === 'runtime.host.log'
+          && message.params?.adapterKind === 'grok-build'
+          && /plugin|rovai_smoke/i.test(message.params?.text ?? '')) {
+        process.stderr.write(`[grok-mcp-debug] ${String(message.params.text).slice(0, 2_048)}\n`)
+      }
       return
     }
     const pendingRequest = pending.get(message.id)
@@ -515,6 +587,15 @@ async function waitFor(read, label, timeoutMs) {
 
 function wait(milliseconds) {
   return new Promise((resolveWait) => setTimeout(resolveWait, milliseconds))
+}
+
+async function pathExists(path) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function run(command, args, cwd) {

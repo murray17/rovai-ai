@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_identity::parse_agent_id,
-    agent_profile::{AdapterKind, resolve_frozen_runtime},
+    agent_profile::resolve_frozen_runtime,
     camp_attachment_publication::{AuthorityAttachment, CampAttachmentPublicationCoordinator},
     camp_content::{
         StructuredCampMessageSegment, canonical_content_digest, normalize_content,
@@ -20,8 +20,8 @@ use crate::{
         DomainCommandGateway, EntityReference, canonical_json_digest, sealed,
     },
     context::{
-        CharterDeliveryMode, ContextService, DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
-        DeliveryContextPreview, FrozenDeliveryContext,
+        ContextService, DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, DeliveryContextPreview,
+        FrozenDeliveryContext, charter_delivery_mode_for_adapter,
     },
     context_index::index_camp_message,
     current_user::CURRENT_USER_ID,
@@ -2397,19 +2397,7 @@ fn process_dispatch_attempt(
         |row| row.get(0),
     )?;
     let agent_run_id = Uuid::new_v4().to_string();
-    let charter_delivery_mode = match runtime.adapter_kind {
-        AdapterKind::AntigravityApp
-        | AdapterKind::OpencodeCli
-        | AdapterKind::CopilotCli
-        | AdapterKind::KiroCli
-        | AdapterKind::QoderCli
-        | AdapterKind::CodebuddyCli
-        | AdapterKind::QwenCode
-        | AdapterKind::TraeCnCli
-        | AdapterKind::CursorAgent
-        | AdapterKind::KimiCodeCli => CharterDeliveryMode::FirstPayload,
-        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli => CharterDeliveryMode::NativeAppend,
-    };
+    let charter_delivery_mode = charter_delivery_mode_for_adapter(runtime.adapter_kind);
     let frozen_snapshot: String = transaction.query_row(
         "SELECT frozen_snapshot_json FROM message_delivery WHERE id = ?1",
         [&delivery.id],

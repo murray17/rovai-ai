@@ -67,6 +67,7 @@ const ADAPTER_KINDS: readonly AdapterKind[] = [
   'trae-cn-cli',
   'cursor-agent',
   'kimi-code-cli',
+  'grok-build',
   'antigravity-app'
 ]
 

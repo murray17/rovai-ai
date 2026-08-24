@@ -3,9 +3,9 @@ document_type: runtime-research
 runtime: grok-build
 upstream: Grok Build CLI
 authority: research-evidence-only
-status: proposed
-admission: not_qualified
-last_updated: 2026-08-20
+status: validated
+admission: qualified
+last_updated: 2026-08-24
 ---
 
 # Grok Build Runtime 接入研究
@@ -13,7 +13,32 @@ last_updated: 2026-08-20
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
 > xAI 官方文档是主要来源；Multica/Botmux 代码只作为非合同参考，不替代当前 Grok 二进制的真实 Probe。
 
-## 基本结论
+## 2026-08-24 目标版本实机复核
+
+下文保留接入前研究假设；本节记录 `grok 0.2.118 (1e1687c1cf6a) × MiniMax-M3 × macOS arm64` 的后续
+实证，当前产品结论以 v1.28 Version、Contract 与 compatibility register 为准。
+
+- ACP `initialize/authenticate/session/new/prompt/cancel`、动态 catalog 与标准 `session/set_model` 通过；
+  `session/set_config_option` 不存在；
+- BYOK `xai.api_key` 真实通过。产品现直接支持官方 `$GROK_HOME/config.toml` 的 custom-model schema，
+  `$GROK_HOME/.env` 只承载 `env_key` 明确引用的进程密钥；无 BYOK 时保留原生 Home 并选择 advertised
+  `cached_token`。本机没有 Grok login，account-token 端到端仍为 `Unverified`；
+- Fleet LRU 的 warm Host/同 Session 两轮通过；Runtime 广告 load、不广告 resume。独立新进程与完整 Core
+  重启都以 exact `session/load` 完成 HistoryRestore，replay quarantine、恢复后 Tool/Approval/cancel、坏 ID
+  fallback 全部通过；
+- Session `mcpServers` 的确被忽略，但 process `--plugin-dir` 可加载权限收窄的临时 Plugin。产品 smoke 验证
+  `AdditivePerRun / NativeWinsSkip`、两个 native 同名 Server 保留并启动、两个冲突 Assignment skip、第三个
+  不同名 Server 被 MiniMax-M3 调用，以及 Plugin cleanup；
+- `_meta.rules` 在 `session/new` 上是追加型原生 system rules，并随 exact load 保留。开发者已确认
+  [model-context revision 2](../versions/v1.28/model-context-change-grok-native-rules.md)；生产保持完整 Bootstrap
+  bytes 不变并改为 `native_append`，首轮 user payload 不再携带 Bootstrap，且不使用 `systemPromptOverride`；
+- MiniMax `<think>` 可作为普通 `agent_message_chunk` 出现；产品不再做 provider-specific sanitizer，Kimi/Grok
+  均按 generic ACP agent-text 路径原样投影到执行台、final 与 Missing-Send；
+- no-leader live Probe 已取得 `_x.ai/session_notification` 的 structured `auto_compact_completed` 与稳定 event ID；
+  产品 detector 为 `best_effort`，真实强制压缩后的下一轮 Redelivery revision 1 已 accepted。Usage/Cost 语义仍未
+  独立验证并保持 Disabled；macOS x64 与 Windows x64 不从本机证据外推。
+
+## 基本结论（接入前研究基线）
 
 ```text
 Runtime: Grok Build CLI
@@ -283,11 +308,24 @@ Rovai implementation: Disabled
 
 ### Compaction
 
-官方 headless/ACP 文档未给出结构化 compaction lifecycle。Skills、Hook 或文本提示不能代替 Runtime signal。
+接入前，官方公开 headless/ACP 文档没有给出结构化 compaction lifecycle，因此当时不能用 Skill、Hook 或文本
+提示替代 Runtime signal：
 
 ```text
-Runtime evidence: NotObserved
-Rovai detector: Disabled
+接入前 Runtime evidence: NotObserved
+接入前 Rovai detector: Disabled
+```
+
+后续对目标二进制源码与真实 `grok --no-leader agent stdio` 的 debug-arm Probe 找到并验证了 direct live wire：
+无 request ID 的 `_x.ai/session_notification`，`params.sessionId` 为 exact Session ID，
+`params.update.sessionUpdate=auto_compact_completed`，`params._meta.eventId` 为稳定 occurrence identity。产品只
+准入这一完成态与非负 `tokens_after`，拒绝 started/failed/cancelled/replay/nested/unknown；不使用 token、summary
+或模型文本猜测。真实 Core 两轮 smoke 证明 revision 1 在下一次输入中 accepted 并 ACK。
+
+```text
+当前 Runtime evidence: Verified（0.2.118 / macOS arm64）
+当前 Rovai detector: Implemented / best_effort
+当前 Usage/Cost: Unverified / Disabled
 ```
 
 ## 9. Windows 平台边界
@@ -344,7 +382,7 @@ Process cleanup: Windows Job Object
 - 新增 `smoke:grok-runtime`，覆盖 auth、output、Approval、resume、MCP、cleanup。
 - 更新 Runtime Activity、monitoring eligibility、diagnostics、planned shutdown 和 compatibility register。
 
-## 最终决定
+## 接入前决定（已由 2026-08-24 实机复核取代）
 
 ```text
 Qualified capabilities: 无

@@ -15,9 +15,9 @@ use crate::{
 
 pub const BOOTSTRAP_REDELIVERY_ENVELOPE_VERSION: i64 = 2;
 pub const BOOTSTRAP_REDELIVERY_FORMATTER_VERSION: i64 = 2;
-pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v1.27";
+pub const BOOTSTRAP_REDELIVERY_POLICY_RELEASE: &str = "v1.28";
 
-const POLICY_ADAPTERS: [AdapterKind; 8] = [
+const POLICY_ADAPTERS: [AdapterKind; 9] = [
     AdapterKind::CopilotCli,
     AdapterKind::OpencodeCli,
     AdapterKind::KiroCli,
@@ -25,6 +25,7 @@ const POLICY_ADAPTERS: [AdapterKind; 8] = [
     AdapterKind::CodebuddyCli,
     AdapterKind::QwenCode,
     AdapterKind::KimiCodeCli,
+    AdapterKind::GrokBuild,
     AdapterKind::AntigravityApp,
 ];
 
@@ -117,7 +118,8 @@ pub const fn release_default_policy(adapter_kind: AdapterKind) -> CompactionDete
         | AdapterKind::QoderCli
         | AdapterKind::CodebuddyCli
         | AdapterKind::QwenCode
-        | AdapterKind::KimiCodeCli => CompactionDetectorPolicy::BestEffort,
+        | AdapterKind::KimiCodeCli
+        | AdapterKind::GrokBuild => CompactionDetectorPolicy::BestEffort,
         AdapterKind::AntigravityApp
         | AdapterKind::CodexCli
         | AdapterKind::ClaudeCodeCli
@@ -135,6 +137,7 @@ pub const fn detector_policy_environment_key(adapter_kind: AdapterKind) -> &'sta
         AdapterKind::CodebuddyCli => "ROVAI_INTERNAL_CODEBUDDY_COMPACTION_DETECTOR_POLICY",
         AdapterKind::QwenCode => "ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY",
         AdapterKind::KimiCodeCli => "ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY",
+        AdapterKind::GrokBuild => "ROVAI_INTERNAL_GROK_COMPACTION_DETECTOR_POLICY",
         AdapterKind::AntigravityApp => "ROVAI_INTERNAL_ANTIGRAVITY_COMPACTION_DETECTOR_POLICY",
         AdapterKind::CodexCli
         | AdapterKind::ClaudeCodeCli
@@ -894,6 +897,9 @@ fn qualified_admission(
             source_signal == "kimi.acp.compaction.completed_text.v1"
                 && admission_point == "completed"
         }
+        AdapterKind::GrokBuild => {
+            source_signal == "grok.acp.auto_compact_completed.v1" && admission_point == "completed"
+        }
         AdapterKind::CodexCli
         | AdapterKind::ClaudeCodeCli
         | AdapterKind::AntigravityApp
@@ -959,6 +965,10 @@ mod tests {
             CompactionDetectorPolicy::BestEffort
         );
         assert_eq!(
+            release_default_policy(AdapterKind::GrokBuild),
+            CompactionDetectorPolicy::BestEffort
+        );
+        assert_eq!(
             release_default_policy(AdapterKind::CodexCli),
             CompactionDetectorPolicy::Disabled
         );
@@ -1021,6 +1031,16 @@ mod tests {
         assert!(!qualified_admission(
             AdapterKind::KimiCodeCli,
             "kimi.acp.compaction.started_text.v1",
+            "started"
+        ));
+        assert!(qualified_admission(
+            AdapterKind::GrokBuild,
+            "grok.acp.auto_compact_completed.v1",
+            "completed"
+        ));
+        assert!(!qualified_admission(
+            AdapterKind::GrokBuild,
+            "grok.acp.auto_compact_started.v1",
             "started"
         ));
     }

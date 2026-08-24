@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: development-environment
-last_updated: 2026-08-15
+last_updated: 2026-08-24
 ---
 
 # 开发环境与依赖
@@ -79,6 +79,7 @@ ROVAI_QWEN_BIN
 ROVAI_TRAE_CN_BIN
 ROVAI_CURSOR_BIN
 ROVAI_KIMI_BIN
+ROVAI_GROK_BIN
 ```
 
 环境变量只改变对应进程的发现输入，不应写入仓库、截图、诊断导出或用户内容。
@@ -97,6 +98,29 @@ KIMI_MODEL_CAPABILITIES
 
 前四项必填。真实 key 不得写入仓库、fixture、命令行、截图或诊断；
 `KIMI_MODEL_CAPABILITIES=thinking` 只声明 provider 能力，Rovai 不强制关闭 Kimi/MiniMax thinking。
+
+Grok Build 直接使用官方 `$GROK_HOME/config.toml`（未设置时为 `~/.grok/config.toml`）。例如：
+
+```toml
+[models]
+default = "minimax-m3"
+
+[model.minimax-m3]
+model = "MiniMax-M3"
+base_url = "https://api.minimaxi.com/v1"
+env_key = "MINIMAX_API_KEY"
+api_backend = "chat_completions"
+```
+
+Rovai 可从 `$GROK_HOME/.env` 读取该 TOML 明确引用的密钥名：
+
+```text
+MINIMAX_API_KEY=<secret>
+```
+
+Unix `.env` 必须为 `0600` 或更严格；未被 `env_key` / `env_http_headers` 引用的变量不会注入 Grok 子进程。
+Grok 官方 CLI 本身接受进程环境变量但不自动加载 `.env`；直接在终端运行时应先 export/source 对应变量，
+或使用官方 `api_key` 字段。Core 不生成或修改 `config.toml` / `.env`。
 
 ## 安装依赖
 

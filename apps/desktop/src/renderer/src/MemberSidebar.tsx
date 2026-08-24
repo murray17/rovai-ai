@@ -470,6 +470,7 @@ function adapterLabel(kind: AdapterKind): string {
     'trae-cn-cli': 'TRAE CLI',
     'cursor-agent': 'Cursor Agent',
     'kimi-code-cli': 'Kimi Code',
+    'grok-build': 'Grok Build',
     'antigravity-app': 'Antigravity'
   })[kind]
 }

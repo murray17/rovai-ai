@@ -6,7 +6,8 @@ const ACP_ADAPTERS = new Set([
   'codebuddy-cli',
   'qwen-code',
   'trae-cn-cli',
-  'kimi-code-cli'
+  'kimi-code-cli',
+  'grok-build'
 ])
 
 export function validateAcpRecoveryProtocolFixture(fixture) {
@@ -20,8 +21,6 @@ export function validateAcpRecoveryProtocolFixture(fixture) {
   let toolEventCount = 0
   let turnCompleted = false
   let state = { kind: 'empty' }
-  const privateAssistantStream = fixture.adapterKind === 'kimi-code-cli'
-    && fixture.assistantStreamVisibility === 'private'
   for (const event of fixture.events) {
     if (!Number.isInteger(event.sequence) || event.sequence <= previousSequence) {
       throw new Error(`Protocol fixture sequence is not strictly increasing: ${JSON.stringify(event)}`)
@@ -33,9 +32,6 @@ export function validateAcpRecoveryProtocolFixture(fixture) {
       continue
     }
     if (event.kind === 'assistant') {
-      if (privateAssistantStream) {
-        throw new Error('Kimi private assistant chunks entered the public protocol fixture')
-      }
       if (turnCompleted) throw new Error('Assistant chunk arrived after prompt completion')
       const messageId = nonEmptyString(event.messageId)
       const text = typeof event.text === 'string' ? event.text : ''
@@ -59,30 +55,6 @@ export function validateAcpRecoveryProtocolFixture(fixture) {
   if (toolEventCount === 0) throw new Error('ACP protocol fixture did not observe real tool activity')
   if (!turnCompleted) throw new Error('ACP protocol fixture omitted prompt completion')
   const candidate = candidateFromState(state)
-  if (privateAssistantStream) {
-    if (candidate !== null
-        || fixture.publishedFinal !== fixture.expectedFinal
-        || fixture.recovery?.decision !== 'published'
-        || fixture.recovery?.candidateBoundary !== 'acp_end_turn_assistant_suffix'
-        || !nonEmptyString(fixture.recovery?.messageId)) {
-      throw new Error(`Kimi private recovery evidence disagrees with the real final: ${JSON.stringify({
-        expected: fixture.expectedFinal,
-        published: fixture.publishedFinal,
-        candidate,
-        recovery: fixture.recovery
-      })}`)
-    }
-    return {
-      adapterKind: fixture.adapterKind,
-      toolEventCount,
-      assistantChunkCount: 0,
-      identifiedChunkCount: 0,
-      anonymousChunkCount: 0,
-      assistantStreamVisibility: 'private',
-      candidateSource: 'terminal_recovery_record',
-      candidate: fixture.publishedFinal
-    }
-  }
   if (candidate !== fixture.expectedFinal) {
     throw new Error(`ACP protocol candidate disagrees with the real final: ${JSON.stringify({
       expected: fixture.expectedFinal,

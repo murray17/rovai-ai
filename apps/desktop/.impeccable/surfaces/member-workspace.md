@@ -91,9 +91,10 @@ unrelated member edits preserve that Runtime subobject exactly, while the Render
 
 Kimi Code follows the same admission-first rule and is currently qualified on macOS arm64, macOS x64 and
 Windows x64. Its model and `default | plan | auto | yolo` permission selector therefore follow the ordinary
-available Runtime flow when machine readiness also passes. Read-only workspace always projects effective `plan`; provider
-credentials remain private Core configuration and never appear in this surface. Kimi/MiniMax thinking is not
-forcibly disabled; process detail may retain it while final public output excludes raw reasoning tags.
+available Runtime flow when machine readiness also passes. Read-only workspace always projects effective `plan`;
+provider credentials remain private Core configuration and never appear in this surface. Kimi/Grok ACP agent
+text is not provider-cleaned: when an upstream Runtime emits thinking tags as ordinary assistant text, process
+detail and the resulting final candidate retain that text exactly like every other ACP Runtime.
 
 ## Removal
 

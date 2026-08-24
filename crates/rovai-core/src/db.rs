@@ -50,8 +50,12 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.20";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 61;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.22";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 63;
+const V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.21";
+const V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 62;
+const V107_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.20";
+const V107_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 61;
 const V106_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.19";
 const V106_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 60;
 const V104_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.17";
@@ -163,6 +167,8 @@ struct CurrentMigrationState {
     v104: bool,
     v105: bool,
     v106: bool,
+    v107: bool,
+    v108: bool,
 }
 
 impl CurrentMigrationState {
@@ -172,6 +178,89 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108;
+        }
+        if self.v108 {
+            return false;
+        }
+        if contract == V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107;
+        }
+        if self.v107 {
+            return false;
+        }
+        if contract == V107_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V107_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1083,7 +1172,9 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 103),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 104),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 105),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 106)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 106),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 107),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 108)
         "#,
         [],
         |row| {
@@ -1125,6 +1216,8 @@ fn load_current_migration_state(
                 v104: row.get(34)?,
                 v105: row.get(35)?,
                 v106: row.get(36)?,
+                v107: row.get(37)?,
+                v108: row.get(38)?,
             })
         },
     )
@@ -2570,6 +2663,12 @@ impl Database {
             if !self.schema_migration_applied(106)? {
                 self.migrate_kimi_compaction_detector_v106()?;
             }
+            if !self.schema_migration_applied(107)? {
+                self.migrate_grok_runtime_catalog_v107()?;
+            }
+            if !self.schema_migration_applied(108)? {
+                self.migrate_grok_compaction_detector_v108()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2937,6 +3036,12 @@ impl Database {
         }
         if !self.schema_migration_applied(106)? {
             self.migrate_kimi_compaction_detector_v106()?;
+        }
+        if !self.schema_migration_applied(107)? {
+            self.migrate_grok_runtime_catalog_v107()?;
+        }
+        if !self.schema_migration_applied(108)? {
+            self.migrate_grok_compaction_detector_v108()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -14989,6 +15094,283 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_grok_runtime_catalog_v107(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            fn rebuild_closed_set_table(
+                transaction: &Transaction<'_>,
+                table: &str,
+                closed_set: &str,
+                expanded_closed_set: &str,
+            ) -> Result<()> {
+                let create_sql: String = transaction.query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )?;
+                let replacement_name = format!("{table}_v107");
+                if create_sql.contains(expanded_closed_set) {
+                    return Ok(());
+                }
+                let definition = create_sql
+                    .find('(')
+                    .map(|offset| &create_sql[offset..])
+                    .with_context(|| format!("v107 could not read the {table} table definition"))?;
+                let mut replacement_sql = format!("CREATE TABLE {replacement_name} {definition}");
+                let expanded_sql = replacement_sql.replace(closed_set, expanded_closed_set);
+                if expanded_sql == replacement_sql {
+                    anyhow::bail!("v107 could not expand the {table} closed set");
+                }
+                replacement_sql = expanded_sql;
+
+                let dependent_schema = {
+                    let mut statement = transaction.prepare(
+                        r#"
+                        SELECT sql
+                        FROM sqlite_master
+                        WHERE tbl_name = ?1
+                          AND type IN ('index', 'trigger')
+                          AND sql IS NOT NULL
+                        ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                        "#,
+                    )?;
+                    statement
+                        .query_map([table], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+
+                transaction.execute_batch(&replacement_sql)?;
+                transaction.execute_batch(&format!(
+                    "INSERT INTO {replacement_name} SELECT * FROM {table};\n\
+                     DROP TABLE {table};\n\
+                     ALTER TABLE {replacement_name} RENAME TO {table};"
+                ))?;
+                for schema in dependent_schema {
+                    transaction.execute_batch(&schema)?;
+                }
+                Ok(())
+            }
+
+            rebuild_closed_set_table(
+                &transaction,
+                "adapter_installation",
+                "'cursor-agent', 'kimi-code-cli'",
+                "'cursor-agent', 'kimi-code-cli', 'grok-build'",
+            )?;
+            rebuild_closed_set_table(
+                &transaction,
+                "agent_profile",
+                "'cursor-agent', 'kimi-code-cli'",
+                "'cursor-agent', 'kimi-code-cli', 'grok-build'",
+            )?;
+            rebuild_closed_set_table(
+                &transaction,
+                "skill_group_assignment",
+                "'cursor', 'kimi'",
+                "'cursor', 'kimi', 'grok'",
+            )?;
+            rebuild_closed_set_table(
+                &transaction,
+                "skill_projection_observation",
+                "'cursor', 'kimi'",
+                "'cursor', 'kimi', 'grok'",
+            )?;
+
+            transaction.execute_batch(
+                r#"
+                UPDATE skill
+                SET version = version + 1, updated_at = datetime('now')
+                WHERE current_revision_id IS NOT NULL
+                  AND lifecycle_status = 'active'
+                  AND (
+                        (origin = 'official' AND name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 12 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen',
+                                  'trae', 'cursor', 'kimi'
+                              )
+                        )
+                  );
+
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                )
+                SELECT 'grok', skill.id, skill.current_revision_id,
+                       datetime('now'), datetime('now')
+                FROM skill
+                WHERE skill.current_revision_id IS NOT NULL
+                  AND skill.lifecycle_status = 'active'
+                  AND (
+                        (skill.origin = 'official' AND skill.name IN (
+                            'cli-operations', 'memory-stewardship'
+                        ))
+                        OR 12 = (
+                            SELECT COUNT(*)
+                            FROM skill_group_assignment AS assignment
+                            WHERE assignment.skill_id = skill.id
+                              AND assignment.group_key IN (
+                                  'codex', 'opencode', 'copilot', 'claude_compatible',
+                                  'antigravity', 'kiro', 'qoder', 'codebuddy', 'qwen',
+                                  'trae', 'cursor', 'kimi'
+                              )
+                        )
+                  );
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.21', projection_schema_version = 62,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (107, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v107 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
+    fn migrate_grok_compaction_detector_v108(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            fn rebuild_closed_set_table(
+                transaction: &Transaction<'_>,
+                table: &str,
+                closed_set: &str,
+                expanded_closed_set: &str,
+            ) -> Result<()> {
+                let create_sql: String = transaction.query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )?;
+                if create_sql.contains(expanded_closed_set) {
+                    return Ok(());
+                }
+                let definition = create_sql
+                    .find('(')
+                    .map(|offset| &create_sql[offset..])
+                    .with_context(|| format!("v108 could not read the {table} table definition"))?;
+                let replacement_name = format!("{table}_v108");
+                let replacement_sql = format!("CREATE TABLE {replacement_name} {definition}")
+                    .replace(closed_set, expanded_closed_set);
+                if !replacement_sql.contains(expanded_closed_set) {
+                    anyhow::bail!("v108 could not expand the {table} closed set");
+                }
+
+                let dependent_schema = {
+                    let mut statement = transaction.prepare(
+                        r#"
+                        SELECT sql
+                        FROM sqlite_master
+                        WHERE tbl_name = ?1
+                          AND type IN ('index', 'trigger')
+                          AND sql IS NOT NULL
+                        ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                        "#,
+                    )?;
+                    statement
+                        .query_map([table], |row| row.get::<_, String>(0))?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+
+                transaction.execute_batch(&replacement_sql)?;
+                transaction.execute_batch(&format!(
+                    "INSERT INTO {replacement_name} SELECT * FROM {table};\n\
+                     DROP TABLE {table};\n\
+                     ALTER TABLE {replacement_name} RENAME TO {table};"
+                ))?;
+                for schema in dependent_schema {
+                    transaction.execute_batch(&schema)?;
+                }
+                Ok(())
+            }
+
+            rebuild_closed_set_table(
+                &transaction,
+                "bootstrap_redelivery_requirement",
+                "'codebuddy-cli', 'qwen-code', 'kimi-code-cli'",
+                "'codebuddy-cli', 'qwen-code', 'kimi-code-cli', 'grok-build'",
+            )?;
+            rebuild_closed_set_table(
+                &transaction,
+                "compaction_detector_policy",
+                "'qwen-code', 'kimi-code-cli',\n                        'antigravity-app'",
+                "'qwen-code', 'kimi-code-cli', 'grok-build',\n                        'antigravity-app'",
+            )?;
+            let observer_binding_fence: String = transaction.query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'native_session_compaction_observer_binding_fence'",
+                [],
+                |row| row.get(0),
+            )?;
+            transaction
+                .execute_batch("DROP TRIGGER native_session_compaction_observer_binding_fence;")?;
+            rebuild_closed_set_table(
+                &transaction,
+                "native_session_compaction_observer_lease",
+                "'codebuddy-cli', 'qwen-code', 'kimi-code-cli'",
+                "'codebuddy-cli', 'qwen-code', 'kimi-code-cli', 'grok-build'",
+            )?;
+            transaction.execute_batch(&observer_binding_fence)?;
+
+            transaction.execute_batch(
+                r#"
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.22', projection_schema_version = 63,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (108, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v108 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -19515,6 +19897,8 @@ fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
             UPDATE rovai_data_contract
             SET contract_version = 'v1.15', projection_schema_version = 56
             WHERE singleton = 1;
+            DELETE FROM schema_migration WHERE version = 108;
+            DELETE FROM schema_migration WHERE version = 107;
             DELETE FROM schema_migration WHERE version = 106;
             DELETE FROM schema_migration WHERE version = 105;
             DELETE FROM schema_migration WHERE version = 104;
@@ -20056,6 +20440,8 @@ mod tests {
             v104: version >= 104,
             v105: version >= 105,
             v106: version >= 106,
+            v107: version >= 107,
+            v108: version >= 108,
         }
     }
 
@@ -20066,6 +20452,18 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                108,
+            ),
+            (
+                "v1.21/schema-62",
+                V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
+                107,
+            ),
+            (
+                "v1.20/schema-61",
+                V107_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V107_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 106,
             ),
             (
@@ -20338,7 +20736,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(106));
+        assert_eq!(state, migration_state_through(108));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -21460,6 +21858,7 @@ mod tests {
                 SkillDeliveryGroupKey::Trae
                     | SkillDeliveryGroupKey::Cursor
                     | SkillDeliveryGroupKey::Kimi
+                    | SkillDeliveryGroupKey::Grok
             )
         }) {
             for (skill_id, revision_id) in [
@@ -21670,7 +22069,9 @@ mod tests {
         for group in SkillDeliveryGroupKey::ALL.into_iter().filter(|group| {
             !matches!(
                 group,
-                SkillDeliveryGroupKey::Cursor | SkillDeliveryGroupKey::Kimi
+                SkillDeliveryGroupKey::Cursor
+                    | SkillDeliveryGroupKey::Kimi
+                    | SkillDeliveryGroupKey::Grok
             )
         }) {
             for (skill_id, revision_id) in [
@@ -21844,10 +22245,12 @@ mod tests {
             )
             .unwrap();
         let now = chrono::Utc::now().to_rfc3339();
-        for group in SkillDeliveryGroupKey::ALL
-            .into_iter()
-            .filter(|group| *group != SkillDeliveryGroupKey::Kimi)
-        {
+        for group in SkillDeliveryGroupKey::ALL.into_iter().filter(|group| {
+            !matches!(
+                *group,
+                SkillDeliveryGroupKey::Kimi | SkillDeliveryGroupKey::Grok
+            )
+        }) {
             for (skill_id, revision_id) in [
                 ("v105-full", "v105-full-revision"),
                 ("v105-required", "v105-required-revision"),
@@ -22048,6 +22451,501 @@ mod tests {
                 .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
                     row.get::<_, i64>(0)
                 },)
+                .unwrap(),
+            0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v107_adds_grok_catalog_and_preserves_runtime_and_skill_rows() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v107-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+
+        fn restore_v106_closed_set(
+            connection: &rusqlite::Connection,
+            table: &str,
+            current: &str,
+            previous: &str,
+        ) {
+            let create_sql: String = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let definition = &create_sql[create_sql.find('(').unwrap()..];
+            let replacement_name = format!("{table}_v106_fixture");
+            let replacement_sql =
+                format!("CREATE TABLE {replacement_name} {definition}").replace(current, previous);
+            let dependent_schema = {
+                let mut statement = connection
+                    .prepare(
+                        r#"
+                        SELECT sql FROM sqlite_master
+                        WHERE tbl_name = ?1
+                          AND type IN ('index', 'trigger')
+                          AND sql IS NOT NULL
+                        ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                        "#,
+                    )
+                    .unwrap();
+                statement
+                    .query_map([table], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            };
+            connection.execute_batch(&replacement_sql).unwrap();
+            connection
+                .execute_batch(&format!(
+                    "INSERT INTO {replacement_name} SELECT * FROM {table};\n\
+                     DROP TABLE {table};\n\
+                     ALTER TABLE {replacement_name} RENAME TO {table};"
+                ))
+                .unwrap();
+            for schema in dependent_schema {
+                connection.execute_batch(&schema).unwrap();
+            }
+        }
+
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        restore_v106_closed_set(
+            database.connection(),
+            "adapter_installation",
+            "'cursor-agent', 'kimi-code-cli', 'grok-build'",
+            "'cursor-agent', 'kimi-code-cli'",
+        );
+        restore_v106_closed_set(
+            database.connection(),
+            "agent_profile",
+            "'cursor-agent', 'kimi-code-cli', 'grok-build'",
+            "'cursor-agent', 'kimi-code-cli'",
+        );
+        restore_v106_closed_set(
+            database.connection(),
+            "skill_group_assignment",
+            "'cursor', 'kimi', 'grok'",
+            "'cursor', 'kimi'",
+        );
+        restore_v106_closed_set(
+            database.connection(),
+            "skill_projection_observation",
+            "'cursor', 'kimi', 'grok'",
+            "'cursor', 'kimi'",
+        );
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = ON;
+                DELETE FROM schema_migration WHERE version = 107;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.20', projection_schema_version = 61
+                WHERE singleton = 1;
+
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'v107-kimi-installation', 'kimi-code-cli', '/tmp/v107-kimi',
+                    'kimi', 'managed_default', 'manual', 'default', 1,
+                    7, 'valid', 3, '2026-08-23T00:00:00Z', '2026-08-23T00:00:00Z'
+                );
+
+                INSERT INTO skill(
+                    id, name, origin, enabled, lifecycle_status,
+                    current_revision_id, version, created_at, updated_at
+                ) VALUES
+                    ('v107-full', 'v107-full', 'imported', 1, 'active', NULL, 4,
+                     datetime('now'), datetime('now')),
+                    ('v107-custom', 'v107-custom', 'imported', 1, 'active', NULL, 5,
+                     datetime('now'), datetime('now')),
+                    ('v107-required', 'cli-operations', 'official', 1, 'active', NULL, 6,
+                     datetime('now'), datetime('now'));
+
+                INSERT INTO skill_revision(
+                    id, skill_id, revision, name, description, source_type,
+                    source_metadata_json, content_digest, risk_summary_json,
+                    file_count, total_bytes, installed_at
+                ) VALUES
+                    ('v107-full-revision', 'v107-full', 1, 'v107-full', 'full',
+                     'local_folder', '{}', 'sha256:v107-full',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v107-custom-revision', 'v107-custom', 1, 'v107-custom', 'custom',
+                     'local_folder', '{}', 'sha256:v107-custom',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now')),
+                    ('v107-required-revision', 'v107-required', 1, 'cli-operations', 'required',
+                     'bundled', '{}', 'sha256:v107-required',
+                     '{"executableFileCount":0,"scriptFileCount":0,"binaryCandidateCount":0,"declaredTools":[]}',
+                     1, 1, datetime('now'));
+
+                UPDATE skill
+                SET current_revision_id = CASE id
+                    WHEN 'v107-full' THEN 'v107-full-revision'
+                    WHEN 'v107-custom' THEN 'v107-custom-revision'
+                    ELSE 'v107-required-revision'
+                END
+                WHERE id IN ('v107-full', 'v107-custom', 'v107-required');
+                "#,
+            )
+            .unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+        for group in SkillDeliveryGroupKey::ALL
+            .into_iter()
+            .filter(|group| *group != SkillDeliveryGroupKey::Grok)
+        {
+            for (skill_id, revision_id) in [
+                ("v107-full", "v107-full-revision"),
+                ("v107-required", "v107-required-revision"),
+            ] {
+                database
+                    .connection()
+                    .execute(
+                        r#"
+                        INSERT INTO skill_group_assignment(
+                            group_key, skill_id, revision_id, created_at, updated_at
+                        ) VALUES (?1, ?2, ?3, ?4, ?4)
+                        "#,
+                        params![group.as_str(), skill_id, revision_id, now],
+                    )
+                    .unwrap();
+            }
+        }
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO skill_group_assignment(
+                    group_key, skill_id, revision_id, created_at, updated_at
+                ) VALUES (
+                    'codex', 'v107-custom', 'v107-custom-revision',
+                    datetime('now'), datetime('now')
+                );
+                INSERT INTO skill_projection_observation(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at
+                ) VALUES (
+                    '/tmp/v107-root', 'kimi', 'v107-full', 'v107-full-revision',
+                    '/tmp/v107-root/.kimi-code/skills/v107-full', 'kimi', 0,
+                    'ready', NULL, '2026-08-23T00:00:00Z'
+                );
+                "#,
+            )
+            .unwrap();
+
+        database.migrate_grok_runtime_catalog_v107().unwrap();
+
+        let migrated: (i64, i64, i64, i64, i64, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT COUNT(*) FROM skill_group_assignment WHERE skill_id = 'v107-full'),
+                    (SELECT version FROM skill WHERE id = 'v107-full'),
+                    (SELECT COUNT(*) FROM skill_group_assignment WHERE skill_id = 'v107-custom'),
+                    (SELECT version FROM skill WHERE id = 'v107-custom'),
+                    (SELECT COUNT(*) FROM skill_group_assignment WHERE skill_id = 'v107-required'),
+                    (SELECT version FROM skill WHERE id = 'v107-required'),
+                    (SELECT generation FROM adapter_installation WHERE id = 'v107-kimi-installation'),
+                    (SELECT COUNT(*) FROM skill_projection_observation WHERE execution_root = '/tmp/v107-root')
+                "#,
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+                        row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(migrated, (13, 5, 1, 5, 13, 7, 7, 1));
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO adapter_installation(
+                    id, adapter_kind, executable_path, command_name,
+                    installation_class, source, auth_scope, enabled,
+                    generation, path_state, version, created_at, updated_at
+                ) VALUES (
+                    'v107-grok-installation', 'grok-build', '/tmp/v107-grok',
+                    'grok', 'managed_default', 'manual', 'default', 1,
+                    1, 'valid', 1, datetime('now'), datetime('now')
+                );
+                INSERT INTO skill_projection_observation(
+                    execution_root, group_key, skill_id, revision_id, entry_path,
+                    delivered_via_group_key, duplicate_visible, state,
+                    last_error_code, last_observed_at
+                ) VALUES (
+                    '/tmp/v107-root', 'grok', 'v107-full', 'v107-full-revision',
+                    '/tmp/v107-root/.grok/skills/v107-full', 'grok', 0,
+                    'ready', NULL, datetime('now')
+                );
+                "#,
+            )
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.21".to_string(), 62)
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v108_adds_grok_compaction_closed_sets_and_preserves_observer_state() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v108-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+
+        fn restore_v107_closed_set(
+            connection: &rusqlite::Connection,
+            table: &str,
+            current: &str,
+            previous: &str,
+        ) {
+            let create_sql: String = connection
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let definition = &create_sql[create_sql.find('(').unwrap()..];
+            let replacement_name = format!("{table}_v107_fixture");
+            let replacement_sql =
+                format!("CREATE TABLE {replacement_name} {definition}").replace(current, previous);
+            assert!(replacement_sql.contains(previous));
+            let dependent_schema = {
+                let mut statement = connection
+                    .prepare(
+                        r#"
+                        SELECT sql FROM sqlite_master
+                        WHERE tbl_name = ?1
+                          AND type IN ('index', 'trigger')
+                          AND sql IS NOT NULL
+                        ORDER BY CASE type WHEN 'index' THEN 0 ELSE 1 END, name
+                        "#,
+                    )
+                    .unwrap();
+                statement
+                    .query_map([table], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .unwrap()
+            };
+            connection.execute_batch(&replacement_sql).unwrap();
+            connection
+                .execute_batch(&format!(
+                    "INSERT INTO {replacement_name} SELECT * FROM {table};\n\
+                     DROP TABLE {table};\n\
+                     ALTER TABLE {replacement_name} RENAME TO {table};"
+                ))
+                .unwrap();
+            for schema in dependent_schema {
+                connection.execute_batch(&schema).unwrap();
+            }
+        }
+
+        database
+            .connection()
+            .execute_batch("PRAGMA foreign_keys = OFF;")
+            .unwrap();
+        restore_v107_closed_set(
+            database.connection(),
+            "bootstrap_redelivery_requirement",
+            "'codebuddy-cli', 'qwen-code', 'kimi-code-cli', 'grok-build'",
+            "'codebuddy-cli', 'qwen-code', 'kimi-code-cli'",
+        );
+        restore_v107_closed_set(
+            database.connection(),
+            "compaction_detector_policy",
+            "'qwen-code', 'kimi-code-cli', 'grok-build',\n                        'antigravity-app'",
+            "'qwen-code', 'kimi-code-cli',\n                        'antigravity-app'",
+        );
+        let observer_binding_fence: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'trigger' AND name = 'native_session_compaction_observer_binding_fence'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute_batch("DROP TRIGGER native_session_compaction_observer_binding_fence;")
+            .unwrap();
+        restore_v107_closed_set(
+            database.connection(),
+            "native_session_compaction_observer_lease",
+            "'codebuddy-cli', 'qwen-code', 'kimi-code-cli', 'grok-build'",
+            "'codebuddy-cli', 'qwen-code', 'kimi-code-cli'",
+        );
+        database
+            .connection()
+            .execute_batch(&observer_binding_fence)
+            .unwrap();
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = ON;
+                DELETE FROM schema_migration WHERE version = 108;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.21', projection_schema_version = 62
+                WHERE singleton = 1;
+
+                INSERT INTO camp(
+                    id, title, project_binding_kind, project_path,
+                    last_message_sequence, version, created_at, updated_at
+                ) VALUES (
+                    'camp-v108', 'V108 migration fixture', 'directory', '/tmp/rovai-v108',
+                    0, 1, '2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z'
+                );
+                INSERT INTO conversation(
+                    id, camp_id, agent_id,
+                    summary_through_message_sequence, last_message_sequence,
+                    version, created_at, updated_at
+                ) VALUES (
+                    'conversation-v108', 'camp-v108', 'agent_1',
+                    0, 0, 1, '2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z'
+                );
+                INSERT INTO compaction_detector_policy(
+                    adapter_kind, policy, policy_epoch, release_version, applied_at, updated_at
+                ) VALUES (
+                    'kimi-code-cli', 'best_effort', 7, 'v1.27',
+                    '2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z'
+                );
+                INSERT INTO bootstrap_redelivery_requirement(
+                    conversation_id, native_binding_id, native_binding_generation,
+                    adapter_kind, requested_revision, acknowledged_revision,
+                    created_at, updated_at
+                ) VALUES (
+                    'conversation-v108', 'binding-kimi-v108', 1,
+                    'kimi-code-cli', 3, 2,
+                    '2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z'
+                );
+                INSERT INTO native_session_compaction_observer_lease(
+                    id, conversation_id, adapter_installation_id, adapter_kind,
+                    host_instance_id, relay_process_id, native_session_id,
+                    native_binding_id, native_binding_generation,
+                    detector_policy_epoch, status, created_at, fenced_at,
+                    fence_reason, updated_at
+                ) VALUES (
+                    'lease-kimi-v108', 'conversation-v108', 'installation-kimi-v108',
+                    'kimi-code-cli', 'host-kimi-v108', 'relay-kimi-v108',
+                    'session-kimi-v108', 'binding-kimi-v108', 1, 7, 'active',
+                    '2026-08-24T00:00:00Z', NULL, NULL, '2026-08-24T00:00:00Z'
+                );
+                INSERT INTO native_session_compaction_observation(
+                    id, observer_lease_id, native_binding_id,
+                    native_binding_generation, source_observation_id,
+                    source_signal, admission_point, source_event_digest,
+                    requested_revision, observed_at, committed_at
+                ) VALUES (
+                    'observation-kimi-v108', 'lease-kimi-v108', 'binding-kimi-v108',
+                    1, 'event-kimi-v108', 'kimi.acp.compaction.completed_text.v1',
+                    'completed', 'sha256:event-kimi-v108', 3,
+                    '2026-08-24T00:00:00Z', '2026-08-24T00:00:00Z'
+                );
+                "#,
+            )
+            .unwrap();
+
+        database.migrate_grok_compaction_detector_v108().unwrap();
+
+        let preserved: (String, i64, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT
+                    (SELECT policy FROM compaction_detector_policy WHERE adapter_kind = 'kimi-code-cli'),
+                    (SELECT requested_revision FROM bootstrap_redelivery_requirement WHERE native_binding_id = 'binding-kimi-v108'),
+                    (SELECT detector_policy_epoch FROM native_session_compaction_observer_lease WHERE id = 'lease-kimi-v108'),
+                    (SELECT requested_revision FROM native_session_compaction_observation WHERE id = 'observation-kimi-v108')
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(preserved, ("best_effort".to_string(), 3, 7, 3));
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                INSERT INTO compaction_detector_policy(
+                    adapter_kind, policy, policy_epoch, release_version, applied_at, updated_at
+                ) VALUES (
+                    'grok-build', 'best_effort', 1, 'v1.28',
+                    datetime('now'), datetime('now')
+                );
+                INSERT INTO bootstrap_redelivery_requirement(
+                    conversation_id, native_binding_id, native_binding_generation,
+                    adapter_kind, requested_revision, acknowledged_revision,
+                    created_at, updated_at
+                ) VALUES (
+                    'conversation-v108', 'binding-grok-v108', 2,
+                    'grok-build', 1, 0, datetime('now'), datetime('now')
+                );
+                INSERT INTO native_session_compaction_observer_lease(
+                    id, conversation_id, adapter_installation_id, adapter_kind,
+                    host_instance_id, relay_process_id, native_session_id,
+                    native_binding_id, native_binding_generation,
+                    detector_policy_epoch, status, created_at, fenced_at,
+                    fence_reason, updated_at
+                ) VALUES (
+                    'lease-grok-v108', 'conversation-v108', 'installation-grok-v108',
+                    'grok-build', 'host-grok-v108', 'relay-grok-v108',
+                    'session-grok-v108', 'binding-grok-v108', 2, 1, 'active',
+                    datetime('now'), NULL, NULL, datetime('now')
+                );
+                "#,
+            )
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT contract_version, projection_schema_version FROM rovai_data_contract WHERE singleton = 1",
+                    [],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap(),
+            ("v1.22".to_string(), 63)
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
                 .unwrap(),
             0
         );
@@ -27472,7 +28370,7 @@ mod tests {
             connection,
             &[
                 58, 59, 60, 61, 62, 67, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101,
-                102, 103, 104, 105, 106,
+                102, 103, 104, 105, 106, 107, 108,
             ],
         );
         for table in [

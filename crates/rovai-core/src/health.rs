@@ -1066,6 +1066,7 @@ async fn acp_probe_at(
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
+            | AdapterKind::GrokBuild
             | AdapterKind::CursorAgent
             | AdapterKind::KimiCodeCli
     ) {
@@ -1287,6 +1288,20 @@ async fn run_acp_probe(
         command.env("KIMI_CODE_HOME", probe_root.join("kimi-code-home"));
         crate::acp::configure_kimi_model_environment(&mut command)?;
     }
+    let grok_byok_configured =
+        kind == AdapterKind::GrokBuild && crate::acp::grok_native_byok_configured()?;
+    if kind == AdapterKind::GrokBuild {
+        // A BYOK Probe copies the official Grok configuration layers into a
+        // disposable Home so the native parser and model catalog remain exact
+        // without writing Probe Sessions into the user's Home. Account auth
+        // retains the native Home so an existing cached token remains reachable.
+        if grok_byok_configured {
+            let grok_probe_home = probe_root.join("grok-home");
+            crate::acp::prepare_grok_probe_home(&grok_probe_home)?;
+            command.env("GROK_HOME", grok_probe_home);
+        }
+        crate::acp::configure_grok_native_environment(&mut command)?;
+    }
     if kind == AdapterKind::TraeCnCli {
         command.args(["--permission-mode", "default"]);
     }
@@ -1336,20 +1351,43 @@ async fn run_acp_probe(
             if !include_session {
                 return Ok::<_, anyhow::Error>((initialize, None));
             }
-            let session_request_id = if kind == AdapterKind::CursorAgent {
+            let auth_method = match kind {
+                AdapterKind::CursorAgent => Some(("cursor_login", "Cursor")),
+                AdapterKind::GrokBuild => Some((
+                    select_grok_noninteractive_auth_method(&initialize, grok_byok_configured)?,
+                    "Grok Build",
+                )),
+                _ => None,
+            };
+            let session_request_id = if let Some((method_id, runtime_name)) = auth_method {
+                let advertised = initialize
+                    .get("authMethods")
+                    .and_then(Value::as_array)
+                    .is_some_and(|methods| {
+                        methods.iter().any(|method| {
+                            method.get("id").and_then(Value::as_str) == Some(method_id)
+                        })
+                    });
+                if !advertised {
+                    bail!(
+                        "{runtime_name} ACP did not advertise required authentication method {method_id}"
+                    );
+                }
                 write_json_line(
                     stdin,
                     &json!({
                         "jsonrpc": "2.0",
                         "id": 2,
                         "method": "authenticate",
-                        "params": {"methodId": "cursor_login"}
+                        "params": {"methodId": method_id, "_meta": {"headless": true}}
                     }),
                 )
                 .await?;
                 timeout(Duration::from_secs(15), read_rpc_result(lines, 2))
                     .await
-                    .context("Cursor authentication required or did not complete")??;
+                    .with_context(|| {
+                        format!("{runtime_name} authentication required or did not complete")
+                    })??;
                 3
             } else {
                 2
@@ -1370,7 +1408,7 @@ async fn run_acp_probe(
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .context("ACP session/new did not return sessionId")?;
-            if kind == AdapterKind::KiroCli {
+            if matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
                 let current_model = session
                     .pointer("/models/currentModelId")
                     .and_then(Value::as_str)
@@ -1386,7 +1424,7 @@ async fn run_acp_probe(
                             .and_then(|option| option.get("currentValue"))
                             .and_then(Value::as_str)
                     })
-                    .context("Kiro ACP Session did not report its current model")?;
+                    .context("ACP Session did not report its current model")?;
                 write_json_line(
                     stdin,
                     &json!({
@@ -1430,6 +1468,108 @@ async fn run_acp_probe(
         }
         Err(error) => Err(error),
     }
+}
+
+pub(crate) fn select_grok_noninteractive_auth_method(
+    initialize: &Value,
+    prefer_api_key: bool,
+) -> Result<&'static str> {
+    const SUPPORTED: [&str; 2] = ["cached_token", "xai.api_key"];
+    let advertised = initialize
+        .get("authMethods")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|method| method.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    let default_method = initialize
+        .pointer("/_meta/defaultAuthMethodId")
+        .and_then(Value::as_str);
+    if prefer_api_key && advertised.contains(&"xai.api_key") {
+        return Ok("xai.api_key");
+    }
+    if let Some(default_method) = default_method
+        && advertised.contains(&default_method)
+        && let Some(method) = SUPPORTED.iter().find(|method| **method == default_method)
+    {
+        return Ok(*method);
+    }
+    for method in SUPPORTED {
+        if advertised.contains(&method) {
+            return Ok(method);
+        }
+    }
+    let advertised = if advertised.is_empty() {
+        "none".to_string()
+    } else {
+        advertised.join(", ")
+    };
+    bail!(
+        "Grok Build ACP did not advertise a non-interactive authentication method \
+         (expected cached_token or xai.api_key; advertised: {advertised}). \
+         Run `grok login` or `grok login --device-auth` before retrying account authentication"
+    )
+}
+
+pub(crate) async fn inspect_grok_native_mcp_server_names(
+    executable: &Path,
+    cwd: &Path,
+) -> Result<BTreeSet<String>> {
+    if !runtime_launch_allowed(
+        AdapterKind::GrokBuild,
+        RuntimeLaunchPurpose::DispatchPreflight,
+    ) {
+        bail!("runtime_launch_disallowed:dispatch_preflight");
+    }
+    let mut command = runtime_command(executable);
+    command
+        .args(["--no-auto-update", "inspect", "--json"])
+        .current_dir(cwd);
+    let output = bounded_output(&mut command, Duration::from_secs(15))
+        .await
+        .context("Grok native MCP inspection failed")?;
+    if !output.status.success() {
+        bail!(
+            "Grok native MCP inspection exited unsuccessfully (status={})",
+            output.status
+        );
+    }
+    let document = serde_json::from_slice::<Value>(&output.stdout.bytes)
+        .context("Grok native MCP inspection returned invalid JSON")?;
+    grok_native_mcp_server_names_from_inspect(&document)
+}
+
+fn grok_native_mcp_server_names_from_inspect(document: &Value) -> Result<BTreeSet<String>> {
+    // Reserve every discovered native name, including disabled or untrusted
+    // project definitions. Grok resolves same-name precedence before applying
+    // those gates, so such a definition can still shadow a process plugin and
+    // must not leave a Rovai exposure falsely marked Ready.
+    let servers = document
+        .get("mcpServers")
+        .context("Grok inspect JSON omitted mcpServers")?;
+    let mut names = BTreeSet::new();
+    match servers {
+        Value::Array(servers) => {
+            for server in servers {
+                let name = server
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .filter(|name| !name.trim().is_empty())
+                    .context("Grok inspect JSON contains an MCP server without a name")?;
+                names.insert(name.to_string());
+            }
+        }
+        Value::Object(servers) => {
+            names.extend(
+                servers
+                    .keys()
+                    .filter(|name| !name.trim().is_empty())
+                    .cloned(),
+            );
+        }
+        _ => bail!("Grok inspect JSON mcpServers has an unsupported shape"),
+    }
+    Ok(names)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1788,8 +1928,19 @@ pub fn configure_acp_command(command: &mut Command, kind: AdapterKind, allow_all
         AdapterKind::KimiCodeCli => {
             command.arg("acp");
         }
+        AdapterKind::GrokBuild => {
+            configure_grok_acp_command(command, None);
+        }
         AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp => {}
     }
+}
+
+pub(crate) fn configure_grok_acp_command(command: &mut Command, plugin_dir: Option<&Path>) {
+    command.args(["--no-auto-update", "agent", "--no-leader"]);
+    if let Some(plugin_dir) = plugin_dir {
+        command.arg("--plugin-dir").arg(plugin_dir);
+    }
+    command.arg("stdio");
 }
 
 fn acp_observed_capabilities(
@@ -1814,6 +1965,9 @@ fn acp_observed_capabilities(
     if kind == AdapterKind::CursorAgent && session.is_some() {
         capabilities.push("cursor.authenticate".to_string());
         capabilities.push("session.new".to_string());
+    }
+    if kind == AdapterKind::GrokBuild && session.is_some() {
+        capabilities.push("grok.authenticate".to_string());
     }
     if kind != AdapterKind::KimiCodeCli
         && initialize
@@ -1844,7 +1998,7 @@ fn acp_observed_capabilities(
             .map(str::to_string),
         );
         capabilities.push(
-            if kind == AdapterKind::KiroCli {
+            if matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
                 "session.set_model"
             } else {
                 "session.set_config_option"
@@ -1880,6 +2034,23 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
         .map(str::to_string)
         .collect();
     }
+    if kind == AdapterKind::GrokBuild {
+        return [
+            "acp.initialize",
+            "grok.authenticate",
+            "session.new",
+            "session.prompt",
+            "session.cancel",
+            "session.update",
+            "structured_permission_request",
+            "workspace.additional_roots",
+            "session.set_model",
+            "mcp.additive_per_run",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    }
     let mut capabilities = [
         "acp.initialize",
         "session.new",
@@ -1894,7 +2065,7 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
     .map(str::to_string)
     .collect::<Vec<_>>();
     capabilities.push(
-        if kind == AdapterKind::KiroCli {
+        if matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
             "session.set_model"
         } else {
             "session.set_config_option"
@@ -1918,6 +2089,7 @@ fn additive_acp_mcp_verified(kind: AdapterKind) -> bool {
             | AdapterKind::CodebuddyCli
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
+            | AdapterKind::GrokBuild
     )
 }
 
@@ -2602,6 +2774,7 @@ pub fn find_adapter(kind: AdapterKind) -> Option<PathBuf> {
         ),
         AdapterKind::CursorAgent => (&["ROVAI_CURSOR_BIN"][..], "cursor-agent"),
         AdapterKind::KimiCodeCli => (&["ROVAI_KIMI_BIN"][..], "kimi"),
+        AdapterKind::GrokBuild => (&["ROVAI_GROK_BIN"][..], "grok"),
         AdapterKind::AntigravityApp => (
             &[
                 "ROVAI_ANTIGRAVITY_BIN",
@@ -2713,6 +2886,10 @@ mod tests {
         assert_eq!(arguments(AdapterKind::CursorAgent), ["acp"]);
         assert_eq!(arguments(AdapterKind::KimiCodeCli), ["acp"]);
         assert_eq!(
+            arguments(AdapterKind::GrokBuild),
+            ["--no-auto-update", "agent", "--no-leader", "stdio"]
+        );
+        assert_eq!(
             arguments(AdapterKind::KiroCli),
             ["acp", "--agent", KIRO_ADDITIVE_AGENT_NAME]
         );
@@ -2743,6 +2920,7 @@ mod tests {
             AdapterKind::CodebuddyCli,
             AdapterKind::QwenCode,
             AdapterKind::TraeCnCli,
+            AdapterKind::GrokBuild,
         ] {
             assert!(additive_acp_mcp_verified(kind));
         }
@@ -3095,6 +3273,122 @@ exit 0
             "the inherited ACP descendant must be reaped"
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn grok_auth_prefers_the_advertised_noninteractive_default() {
+        let initialize = json!({
+            "authMethods": [
+                {"id": "xai.api_key"},
+                {"id": "cached_token"},
+                {"id": "grok.com"}
+            ],
+            "_meta": {"defaultAuthMethodId": "cached_token"}
+        });
+        assert_eq!(
+            select_grok_noninteractive_auth_method(&initialize, false).unwrap(),
+            "cached_token"
+        );
+        assert_eq!(
+            select_grok_noninteractive_auth_method(&initialize, true).unwrap(),
+            "xai.api_key"
+        );
+
+        let byok = json!({
+            "authMethods": [{"id": "xai.api_key"}, {"id": "grok.com"}],
+            "_meta": {"defaultAuthMethodId": "xai.api_key"}
+        });
+        assert_eq!(
+            select_grok_noninteractive_auth_method(&byok, true).unwrap(),
+            "xai.api_key"
+        );
+    }
+
+    #[test]
+    fn grok_auth_falls_back_without_starting_an_interactive_login() {
+        let fallback = json!({
+            "authMethods": [{"id": "grok.com"}, {"id": "xai.api_key"}],
+            "_meta": {"defaultAuthMethodId": "grok.com"}
+        });
+        assert_eq!(
+            select_grok_noninteractive_auth_method(&fallback, false).unwrap(),
+            "xai.api_key"
+        );
+
+        let interactive_only = json!({
+            "authMethods": [{"id": "grok.com"}],
+            "_meta": {"defaultAuthMethodId": "grok.com"}
+        });
+        let error = select_grok_noninteractive_auth_method(&interactive_only, false).unwrap_err();
+        assert!(error.to_string().contains("grok login --device-auth"));
+    }
+
+    #[test]
+    fn grok_capabilities_require_the_verified_standard_model_method() {
+        let initialize = json!({
+            "agentCapabilities": {"loadSession": true}
+        });
+        let session = json!({
+            "sessionId": "grok-session",
+            "models": {
+                "currentModelId": "MiniMax-M3",
+                "availableModels": [{"modelId": "MiniMax-M3", "name": "MiniMax-M3"}]
+            }
+        });
+        let observed = acp_observed_capabilities(
+            AdapterKind::GrokBuild,
+            Some("0.2.118"),
+            Some("sha256:grok"),
+            &initialize,
+            Some(&session),
+        );
+        let required = acp_required_capabilities(AdapterKind::GrokBuild);
+        assert!(observed.contains(&"session.set_model".to_string()));
+        assert!(!observed.contains(&"session.set_config_option".to_string()));
+        assert!(required.contains(&"session.set_model".to_string()));
+        assert!(!required.contains(&"session.set_config_option".to_string()));
+    }
+
+    #[test]
+    fn grok_inspect_names_reserve_current_and_legacy_native_definitions() {
+        let current = json!({
+            "projectTrusted": true,
+            "projectRoot": "/workspace",
+            "mcpServers": [
+                {"name": "native-one", "source": {"type": "configToml"}},
+                {"name": "Native-Two", "source": {"type": "mcpJson"}},
+                {"name": "disabled", "disabled": true},
+                {"name": "blocked", "disabledReason": "managed policy"}
+            ]
+        });
+        assert_eq!(
+            grok_native_mcp_server_names_from_inspect(&current).unwrap(),
+            BTreeSet::from([
+                "Native-Two".to_string(),
+                "blocked".to_string(),
+                "disabled".to_string(),
+                "native-one".to_string(),
+            ])
+        );
+
+        let untrusted = json!({
+            "projectTrusted": false,
+            "projectRoot": "/workspace",
+            "mcpServers": [
+                {"name": "project", "source": {"type": "mcpJson", "path": "/workspace/.mcp.json"}},
+                {"name": "user", "source": {"type": "mcpJson", "path": "/home/user/.cursor/mcp.json"}}
+            ]
+        });
+        assert_eq!(
+            grok_native_mcp_server_names_from_inspect(&untrusted).unwrap(),
+            BTreeSet::from(["project".to_string(), "user".to_string()])
+        );
+
+        let legacy = json!({"mcpServers": {"docs": {}, "search": {}}});
+        assert_eq!(
+            grok_native_mcp_server_names_from_inspect(&legacy).unwrap(),
+            BTreeSet::from(["docs".to_string(), "search".to_string()])
+        );
     }
 
     #[test]

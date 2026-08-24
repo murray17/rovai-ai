@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "macos-arm64-grok-build-v1",
+  "capturedAt": "2026-08-24",
+  "platform": "macos-arm64",
+  "hostEnvelope": {
+    "os": "macOS 26.3",
+    "build": "25D125",
+    "architecture": "arm64"
+  },
+  "baseRevision": "c5c745bf19745a2ca20a44f534aedcac843e4725",
+  "qualifiedRuntimeKinds": [
+    "grok-build"
+  ],
+  "runtimeEvidence": {
+    "runtimeVersion": "0.2.118 (1e1687c1cf6a)",
+    "protocol": "acp-v1",
+    "launch": "grok --permission-mode <effective> --no-auto-update agent --no-leader [--plugin-dir <private-root>] stdio",
+    "authenticationMethod": "xai.api_key BYOK verified; cached_token non-interactive product path implemented but not exercised on this host",
+    "provider": "MiniMax OpenAI-compatible endpoint",
+    "model": "MiniMax-M3",
+    "providerConfiguration": "official $GROK_HOME/config.toml custom-model schema; env_key secrets resolved process-locally from a mode-0600 $GROK_HOME/.env",
+    "initialize": "passed",
+    "sessionNew": "passed",
+    "promptEndTurn": "passed",
+    "dynamicModelCatalog": "passed",
+    "explicitModelSelection": "passed through standard session/set_model; session/set_config_option is not advertised",
+    "nativeStatePreserved": true,
+    "nativeSystemRules": "passed: the exact frozen Native Session Bootstrap is appended once through session/new params._meta.rules; systemPromptOverride is absent; same-host reuse and exact-ID session/load do not inject it again",
+    "compactionSignal": "passed for exact live no-request-id _x.ai/session_notification with sessionUpdate=auto_compact_completed, matching Session ID, non-empty eventId, nonnegative tokens_after, and non-replay metadata",
+    "agentTextBoundary": "real Grok and Kimi Product AgentRuns exposed think blocks; Core preserves them through the generic agent.text.delta, terminal final, and Missing-Send paths"
+  },
+  "acceptance": {
+    "status": "qualified",
+    "coreDeepProbe": "passed",
+    "twoTurnAgentRun": "passed with one native session and warm Fleet LRU Host reuse",
+    "nativeBootstrap": "passed deterministic exact-request and live Runtime probes: Grok uses additive _meta.rules for a new Native Session, prompt payloads contain only current Dynamic Context, load retains the original rules, and replacement-new prepares one new binding-scoped copy",
+    "coldContinuation": "passed as exact-ID session/load HistoryRestore across Core and ACP Host restart; the Runtime does not advertise session/resume",
+    "historyReplayIsolation": "passed with zero replay Actions and Approvals, then a new approved Tool and cancellation; invalid ID recorded one continuity-lost event and created one fresh Session",
+    "permissionAndToolPath": "approved write completed and denied write was not created",
+    "cancellation": "passed with no post-cancel file creation",
+    "commandOutputMatrix": "passed for stdout, stderr, mixed, empty, nonzero, and bounded large output",
+    "builtInCli": "passed all 15 operations with continuation, conflict, gather, exact-read, and lease-fencing coverage",
+    "skillDiscovery": "passed through the native .grok/skills projection",
+    "missingSendRecovery": "passed for zero-send publication, accepted-send suppression, and tool-to-final recovery",
+    "genericAgentText": "passed deterministic fixtures plus real two-turn and Missing-Send Product smokes for Kimi/Grok with provider think tags preserved verbatim",
+    "compactionRedelivery": "passed through the Product Core path with the target Grok debug arm used only by acceptance: the completion advanced requested revision once, the current AgentRun remained unpolluted, the next eligible input carried Bootstrap Redelivery revision 1, and accepted ACK advanced acknowledged revision to 1",
+    "externalMcp": "passed as AdditivePerRun/NativeWinsSkip through a private process plugin-dir: two native same-name definitions were preserved and started, two conflicting assignments were skipped, and one distinct assigned stdio server was called by the model",
+    "migrationPreservation": "passed through Migration 108 and Data Contract v1.22/projection schema 63; existing Runtime, member, Skill assignment, Kimi compaction policy/requirement/observer lease/observation, trigger, index, and foreign-key state were preserved while Grok entered the three compaction closed sets"
+  },
+  "notQualified": [
+    {
+      "platform": "macos-x64",
+      "blocker": "no current host evidence"
+    },
+    {
+      "platform": "windows-x64",
+      "blocker": "no current host evidence"
+    }
+  ],
+  "limitations": [
+    "Credentials, raw prompts, machine paths, Session IDs, Run IDs, and API keys are intentionally excluded.",
+    "Usage and cost fields remain disabled until their provider semantics are independently verified.",
+    "Native session/resume is unsupported by Grok 0.2.118; cold continuity is qualified only as exact-ID session/load HistoryRestore.",
+    "Compaction detection is best-effort and fail-closed. The internal debug arm is acceptance-only and is not exposed as a product capability or user setting.",
+    "Grok ignores ACP Session mcpServers; External MCP therefore uses a private process plugin-dir and rotates Host compatibility when the full server set changes.",
+    "Grok itself does not load .env files; Rovai resolves only environment names referenced by the official config and injects them into the Grok child process.",
+    "Provider text emitted as ordinary ACP agent_message_chunk is not classified or cleaned by Rovai and can therefore appear in execution evidence and final publication.",
+    "Account cached-token authentication was not exercised because this host has no existing Grok login; health and AgentRun select only advertised non-interactive methods and never initiate interactive login."
+  ]
+}

@@ -91,6 +91,11 @@ const runtimes = [
     evidenceKind: 'runtime_activity', eventType: 'activity.completed',
     runLevelOnly: true, expectedToolDisclosure: false, payload: { kind: 'runtime' }
   }),
+  runtime('grok', 'grok-build', 'Grok Build', null, {
+    protocol: 'acp-v1', domain: 'runtime', semantic: 'runtime.run',
+    evidenceKind: 'runtime_activity', eventType: 'activity.completed',
+    runLevelOnly: true, expectedToolDisclosure: false, payload: { kind: 'runtime' }
+  }),
   runtime('claude', 'claude-code-cli', 'Claude Code', claudeExpectedCommand, {
     protocol: 'claude-stream-json', domain: 'shell', semantic: 'shell.execute',
     evidenceKind: 'runtime.action', eventType: 'runtime.action', payload: {

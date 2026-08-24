@@ -1,4 +1,5 @@
 import readline from 'node:readline'
+import { writeFileSync } from 'node:fs'
 
 const lines = readline.createInterface({
   input: process.stdin,
@@ -10,11 +11,13 @@ function reply(id, result) {
 }
 
 const source = process.env.ROVAI_MCP_SMOKE_SOURCE ?? 'rovai-mcp-smoke'
+const startupMarker = process.env.ROVAI_MCP_SMOKE_STARTUP_MARKER
 
 lines.on('line', (line) => {
   if (!line.trim()) return
   const message = JSON.parse(line)
   if (message.method === 'initialize') {
+    if (startupMarker) writeFileSync(startupMarker, `${source}\n`, { mode: 0o600 })
     reply(message.id, {
       protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
       capabilities: { tools: {} },

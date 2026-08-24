@@ -40,7 +40,8 @@ const requestedAdapters = adapterSelection === 'all'
       'codebuddy-cli',
       'qwen-code',
       'trae-cn-cli',
-      'kimi-code-cli'
+      'kimi-code-cli',
+      'grok-build'
     ]
   : adapterSelection.split(',').map((value) => value.trim()).filter(Boolean)
 const supportedAdapters = new Set([
@@ -54,7 +55,8 @@ const supportedAdapters = new Set([
   'codebuddy-cli',
   'qwen-code',
   'trae-cn-cli',
-  'kimi-code-cli'
+  'kimi-code-cli',
+  'grok-build'
 ])
 const allDeliveryGroups = [
   'antigravity',
@@ -63,6 +65,7 @@ const allDeliveryGroups = [
   'codex',
   'copilot',
   'cursor',
+  'grok',
   'kimi',
   'kiro',
   'opencode',
@@ -477,8 +480,8 @@ async function runNativeDiscovery(request, workspace, adapterKind, marker) {
   const output = agentMessages
     .map((message) => message.body.trim())
     .join('\n')
-  if (!containsExpectedPrivateMarker(output, marker)) {
-    throw new Error(`${adapterKind} did not return the private Skill marker exactly once: ${JSON.stringify({ marker, output, lastState })}`)
+  if (!containsOnlyExpectedPrivateMarker(output, marker)) {
+    throw new Error(`${adapterKind} did not return only the expected private Skill marker: ${JSON.stringify({ marker, output, lastState })}`)
   }
   const taskHelpIndex = output.indexOf('rovai task create --help')
   const sendHelpIndex = output.indexOf('rovai send --help')
@@ -617,6 +620,7 @@ function groupRoot(groupKey) {
   if (groupKey === 'qwen') return '.qwen/skills'
   if (groupKey === 'trae') return '.trae/skills'
   if (groupKey === 'kimi') return '.kimi-code/skills'
+  if (groupKey === 'grok') return '.grok/skills'
   throw new Error(`Unknown Skill delivery group: ${groupKey}`)
 }
 
@@ -632,6 +636,7 @@ function deliveryGroup(adapterKind) {
   if (adapterKind === 'qwen-code') return 'qwen'
   if (adapterKind === 'trae-cn-cli') return 'trae'
   if (adapterKind === 'kimi-code-cli') return 'kimi'
+  if (adapterKind === 'grok-build') return 'grok'
   throw new Error(`Unknown Skill smoke Adapter: ${adapterKind}`)
 }
 
@@ -639,14 +644,17 @@ function markerFor(adapterKind) {
   return `ROVAI_NATIVE_SKILL_${adapterKind.replaceAll('-', '_').toUpperCase()}_${crypto.randomUUID().slice(0, 8).toUpperCase()}`
 }
 
-function containsExpectedPrivateMarker(output, marker) {
+function containsOnlyExpectedPrivateMarker(output, marker) {
+  // Generic ACP text deliberately preserves every agent_message_chunk. A Runtime may
+  // repeat the marker while reasoning and in its final answer; discovery is proven by
+  // the private nonce's presence, while any different private marker still fails.
   const normalized = output.trim()
   const privateNonce = marker.split('_').at(-1)
   const observedMarkers = normalized.match(/ROVAI_NATIVE_SKILL_[A-Z0-9_]+/g) ?? []
   const nonceMatches = normalized.match(new RegExp(`\\b${privateNonce}\\b`, 'g')) ?? []
-  return observedMarkers.length === 1
-    ? observedMarkers[0] === marker
-    : observedMarkers.length === 0 && nonceMatches.length === 1
+  return observedMarkers.length > 0
+    ? observedMarkers.every((observed) => observed === marker)
+    : nonceMatches.length > 0
 }
 
 function onlyCandidate(inspection) {

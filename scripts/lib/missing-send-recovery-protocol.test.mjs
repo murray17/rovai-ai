@@ -19,42 +19,29 @@ test('ACP recovery fixture validates tool then identified final chunks', () => {
   assert.equal(result.identifiedChunkCount, 3)
 })
 
-test('Kimi recovery fixture binds a private assistant stream to terminal recovery evidence', () => {
-  const result = validateAcpRecoveryProtocolFixture({
-    adapterKind: 'kimi-code-cli',
-    expectedFinal: 'FINAL',
-    assistantStreamVisibility: 'private',
-    publishedFinal: 'FINAL',
-    recovery: {
-      decision: 'published',
-      candidateBoundary: 'acp_end_turn_assistant_suffix',
-      messageId: 'message-1'
-    },
-    events: [
-      { sequence: 1, kind: 'tool' },
-      { sequence: 2, kind: 'turn_completed', stopReason: 'end_turn' }
-    ]
+for (const adapterKind of ['kimi-code-cli', 'grok-build']) {
+  test(`${adapterKind} recovery uses generic ACP assistant text without MiniMax cleanup`, () => {
+    const expectedFinal = '<think>provider reasoning</think>\nPUBLIC'
+    const result = validateAcpRecoveryProtocolFixture({
+      adapterKind,
+      expectedFinal,
+      events: [
+        { sequence: 1, kind: 'tool' },
+        {
+          sequence: 2,
+          kind: 'assistant',
+          messageId: 'message-1',
+          messageIdSource: 'update',
+          text: expectedFinal
+        },
+        { sequence: 3, kind: 'turn_completed', stopReason: 'end_turn' }
+      ]
+    })
+    assert.equal(result.assistantStreamVisibility, 'public')
+    assert.equal(result.candidateSource, 'assistant_chunks')
+    assert.equal(result.candidate, expectedFinal)
   })
-  assert.equal(result.assistantStreamVisibility, 'private')
-  assert.equal(result.candidateSource, 'terminal_recovery_record')
-  assert.equal(result.candidate, 'FINAL')
-  assert.throws(() => validateAcpRecoveryProtocolFixture({
-    adapterKind: 'kimi-code-cli',
-    expectedFinal: 'FINAL',
-    assistantStreamVisibility: 'private',
-    publishedFinal: 'FINAL',
-    recovery: {
-      decision: 'published',
-      candidateBoundary: 'acp_end_turn_assistant_suffix',
-      messageId: 'message-1'
-    },
-    events: [
-      { sequence: 1, kind: 'tool' },
-      { sequence: 2, kind: 'assistant', messageId: 'private', text: 'FINAL' },
-      { sequence: 3, kind: 'turn_completed', stopReason: 'end_turn' }
-    ]
-  }), /private assistant chunks/)
-})
+}
 
 test('ACP recovery fixture accepts one anonymous suffix', () => {
   const result = validateAcpRecoveryProtocolFixture({

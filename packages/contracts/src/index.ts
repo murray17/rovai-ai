@@ -32,6 +32,7 @@ export type AdapterKind =
   | 'trae-cn-cli'
   | 'cursor-agent'
   | 'kimi-code-cli'
+  | 'grok-build'
   | 'antigravity-app'
 
 export type RuntimeOptionScope = 'run' | 'session' | 'host'

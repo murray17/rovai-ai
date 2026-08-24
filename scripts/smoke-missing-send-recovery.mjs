@@ -1,4 +1,5 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -28,7 +29,8 @@ const allSpecifications = [
   ['codebuddy-cli', 'CodeBuddy'],
   ['qwen-code', 'Qwen'],
   ['trae-cn-cli', 'TRAE'],
-  ['kimi-code-cli', 'Kimi Code']
+  ['kimi-code-cli', 'Kimi Code'],
+  ['grok-build', 'Grok Build']
 ].map(([adapterKind, label]) => ({
   adapterKind,
   label,
@@ -171,7 +173,7 @@ for (const specification of specifications) {
         core.events,
         specification.adapterKind,
         toolStart.agentRunId,
-        toolFixtureToken,
+        toolFacts.messages[0]?.body,
         toolFacts
       )
       acpProtocol = validateAcpRecoveryProtocolFixture(protocolFixture)
@@ -446,8 +448,10 @@ function assertRecoveryPublication(facts, {
     throw new Error(`${adapterKind} zero-send created ${facts.messages.length} source messages: ${JSON.stringify(facts.messages)}`)
   }
   const [message] = facts.messages
+  const canonicalContent = JSON.stringify([{ kind: 'text', text: message.body }])
+  const messageDigest = `sha256:${createHash('sha256').update(canonicalContent).digest('hex')}`
   if (message.id !== facts.run.finalCampMessageId
-      || message.body !== marker
+      || !message.body.includes(marker)
       || message.authorType !== 'agent'
       || message.authorId !== expectedAuthorId
       || message.sourceAgentRunId !== facts.run.id
@@ -458,14 +462,15 @@ function assertRecoveryPublication(facts, {
       || JSON.stringify(message.addressedAgentIds) !== '[]'
       || JSON.stringify(message.effectiveRecipientIds) !== '[]'
       || JSON.stringify(message.recipientPresentation) !== '{}'
-      || JSON.stringify(message.structuredContent) !== JSON.stringify([{ kind: 'text', text: marker }])) {
+      || JSON.stringify(message.structuredContent) !== JSON.stringify([{ kind: 'text', text: message.body }])) {
     throw new Error(`${adapterKind} recovery message shape is invalid: ${JSON.stringify({ facts, marker })}`)
   }
   const recovery = facts.terminalEvent?.missingSendRecovery
   if (recovery?.decision !== 'published'
       || recovery.acceptedSendDetected !== false
       || recovery.candidateBoundary !== expectedBoundary
-      || recovery.messageId !== message.id) {
+      || recovery.messageId !== message.id
+      || recovery.candidateDigest !== messageDigest) {
     throw new Error(`${adapterKind} recovery decision is invalid: ${JSON.stringify(recovery)}`)
   }
 }
@@ -530,7 +535,7 @@ function buildAcpProtocolFixture(events, adapterKind, agentRunId, expectedFinal,
     adapterKind,
     agentRunId,
     expectedFinal,
-    assistantStreamVisibility: adapterKind === 'kimi-code-cli' ? 'private' : 'public',
+    assistantStreamVisibility: 'public',
     publishedFinal: facts.messages[0]?.body ?? null,
     recovery: facts.terminalEvent?.missingSendRecovery ?? null,
     events: fixtureEvents

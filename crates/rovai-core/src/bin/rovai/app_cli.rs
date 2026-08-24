@@ -23,7 +23,7 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const POLL_INTERVAL: Duration = Duration::from_millis(300);
 const SETTLEMENT_GRACE: Duration = Duration::from_secs(5);
 const CONTEXT_ENV: &str = "ROVAI_APP_AUTOMATION_CONTEXT";
-const ADAPTER_KINDS: [&str; 12] = [
+const ADAPTER_KINDS: [&str; 13] = [
     "codex-cli",
     "opencode-cli",
     "copilot-cli",
@@ -35,6 +35,7 @@ const ADAPTER_KINDS: [&str; 12] = [
     "trae-cn-cli",
     "cursor-agent",
     "kimi-code-cli",
+    "grok-build",
     "antigravity-app",
 ];
 
@@ -1834,6 +1835,33 @@ mod tests {
         assert_eq!(params["model"]["options"]["effort"], "high");
         assert_eq!(params["permissions"]["adapterKind"], "opencode-cli");
         assert_eq!(params["permissions"]["values"]["permission_mode"], "allow");
+    }
+
+    #[test]
+    fn member_runtime_configuration_admits_grok_build() {
+        let flags = Flags::parse(&[
+            "--agent-id".into(),
+            "agent_13".into(),
+            "--expected-version".into(),
+            "1".into(),
+            "--adapter".into(),
+            "grok-build".into(),
+            "--runtime-default".into(),
+            "--permission-schema-version".into(),
+            "1".into(),
+            "--permissions-json".into(),
+            r#"{"permission_mode":"bypassPermissions"}"#.into(),
+        ])
+        .unwrap();
+        let params = member_runtime_set_params(&flags).unwrap();
+
+        assert_eq!(params["adapterKind"], "grok-build");
+        assert_eq!(params["model"]["mode"], "runtime_default");
+        assert_eq!(params["permissions"]["adapterKind"], "grok-build");
+        assert_eq!(
+            params["permissions"]["values"]["permission_mode"],
+            "bypassPermissions"
+        );
     }
 
     #[test]
