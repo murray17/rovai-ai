@@ -511,20 +511,6 @@ impl AgentRuntimeAdapterRegistry {
                 WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
             );
         }
-        if kind == AdapterKind::KimiCodeCli {
-            if platform == HostPlatformKey::MacosArm64 {
-                return RuntimePlatformAdmission::qualified(
-                    kind,
-                    platform,
-                    MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-                );
-            }
-            return RuntimePlatformAdmission::not_qualified(
-                kind,
-                platform,
-                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
-            );
-        }
         match platform {
             HostPlatformKey::MacosArm64 | HostPlatformKey::MacosX64 => {
                 RuntimePlatformAdmission::qualified(

@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.27
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # v1.27 Kimi Code + MiniMax M3 实施验收计划
@@ -81,9 +81,12 @@ last_updated: 2026-08-23
   十一种 Runtime；范围外 `cursor-agent` 保持 `not_qualified`。
 - [x] 修复 Windows titlebar overlay 的未缩放 `env(titlebar-area-width)` 在 200% zoom 下撑大根 grid；packaged
   planned-shutdown 的 1040×700 Day/Night 与 200% zoom 对话框、文档尺寸、自然退出和恢复矩阵通过。
+- [x] 维护者确认 Kimi x86_64 macOS 平台验收完成并明确批准发布；`kimi-code-cli × macos-x64` 使用更新后的
+  macOS digest-bound evidence revision 晋升为 `qualified`，Core closed matrix、Renderer fixture 与当前文档
+  同步；本提交在 arm64 主机完成确定性回归，不冒充在本提交内重跑 x86_64 真实模型 Smoke。
 
-Kimi 验收不包含 macOS x64、Windows x64 的平台资格，也没有开启 Usage/Cost；Claude Code 的 Windows x64
-资格使用独立 Adapter 证据，不改变 Kimi 或其他 Runtime 的平台状态。Kimi Compaction compatibility
+Kimi 当前在 macOS arm64、macOS x64 与 Windows x64 三个平台均已准入，但仍没有开启 Usage/Cost；Windows x64
+与 macOS x64 使用各自的平台准入来源，不把 arm64 结果静默外推。Kimi Compaction compatibility
 detector 已进入代码和定向 Rust 验证，真实自动/手动完整 Core smoke 仍待执行。warm Host、External MCP 与
 native resume 已进入产品，History Restore 只在 load-only 时作为既有 quarantine fallback。
-十五项 Built-in CLI matrix 已在 macOS arm64 完整通过，该平台已准入；其他平台仍需独立完成同等级证据。
+十五项 Built-in CLI matrix 已在 macOS arm64 完整通过；x86_64 macOS 平台验收由维护者确认完成并批准开放。

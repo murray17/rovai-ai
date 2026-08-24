@@ -1,5 +1,5 @@
 ---
-version: 4
+version: 5
 slug: "settings-workspace"
 primary_target: "apps/desktop/src/renderer/src/SettingsPageHeader.tsx"
 related_targets:
@@ -121,8 +121,8 @@ Windows admissions are all `not_qualified` and the product chain has not passed.
 Runtime settings directory until a later qualified integration explicitly reopens that surface. This is not a
 Renderer-only preview and must not be relabeled “待支持”.
 
-Kimi Code is a Product Runtime Catalog row and is qualified on macOS arm64 after its complete Built-in CLI
-matrix passed. macOS x64 and Windows x64 remain `not_qualified` and expose no machine action. Settings never
+Kimi Code is a Product Runtime Catalog row and is qualified on macOS arm64, macOS x64 and Windows x64.
+Each platform follows the ordinary machine availability flow after platform admission. Settings never
 renders the private provider file, token or base URL, and does not expose a Rovai-owned switch that forces
 Kimi/MiniMax thinking off.
 

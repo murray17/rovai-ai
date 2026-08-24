@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.27
 lifecycle: current
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # v1.27 决策记录
@@ -386,3 +386,48 @@ First-run v1 把 Welcome、Member 与 Runtime 都定义为不可跳过的 mandat
 - **只在 React 内隐藏 onboarding：** 重启会恢复旧持久状态，不能真正解除卡死；
 - **允许 provisioning 中途延后：** 可能留下已经创建的成员或配置，却把完成态声明为无产品身份；
 - **新增独立扫描失败页：** 不改变用户可执行选择，只增加一个与零可用结果同义的产品状态。
+
+<a id="v1-27-d09"></a>
+## V1.27-D09：完成独立平台验收后准入 Kimi macOS x64
+
+### 背景
+
+D03 正确地拒绝把 Kimi macOS arm64 的资格自动外推到 macOS x64；当时没有 x86_64 平台自己的验收结论，
+所以 `kimi-code-cli × macos-x64` 保持 `runtime_platform.qualification_evidence_missing`。随后 Windows x64
+也通过独立 Windows 资格证据准入，进一步确认同一 Adapter 的平台状态必须分别建立，而不是按协议形态或共享
+实现批量推导。
+
+2026-08-24，维护者确认 Kimi Code 的 x86_64 macOS 平台验收已经完成，并明确批准开放。继续保留 x64 特例
+阻断会让 Registry、Settings 与 AgentRun preflight 拒绝一个已经通过发布裁决的平台，并使常青文档继续显示
+过期状态。本提交所在主机是 macOS arm64，因此本提交可以复核确定性准入链路和闭合矩阵，但不能冒充在本次
+提交内重新执行 x86_64 真实模型 Smoke。
+
+### 决定
+
+1. D03 第 2 项、后果和 D04 第 5 项中关于 macOS x64 继续未准入的结论由本决定替代；
+2. `kimi-code-cli × macos-x64` 晋升为 `qualified`，使用更新后的
+   `docs/runtime-compatibility.md` SHA-256 digest 作为 macOS evidence revision；
+3. Kimi macOS x64 进入与 arm64 相同的普通 discovery、检查、Installation、成员配置、诊断和 AgentRun
+   preflight 路径；机器缺少 executable、认证或 Ready evidence 时仍按既有 Machine Availability 合同阻断；
+4. 该晋升不改变 Adapter、provider allowlist、权限默认、用户原生 Home、warm/cold continuation、External MCP、
+   Usage/Cost、Compaction 或 Renderer 信息架构；
+5. Windows x64 的现有 Kimi 资格继续由独立 Windows evidence revision 拥有。Cursor 三个平台仍保持
+   `not_qualified`，本决定不能外推到其他 Adapter 或未来平台。
+
+当前规范见 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)、
+[Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)与
+[Runtime 兼容性清单](../../runtime-compatibility.md)。
+
+### 后果
+
+- Intel Mac 用户可以在普通 Settings 与成员工作区选择、检查并执行 Kimi；
+- macOS Kimi 不再需要架构特例，Registry 的唯一未准入 Runtime 继续是 Cursor；
+- macOS evidence revision 随兼容性清单更新，旧 Snapshot 能通过 revision 漂移诚实失效并重新检查；
+- 当前提交的自动验证只证明准入代码、投影和文档一致，不被描述为新的 x86_64 实机资格运行。
+
+### 被拒绝方案
+
+- **继续阻断 macOS x64：** 与维护者已经完成验收并明确批准发布的当前裁决冲突；
+- **把 arm64 digest 直接套到 x64 而不记录平台晋升：** 会掩盖 D03 的独立取证边界与本次发布来源；
+- **新增第二个 Kimi AdapterKind：** CPU 架构是 HostPlatformKey，不是新的 Runtime 产品身份；
+- **同时修改 Runtime 能力或权限：** 平台准入不提供这些独立语义变化的证据。
