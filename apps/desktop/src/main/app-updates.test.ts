@@ -1,164 +1,200 @@
+import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AppUpdatesService,
-  compareVersions,
-  parseVersion,
-  summarizeReleaseNotes
+  type DesktopAutoUpdater
 } from './app-updates'
 
-const RELEASE_URL = 'https://github.com/murray17/rovai-ai/releases/tag/v1.3.0'
-const NOW = new Date('2026-08-23T08:00:00.000Z')
+const NOW = new Date('2026-08-24T08:00:00.000Z')
 
-function release(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    tag_name: 'v1.3.0',
-    name: 'Rovai AI 1.3.0',
-    body: '## 新功能\n- 增加关于与更新页面\n- 改善启动体验',
-    html_url: RELEASE_URL,
-    published_at: '2026-08-22T09:30:00Z',
-    draft: false,
-    prerelease: false,
-    ...overrides
-  }
+class FakeUpdater extends EventEmitter {
+  autoDownload = false
+  autoInstallOnAppQuit = true
+  autoRunAppAfterInstall = false
+  allowPrerelease = true
+  checkForUpdates = vi.fn<() => Promise<unknown>>(async () => ({}))
+  quitAndInstall = vi.fn<(isSilent?: boolean, isForceRunAfter?: boolean) => void>()
 }
 
-describe('app update version comparison', () => {
-  it('compares normalized stable and prerelease versions', () => {
-    expect(parseVersion('v1.2')).toMatchObject({ normalized: '1.2.0', core: [1, 2, 0] })
-    expect(compareVersions(parseVersion('1.2.1')!, parseVersion('1.2.0')!)).toBeGreaterThan(0)
-    expect(compareVersions(parseVersion('1.2.0')!, parseVersion('1.2.0-rc.2')!)).toBeGreaterThan(0)
-    expect(compareVersions(parseVersion('1.2.0-rc.10')!, parseVersion('1.2.0-rc.2')!)).toBeGreaterThan(0)
-    expect(parseVersion('1.2.3.4')).toBeNull()
+function service(updater: FakeUpdater, isPackaged = true): AppUpdatesService {
+  return new AppUpdatesService({
+    currentVersion: () => '0.0.2',
+    isPackaged: () => isPackaged,
+    updater: updater as unknown as DesktopAutoUpdater,
+    now: () => NOW
   })
-
-  it('turns markdown release notes into a bounded plain-text summary', () => {
-    expect(summarizeReleaseNotes(
-      '## 更新内容\n- [查看详情](https://example.com)\n![截图](https://example.com/a.png)\n```sh\nrm -rf /\n```'
-    )).toBe('更新内容\n查看详情\n截图')
-    expect(summarizeReleaseNotes(' '.repeat(20))).toBeNull()
-  })
-})
+}
 
 describe('AppUpdatesService', () => {
-  it('starts idle and checks the unauthenticated official latest-release endpoint only on demand', async () => {
-    const openExternal = vi.fn(async () => undefined)
-    const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      const headers = new Headers(init?.headers)
-      expect(headers.get('accept')).toBe('application/vnd.github+json')
-      expect(headers.get('x-github-api-version')).toBe('2026-03-10')
-      expect(headers.get('user-agent')).toBe('Rovai-AI/1.2.0')
-      expect(headers.has('authorization')).toBe(false)
-      return new Response(JSON.stringify(release()), {
-        status: 200,
-        headers: { etag: '"release-v1.3.0"' }
-      })
-    })
-    const service = new AppUpdatesService({
-      currentVersion: () => '1.2.0',
-      fetchImpl,
-      openExternal,
-      now: () => NOW
-    })
+  it('keeps checks manual while configuring found updates to download immediately', () => {
+    const updater = new FakeUpdater()
+    const updates = service(updater)
 
-    expect(service.get()).toMatchObject({ status: 'idle', currentVersion: '1.2.0' })
-    expect(fetchImpl).not.toHaveBeenCalled()
-
-    await expect(service.check()).resolves.toEqual({
-      currentVersion: '1.2.0',
-      status: 'update_available',
-      latestVersion: '1.3.0',
-      releaseName: 'Rovai AI 1.3.0',
-      releaseNotesSummary: '新功能\n增加关于与更新页面\n改善启动体验',
-      publishedAt: '2026-08-22T09:30:00.000Z',
-      releasePageAvailable: true,
-      checkedAt: NOW.toISOString(),
-      failureReason: null,
-      retryAt: null
+    expect(updates.get()).toEqual({
+      currentVersion: '0.0.2',
+      status: 'idle',
+      latestVersion: null,
+      checkedAt: null,
+      downloadPercent: null,
+      transferredBytes: null,
+      totalBytes: null,
+      bytesPerSecond: null,
+      failureReason: null
     })
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'https://api.github.com/repos/murray17/rovai-ai/releases/latest',
-      expect.objectContaining({ method: 'GET' })
-    )
-    await expect(service.openReleasePage()).resolves.toBe(true)
-    expect(openExternal).toHaveBeenCalledWith(RELEASE_URL)
+    expect(updater.checkForUpdates).not.toHaveBeenCalled()
+    expect(updater.autoDownload).toBe(true)
+    expect(updater.autoInstallOnAppQuit).toBe(false)
+    expect(updater.autoRunAppAfterInstall).toBe(true)
+    expect(updater.allowPrerelease).toBe(false)
   })
 
-  it('reports up-to-date, no-release, and rate-limit outcomes without retrying', async () => {
-    const upToDate = new AppUpdatesService({
-      currentVersion: () => '1.3.0',
-      fetchImpl: async () => new Response(JSON.stringify(release()), { status: 200 }),
-      openExternal: async () => undefined,
-      now: () => NOW
+  it('publishes checking, download progress, and ready-to-install snapshots', async () => {
+    const updater = new FakeUpdater()
+    const updates = service(updater)
+    const observed: string[] = []
+    updates.onChanged((snapshot) => observed.push(snapshot.status))
+    updater.checkForUpdates.mockImplementation(async () => {
+      updater.emit('checking-for-update')
+      updater.emit('update-available', { version: '0.0.3' })
+      return {}
     })
-    await expect(upToDate.check()).resolves.toMatchObject({ status: 'up_to_date' })
 
-    const noReleaseFetch = vi.fn(async () => new Response('', { status: 404 }))
-    const noRelease = new AppUpdatesService({
-      currentVersion: () => '1.2.0',
-      fetchImpl: noReleaseFetch,
-      openExternal: async () => undefined,
-      now: () => NOW
+    await expect(updates.check()).resolves.toMatchObject({
+      status: 'downloading',
+      latestVersion: '0.0.3',
+      downloadPercent: 0
     })
-    await expect(noRelease.check()).resolves.toMatchObject({
-      status: 'no_release',
-      releasePageAvailable: false
+    updater.emit('download-progress', {
+      percent: 42.34,
+      transferred: 42_340_000,
+      total: 100_000_000,
+      bytesPerSecond: 5_000_000
     })
-    expect(noReleaseFetch).toHaveBeenCalledTimes(1)
+    expect(updates.get()).toMatchObject({
+      status: 'downloading',
+      downloadPercent: 42.3,
+      transferredBytes: 42_340_000,
+      totalBytes: 100_000_000,
+      bytesPerSecond: 5_000_000
+    })
+    updater.emit('update-downloaded', { version: '0.0.3' })
+    expect(updates.get()).toMatchObject({
+      status: 'ready_to_install',
+      latestVersion: '0.0.3',
+      downloadPercent: 100,
+      transferredBytes: 100_000_000
+    })
+    expect(observed).toEqual([
+      'checking',
+      'downloading',
+      'downloading',
+      'ready_to_install'
+    ])
+  })
 
-    const rateLimitedFetch = vi.fn(async () => new Response('', {
-      status: 429,
-      headers: { 'retry-after': '90' }
+  it('reports the current version as up to date without starting a download', async () => {
+    const updater = new FakeUpdater()
+    const updates = service(updater)
+    updater.checkForUpdates.mockImplementation(async () => {
+      updater.emit('update-not-available', { version: '0.0.2' })
+      return {}
+    })
+
+    await expect(updates.check()).resolves.toMatchObject({
+      status: 'up_to_date',
+      latestVersion: '0.0.2',
+      downloadPercent: null
+    })
+  })
+
+  it('keeps unpackaged, network, invalid-release, and download failures recoverable', async () => {
+    const unpackagedUpdater = new FakeUpdater()
+    await expect(service(unpackagedUpdater, false).check()).resolves.toMatchObject({
+      status: 'check_failed',
+      failureReason: 'updater_unavailable'
+    })
+    expect(unpackagedUpdater.checkForUpdates).not.toHaveBeenCalled()
+
+    const networkUpdater = new FakeUpdater()
+    networkUpdater.checkForUpdates.mockRejectedValue(new Error('connect ETIMEDOUT'))
+    await expect(service(networkUpdater).check()).resolves.toMatchObject({
+      status: 'check_failed',
+      failureReason: 'network'
+    })
+
+    const invalidUpdater = new FakeUpdater()
+    invalidUpdater.checkForUpdates.mockImplementation(async () => {
+      invalidUpdater.emit('update-available', { version: '<script>' })
+      return {}
+    })
+    await expect(service(invalidUpdater).check()).resolves.toMatchObject({
+      status: 'check_failed',
+      failureReason: 'invalid_release'
+    })
+
+    const downloadUpdater = new FakeUpdater()
+    downloadUpdater.checkForUpdates.mockImplementation(async () => {
+      downloadUpdater.emit('update-available', { version: '0.0.3' })
+      return {}
+    })
+    const downloading = service(downloadUpdater)
+    await downloading.check()
+    downloadUpdater.emit('error', new Error('download connection reset'))
+    expect(downloading.get()).toMatchObject({
+      status: 'download_failed',
+      failureReason: 'download_failed',
+      latestVersion: '0.0.3'
+    })
+  })
+
+  it('coalesces simultaneous checks', async () => {
+    const updater = new FakeUpdater()
+    let resolveCheck!: (value: unknown) => void
+    updater.checkForUpdates.mockImplementation(() => new Promise((resolve) => {
+      resolveCheck = resolve
     }))
-    const rateLimited = new AppUpdatesService({
-      currentVersion: () => '1.2.0',
-      fetchImpl: rateLimitedFetch,
-      openExternal: async () => undefined,
-      now: () => NOW
-    })
-    await expect(rateLimited.check()).resolves.toMatchObject({
-      status: 'check_failed',
-      failureReason: 'rate_limited',
-      retryAt: '2026-08-23T08:01:30.000Z'
-    })
-    expect(rateLimitedFetch).toHaveBeenCalledTimes(1)
-  })
+    const updates = service(updater)
 
-  it('rejects untrusted release pages and never opens them', async () => {
-    const openExternal = vi.fn(async () => undefined)
-    const service = new AppUpdatesService({
-      currentVersion: () => '1.2.0',
-      fetchImpl: async () => new Response(JSON.stringify(release({
-        html_url: 'https://example.com/murray17/rovai-ai/releases/tag/v1.3.0'
-      })), { status: 200 }),
-      openExternal,
-      now: () => NOW
-    })
-
-    await expect(service.check()).resolves.toMatchObject({
-      status: 'check_failed',
-      failureReason: 'invalid_release',
-      releasePageAvailable: false
-    })
-    await expect(service.openReleasePage()).resolves.toBe(false)
-    expect(openExternal).not.toHaveBeenCalled()
-  })
-
-  it('coalesces simultaneous manual checks into one GitHub request', async () => {
-    let resolveResponse!: (response: Response) => void
-    const pending = new Promise<Response>((resolve) => { resolveResponse = resolve })
-    const fetchImpl = vi.fn(() => pending)
-    const service = new AppUpdatesService({
-      currentVersion: () => '1.2.0',
-      fetchImpl,
-      openExternal: async () => undefined,
-      now: () => NOW
-    })
-
-    const first = service.check()
-    const second = service.check()
-    expect(fetchImpl).toHaveBeenCalledTimes(1)
-    resolveResponse(new Response(JSON.stringify(release()), { status: 200 }))
+    const first = updates.check()
+    const second = updates.check()
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(1)
+    updater.emit('update-not-available', { version: '0.0.2' })
+    resolveCheck({})
     await expect(Promise.all([first, second])).resolves.toHaveLength(2)
-    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    expect(updater.checkForUpdates).toHaveBeenCalledTimes(1)
+  })
+
+  it('only installs a fully downloaded update and keeps installation retryable', async () => {
+    const updater = new FakeUpdater()
+    const updates = service(updater)
+    expect(updates.install()).toBe(false)
+
+    updater.checkForUpdates.mockImplementation(async () => {
+      updater.emit('update-available', { version: '0.0.3' })
+      return {}
+    })
+    await updates.check()
+    updater.emit('update-downloaded', { version: '0.0.3' })
+    expect(updates.install()).toBe(true)
+    expect(updater.quitAndInstall).toHaveBeenCalledWith(true, true)
+    expect(updates.get().status).toBe('installing')
+    updater.emit('error', new Error('native installer failed'))
+    expect(updates.get()).toMatchObject({
+      status: 'install_failed',
+      failureReason: 'install_failed'
+    })
+
+    const failingUpdater = new FakeUpdater()
+    failingUpdater.quitAndInstall.mockImplementation(() => {
+      throw new Error('installer unavailable')
+    })
+    const failing = service(failingUpdater)
+    failingUpdater.emit('update-available', { version: '0.0.3' })
+    failingUpdater.emit('update-downloaded', { version: '0.0.3' })
+    expect(failing.install()).toBe(false)
+    expect(failing.get()).toMatchObject({
+      status: 'install_failed',
+      failureReason: 'install_failed'
+    })
   })
 })

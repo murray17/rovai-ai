@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: desktop-ui-acceptance-infrastructure
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # 桌面 UI 验收与隔离数据
@@ -18,7 +18,7 @@ pnpm package:mac
 后续示例都从仓库根目录执行：
 
 ```bash
-ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai-ai.app"
+ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai AI.app"
 ```
 
 ## 隔离 `userData`
@@ -43,7 +43,7 @@ node scripts/capture-desktop.mjs "$ROVAI_APP" "$FIXTURE_ROOT/capture"
 
 ```bash
 ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
-"$ROVAI_APP/Contents/MacOS/Rovai-ai" \
+"$ROVAI_APP/Contents/MacOS/Rovai AI" \
   --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
 
@@ -101,6 +101,7 @@ pnpm accept:structured-mentions-ui
 pnpm accept:task-card-ui
 pnpm accept:runtime-activity-ui
 pnpm accept:diagnostics-ui
+pnpm accept:app-updates-ui
 pnpm accept:onboarding-ui
 ```
 
@@ -108,7 +109,8 @@ pnpm accept:onboarding-ui
 可恢复 Project 移除、跨重启隐藏、Quick Chat 焦点回退与 Core 数据保留）、结构化提及和
 当前会话完整正文查找（含地图快捷返回、非 Camp 边界、旧消息 anchored 定位与双主题双尺寸）、
 Task 创建操作行、完整表单聚焦、取消恢复与单卡原地更新、十 Runtime Canonical Activity 工具名称与 Agent 级连续执行过程、A2A 消息
-Scheme C 转交 footer，以及诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏的桌面回归。
+Scheme C 转交 footer，诊断中心双尺寸、只读自检、MCP 权限修复复检与 v5 脱敏，以及“关于与更新”
+的真实 packaged 0.0.2 版本、Day/Night、1040×700、200% 等效布局、键盘焦点和无竖线回归。
 当前 Neutral Porcelain + Steel 视觉迁移还必须按当前版本实施计划覆盖 2K Composer、八个设置页、
 队员半身照与 Runtime 入口、记忆 Workbench、New Conversation 和各类 Dialog/Drawer。
 具体 Schema/Migration 编号属于测试 fixture 和版本证据，不是本文的常青要求。
@@ -385,7 +387,7 @@ Skill 短标签显示“GitHub”；主行不存在来源明细，`DonkeyKing01/
 
 ## 从明确来源创建只读隔离副本
 
-需要复现已有 Camp 时，先彻底退出 Rovai-ai。v0.51 起诊断中心和 v5 导出故意不显示绝对
+需要复现已有 Camp 时，先彻底退出 Rovai AI。v0.51 起诊断中心和 v5 导出故意不显示绝对
 SQLite 路径；只使用用户明确提供、Electron 开发日志记录或隔离启动参数已证明的来源路径。然后使用 SQLite
 Backup API 创建副本：
 

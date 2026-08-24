@@ -3,258 +3,216 @@ import type {
   AppUpdateSnapshot
 } from '@contracts'
 
-const GITHUB_API_VERSION = '2026-03-10'
-const LATEST_RELEASE_ENDPOINT = 'https://api.github.com/repos/murray17/rovai-ai/releases/latest'
-const RELEASE_PAGE_PREFIX = '/murray17/rovai-ai/releases/tag/'
-const MAX_RESPONSE_CHARACTERS = 512 * 1024
-const MAX_RELEASE_NAME_CHARACTERS = 160
-const MAX_RELEASE_NOTES_CHARACTERS = 720
-const DEFAULT_TIMEOUT_MS = 12_000
-
-type FetchImplementation = (input: string | URL | Request, init?: RequestInit) => Promise<Response>
-
-interface ParsedVersion {
-  normalized: string
-  core: [number, number, number]
-  prerelease: Array<number | string>
+interface DesktopUpdateInfo {
+  version: string
 }
 
-interface GitHubReleasePayload {
-  tagName: string
-  name: string | null
-  body: string | null
-  htmlUrl: string
-  publishedAt: string | null
-  draft: boolean
-  prerelease: boolean
+interface DesktopDownloadProgress {
+  percent: number
+  transferred: number
+  total: number
+  bytesPerSecond: number
+}
+
+export interface DesktopAutoUpdater {
+  autoDownload: boolean
+  autoInstallOnAppQuit: boolean
+  autoRunAppAfterInstall: boolean
+  allowPrerelease: boolean
+  on(event: 'checking-for-update', listener: () => void): this
+  on(event: 'update-available', listener: (info: DesktopUpdateInfo) => void): this
+  on(event: 'update-not-available', listener: (info: DesktopUpdateInfo) => void): this
+  on(event: 'download-progress', listener: (progress: DesktopDownloadProgress) => void): this
+  on(event: 'update-downloaded', listener: (info: DesktopUpdateInfo) => void): this
+  on(event: 'update-cancelled', listener: (info: DesktopUpdateInfo) => void): this
+  on(event: 'error', listener: (error: Error) => void): this
+  checkForUpdates(): Promise<unknown>
+  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void
 }
 
 interface AppUpdatesServiceOptions {
   currentVersion(): string
-  openExternal(url: string): Promise<void>
-  fetchImpl?: FetchImplementation
+  isPackaged(): boolean
+  updater: DesktopAutoUpdater
   now?: () => Date
-  timeoutMs?: number
 }
+
+type SnapshotListener = (snapshot: AppUpdateSnapshot) => void
 
 export class AppUpdatesService {
   readonly #currentVersion: () => string
-  readonly #openExternal: (url: string) => Promise<void>
-  readonly #fetch: FetchImplementation
+  readonly #isPackaged: () => boolean
+  readonly #updater: DesktopAutoUpdater
   readonly #now: () => Date
-  readonly #timeoutMs: number
+  readonly #listeners = new Set<SnapshotListener>()
   #snapshot: AppUpdateSnapshot
-  #releasePageUrl: string | null = null
-  #etag: string | null = null
-  #inFlight: Promise<AppUpdateSnapshot> | null = null
+  #checkInFlight: Promise<AppUpdateSnapshot> | null = null
 
   constructor(options: AppUpdatesServiceOptions) {
     this.#currentVersion = options.currentVersion
-    this.#openExternal = options.openExternal
-    this.#fetch = options.fetchImpl ?? globalThis.fetch
+    this.#isPackaged = options.isPackaged
+    this.#updater = options.updater
     this.#now = options.now ?? (() => new Date())
-    this.#timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
     this.#snapshot = idleSnapshot(this.#currentVersion())
+
+    this.#updater.autoDownload = true
+    this.#updater.autoInstallOnAppQuit = false
+    this.#updater.autoRunAppAfterInstall = true
+    this.#updater.allowPrerelease = false
+
+    this.#updater.on('checking-for-update', () => {
+      if (this.#snapshot.status === 'checking') return
+      this.#replace({
+        ...idleSnapshot(this.#currentVersion()),
+        status: 'checking',
+        checkedAt: this.#now().toISOString()
+      })
+    })
+    this.#updater.on('update-available', (info) => {
+      const latestVersion = safeVersion(info.version)
+      if (!latestVersion) {
+        this.#acceptFailure('invalid_release')
+        return
+      }
+      this.#replace({
+        ...this.#snapshot,
+        currentVersion: this.#currentVersion(),
+        status: 'downloading',
+        latestVersion,
+        checkedAt: this.#snapshot.checkedAt ?? this.#now().toISOString(),
+        downloadPercent: 0,
+        transferredBytes: 0,
+        totalBytes: null,
+        bytesPerSecond: null,
+        failureReason: null
+      })
+    })
+    this.#updater.on('update-not-available', (info) => {
+      this.#replace({
+        ...idleSnapshot(this.#currentVersion()),
+        status: 'up_to_date',
+        latestVersion: safeVersion(info.version) ?? safeVersion(this.#currentVersion()),
+        checkedAt: this.#snapshot.checkedAt ?? this.#now().toISOString()
+      })
+    })
+    this.#updater.on('download-progress', (progress) => {
+      if (this.#snapshot.status !== 'downloading') return
+      this.#replace({
+        ...this.#snapshot,
+        downloadPercent: boundedPercent(progress.percent),
+        transferredBytes: boundedBytes(progress.transferred),
+        totalBytes: boundedBytes(progress.total),
+        bytesPerSecond: boundedBytes(progress.bytesPerSecond)
+      })
+    })
+    this.#updater.on('update-downloaded', (info) => {
+      const latestVersion = safeVersion(info.version) ?? this.#snapshot.latestVersion
+      if (!latestVersion) {
+        this.#acceptFailure('invalid_release')
+        return
+      }
+      this.#replace({
+        ...this.#snapshot,
+        status: 'ready_to_install',
+        latestVersion,
+        downloadPercent: 100,
+        transferredBytes: this.#snapshot.totalBytes ?? this.#snapshot.transferredBytes,
+        failureReason: null
+      })
+    })
+    this.#updater.on('update-cancelled', () => {
+      this.#acceptFailure('download_failed')
+    })
+    this.#updater.on('error', (error) => {
+      this.#acceptFailure(failureReason(error, this.#snapshot.status))
+    })
   }
 
   get(): AppUpdateSnapshot {
     return structuredClone(this.#snapshot)
   }
 
-  check(): Promise<AppUpdateSnapshot> {
-    if (this.#inFlight) return this.#inFlight.then((snapshot) => structuredClone(snapshot))
-    const request = this.#performCheck().finally(() => {
-      this.#inFlight = null
-    })
-    this.#inFlight = request
-    return request.then((snapshot) => structuredClone(snapshot))
+  onChanged(listener: SnapshotListener): () => void {
+    this.#listeners.add(listener)
+    return () => this.#listeners.delete(listener)
   }
 
-  async openReleasePage(): Promise<boolean> {
-    if (!this.#releasePageUrl) return false
-    await this.#openExternal(this.#releasePageUrl)
-    return true
+  check(): Promise<AppUpdateSnapshot> {
+    if (this.#checkInFlight) {
+      return this.#checkInFlight.then(() => this.get())
+    }
+    if (this.#snapshot.status === 'downloading'
+        || this.#snapshot.status === 'ready_to_install'
+        || this.#snapshot.status === 'installing') {
+      return Promise.resolve(this.get())
+    }
+    const request = this.#performCheck().finally(() => {
+      this.#checkInFlight = null
+    })
+    this.#checkInFlight = request
+    return request.then(() => this.get())
+  }
+
+  install(): boolean {
+    if (this.#snapshot.status !== 'ready_to_install'
+        && this.#snapshot.status !== 'install_failed') return false
+    this.#replace({
+      ...this.#snapshot,
+      status: 'installing',
+      failureReason: null
+    })
+    try {
+      this.#updater.quitAndInstall(true, true)
+      return true
+    } catch {
+      this.#replace({
+        ...this.#snapshot,
+        status: 'install_failed',
+        failureReason: 'install_failed'
+      })
+      return false
+    }
   }
 
   async #performCheck(): Promise<AppUpdateSnapshot> {
-    const currentVersion = this.#currentVersion()
-    const checkedAt = this.#now().toISOString()
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.#timeoutMs)
-    timeout.unref?.()
-
-    let response: Response
+    this.#replace({
+      ...idleSnapshot(this.#currentVersion()),
+      status: 'checking',
+      checkedAt: this.#now().toISOString()
+    })
+    if (!this.#isPackaged()) {
+      this.#acceptFailure('updater_unavailable')
+      return this.get()
+    }
     try {
-      response = await this.#fetch(LATEST_RELEASE_ENDPOINT, {
-        method: 'GET',
-        headers: {
-          Accept: 'application/vnd.github+json',
-          'User-Agent': `Rovai-AI/${safeUserAgentVersion(currentVersion)}`,
-          'X-GitHub-Api-Version': GITHUB_API_VERSION,
-          ...(this.#etag ? { 'If-None-Match': this.#etag } : {})
-        },
-        redirect: 'follow',
-        signal: controller.signal
-      })
-    } catch {
-      return this.#acceptFailure(currentVersion, 'network', checkedAt)
-    } finally {
-      clearTimeout(timeout)
-    }
-
-    if (response.status === 304 && this.#releasePageUrl && hasRelease(this.#snapshot)) {
-      this.#snapshot = { ...this.#snapshot, checkedAt }
-      return this.#snapshot
-    }
-    if (response.status === 404) {
-      this.#releasePageUrl = null
-      this.#etag = null
-      this.#snapshot = {
-        ...idleSnapshot(currentVersion),
-        status: 'no_release',
-        checkedAt
+      const result = await this.#updater.checkForUpdates()
+      if (result === null && this.#snapshot.status === 'checking') {
+        this.#acceptFailure('updater_unavailable')
       }
-      return this.#snapshot
+    } catch (error) {
+      if (!isFailureStatus(this.#snapshot.status)) {
+        this.#acceptFailure(failureReason(error, this.#snapshot.status))
+      }
     }
-    if (response.status === 403 || response.status === 429) {
-      return this.#acceptFailure(
-        currentVersion,
-        'rate_limited',
-        checkedAt,
-        rateLimitRetryAt(response.headers, this.#now())
-      )
-    }
-    if (!response.ok) {
-      return this.#acceptFailure(currentVersion, 'github_unavailable', checkedAt)
-    }
-
-    const declaredLength = Number(response.headers.get('content-length'))
-    if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_CHARACTERS) {
-      return this.#acceptFailure(currentVersion, 'invalid_release', checkedAt)
-    }
-
-    let raw: string
-    try {
-      raw = await response.text()
-    } catch {
-      return this.#acceptFailure(currentVersion, 'network', checkedAt)
-    }
-    if (raw.length > MAX_RESPONSE_CHARACTERS) {
-      return this.#acceptFailure(currentVersion, 'invalid_release', checkedAt)
-    }
-
-    let release: GitHubReleasePayload | null = null
-    try {
-      release = parseGitHubRelease(JSON.parse(raw) as unknown)
-    } catch {
-      release = null
-    }
-    const current = parseVersion(currentVersion)
-    const latest = release ? parseVersion(release.tagName) : null
-    const releasePageUrl = release ? trustedReleasePageUrl(release.htmlUrl) : null
-    if (!release || release.draft || release.prerelease || !current || !latest || !releasePageUrl) {
-      return this.#acceptFailure(currentVersion, 'invalid_release', checkedAt)
-    }
-
-    this.#etag = response.headers.get('etag')
-    this.#releasePageUrl = releasePageUrl
-    this.#snapshot = {
-      currentVersion,
-      status: compareVersions(latest, current) > 0 ? 'update_available' : 'up_to_date',
-      latestVersion: latest.normalized,
-      releaseName: boundedSingleLine(release.name ?? release.tagName, MAX_RELEASE_NAME_CHARACTERS),
-      releaseNotesSummary: summarizeReleaseNotes(release.body),
-      publishedAt: validIsoDate(release.publishedAt),
-      releasePageAvailable: true,
-      checkedAt,
-      failureReason: null,
-      retryAt: null
-    }
-    return this.#snapshot
+    return this.get()
   }
 
-  #acceptFailure(
-    currentVersion: string,
-    reason: AppUpdateFailureReason,
-    checkedAt: string,
-    retryAt: string | null = null
-  ): AppUpdateSnapshot {
-    this.#releasePageUrl = null
-    this.#etag = null
-    this.#snapshot = {
-      ...idleSnapshot(currentVersion),
-      status: 'check_failed',
-      checkedAt,
-      failureReason: reason,
-      retryAt
-    }
-    return this.#snapshot
+  #acceptFailure(reason: AppUpdateFailureReason): void {
+    const downloadFailure = reason === 'download_failed'
+    const installFailure = reason === 'install_failed'
+    this.#replace({
+      ...this.#snapshot,
+      currentVersion: this.#currentVersion(),
+      status: installFailure ? 'install_failed' : downloadFailure ? 'download_failed' : 'check_failed',
+      checkedAt: this.#snapshot.checkedAt ?? this.#now().toISOString(),
+      failureReason: reason
+    })
   }
-}
 
-export function parseVersion(value: string): ParsedVersion | null {
-  const match = value.trim().match(
-    /^v?(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?(?:\.(0|[1-9]\d*))?(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
-  )
-  if (!match) return null
-  const core = [match[1], match[2] ?? '0', match[3] ?? '0'].map(Number)
-  if (core.some((part) => !Number.isSafeInteger(part))) return null
-  const prerelease = match[4]
-    ? match[4].split('.').map((identifier) => /^(0|[1-9]\d*)$/.test(identifier)
-        ? Number(identifier)
-        : identifier)
-    : []
-  return {
-    normalized: `${core.join('.')}${match[4] ? `-${match[4]}` : ''}`,
-    core: core as [number, number, number],
-    prerelease
+  #replace(snapshot: AppUpdateSnapshot): void {
+    this.#snapshot = snapshot
+    for (const listener of this.#listeners) listener(structuredClone(snapshot))
   }
-}
-
-export function compareVersions(left: ParsedVersion, right: ParsedVersion): number {
-  for (let index = 0; index < left.core.length; index += 1) {
-    if (left.core[index] !== right.core[index]) return left.core[index] - right.core[index]
-  }
-  if (left.prerelease.length === 0 || right.prerelease.length === 0) {
-    return left.prerelease.length === right.prerelease.length
-      ? 0
-      : left.prerelease.length === 0 ? 1 : -1
-  }
-  const length = Math.max(left.prerelease.length, right.prerelease.length)
-  for (let index = 0; index < length; index += 1) {
-    const leftPart = left.prerelease[index]
-    const rightPart = right.prerelease[index]
-    if (leftPart === undefined || rightPart === undefined) {
-      return leftPart === rightPart ? 0 : leftPart === undefined ? -1 : 1
-    }
-    if (leftPart === rightPart) continue
-    if (typeof leftPart === 'number' && typeof rightPart === 'number') return leftPart - rightPart
-    if (typeof leftPart === 'number') return -1
-    if (typeof rightPart === 'number') return 1
-    return leftPart.localeCompare(rightPart)
-  }
-  return 0
-}
-
-export function summarizeReleaseNotes(body: string | null): string | null {
-  if (!body?.trim()) return null
-  const lines = body
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/<[^>]{1,240}>/g, ' ')
-    .split(/\r?\n/)
-    .map((line) => line
-      .replace(/^\s{0,3}(?:#{1,6}|>|[-*+] |\d+[.)] )\s*/, '')
-      .replace(/^\s*\[[ xX]\]\s*/, '')
-      .replace(/[*_~`]/g, '')
-      .replace(/\s+/g, ' ')
-      .trim())
-    .filter(Boolean)
-    .slice(0, 6)
-  if (lines.length === 0) return null
-  return boundedMultiline(lines.join('\n'), MAX_RELEASE_NOTES_CHARACTERS)
 }
 
 function idleSnapshot(currentVersion: string): AppUpdateSnapshot {
@@ -262,95 +220,53 @@ function idleSnapshot(currentVersion: string): AppUpdateSnapshot {
     currentVersion,
     status: 'idle',
     latestVersion: null,
-    releaseName: null,
-    releaseNotesSummary: null,
-    publishedAt: null,
-    releasePageAvailable: false,
     checkedAt: null,
-    failureReason: null,
-    retryAt: null
+    downloadPercent: null,
+    transferredBytes: null,
+    totalBytes: null,
+    bytesPerSecond: null,
+    failureReason: null
   }
 }
 
-function hasRelease(snapshot: AppUpdateSnapshot): boolean {
-  return snapshot.releasePageAvailable
-    && snapshot.latestVersion !== null
-    && (snapshot.status === 'up_to_date' || snapshot.status === 'update_available')
+function safeVersion(value: string): string | null {
+  const match = value.trim().match(
+    /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/
+  )
+  if (!match) return null
+  return `${match[1]}.${match[2]}.${match[3]}${match[4] ?? ''}`
 }
 
-function parseGitHubRelease(value: unknown): GitHubReleasePayload | null {
-  if (!isRecord(value)) return null
-  if (typeof value.tag_name !== 'string'
-      || (typeof value.name !== 'string' && value.name !== null)
-      || (typeof value.body !== 'string' && value.body !== null)
-      || typeof value.html_url !== 'string'
-      || (typeof value.published_at !== 'string' && value.published_at !== null)
-      || typeof value.draft !== 'boolean'
-      || typeof value.prerelease !== 'boolean') return null
-  return {
-    tagName: value.tag_name,
-    name: value.name,
-    body: value.body,
-    htmlUrl: value.html_url,
-    publishedAt: value.published_at,
-    draft: value.draft,
-    prerelease: value.prerelease
+function boundedPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(100, Math.max(0, Math.round(value * 10) / 10))
+}
+
+function boundedBytes(value: number): number | null {
+  if (!Number.isFinite(value) || value < 0) return null
+  return Math.round(value)
+}
+
+function failureReason(
+  error: unknown,
+  status: AppUpdateSnapshot['status']
+): AppUpdateFailureReason {
+  if (status === 'downloading') return 'download_failed'
+  if (status === 'installing' || status === 'ready_to_install' || status === 'install_failed') {
+    return 'install_failed'
   }
-}
-
-function trustedReleasePageUrl(value: string): string | null {
-  try {
-    const url = new URL(value)
-    if (url.protocol !== 'https:'
-        || url.hostname.toLowerCase() !== 'github.com'
-        || url.port
-        || url.username
-        || url.password
-        || url.search
-        || url.hash
-        || !url.pathname.startsWith(RELEASE_PAGE_PREFIX)
-        || url.pathname.length <= RELEASE_PAGE_PREFIX.length) return null
-    return url.toString()
-  } catch {
-    return null
+  const message = error instanceof Error
+    ? `${error.name} ${error.message}`.toLowerCase()
+    : String(error).toLowerCase()
+  if (/enet|econn|etimedout|network|timeout|timed out|dns|socket|http status (?:408|429|5\d\d)/.test(message)) {
+    return 'network'
   }
-}
-
-function rateLimitRetryAt(headers: Headers, now: Date): string | null {
-  const retryAfter = headers.get('retry-after')
-  const retryAfterSeconds = retryAfter === null ? Number.NaN : Number(retryAfter)
-  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
-    return new Date(now.getTime() + retryAfterSeconds * 1000).toISOString()
+  if (/latest-mac|ya?ml|sha512|checksum|signature|semver|release|provider|update info/.test(message)) {
+    return 'invalid_release'
   }
-  const resetSeconds = Number(headers.get('x-ratelimit-reset'))
-  if (Number.isFinite(resetSeconds) && resetSeconds > 0) {
-    return new Date(resetSeconds * 1000).toISOString()
-  }
-  return null
+  return 'updater_unavailable'
 }
 
-function validIsoDate(value: string | null): string | null {
-  if (!value) return null
-  const parsed = new Date(value)
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
-}
-
-function boundedSingleLine(value: string, maximum: number): string {
-  const normalized = value.replace(/\s+/g, ' ').trim()
-  return normalized.length <= maximum ? normalized : `${normalized.slice(0, maximum - 1).trimEnd()}…`
-}
-
-function boundedMultiline(value: string, maximum: number): string {
-  if (value.length <= maximum) return value
-  const candidate = value.slice(0, maximum - 1)
-  const boundary = Math.max(candidate.lastIndexOf(' '), candidate.lastIndexOf('\n'))
-  return `${candidate.slice(0, boundary > maximum * 0.72 ? boundary : candidate.length).trimEnd()}…`
-}
-
-function safeUserAgentVersion(value: string): string {
-  return value.replace(/[^0-9A-Za-z.+-]/g, '_').slice(0, 80) || 'unknown'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+function isFailureStatus(status: AppUpdateSnapshot['status']): boolean {
+  return status === 'check_failed' || status === 'download_failed' || status === 'install_failed'
 }

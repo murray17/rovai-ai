@@ -15,7 +15,7 @@ import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 const appPath = resolve(
-  process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app')
+  process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app')
 )
 const dataDir = process.env.ROVAI_MEMBER_AVATAR_ACCEPT_DATA_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-member-avatar-ui-accept-'))

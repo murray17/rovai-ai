@@ -1,14 +1,11 @@
 /*
- * THESIS: One quiet, inspectable release check; no updater dashboard or installation wizard.
- * OWN-WORLD: Rovai's open Porcelain/Graphite settings plane, Steel action, aligned evidence rows.
- * STORY: Read the installed version, check once on demand, review the latest notes, open GitHub.
- * FIRST VIEWPORT: Borderless settings header, version row, then one update row with the sole primary action.
- * FORM: Established settings-surface extension; no concept seed. Key: about-updates-lightweight-release-check.
- * FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review and surface brief.
+ * THESIS: One calm update surface: check once, download immediately, install when ready.
+ * OWN-WORLD: Rovai's open Porcelain/Graphite settings plane, Steel action, aligned status rows.
+ * STORY: Read the installed version, check on demand, keep progress visible, then install and restart.
+ * FIRST VIEWPORT: Borderless settings header, installed version, update action, progress and recovery.
  */
 import { useEffect, useState } from 'react'
 import type {
-  AppUpdateFailureReason,
   AppUpdateSnapshot,
   AppUpdatesApi
 } from '@contracts'
@@ -22,21 +19,27 @@ export function AboutUpdatesSettings({
   const resolvedApi = api ?? (typeof window === 'undefined' ? null : window.rovai.appUpdates)
   const [snapshot, setSnapshot] = useState<AppUpdateSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
-  const [checking, setChecking] = useState(false)
-  const [openingRelease, setOpeningRelease] = useState(false)
   const [loadError, setLoadError] = useState(false)
-  const [openError, setOpenError] = useState(false)
+  const [actionError, setActionError] = useState(false)
 
   useEffect(() => {
     let active = true
+    let receivedChange = false
     if (!resolvedApi) {
       setLoading(false)
       setLoadError(true)
       return () => { active = false }
     }
+    const unsubscribe = resolvedApi.onChanged((next) => {
+      if (!active) return
+      receivedChange = true
+      setSnapshot(next)
+      setLoadError(false)
+      setActionError(false)
+    })
     void resolvedApi.get()
       .then((next) => {
-        if (!active) return
+        if (!active || receivedChange) return
         setSnapshot(next)
         setLoadError(false)
       })
@@ -46,96 +49,74 @@ export function AboutUpdatesSettings({
       .finally(() => {
         if (active) setLoading(false)
       })
-    return () => { active = false }
+    return () => {
+      active = false
+      unsubscribe()
+    }
   }, [resolvedApi])
 
   const checkForUpdates = async (): Promise<void> => {
-    if (!resolvedApi || checking) return
-    setChecking(true)
-    setOpenError(false)
+    if (!resolvedApi || isBusy(snapshot?.status)) return
+    setActionError(false)
     try {
       setSnapshot(await resolvedApi.check())
       setLoadError(false)
     } catch {
-      if (snapshot) {
-        setSnapshot({
-          ...snapshot,
-          status: 'check_failed',
-          checkedAt: new Date().toISOString(),
-          failureReason: 'network',
-          retryAt: null
-        })
-        setLoadError(false)
-      } else {
-        setLoadError(true)
-      }
-    } finally {
-      setChecking(false)
+      setActionError(true)
     }
   }
 
-  const openReleasePage = async (): Promise<void> => {
-    if (!resolvedApi || openingRelease) return
-    setOpeningRelease(true)
-    setOpenError(false)
+  const installUpdate = async (): Promise<void> => {
+    if (!resolvedApi || !snapshot || !canInstall(snapshot.status)) return
+    setActionError(false)
     try {
-      if (!await resolvedApi.openReleasePage()) setOpenError(true)
+      if (!await resolvedApi.install()) setActionError(true)
     } catch {
-      setOpenError(true)
-    } finally {
-      setOpeningRelease(false)
+      setActionError(true)
     }
   }
 
   return (
     <AboutUpdatesSettingsView
       snapshot={snapshot}
-      canCheck={Boolean(resolvedApi)}
+      canUpdate={Boolean(resolvedApi)}
       loading={loading}
-      checking={checking}
-      openingRelease={openingRelease}
       loadError={loadError}
-      openError={openError}
+      actionError={actionError}
       onCheck={() => void checkForUpdates()}
-      onOpenRelease={() => void openReleasePage()}
+      onInstall={() => void installUpdate()}
     />
   )
 }
 
 export function AboutUpdatesSettingsView({
   snapshot,
-  canCheck,
+  canUpdate,
   loading,
-  checking,
-  openingRelease,
   loadError,
-  openError,
+  actionError,
   onCheck,
-  onOpenRelease
+  onInstall
 }: {
   snapshot: AppUpdateSnapshot | null
-  canCheck: boolean
+  canUpdate: boolean
   loading: boolean
-  checking: boolean
-  openingRelease: boolean
   loadError: boolean
-  openError: boolean
+  actionError: boolean
   onCheck(): void
-  onOpenRelease(): void
+  onInstall(): void
 }): React.JSX.Element {
-  const status = updateStatus(snapshot, loading, loadError, checking, canCheck)
-  const releaseVisible = Boolean(
-    snapshot?.releasePageAvailable
-    && snapshot.latestVersion
-    && (snapshot.status === 'up_to_date' || snapshot.status === 'update_available')
-  )
+  const presentation = updatePresentation(snapshot, loading, loadError, actionError, canUpdate)
+  const action = updateAction(snapshot, loading, canUpdate)
+  const downloading = snapshot?.status === 'downloading'
+  const progress = downloading ? snapshot.downloadPercent ?? 0 : 0
 
   return (
     <div className="about-updates-settings">
       <SettingsPageHeader
         eyebrow="Settings / About & Updates"
         title="关于与更新"
-        description="查看当前版本，按需检查官方 GitHub Releases。"
+        description="查看当前版本，检查并安装 Rovai AI 更新。"
       />
 
       <div className="about-updates-body">
@@ -157,63 +138,53 @@ export function AboutUpdatesSettingsView({
 
         <section className="section-block about-updates-section" aria-labelledby="about-update-heading">
           <div className="section-heading">
-            <div><h2 id="about-update-heading">更新</h2><p>手动检查</p></div>
+            <div><h2 id="about-update-heading">更新</h2><p>一键升级</p></div>
           </div>
           <div className="about-update-body">
             <div className="about-update-control">
               <div>
-                <strong>GitHub Releases</strong>
-                <p>仅在你点击时读取一次公开 Release 信息；不会下载或安装内容。</p>
+                <strong>{controlTitle(snapshot)}</strong>
+                <p>{controlDetail(snapshot)}</p>
               </div>
               <button
                 className="primary-button"
                 type="button"
-                disabled={!canCheck || (loading && !snapshot)}
-                aria-disabled={checking || undefined}
-                aria-busy={checking || undefined}
+                disabled={action.disabled}
+                aria-busy={isBusy(snapshot?.status) || undefined}
                 aria-describedby="about-update-status"
-                onClick={onCheck}
+                onClick={action.kind === 'install' ? onInstall : onCheck}
               >
-                {checking && <span className="about-update-spinner" aria-hidden="true" />}
-                {checking ? '正在检查…' : snapshot?.checkedAt ? '重新检查' : '检查更新'}
+                {(snapshot?.status === 'checking' || snapshot?.status === 'installing') && (
+                  <span className="about-update-spinner" aria-hidden="true" />
+                )}
+                {action.label}
               </button>
             </div>
 
+            {downloading && (
+              <div className="about-download-progress" aria-label="更新下载进度">
+                <div className="about-download-progress-heading">
+                  <span>下载进度</span>
+                  <strong>{formatPercent(progress)}</strong>
+                </div>
+                <progress max="100" value={progress} aria-label={`已下载 ${formatPercent(progress)}`} />
+                <div className="about-download-progress-meta">
+                  <span>{formatTransfer(snapshot.transferredBytes, snapshot.totalBytes)}</span>
+                  <span>{formatSpeed(snapshot.bytesPerSecond)}</span>
+                </div>
+              </div>
+            )}
+
             <div
               id="about-update-status"
-              className={`about-update-status is-${status.tone}`}
-              role={status.tone === 'error' ? 'alert' : 'status'}
+              className={`about-update-status is-${presentation.tone}`}
+              role={presentation.tone === 'error' ? 'alert' : 'status'}
               aria-live="polite"
             >
               <span className="about-update-status-mark" aria-hidden="true" />
-              <div><strong>{status.title}</strong><p>{status.detail}</p></div>
+              <div><strong>{presentation.title}</strong><p>{presentation.detail}</p></div>
             </div>
-
-            {releaseVisible && snapshot && (
-              <section className="about-release-notes" aria-labelledby="about-release-notes-heading">
-                <div className="about-release-notes-heading">
-                  <div>
-                    <h3 id="about-release-notes-heading">Release Notes 摘要</h3>
-                    <p>{snapshot.releaseName?.trim() || displayVersion(snapshot.latestVersion ?? '')}</p>
-                  </div>
-                  <span>{releaseMetadata(snapshot)}</span>
-                </div>
-                <p className="about-release-notes-copy">
-                  {snapshot.releaseNotesSummary ?? '此版本没有提供可显示的 Release Notes 摘要。请前往 GitHub 查看完整内容。'}
-                </p>
-                <div className="about-release-notes-action">
-                  <button
-                    className="quiet-button compact"
-                    type="button"
-                    disabled={openingRelease}
-                    onClick={onOpenRelease}
-                  >
-                    {openingRelease ? '正在打开…' : '在 GitHub 查看此 Release'}
-                  </button>
-                  {openError && <span role="alert">无法打开 GitHub Release，请稍后重试。</span>}
-                </div>
-              </section>
-            )}
+            <p className="about-update-source">正式更新来自 Rovai AI 的 GitHub Release。</p>
           </div>
         </section>
       </div>
@@ -221,111 +192,169 @@ export function AboutUpdatesSettingsView({
   )
 }
 
-function updateStatus(
+function updateAction(
+  snapshot: AppUpdateSnapshot | null,
+  loading: boolean,
+  canUpdate: boolean
+): { kind: 'check' | 'install'; label: string; disabled: boolean } {
+  if (loading) return { kind: 'check', label: '读取中…', disabled: true }
+  if (!snapshot) return { kind: 'check', label: '重试', disabled: !canUpdate }
+  switch (snapshot.status) {
+    case 'checking':
+      return { kind: 'check', label: '正在检查…', disabled: true }
+    case 'downloading':
+      return {
+        kind: 'check',
+        label: `正在下载 ${formatPercent(snapshot.downloadPercent ?? 0)}`,
+        disabled: true
+      }
+    case 'ready_to_install':
+      return { kind: 'install', label: '安装并重启', disabled: !canUpdate }
+    case 'installing':
+      return { kind: 'install', label: '正在安装…', disabled: true }
+    case 'install_failed':
+      return { kind: 'install', label: '重试安装', disabled: !canUpdate }
+    case 'up_to_date':
+      return { kind: 'check', label: '重新检查', disabled: !canUpdate }
+    case 'check_failed':
+    case 'download_failed':
+      return { kind: 'check', label: '重试', disabled: !canUpdate }
+    case 'idle':
+      return { kind: 'check', label: '检查更新', disabled: !canUpdate }
+  }
+}
+
+function updatePresentation(
   snapshot: AppUpdateSnapshot | null,
   loading: boolean,
   loadError: boolean,
-  checking: boolean,
-  canCheck: boolean
+  actionError: boolean,
+  canUpdate: boolean
 ): { tone: 'neutral' | 'success' | 'attention' | 'error'; title: string; detail: string } {
   if (loading) return { tone: 'neutral', title: '正在读取当前版本', detail: '更新检查尚未开始。' }
-  if (checking) {
-    return {
-      tone: 'neutral',
-      title: '正在检查官方 Release',
-      detail: '完成后将显示当前版本与最新正式版本的比较结果。'
-    }
-  }
   if (loadError || !snapshot) {
     return {
       tone: 'error',
-      title: '无法读取应用版本',
-      detail: canCheck ? '可直接点击“检查更新”重试。' : '请重新打开此页面后再试。'
+      title: '无法读取更新状态',
+      detail: canUpdate ? '可以直接重试检查。' : '请重新打开此页面后再试。'
     }
+  }
+  if (actionError) {
+    return { tone: 'error', title: '更新操作未完成', detail: '当前版本没有变化，请重试。' }
   }
   switch (snapshot.status) {
     case 'idle':
       return {
         tone: 'neutral',
         title: '尚未检查更新',
-        detail: '点击“检查更新”后才会连接 GitHub。'
+        detail: '点击“检查更新”后会连接正式发布通道。'
+      }
+    case 'checking':
+      return {
+        tone: 'neutral',
+        title: '正在检查更新',
+        detail: '正在确认是否有可用的新版本。'
+      }
+    case 'downloading':
+      return {
+        tone: 'neutral',
+        title: `正在下载 ${displayVersion(snapshot.latestVersion ?? '')}`,
+        detail: '下载期间可以继续使用 Rovai AI。'
+      }
+    case 'ready_to_install':
+      return {
+        tone: 'success',
+        title: `${displayVersion(snapshot.latestVersion ?? '')} 已准备好`,
+        detail: '点击“安装并重启”即可完成更新。'
+      }
+    case 'installing':
+      return {
+        tone: 'neutral',
+        title: '正在安装更新',
+        detail: 'Rovai AI 将关闭并自动重新打开。'
       }
     case 'up_to_date':
       return {
         tone: 'success',
-        title: '当前已是最新正式版本',
-        detail: `已与官方 GitHub Releases 中的 ${displayVersion(snapshot.latestVersion ?? snapshot.currentVersion)} 完成比较。`
-      }
-    case 'update_available':
-      return {
-        tone: 'attention',
-        title: `发现新版本 ${displayVersion(snapshot.latestVersion ?? '')}`,
-        detail: '可先阅读下方摘要，再前往 GitHub Release 页面选择安装包。'
-      }
-    case 'no_release':
-      return {
-        tone: 'neutral',
-        title: '暂未找到正式 Release',
-        detail: '官方 GitHub Releases 目前没有可用于比较的正式版本。'
+        title: '当前已是最新版本',
+        detail: `${displayVersion(snapshot.currentVersion)} 已安装。`
       }
     case 'check_failed':
-      return failureStatus(snapshot.failureReason, snapshot.retryAt)
+      return checkFailure(snapshot.failureReason)
+    case 'download_failed':
+      return {
+        tone: 'error',
+        title: '更新下载中断',
+        detail: '当前版本没有变化，请检查网络后重试。'
+      }
+    case 'install_failed':
+      return {
+        tone: 'error',
+        title: '更新未能开始安装',
+        detail: '已下载的更新仍然保留，可以重试安装。'
+      }
   }
 }
 
-function failureStatus(
-  reason: AppUpdateFailureReason | null,
-  retryAt: string | null
-): { tone: 'error'; title: string; detail: string } {
-  if (reason === 'rate_limited') {
-    return {
-      tone: 'error',
-      title: 'GitHub 请求暂时受限',
-      detail: retryAt
-        ? `未使用 Token 的公开请求已达到限制，请在 ${formatTime(retryAt)} 后重试。`
-        : '未使用 Token 的公开请求已达到限制，请稍后重试。'
-    }
+function checkFailure(reason: AppUpdateSnapshot['failureReason']): {
+  tone: 'error'
+  title: string
+  detail: string
+} {
+  if (reason === 'network') {
+    return { tone: 'error', title: '无法连接更新服务', detail: '请检查网络连接后重试。' }
   }
   if (reason === 'invalid_release') {
-    return {
-      tone: 'error',
-      title: 'Release 信息无法验证',
-      detail: '返回的版本或下载页信息不符合 Rovai 的公开 Release 规则。'
-    }
+    return { tone: 'error', title: '更新信息暂不可用', detail: '正式发布文件尚未准备完整，请稍后重试。' }
   }
-  if (reason === 'github_unavailable') {
-    return { tone: 'error', title: 'GitHub 暂时不可用', detail: '本次检查没有完成，请稍后重试。' }
+  return { tone: 'error', title: '当前无法检查更新', detail: '请稍后重试。' }
+}
+
+function controlTitle(snapshot: AppUpdateSnapshot | null): string {
+  if (!snapshot?.latestVersion) return 'Rovai AI 更新'
+  if (snapshot.status === 'up_to_date') return 'Rovai AI 已是最新版本'
+  return `Rovai AI ${displayVersion(snapshot.latestVersion)}`
+}
+
+function controlDetail(snapshot: AppUpdateSnapshot | null): string {
+  if (snapshot?.status === 'ready_to_install' || snapshot?.status === 'install_failed') {
+    return '更新已下载完成，安装后 Rovai AI 会自动重新打开。'
   }
-  return { tone: 'error', title: '无法连接 GitHub', detail: '请检查网络连接后重试。' }
+  if (snapshot?.status === 'up_to_date') return '需要时可以重新检查正式发布通道。'
+  return '检查到新版本后会立即下载，并持续显示下载进度。'
 }
 
 function displayVersion(value: string): string {
   const trimmed = value.trim().replace(/^v/i, '')
-  return trimmed ? `v${trimmed}` : '版本未知'
+  return trimmed ? `v${trimmed}` : '新版本'
 }
 
-function releaseMetadata(snapshot: AppUpdateSnapshot): string {
-  const version = displayVersion(snapshot.latestVersion ?? '')
-  if (!snapshot.publishedAt) return version
-  try {
-    const date = new Intl.DateTimeFormat('zh-CN', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric'
-    }).format(new Date(snapshot.publishedAt))
-    return `${version} · ${date}`
-  } catch {
-    return version
-  }
+function formatPercent(value: number): string {
+  return `${Math.round(Math.min(100, Math.max(0, value)))}%`
 }
 
-function formatTime(value: string): string {
-  try {
-    return new Intl.DateTimeFormat('zh-CN', {
-      hour: '2-digit',
-      minute: '2-digit'
-    }).format(new Date(value))
-  } catch {
-    return '限制解除'
-  }
+function formatTransfer(transferred: number | null, total: number | null): string {
+  if (transferred === null && total === null) return '正在准备下载…'
+  if (total === null) return `已下载 ${formatBytes(transferred ?? 0)}`
+  return `${formatBytes(transferred ?? 0)} / ${formatBytes(total)}`
+}
+
+function formatSpeed(bytesPerSecond: number | null): string {
+  return bytesPerSecond === null ? '速度计算中' : `${formatBytes(bytesPerSecond)}/s`
+}
+
+function formatBytes(bytes: number): string {
+  const value = Math.max(0, bytes)
+  if (value < 1024) return `${Math.round(value)} B`
+  if (value < 1024 ** 2) return `${(value / 1024).toFixed(1)} KB`
+  if (value < 1024 ** 3) return `${(value / 1024 ** 2).toFixed(1)} MB`
+  return `${(value / 1024 ** 3).toFixed(1)} GB`
+}
+
+function isBusy(status: AppUpdateSnapshot['status'] | undefined): boolean {
+  return status === 'checking' || status === 'downloading' || status === 'installing'
+}
+
+function canInstall(status: AppUpdateSnapshot['status']): boolean {
+  return status === 'ready_to_install' || status === 'install_failed'
 }

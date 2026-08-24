@@ -1791,34 +1791,39 @@ export interface AppearanceApi {
 
 export type AppUpdateStatus =
   | 'idle'
+  | 'checking'
   | 'up_to_date'
-  | 'update_available'
-  | 'no_release'
+  | 'downloading'
+  | 'ready_to_install'
+  | 'installing'
   | 'check_failed'
+  | 'download_failed'
+  | 'install_failed'
 
 export type AppUpdateFailureReason =
   | 'network'
-  | 'rate_limited'
-  | 'github_unavailable'
+  | 'updater_unavailable'
   | 'invalid_release'
+  | 'download_failed'
+  | 'install_failed'
 
 export interface AppUpdateSnapshot {
   currentVersion: string
   status: AppUpdateStatus
   latestVersion: string | null
-  releaseName: string | null
-  releaseNotesSummary: string | null
-  publishedAt: string | null
-  releasePageAvailable: boolean
   checkedAt: string | null
+  downloadPercent: number | null
+  transferredBytes: number | null
+  totalBytes: number | null
+  bytesPerSecond: number | null
   failureReason: AppUpdateFailureReason | null
-  retryAt: string | null
 }
 
 export interface AppUpdatesApi {
   get(): Promise<AppUpdateSnapshot>
   check(): Promise<AppUpdateSnapshot>
-  openReleasePage(): Promise<boolean>
+  install(): Promise<boolean>
+  onChanged(listener: (snapshot: AppUpdateSnapshot) => void): () => void
 }
 
 export type StartupLocationMode = 'last_location' | 'quick_chat'

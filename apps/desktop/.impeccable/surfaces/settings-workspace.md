@@ -162,19 +162,21 @@ Coverage, clean-break and freshness semantics local to that page.
 
 About & Updates belongs to the Support group and extends the same borderless `1040px` settings track,
 two-column section rhythm and quiet raised rows used by reviewed settings pages. The first viewport
-shows the installed Rovai AI version and one primary “检查更新” action. It is an inspect-and-handoff
-surface, not an updater dashboard or installation wizard.
+shows the installed Rovai AI version and one primary action. It is a compact one-click updater surface,
+not an updater dashboard or installation wizard.
 
-Checking is always a user action. One click requests the latest published full release from the public
-official `murray17/rovai-ai` GitHub Releases API, compares its semantic version with the packaged App
-version and presents a bounded plain-text Release Notes summary. When a trusted release page is
-available, a secondary action opens that exact page in the system browser. The Renderer never accepts
-or renders remote HTML and never receives an arbitrary URL.
+Checking is always a user action. One click asks the packaged Main-process updater for the latest stable
+release from the public official `murray17/rovai-ai` GitHub release channel. When a newer release exists,
+download begins immediately and the same bounded row shows determinate percent, transferred/total bytes
+and speed without blocking navigation or ordinary App use. Renderer receives only the typed update
+snapshot; it never receives a remote URL, HTML, local installer path or updater credential.
 
-The page keeps the installed version visible through idle, checking, up-to-date, update-available,
-no-release, network failure, GitHub unavailable, rate-limited and invalid-release states. A failure
-keeps the manual action recoverable and never retries automatically. This first version has no
-background request, timer, GitHub token, automatic download, overwrite, restart or `electron-updater`.
+The page keeps the installed version visible through idle, checking, downloading, up-to-date,
+ready-to-install, installing and recoverable check/download/install failure states. Download completion
+changes the primary action to “安装并重启”; installation is never triggered by checking alone. There is
+no background request, timer, GitHub token, pause queue, release-notes reader or automatic retry. Main
+uses the existing controlled-shutdown boundary before the updater-owned restart; Renderer does not add
+task waiting, hash, signature or shutdown controls to this surface.
 
 ## Inheritance and hard boundaries
 

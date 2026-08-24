@@ -73,8 +73,9 @@ jobs:
         with:
           name: rovai-windows-x64-unsigned-${{ github.sha }}
           path: |
-            dist/Rovai-ai-*-x64.exe
-            dist/Rovai-ai-*-x64.exe.blockmap
+            dist/Rovai-AI-*-x64.exe
+            dist/Rovai-AI-*-x64.exe.blockmap
+            dist/latest.yml
             dist/windows-release-manifest.json
             dist/windows-verification-report.txt
             dist/win-unpacked/**

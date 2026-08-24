@@ -8,9 +8,27 @@ const packageMetadata = JSON.parse(readFileSync(
 
 describe('desktop package metadata', () => {
   it('keeps the visible brand separate from Electron helper bundle identity', () => {
-    expect(packageMetadata.productName).toBe('Rovai-ai')
+    expect(packageMetadata.productName).toBe('Rovai AI')
+    expect(packageMetadata.version).toBe('0.0.2')
+    expect(packageMetadata.build.productName).toBe('Rovai AI')
+    expect(packageMetadata.build.mac.executableName).toBeUndefined()
+    expect(packageMetadata.build.win.executableName).toBe('Rovai-ai')
+    expect(packageMetadata.build.mac.artifactName).toBe('Rovai-AI-${version}-${arch}.${ext}')
+    expect(packageMetadata.build.win.artifactName).toBe('Rovai-AI-${version}-${arch}.${ext}')
     expect(packageMetadata.build.mac.extendInfo.CFBundleDisplayName).toBe('Rovai AI')
     expect(packageMetadata.build.mac.extendInfo.CFBundleName).toBeUndefined()
+  })
+
+  it('packages GitHub update metadata and a macOS zip beside the install DMG', () => {
+    expect(packageMetadata.build.publish).toEqual([{
+      provider: 'github',
+      owner: 'murray17',
+      repo: 'rovai-ai',
+      releaseType: 'release'
+    }])
+    expect(packageMetadata.build.mac.target).toEqual(['dir', 'dmg', 'zip'])
+    expect(packageMetadata.scripts['dist:mac:release:arm64']).toContain('--mac dmg zip')
+    expect(packageMetadata.scripts['dist:mac:release:x64']).toContain('--mac dmg zip')
   })
 
   it('does not build or package a native open-panel prewarmer', () => {

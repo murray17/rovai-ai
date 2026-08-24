@@ -31,6 +31,14 @@
 
 原型示例版本、大小和速度仅用于交互评审，不是正式 Release 事实。
 
+## 对应生产实现
+
+- Renderer：`apps/desktop/src/renderer/src/AboutUpdatesSettings.tsx`；
+- Main 更新状态机：`apps/desktop/src/main/app-updates.ts`；
+- Preload/typed contract：`apps/desktop/src/preload/index.ts` 与 `packages/contracts/src/index.ts`；
+- Release 产物与双架构清单：`package.json`、`.github/workflows/macos-signed-build.yml` 与
+  `scripts/merge-macos-update-info.mjs`。
+
 ## 正式实现的发布前置条件
 
 - 把 macOS 产品展示名与产物名统一为 `Rovai AI`，但保持既有 `ai.rovai.desktop` 应用身份与数据迁移兼容；

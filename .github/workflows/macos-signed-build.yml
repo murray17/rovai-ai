@@ -135,10 +135,10 @@ jobs:
           printf 'CSC_NAME=%s\n' 'Rovai Release Signing' >> "$GITHUB_ENV"
           printf 'CSC_KEYCHAIN=%s\n' "$KEYCHAIN_PATH" >> "$GITHUB_ENV"
 
-      - name: Build signed DMG
+      - name: Build signed release artifacts
         run: ${{ matrix.build-command }}
 
-      - name: Verify signed DMG
+      - name: Verify signed release artifacts
         run: node scripts/verify-macos-release.mjs ${{ matrix.arch }}
 
       - name: Clean sensitive signing material
@@ -183,6 +183,66 @@ jobs:
           name: ${{ matrix.artifact-name }}
           path: |
             dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
             dist/signing-report-*.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    needs: build
+    name: Assemble macOS release bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 26
+
+      - name: Install pnpm
+        run: npm install --global pnpm@11.20.0
+
+      - name: Install manifest dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Download arm64 artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rovai-macos-arm64-signed
+          path: dist/intermediate/arm64
+
+      - name: Download x64 artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: rovai-macos-x64-signed
+          path: dist/intermediate/x64
+
+      - name: Assemble architecture-complete update manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          cp dist/intermediate/arm64/*.dmg dist/release/
+          cp dist/intermediate/arm64/*.zip dist/release/
+          cp dist/intermediate/arm64/signing-report-*.txt dist/release/
+          cp dist/intermediate/x64/*.dmg dist/release/
+          cp dist/intermediate/x64/*.zip dist/release/
+          cp dist/intermediate/x64/signing-report-*.txt dist/release/
+          node scripts/merge-macos-update-info.mjs \
+            dist/release/latest-mac.yml \
+            dist/intermediate/arm64/latest-mac.yml \
+            dist/intermediate/x64/latest-mac.yml
+
+      - name: Upload complete signed macOS release
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rovai-macos-signed
+          path: dist/release/*
           if-no-files-found: error
           retention-days: 14
