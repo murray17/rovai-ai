@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Runtime Catalog Boundaries
@@ -26,7 +26,7 @@ last_updated: 2026-08-23
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含十二种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前包含十三种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
 普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
@@ -238,8 +238,9 @@ Run 直接复用同一 Host/Session。Host 被停止、淘汰或失效后，后�
 Session ID 必须与原 ID 完全相同。v22 创建的 Rovai 私有 Home 不再被新 Host 使用，也不自动迁移或删除；旧
 Binding 不可见时沿用一次 continuity-lost replacement。
 
-Kimi/MiniMax 可能在普通文本中返回 `<think>` 块，因此 Kimi streamed text 只作为私有 observation；只有 terminal
-候选完成推理清洗后才能进入公开输出，未闭合块 fail closed。External MCP 以
+Kimi/MiniMax 可能在普通文本中返回 `<think>` 块。Core 不再以 provider 或标签推断私有推理：Kimi 的标准
+ACP `agent_message_chunk` 与其他 ACP Runtime 一样原样进入 `agent.text.delta`、Runtime Evidence、terminal
+final 与 Missing-Send candidate，只应用通用 whitespace trim。External MCP 以
 `AdditivePerRun / RovaiWins` 经标准 ACP `session/new/resume/load.mcpServers` 投递，不写用户级 Runtime
 配置；完整解析后的 Server 集合进入 Host compatibility，含 AgentRun identity 的 Run-local projection/evidence
 digest 不进入，Server 定义变化仍 fence 旧 Host。stdio、Streamable HTTP、同名整项优先、ContextManifest 和
@@ -258,6 +259,37 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
 [Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
+
+## Grok Build 当前边界
+
+`grok-build` 通过 `grok --permission-mode <effective> --no-auto-update agent --no-leader [--plugin-dir
+<private-root>] stdio` 复用 ACP v1 Host。initialize 成功后，BYOK 优先已广告的 `xai.api_key`；没有 BYOK
+overlay 时只接受 Runtime 广告的安全非交互默认、`cached_token` 或 `xai.api_key`，不回退到浏览器/device
+login。模型目录来自真实 Session，显式模型使用标准 `session/set_model`。
+
+Grok 模型/provider 直接使用官方 `$GROK_HOME/config.toml` 的 `[models]`、`[model.<id>]` 与
+`[model_providers.<id>]`；Core 不再定义或翻译 `GROK_MODEL_*` 私有三字段，也不改写用户配置。权限收窄的
+`$GROK_HOME/.env` 只作为本机密钥环境源：Core 仅解析官方 TOML 的 `env_key` / `env_http_headers` 引用和
+官方全局 API-key 名称，并把对应值注入目标子进程；未引用变量不进入。官方 `api_key` 字段同样兼容。
+
+正式 AgentRun 继承用户原生 `HOME` / `GROK_HOME`。BYOK Probe 把官方 `config.toml`、managed config 与
+requirements config 复制到临时 `GROK_HOME`，不复制 `.env`；account-auth Probe 为读取既有 cached token
+保留原生 Home。官方配置摘要同时 fence warm Host 与 cold HistoryRestore。
+
+Grok/MiniMax `<think>` 若由 Runtime 作为普通 `agent_message_chunk` 发出，就与其他 ACP agent text 一样原样
+进入执行台 Evidence、Camp final 与 Missing-Send，不做 provider-specific 清洗或重分类。`_x.ai/*`
+notification 只作为已知 Session metadata/lifecycle 安全路由。Runtime Fleet LRU 保留 compatible warm
+Host/Session；当前版本没有
+resume advertisement，cold continuation 只用 exact `session/load` HistoryRestore，replay 在 bounded loading
+phase 隔离，失败后只允许一次 fresh fallback。
+
+External MCP 为 `AdditivePerRun / NativeWinsSkip`。`grok 0.2.118` 的 ACP Session 忽略 `mcpServers`，Core 因此
+在私有 Runtime 目录生成临时 Plugin 并用 process `--plugin-dir` 追加；`grok inspect --json` 已发现的所有
+native 名称都保留，冲突 Assignment skip，不同名 Server 可追加，完整集合进入 Host compatibility，Plugin 随
+Host 清理。Core 不写 project/user config。managed Skill 投影到 `.grok/skills`。Usage/Cost 保持 Disabled。
+
+`grok-build × macos-arm64` 只绑定独立 adapter-scoped qualification evidence；macOS x64 与 Windows x64
+保持 `not_qualified / runtime_platform.qualification_evidence_missing`。
 
 ## 队员最高权限默认
 

@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.27
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress

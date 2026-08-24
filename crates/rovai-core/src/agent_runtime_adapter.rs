@@ -24,8 +24,9 @@ use crate::{
     mcp::McpServerDefinition,
     platform::HostPlatformKey,
     runtime_platform_admission::{
-        MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION, RuntimePlatformAdmission,
-        RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+        GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+        RuntimePlatformAdmission, RuntimePlatformAdmissionReasonCode,
+        WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
     },
 };
 
@@ -223,10 +224,11 @@ pub enum SkillDeliveryGroupKey {
     Trae,
     Cursor,
     Kimi,
+    Grok,
 }
 
 impl SkillDeliveryGroupKey {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Codex,
         Self::Opencode,
         Self::Copilot,
@@ -239,6 +241,7 @@ impl SkillDeliveryGroupKey {
         Self::Trae,
         Self::Cursor,
         Self::Kimi,
+        Self::Grok,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -255,6 +258,7 @@ impl SkillDeliveryGroupKey {
             Self::Trae => "trae",
             Self::Cursor => "cursor",
             Self::Kimi => "kimi",
+            Self::Grok => "grok",
         }
     }
 
@@ -272,6 +276,7 @@ impl SkillDeliveryGroupKey {
             Self::Trae => Path::new(".trae/skills"),
             Self::Cursor => Path::new(".cursor/skills"),
             Self::Kimi => Path::new(".kimi-code/skills"),
+            Self::Grok => Path::new(".grok/skills"),
         }
     }
 }
@@ -293,6 +298,7 @@ impl std::str::FromStr for SkillDeliveryGroupKey {
             "trae" => Ok(Self::Trae),
             "cursor" => Ok(Self::Cursor),
             "kimi" => Ok(Self::Kimi),
+            "grok" => Ok(Self::Grok),
             _ => anyhow::bail!("unsupported Skill delivery group: {value}"),
         }
     }
@@ -504,6 +510,20 @@ impl AgentRuntimeAdapterRegistry {
                 RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             );
         }
+        if kind == AdapterKind::GrokBuild {
+            if platform == HostPlatformKey::MacosArm64 {
+                return RuntimePlatformAdmission::qualified(
+                    kind,
+                    platform,
+                    GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION,
+                );
+            }
+            return RuntimePlatformAdmission::not_qualified(
+                kind,
+                platform,
+                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+            );
+        }
         if platform == HostPlatformKey::WindowsX64 {
             return RuntimePlatformAdmission::qualified(
                 kind,
@@ -596,6 +616,9 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KimiCodeCli => json!({
                 "permission_mode": "yolo",
             }),
+            AdapterKind::GrokBuild => json!({
+                "permission_mode": "bypassPermissions",
+            }),
             AdapterKind::AntigravityApp => json!({
                 "mode": "accept-edits",
                 "sandbox": "off",
@@ -621,7 +644,8 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
             | AdapterKind::CursorAgent
-            | AdapterKind::KimiCodeCli => resolve_acp_runtime(kind, input),
+            | AdapterKind::KimiCodeCli
+            | AdapterKind::GrokBuild => resolve_acp_runtime(kind, input),
         }
     }
 
@@ -660,6 +684,10 @@ impl AgentRuntimeAdapterRegistry {
                 [SkillDeliveryGroupKey::Kimi],
                 SkillDiscoveryVerification::Verified,
             ),
+            AdapterKind::GrokBuild => native_skill_discovery(
+                [SkillDeliveryGroupKey::Grok],
+                SkillDiscoveryVerification::Verified,
+            ),
         }
     }
 
@@ -677,6 +705,9 @@ impl AgentRuntimeAdapterRegistry {
             | AdapterKind::TraeCnCli
             | AdapterKind::KimiCodeCli => {
                 additive_native_mcp_projection(McpSameNamePolicy::RovaiWins)
+            }
+            AdapterKind::GrokBuild => {
+                additive_native_mcp_projection(McpSameNamePolicy::NativeWinsSkip)
             }
             AdapterKind::CursorAgent => unsupported_external_mcp_projection(),
         }
@@ -722,6 +753,9 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::KimiCodeCli => {
                 acp_capability_snapshot(observation, kimi_permission_options())
             }
+            AdapterKind::GrokBuild => {
+                acp_capability_snapshot(observation, grok_permission_options())
+            }
             kind => anyhow::bail!("{} does not use the ACP snapshot mapper", kind.as_str()),
         }
     }
@@ -746,6 +780,7 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::TraeCnCli => trae_static_permission_options(),
             AdapterKind::CursorAgent => cursor_permission_options(),
             AdapterKind::KimiCodeCli => kimi_permission_options(),
+            AdapterKind::GrokBuild => grok_permission_options(),
         };
         let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
         Ok(AdapterCapabilitySnapshot {
@@ -1567,6 +1602,16 @@ fn acp_capability_snapshot(
                 "session.new",
                 "context.charter.first_payload",
             ]
+        } else if adapter_kind == AdapterKind::GrokBuild {
+            &[
+                "acp.initialize",
+                "session.new",
+                "session.prompt",
+                "session.cancel",
+                "session.update",
+                "structured_permission_request",
+                "context.charter.native_append",
+            ]
         } else {
             &[
                 "acp.initialize",
@@ -1603,8 +1648,17 @@ fn acp_capability_snapshot(
         if adapter_kind != AdapterKind::CursorAgent {
             capabilities.push(BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string());
         }
-        if adapter_kind != AdapterKind::CursorAgent {
-            append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
+        let mcp_projection = AgentRuntimeAdapterRegistry::default().mcp_projection(adapter_kind);
+        match mcp_projection.external_mcp_projection {
+            ExternalMcpProjection::AdditivePerRun => append_additive_mcp_axes(
+                &mut capabilities,
+                mcp_projection
+                    .same_name_policy
+                    .context("additive MCP projection has no same-name policy")?,
+            ),
+            ExternalMcpProjection::Unsupported => {
+                capabilities.push("mcp.external_projection.unsupported".to_string());
+            }
         }
     }
     capabilities.sort();
@@ -1976,6 +2030,32 @@ fn kimi_permission_options() -> Vec<PermissionOptionDescriptor> {
             .collect(),
         recommended_value: json!("default"),
         scope: RuntimeOptionScope::Session,
+        risk: "dangerous".to_string(),
+        supported: true,
+        required: true,
+        unsupported_reason: None,
+    }]
+}
+
+fn grok_permission_options() -> Vec<PermissionOptionDescriptor> {
+    vec![PermissionOptionDescriptor {
+        key: "permission_mode".to_string(),
+        label: "permission-mode".to_string(),
+        description: "Grok Build's native host permission mode. Plan is read-only; bypassPermissions disables interactive permission prompts.".to_string(),
+        value_type: "enum".to_string(),
+        choices: [
+            "default",
+            "acceptEdits",
+            "auto",
+            "dontAsk",
+            "bypassPermissions",
+            "plan",
+        ]
+        .into_iter()
+        .map(|value| choice(value, value))
+        .collect(),
+        recommended_value: json!("default"),
+        scope: RuntimeOptionScope::Host,
         risk: "dangerous".to_string(),
         supported: true,
         required: true,
@@ -2432,6 +2512,10 @@ mod tests {
             ),
             (AdapterKind::KimiCodeCli, json!({"permission_mode": "yolo"})),
             (
+                AdapterKind::GrokBuild,
+                json!({"permission_mode": "bypassPermissions"}),
+            ),
+            (
                 AdapterKind::AntigravityApp,
                 json!({
                     "mode": "accept-edits",
@@ -2805,6 +2889,61 @@ mod tests {
             snapshot
                 .capabilities
                 .contains(&BUILTIN_TOOL_RUNTIME_CAPABILITY.to_string())
+        );
+    }
+
+    #[test]
+    fn grok_snapshot_claims_verified_additive_external_mcp_with_native_precedence() {
+        let snapshot = AgentRuntimeAdapterRegistry::default()
+            .acp_capability_snapshot(AcpProbeObservation {
+                adapter_kind: AdapterKind::GrokBuild,
+                reported_version: Some("grok 0.2.118".to_string()),
+                executable_fingerprint: Some("sha256:grok".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: vec!["grok.authenticate".to_string()],
+                initialize_result: Some(json!({
+                    "protocolVersion": 1,
+                    "agentCapabilities": {"loadSession": true}
+                })),
+                session_result: Some(json!({
+                    "sessionId": "grok-test",
+                    "configOptions": [{
+                        "id": "model",
+                        "name": "Model",
+                        "currentValue": "MiniMax-M3",
+                        "options": [{"value": "MiniMax-M3", "name": "MiniMax-M3"}]
+                    }]
+                })),
+                attempted_at: "2026-08-24T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("Grok ACP catalog should map");
+
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"mcp.external_projection.additive_per_run".to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"mcp.same_name_policy.native_wins_skip".to_string())
+        );
+        assert!(
+            !snapshot
+                .capabilities
+                .contains(&"mcp.same_name_policy.rovai_wins".to_string())
+        );
+        assert!(
+            snapshot
+                .capabilities
+                .contains(&"context.charter.native_append".to_string())
+        );
+        assert!(
+            !snapshot
+                .capabilities
+                .contains(&"context.charter.first_payload".to_string())
         );
     }
 
@@ -3331,6 +3470,11 @@ mod tests {
                 &[SkillDeliveryGroupKey::Kimi],
                 SkillDiscoveryVerification::Verified,
             ),
+            (
+                AdapterKind::GrokBuild,
+                &[SkillDeliveryGroupKey::Grok],
+                SkillDiscoveryVerification::Verified,
+            ),
         ];
         assert_eq!(cases.len(), AdapterKind::ALL.len());
         for (kind, delivery_groups, verification) in cases {
@@ -3364,6 +3508,7 @@ mod tests {
             AdapterKind::QwenCode,
             AdapterKind::TraeCnCli,
             AdapterKind::KimiCodeCli,
+            AdapterKind::GrokBuild,
         ] {
             let capability = registry.mcp_projection(kind);
             assert!(capability.supports_stdio);
@@ -3374,11 +3519,13 @@ mod tests {
             );
             assert_eq!(
                 capability.same_name_policy,
-                Some(if kind == AdapterKind::CodexCli {
-                    McpSameNamePolicy::NativeWinsSkip
-                } else {
-                    McpSameNamePolicy::RovaiWins
-                })
+                Some(
+                    if matches!(kind, AdapterKind::CodexCli | AdapterKind::GrokBuild) {
+                        McpSameNamePolicy::NativeWinsSkip
+                    } else {
+                        McpSameNamePolicy::RovaiWins
+                    }
+                )
             );
             assert_eq!(
                 capability.approval_control,

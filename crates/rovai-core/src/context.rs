@@ -86,6 +86,24 @@ impl CharterDeliveryMode {
     }
 }
 
+pub const fn charter_delivery_mode_for_adapter(adapter_kind: AdapterKind) -> CharterDeliveryMode {
+    match adapter_kind {
+        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::GrokBuild => {
+            CharterDeliveryMode::NativeAppend
+        }
+        AdapterKind::OpencodeCli
+        | AdapterKind::CopilotCli
+        | AdapterKind::AntigravityApp
+        | AdapterKind::KiroCli
+        | AdapterKind::QoderCli
+        | AdapterKind::CodebuddyCli
+        | AdapterKind::QwenCode
+        | AdapterKind::TraeCnCli
+        | AdapterKind::CursorAgent
+        | AdapterKind::KimiCodeCli => CharterDeliveryMode::FirstPayload,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MaterializeContextRequest<'a> {
     pub agent_run_id: &'a str,
@@ -6155,6 +6173,26 @@ fn sha256_text(value: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn charter_delivery_modes_are_closed_over_the_product_runtime_catalog() {
+        for adapter_kind in AdapterKind::ALL {
+            let expected = if matches!(
+                adapter_kind,
+                AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::GrokBuild
+            ) {
+                CharterDeliveryMode::NativeAppend
+            } else {
+                CharterDeliveryMode::FirstPayload
+            };
+            assert_eq!(charter_delivery_mode_for_adapter(adapter_kind), expected);
+        }
+    }
+}
+
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
@@ -8183,7 +8221,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.20".to_string(), 61, 1));
+        assert_eq!(contract, ("v1.22".to_string(), 63, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

@@ -5,7 +5,7 @@ The runtime product logos in this directory come from
 `1.94.0`. The source project is [Lobe Icons](https://github.com/lobehub/lobe-icons).
 The exact package tarball SHA-256 is
 `a813cbb544624f51344ceab00b21c3fb0e760a989453ca447c502098698b1ec2`.
-Ten local SVGs are byte-identical. Two differ only by one trailing newline.
+Eleven local SVGs are byte-identical. Two differ only by one trailing newline.
 The Kimi asset changes the primary glyph from white to dark ink so it remains
 legible on Rovai's required white Runtime logo surface.
 
@@ -18,6 +18,7 @@ legible on Rovai's required white Runtime logo surface.
 | `copilot-color.svg` | `BYTE_IDENTICAL` |
 | `cursor.svg` | `BYTE_IDENTICAL` |
 | `deepseek-color.svg` | `FORMAT_ONLY_TRAILING_NEWLINE` |
+| `grok.svg` | `BYTE_IDENTICAL` |
 | `kiro-color.svg` | `BYTE_IDENTICAL` |
 | `kimi.svg` | `MATERIAL_FILL_ADAPTATION_FROM_kimi-color.svg` |
 | `opencode.svg` | `BYTE_IDENTICAL` |

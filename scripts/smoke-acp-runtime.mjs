@@ -19,6 +19,8 @@ const keepFixture = process.env.ROVAI_KEEP_ACP_RUNTIME_FIXTURE === '1'
 const fullCommandOutputMatrix = process.env.ROVAI_ACP_FULL_COMMAND_MATRIX === '1'
 const useProductPermissionDefaults = process.env.ROVAI_ACP_USE_PRODUCT_PERMISSION_DEFAULTS === '1'
 const plainTwoTurn = process.env.ROVAI_ACP_PLAIN_TWO_TURN === '1'
+const cancelRunningTool = process.env.ROVAI_ACP_CANCEL_RUNNING_TOOL === '1'
+const grokCompactionAcceptance = process.env.ROVAI_GROK_COMPACTION_ACCEPTANCE === '1'
 let core
 let shuttingDown = false
 
@@ -36,7 +38,13 @@ try {
     '--skill-library-root', join(dataDir, 'managed-skill-library')
   ], {
     cwd: root,
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: {
+      ...process.env,
+      ...(grokCompactionAcceptance
+        ? { ROVAI_INTERNAL_GROK_COMPACTION_ACCEPTANCE: '1' }
+        : {})
+    }
   })
   core.stderr.pipe(process.stderr)
   const pending = new Map()
@@ -146,6 +154,11 @@ try {
       token: 'ROVAI_KIMI_ACP_OK'
     },
     {
+      adapterKind: 'grok-build',
+      permissionValues: { permission_mode: process.env.ROVAI_GROK_PERMISSION_MODE ?? 'default' },
+      token: 'ROVAI_GROK_ACP_OK'
+    },
+    {
       adapterKind: 'antigravity-app',
       permissionValues: {
         mode: 'accept-edits',
@@ -155,6 +168,13 @@ try {
       token: 'ROVAI_ANTIGRAVITY_TWO_TURN_OK'
     }
   ].filter((specification) => !process.env.ROVAI_ACP_SMOKE_ADAPTER || specification.adapterKind === process.env.ROVAI_ACP_SMOKE_ADAPTER)
+  if (grokCompactionAcceptance
+      && (specifications.length !== 1
+        || specifications[0].adapterKind !== 'grok-build'
+        || !plainTwoTurn
+        || !commandOutputOnly)) {
+    throw new Error('Grok compaction acceptance requires the isolated grok-build plain two-turn command-output smoke')
+  }
   const results = []
   for (const specification of specifications) {
     const installation = await configureProductRuntime(
@@ -370,6 +390,7 @@ try {
         throw new Error(`${specification.adapterKind} fixed printf output was not projected: ${JSON.stringify({
           commandRun,
           commandStart,
+          commandOutputMessage,
           marker: commandMarker,
           runtimeActions: commandRuntimeActions
         })}`)
@@ -395,6 +416,75 @@ try {
         warmHostReused: commandStart.params.hostInstanceId === results.at(-1).hostInstanceId,
         hostInstanceId: commandStart.params.hostInstanceId
       }
+      if (grokCompactionAcceptance) {
+        const runId = commandRunId.replaceAll("'", "''")
+        const evidenceOutput = await runCapture('sqlite3', [
+          '-batch',
+          '-noheader',
+          '-separator',
+          '|',
+          join(dataDir, 'rovai.sqlite'),
+          `
+            SELECT 'delivery', status,
+                   CAST(bootstrap_redelivery_present AS TEXT),
+                   COALESCE(CAST(bootstrap_redelivery_revision AS TEXT), '')
+            FROM runtime_input_delivery
+            WHERE agent_run_id = '${runId}'
+            UNION ALL
+            SELECT 'requirement', CAST(requested_revision AS TEXT),
+                   CAST(acknowledged_revision AS TEXT), adapter_kind
+            FROM bootstrap_redelivery_requirement
+            WHERE (native_binding_id, native_binding_generation) = (
+                SELECT native_binding_id, native_binding_generation
+                FROM runtime_input_delivery
+                WHERE agent_run_id = '${runId}'
+                LIMIT 1
+            )
+            UNION ALL
+            SELECT 'observation', observation.source_signal,
+                   observation.admission_point, observation.source_observation_id
+            FROM native_session_compaction_observation AS observation
+            JOIN native_session_compaction_observer_lease AS lease
+              ON lease.id = observation.observer_lease_id
+            WHERE lease.adapter_kind = 'grok-build'
+              AND (observation.native_binding_id, observation.native_binding_generation) = (
+                  SELECT native_binding_id, native_binding_generation
+                  FROM runtime_input_delivery
+                  WHERE agent_run_id = '${runId}'
+                  LIMIT 1
+              )
+            ORDER BY 1;
+          `
+        ], root)
+        const evidence = new Map(evidenceOutput.trim().split('\n').filter(Boolean).map((line) => {
+          const [kind, ...values] = line.split('|')
+          return [kind, values]
+        }))
+        const deliveryEvidence = evidence.get('delivery')
+        const requirementEvidence = evidence.get('requirement')
+        const observationEvidence = evidence.get('observation')
+        if (JSON.stringify(deliveryEvidence) !== JSON.stringify(['accepted', '1', '1'])
+            || JSON.stringify(requirementEvidence) !== JSON.stringify(['1', '1', 'grok-build'])
+            || observationEvidence?.[0] !== 'grok.acp.auto_compact_completed.v1'
+            || observationEvidence?.[1] !== 'completed'
+            || !observationEvidence?.[2]?.startsWith('grok.acp.auto_compact_completed.v1:runtime:')) {
+          throw new Error(`Grok compaction redelivery evidence did not converge: ${JSON.stringify({
+            deliveryEvidence,
+            requirementEvidence,
+            observationEvidence,
+            evidenceOutput
+          })}`)
+        }
+        results.at(-1).compactionAcceptance = {
+          sourceSignal: observationEvidence[0],
+          admissionPoint: observationEvidence[1],
+          occurrenceIdentity: observationEvidence[2],
+          requestedRevision: Number(requirementEvidence[0]),
+          acknowledgedRevision: Number(requirementEvidence[1]),
+          redeliveryInputStatus: deliveryEvidence[0],
+          redeliveryRevision: Number(deliveryEvidence[2])
+        }
+      }
       if (fullCommandOutputMatrix) {
         results.at(-1).commandOutputMatrix = await runCommandOutputMatrix({
           request,
@@ -414,7 +504,8 @@ try {
         'codebuddy-cli': 'CODEBUDDY',
         'qwen-code': 'QWEN',
         'trae-cn-cli': 'TRAE',
-        'kimi-code-cli': 'KIMI'
+        'kimi-code-cli': 'KIMI',
+        'grok-build': 'GROK'
       })[specification.adapterKind]
       const writePath = join(projectRoot, `ACP_APPROVED_${adapterFileStem}.txt`)
       if (specification.adapterKind === 'codebuddy-cli') {
@@ -494,6 +585,7 @@ try {
         throw error
       })
       const writtenMatches = written === `${writeToken}\n`
+        || (specification.adapterKind === 'grok-build' && written === writeToken)
         || (process.platform === 'win32' && written === `${writeToken}\r\n`)
       const requiresNativeSessionContinuation = true
       if (writeRun?.status !== 'succeeded'
@@ -521,6 +613,14 @@ try {
           && resolvedApprovals.size !== 0) {
         throw new Error(`Kimi yolo write unexpectedly required interactive Approval: ${JSON.stringify({
           approvalCount: resolvedApprovals.size,
+          permissionValues
+        })}`)
+      }
+      if (specification.adapterKind === 'grok-build'
+          && permissionValues.permission_mode === 'bypassPermissions'
+          && commandApprovals.size !== 0) {
+        throw new Error(`Grok bypassPermissions command unexpectedly required interactive Approval: ${JSON.stringify({
+          approvalCount: commandApprovals.size,
           permissionValues
         })}`)
       }
@@ -629,6 +729,38 @@ try {
           fileCreated: deniedFileExists
         }
       }
+
+      if (cancelRunningTool) {
+        const cancelPath = join(projectRoot, `ACP_CANCELLED_${adapterFileStem}.txt`)
+        const cancelRequest = await sendExistingCampMessage(
+          request,
+          camp.id,
+          `Use the Bash or terminal tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
+          {
+            taskId: null,
+            purpose: 'Verify ACP running Tool cancellation and process cleanup',
+            completionRole: 'required'
+          }
+        )
+        const cancelRunId = cancelRequest.commandResult?.payload?.agentRunIds?.[0]
+        if (!cancelRunId) throw new Error(`ACP cancel AgentRun was not accepted: ${JSON.stringify(cancelRequest)}`)
+        const cancelled = await cancelAgentRun(request, camp.id, cancelRunId)
+        const cancelledFile = await readFile(cancelPath, 'utf8').catch((error) => {
+          if (error?.code === 'ENOENT') return null
+          throw error
+        })
+        if (!['cancelled', 'failed'].includes(cancelled.run.status) || cancelledFile !== null) {
+          throw new Error(`ACP cancellation did not fail closed: ${JSON.stringify({
+            run: cancelled.run,
+            cancelledFile
+          })}`)
+        }
+        results.at(-1).cancellation = {
+          status: cancelled.run.status,
+          fileCreated: false,
+          approvalCount: cancelled.resolvedApprovals.size
+        }
+      }
     }
   }
 
@@ -660,6 +792,54 @@ async function sendExistingCampMessage(request, campId, body, execution) {
     draftRevision: saved.revision,
     execution
   })
+}
+
+async function cancelAgentRun(request, campId, agentRunId) {
+  const resolvedApprovals = new Set()
+  const deadline = Date.now() + 180_000
+  let cancellationRequested = false
+  let run
+  while (Date.now() < deadline) {
+    const snapshot = await request('camps.snapshot', { campId })
+    const actions = snapshot.actions.filter((action) => action.agentRunId === agentRunId)
+    for (const approval of snapshot.approvals.filter((candidate) =>
+      candidate.status === 'pending'
+        && !resolvedApprovals.has(candidate.id)
+        && actions.some((action) => action.id === candidate.actionId)
+    )) {
+      const option = approval.options.find((candidate) => candidate.kind === 'allow_once')
+        ?? approval.options.find((candidate) => candidate.kind === 'allow_session')
+      if (!option) throw new Error(`ACP cancel request has no bounded allow option: ${JSON.stringify(approval)}`)
+      const resolution = await request('action.approvals.resolve', {
+        commandId: crypto.randomUUID(),
+        campId,
+        approvalId: approval.id,
+        expectedVersion: approval.version,
+        optionId: option.optionId,
+        reason: 'Start the bounded command before ACP cancel smoke'
+      })
+      if (resolution.status === 'rejected') throw new Error(`ACP cancel approval was rejected: ${JSON.stringify(resolution)}`)
+      resolvedApprovals.add(approval.id)
+    }
+    run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    if (!cancellationRequested && resolvedApprovals.size > 0 && run) {
+      const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
+      if (!turn) throw new Error(`ACP cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
+      const cancellation = await request('campTurns.cancel', {
+        commandId: crypto.randomUUID(),
+        command: { campId, campTurnId: turn.id, expectedVersion: turn.version }
+      })
+      if (cancellation.status === 'rejected') {
+        throw new Error(`ACP CampTurn cancellation was rejected: ${JSON.stringify(cancellation)}`)
+      }
+      cancellationRequested = true
+    }
+    if (cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
+      return { run, resolvedApprovals }
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+  }
+  throw new Error(`Timed out cancelling ACP AgentRun ${agentRunId}: ${JSON.stringify(run)}`)
 }
 
 async function runCommandOutputMatrix({ request, events, campId, adapterKind }) {
@@ -801,6 +981,20 @@ async function run(command, args, cwd) {
     child.once('error', rejectRun)
     child.once('close', (code) => code === 0
       ? resolveRun()
+      : rejectRun(new Error(`${command} failed (${code}): ${stderr.join('')}`)))
+  })
+}
+
+async function runCapture(command, args, cwd) {
+  return new Promise((resolveRun, rejectRun) => {
+    const child = spawn(command, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] })
+    const stdout = []
+    const stderr = []
+    child.stdout.on('data', (chunk) => stdout.push(String(chunk)))
+    child.stderr.on('data', (chunk) => stderr.push(String(chunk)))
+    child.once('error', rejectRun)
+    child.once('close', (code) => code === 0
+      ? resolveRun(stdout.join(''))
       : rejectRun(new Error(`${command} failed (${code}): ${stderr.join('')}`)))
   })
 }

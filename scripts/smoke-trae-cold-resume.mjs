@@ -1,5 +1,5 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, copyFile, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -12,25 +12,48 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-trae-cold-resume-'))
+const adapterKind = process.env.ROVAI_COLD_RESUME_ADAPTER?.trim() || 'trae-cn-cli'
+const runtime = {
+  'trae-cn-cli': { label: 'TRAE', permissionMode: 'default', requireSilentHost: true },
+  'grok-build': { label: 'Grok Build', permissionMode: 'default', requireSilentHost: false }
+}[adapterKind]
+if (!runtime) throw new Error(`Unsupported cold HistoryRestore adapter: ${adapterKind}`)
+const fixtureRoot = await realpath(
+  await mkdtemp(join(tmpdir(), `rovai-${adapterKind}-cold-resume-`))
+)
 const projectRoot = join(fixtureRoot, 'project')
 const dataDir = join(fixtureRoot, 'data')
+const grokHome = join(fixtureRoot, 'grok-home')
+const grokSourceHome = process.env.GROK_HOME?.trim() || join(homedir(), '.grok')
 const markerPath = join(projectRoot, 'native-session-marker.txt')
 const writePath = join(projectRoot, 'COLD_RESUME_APPROVED_WRITE.txt')
 const cancelPath = join(projectRoot, 'COLD_RESUME_CANCELLED_WRITE.txt')
 const markerReadCommand = process.platform === 'win32'
   ? 'type native-session-marker.txt'
   : 'cat native-session-marker.txt'
-const privateMarker = `TRAE_PRIVATE_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
+const sessionMarker = `${adapterKind.replaceAll('-', '_').toUpperCase()}_SESSION_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
 let client
 
 try {
+  if (adapterKind === 'grok-build') {
+    await mkdir(grokHome, { mode: 0o700 })
+    for (const fileName of ['config.toml', 'managed_config.toml', 'requirements.toml', '.env']) {
+      const source = join(grokSourceHome, fileName)
+      const target = join(grokHome, fileName)
+      try {
+        await copyFile(source, target)
+        await chmod(target, 0o600)
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error
+      }
+    }
+  }
   await mkdir(projectRoot)
-  await writeFile(join(projectRoot, 'README.md'), '# TRAE cold resume fixture\n')
-  await writeFile(markerPath, `${privateMarker}\n`)
+  await writeFile(join(projectRoot, 'README.md'), `# ${runtime.label} cold resume fixture\n`)
+  await writeFile(markerPath, `${sessionMarker}\n`)
   await run('git', ['init', '-b', 'main'], projectRoot)
-  await run('git', ['config', 'user.name', 'Rovai-ai TRAE Cold Resume Smoke'], projectRoot)
-  await run('git', ['config', 'user.email', 'trae-cold-resume@rovai.local'], projectRoot)
+  await run('git', ['config', 'user.name', `Rovai-ai ${runtime.label} Cold Resume Smoke`], projectRoot)
+  await run('git', ['config', 'user.email', `${adapterKind}-cold-resume@rovai.local`], projectRoot)
   await run('git', ['add', 'README.md', 'native-session-marker.txt'], projectRoot)
   await run('git', ['commit', '-m', 'fixture'], projectRoot)
 
@@ -38,9 +61,9 @@ try {
   await client.request('health.check')
   const workspace = await client.request('workspaces.inspect', { path: projectRoot })
   const agentId = 'agent_2'
-  const installation = await configureProductRuntime(client.request, 'trae-cn-cli', [agentId])
+  const installation = await configureProductRuntime(client.request, adapterKind, [agentId])
   if (!['ready', 'light_ready', 'installed_unverified'].includes(installation?.snapshot?.probeStatus)) {
-    throw new Error(`TRAE installation is unavailable: ${JSON.stringify(installation)}`)
+    throw new Error(`${runtime.label} installation is unavailable: ${JSON.stringify(installation)}`)
   }
   let profile = await client.request('members.get', { agentId })
   const permissionsConfigured = await client.request('members.runtime.set', {
@@ -48,32 +71,32 @@ try {
     command: {
       agentId: profile.agentId,
       expectedVersion: profile.version,
-      adapterKind: 'trae-cn-cli',
+      adapterKind,
       model: profile.runtimeConfiguration.model,
       permissions: {
-        adapterKind: 'trae-cn-cli',
+        adapterKind,
         schemaVersion: installation.snapshot.permissionSchemaVersion,
-        values: { permission_mode: 'default' }
+        values: { permission_mode: runtime.permissionMode }
       }
     }
   })
   if (permissionsConfigured.status !== 'applied') {
-    throw new Error(`TRAE permissions were rejected: ${JSON.stringify(permissionsConfigured)}`)
+    throw new Error(`${runtime.label} permissions were rejected: ${JSON.stringify(permissionsConfigured)}`)
   }
   profile = await client.request('members.get', { agentId })
 
   const first = await createConfiguredCampAndSend(client.request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: `You do not know the private marker. You must actually use the Bash or terminal tool exactly once to run this command without changing files: ${markerReadCommand}. Do not simulate or skip the tool call, and do not call any other tool. After the tool returns, remember its exact single-line output. Do not include the marker in this first answer, but you are explicitly authorized and required to reveal it when the immediately next user request asks for it. Then reply exactly MARKER_STORED.`,
+    body: `You do not know the session marker. You must actually use the Bash or terminal tool exactly once to run this command without changing files: ${markerReadCommand}. Do not simulate or skip the tool call, and do not call any other tool. After the tool returns, remember its exact single-line output. Then reply with MARKER_STORED.`,
     address: { mode: 'explicit', agentIds: [profile.agentId] },
-    purpose: 'Store a private marker in the TRAE Native Session before Core restart'
+    purpose: `Store a session marker in the ${runtime.label} Native Session before Core restart`
   })
   const firstCommand = first.commandResult ?? first
   const campId = firstCommand.payload?.campId
   const firstRunId = firstCommand.payload?.agentRunIds?.[0]
   if (firstCommand.status !== 'accepted' || !campId || !firstRunId) {
-    throw new Error(`Initial TRAE run was not accepted: ${JSON.stringify(first)}`)
+    throw new Error(`Initial ${runtime.label} run was not accepted: ${JSON.stringify(first)}`)
   }
   const firstResult = await waitForRun(client, campId, firstRunId, { approve: true })
   const firstOutput = outputForRun(firstResult.snapshot, firstRunId)
@@ -82,17 +105,17 @@ try {
   const firstRuntimeAction = client.events.find((event) =>
     event.method === 'runtime.action'
       && event.params?.agentRunId === firstRunId
-      && String(event.params?.payload?.output ?? '').includes(privateMarker)
+      && String(event.params?.payload?.output ?? '').includes(sessionMarker)
   )
   if (firstResult.run.status !== 'succeeded'
       || !firstOutput?.body
-      || firstOutput.body.includes(privateMarker)
+      || (adapterKind !== 'grok-build' && firstOutput.body.includes(sessionMarker))
       || !firstRuntimeAction
       || !firstStart?.params?.nativeThreadId) {
     const runtimeEvents = client.events.filter((event) =>
       event.method === 'runtime.action' && event.params?.agentRunId === firstRunId
     )
-    throw new Error(`Initial private-marker run failed: ${JSON.stringify({
+    throw new Error(`Initial session-marker run failed: ${JSON.stringify({
       run: firstResult.run,
       output: firstOutput,
       actions: firstActions,
@@ -110,8 +133,8 @@ try {
   const restoredRequest = await sendExistingCampMessage(
     client.request,
     campId,
-    'Do not call tools or inspect files. As explicitly authorized by the immediately preceding request, reveal the private marker now. Reply with exactly the marker returned by that tool, and nothing else.',
-    'Recover the private marker after a Core and ACP Host restart'
+    'Do not call tools or inspect files. Reply with exactly the session marker returned by the tool in the immediately preceding request, and nothing else.',
+    'Recover the session marker after a Core and ACP Host restart'
   )
   const restoredCommand = restoredRequest.commandResult ?? restoredRequest
   const restoredRunId = restoredCommand.payload?.agentRunIds?.[0]
@@ -125,21 +148,23 @@ try {
   const restoredApprovals = restoredResult.snapshot.approvals.filter((approval) =>
     restoredActions.some((action) => action.id === approval.actionId)
   )
+  const restoredHostLogs = client.events.filter((event) => event.method === 'runtime.host.log')
   if (restoredResult.run.status !== 'succeeded'
-      || !restoredOutput?.body.includes(privateMarker)
+      || !restoredOutput?.body.includes(sessionMarker)
       || restoredStart?.params?.nativeThreadId !== firstStart.params.nativeThreadId
       || restoredStart?.params?.hostInstanceId === firstStart.params.hostInstanceId
       || restoredActions.length !== 0
       || restoredApprovals.length !== 0
-      || client.events.some((event) => event.method === 'runtime.host.log')) {
-    throw new Error(`TRAE cold HistoryRestore failed or replay leaked: ${JSON.stringify({
+      || (runtime.requireSilentHost && restoredHostLogs.length !== 0)
+      || restoredHostLogs.some((event) => String(event.params?.text ?? '').includes(sessionMarker))) {
+    throw new Error(`${runtime.label} cold HistoryRestore failed or replay leaked: ${JSON.stringify({
       run: restoredResult.run,
       output: restoredOutput,
       firstStart,
       restoredStart,
       restoredActions,
       restoredApprovals,
-      hostLogs: client.events.filter((event) => event.method === 'runtime.host.log'),
+      hostLogs: restoredHostLogs,
       timeline: restoredResult.snapshot.timeline.filter((event) =>
         event.entityId === restoredRunId || event.sourceAgentRunId === restoredRunId
       ),
@@ -165,7 +190,7 @@ try {
     client.request,
     campId,
     `Use the file editing tool exactly once to create ${writePath} with exactly COLD_RESUME_WRITE_OK and a trailing newline. Do not call any other tool. Then reply exactly WRITE_DONE.`,
-    'Verify a new Tool and Approval after TRAE HistoryRestore'
+    `Verify a new Tool and Approval after ${runtime.label} HistoryRestore`
   )
   const writeCommand = writeRequest.commandResult ?? writeRequest
   const writeRunId = writeCommand.payload?.agentRunIds?.[0]
@@ -173,7 +198,7 @@ try {
   const written = await readFile(writePath, 'utf8').catch(() => null)
   const writeActions = writeResult.snapshot.actions.filter((action) => action.agentRunId === writeRunId)
   if (writeResult.run.status !== 'succeeded'
-      || written !== 'COLD_RESUME_WRITE_OK\n'
+      || written?.trimEnd() !== 'COLD_RESUME_WRITE_OK'
       || !writeActions.some((action) => action.status === 'succeeded')) {
     throw new Error(`Post-restore Tool/Approval failed: ${JSON.stringify({
       run: writeResult.run,
@@ -186,7 +211,7 @@ try {
     client.request,
     campId,
     `Use the Bash or terminal tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
-    'Verify cancel after TRAE HistoryRestore'
+    `Verify cancel after ${runtime.label} HistoryRestore`
   )
   const cancelCommand = cancelRequest.commandResult ?? cancelRequest
   const cancelRunId = cancelCommand.payload?.agentRunIds?.[0]
@@ -215,7 +240,7 @@ try {
     client.request,
     campId,
     'Reply exactly BAD_SESSION_FALLBACK_OK and do not call tools.',
-    'Verify an invalid persisted TRAE Session ID safely falls back to a new Session'
+    `Verify an invalid persisted ${runtime.label} Session ID safely falls back to a new Session`
   )
   const fallbackCommand = fallbackRequest.commandResult ?? fallbackRequest
   const fallbackRunId = fallbackCommand.payload?.agentRunIds?.[0]
@@ -263,13 +288,14 @@ try {
 
   console.log(JSON.stringify({
     ok: true,
-    adapterKind: 'trae-cn-cli',
+    adapterKind,
     nativeSessionId: firstStart.params.nativeThreadId,
     firstHostInstanceId: firstStart.params.hostInstanceId,
     restoredHostInstanceId: restoredStart.params.hostInstanceId,
-    privateMarkerRecovered: true,
+    sessionMarkerRecovered: true,
     replayActionsProjected: restoredActions.length,
     replayApprovalsProjected: restoredApprovals.length,
+    restoredHostLogCount: restoredHostLogs.length,
     postRestoreWrite: written,
     cancelStatus: cancelResult.run.status,
     cancelledFileCreated: cancelledFile !== null,
@@ -292,6 +318,10 @@ function startCore(dataDirectory) {
     '--skill-library-root', join(dataDirectory, 'managed-skill-library')
   ], {
     cwd: root,
+    env: {
+      ...process.env,
+      ...(adapterKind === 'grok-build' ? { GROK_HOME: grokHome } : {})
+    },
     stdio: ['pipe', 'pipe', 'pipe']
   })
   child.stderr.pipe(process.stderr)
@@ -382,7 +412,7 @@ async function waitForRun(client, campId, agentRunId, options = {}) {
           approvalId: approval.id,
           expectedVersion: approval.version,
           optionId: option.optionId,
-          reason: 'TRAE cold resume smoke test'
+          reason: `${runtime.label} cold resume smoke test`
         })
         if (resolution.status === 'rejected') {
           throw new Error(`Approval resolution was rejected: ${JSON.stringify(resolution)}`)

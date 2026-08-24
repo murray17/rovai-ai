@@ -7446,6 +7446,7 @@ function runtimeAdapterLabel(kind: string): string {
     'trae-cn-cli': 'TRAE CLI',
     'cursor-agent': 'Cursor Agent',
     'kimi-code-cli': 'Kimi Code',
+    'grok-build': 'Grok Build',
     'antigravity-app': 'Antigravity'
   } as Record<string, string>)[kind] ?? kind
 }

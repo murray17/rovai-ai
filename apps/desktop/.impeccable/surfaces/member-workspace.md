@@ -93,8 +93,9 @@ Kimi Code follows the same admission-first rule. macOS arm64 currently remains n
 Built-in CLI qualification matrix did not produce operation evidence; therefore its model and
 `default | plan | auto | yolo` permission selector stay disabled. macOS x64 and Windows x64 also stay disabled.
 Read-only workspace always projects effective `plan` once a future platform is qualified; provider
-credentials remain private Core configuration and never appear in this surface. Kimi/MiniMax thinking is not
-forcibly disabled; process detail may retain it while final public output excludes raw reasoning tags.
+credentials remain private Core configuration and never appear in this surface. Kimi/Grok ACP agent text is
+not provider-cleaned: when an upstream Runtime emits thinking tags as ordinary assistant text, process detail
+and the resulting final candidate retain that text exactly like every other ACP Runtime.
 
 ## Removal
 

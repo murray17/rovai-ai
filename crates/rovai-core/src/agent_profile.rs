@@ -46,6 +46,7 @@ pub enum AdapterKind {
     TraeCnCli,
     CursorAgent,
     KimiCodeCli,
+    GrokBuild,
     AntigravityApp,
 }
 
@@ -93,7 +94,7 @@ impl MissingSendRecoveryMode {
 }
 
 impl AdapterKind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::CodexCli,
         Self::OpencodeCli,
         Self::CopilotCli,
@@ -106,6 +107,7 @@ impl AdapterKind {
         Self::TraeCnCli,
         Self::CursorAgent,
         Self::KimiCodeCli,
+        Self::GrokBuild,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -121,6 +123,7 @@ impl AdapterKind {
             Self::TraeCnCli => "trae-cn-cli",
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi-code-cli",
+            Self::GrokBuild => "grok-build",
             Self::AntigravityApp => "antigravity-app",
         }
     }
@@ -138,6 +141,7 @@ impl AdapterKind {
             Self::TraeCnCli => "traecli",
             Self::CursorAgent => "cursor-agent",
             Self::KimiCodeCli => "kimi",
+            Self::GrokBuild => "grok",
             Self::AntigravityApp => "agy",
         }
     }
@@ -151,6 +155,7 @@ impl AdapterKind {
         match self {
             Self::CursorAgent => &["cursor-agent", "agent"],
             Self::KimiCodeCli => &["kimi"],
+            Self::GrokBuild => &["grok"],
             Self::CodexCli => &["codex"],
             Self::OpencodeCli => &["opencode"],
             Self::CopilotCli => &["copilot"],
@@ -177,6 +182,7 @@ impl AdapterKind {
             Self::TraeCnCli => "TRAE CLI",
             Self::CursorAgent => "Cursor Agent",
             Self::KimiCodeCli => "Kimi Code",
+            Self::GrokBuild => "Grok Build",
             Self::AntigravityApp => "Antigravity",
         }
     }
@@ -193,6 +199,7 @@ impl AdapterKind {
                 | Self::TraeCnCli
                 | Self::CursorAgent
                 | Self::KimiCodeCli
+                | Self::GrokBuild
         )
     }
 
@@ -209,6 +216,7 @@ impl AdapterKind {
             Self::TraeCnCli => "ROVAI_TRAE_CN_BIN",
             Self::CursorAgent => "ROVAI_CURSOR_BIN",
             Self::KimiCodeCli => "ROVAI_KIMI_BIN",
+            Self::GrokBuild => "ROVAI_GROK_BIN",
             Self::AntigravityApp => "ROVAI_ANTIGRAVITY_BIN",
         }
     }
@@ -231,6 +239,7 @@ impl AdapterKind {
             | Self::TraeCnCli
             | Self::CursorAgent
             | Self::KimiCodeCli
+            | Self::GrokBuild
             | Self::AntigravityApp => PublicOutputMode::ExplicitSendOnly,
         }
     }
@@ -250,6 +259,7 @@ impl AdapterKind {
             | Self::QwenCode
             | Self::TraeCnCli
             | Self::KimiCodeCli
+            | Self::GrokBuild
             | Self::AntigravityApp => MissingSendRecoveryMode::IfNoAcceptedSend,
             Self::CursorAgent => MissingSendRecoveryMode::Disabled,
         }
@@ -272,6 +282,7 @@ impl FromStr for AdapterKind {
             "trae-cn-cli" => Ok(Self::TraeCnCli),
             "cursor-agent" => Ok(Self::CursorAgent),
             "kimi-code-cli" => Ok(Self::KimiCodeCli),
+            "grok-build" => Ok(Self::GrokBuild),
             "antigravity-app" => Ok(Self::AntigravityApp),
             _ => anyhow::bail!("unsupported Adapter kind: {value}"),
         }
@@ -3435,7 +3446,8 @@ fn provisional_runtime_protocol(adapter_kind: AdapterKind) -> &'static str {
         | AdapterKind::QwenCode
         | AdapterKind::TraeCnCli
         | AdapterKind::CursorAgent
-        | AdapterKind::KimiCodeCli => "acp-v1",
+        | AdapterKind::KimiCodeCli
+        | AdapterKind::GrokBuild => "acp-v1",
     }
 }
 
@@ -4958,6 +4970,7 @@ mod slow_tests {
                 AdapterKind::TraeCnCli,
                 AdapterKind::CursorAgent,
                 AdapterKind::KimiCodeCli,
+                AdapterKind::GrokBuild,
             ]
         );
     }

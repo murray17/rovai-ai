@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: test-policy-and-command-routing
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # 测试与 Smoke Test
@@ -180,18 +180,18 @@ pnpm build:desktop
 | 命令 | 默认或支持的 Runtime | 额外说明 |
 | --- | --- | --- |
 | `pnpm smoke:intake` | Codex | 创建 Git fixture；验证 Camp 消息、连续 Conversation、重启和删除 |
-| `pnpm smoke:acp-runtime` | OpenCode + Copilot + TRAE + Kimi | `ROVAI_ACP_SMOKE_ADAPTER` 可选其中一个；四者都执行固定 `printf` 并断言公开 command output 进入 `runtime.action.payload.output`；TRAE 使用 warm Host/Session 与 `session/load`；Kimi 使用私有 provider 配置、用户原生 Home、兼容 warm Host/Session、cold exact resume fallback、allow-once、无副作用 deny/pre-refusal、thinking 输出隔离与 cancel；Deep Probe 单独使用临时 Home |
+| `pnpm smoke:acp-runtime` | 已完成接入的 ACP Runtime（含 TRAE、Kimi、Grok） | `ROVAI_ACP_SMOKE_ADAPTER` 可选择单一 Runtime；命令矩阵断言公开 command output 进入 `runtime.action.payload.output`。TRAE/Grok 覆盖 warm Host/Session 与 exact `session/load` HistoryRestore；Kimi/Grok 的普通 ACP agent text（包括 provider `<think>`）原样进入执行台与 final。Grok 正式 Host 使用官方 `$GROK_HOME/config.toml` 和 mode-0600 `.env`；隔离 Probe/Smoke 使用同一官方布局 |
 | `pnpm smoke:claude-runtime` | Claude Code | 验证原生权限、连续性和 Resume；两次无工具回复必须投影公开 narration；随后强制 `Bash` 固定 `printf`，断言公开 output、原生 tool-use ID 与同 Session/Conversation 关联 |
 | `pnpm smoke:antigravity-runtime` | Antigravity + Codex | 要求 `output.stream_json`，强制原生 `run_command` 固定 `printf` 并断言公开 output/step ID；另覆盖同 Session 续接、私有日志清理和 Antigravity 到 Codex 换绑 |
 | `pnpm smoke:action-approval` | Codex | 验证越界动作的 Approval 与唯一副作用 |
 | `pnpm smoke:multi-agent` | Codex | 同一 CampTurn 的两个真实并发 AgentRun |
-| `pnpm smoke:builtin-cli` | 默认十一种已通过完整矩阵的 Runtime；Cursor 未准入 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。Kimi 已通过十五项 operation、56 条 full-run evidence、三种输入、Gather、conflict、fencing 与 logical/native continuation，进入默认列表 |
-| `pnpm smoke:skills` | Codex 默认；`all` 为十一种已准入 Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十一组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills` 的投影、发现、调用 marker 与 canonical `--to-principal` 教学已通过并进入 `all`；`--to-user` 仅为隐藏兼容 alias |
+| `pnpm smoke:builtin-cli` | 默认十二种已通过完整矩阵的 Runtime；Cursor 未准入 | 首个选中 Runtime 的先导 AgentRun 先通过真实 `rovai` lease 产生一条 Public A2A，并证明对应 Message Delivery 与 publication event；同一历史 Camp 另写真实文件附件。随后另一 Camp 的真实 AgentRun Manifest 冻结该历史 Camp，并以自己的 lease/context 执行 `history.search`、显式历史 `camp.search` 与 `camp.read item`，核对同一 A2A identity 及附件 `kind/fileCount`。每个真实 AgentRun 其余只使用固定业务命令，调用十五项 CLI operation；Gather case 额外验证成员公开回传被 capture、Lead 不逐条唤醒且只创建一次 completion。其余仍验证旧 send 输入拒绝、Projection/schema、冲突 recovery、release fence、Replay 与后续 AgentRun 新 lease；transport-independent indeterminate 由 CLI response-loss test 覆盖。Kimi 与 Grok 均已通过十五项 operation 并进入默认列表 |
+| `pnpm smoke:skills` | Codex 默认；`all` 为十二种已准入 Runtime | `ROVAI_SKILL_SMOKE_ADAPTERS=all` 逐一尝试十二组真实投递、发现与消息局部注意力；Cursor `.cursor/skills` 为 DocumentationOnly。Kimi `.kimi-code/skills` 与 Grok `.grok/skills` 的投影、发现、调用 marker 和 canonical `--to-principal` 教学已通过并进入 `all`；`--to-user` 仅为隐藏兼容 alias |
 | `pnpm smoke:mcp` | Codex、Claude Code、OpenCode、Copilot；可选 CodeBuddy、Qwen Code | 默认前四种；保留 Runtime 原生配置并逐 Run 追加 MCP；OpenCode 默认使用 `opencode/mimo-v2.5-free` |
-| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略；Codex 同名项应跳过，其余九种由 Rovai 整项优先。Kimi 额外真实调用 stdio、Streamable HTTP 和第二个 stdio Server，并断言三项 exposure 均为 `ready`；默认十种 |
+| `pnpm smoke:mcp-projection` | Codex、Claude Code、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE、Kimi、Grok | 通过真实 Core、Assignment、AgentRun Projection 与 ContextManifest 验证原生配置保留及 Adapter-specific 同名策略。Grok 使用私有进程 Plugin：原生同名项 `NativeWinsSkip`，不同名 assignment 逐 Run 追加并真实调用；Kimi 额外覆盖 stdio、Streamable HTTP 和第二个 stdio Server；默认十一种 |
 | `pnpm smoke:memory-runtime` | Codex + Claude Code | 可只选一种；Claude 有 bounded model/budget 配置 |
 | `pnpm smoke:recovery` | OpenCode 默认 | 可选择其他产品 Runtime；创建 Git fixture 并杀死 Core 验证恢复 |
-| `pnpm smoke:missing-send-recovery` | 十一种已完成专项矩阵的 Runtime（含 Kimi）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture；TRAE/Kimi 使用同一严格 candidate/抑制规则，Kimi private assistant stream 不进入公共 fixture，candidate 先清洗 thinking block |
+| `pnpm smoke:missing-send-recovery` | 十二种已完成专项矩阵的 Runtime（含 Kimi、Grok）；Cursor Disabled | 每种 Runtime 使用独立临时 data-dir/Git workspace，真实执行 zero-send 与 accepted-send suppression；ACP 额外执行 tool→final 并生成独立协议 fixture。Kimi/Grok 与其他 ACP Runtime 共用公开 assistant stream、严格 candidate/抑制规则和完整正文 digest；provider `<think>` 不清洗、不重分类 |
 | `pnpm accept:planned-shutdown` | Claude Code + 当前平台 packaged App | 在隔离 Git workspace/`userData` 中等待真实 input accepted 后退出，验证 deadline、自然 child exit、无伪 terminal、进程 reap、重启 blocker 与关闭 modal 截图；运行前在 macOS 执行 `pnpm package:mac`，在 Windows x64 执行 `pnpm package:windows:x64` |
 | `pnpm accept:onboarding-ui` | 本机首个可用正式 Runtime + packaged App | 不调用模型；用全新隔离 `userData` 验证三页断点、真实 provisioning、`初次集结`、Draft-only starter、重启与 `1040×700` 双主题截图 |
 

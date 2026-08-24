@@ -4937,9 +4937,9 @@ describe('task event projections', () => {
     expect(markup).not.toContain('尚未检查')
     expect(markup).not.toContain('已检查')
     expect(markup).toContain('实验性')
-    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(12)
-    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(12)
-    expect(markup.match(/检查可用性/g)).toHaveLength(11)
+    expect(markup.match(/class="runtime-product-logo"/g)).toHaveLength(13)
+    expect(markup.match(/class="quiet-button runtime-product-check"/g)).toHaveLength(13)
+    expect(markup.match(/检查可用性/g)).toHaveLength(12)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
     expect(markup).not.toContain('九种已支持产品')
@@ -4978,8 +4978,8 @@ describe('task event projections', () => {
       onReload: async () => undefined
     }))
 
-    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(11)
-    expect(markup.match(/不可检查/g)).toHaveLength(11)
+    expect(markup.match(/Windows 尚未验证/g)).toHaveLength(12)
+    expect(markup.match(/不可检查/g)).toHaveLength(12)
     expect(markup).not.toContain('检查可用性')
     expect(markup).toContain('当前平台尚无可检测 Runtime')
     expect(markup).toContain('这不是本机安装、登录或扫描故障')
@@ -5108,11 +5108,13 @@ function runtimeAdmissionRows(
     'trae-cn-cli',
     'cursor-agent',
     'kimi-code-cli',
+    'grok-build',
     'antigravity-app'
   ]
   return runtimeKinds.map((runtimeKind) => {
     const requiresQualification = runtimeKind === 'cursor-agent'
       || (runtimeKind === 'kimi-code-cli' && platform !== 'macos-arm64')
+      || (runtimeKind === 'grok-build' && platform !== 'macos-arm64')
     const effectiveStatus = requiresQualification && status === 'qualified'
       ? 'not_qualified'
       : status

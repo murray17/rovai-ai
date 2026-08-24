@@ -302,8 +302,9 @@ Shell override: KIMI_SHELL_PATH
   无 Approval、Tool 或文件副作用时如实记录，不伪造 deny；
 - provider 只通过权限 `0600` 的仓库外配置注入目标进程，用户 `~/.kimi/config.toml` 保持不变，真实 token
   不进入仓库、数据库或 Evidence；
-- Rovai 不强制关闭 Kimi/MiniMax thinking；完整 `<think>` reasoning block 不进入最终公开消息，未闭合块
-  fail closed，执行过程仍可留在私有 observation/执行台；
+- 冻结 v1.27 验收时，Kimi 曾对 `<think>` reasoning block 使用 terminal sanitizer；v1.28 已由当前决定
+  明确取代该产品边界。现行实现不强制关闭 thinking，也不按 provider/tag 清洗：普通
+  `agent_message_chunk` 原样进入执行台 Evidence、final 与 Missing-Send；
 - 正常完成后，健康、quiescent 且 compatibility key 完全一致的 Host 进入 warm LRU，后继 Run 复用同一
   Host/Session；正式 AgentRun 不覆盖 `HOME` / `KIMI_CODE_HOME`，继承用户原生状态根，Deep Probe 仍使用
   一次性临时 Home。原始 ACP Probe 证明同一 Home 的新进程可 exact resume/load 并保留上下文；产品级回归又
@@ -320,8 +321,8 @@ Shell override: KIMI_SHELL_PATH
   correlation，started 建 pending、blocked 保持、cancelled 清除、completed observation 后清除，并保留
   idle/detached completion detector。Host fixture 已验证 lifecycle frame 不进入 final/Missing-Send；真实
   自动/手动完整 Core observation smoke 尚待执行；
-- Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景通过，Kimi private stream 未进入
-  公共 protocol fixture；
+- Missing-Send zero-send、accepted-send suppression 与 ACP tool→final 三场景在 v1.27 冻结时通过；v1.28
+  已把 Kimi 改为 generic public assistant stream，protocol fixture 直接从原样 chunk 重建 terminal candidate；
 - 早期完整十五项 Built-in CLI matrix 的 `0/15` 并非模型跳过 Shell：保留 fixture 证明 Kimi 已执行验收脚本，
   但脚本在第一项 canonical operation 前把 legacy stdin 非法输入的当前退出码 `2` 错误期待为 `1`。修正该
   过期断言后，十五项 operation、三种输入、Gather capture、精确后继寻址、stale-version conflict、
