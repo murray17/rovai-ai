@@ -81,8 +81,7 @@ Next: <next concrete step>
 1. 在干净的主 checkout 确认并按仓库规则同步 `main`；不覆盖其它未提交工作；
 2. 从 `origin/main` 创建独立治理分支，只更新本次工作需要的治理文档并运行对应文档门禁；
 3. 把治理文档作为独立提交推送到治理分支，并按
-   [本地开发提交与主线合入流程](local-workflow.md#代码提交与主线合入统一使用-pr)创建 PR；不得先尝试
-   直接推送 `main`；
+   [本地开发提交与主线合入流程](local-workflow.md#代码-push-流程)创建 PR；
 4. 等待治理 PR 合入，重新获取 `origin/main`，记录合入后的不可变 SHA，并从它创建或更新编码 worktree；
 5. 在交接的 `Governance` 字段记录该 SHA 和治理 PR。
 

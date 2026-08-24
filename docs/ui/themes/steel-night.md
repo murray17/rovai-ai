@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: steel-night
 mode: dark
-last_updated: 2026-08-18
+last_updated: 2026-08-24
 ---
 
 # Steel Night
@@ -119,6 +119,7 @@ Dark. `color-scheme: dark`.
 
 | Token | Value |
 |---|---:|
+| `--inline-code-canvas` | `#1d252b` |
 | `--evidence-canvas` | `#12191d` |
 | `--evidence-surface` | `#171f24` |
 | `--evidence-ink` | `#dce4e9` |
@@ -158,7 +159,9 @@ Night inherits the shared non-color structure from `:root`; aliases resolve agai
 ## Brand, semantic, identity, and evidence color rules
 
 The same semantic separation as Day applies. Brightened identity colors retain stable ID mapping;
-they do not become statuses. Evidence and diffs remain neutral and structurally labeled.
+they do not become statuses. Evidence and diffs remain neutral and structurally labeled. Narrative
+inline code uses the quieter `--inline-code-canvas`; fenced code and bounded evidence surfaces
+continue to use `--evidence-canvas`.
 
 ## Contrast requirements
 
