@@ -540,8 +540,8 @@ Runtime；为 Kimi 定义私有 Shell RPC 又会复制 ACP 标准和现有本地
   lifecycle 不变；
 - Core 新增 Host-local Terminal map 与有界输出窗口，生命周期必须随 Run/Host 清理；
 - 实际 Kimi Code 0.38.0 npm 发布包的只读复核和隔离 Home initialize 确认 exact standard wire、4 MiB limit、
-  capability failure 分支与 `terminal=true` negotiation；确定性 Host fixture 证明本地生命周期，但未调用云端模型，
-  不冒充真实 0.38.x 模型 Smoke。
+  capability failure 分支与 `terminal=true` negotiation；确定性 Host fixture 证明本地生命周期，macOS arm64
+  隔离开发 App 的真实 Camp AgentRun 进一步证明两次 Bash、固定输出、Run success 与进程回收。
 
 ### 被拒绝方案
 

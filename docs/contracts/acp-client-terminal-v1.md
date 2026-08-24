@@ -78,6 +78,10 @@ warm reuse。
 - 输出窗口有界并报告 truncation；Terminal wire/output/error 不进入 Camp incoming route；
 - session/load、session/resume、History Restore、Prompt ACK 和现有 `terminal=false` Runtime 行为保持原合同。
 
+当前 macOS arm64 产品证据还包含 Kimi Code 0.38.0 的隔离开发 App/Camp AgentRun：App Deep Probe 为
+authenticated/ready，两次 Bash 分别返回 canonical workspace cwd 与 `ROVAI_KIMI_038_TERMINAL_OK`，Run 成功，
+终态后没有遗留 Kimi/Terminal 子进程。该证据不外推为其他平台的独立资格运行。
+
 ## References
 
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)

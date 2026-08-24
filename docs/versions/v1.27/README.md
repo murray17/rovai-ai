@@ -92,7 +92,8 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   final 时 AgentRun 正确 fail closed，Tool terminal 仍可审计；
 - 实际 Kimi Code 0.38.0 npm 发布包只读复核确认标准 Client Terminal 五个 method、4 MiB limit 与
   `ACP terminal capability is unavailable` 分支；隔离 Home initialize 返回 0.38.0 并接受 `terminal=true`，
-  Host wire/lifecycle fixture 全部通过。未调用云端模型，因此不将其表述为新的真实模型 Smoke；
+  Host wire/lifecycle fixture 全部通过；本机 Homebrew 升级后，隔离开发 App 的真实 Camp AgentRun 通过两次
+  Bash 调用返回 canonical workspace cwd 与 `ROVAI_KIMI_038_TERMINAL_OK`，Run 为 succeeded 且无遗留子进程；
 - 早期 Built-in CLI `0/15` 来自 fixture 把 legacy stdin 非法输入退出码错误地期待为 `1`；Kimi 实际执行了
   Shell，并在第一项 canonical operation 前被断言终止。修正为当前 CLI 合同的退出码 `2` 后，十五项
   operation、三种输入、Gather、conflict、lease fence、exact successor read 与 logical/native continuation

@@ -37,7 +37,8 @@ last_updated: 2026-08-24
 - [x] ACP Client Terminal 采用 Runtime-specific policy：Kimi 初始化为 `terminal=true`，其他 Runtime 保持
   `false`；通用本地 Bridge 的 create→output→wait→release、kill、重复调用、Run cancellation、workspace
   escape、环境继承和输出上限确定性测试通过。实际 0.38.0 npm 发布包只读复核与隔离 Home initialize 确认
-  exact wire、4 MiB limit、错误分支和 `terminal=true` negotiation；未调用云端模型，不把结果描述为真实模型 Smoke；
+  exact wire、4 MiB limit、错误分支和 `terminal=true` negotiation；Homebrew 升级后的隔离开发 App 真实 Camp
+  AgentRun 完成两次 Bash、固定 marker、Run success 和无遗留子进程验证；
 - [x] `traecli 0.120.52` 实测 Bash `rawInput.Command + Description`；Core 只对白名单 Adapter 公开
   `Command`，稀疏 terminal 继承相同 command/kind/digest，六类 command 的 started/terminal 展示通过；
 - [ ] TRAE `exit 7` 仍由 Runtime 报告 `completed` 且不含 exit code；正式 full matrix 的既有 status 断言

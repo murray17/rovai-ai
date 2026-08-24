@@ -250,7 +250,8 @@ Kimi Code 的 ACP compatibility policy 使用通用 Client Terminal `local_bridg
 其他 Runtime 的 Shell 路径。实际 `@moonshot-ai/kimi-code@0.38.0` 发布包的只读复核确认其 exact
 create/output/wait/kill/release、4 MiB output limit 与 capability-unavailable 分支；一次性隔离 Home initialize
 也返回 0.38.0 且接受 `terminal=true`。确定性 Host fixture 覆盖完整 wire、Run cancellation 与 workspace
-escape；日常安装仍为 0.32.0，且未执行 0.38.x 云端模型 Prompt，因此这些结果不冒充真实模型 Smoke。
+escape。macOS arm64 本机随后通过 Homebrew 升级到 0.38.0；隔离开发 App 的 Deep Probe 返回 authenticated/ready，
+真实 Camp AgentRun 经两次 Bash 调用读取 workspace cwd 与固定 marker 后成功结束，且未遗留 Kimi/Terminal 子进程。
 
 Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时
 由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session；`KIMI_MODEL_*`
