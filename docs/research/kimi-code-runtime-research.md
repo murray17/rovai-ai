@@ -4,14 +4,14 @@ runtime: kimi-code-cli
 upstream: MoonshotAI/kimi-code
 authority: research-evidence-only
 status: implemented
-admission: macos_arm64_qualified
-last_updated: 2026-08-23
+admission: shipped_platforms_qualified
+last_updated: 2026-08-24
 ---
 
 # Kimi Code CLI Runtime 接入研究
 
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
-> 第 1–11 节保留接入前研究快照；其假设不能覆盖后续真实证据。当前实施与准入结论见第 12 节及
+> 第 1–11 节保留接入前研究快照；其假设不能覆盖后续真实证据。当前实施与准入结论见第 12、13 节及
 > [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 基本结论
@@ -23,8 +23,8 @@ Runtime: Kimi Code CLI
 建议接入形态: vendor_extended_acp
 Exact launch command: kimi acp
 Transport: stdio / JSON-RPC 2.0 / ACP v1
-当前 Admission: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
-一句话结论: Kimi 0.32.0 + MiniMax M3 已完成 ACP 与 Built-in CLI 十五项完整矩阵，macOS arm64 准入；其他平台仍需独立取证。
+当前 Admission: macOS arm64 / macOS x64 / Windows x64 qualified
+一句话结论: Kimi 0.32.0 + MiniMax M3 已完成 ACP 与 Built-in CLI 十五项完整矩阵；三个 shipped 平台分别完成准入。
 最接近的现有 Adapter: TRAE/Kiro ACP Host，加上 Kimi 私有 Session、Skill catalog 与交互扩展处理。
 ```
 
@@ -329,22 +329,32 @@ Shell override: KIMI_SHELL_PATH
   initial/resumed lease fencing、logical conversation 与 native Session continuation 全部通过，产生 56 条
   full-run evidence。
 
-基于以上证据，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64 保持
-`not_qualified / runtime_platform.qualification_evidence_missing`。
+基于本节 2026-08-22 当时的证据，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64 当时
+保持 `not_qualified / runtime_platform.qualification_evidence_missing`。后续平台晋升见第 13 节。
+
+## 13. 后续逐平台准入
+
+Windows x64 随同当前版本的逐 Adapter Windows 资格矩阵使用独立 Windows evidence revision 晋升。2026-08-24，
+维护者确认 Kimi Code 的 x86_64 macOS 平台验收已经完成，并明确批准开放；`kimi-code-cli × macos-x64` 因此
+使用更新后的 macOS compatibility-register digest 晋升为 `qualified`。
+
+这两项结论不改写第 12 节在 2026-08-22 的 arm64 实测事实，也不把 arm64 结果静默外推。本次 macOS x64
+准入提交运行于 arm64 主机，只复核确定性 Registry、投影与文档门禁；x86_64 资格来源是维护者完成平台验收后
+的明确发布确认。三个 shipped 平台现在都进入普通 discovery、检查、成员配置和 AgentRun 路径。
 
 ## 最终决定
 
 ```text
-Qualified capabilities on macOS arm64: ACP AgentRun、Approval、command output、Missing-Send、cancel/cleanup、managed Skill、Built-in CLI、warm Host/Session reuse、cold Host native resume
+Qualified capabilities: ACP AgentRun、Approval、command output、Missing-Send、cancel/cleanup、managed Skill、Built-in CLI、warm Host/Session reuse、cold Host native resume
 Product continuation: compatible warm Host/Session + user-native Kimi Home；停止/淘汰后 cold exact resume；load-only 时使用 History Restore quarantine；Probe only 使用临时 Home
 External MCP: AdditivePerRun / RovaiWins；ACP session/new/resume/load.mcpServers；stdio 与 Streamable HTTP Verified
 Best-effort capabilities: Kimi-only Prompt lifecycle correlation + idle/detached ACP `compaction.completed` exact-frame detector
 Disabled capabilities: Usage/Cost monitoring
 Verified upstream-only boundaries: 同 Host 并发 Session 隔离、跨隔离 home Unknown session、ACP stdio MCP happy path 与相邻 Session 隔离
-Unverified capabilities: macOS x64、Windows x64
+Platform qualification: macOS arm64 / macOS x64 / Windows x64 qualified
 Known boundary: Client fs write 需要 Core one-time authorization；Runtime 预拒绝不得伪造用户 deny
 Non-blocking gaps: Usage/Cost、Compaction 自动/手动真实 Core observation smoke
-Admission decision: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
+Admission decision: macOS arm64 / macOS x64 / Windows x64 qualified
 ```
 
 ## 上游来源

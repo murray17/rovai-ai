@@ -5113,7 +5113,6 @@ function runtimeAdmissionRows(
   ]
   return runtimeKinds.map((runtimeKind) => {
     const requiresQualification = runtimeKind === 'cursor-agent'
-      || (runtimeKind === 'kimi-code-cli' && platform !== 'macos-arm64')
       || (runtimeKind === 'grok-build' && platform !== 'macos-arm64')
     const effectiveStatus = requiresQualification && status === 'qualified'
       ? 'not_qualified'

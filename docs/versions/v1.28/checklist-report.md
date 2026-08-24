@@ -105,7 +105,7 @@ node scripts/smoke-acp-runtime.mjs
 ```
 
 确定性门禁最终计数：`pnpm test` 通过 76 个 Vitest 文件 / 523 个测试，以及 194 个 Node 测试；
-`pnpm test:rust:pr` 通过 library 308、CLI 25、slow 273 个测试；`pnpm test:rust:core` 通过 146 个测试，
+`pnpm test:rust:pr` 通过 library 310、CLI 25、slow 273 个测试；`pnpm test:rust:core` 通过 156 个测试，
 另有 4 个明确标记的 manual ignored 测试。`cargo fmt --check`、workspace/all-target Clippy `-D warnings`、
 TypeScript typecheck、Desktop build 与文档治理门禁均通过。
 
@@ -126,19 +126,20 @@ read 与同 Native Session continuation 通过。一次最小 command-output 回
 原始 Runtime action 已是 `toolCallId="" / toolName=null / Tool not found`，Rovai 未清洗或重写。相同回路与
 完整 Built-in 原命令随后通过，因此按 provider 瞬态记录，不增加 MiniMax 专属兼容层。
 
-作为非 Grok 回归观察，本机已升级到 Kimi `0.38.0`；其真实 Bash action 连续返回
-`ACP terminal capability is unavailable`，使 accepted-send suppression smoke 无法建立 accepted send。冻结的
-Kimi macOS arm64 资格仍绑定 `0.32.0`，generic agent-text 单元与 zero-send 路径通过；本报告不把 `0.38.0`
-失败伪写成通过，也不因此改变 Grok `0.2.118` 的 adapter-scoped admission。
+合并最新 `main` 后同时保留其 Kimi `0.38.0` 标准 ACP Client Terminal `LocalBridged` 实现，并删除
+Kimi 专属 `agent_message_chunk` 抑制。当前版本真实 Missing-Send 三场景再次通过：zero-send publication、
+accepted-send suppression 与 tool→final（6 条 ACP Tool event）；这证明 Terminal 桥与 Kimi/Grok generic
+agent-text 原样投影可以同时成立，不需要 MiniMax 专属清洗或解析。
 
 ## Desktop 包与 AgentRun View 验收
 
 `pnpm package:mac` 已产出 arm64 包 `dist/mac-arm64/Rovai-ai.app`。App、内置 `rovai-core` 与 `rovai` CLI
-均通过 `codesign --verify --deep --strict`；Core UUID 为 `4289A8B1-6B16-3E4C-B5A9-FAAD4A52FC20`，CLI UUID
-为 `0F90237C-2C3B-324D-9F9E-790CD835094C`，与 staging release 二进制一致。
+均通过 `codesign --verify --deep --strict`；最终合并包 Core UUID 为 `F5270959-9A01-3920-A473-1FC1AF88EE1B`，
+CLI UUID 为 `7816CE01-062B-39E2-88F1-8BD0EFEBB59E`，与 staging release 二进制一致。
 验收后同一包已替换 `/Applications/Rovai AI.app`，旧包保留为
-`/Applications/Rovai AI.app.backup-before-grok-v128-20260825-002302`；替换没有终止正在运行的日常实例，
-因此该实例需由用户正常退出并重新打开后才会加载磁盘上的新包。
+`/Applications/Rovai AI.app.backup-before-grok-v128-main-20260825-005025`，接入前原包另保留在
+`/Applications/Rovai AI.app.backup-before-grok-v128-20260825-002302`。替换没有终止正在运行的日常实例，
+因此当前实例需由用户正常退出并重新打开后才会加载磁盘上的最终合并包。
 
 验收使用独立 `userData` 启动该包，未复用日常 App 数据。包内 App CLI 的 `runtime check` 返回
 `grok-build / ready`，模型目录返回默认 `minimax-m3` 与可选 `grok-4.5`；随后创建队员“艾达”（Runtime
@@ -153,7 +154,7 @@ Agent 执行台已实际打开并核对：队员、Grok Build、实际模型、R
 - 资格证据：[macos-arm64-grok-build-v1.json](../../../qualification/runtime-platform/macos-arm64-grok-build-v1.json)，
   digest `sha256:4af780448b73c2e8878cd63b298620ebf46b1e1f2181b7c44a0ab5cac9c28c21`；
 - 兼容性总表：[Runtime 兼容性清单](../../runtime-compatibility.md)，digest
-  `sha256:1093f682bab77c6d9cbe7d053f63e00d2748a448eecd22d4ce2c89e10c27ff28`；
+  `sha256:52a77b5ff6f8331d45f21d594b6f2830a737ab87656e98ca0e51dad48d1d3ab8`；
 - Base revision：`c5c745bf19745a2ca20a44f534aedcac843e4725`；
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-grok-build`；
 - Branch：`codex/grok-build-runtime`；通过 PR 交付并合并 `main`。

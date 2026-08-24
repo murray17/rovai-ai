@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-19
+last_updated: 2026-08-24
 ---
 
 # 本地开发与 App 隔离流程
@@ -57,6 +57,23 @@ Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等�
 7. 不得为了方便直接调用 `electron-vite dev`、直接打开 `dist/.../Rovai-ai.app`，或让
    `rovai-core --data-dir` 指向日常目录；
 8. 测试结束后只清理本次命令创建且路径已经确认的临时目录，不推测或递归删除日常目录。
+
+## 代码 Push 流程
+
+本仓库所有变更统一通过 Pull Request 合入 `main`。
+
+本地开发完成后的固定流程是：
+
+1. 从已同步的 `origin/main` 创建 `rovai/<task>` 任务分支。需要隔离目录时，按
+   [Git Worktree 生命周期与清理](worktrees.md)创建并记录分支、基线和绝对路径；
+2. 在任务分支实施、提交并完成与改动风险相称的本地门禁；
+3. 使用 `git push -u origin <任务分支>` 推送任务分支，然后创建以 `main` 为 base 的 PR，并向用户提供
+   PR 链接；
+4. 等待仓库要求的 Review 与 CI 通过后合并 PR；
+5. 合并后执行 `git fetch origin main`，确认任务提交已进入 `origin/main`，再同步本地主 checkout；
+6. 使用 worktree 时，确认远端已合入且工作目录干净后，再移除 worktree 与本地任务分支。
+
+若 PR 创建或合并受阻，保留已推送的任务分支并报告原因。
 
 ## 开发版：只使用 `pnpm dev`
 

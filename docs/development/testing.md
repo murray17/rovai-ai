@@ -169,7 +169,7 @@ pnpm build:desktop
 | 命令 | 主要范围 | 外部要求 |
 | --- | --- | --- |
 | `pnpm smoke:core` | 全新数据库、普通目录、空 Git 仓库、导航、重启和删除 | Git；不调用模型 |
-| `pnpm smoke:member-config` | 十二种产品目录 identity、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；Cursor 验证 Catalog/Admission 阻断，不制造 Installation 或配置；macOS arm64 Kimi 已准入，在 PATH 隔离 fixture 中按缺少 executable 返回 `runtime_configuration_unavailable`；Settings Preview 不进入该矩阵 |
+| `pnpm smoke:member-config` | 十二种产品目录 identity、Installation、成员 Runtime 配置、Readiness 和重启 | 不调用模型；可用 `ROVAI_*_BIN` 覆盖发现；Cursor 验证 Catalog/Admission 阻断，不制造 Installation 或配置；macOS arm64/x64 Kimi 已准入，在 PATH 隔离 fixture 中按缺少 executable 返回 `runtime_configuration_unavailable`；Settings Preview 不进入该矩阵 |
 | `pnpm smoke:memory` | Memory Migration、治理、Revision、导出、投影恢复和权限 | 不调用模型 |
 
 ### 真实 Runtime Smoke

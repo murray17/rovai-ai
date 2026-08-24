@@ -14,7 +14,7 @@ last_updated: 2026-08-24
 [Runtime Platform Admission v1](../contracts/runtime-platform-admission-v1.md)拥有；Runtime 启动与延迟验证边界见
 [Runtime 进程与校验不变量](foundational-invariants.md#runtime-process-verification)、
 [Runtime 恢复与关闭不变量](foundational-invariants.md#runtime-recovery-shutdown)及
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。实测版本和能力只由
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。实测版本和能力只由
 [Runtime 兼容性清单](../runtime-compatibility.md)记录。
 
 ## 四层权威
@@ -141,10 +141,14 @@ Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime
 
 ## 内部诊断与公开 Runtime failure
 
-Claude Code 与 Antigravity 的执行或显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
+任一 Product Runtime 的真实执行失败，以及支持该边界的显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
 `RuntimeFailureView`。该对象只保存 Runtime identity、origin、phase、稳定 code、安全 summary/detail 与
 retryable；完整 error chain、原始 stderr、私有日志、exit status、byte count 和 digest 仍属于内部诊断。
 公开 detail 必须先脱敏、去控制字符并有界化，不能包含 Prompt、用户消息、Tool input 或完整 Tool output。
+
+ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界 message；Prompt activity 与 matching
+response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 false，不能用 Provider 可重试分类覆盖 Core
+的防重放门禁。原始 `error.data` 不进入公开投影。
 
 `runtime` 只表示 Runtime/Provider 明确报错；协议、参数和输出格式问题是 `compatibility`，executable/cwd/
 权限/附件目录问题是 `environment`，只有明确 Core 状态、持久化或配置生成证据才能是 `rovai`，否则为
@@ -153,7 +157,7 @@ retryable；完整 error chain、原始 stderr、私有日志、exit status、by
 `AgentRunView.failure` 和 `ProductRuntimeAvailability.failure` 只投影该安全对象。显式检查可以持久化 Probe
 Attempt failure；启动浅检测的瞬时 version failure 仍只用于内部发现，不升级为产品级 failure，也不覆盖
 last-known-good。此增量不修改其他 Runtime 的执行路径或 Availability 状态集合。字段级合同见
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。
 
 ## TRAE CLI CN 当前边界
 
@@ -216,8 +220,22 @@ Cursor Host 完成 Run 后停止，不跨 Run 延伸未证明的进程状态。
 项目 `.cursor/skills` 是 Rovai managed delivery target；该结论只建立可清理文件投影，不把上游文档中的
 Skill 扫描能力冒充真实 load/invocation pass。当前所有平台未准入，因此普通产品路径不会实际投影或启动
 Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identity 只用于内部兼容、历史读取和后续实现。
-字段级行为见 [Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，
+字段级行为见 [Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
+
+## ACP Client Terminal 边界
+
+ACP Client Terminal 是 Runtime-specific compatibility capability，不是全局 ACP 开关。Adapter registry 为每种
+Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initialize 声明 `terminal=true` 并在同一 Host
+安装通用标准 Bridge。当前只有 Kimi Code 使用 `local_bridged`；其他 ACP Runtime 继续声明 `terminal=false`，
+保留各自已资格验证的内部 Shell 路径。
+
+Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
+admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
+macOS protected-tree deny 和平台进程树所有权；cwd 经 canonical/symlink 检查后不得逃逸 workspace。Run cancel、
+detach、Host EOF/shutdown 与 fleet reap 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr
+使用有界私有 buffer，Terminal wire、output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
+[ACP Client Terminal v1](../contracts/acp-client-terminal-v1.md)。
 
 ## Kimi Code 当前边界
 
@@ -226,6 +244,14 @@ Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identi
 `KIMI_MODEL_*` provider 字段，并只注入目标子进程。`KIMI_MODEL_CAPABILITIES=thinking` 只声明能力，
 Rovai 不强制关闭 Kimi/MiniMax thinking。未知、重复、缺失、格式错误或权限过宽均在 launch 前
 fail closed；秘密不进入数据库、Evidence、diagnostics 或公开 command。
+
+Kimi Code 的 ACP compatibility policy 使用通用 Client Terminal `local_bridged` 模式。初始化真实声明
+`clientCapabilities.terminal=true`，Shell 子进程由上述本地 Bridge 执行；这不是 Kimi 私有 Shell 协议，也不改变
+其他 Runtime 的 Shell 路径。实际 `@moonshot-ai/kimi-code@0.38.0` 发布包的只读复核确认其 exact
+create/output/wait/kill/release、4 MiB output limit 与 capability-unavailable 分支；一次性隔离 Home initialize
+也返回 0.38.0 且接受 `terminal=true`。确定性 Host fixture 覆盖完整 wire、Run cancellation 与 workspace
+escape。macOS arm64 本机随后通过 Homebrew 升级到 0.38.0；隔离开发 App 的 Deep Probe 返回 authenticated/ready，
+真实 Camp AgentRun 经两次 Bash 调用读取 workspace cwd 与固定 marker 后成功结束，且未遗留 Kimi/Terminal 子进程。
 
 Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时
 由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session；`KIMI_MODEL_*`
@@ -255,9 +281,10 @@ advertisement 只安全路由为私有 metadata，当前没有产品消费者，
 Missing-Send、cancel 与 cleanup。早期 Built-in CLI `0/15` 是 fixture 在第一项 canonical operation 前错误检查
 legacy stdin 非法输入退出码；改为当前 CLI 合同的 `2` 后，十五项 operation、三种输入、Gather、conflict、
 lease fencing、exact successor read 与 logical/native continuation 全部通过，共产生 56 条 full-run evidence。
-因此 snapshot 声明 built-in transport，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64
-没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，证据状态见
+因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
+`qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
+x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## Grok Build 当前边界
@@ -312,7 +339,7 @@ Kimi 暴露 Session-scoped `permission_mode=default|plan|auto|yolo`，新 draft 
 writable AgentRun 通过标准 ACP `session/set_config_option` 投递 `mode=yolo`，read-only AgentRun 强制
 `plan`。descriptor 的 `recommendedValue=default` 只是保守提示，不改变 Product default；已有成员保存的
 `default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。十二种 Runtime 的 exact 默认矩阵见
-[Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)。
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。
 
 ## Preview 呈现与晋升
 

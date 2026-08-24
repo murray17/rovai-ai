@@ -18,7 +18,7 @@ last_updated: 2026-08-24
 | `qoder-cli` | Qoder | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `codebuddy-cli` | CodeBuddy | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
 | `qwen-code` | Qwen Code | ACP v1 | `fine_grained` | 同 ACP 合同 | 受控 fixture 通过 | Skill turn 通过 |
-| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；仅 `rawInput.command` 进入公开 input，命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 公共 command/相邻 raw 字段排除、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；当前安装真实 command-output smoke 通过，完整展示 post-fix smoke 待运行 |
+| `trae-cn-cli` | TRAE CLI CN | ACP v1 | `fine_grained` | 同 ACP 合同；标准 `rawInput.command` 与 TRAE Bash 实测 `rawInput.Command` 的非空字符串进入公开 input，`Description` 等相邻字段保持私有；命令结构补全缺失的 execute kind；同 `toolCallId` 的 terminal 自带 command/kind/digest；Terminal content 只作 display anchor | 实测 `Command + Description` started、相邻 raw 字段排除、非 TRAE 大写字段 fail-closed、稀疏 terminal、非零 exit code 与固定 `printf` fixture 已建立 | `traecli 0.120.52` completion/cancel、Approval allow/deny、Missing-Send tool→final 与 MCP Projection 正式 Smoke 通过；六类 command 的 started/terminal 展示通过；正式 full matrix 仍被既有 nonzero status 漂移阻断 |
 | `cursor-agent` | Cursor Agent | ACP v1 | `run_level` | 仅采用 ACP 标准 Session/Prompt 终态；`cursor/update_todos`、`cursor/task`、`cursor/generate_image` 保持私有且不生成 Activity，未知 Cursor 扩展 fail closed；认证和结构化工具事件尚未完成真实 admission | 私有 request 路由、私有 notification 隔离与 Runtime-level unknown fallback fixture 已建立 | `2026.08.11-e8db854` 隔离探测通过 initialize；authenticate 超时且未取得 authenticated Session，因此无 completion/tool smoke，不声明细粒度 coverage |
 | `kimi-code-cli` | Kimi Code | ACP v1 | `run_level` | 标准 ACP Shell update 保留稳定 Tool ID、公开 command/output 与 terminal；普通 `agent_message_chunk` 原样进入 agent text Evidence，不按 provider 或 `<think>` 标签清洗；缺少结构化事件时不补造细粒度 Activity | Kimi run-level mapping、Tool chronology、generic agent-text 与 Runtime-level fallback fixture 已建立 | `kimi 0.32.0` + MiniMax M3 真实 prompt、Shell allow/deny、固定 `printf` output、cancel、cleanup 与完整十五项 Built-in CLI matrix 通过；`run_level` 只表示缺少结构化事件时不补造细粒度 Activity，不否定 Built-in transport 资格 |
 | `grok-build` | Grok Build | ACP v1 | `run_level` | 标准 ACP tool update 按既有安全归一；`_x.ai/*` notification 保持 metadata，普通 assistant text 原样进入 agent text Evidence；缺少结构化 Tool 事件时不补造细粒度 Activity | Grok run-level mapping、官方 config、generic agent-text 与 Missing-Send fixture 已建立 | `grok 0.2.118` + MiniMax-M3 的 macOS arm64 真实矩阵由 v1.28 adapter-scoped evidence 冻结；Usage/Cost 不从 vendor metadata 推断 |
@@ -27,6 +27,18 @@ last_updated: 2026-08-24
 
 Coverage 只描述 Core 实际能看到的粒度，不是产品支持等级。若某次运行没有报告结构化 tool event，
 该运行不能因为产品基线为 `fine_grained` 就补写工具调用。
+
+## 2026-08-24 TRAE command display 真实 smoke 记录
+
+- `traecli 0.120.52` 的真实 Bash started event 使用 `rawInput = { Command, Description }`，没有原生
+  `kind`；terminal event 省略 `rawInput`，通过相同 `toolCallId` 与 started observation 关联；
+- 修复后的隔离 Core 对 stdout、stderr、mixed、empty、nonzero 与 large 六类命令都在 started 和 terminal
+  payload 公开原始受控 command，并投影为 `shell.execute`；`Description` 未进入公开 payload；
+- 当前 Codex 宿主禁止嵌套 macOS Seatbelt，本次真实 Runtime 验收仅在临时测试二进制中跳过第二层
+  `sandbox-exec`，正式源码未保留该绕过，数据目录与 Git workspace 均为一次性隔离路径；
+- 正式 full matrix 仍在 nonzero status 断言失败：TRAE 对 `exit 7` 报告 `status=completed`，且
+  `rawOutput` 没有 exit code。临时只放宽该状态断言后，六类 command display 全部通过；此证据不把
+  output 中的 `Error:` 文本推断成退出码，也不冒充既有 nonzero status 合同已经通过。
 
 ## 2026-08-17 command output 真实 smoke 记录
 
@@ -92,8 +104,9 @@ wire shape，Core post-fix live smoke 仍需单独运行。
 | 未识别 | Evidence kind 可证明时使用其域，否则 `unknown` |
 
 `toolCallId` 是 lifecycle identity。ACP `title` 是 Runtime presentation hint，不是分类输入；只有明确的
-`toolName` 才作为精确名称。只有非空字符串 `rawInput.command` 可以投影为公开 `input`；相邻 rawInput 字段
-保持私有并只参与完整 `rawInputDigest`。Runtime 缺失 kind 时，这个窄 command shape 映射为 `execute`。同一
+`toolName` 才作为精确名称。通用 ACP 只有非空字符串 `rawInput.command` 可以投影为公开 `input`；
+`trae-cn-cli` 额外只接受实测 Bash 字段 `rawInput.Command`，该大小写例外不适用于其他 Adapter。相邻
+rawInput 字段保持私有并只参与完整 `rawInputDigest`。Runtime 缺失 kind 时，这个窄 command shape 映射为 `execute`。同一
 `toolCallId` 的 terminal update 即使省略 rawInput/kind，也从当前 Prompt 的进程内观察携带相同 command、kind
 与 digest；不从 title 或 digest 推导。effective execute 的 `exitCode | exit_code` 非零时，公开 terminal status
 与 Action outcome 为 failed，即使 ACP tool lifecycle 报告 completed。
@@ -153,7 +166,8 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。
 - terminal 冲突为 `unsettled`；
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
 - title、provider 和 Runtime 名称永远不决定 domain 或 identity；唯一例外是 Adapter 白名单公开的 ACP
-  `rawInput.command` 可在原生 kind 缺失时证明 shell/execute，但 command 正文不参与 operation identity。
+  `rawInput.command`，以及仅 `trae-cn-cli` 的 `rawInput.Command`，可在原生 kind 缺失时证明
+  shell/execute，但 command 正文不参与 operation identity。
 - 所有公开 Shell command 只允许按上述 Renderer 边界生成完整脱敏的 presentation；没有 command 时保持
   toolName/title/domain fallback。
 - `runtime.diagnostic` 是 non-activity 状态证据；它不能因为 `kind=step`、Runtime 名称或展示文案而伪造成

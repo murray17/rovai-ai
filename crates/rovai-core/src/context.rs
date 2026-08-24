@@ -1919,6 +1919,22 @@ impl ContextService {
         Ok(())
     }
 
+    pub fn runtime_input_delivery_status(
+        &self,
+        database: &Database,
+        delivery_id: &str,
+    ) -> Result<Option<String>> {
+        database
+            .connection()
+            .query_row(
+                "SELECT status FROM runtime_input_delivery WHERE id = ?1",
+                [delivery_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn mark_input_delivery_not_accepted(
         &self,
         database: &mut Database,
@@ -10564,7 +10580,12 @@ mod slow_tests {
             )
             .unwrap();
         let expired = runtime
-            .expire_elapsed_camp_turn_execution_budgets(&mut fixture.database, observed_now, 10)
+            .expire_elapsed_camp_turn_execution_budgets(
+                &mut fixture.database,
+                observed_now,
+                observed_now,
+                10,
+            )
             .unwrap();
         assert_eq!(expired.len(), 1);
         let candidate = runtime

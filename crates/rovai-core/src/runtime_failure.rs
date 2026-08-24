@@ -62,14 +62,6 @@ impl RuntimeFailureView {
     }
 
     pub fn validate(&self) -> Result<()> {
-        if !matches!(
-            self.runtime_kind,
-            AdapterKind::ClaudeCodeCli | AdapterKind::AntigravityApp
-        ) {
-            anyhow::bail!(
-                "public Runtime failure is only supported for Claude Code or Antigravity"
-            );
-        }
         if self.code.trim().is_empty()
             || self.code.len() > 120
             || !self
@@ -288,9 +280,19 @@ fn classify_high_value_runtime_error(
 
 fn runtime_display_name(runtime_kind: AdapterKind) -> &'static str {
     match runtime_kind {
+        AdapterKind::CodexCli => "Codex CLI",
+        AdapterKind::OpencodeCli => "OpenCode",
+        AdapterKind::CopilotCli => "GitHub Copilot CLI",
         AdapterKind::ClaudeCodeCli => "Claude Code",
+        AdapterKind::KiroCli => "Kiro CLI",
+        AdapterKind::QoderCli => "Qoder CLI",
+        AdapterKind::CodebuddyCli => "CodeBuddy CLI",
+        AdapterKind::QwenCode => "Qwen Code",
+        AdapterKind::TraeCnCli => "TRAE CLI",
+        AdapterKind::CursorAgent => "Cursor Agent",
+        AdapterKind::KimiCodeCli => "Kimi Code",
+        AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::AntigravityApp => "Antigravity",
-        _ => "Runtime",
     }
 }
 
@@ -629,6 +631,24 @@ mod tests {
         );
         assert_eq!(compatibility.code, "runtime_stream_incompatible");
         assert_eq!(compatibility.origin, RuntimeFailureOrigin::Compatibility);
+
+        let trae = public_runtime_failure_from_output(
+            AdapterKind::TraeCnCli,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            "runtime_prompt_runtime_error",
+            "TRAE CLI 未能完成运行",
+            Some("ACP error -32603: Internal error"),
+            &[],
+            false,
+        );
+        trae.validate().unwrap();
+        assert_eq!(trae.code, "runtime_prompt_runtime_error");
+        assert_eq!(
+            trae.detail.as_deref(),
+            Some("ACP error -32603: Internal error")
+        );
+        assert!(!trae.retryable);
     }
 
     #[test]

@@ -153,6 +153,8 @@ only boundary of an input or control.
   accent. Semantic danger or attention may replace the accent when meaning requires it.
 - **Evidence:** uses the dedicated evidence and diff tokens, monospaced type where appropriate, and
   structural `+`/`-`, line numbers or labels in addition to color.
+- **Inline code:** narrative inline code uses its dedicated quiet canvas with `0 2px` padding and a
+  `3px` radius; fenced code and bounded evidence surfaces keep the stronger evidence canvas.
 - **Identity:** portraits and eight stable identity tokens are a narrow exception to the neutral
   workspace. Identity treatments do not spread into background decoration.
 

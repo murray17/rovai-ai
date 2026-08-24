@@ -4,14 +4,17 @@
 
 ### 组建一支会一起成长的 Agent 队伍。
 
-Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<br>
+Rovai AI 像一座属于你的 Agent 公会，你可以招募不同性格与分工的队员。<br>
 他们围绕真实任务共同探索、讨论与行动，并在一次次旅程中逐渐形成<br>
 属于这支队伍的默契与协作记忆。
 
 <p>
-  <img src="https://img.shields.io/badge/platform-macOS-111111?logo=apple&logoColor=white" alt="macOS">
-  <img src="https://img.shields.io/badge/Windows_x64-unsigned-4b8f77?logo=windows11&logoColor=white" alt="Windows x64 unsigned">
+  <a href="https://github.com/murray17/rovai-ai/releases"><img src="https://img.shields.io/badge/macOS-arm64%20%2B%20x64-111111?logo=apple&logoColor=white" alt="macOS arm64 + x64"></a>
+  <a href="https://github.com/murray17/rovai-ai/releases"><img src="https://img.shields.io/badge/Windows-x64-0078D4?logo=windows11&logoColor=white" alt="Windows x64"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-4b8f77" alt="MIT License"></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.85%2B-000000?logo=rust&logoColor=white" alt="Rust 1.85+"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Node.js-24%2B-339933?logo=node.js&logoColor=white" alt="Node.js 24+"></a>
+  <a href="https://linux.do/"><img src="https://img.shields.io/badge/LINUX%20DO-Community-1f6feb" alt="LINUX DO Community"></a>
 </p>
 
 <p>
@@ -59,7 +62,7 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
 
 ## 看看一支队伍如何开始协作
 
-这一次，我们招募到了四位伙伴：
+这一次，有四名冒险者响应了招募：
 
 > **游学者叮叮**——听说狐狸就是这么叫的；<br>
 > **爱反驳的芝士**——呃，一只雪豹；<br>
@@ -115,12 +118,12 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
       <a href="docs/assets/readme/recruit-member.png">
         <img
           src="docs/assets/readme/recruit-member.png"
-          alt="Rovai AI 招募伙伴"
+          alt="Rovai AI 招募队员"
           width="273"
         >
       </a>
       <br>
-      <strong>招募伙伴</strong>
+      <strong>招募队员</strong>
     </td>
     <td align="center" width="33%">
       <a href="docs/assets/readme/grill-duo.png">
@@ -151,7 +154,7 @@ Rovai AI 让你像组建冒险团一样，招募个性鲜明的长期队员。<b
   <sub>点击任意图片查看完整截图。</sub>
 </p>
 
-第一次集结时，他们只是性格与分工不同的伙伴。
+第一次集结时，他们只是性格与分工不同的独行者。
 
 随着一次次讨论、行动与交接，这些差异才慢慢变成队伍之间的默契。
 
@@ -206,7 +209,7 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 | [Claude Code](https://code.claude.com/docs/en/installation) | 兼容追加 | 兼容追加 | 原生方式支持 |
 | [Codex CLI](https://developers.openai.com/codex/cli/) | 兼容追加 | 兼容追加 | 原生方式支持 |
 | [OpenCode](https://opencode.ai/docs/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
-| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
+| [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
 | [Antigravity](https://www.antigravity.google/docs/cli-getting-started) | 支持 Runtime 原生 MCP | 兼容追加 | 基于 Runtime 能力 |
 | [Kiro CLI](https://kiro.dev/docs/cli/) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
 | [Qoder CLI](https://docs.qoder.com/cli/installation) | 兼容追加 | 兼容追加 | Runtime compact 事件驱动 |
@@ -216,10 +219,6 @@ Agent Runtime 则决定他通过什么工具与模型参与任务。
 | [Kimi Code](https://github.com/MoonshotAI/kimi-code) | 兼容追加 | 兼容追加 | 原生续接；压缩后重投递 |
 
 具体版本、能力与实测边界见：[Agent Runtime 兼容性清单](docs/runtime-compatibility.md)。
-
-Kimi Code 当前已完成 macOS arm64 与 Windows x64 准入；macOS x64 尚未准入。
-Windows x64 当前设置页展示的十一种 Runtime 均已完成资格准入；Cursor Agent 不在当前设置页范围，
-并继续保持 Windows 未准入。
 
 ---
 
@@ -242,7 +241,7 @@ Windows x64 当前设置页展示的十一种 Runtime 均已完成资格准入�
 <p align="center">
   <img
     src="docs/assets/readme/rovai-architecture.png"
-    alt="Rovai AI architecture showing Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and runtime-native capabilities"
+    alt="Rovai AI architecture showing Principal, Desktop, Core, Runtime Adapter Layer, Agent Runtimes, user workspace, and Runtime-native capabilities"
     width="100%"
   >
 </p>
@@ -259,27 +258,19 @@ Windows x64 当前设置页展示的十一种 Runtime 均已完成资格准入�
 
 我们相信，队伍是这样长出来的
 
-> **能力让队员加入队伍，共同经历才让他们成为伙伴。**
-
-### ✦ 不是随从，是伙伴
-
-随从只管照做，伙伴会有自己的看法。
-
-他们会接过任务，也会在你走偏时问一句：
-
-> **“我们为什么要走这条路？”**
-
-### ✦ 成长不是变得越来越相似
-
-默契不意味着所有人最后都说出同一个答案。
-
-探索者继续探索，质疑者继续挑错，行动派继续推动事情落地。相处久了，他们会知道什么时候该听谁的。
+> **能力让队员加入队伍，共同经历才让他们彼此了解、彼此信赖。**
 
 ### ✦ 世界观带来温度，工作保持专业
 
 Camp、Principal、队员和旅程，是 Rovai 表达协作关系的语言，不是额外的角色扮演。
 
 Rovai 的设计始终保持克制，不会为了世界观增加无关流程或冗长上下文。
+
+### ✦ 成长不是变得越来越相似
+
+默契不意味着所有人最后都说出同一个答案。
+
+探索者继续探索，质疑者继续挑错，行动派继续推动事情落地。相处久了，他们会知道什么时候该听谁的。
 
 ### ✦ 记忆不是存下所有话，而是记住为什么
 

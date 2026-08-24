@@ -82,7 +82,7 @@ External MCP 支持性裁决、文档治理与 Impeccable UI detector。
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
 | Decisions | 已更新 | [V1.28-D01](decisions.md#v1-28-d01)冻结 provider/Home/auth 边界，[V1.28-D02](decisions.md#v1-28-d02)冻结公开输出与平台准入，[V1.28-D03](decisions.md#v1-28-d03)冻结 External MCP 的 Plugin 追加边界，[V1.28-D04](decisions.md#v1-28-d04)冻结 load-only HistoryRestore，[V1.28-D05](decisions.md#v1-28-d05)冻结 native rules 与 structured compaction redelivery。 |
-| Contracts | 已更新 | [Runtime Launch and Verification](../../contracts/runtime-launch-and-verification-v25.md)与[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)补充 Grok 行为。 |
+| Contracts | 已更新 | [Runtime Launch and Verification](../../contracts/runtime-launch-and-verification-v26.md)与[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)补充 Grok 行为。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)补充 Grok identity、provider 与原生状态边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)补充 Grok detector。 |
 | UI | 已更新 | 复用现有 Runtime catalog、状态与成员参数组件；member-workspace brief 明确 generic agent text 可原样进入执行台与 final。 |
 | Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增 Grok ACP run-level 映射。 |

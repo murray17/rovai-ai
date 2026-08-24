@@ -3,7 +3,7 @@ document_type: implementation-plan
 version: v1.27
 authority: implementation-and-acceptance-status
 status: in_progress
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # v1.27 Kimi Code + MiniMax M3 实施验收计划
@@ -34,12 +34,26 @@ last_updated: 2026-08-23
 
 - [x] 真实 initialize、session/new、MiniMax M3 prompt 与 `end_turn` 通过；
 - [x] 真实 Shell allow-once、pending→in_progress→completed、固定 command output 通过；
+- [x] ACP Client Terminal 采用 Runtime-specific policy：Kimi 初始化为 `terminal=true`，其他 Runtime 保持
+  `false`；通用本地 Bridge 的 create→output→wait→release、kill、重复调用、Run cancellation、workspace
+  escape、环境继承和输出上限确定性测试通过。实际 0.38.0 npm 发布包只读复核与隔离 Home initialize 确认
+  exact wire、4 MiB limit、错误分支和 `terminal=true` negotiation；Homebrew 升级后的隔离开发 App 真实 Camp
+  AgentRun 完成两次 Bash、固定 marker、Run success 和无遗留子进程验证；
+- [x] `traecli 0.120.52` 实测 Bash `rawInput.Command + Description`；Core 只对白名单 Adapter 公开
+  `Command`，稀疏 terminal 继承相同 command/kind/digest，六类 command 的 started/terminal 展示通过；
+- [ ] TRAE `exit 7` 仍由 Runtime 报告 `completed` 且不含 exit code；正式 full matrix 的既有 status 断言
+  保持失败，不从 `Error:` output 猜测退出码，也不把 command display 通过扩大为 status 通过；
 - [x] 真实 `session/cancel` 在有界时间内返回 cancelled，未留下目标进程；
 - [x] `<think>` 块不会进入公开输出，未闭合推理 fail closed；
 - [x] External MCP 通过标准 ACP Session 字段进入 Kimi capability snapshot；Usage/Cost 保持 Disabled；
   Compaction 通过 Kimi-only Prompt lifecycle correlation 与 idle/detached exact completion frame 以
   `best_effort` 接入；真实 `session.resume/load` 与 Built-in transport 保留；
 - [x] ACP Client 文件写入无授权时 fail closed；危险写入无 Tool/Approval/文件副作用时如实记录 Runtime 预拒绝。
+- [x] 修复 matching ACP error 在已有 fenced Prompt activity 后误报 `not_accepted`：输入保持 accepted，Run failure
+  独立结算、普通重试关闭，并保留安全 JSON-RPC error code 与结构化 Runtime failure；无 activity 的预拒绝
+  继续为 not accepted，response 前 Host loss 继续为 delivery unknown。
+- [x] 修复 macOS suspend 后进程 awake elapsed 与 wall clock 分歧：AgentRun/Camp/Conversation/Event 审计字段
+  使用真实 wall clock，Execution Budget 使用计入 suspend 且非倒退的独立 observation。
 - [x] 真实 writable Kimi smoke 直接读取 Core `memberRuntimeDefaults` 得到 `permission_mode=yolo`，固定 Prompt、
   Shell command 和文件写入均完成且没有交互式 Approval；资格用 `permission_mode=default` 的 allow/deny
   矩阵继续独立覆盖审批边界；
@@ -81,9 +95,12 @@ last_updated: 2026-08-23
   十一种 Runtime；范围外 `cursor-agent` 保持 `not_qualified`。
 - [x] 修复 Windows titlebar overlay 的未缩放 `env(titlebar-area-width)` 在 200% zoom 下撑大根 grid；packaged
   planned-shutdown 的 1040×700 Day/Night 与 200% zoom 对话框、文档尺寸、自然退出和恢复矩阵通过。
+- [x] 维护者确认 Kimi x86_64 macOS 平台验收完成并明确批准发布；`kimi-code-cli × macos-x64` 使用更新后的
+  macOS digest-bound evidence revision 晋升为 `qualified`，Core closed matrix、Renderer fixture 与当前文档
+  同步；本提交在 arm64 主机完成确定性回归，不冒充在本提交内重跑 x86_64 真实模型 Smoke。
 
-Kimi 验收不包含 macOS x64、Windows x64 的平台资格，也没有开启 Usage/Cost；Claude Code 的 Windows x64
-资格使用独立 Adapter 证据，不改变 Kimi 或其他 Runtime 的平台状态。Kimi Compaction compatibility
+Kimi 当前在 macOS arm64、macOS x64 与 Windows x64 三个平台均已准入，但仍没有开启 Usage/Cost；Windows x64
+与 macOS x64 使用各自的平台准入来源，不把 arm64 结果静默外推。Kimi Compaction compatibility
 detector 已进入代码和定向 Rust 验证，真实自动/手动完整 Core smoke 仍待执行。warm Host、External MCP 与
 native resume 已进入产品，History Restore 只在 load-only 时作为既有 quarantine fallback。
-十五项 Built-in CLI matrix 已在 macOS arm64 完整通过，该平台已准入；其他平台仍需独立完成同等级证据。
+十五项 Built-in CLI matrix 已在 macOS arm64 完整通过；x86_64 macOS 平台验收由维护者确认完成并批准开放。

@@ -442,6 +442,18 @@ pub const TRAE_RUNTIME_DEFAULT_MODEL_ID: &str = "trae-cn-cli://runtime-default";
 pub const CURSOR_RUNTIME_DEFAULT_MODEL_ID: &str = "cursor-agent://runtime-default";
 pub const KIRO_ADDITIVE_AGENT_NAME: &str = "rovai";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AcpClientTerminalMode {
+    Disabled,
+    LocalBridged,
+}
+
+impl AcpClientTerminalMode {
+    pub const fn is_available(self) -> bool {
+        matches!(self, Self::LocalBridged)
+    }
+}
+
 /// Writes the Kiro custom Agent used by Rovai-ai ACP Hosts. Native MCP sources
 /// remain enabled; the Agent's `mcpServers` table contains only this Run's
 /// additive Rovai definitions.
@@ -498,6 +510,19 @@ pub struct AgentRuntimeAdapterRegistry {
 }
 
 impl AgentRuntimeAdapterRegistry {
+    pub fn acp_client_terminal_mode(&self, kind: AdapterKind) -> AcpClientTerminalMode {
+        match kind {
+            // Kimi Code 0.32 falls back to internal Bash when the ACP Client
+            // advertises terminal=false, while 0.38 requires the negotiated
+            // standard Client Terminal. Both releases implement the same ACP
+            // bridge when terminal=true, so the Runtime identity can own one
+            // compatibility mode without an unverified version range. The
+            // bridge itself remains Runtime-agnostic.
+            AdapterKind::KimiCodeCli => AcpClientTerminalMode::LocalBridged,
+            _ => AcpClientTerminalMode::Disabled,
+        }
+    }
+
     pub fn platform_admission(
         &self,
         kind: AdapterKind,
@@ -529,20 +554,6 @@ impl AgentRuntimeAdapterRegistry {
                 kind,
                 platform,
                 WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-            );
-        }
-        if kind == AdapterKind::KimiCodeCli {
-            if platform == HostPlatformKey::MacosArm64 {
-                return RuntimePlatformAdmission::qualified(
-                    kind,
-                    platform,
-                    MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
-                );
-            }
-            return RuntimePlatformAdmission::not_qualified(
-                kind,
-                platform,
-                RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
             );
         }
         match platform {
@@ -2474,6 +2485,25 @@ fn antigravity_binding_compatibility_digest(
 mod tests {
     use super::*;
     use crate::agent_profile::{PermissionOptionDescriptor, ValueChoice};
+
+    #[test]
+    fn client_terminal_policy_is_local_bridged_only_for_kimi() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        assert_eq!(
+            registry.acp_client_terminal_mode(AdapterKind::KimiCodeCli),
+            AcpClientTerminalMode::LocalBridged
+        );
+        for kind in AdapterKind::ALL {
+            if kind != AdapterKind::KimiCodeCli {
+                assert_eq!(
+                    registry.acp_client_terminal_mode(kind),
+                    AcpClientTerminalMode::Disabled,
+                    "{} must keep its existing Shell path",
+                    kind.as_str()
+                );
+            }
+        }
+    }
 
     #[test]
     fn member_permission_defaults_use_each_runtime_native_maximum() {

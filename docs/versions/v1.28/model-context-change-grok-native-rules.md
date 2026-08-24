@@ -339,4 +339,4 @@ revision 并重新确认。
 - [v1.28 版本概览](README.md)
 - [核心模型上下文变更治理](../../development/model-context-change-governance.md)
 - [Runtime 接入与准入 Checklist](../../development/runtime-integration-checklist.md)
-- [Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)
+- [Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)
