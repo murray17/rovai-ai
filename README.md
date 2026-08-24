@@ -4,8 +4,7 @@
 
 ### Assemble a team of agents that grows together.
 
-Rovai AI lets you recruit long-lived members with distinct personalities,<br>
-the way you would assemble an adventuring party.<br>
+Rovai AI is like an Agent guild of your own, where you can recruit members with different personalities and roles.<br>
 Together, they explore, discuss, and act on real tasks — building<br>
 team chemistry and collaborative memory along the way.
 
@@ -65,7 +64,7 @@ When they first meet, they are only agents with different roles.
 
 ## See a team come together
 
-This time, four new members have joined the party:
+This time, four adventurers answered the call:
 
 > **Dingding, the wandering scholar** — apparently, that's what foxes say;<br>
 > **Cheese, who loves to argue** — uh, a snow leopard;<br>
@@ -123,12 +122,12 @@ everyone is, what this journey is about, and who should speak first.
       <a href="docs/assets/readme/recruit-member.png">
         <img
           src="docs/assets/readme/recruit-member.png"
-          alt="Recruit a companion in Rovai AI"
+          alt="Recruit a member in Rovai AI"
           width="273"
         >
       </a>
       <br>
-      <strong>Recruit a Companion</strong>
+      <strong>Recruit a Member</strong>
     </td>
     <td align="center" width="33%">
       <a href="docs/assets/readme/grill-duo.png">
@@ -159,7 +158,7 @@ everyone is, what this journey is about, and who should speak first.
   <sub>Click any image to view the full screenshot.</sub>
 </p>
 
-At their first gathering, they are simply members with different personalities and roles.
+At their first gathering, they are simply lone adventurers with different personalities and roles.
 
 Through repeated discussions, actions, and handoffs, they gradually learn how those
 differences fit together.
@@ -270,22 +269,7 @@ architecture:
 
 We believe this is how a team grows.
 
-> **Capabilities bring members into the team. Shared experience turns them into companions.**
-
-### ✦ Companions, not followers
-
-Followers simply do as they are told. Companions have opinions of their own.
-
-They take on tasks, but when you are heading the wrong way, they may also ask:
-
-> **“Why are we taking this road?”**
-
-### ✦ Growing together does not mean growing alike
-
-Chemistry does not mean everyone eventually gives the same answer.
-
-Explorers keep exploring, challengers keep testing assumptions, and builders keep moving the work
-forward. Over time, they learn whose judgment to trust, and when.
+> **Capabilities bring members into the team. Shared experience helps them understand and trust one another.**
 
 ### ✦ Worldbuilding adds warmth; the work stays professional
 
@@ -294,6 +278,13 @@ an extra layer of role-playing.
 
 Rovai keeps the design restrained. Worldbuilding never adds irrelevant steps or bloated
 context.
+
+### ✦ Growing together does not mean growing alike
+
+Chemistry does not mean everyone eventually gives the same answer.
+
+Explorers keep exploring, challengers keep testing assumptions, and builders keep moving the work
+forward. Over time, they learn whose judgment to trust, and when.
 
 ### ✦ Remember why, not every word
 
