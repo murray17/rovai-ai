@@ -58,28 +58,22 @@ Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等�
    `rovai-core --data-dir` 指向日常目录；
 8. 测试结束后只清理本次命令创建且路径已经确认的临时目录，不推测或递归删除日常目录。
 
-## 代码提交与主线合入：统一使用 PR
+## 代码 Push 流程
 
-本仓库的普通代码、文档和配置变更统一通过 Pull Request 合入 `main`。开发者或 AI Agent 收到
-“提交到 main”“push 到 main”或同义交付要求时，应将其解释为“让当前改动经 PR 成为
-`origin/main` 的祖先”，不得先尝试直接执行 `git push origin main`，也不得把特性分支先快进到
-本地 `main` 后再碰撞远端保护规则。
+本仓库所有变更统一通过 Pull Request 合入 `main`。
 
 本地开发完成后的固定流程是：
 
-1. 从已同步的 `origin/main` 创建任务分支；AI Agent 默认使用 `codex/` 前缀。需要隔离目录时，按
+1. 从已同步的 `origin/main` 创建 `rovai/<task>` 任务分支。需要隔离目录时，按
    [Git Worktree 生命周期与清理](worktrees.md)创建并记录分支、基线和绝对路径；
-2. 只在任务分支实施、提交并完成与改动风险相称的本地门禁，不把未通过验证的提交移入本地 `main`；
+2. 在任务分支实施、提交并完成与改动风险相称的本地门禁；
 3. 使用 `git push -u origin <任务分支>` 推送任务分支，然后创建以 `main` 为 base 的 PR，并向用户提供
    PR 链接；
-4. 等待仓库要求的 Review 与 CI 终态，通过 PR 合并；不得以管理员绕过、force push 或临时关闭保护规则
-   代替正常合入；
-5. 合并后执行 `git fetch origin main`，确认任务提交是 `origin/main` 的祖先，再把“已推送到 main”作为
-   完成结果报告；本地主 checkout 只在此时按 fast-forward 同步到 `origin/main`；
-6. 使用 worktree 时，在远端合入和工作目录干净得到证明后，再按清理流程移除 worktree 与本地任务分支。
+4. 等待仓库要求的 Review 与 CI 通过后合并 PR；
+5. 合并后执行 `git fetch origin main`，确认任务提交已进入 `origin/main`，再同步本地主 checkout；
+6. 使用 worktree 时，确认远端已合入且工作目录干净后，再移除 worktree 与本地任务分支。
 
-若权限、Review、CI 或仓库规则阻止 PR 创建或合并，应保留已推送的任务分支并报告精确 blocker；直接推送
-`main` 不是回退路径。
+若 PR 创建或合并受阻，保留已推送的任务分支并报告原因。
 
 ## 开发版：只使用 `pnpm dev`
 
