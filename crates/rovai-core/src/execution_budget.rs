@@ -1,4 +1,7 @@
-use std::{sync::OnceLock, time::Instant};
+use std::{
+    sync::{Mutex, OnceLock},
+    time::Instant,
+};
 
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
@@ -10,24 +13,42 @@ pub const PRODUCT_MAX_AGENT_RUN_RESPONSIBILITIES: i64 = 32;
 pub const PRODUCT_MAX_ACCEPTED_A2A: i64 = 16;
 
 #[derive(Debug)]
-struct ProcessMonotonicUtcClock {
+struct ProcessExecutionBudgetClock {
     started_wall: DateTime<Utc>,
-    started_monotonic: Instant,
+    started_awake: Instant,
+    last_observed: Mutex<DateTime<Utc>>,
 }
 
-static PROCESS_MONOTONIC_UTC_CLOCK: OnceLock<ProcessMonotonicUtcClock> = OnceLock::new();
+static PROCESS_EXECUTION_BUDGET_CLOCK: OnceLock<ProcessExecutionBudgetClock> = OnceLock::new();
 
 pub fn camp_turn_execution_budget_now() -> DateTime<Utc> {
-    let clock = PROCESS_MONOTONIC_UTC_CLOCK.get_or_init(|| ProcessMonotonicUtcClock {
-        started_wall: Utc::now(),
-        started_monotonic: Instant::now(),
+    let wall_now = Utc::now();
+    let clock = PROCESS_EXECUTION_BUDGET_CLOCK.get_or_init(|| ProcessExecutionBudgetClock {
+        started_wall: wall_now,
+        started_awake: Instant::now(),
+        last_observed: Mutex::new(wall_now),
     });
-    let elapsed = Duration::from_std(clock.started_monotonic.elapsed())
+    let awake_elapsed = Duration::from_std(clock.started_awake.elapsed())
         .unwrap_or_else(|_| Duration::seconds(i64::MAX));
-    clock
+    let awake_now = clock
         .started_wall
-        .checked_add_signed(elapsed)
-        .unwrap_or(DateTime::<Utc>::MAX_UTC)
+        .checked_add_signed(awake_elapsed)
+        .unwrap_or(DateTime::<Utc>::MAX_UTC);
+    let mut last_observed = clock
+        .last_observed
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let observed = reconcile_execution_budget_time(wall_now, awake_now, *last_observed);
+    *last_observed = observed;
+    observed
+}
+
+fn reconcile_execution_budget_time(
+    wall_now: DateTime<Utc>,
+    awake_now: DateTime<Utc>,
+    last_observed: DateTime<Utc>,
+) -> DateTime<Utc> {
+    wall_now.max(awake_now).max(last_observed)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,6 +149,26 @@ mod tests {
     use chrono::TimeZone;
 
     use super::*;
+
+    #[test]
+    fn execution_budget_time_counts_suspend_wall_progress_without_ever_regressing() {
+        let started = Utc.with_ymd_and_hms(2026, 8, 24, 11, 16, 47).unwrap();
+        let after_suspend = Utc.with_ymd_and_hms(2026, 8, 24, 12, 0, 7).unwrap();
+        let awake_only = started + Duration::seconds(5);
+
+        assert_eq!(
+            reconcile_execution_budget_time(after_suspend, awake_only, started),
+            after_suspend
+        );
+        assert_eq!(
+            reconcile_execution_budget_time(
+                after_suspend - Duration::minutes(10),
+                awake_only + Duration::seconds(1),
+                after_suspend,
+            ),
+            after_suspend
+        );
+    }
 
     #[test]
     fn requested_budget_is_clamped_by_product_safety_maxima() {

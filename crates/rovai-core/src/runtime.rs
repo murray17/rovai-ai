@@ -944,13 +944,15 @@ impl ExecutionRuntimeService {
     pub fn expire_elapsed_camp_turn_execution_budgets(
         &self,
         database: &mut Database,
-        observed_now: chrono::DateTime<chrono::Utc>,
+        observed_budget_now: chrono::DateTime<chrono::Utc>,
+        audit_now: chrono::DateTime<chrono::Utc>,
         limit: i64,
     ) -> Result<Vec<CampTurnExecutionBudgetExpiry>> {
         if !(1..=100).contains(&limit) {
             anyhow::bail!("CampTurn Execution Budget expiry limit must be between 1 and 100");
         }
-        let now = observed_now.to_rfc3339();
+        let budget_now = observed_budget_now.to_rfc3339();
+        let audit_now = audit_now.to_rfc3339();
         let transaction = database
             .connection_mut()
             .transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -967,7 +969,7 @@ impl ExecutionRuntimeService {
                 "#,
             )?;
             statement
-                .query_map(params![now, limit], |row| {
+                .query_map(params![budget_now, limit], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
@@ -987,7 +989,7 @@ impl ExecutionRuntimeService {
                 &camp_turn_id,
                 CampTurnExecutionBudgetExhaustionReason::Elapsed,
                 &command_id,
-                &now,
+                &audit_now,
                 &actor,
                 None,
             )?;
@@ -1479,18 +1481,19 @@ impl ExecutionRuntimeService {
                     "CampTurn Execution Budget is already exhausted",
                 ));
             }
-            let now = camp_turn_execution_budget_now();
-            let now_text = now.to_rfc3339();
+            let budget_now = camp_turn_execution_budget_now();
+            let budget_now_text = budget_now.to_rfc3339();
+            let audit_now_text = chrono::Utc::now().to_rfc3339();
             let deadline = chrono::DateTime::parse_from_rfc3339(&run.execution_budget_deadline_at)
                 .context("CampTurn Execution Budget deadline is invalid")?
                 .with_timezone(&chrono::Utc);
-            if now >= deadline {
+            if budget_now >= deadline {
                 let exhaustion = exhaust_camp_turn_execution_budget(
                     transaction,
                     &run.camp_turn_id,
                     CampTurnExecutionBudgetExhaustionReason::Elapsed,
                     &envelope.command_id,
-                    &now_text,
+                    &audit_now_text,
                     &envelope.actor,
                     None,
                 )?;
@@ -1593,8 +1596,9 @@ impl ExecutionRuntimeService {
                 .map(serde_json::to_string)
                 .transpose()?;
 
-            let lease_expires_at =
-                (now + chrono::Duration::seconds(envelope.payload.lease_seconds)).to_rfc3339();
+            let lease_expires_at = (budget_now
+                + chrono::Duration::seconds(envelope.payload.lease_seconds))
+            .to_rfc3339();
             let next_epoch = run.execution_epoch + 1;
             let updated = transaction.execute(
                 r#"
@@ -1619,7 +1623,7 @@ impl ExecutionRuntimeService {
                         AND camp_turn.status IN ('running', 'waiting')
                         AND camp_turn.cancel_requested_at IS NULL
                         AND camp_turn.execution_budget_exhausted_at IS NULL
-                        AND camp_turn.execution_budget_deadline_at > ?6
+                        AND camp_turn.execution_budget_deadline_at > ?9
                   )
                 "#,
                 params![
@@ -1631,9 +1635,10 @@ impl ExecutionRuntimeService {
                     next_epoch,
                     envelope.payload.lease_owner,
                     lease_expires_at,
-                    now_text,
+                    audit_now_text,
                     envelope.payload.expected_version,
                     starting_git_observation,
+                    budget_now_text,
                 ],
             )?;
             if updated != 1 {
@@ -1653,7 +1658,7 @@ impl ExecutionRuntimeService {
                     updated_at = ?2
                 WHERE id = ?1
                 "#,
-                params![run.conversation_id, now_text],
+                params![run.conversation_id, audit_now_text],
             )?;
             append_domain_event(
                 transaction,
@@ -1721,7 +1726,8 @@ impl ExecutionRuntimeService {
                     "AgentRun is outside the Camp",
                 ));
             }
-            let now = camp_turn_execution_budget_now().to_rfc3339();
+            let budget_now = camp_turn_execution_budget_now().to_rfc3339();
+            let audit_now = chrono::Utc::now().to_rfc3339();
             let updated = transaction.execute(
                 r#"
                 UPDATE agent_run
@@ -1747,14 +1753,15 @@ impl ExecutionRuntimeService {
                         AND camp_turn.status IN ('running', 'waiting')
                         AND camp_turn.cancel_requested_at IS NULL
                         AND camp_turn.execution_budget_exhausted_at IS NULL
-                        AND camp_turn.execution_budget_deadline_at > ?4
+                        AND camp_turn.execution_budget_deadline_at > ?5
                   )
                 "#,
                 params![
                     envelope.payload.agent_run_id,
                     envelope.payload.expected_version,
                     envelope.payload.execution_epoch,
-                    now,
+                    audit_now,
+                    budget_now,
                 ],
             )?;
             if updated != 1 {
@@ -2696,7 +2703,8 @@ impl ExecutionRuntimeService {
                     "Native Session binding requires a Runtime Adapter",
                 ));
             }
-            let now = camp_turn_execution_budget_now().to_rfc3339();
+            let budget_now = camp_turn_execution_budget_now().to_rfc3339();
+            let audit_now = chrono::Utc::now().to_rfc3339();
             let row = transaction
                 .query_row(
                     r#"
@@ -2726,7 +2734,7 @@ impl ExecutionRuntimeService {
                     params![
                         envelope.payload.conversation_id,
                         envelope.payload.agent_run_id,
-                        now,
+                        budget_now,
                     ],
                     |row| {
                         Ok((
@@ -2873,7 +2881,7 @@ impl ExecutionRuntimeService {
                         params![
                             envelope.payload.conversation_id,
                             envelope.payload.native_session_id,
-                            now,
+                            audit_now,
                             envelope.payload.expected_conversation_version,
                             envelope.payload.adapter_installation_id,
                             envelope.payload.binding_compatibility_digest,
@@ -2911,7 +2919,7 @@ impl ExecutionRuntimeService {
                             envelope.payload.binding_compatibility_digest,
                             binding_id,
                             binding_generation,
-                            now,
+                            audit_now,
                             envelope.payload.expected_conversation_version,
                             envelope.payload.previous_adapter_installation_id,
                             envelope.payload.previous_native_session_id,
@@ -2946,7 +2954,7 @@ impl ExecutionRuntimeService {
                         envelope.payload.conversation_id,
                         frozen_installation_generation,
                         frozen_session_compatibility_key,
-                        now,
+                        audit_now,
                         envelope.payload.expected_conversation_version,
                         envelope.payload.native_session_id,
                         binding_id,
@@ -2973,7 +2981,7 @@ impl ExecutionRuntimeService {
                     envelope.payload.conversation_id,
                     envelope.payload.adapter_installation_id,
                     frozen_installation_generation,
-                    now,
+                    audit_now,
                 ],
             )?;
             append_domain_event(
@@ -8121,7 +8129,12 @@ mod tests {
             + chrono::Duration::seconds(1);
         let runtime = ExecutionRuntimeService::default();
         let expired = runtime
-            .expire_elapsed_camp_turn_execution_budgets(&mut database, observed_after_deadline, 10)
+            .expire_elapsed_camp_turn_execution_budgets(
+                &mut database,
+                observed_after_deadline,
+                observed_after_deadline,
+                10,
+            )
             .unwrap();
         assert_eq!(expired.len(), 1);
         assert_eq!(expired[0].camp_turn_id, camp_turn_id);
@@ -8200,6 +8213,7 @@ mod tests {
         let no_second_expiry = runtime
             .expire_elapsed_camp_turn_execution_budgets(
                 &mut database,
+                observed_after_deadline + chrono::Duration::seconds(1),
                 observed_after_deadline + chrono::Duration::seconds(1),
                 10,
             )
