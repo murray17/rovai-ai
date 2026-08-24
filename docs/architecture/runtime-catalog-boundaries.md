@@ -219,6 +219,20 @@ Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identi
 字段级行为见 [Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
+## ACP Client Terminal 边界
+
+ACP Client Terminal 是 Runtime-specific compatibility capability，不是全局 ACP 开关。Adapter registry 为每种
+Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initialize 声明 `terminal=true` 并在同一 Host
+安装通用标准 Bridge。当前只有 Kimi Code 使用 `local_bridged`；其他 ACP Runtime 继续声明 `terminal=false`，
+保留各自已资格验证的内部 Shell 路径。
+
+Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
+admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
+macOS protected-tree deny 和平台进程树所有权；cwd 经 canonical/symlink 检查后不得逃逸 workspace。Run cancel、
+detach、Host EOF/shutdown 与 fleet reap 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr
+使用有界私有 buffer，Terminal wire、output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
+[ACP Client Terminal v1](../contracts/acp-client-terminal-v1.md)。
+
 ## Kimi Code 当前边界
 
 `kimi-code-cli` 通过 `kimi acp` 复用 ACP v1 Host。Core 不读取或改写用户 `~/.kimi`，而是从权限收窄的
@@ -226,6 +240,13 @@ Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identi
 `KIMI_MODEL_*` provider 字段，并只注入目标子进程。`KIMI_MODEL_CAPABILITIES=thinking` 只声明能力，
 Rovai 不强制关闭 Kimi/MiniMax thinking。未知、重复、缺失、格式错误或权限过宽均在 launch 前
 fail closed；秘密不进入数据库、Evidence、diagnostics 或公开 command。
+
+Kimi Code 的 ACP compatibility policy 使用通用 Client Terminal `local_bridged` 模式。初始化真实声明
+`clientCapabilities.terminal=true`，Shell 子进程由上述本地 Bridge 执行；这不是 Kimi 私有 Shell 协议，也不改变
+其他 Runtime 的 Shell 路径。实际 `@moonshot-ai/kimi-code@0.38.0` 发布包的只读复核确认其 exact
+create/output/wait/kill/release、4 MiB output limit 与 capability-unavailable 分支；一次性隔离 Home initialize
+也返回 0.38.0 且接受 `terminal=true`。确定性 Host fixture 覆盖完整 wire、Run cancellation 与 workspace
+escape；日常安装仍为 0.32.0，且未执行 0.38.x 云端模型 Prompt，因此这些结果不冒充真实模型 Smoke。
 
 Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时
 由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session；`KIMI_MODEL_*`

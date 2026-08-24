@@ -206,6 +206,109 @@ impl ManagedProcessLaunchSpec {
         })
     }
 
+    /// Resolves a child command against the exact environment snapshot used by
+    /// this managed Runtime process. Relative paths and shell command strings
+    /// are deliberately rejected: the returned path is always a canonical
+    /// executable identity suitable for the managed launch boundary.
+    pub fn resolve_child_application(&self, command: &str) -> Result<PathBuf> {
+        if command.is_empty() || command.contains('\0') {
+            bail!("managed_process.invalid_application: command is empty or contains NUL");
+        }
+        let command_path = Path::new(command);
+        if command_path.is_absolute() {
+            return canonical_managed_application(command_path);
+        }
+        if command_path.components().count() != 1
+            || command_path.file_name() != Some(std::ffi::OsStr::new(command))
+        {
+            bail!(
+                "managed_process.invalid_application: expected an absolute path or command name, got {}",
+                command_path.display()
+            );
+        }
+        let path = environment_value(&self.environment, std::ffi::OsStr::new("PATH"))
+            .context("managed_process.invalid_application: Runtime PATH is unavailable")?;
+        for directory in env::split_paths(path) {
+            if !directory.is_absolute() {
+                continue;
+            }
+            #[cfg(windows)]
+            let candidates = {
+                let mut candidates = vec![directory.join(command)];
+                if !command.to_ascii_lowercase().ends_with(".exe") {
+                    candidates.push(directory.join(format!("{command}.exe")));
+                }
+                candidates
+            };
+            #[cfg(not(windows))]
+            let candidates = [directory.join(command)];
+            for candidate in candidates {
+                if let Ok(application) = canonical_managed_application(&candidate) {
+                    return Ok(application);
+                }
+            }
+        }
+        bail!(
+            "managed_process.invalid_application: command is not available on Runtime PATH: {command}"
+        )
+    }
+
+    /// Derives a one-shot child from an already-admitted Runtime launch. This
+    /// preserves the Runtime's explicit environment and protected local trees
+    /// while giving the child its own process-group/Job ownership boundary.
+    pub fn derive_runtime_one_shot(
+        &self,
+        application: PathBuf,
+        arguments: Vec<OsString>,
+        working_directory: PathBuf,
+        environment_overrides: BTreeMap<OsString, OsString>,
+        ownership: impl Into<String>,
+    ) -> Result<Self> {
+        let application = canonical_managed_application(&application)?;
+        if arguments
+            .iter()
+            .any(|argument| argument.to_string_lossy().contains('\0'))
+        {
+            bail!("managed_process.invalid_argument: argv contains NUL");
+        }
+        if !working_directory.is_absolute() || !working_directory.is_dir() {
+            bail!(
+                "managed_process.invalid_argument: working directory is unavailable: {}",
+                working_directory.display()
+            );
+        }
+        let mut environment = self.environment.clone();
+        for (key, value) in environment_overrides {
+            if key.is_empty()
+                || key.to_string_lossy().contains(['\0', '='])
+                || value.to_string_lossy().contains('\0')
+            {
+                bail!("managed_process.invalid_argument: environment override is invalid");
+            }
+            insert_environment(&mut environment, key, value);
+        }
+        let ownership = ownership.into();
+        if ownership.trim().is_empty() {
+            bail!("managed_process.invalid_argument: ownership identity is empty");
+        }
+        #[cfg(windows)]
+        let application_identity = windows::capture_application_identity(&application)?;
+        Ok(Self {
+            purpose: ManagedProcessPurpose::RuntimeOneShot,
+            application,
+            arguments,
+            working_directory,
+            environment,
+            stdin_policy: ManagedStdinPolicy::Null,
+            windows_argv_dialect: self.windows_argv_dialect,
+            #[cfg(windows)]
+            application_identity,
+            #[cfg(target_os = "macos")]
+            user_automation_denial_root: self.user_automation_denial_root.clone(),
+            ownership,
+        })
+    }
+
     pub fn application(&self) -> &Path {
         &self.application
     }
@@ -242,6 +345,57 @@ impl ManagedProcessLaunchSpec {
     fn application_identity(&self) -> &windows::WindowsApplicationIdentity {
         &self.application_identity
     }
+}
+
+fn environment_value<'a>(
+    environment: &'a BTreeMap<OsString, OsString>,
+    key: &std::ffi::OsStr,
+) -> Option<&'a std::ffi::OsStr> {
+    #[cfg(windows)]
+    let value = environment
+        .iter()
+        .find(|(candidate, _)| windows::environment_keys_equal(candidate, key))
+        .map(|(_, value)| value);
+    #[cfg(not(windows))]
+    let value = environment.get(key);
+    value.map(OsString::as_os_str)
+}
+
+fn canonical_managed_application(path: &Path) -> Result<PathBuf> {
+    let application = path.canonicalize().with_context(|| {
+        format!(
+            "managed_process.invalid_application: executable is unavailable: {}",
+            path.display()
+        )
+    })?;
+    if !application.is_file() {
+        bail!(
+            "managed_process.invalid_application: expected a file, got {}",
+            application.display()
+        );
+    }
+    #[cfg(windows)]
+    if !application
+        .extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
+    {
+        bail!(
+            "managed_process.invalid_application: expected a native Windows EXE, got {}",
+            application.display()
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if application.metadata()?.permissions().mode() & 0o111 == 0 {
+            bail!(
+                "managed_process.invalid_application: file is not executable: {}",
+                application.display()
+            );
+        }
+    }
+    Ok(application)
 }
 
 fn insert_environment(

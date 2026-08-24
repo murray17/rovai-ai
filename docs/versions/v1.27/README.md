@@ -46,6 +46,9 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 - 发现 `kimi`，以 `kimi acp` 启动 ACP v1；正式 AgentRun 继承用户原生 Kimi Home，正常完成的兼容 Run 复用
   warm Host/Session，Host 被停止或淘汰后由后继 Host 在同一原生 Home 中精确恢复；显式 Deep Probe 仍使用
   一次性临时 Home；
+- ACP Client Terminal 改为 Runtime-specific compatibility policy：Kimi 使用通用本地 `LocalBridged` 并在
+  initialize 声明 `terminal=true`，其他 Runtime 继续为 `false`；标准 create/output/wait/kill/release 复用
+  ManagedProcess、Run workspace/cancellation 与 Host lifecycle，不建立 Kimi 私有或云端 Shell；
 - 从 `~/.config/rovai/kimi-code.env`（或 `ROVAI_KIMI_CONFIG`）读取严格 allowlist 的六个
   `KIMI_MODEL_*` 字段；Unix 上拒绝 group/other 可访问文件；
 - 支持 `default`、`plan`、`auto`、`yolo` 权限模式；新队员 Product default 为原生最高权限 `yolo`，已有
@@ -76,6 +79,9 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 - allow 与 deny 均已通过真实 Approval roundtrip；deny 的目标 Tool 为 `not_executed` 且没有文件副作用；
 - stdout、stderr、mixed、empty、nonzero 与 large output 六类终态 Tool Evidence 已通过；empty 场景中模型未给
   final 时 AgentRun 正确 fail closed，Tool terminal 仍可审计；
+- 实际 Kimi Code 0.38.0 npm 发布包只读复核确认标准 Client Terminal 五个 method、4 MiB limit 与
+  `ACP terminal capability is unavailable` 分支；隔离 Home initialize 返回 0.38.0 并接受 `terminal=true`，
+  Host wire/lifecycle fixture 全部通过。未调用云端模型，因此不将其表述为新的真实模型 Smoke；
 - 早期 Built-in CLI `0/15` 来自 fixture 把 legacy stdin 非法输入退出码错误地期待为 `1`；Kimi 实际执行了
   Shell，并在第一项 canonical operation 前被断言终止。修正为当前 CLI 合同的退出码 `2` 后，十五项
   operation、三种输入、Gather、conflict、lease fence、exact successor read 与 logical/native continuation
@@ -103,8 +109,8 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.26 冻结为 historical；本概览、计划、决定和版本索引建立唯一 current v1.27。 |
-| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation；[V1.27-D08](decisions.md#v1-27-d08)允许零可用 Runtime 无副作用结束首次训练；[V1.27-D09](decisions.md#v1-27-d09)记录 Kimi macOS x64 的独立准入晋升。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)继承用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP 与十二种 Runtime 原生最高权限默认，并冻结 Cursor 隐藏边界；[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)增加 schema 2 与 `runtime_deferred`。 |
+| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation；[V1.27-D08](decisions.md#v1-27-d08)允许零可用 Runtime 无副作用结束首次训练；[V1.27-D09](decisions.md#v1-27-d09)记录 Kimi macOS x64 的独立准入晋升；[V1.27-D10](decisions.md#v1-27-d10)记录 Runtime-specific ACP Client Terminal policy 与通用本地 Bridge。 |
+| Contracts | 已更新 | [ACP Client Terminal v1](../../contracts/acp-client-terminal-v1.md)冻结 capability、标准 wire、Run/workspace fence、有界输出和 cleanup；[Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)继承用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP 与十二种 Runtime 原生最高权限默认，并冻结 Cursor 隐藏边界；[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)增加 schema 2 与 `runtime_deferred`。 |
 | User Automation | 已更新 | [User Automation v1](../../contracts/user-automation-v1.md)补齐 `runtime check/models` 与成员 create/runtime set/clear 的封闭 App CLI；所有写入复用既有 Core Domain Command、显式版本 fence 与幂等 command ID，不开放 generic invoke。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity，并记录 Kimi 三个 shipped 平台的当前准入；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector；[First-run Onboarding](../../architecture/first-run-onboarding.md)增加 configured/deferred 分支。 |
 | UI | 已更新 | Settings 与成员工作区继续展示已接入 Kimi并隐藏 Cursor；Kimi macOS x64 进入普通机器可用性与配置流；首次训练 Runtime 页增加零可用结果面、重新扫描和无副作用“进入 Rovai”。 |
@@ -118,6 +124,7 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 - [实施与验收计划](implementation-plan.md)
 - [版本决定](decisions.md)
 - [Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)
+- [ACP Client Terminal v1](../../contracts/acp-client-terminal-v1.md)
 - [First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)
 - [Kimi Code Runtime Research](../../research/kimi-code-runtime-research.md)
 - [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)

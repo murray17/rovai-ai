@@ -34,6 +34,10 @@ last_updated: 2026-08-24
 
 - [x] 真实 initialize、session/new、MiniMax M3 prompt 与 `end_turn` 通过；
 - [x] 真实 Shell allow-once、pending→in_progress→completed、固定 command output 通过；
+- [x] ACP Client Terminal 采用 Runtime-specific policy：Kimi 初始化为 `terminal=true`，其他 Runtime 保持
+  `false`；通用本地 Bridge 的 create→output→wait→release、kill、重复调用、Run cancellation、workspace
+  escape、环境继承和输出上限确定性测试通过。实际 0.38.0 npm 发布包只读复核与隔离 Home initialize 确认
+  exact wire、4 MiB limit、错误分支和 `terminal=true` negotiation；未调用云端模型，不把结果描述为真实模型 Smoke；
 - [x] 真实 `session/cancel` 在有界时间内返回 cancelled，未留下目标进程；
 - [x] `<think>` 块不会进入公开输出，未闭合推理 fail closed；
 - [x] External MCP 通过标准 ACP Session 字段进入 Kimi capability snapshot；Usage/Cost 保持 Disabled；

@@ -12788,8 +12788,9 @@ fn public_acp_content_text(value: Option<&Value>) -> Option<String> {
                 .and_then(Value::as_str)
                 .and_then(nonempty_public_text),
             // ACP terminal content is only a display anchor owned by the Agent.
-            // Rovai advertises no Client Terminal capability and must not treat a
-            // terminalId (or a diff/resource payload) as public command output.
+            // A Runtime-specific Client Terminal bridge may serve its output
+            // directly on the protocol, but terminalId (and diff/resource
+            // payloads) are never public command output by themselves.
             Some("terminal" | "diff" | "image" | "audio" | "resource" | "resource_link") => None,
             Some(_) => None,
             // Preserve the small legacy shapes emitted by older ACP adapters,
