@@ -1,7 +1,7 @@
 ---
 document_type: development-index
 authority: development-routing
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Rovai-ai 开发者指南
@@ -22,6 +22,10 @@ last_updated: 2026-08-23
 [Git Worktree 生命周期与清理](worktrees.md)。Rovai-ai 的 Rust、Electron 和打包生成物会让每个
 活跃 worktree 占用数 GiB；Task 已合入或明确放弃后，清理 worktree 是同一次任务收口的一部分，
 不能无限期留待以后处理。
+
+所有本地代码、文档和配置变更都必须从任务分支通过 PR 合入 `main`；即使交付要求写成“push 到 main”，
+也不要先尝试直接推送受保护主线，或先把本地 `main` 快进到尚未合入的任务提交。完整步骤见
+[本地开发提交与主线合入流程](local-workflow.md#代码提交与主线合入统一使用-pr)。
 
 在仓库根目录安装锁定依赖并启动开发版桌面应用：
 
