@@ -22,6 +22,10 @@ last_updated: 2026-08-24
 > `runtime_deferred` 无产品副作用终态和对应第三页空结果 UI；正常 Runtime provisioning 与“初次集结”路径
 > 保持不变。
 >
+> 同版本修复 macOS 休眠后 AgentRun 审计时间滞后，以及 ACP Runtime 已产生 Prompt/Tool activity 后以 error
+> response 误报 `not_accepted` 的问题。业务时间改用真实 wall clock，Execution Budget 保留独立非倒退时钟；
+> matching error 在已有 Prompt activity 时保持 input accepted、关闭原 Run 重放，并投影安全结构化 failure。
+>
 > 同版本还修复 TRAE CLI CN Bash command 展示：`traecli 0.120.52` 实测使用
 > `rawInput.Command`，Core 现在只在 `trae-cn-cli` Adapter 边界公开该非空字符串，并继续排除相邻
 > `Description`；其他 ACP Adapter 的大写同形字段保持 fail closed。
@@ -70,6 +74,9 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 - 首次训练扫描结束或失败后没有可直接继续的 Runtime 时，显示统一空结果页；用户可重新扫描，或在尚未
   provisioning 时结束训练并进入普通 App。该终态不创建成员配置、Camp、Run 或 onboarding restore target，
   以后从正常 Settings/成员工作区配置 Runtime。
+- AgentRun `created_at/started_at` 使用真实 UTC wall clock，Execution Budget 使用独立非倒退 observation；
+  ACP matching error 在已有 fenced Prompt activity 时保持 input accepted，失败禁止原 Run 重放并形成所有
+  Product Runtime 通用的安全 `RuntimeFailureView`。
 
 ## 明确边界
 
@@ -107,8 +114,8 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.26 冻结为 historical；本概览、计划、决定和版本索引建立唯一 current v1.27。 |
-| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation；[V1.27-D08](decisions.md#v1-27-d08)允许零可用 Runtime 无副作用结束首次训练；[V1.27-D09](decisions.md#v1-27-d09)记录 Kimi macOS x64 的独立准入晋升。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)继承 v25 的用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP、十二种 Runtime 原生最高权限默认与 Cursor 隐藏边界，并增加 TRAE 专属 `rawInput.Command` 公开白名单；[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)增加 schema 2 与 `runtime_deferred`。 |
+| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation；[V1.27-D08](decisions.md#v1-27-d08)允许零可用 Runtime 无副作用结束首次训练；[V1.27-D09](decisions.md#v1-27-d09)记录 Kimi macOS x64 的独立准入晋升；[V1.27-D10](decisions.md#v1-27-d10)修正 ACP error/activity 输入确认；[V1.27-D11](decisions.md#v1-27-d11)分离审计与预算时间域。 |
+| Contracts | 已更新 | [Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)继承 v25 的 launch/权限/Cursor 边界，增加 TRAE 专属 `rawInput.Command` 公开白名单，并修正 ACP matching error、跨 Runtime failure 与 AgentRun 时间域；[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)增加 schema 2 与 `runtime_deferred`。 |
 | User Automation | 已更新 | [User Automation v1](../../contracts/user-automation-v1.md)补齐 `runtime check/models` 与成员 create/runtime set/clear 的封闭 App CLI；所有写入复用既有 Core Domain Command、显式版本 fence 与幂等 command ID，不开放 generic invoke。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity，并记录 Kimi 三个 shipped 平台的当前准入；[基础架构不变量](../../architecture/foundational-invariants.md#evidence-canonical-activity)记录 TRAE 专属 command 字段边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector；[First-run Onboarding](../../architecture/first-run-onboarding.md)增加 configured/deferred 分支。 |
 | UI | 已更新 | Settings 与成员工作区继续展示已接入 Kimi并隐藏 Cursor；Kimi macOS x64 进入普通机器可用性与配置流；首次训练 Runtime 页增加零可用结果面、重新扫描和无副作用“进入 Rovai”。 |

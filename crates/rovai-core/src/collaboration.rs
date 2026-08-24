@@ -31,8 +31,7 @@ use crate::{
     db::Database,
     execution_budget::{
         CampTurnExecutionBudgetExhaustionReason, CampTurnExecutionBudgetRequest,
-        FrozenCampTurnExecutionBudget, camp_turn_execution_budget_now,
-        freeze_camp_turn_execution_budget,
+        FrozenCampTurnExecutionBudget, freeze_camp_turn_execution_budget,
     },
     gather::cancel_gathers_for_initiator,
     message_delivery::cancel_pending_turn_deliveries,
@@ -2204,7 +2203,10 @@ impl CollaborationService {
                     } else {
                         None
                     };
-                    let now = camp_turn_execution_budget_now().to_rfc3339();
+                    // Domain and audit timestamps must reflect the user's wall clock. Execution
+                    // Budget observation has a separate non-decreasing clock because its elapsed
+                    // safety semantics are not a presentation timestamp.
+                    let now = chrono::Utc::now().to_rfc3339();
                     let created_conversation_ids = if command.execution.is_some() {
                         ensure_resolution_conversations(
                             transaction,

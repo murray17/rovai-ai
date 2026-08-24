@@ -141,10 +141,14 @@ Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime
 
 ## 内部诊断与公开 Runtime failure
 
-Claude Code 与 Antigravity 的执行或显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
+任一 Product Runtime 的真实执行失败，以及支持该边界的显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
 `RuntimeFailureView`。该对象只保存 Runtime identity、origin、phase、稳定 code、安全 summary/detail 与
 retryable；完整 error chain、原始 stderr、私有日志、exit status、byte count 和 digest 仍属于内部诊断。
 公开 detail 必须先脱敏、去控制字符并有界化，不能包含 Prompt、用户消息、Tool input 或完整 Tool output。
+
+ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界 message；Prompt activity 与 matching
+response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 false，不能用 Provider 可重试分类覆盖 Core
+的防重放门禁。原始 `error.data` 不进入公开投影。
 
 `runtime` 只表示 Runtime/Provider 明确报错；协议、参数和输出格式问题是 `compatibility`，executable/cwd/
 权限/附件目录问题是 `environment`，只有明确 Core 状态、持久化或配置生成证据才能是 `rovai`，否则为

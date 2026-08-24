@@ -80,6 +80,7 @@ pub enum AcpIncoming {
         execution_epoch: i64,
         native_prompt_id: String,
         delivery_id: String,
+        native_error_code: Option<i64>,
         error: String,
     },
     Message {
@@ -147,6 +148,7 @@ impl AcpRuntimeOwner {
         adapter_kind: AdapterKind,
         host_instance_id: &str,
         active_prompt: &AcpActivePrompt,
+        native_error_code: Option<i64>,
         error: String,
     ) -> AcpIncoming {
         AcpIncoming::InputNotAccepted {
@@ -156,6 +158,7 @@ impl AcpRuntimeOwner {
             execution_epoch: self.execution_epoch,
             native_prompt_id: active_prompt.prompt_id.clone(),
             delivery_id: active_prompt.delivery_id.clone(),
+            native_error_code,
             error,
         }
     }
@@ -231,6 +234,7 @@ struct AcpActivePrompt {
     prompt_id: String,
     delivery_id: String,
     acceptance_emitted: bool,
+    prompt_activity_observed: bool,
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
 }
 
@@ -521,6 +525,32 @@ enum PendingRpc {
         session_id: String,
         prompt_id: String,
     },
+}
+
+#[derive(Debug, Clone)]
+struct AcpRpcError {
+    code: Option<i64>,
+    message: String,
+}
+
+impl AcpRpcError {
+    fn from_response(value: &Value) -> Self {
+        Self {
+            code: value.get("code").and_then(Value::as_i64),
+            message: value
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ACP request failed")
+                .to_string(),
+        }
+    }
+
+    fn diagnostic(&self) -> String {
+        self.code.map_or_else(
+            || self.message.clone(),
+            |code| format!("ACP error {code}: {}", self.message),
+        )
+    }
 }
 
 pub(crate) struct AcpHost {
@@ -953,12 +983,9 @@ impl AcpHost {
     }
 
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
-        let response = if let Some(error) = message.get("error") {
-            Err(error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("ACP request failed")
-                .to_string())
+        let response_error = message.get("error").map(AcpRpcError::from_response);
+        let response = if let Some(error) = response_error.as_ref() {
+            Err(error.diagnostic())
         } else {
             Ok(message.get("result").cloned().unwrap_or(Value::Null))
         };
@@ -982,16 +1009,18 @@ impl AcpHost {
                     if route.owner != owner || active_prompt.prompt_id != prompt_id {
                         return;
                     }
-                    let should_emit_acceptance = !active_prompt.acceptance_emitted;
+                    let should_emit_input_disposition = !active_prompt.acceptance_emitted;
                     active_prompt.acceptance_emitted = true;
                     let active_prompt = active_prompt.clone();
                     route.phase = AcpSessionPhase::PromptCompleted(active_prompt.clone());
                     route.sequence = route.sequence.saturating_add(1);
-                    Some((active_prompt, should_emit_acceptance, route.sequence))
+                    Some((active_prompt, should_emit_input_disposition, route.sequence))
                 };
-                if let Some((active_prompt, should_emit_acceptance, sequence)) = active_prompt {
-                    match &response {
-                        Ok(_) if should_emit_acceptance => {
+                if let Some((active_prompt, should_emit_input_disposition, sequence)) =
+                    active_prompt
+                {
+                    match (&response, response_error.as_ref()) {
+                        (Ok(_), _) if should_emit_input_disposition => {
                             let _ = self.incoming.send(owner.input_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -999,27 +1028,54 @@ impl AcpHost {
                                 &active_prompt,
                             ));
                         }
-                        Err(error) if should_emit_acceptance => {
+                        (Err(_), Some(_))
+                            if should_emit_input_disposition
+                                && active_prompt.prompt_activity_observed =>
+                        {
+                            // A matching terminal response alone may be a pre-execution
+                            // rejection. Prompt-scoped activity observed before that matching
+                            // response proves the current input was processed; terminal failure
+                            // is recorded separately and must never make the input retryable.
+                            let _ = self.incoming.send(owner.input_accepted(
+                                self.adapter_kind,
+                                &self.host_instance_id,
+                                &session_id,
+                                &active_prompt,
+                            ));
+                        }
+                        (Err(error), Some(response_error)) if should_emit_input_disposition => {
                             let _ = self.incoming.send(owner.input_not_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
                                 &active_prompt,
+                                response_error.code,
                                 error.clone(),
                             ));
                         }
                         _ => {}
                     }
-                    let params = match response {
-                        Ok(result) => json!({
+                    let input_disposition =
+                        if response.is_ok() || active_prompt.prompt_activity_observed {
+                            "accepted"
+                        } else {
+                            "not_accepted"
+                        };
+                    let params = match (response, response_error) {
+                        (Ok(result), _) => json!({
                             "sessionId": session_id,
                             "promptId": prompt_id,
+                            "deliveryId": active_prompt.delivery_id,
                             "requestId": id,
+                            "inputDisposition": input_disposition,
                             "result": result
                         }),
-                        Err(error) => json!({
+                        (Err(error), response_error) => json!({
                             "sessionId": session_id,
                             "promptId": prompt_id,
+                            "deliveryId": active_prompt.delivery_id,
                             "requestId": id,
+                            "inputDisposition": input_disposition,
+                            "nativeErrorCode": response_error.and_then(|error| error.code),
                             "error": error
                         }),
                     };
@@ -1168,6 +1224,7 @@ impl AcpHost {
                 {
                     return AcpSessionMessageRoute::SessionMetadata;
                 }
+                active_prompt.prompt_activity_observed = true;
                 route.sequence = route.sequence.saturating_add(1);
                 AcpSessionMessageRoute::Forward {
                     owner: route.owner.clone(),
@@ -1261,9 +1318,10 @@ impl AcpHost {
         }
         let session_id = session_ids.into_iter().next()?;
         let route = routes.get_mut(&session_id)?;
-        let AcpSessionPhase::PromptActive(active_prompt) = &route.phase else {
+        let AcpSessionPhase::PromptActive(active_prompt) = &mut route.phase else {
             return None;
         };
+        active_prompt.prompt_activity_observed = true;
         route.sequence = route.sequence.saturating_add(1);
         Some((
             session_id,
@@ -1600,6 +1658,7 @@ impl AcpHost {
                 prompt_id: prompt_id.clone(),
                 delivery_id: delivery_id.to_string(),
                 acceptance_emitted: false,
+                prompt_activity_observed: false,
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
             });
         }
@@ -4952,6 +5011,124 @@ while IFS= read -r ignored; do :; done
             ) {
                 return;
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn prompt_error_after_activity_keeps_input_accepted_while_early_rejection_does_not() {
+        for (case_name, prompt_activity, error_code, expected_accepted) in [
+            (
+                "activity-before-error",
+                r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-error","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}'"#,
+                -32603,
+                true,
+            ),
+            ("error-before-activity", ":", -32602, false),
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "rovai-acp-prompt-error-{case_name}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("traecli");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-error","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}}}}}}'
+IFS= read -r prompt || exit 1
+{prompt_activity}
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"error":{{"code":{error_code},"message":"Internal error"}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                ),
+            );
+
+            let frozen = frozen_trae_runtime(&executable);
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::Disabled,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
+                None,
+            )
+            .await
+            .unwrap();
+            let runtime = AcpRuntime::from_host(
+                AcpRuntimeOwner {
+                    agent_run_id: format!("run-{case_name}"),
+                    execution_epoch: 1,
+                },
+                host.clone(),
+                "sha256:compatibility".to_string(),
+                "sha256:mcp".to_string(),
+                root.clone(),
+                Some(exact_attachment_root(&root)),
+                "runtime_managed".to_string(),
+            );
+            runtime
+                .start_or_resume_session(
+                    None,
+                    AcpSessionCapabilities::default(),
+                    "runtime_default",
+                    TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                    &json!({}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap();
+            let prompt_id = runtime
+                .start_prompt(&format!("delivery-{case_name}"), "continue")
+                .await
+                .unwrap();
+
+            if expected_accepted {
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::Message { ref message, .. })
+                        if message.pointer("/params/update/content/text").and_then(Value::as_str)
+                            == Some("working")
+                ));
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::InputAccepted { native_prompt_id, .. })
+                        if native_prompt_id == prompt_id
+                ));
+            } else {
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::InputNotAccepted {
+                        native_prompt_id,
+                        native_error_code: Some(-32602),
+                        ..
+                    }) if native_prompt_id == prompt_id
+                ));
+            }
+            assert!(matches!(
+                receiver.recv().await,
+                Some(AcpIncoming::Message { message, .. })
+                    if message.get("method").and_then(Value::as_str)
+                        == Some("rovai/acp_prompt_completed")
+                        && message.pointer("/params/nativeErrorCode").and_then(Value::as_i64)
+                            == Some(error_code)
+                        && message.pointer("/params/inputDisposition").and_then(Value::as_str)
+                            == Some(if expected_accepted { "accepted" } else { "not_accepted" })
+            ));
+
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
         }
     }
 

@@ -44,6 +44,11 @@ last_updated: 2026-08-24
   Compaction 通过 Kimi-only Prompt lifecycle correlation 与 idle/detached exact completion frame 以
   `best_effort` 接入；真实 `session.resume/load` 与 Built-in transport 保留；
 - [x] ACP Client 文件写入无授权时 fail closed；危险写入无 Tool/Approval/文件副作用时如实记录 Runtime 预拒绝。
+- [x] 修复 matching ACP error 在已有 fenced Prompt activity 后误报 `not_accepted`：输入保持 accepted，Run failure
+  独立结算、普通重试关闭，并保留安全 JSON-RPC error code 与结构化 Runtime failure；无 activity 的预拒绝
+  继续为 not accepted，response 前 Host loss 继续为 delivery unknown。
+- [x] 修复 macOS suspend 后进程 awake elapsed 与 wall clock 分歧：AgentRun/Camp/Conversation/Event 审计字段
+  使用真实 wall clock，Execution Budget 使用计入 suspend 且非倒退的独立 observation。
 - [x] 真实 writable Kimi smoke 直接读取 Core `memberRuntimeDefaults` 得到 `permission_mode=yolo`，固定 Prompt、
   Shell command 和文件写入均完成且没有交互式 Approval；资格用 `permission_mode=default` 的 allow/deny
   矩阵继续独立覆盖审批边界；
