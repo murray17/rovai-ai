@@ -1,5 +1,5 @@
 ---
-version: 4
+version: 5
 slug: "member-workspace"
 primary_target: "apps/desktop/src/renderer/src/MemberManagement.tsx"
 related_targets:
@@ -89,10 +89,9 @@ future contract explicitly opens it. A historically persisted Cursor configurati
 unrelated member edits preserve that Runtime subobject exactly, while the Renderer must not manufacture its
 `execution_mode` or `approval_policy` defaults or offer a new Cursor selection.
 
-Kimi Code follows the same admission-first rule. macOS arm64 currently remains not qualified because its
-Built-in CLI qualification matrix did not produce operation evidence; therefore its model and
-`default | plan | auto | yolo` permission selector stay disabled. macOS x64 and Windows x64 also stay disabled.
-Read-only workspace always projects effective `plan` once a future platform is qualified; provider
+Kimi Code follows the same admission-first rule and is currently qualified on macOS arm64, macOS x64 and
+Windows x64. Its model and `default | plan | auto | yolo` permission selector therefore follow the ordinary
+available Runtime flow when machine readiness also passes. Read-only workspace always projects effective `plan`; provider
 credentials remain private Core configuration and never appear in this surface. Kimi/MiniMax thinking is not
 forcibly disabled; process detail may retain it while final public output excludes raw reasoning tags.
 

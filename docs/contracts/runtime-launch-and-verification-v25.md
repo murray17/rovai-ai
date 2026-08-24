@@ -4,14 +4,16 @@ name: Runtime Launch and Verification
 version: v25
 status: accepted
 source_version: v1.27
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Runtime Launch and Verification v25
 
 v25 replaces [v24](runtime-launch-and-verification-v24.md). v24 的用户原生 Runtime Home、Probe 隔离、
-continuation、External MCP、逐平台准入及十二种 Runtime 原生最高权限默认全部保持不变；本版把 Cursor 的
+continuation、External MCP、逐平台准入字段与消费规则及十二种 Runtime 原生最高权限默认全部保持不变；本版把 Cursor 的
 默认隐藏边界扩展到普通成员 Runtime selector，修正 Settings 与队员配置入口之间的 Renderer 漂移。
+精确 `AdapterKind × HostPlatformKey` 行由 Runtime Platform Admission Registry 与 digest-bound evidence
+拥有，不由本合同冻结；后续平台证据晋升无需改写本合同的 launch、verification 或 permission 语义。
 
 ## Cursor 普通产品入口
 

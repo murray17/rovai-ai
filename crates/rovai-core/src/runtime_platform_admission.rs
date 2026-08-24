@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:6a1a11634d38a5ef03767c68b49eebd9a0883cb7c54250acfa7fd60dfb27bad6";
+    "sha256:b36d537e224e81d07e839841e7d114bb26295faf2757abc9d092c41ce82bb49d";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -212,12 +212,12 @@ mod tests {
     }
 
     #[test]
-    fn existing_macos_catalog_rows_remain_qualified_with_digest_bound_evidence() {
+    fn macos_catalog_qualifies_every_runtime_except_cursor_with_digest_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
 
         for runtime_kind in AdapterKind::ALL
             .into_iter()
-            .filter(|kind| !matches!(kind, AdapterKind::CursorAgent | AdapterKind::KimiCodeCli))
+            .filter(|kind| *kind != AdapterKind::CursorAgent)
         {
             for platform in [HostPlatformKey::MacosArm64, HostPlatformKey::MacosX64] {
                 let admission = registry.platform_admission(runtime_kind, platform);
@@ -242,20 +242,6 @@ mod tests {
             );
             assert_eq!(admission.evidence_revision(), None);
         }
-        let kimi_arm =
-            registry.platform_admission(AdapterKind::KimiCodeCli, HostPlatformKey::MacosArm64);
-        assert!(kimi_arm.is_qualified());
-        assert_eq!(kimi_arm.reason_code(), None);
-        assert_eq!(
-            kimi_arm.evidence_revision(),
-            Some(MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION)
-        );
-        let kimi_x64 =
-            registry.platform_admission(AdapterKind::KimiCodeCli, HostPlatformKey::MacosX64);
-        assert_eq!(
-            kimi_x64.status(),
-            RuntimePlatformAdmissionStatus::NotQualified
-        );
     }
 
     #[test]

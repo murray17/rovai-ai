@@ -6,7 +6,7 @@ authority: version-scope-and-status
 design_status: confirmed
 implementation_status: in_progress
 model_context_change: false
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Rovai-ai v1.27：Kimi Code + MiniMax M3 本地 Runtime 接入
@@ -14,8 +14,9 @@ last_updated: 2026-08-23
 > 当前状态：Kimi Code `0.32.0` 已作为第十二种 Product Runtime identity 接入，并在 macOS arm64 上使用
 > MiniMax 国内 Token Plan、`MiniMax-M3` 与 OpenAI-compatible endpoint 完成基础 ACP、真实 Approval、
 > command-output、Missing-Send、cancel 与进程清理验收。修正 Built-in CLI fixture 的过期退出码断言后，
-> 完整资格矩阵通过十五项 operation 并产生 56 条 full-run evidence；macOS arm64 已晋升为 `qualified`，
-> macOS x64 与 Windows x64 仍未准入。
+> 完整资格矩阵通过十五项 operation 并产生 56 条 full-run evidence；macOS arm64 已晋升为 `qualified`。
+> Windows x64 随后由独立 Windows 资格证据准入；维护者在 2026-08-24 确认 x86_64 macOS 平台验收完成并
+> 明确批准开放。Kimi 当前在 macOS arm64、macOS x64 与 Windows x64 三个 shipped 平台均为 `qualified`。
 >
 > 同版本另修复首次训练在零可用 Runtime 时的永久阻断：Desktop onboarding schema 升级为 v2，新增
 > `runtime_deferred` 无产品副作用终态和对应第三页空结果 UI；正常 Runtime provisioning 与“初次集结”路径
@@ -58,10 +59,10 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   completion frame 以 `best_effort` 启用，不安装 Hook 或修改用户配置。capability snapshot 保留真实
   `session.resume/load`，
   Host 停止或淘汰后由新 Host 优先精确 resume，load 只作 replay-quarantined fallback；
-- macOS arm64 声明 Built-in transport 并进入普通 discovery、检查、成员配置和执行路径；macOS x64 与
-  Windows x64 仍保持准入阻断，不从 arm64 证据外推。
-- Windows x64 的 Claude Code 使用独立 digest-bound 证据进入普通 discovery、检查、成员配置和执行路径；
-  该结论不改变 Kimi 的 Windows 阻断，也不外推到其他 Runtime。
+- Kimi 在 macOS arm64、macOS x64 与 Windows x64 声明 Built-in transport 并进入普通 discovery、检查、
+  成员配置和执行路径；macOS x64 的晋升来自维护者完成平台验收后的明确发布确认，不把 arm64 结论静默外推。
+- Windows x64 的设置页十一种 Runtime 使用独立 digest-bound 证据进入普通 discovery、检查、成员配置和
+  执行路径；该结论不外推到范围外 Cursor。
 - 首次训练扫描结束或失败后没有可直接继续的 Runtime 时，显示统一空结果页；用户可重新扫描，或在尚未
   provisioning 时结束训练并进入普通 App。该终态不创建成员配置、Camp、Run 或 onboarding restore target，
   以后从正常 Settings/成员工作区配置 Runtime。
@@ -94,20 +95,21 @@ Rovai 私有、最小权限的 provider 配置运行 MiniMax M3，而不改写�
   清除，cancelled 只清除；这些 frame 不进入 final 或 Missing-Send。PromptCompleted/Ready/detached warm Host
   保留 exact 四行 completion detector；宽泛关键词和 token-drop 不参与。确定性 Host 回归已覆盖
   started→blocked→completed、单次 observation 与公开文本隔离；真实自动/手动完整 Core smoke 尚未执行；
-- macOS x64 与 Windows x64 没有从 arm64 结论外推资格。
+- macOS x64 在维护者确认独立平台验收完成后于 2026-08-24 晋升；Windows x64 使用独立 Windows 资格证据。
+  两者都不依赖把 arm64 结果静默外推。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | v1.26 冻结为 historical；本概览、计划、决定和版本索引建立唯一 current v1.27。 |
-| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation；[V1.27-D08](decisions.md#v1-27-d08)允许零可用 Runtime 无副作用结束首次训练。 |
+| Decisions | 已更新 | [V1.27-D04](decisions.md#v1-27-d04)保留 warm Host reuse、External MCP 与 async catalog 边界；[V1.27-D05](decisions.md#v1-27-d05)记录初始 idle ACP completion frame；[V1.27-D06](decisions.md#v1-27-d06)把正式 AgentRun 切回用户原生 Home并保留 Probe 临时隔离；[V1.27-D07](decisions.md#v1-27-d07)补齐 Active Prompt lifecycle correlation；[V1.27-D08](decisions.md#v1-27-d08)允许零可用 Runtime 无副作用结束首次训练；[V1.27-D09](decisions.md#v1-27-d09)记录 Kimi macOS x64 的独立准入晋升。 |
 | Contracts | 已更新 | [Runtime Launch and Verification v25](../../contracts/runtime-launch-and-verification-v25.md)继承用户原生 Home、Probe 隔离、warm/cold continuation、Kimi External MCP 与十二种 Runtime 原生最高权限默认，并冻结 Cursor 隐藏边界；[First-run Onboarding v2](../../contracts/first-run-onboarding-v2.md)增加 schema 2 与 `runtime_deferred`。 |
 | User Automation | 已更新 | [User Automation v1](../../contracts/user-automation-v1.md)补齐 `runtime check/models` 与成员 create/runtime set/clear 的封闭 App CLI；所有写入复用既有 Core Domain Command、显式版本 fence 与幂等 command ID，不开放 generic invoke。 |
-| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector；[First-run Onboarding](../../architecture/first-run-onboarding.md)增加 configured/deferred 分支。 |
-| UI | 已更新 | Settings Agent Runtime 目录继续展示已接入 Kimi并隐藏 Cursor；首次训练 Runtime 页增加零可用结果面、重新扫描和无副作用“进入 Rovai”。 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)扩展为十二种 identity，并记录 Kimi 三个 shipped 平台的当前准入；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)记录 Kimi completion frame detector；[First-run Onboarding](../../architecture/first-run-onboarding.md)增加 configured/deferred 分支。 |
+| UI | 已更新 | Settings 与成员工作区继续展示已接入 Kimi并隐藏 Cursor；Kimi macOS x64 进入普通机器可用性与配置流；首次训练 Runtime 页增加零可用结果面、重新扫描和无副作用“进入 Rovai”。 |
 | Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)加入 Kimi ACP `run_level` baseline 与真实 Shell Evidence。 |
-| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 `0.32.0`、MiniMax M3、用户原生 Home、Probe 隔离、warm/cold continuation、External MCP、Built-in 15/15、Kimi Compaction detector 与平台边界；另冻结 Claude Code Windows x64 独立资格 revision。 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)记录 `0.32.0`、MiniMax M3、用户原生 Home、Probe 隔离、warm/cold continuation、External MCP、Built-in 15/15、Kimi Compaction detector 与 macOS x64 晋升；另冻结 Windows x64 独立资格 revision。 |
 | Documentation routing | 已更新 | 文档导航、合同索引和当前决定导航路由到 Runtime Launch v25、本版本与 Kimi Research。 |
 | Root README | 已更新 | 常青能力更新为十二种 Product Runtime identity。 |
 

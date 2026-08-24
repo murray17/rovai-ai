@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Agent Runtime 兼容性清单
@@ -22,12 +22,23 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 当前 closed `AdapterKind` 包含十二种 Product Runtime：Codex CLI、OpenCode、GitHub Copilot、
 Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
-Cursor 在三个目标平台均为 `not_qualified`。Kimi 的 macOS arm64 与 Windows x64 资格均为
-digest-bound `qualified`；macOS x64 仍为 `not_qualified`。
+Cursor 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
+digest-bound `qualified`。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
+
+### 2026-08-24 Kimi Code macOS x64 准入晋升
+
+维护者确认 Kimi Code 的 x86_64 macOS 平台验收已经完成，并明确批准开放该平台。`kimi-code-cli × macos-x64`
+因此从 `not_qualified / runtime_platform.qualification_evidence_missing` 晋升为 digest-bound `qualified`，与
+macOS arm64 一样进入普通 discovery、检查、成员配置和 AgentRun 路径。
+
+本次晋升只改变 Runtime Platform Admission 行，不新增 Adapter、权限、provider、Session、External MCP、Usage
+或 Compaction 语义；现有 Kimi `0.32.0` + MiniMax M3 能力边界继续由下方完整资格复核拥有。当前提交所在主机
+是 macOS arm64，未在本提交内重跑 x86_64 真实模型 Smoke；x86_64 资格依据是维护者已完成验收后的明确发布
+确认，而不是把 arm64 结果静默外推。Windows x64 已由独立 Windows 资格证据准入，不受本次变更影响。
 
 ### 2026-08-22 Kimi Code `0.32.0` + MiniMax M3 macOS arm64 完整资格复核
 
@@ -59,8 +70,8 @@ diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Pla
 `ROVAI_KIMI_CODE_CLI_PRINTF_OK`，allow 与 deny 都完成真实 Approval roundtrip。基础 AgentRun 可用于隔离诊断，
 修正过期 fixture 后 Built-in hard gate 已通过，所以 macOS arm64 为 digest-bound `qualified`；snapshot 声明
 Built-in transport，普通产品与默认资格 Smoke 包含 Kimi。External MCP 与兼容 warm Host 已由独立产品矩阵
-启用；Kimi Compaction compatibility detector 独立以 `best_effort` 启用，该结论不扩大为 Usage、macOS x64
-或 Windows x64 产品资格。native resume 使用用户原生 Kimi Home，History Restore 只作为 load-only
+启用；Kimi Compaction compatibility detector 独立以 `best_effort` 启用。该次 2026-08-22 arm64 结论当时
+没有外推为 macOS x64 或 Windows x64 产品资格；两者后来分别通过自己的发布准入。native resume 使用用户原生 Kimi Home，History Restore 只作为 load-only
 fallback。异步 command catalog 没有当前产品消费者，不再作为
 功能空缺跟踪。
 

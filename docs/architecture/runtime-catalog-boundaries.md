@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Runtime Catalog Boundaries
@@ -254,8 +254,9 @@ advertisement 只安全路由为私有 metadata，当前没有产品消费者，
 Missing-Send、cancel 与 cleanup。早期 Built-in CLI `0/15` 是 fixture 在第一项 canonical operation 前错误检查
 legacy stdin 非法输入退出码；改为当前 CLI 合同的 `2` 后，十五项 operation、三种输入、Gather、conflict、
 lease fencing、exact successor read 与 logical/native continuation 全部通过，共产生 56 条 full-run evidence。
-因此 snapshot 声明 built-in transport，macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64
-没有对应证据，保持 `not_qualified / runtime_platform.qualification_evidence_missing`。字段级行为见
+因此 snapshot 声明 built-in transport。macOS arm64、macOS x64 与 Windows x64 当前均为 digest-bound
+`qualified`：arm64 由完整 Kimi 资格矩阵准入，macOS x64 由维护者完成平台验收后的独立发布确认准入，Windows
+x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
 [Runtime Launch and Verification v25](../contracts/runtime-launch-and-verification-v25.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
