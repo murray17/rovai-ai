@@ -2762,7 +2762,6 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
             | AdapterKind::KimiCodeCli
-            | AdapterKind::GrokBuild
     )
 }
 
@@ -3808,7 +3807,7 @@ pub(crate) fn runtime_compatibility_digest(
     canonical_json_digest(&compatibility)
 }
 
-pub(crate) fn freeze_history_restore_compatibility(
+pub(crate) fn freeze_native_session_compatibility(
     mut frozen_runtime: FrozenAgentRuntimeConfig,
     workspace: &AgentRunWorkspace,
 ) -> Result<FrozenAgentRuntimeConfig> {
@@ -3823,14 +3822,14 @@ pub(crate) fn freeze_history_restore_compatibility(
         .canonicalize()
         .with_context(|| {
             format!(
-                "failed to resolve {} HistoryRestore workspace {}",
+                "failed to resolve {} Native Session workspace {}",
                 adapter_kind.as_str(),
                 workspace.execution_root
             )
         })?;
     let is_grok = adapter_kind == AdapterKind::GrokBuild;
     let mut compatibility = json!({
-        "schemaVersion": if is_grok { 3 } else { 1 },
+        "schemaVersion": 1,
         "adapterKind": frozen_runtime.adapter_kind,
         "installationId": &frozen_runtime.installation_id,
         "protocolVersion": &frozen_runtime.protocol_version,
@@ -3847,7 +3846,7 @@ pub(crate) fn freeze_history_restore_compatibility(
     if is_grok {
         let compatibility = compatibility
             .as_object_mut()
-            .context("HistoryRestore compatibility payload must be an object")?;
+            .context("Native Session compatibility payload must be an object")?;
         compatibility.insert(
             "grokNativeConfigurationDigest".to_string(),
             json!(grok_native_configuration_compatibility_digest()?),
@@ -3858,9 +3857,9 @@ pub(crate) fn freeze_history_restore_compatibility(
         );
     }
     let compatibility_digest = canonical_json_digest(&compatibility)?;
-    let compatibility_revision = if is_grok { 3 } else { 1 };
+    let compatibility_flow = if is_grok { "resume" } else { "history-restore" };
     let compatibility_key = format!(
-        "{}:history-restore-v{compatibility_revision}:{compatibility_digest}",
+        "{}:{compatibility_flow}-v1:{compatibility_digest}",
         adapter_kind.as_str()
     );
     if frozen_runtime.native_session_compatibility_key.as_deref()
@@ -5761,7 +5760,7 @@ mod route_policy_tests {
         assert!(
             validate_new_session_native_rules(
                 AdapterKind::GrokBuild,
-                AcpSessionContinuation::HistoryRestore,
+                AcpSessionContinuation::Resume,
                 Some("rules"),
             )
             .is_err()
@@ -5769,7 +5768,7 @@ mod route_policy_tests {
         assert_eq!(
             validate_new_session_native_rules(
                 AdapterKind::GrokBuild,
-                AcpSessionContinuation::HistoryRestore,
+                AcpSessionContinuation::Resume,
                 None,
             )
             .unwrap(),
@@ -6037,9 +6036,9 @@ mod tests {
             search_environment_generation: 1,
             executable_path: executable.to_string_lossy().to_string(),
             auth_scope: "default".to_string(),
-            reported_version: Some("0.2.118".to_string()),
+            reported_version: Some("1.0.0".to_string()),
             executable_fingerprint: "sha256:grok".to_string(),
-            capabilities: vec!["session.load".to_string()],
+            capabilities: vec!["session.resume".to_string()],
             protocol_version: "acp-v1".to_string(),
             model: ResolvedModelSelection {
                 source: "runtime_default".to_string(),
@@ -9196,7 +9195,7 @@ while IFS= read -r ignored; do :; done
                 Some("session-1"),
                 load_only,
             ),
-            AcpSessionContinuation::HistoryRestore
+            AcpSessionContinuation::New
         );
         assert_eq!(
             select_acp_session_continuation(
@@ -9395,12 +9394,12 @@ while IFS= read -r ignored; do :; done
         .unwrap();
         assert_ne!(changed_host, first);
 
-        let history_key = freeze_history_restore_compatibility(frozen.clone(), &workspace)
+        let history_key = freeze_native_session_compatibility(frozen.clone(), &workspace)
             .unwrap()
             .native_session_compatibility_key
             .unwrap();
         assert!(history_key.starts_with("trae-cn-cli:history-restore-v1:"));
-        let same_history_key = freeze_history_restore_compatibility(frozen.clone(), &workspace)
+        let same_history_key = freeze_native_session_compatibility(frozen.clone(), &workspace)
             .unwrap()
             .native_session_compatibility_key
             .unwrap();
@@ -9411,7 +9410,7 @@ while IFS= read -r ignored; do :; done
         let other_workspace =
             AgentRunWorkspace::runtime_managed_path(other_root.to_string_lossy().to_string());
         let other_workspace_key =
-            freeze_history_restore_compatibility(frozen.clone(), &other_workspace)
+            freeze_native_session_compatibility(frozen.clone(), &other_workspace)
                 .unwrap()
                 .native_session_compatibility_key
                 .unwrap();
@@ -9419,7 +9418,7 @@ while IFS= read -r ignored; do :; done
 
         let mut changed_model = frozen.clone();
         changed_model.model.model_id = "another-model".to_string();
-        let changed_model_key = freeze_history_restore_compatibility(changed_model, &workspace)
+        let changed_model_key = freeze_native_session_compatibility(changed_model, &workspace)
             .unwrap()
             .native_session_compatibility_key
             .unwrap();
@@ -9428,7 +9427,7 @@ while IFS= read -r ignored; do :; done
         let mut changed_permissions = frozen.clone();
         changed_permissions.permissions.values = json!({"permission_mode": "plan"});
         let changed_permissions_key =
-            freeze_history_restore_compatibility(changed_permissions, &workspace)
+            freeze_native_session_compatibility(changed_permissions, &workspace)
                 .unwrap()
                 .native_session_compatibility_key
                 .unwrap();
@@ -9437,7 +9436,7 @@ while IFS= read -r ignored; do :; done
         let mut changed_executable = frozen;
         changed_executable.executable_fingerprint = "sha256:changed".to_string();
         let changed_executable_key =
-            freeze_history_restore_compatibility(changed_executable, &workspace)
+            freeze_native_session_compatibility(changed_executable, &workspace)
                 .unwrap()
                 .native_session_compatibility_key
                 .unwrap();
@@ -9446,9 +9445,9 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn grok_history_restore_compatibility_fences_cold_load_inputs() {
+    fn grok_resume_compatibility_fences_native_binding_inputs() {
         let root = std::env::temp_dir().join(format!(
-            "rovai-grok-history-compatibility-{}",
+            "rovai-grok-resume-compatibility-{}",
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&root).unwrap();
@@ -9456,13 +9455,13 @@ while IFS= read -r ignored; do :; done
         make_executable(&executable, "#!/bin/sh\nexit 0\n");
         let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
         let frozen = frozen_grok_runtime(&executable);
-        let baseline = freeze_history_restore_compatibility(frozen.clone(), &workspace)
+        let baseline = freeze_native_session_compatibility(frozen.clone(), &workspace)
             .unwrap()
             .native_session_compatibility_key
             .unwrap();
-        assert!(baseline.starts_with("grok-build:history-restore-v3:"));
+        assert!(baseline.starts_with("grok-build:resume-v1:"));
         assert_eq!(
-            freeze_history_restore_compatibility(frozen.clone(), &workspace)
+            freeze_native_session_compatibility(frozen.clone(), &workspace)
                 .unwrap()
                 .native_session_compatibility_key
                 .unwrap(),
@@ -9489,7 +9488,7 @@ while IFS= read -r ignored; do :; done
             changed_model,
             changed_permissions,
         ] {
-            let changed_key = freeze_history_restore_compatibility(changed, &workspace)
+            let changed_key = freeze_native_session_compatibility(changed, &workspace)
                 .unwrap()
                 .native_session_compatibility_key
                 .unwrap();
@@ -9501,7 +9500,7 @@ while IFS= read -r ignored; do :; done
         let other_workspace =
             AgentRunWorkspace::runtime_managed_path(other_root.to_string_lossy().to_string());
         assert_ne!(
-            freeze_history_restore_compatibility(frozen.clone(), &other_workspace)
+            freeze_native_session_compatibility(frozen.clone(), &other_workspace)
                 .unwrap()
                 .native_session_compatibility_key
                 .unwrap(),
@@ -9510,7 +9509,7 @@ while IFS= read -r ignored; do :; done
         let mut read_only_workspace = workspace.clone();
         read_only_workspace.access = "read_only".to_string();
         assert_ne!(
-            freeze_history_restore_compatibility(frozen, &read_only_workspace)
+            freeze_native_session_compatibility(frozen, &read_only_workspace)
                 .unwrap()
                 .native_session_compatibility_key
                 .unwrap(),

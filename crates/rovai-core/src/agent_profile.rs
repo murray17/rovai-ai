@@ -19,8 +19,8 @@ use crate::{
         ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
         AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
         TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
-        trae_static_permission_options, validate_machine_ready_snapshot,
-        validate_trae_machine_ready_evidence,
+        trae_static_permission_options, validate_grok_machine_ready_evidence,
+        validate_machine_ready_snapshot, validate_trae_machine_ready_evidence,
     },
     collaboration::end_camp_membership,
     command::{
@@ -1378,6 +1378,21 @@ impl AgentProfileService {
         }
         if runtime.adapter_kind == AdapterKind::TraeCnCli
             && let Err(error) = validate_trae_machine_ready_evidence(
+                runtime.reported_version.as_deref(),
+                Some(&runtime.executable_fingerprint),
+                &runtime.capabilities,
+            )
+        {
+            return Ok(Some(runtime_blocker(
+                "runtime_probe_required",
+                json!({
+                    "installationId": runtime.installation_id,
+                    "detail": error.to_string(),
+                }),
+            )));
+        }
+        if runtime.adapter_kind == AdapterKind::GrokBuild
+            && let Err(error) = validate_grok_machine_ready_evidence(
                 runtime.reported_version.as_deref(),
                 Some(&runtime.executable_fingerprint),
                 &runtime.capabilities,
@@ -3835,6 +3850,22 @@ pub(crate) fn resolve_frozen_runtime_binding(
         serde_json::from_str(&capabilities_json).context("invalid Adapter capabilities")?;
     capabilities.sort();
     capabilities.dedup();
+    if probe_status.as_deref() == Some("ready")
+        && adapter_kind == AdapterKind::GrokBuild
+        && let Err(error) = validate_grok_machine_ready_evidence(
+            reported_version.as_deref(),
+            Some(&executable_fingerprint),
+            &capabilities,
+        )
+    {
+        return Ok(Err(runtime_blocker(
+            "runtime_probe_required",
+            json!({
+                "installationId": installation_id,
+                "detail": error.to_string(),
+            }),
+        )));
+    }
     let protocols: Vec<String> = if preflight_required {
         vec![provisional_runtime_protocol(adapter_kind).to_string()]
     } else {

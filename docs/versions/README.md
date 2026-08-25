@@ -2,7 +2,7 @@
 document_type: versions-index
 authority: version-lifecycle
 current_version: v1.28
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Rovai-ai 版本记录
@@ -179,4 +179,4 @@ last_updated: 2026-08-24
 | v1.25 | `historical` | Codex 最终 Camp 答案指导已实现；冻结时多次真实行为观察仍未完成 | [v1.25/README.md](v1.25/README.md) |
 | v1.26 | `historical` | Cursor Agent Catalog 接入、同名命令防碰撞与保守平台未准入 | [v1.26/README.md](v1.26/README.md) |
 | v1.27 | `historical` | Kimi Code identity、MiniMax M3 私有配置、cold exact resume 与 macOS arm64 准入 | [v1.27/README.md](v1.27/README.md) |
-| v1.28 | `current` | Grok Build identity、MiniMax M3 本机私有配置、ACP 执行与 macOS arm64 准入 | [v1.28/README.md](v1.28/README.md) |
+| v1.28 | `current` | Grok Build、MiniMax M3、`>= 1.0.0` 版本门与标准 ACP resume；目标版本三端实测待补证 | [v1.28/README.md](v1.28/README.md) |

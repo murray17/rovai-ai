@@ -178,12 +178,15 @@ Session 时，把该 payload 原样放入 Grok 已验证的 `_meta.rules`：
 ### 3. continuation 与恢复
 
 - `ReuseSameHostSession`：不重复注入 rules；复用该 Native Session 创建时已冻结的 system rules；
-- `session/load` HistoryRestore：不重新追加 rules。`grok 0.2.118` 的独立新进程实测证明原 Session rules 随
-  exact-ID load 保留，并在恢复后的冲突 user prompt 中继续生效；
-- `session/resume`：当前版本未广告，产品不调用；未来版本只有独立取证后才采用；
-- load 失败后的 replacement `session/new`：对新 Binding/generation 重新准备并注入一次 rules；
+- `session/resume`：不重新追加 rules。Grok 把 rules 定义为 creation-only；恢复时保留原 Session 创建时的
+  system prompt。当前产品最低版本为 `>= 1.0.0`，Ready 必须观察标准 ACP resume capability；
+- resume 失败后的 replacement `session/new`：对新 Binding/generation 重新准备并注入一次 rules；
 - Compaction 不作为首次 rules 注入或 Session 恢复机制；Grok 已有原生 system rules，不采用“只等压缩事件
   再注入”的路径。
+
+该 continuation clean break 由 [V1.28-D06](decisions.md#v1-28-d06) 与 Runtime Launch v27 拥有。它不改变
+Bootstrap bytes、Formatter、delivery mode 或 `_meta.rules` 的 creation-only wire，因此不产生新的模型上下文
+revision，也不需要重新确认 revision 2。
 
 ### 4. Grok 结构化 Compaction Detector
 
@@ -252,8 +255,9 @@ Requirement。completion 如果发生在 Grok 内部 compact-and-resubmit 的当
 
 ## 兼容、迁移与证据
 
-1. Grok Binding compatibility input 新增 `grokNativeRulesRevision: 1`；字段只影响 `grok-build`。旧
-   `first_payload` Binding 不能进入 same-host reuse、load 或未来 resume，必须建立新 Binding/Native Session。
+1. Grok Binding compatibility input 保留 `grokNativeRulesRevision: 1`；字段只影响 `grok-build`。当前
+   `grok-build:resume-v1` key 同时绑定 Runtime、workspace、model、permission 与官方配置输入。旧
+   `first_payload` 或 load-only Binding 不能进入 same-host reuse/resume，必须建立新 Binding/Native Session。
 2. revision 2 确认时 v1.28 尚未合并，没有已发布的 Grok Product Binding。worktree 与隔离验收数据可以重建；历史 terminal
    Bootstrap Evidence、ContextManifest、Runtime Input Delivery 与 CampMessage 不回写、不冒充 native rules。
 3. 新增 Migration 108，只把 `grok-build` 加入 `bootstrap_redelivery_requirement`、
@@ -265,9 +269,9 @@ Requirement。completion 如果发生在 Grok 内部 compact-and-resubmit 的当
    `ROVAI_INTERNAL_GROK_COMPACTION_DETECTOR_POLICY=disabled|best_effort`，release default 为 `best_effort`。
    首次 `disabled -> best_effort` 按既有安全规则为已接受输入的 current Grok Binding 建立一次 baseline
    redelivery；新 Binding 已由首次 Bootstrap 覆盖。普通 detector reconnect 不建立 baseline。
-6. Grok `_meta.rules` 与 compaction signal 资格只绑定
-   `grok 0.2.118 (1e1687c1cf6a) × macOS arm64`。版本/fingerprint 改变后旧 Ready、native-rules 与 detector
-   资格不得直接外推；exact parser 对未知 shape fail closed。
+6. `grok 0.2.118 (1e1687c1cf6a) × macOS arm64` 的 `_meta.rules` 与 compaction signal 是初始历史实证。
+   当前支持门为 `>= 1.0.0`；版本/fingerprint 改变后旧 Ready 与 detector 资格不得直接外推，必须重新完成
+   Deep Probe，exact parser 对未知 shape fail closed。各宿主平台的真实行为证据仍分别记录。
 
 ## 明确不变
 
@@ -277,7 +281,8 @@ Requirement。completion 如果发生在 Grok 内部 compact-and-resubmit 的当
   恢复证据的既有字段和语义；本变更只为 Grok 准入一个新的 requirement source；
 - MCP、Skill、Attachment、Built-in CLI、权限、模型、auth、Missing-Send、generic ACP agent-text 与 Usage/Cost；
 - 所有非 Grok Runtime 的 Charter delivery mode、Binding compatibility 与 compaction policy；
-- Grok `session/load` 仍标为 HistoryRestore，不因 rules 持久化而宣称 `session.resume`。
+- Grok continuation 已由 D06 切到标准 `session/resume`；本 revision 的 creation-only rules 与 resume 不重注入
+  语义保持不变，其他 Runtime 的 load/HistoryRestore 不变。
 
 V1.28-D02 对 Kimi/Grok provider-specific text sanitizer 的移除是本变更之外已确认的输出路径变更；本变更
 以 generic ACP agent-text 为当前基线，不新增、恢复或改变任何 thinking 处理。
@@ -302,14 +307,14 @@ revision 并重新确认。
 
 - exact request fixture：Grok 新 Session 的 `_meta.rules` 与持久 Bootstrap payload bytes/digest 相同且只出现一次；
 - first-prompt fixture：Runtime payload 不再包含 Bootstrap，Dynamic Context bytes/digest 与当前基线相同；
-- continuation：same-host 不重复注入；冷 load 保持 exact ID、rules 行为与 marker，replay 不生成公开输出、Action、
-  Approval、Usage 或 Missing-Send；replacement new 注入一次；
+- continuation：same-host 不重复注入；冷 resume 保持 exact ID 且 request 不携带 rules；恢复失败只建立一次
+  replacement new 并注入一次；Grok 不调用 `session/load`；
 - detector fixture：只接受 exact no-leader live `auto_compact_completed` + exact Session ID + non-empty event ID；started、
   failed、cancelled、wrong/missing Session、missing event ID、request、replay、unknown method/update 全部不推进；
 - detector lifecycle：policy 建立/fencing、event-ID 幂等、prepared cutoff、accepted ACK 与 baseline 行为复用现有
   Observer/Redelivery 测试，并补 Grok Adapter closed-set Migration 108 保留测试；
 - 真实 Grok compaction：用目标版本 `x.ai/debug/arm_auto_compact` 只为验收 arm 下一轮，捕获真实 started/completed
-  wire；证明 current AgentRun 不被 metadata 污染，下一轮恰好出现一次 Redelivery，ACK 后不重复，冷 load replay
+  wire；证明 current AgentRun 不被 metadata 污染，下一轮恰好出现一次 Redelivery，ACK 后不重复，冷 resume metadata
   completion 不生成新 Requirement；
 - compatibility：Grok legacy/current Binding digest 不同；全部非 Grok digest 不变；
 - negative：`systemPromptOverride` 不出现，rules 缺失/错误类型/不同返回 Session ID fail closed；
@@ -323,9 +328,9 @@ revision 并重新确认。
 - Bootstrap Contract、Formatter 3 与三个 section 的生成代码未修改；Grok 新 Binding 的 delivery mode 为
   `native_append`，exact request fixture 只在 `_meta.rules` 出现一次 payload，并断言无
   `systemPromptOverride`；
-- 只有 Grok runtime compatibility 使用 schema 5、HistoryRestore compatibility 使用 v3，并冻结
-  `grokNativeConfigurationDigest` 与 `grokNativeRulesRevision: 1`；所有非 Grok Runtime 继续使用原 schema 3、
-  TRAE HistoryRestore 继续使用 v1，payload 不出现 Grok 字段，因而摘要字节与 delivery mode 均不变；
+- 只有 Grok runtime compatibility 使用 schema 5；Native Session key 切换为 `grok-build:resume-v1` 并冻结
+  `grokNativeConfigurationDigest` 与 `grokNativeRulesRevision: 1`；所有非 Grok Runtime 继续使用原 schema 3，
+  TRAE HistoryRestore 继续使用 v1，payload 不出现 Grok 字段，因而其摘要字节与 delivery mode 均不变；
 - Migration 108 保留既有 Kimi policy、requirement、observer lease 与 observation，并允许 Grok 三个 closed set；
   Data Contract 已迁移到 v1.22/schema 63；
 - direct no-leader Probe 捕获真实 started/completed；产品 acceptance-only debug arm 的两轮 Core smoke 中，
@@ -339,4 +344,4 @@ revision 并重新确认。
 - [v1.28 版本概览](README.md)
 - [核心模型上下文变更治理](../../development/model-context-change-governance.md)
 - [Runtime 接入与准入 Checklist](../../development/runtime-integration-checklist.md)
-- [Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)
+- [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)

@@ -14,10 +14,20 @@ import {
 const root = resolve(import.meta.dirname, '..')
 const adapterKind = process.env.ROVAI_COLD_RESUME_ADAPTER?.trim() || 'trae-cn-cli'
 const runtime = {
-  'trae-cn-cli': { label: 'TRAE', permissionMode: 'default', requireSilentHost: true },
-  'grok-build': { label: 'Grok Build', permissionMode: 'default', requireSilentHost: false }
+  'trae-cn-cli': {
+    label: 'TRAE',
+    permissionMode: 'default',
+    requireSilentHost: true,
+    continuationName: 'HistoryRestore'
+  },
+  'grok-build': {
+    label: 'Grok Build',
+    permissionMode: 'default',
+    requireSilentHost: false,
+    continuationName: 'ACP session/resume'
+  }
 }[adapterKind]
-if (!runtime) throw new Error(`Unsupported cold HistoryRestore adapter: ${adapterKind}`)
+if (!runtime) throw new Error(`Unsupported cold-continuation adapter: ${adapterKind}`)
 const fixtureRoot = await realpath(
   await mkdtemp(join(tmpdir(), `rovai-${adapterKind}-cold-resume-`))
 )
@@ -157,7 +167,7 @@ try {
       || restoredApprovals.length !== 0
       || (runtime.requireSilentHost && restoredHostLogs.length !== 0)
       || restoredHostLogs.some((event) => String(event.params?.text ?? '').includes(sessionMarker))) {
-    throw new Error(`${runtime.label} cold HistoryRestore failed or replay leaked: ${JSON.stringify({
+    throw new Error(`${runtime.label} cold ${runtime.continuationName} failed or replay leaked: ${JSON.stringify({
       run: restoredResult.run,
       output: restoredOutput,
       firstStart,
@@ -190,7 +200,7 @@ try {
     client.request,
     campId,
     `Use the file editing tool exactly once to create ${writePath} with exactly COLD_RESUME_WRITE_OK and a trailing newline. Do not call any other tool. Then reply exactly WRITE_DONE.`,
-    `Verify a new Tool and Approval after ${runtime.label} HistoryRestore`
+    `Verify a new Tool and Approval after ${runtime.label} ${runtime.continuationName}`
   )
   const writeCommand = writeRequest.commandResult ?? writeRequest
   const writeRunId = writeCommand.payload?.agentRunIds?.[0]
@@ -211,7 +221,7 @@ try {
     client.request,
     campId,
     `Use the Bash or terminal tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
-    `Verify cancel after ${runtime.label} HistoryRestore`
+    `Verify cancel after ${runtime.label} ${runtime.continuationName}`
   )
   const cancelCommand = cancelRequest.commandResult ?? cancelRequest
   const cancelRunId = cancelCommand.payload?.agentRunIds?.[0]
@@ -289,6 +299,7 @@ try {
   console.log(JSON.stringify({
     ok: true,
     adapterKind,
+    continuation: runtime.continuationName,
     nativeSessionId: firstStart.params.nativeThreadId,
     firstHostInstanceId: firstStart.params.hostInstanceId,
     restoredHostInstanceId: restoredStart.params.hostInstanceId,

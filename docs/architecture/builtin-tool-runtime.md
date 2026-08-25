@@ -3,7 +3,7 @@ document_type: architecture
 architecture: builtin-tool-runtime
 authority: builtin-tool-component-boundaries
 status: accepted
-last_updated: 2026-08-21
+last_updated: 2026-08-25
 ---
 
 # Built-in Tool Runtime Architecture
@@ -338,7 +338,7 @@ Host 把 Delivery identity 绑定到当前 Session 的唯一 active prompt；ACP
 没有任何当前 Prompt activity 的 matching error 才产生 `InputNotAccepted`。activity 本身仍不产生早期 ACK。
 Host 在 response 前丢失时继续进入既有 runtime-loss / `delivery_unknown` 对账，不能以 pipe flush 抑制恢复。
 历史 load replay 仅能在 `LoadingReplay` route 中被丢弃，不能进入该 ACK 边界。字段级合同见
-[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。
+[Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)。
 
 ### Successful Run 的 Missing-Send Recovery
 

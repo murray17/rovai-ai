@@ -778,7 +778,25 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | Kimi Code | `AdditivePerRun` / `RovaiWins` | ACP `session/new/resume/load.mcpServers`，不写用户级配置 | `0.32.0` + MiniMax M3 真实 Core smoke 已通过 stdio、Streamable HTTP、同名整项优先与三项 `ready` Manifest exposure |
 | Grok Build | `AdditivePerRun` / `NativeWinsSkip` | `0.2.118` 忽略 ACP Session `mcpServers`；Core 使用权限收窄的临时 Plugin 与 process `--plugin-dir`，不写 project/user config | MiniMax-M3 产品 smoke 保留两个原生同名 Server、skip 两个冲突 Assignment，并真实调用第三个不同名 Rovai stdio Server；三项 Manifest exposure 与 cleanup 通过 |
 
-## Grok Build macOS arm64 接入证据
+## Grok Build `>= 1.0.0` 当前支持合同
+
+2026-08-25 起，macOS arm64、macOS x64、Windows x64 共用 `grok >= 1.0.0` 最低版本门；这只统一 Runtime
+版本合同，不合并三个平台的 qualification evidence。低版本或不可解析版本在 light discovery 中为
+`light_failed / runtime_version_below_minimum`；Deep Probe 和 machine Ready 必须观察
+`initialize.agentCapabilities.sessionCapabilities.resume` 对象。
+
+Grok continuation 为 compatible same-host Session → exact `session/resume` → 一次 continuity-lost replacement
+`session/new`。Grok 不再声明或选择 `session.load`，`0.2.118` HistoryRestore fallback 已删除；TRAE、Kimi 等
+其他 Runtime 的通用 load 路径不变。新 Session 继续只在 `session/new._meta.rules` 追加完整 Bootstrap，resume
+不重新注入 creation-only rules。`grok-build:resume-v1` compatibility key 继续 fence 官方配置、rules revision、
+Runtime identity、workspace、model 与 permission，变化时建立新 Session。
+
+当前开发机仍安装 `grok 0.2.118 (1e1687c1cf6a)`；确定性测试已经证明版本门、resume capability、无 Grok load
+fallback 和 creation-only rules，尚未声称 `>= 1.0.0` 真实 Runtime 已在任一平台跑通。macOS arm64 的原平台
+artifact 保留，macOS x64、Windows x64 仍为 `not_qualified`，三端目标版本 Deep Probe/cold resume/AgentRun
+证据待各客户端分别补充。
+
+## Grok Build macOS arm64 初始 `0.2.118` 接入证据（历史）
 
 2026-08-24 的 v1.28 qualification 使用 `grok 0.2.118 (1e1687c1cf6a)`、MiniMax-M3 与本机私有
 OpenAI-compatible endpoint。生产 Host 直接继承官方 `$GROK_HOME/config.toml` 的 `[models]` /
@@ -799,7 +817,7 @@ same-host 与 exact load 不重复注入，replacement new 按新 Binding/genera
 `systemPromptOverride`。Grok runtime/history compatibility 增加 native-rules revision 1，旧 `first_payload`
 Binding 不复用。
 
-该 compatibility 升版严格限定到 Grok：Grok Runtime payload 使用 schema 5、HistoryRestore key 使用 v3，并含
+该次历史 compatibility 升版严格限定到 Grok：Grok Runtime payload 使用 schema 5、HistoryRestore key 使用 v3，并含
 官方配置摘要与 native-rules revision；非 Grok Runtime 仍使用原 schema 3 且不出现 Grok 字段，TRAE
 HistoryRestore 仍为 v1，因此其 canonical payload 与 digest 不变化。
 
