@@ -92,7 +92,7 @@ export async function removeEphemeralRuntimeCampFilesRoot(
   }
   const expectedPlatform = platform === 'darwin' ? 'macos' : platform
   if (
-    marker?.schemaVersion !== 1
+    (marker?.schemaVersion !== 1 && marker?.schemaVersion !== 2)
     || marker.instanceKey !== instanceKey(canonicalDataDirectory)
     || marker.platform !== expectedPlatform
   ) {

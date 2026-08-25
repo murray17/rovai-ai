@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: camp-published-attachment-view-composition
-last_updated: 2026-08-21
+last_updated: 2026-08-25
 ---
 
 # Camp Published Attachment View
@@ -45,7 +45,9 @@ reveal 前必须先确认 parent 可枚举且 target 仍存在；预检失败不
 - Desktop 从 canonical `userData` 派生 macOS instance key，或在 Windows 选择 `<data_dir>\runtime-files`，并把
   完整绝对 `--runtime-camp-files-root` 显式传给 Core；Core 不从 Home 猜共享默认值。macOS Desktop 与子 Core
   必须使用同一 Home：进程环境提供非空 `HOME` 时 Main 以该值派生 root，否则使用 Electron Home；Windows
-  root 不依赖 Home。这样显式隔离 Home 不会与 Core 的 root admission 产生分歧。
+  root 不依赖 Home。这样显式隔离 Home 不会与 Core 的 root admission 产生分歧。macOS 持久 root/Entry
+  identity 使用 canonical path、inode、owner 与 `ATTR_VOL_UUID` 返回的稳定本地卷 UUID，不持久化随 APFS
+  mount assignment 在重启后变化的 `st_dev`。
 - `CampAttachmentStore` 只负责 Composer/Agent Authority ingress、不可变快照和 no-follow 源校验。所有实例按
   exact Authority root + Camp ID 共享 per-Camp ingress admission；Camp root 权限切换、child create/remove、
   failure cleanup 与 Camp Authority removal 必须持有一次 admission，已持有者使用私有 root helper，不可重入。
@@ -120,9 +122,21 @@ Entry 重建。未提交 operation 按数据库事实 adopt 或 rollback；avail
 `integrity_failed` 并 fence Camp Host，再用 journaled whole-Camp rebuild 从 Authority 重建。受控重建只更新
 root/Entry identity、operation 和 physical generation；稳定 catalog revision、Entry semantic identity 与 digest
 必须保持不变，使历史 Manifest 21 在模型可见语义未变时仍可恢复。Authority 不一致时
-保持 fail closed。Camp 存在期间 View Entry 不因 Run、Session、Context 或预算结束而删除；Camp 永久删除捕获
+保持 fail closed，但该边界按 Camp 隔离：如果一次 startup rebuild 已完整 rollback、View 已持久化为
+`integrity_failed`、没有 active operation 且没有未终态 journal，Core 保留公共附件语义和 Authority 记录、拒绝该
+Camp 的 Runtime admission，并继续收敛其他 Camp。root admission、未知 orphan、数据库错误或仍有未终态 operation
+不能降级为 Camp-local failure，仍阻断 Core startup。Desired 为空的 Camp 仍是合法 controlled rebuild：该
+operation 可以没有 Entry，但必须以当前 root identity、空 catalog receipt 和推进后的 physical generation 完成；
+普通 publish/initial backfill 不因此获得空 operation 准入。Camp 存在期间 View Entry 不因 Run、Session、Context 或预算结束而删除；Camp 永久删除捕获
 typed cleanup identity，业务事务提交后清理派生 View。未知名称、symlink/reparse 或 containment 异常保留并阻断，
 删除不会跟随链接或越出已准入实例根。
+
+macOS root marker schema 2 固定上述稳定身份。schema 1 曾把 `st_dev` 写入 digest；升级时只有先通过精确
+instance path、当前用户 ownership、本地文件系统、无 symlink/nested marker 和独占 root lock 的既有 marked
+root 才能原子 rekey。旧 digest 因重启设备号漂移而不再匹配时，派生 View 不被当作业务 Authority 信任；Database
+打开后按当前稳定 root receipt 做逐 Camp 完整验证，并从 Authority 受控重建旧物理 receipt。schema 2 的 instance、
+platform、data-dir 或 root identity 任一不匹配仍 fail closed；unmarked 非空 root、外来 marker 和不安全节点不因
+兼容迁移获得准入。
 
 Migration 99 对 schema 53 做本机 clean break：旧非终态 Formatter 20 输入按 accepted/delivery/action evidence
 诚实终结，旧 Manifest/Blob/ACK/执行证据逐字节保留且不可再 dispatch；随后只从 `message_attachment` 回填 View。
@@ -147,6 +161,8 @@ Unix final directory/file 使用 `0500/0400`，staging 使用 `0700/0600`；Wind
 no-reparse 和 protected DACL admission。副本是新文件/目录，不使用 symlink 或 hardlink。权限位和 DACL 是防误写、
 完整性与最小暴露加固，不是对同 UID/SID 恶意进程的强隔离；跨 Camp 保证仍取决于 Adapter 的真实 sandbox/native
 directory allowlist evidence。存在不受控 ambient filesystem access 时，附件 Runtime 能力必须 fail closed。
+macOS schema-1 rekey 只恢复同一确定性私有实例根的派生 View，不放宽 schema-2 identity mismatch，也不跳过后续
+SQLite/Authority reconciliation。
 
 ## References
 

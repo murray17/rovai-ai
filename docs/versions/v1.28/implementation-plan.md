@@ -45,6 +45,13 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   External MCP 与 Skill smoke，并更新 adapter-scoped v2 evidence；
 - [x] macOS x64 使用原生 x86_64 `grok 1.0.5` 完成同等目标主机矩阵，并更新独立的 adapter-scoped v1 evidence；
 - [ ] Windows x64 客户端补充 `grok >= 1.0.0` 的同等目标主机证据；
+- [x] 以重启前后仅 `st_dev` 漂移的回归输入修复 macOS Runtime Files 启动失败；root/Entry identity 改用稳定
+  volume UUID，schema-1 marker 在已准入私有实例根内原子 rekey，旧物理 receipt 由受控 rebuild 收敛；
+- [x] 以历史 `message_attachment` 保留但 Authority 目录缺失的真实输入修复 startup 全局退出；只有已完整
+  rollback、`integrity_failed` 且没有 active/nonterminal operation 的 Camp-local rebuild failure 可被隔离，
+  受影响 Camp 继续拒绝 Runtime，其他 Camp 与 Core 正常启动；
+- [x] 修复零附件 Camp 在 root rekey 后的空集 controlled rebuild：只为 controlled rebuild 接受零 Entry completion，
+  同一 View 提交写回当前 root identity、空 catalog receipt 并推进 physical generation；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则

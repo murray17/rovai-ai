@@ -215,3 +215,112 @@ Grok cold continuation 与其他支持 ACP resume 的 Runtime 使用同一方法
 - resume 时重新注入 rules：违反 creation-only 语义，也可能在恢复 Session 中重复 system prompt；
 - 删除通用 `session/load`：会破坏 TRAE、Kimi 等仍使用的既有 fallback；
 - 用一个平台的 `1.0.0` 结果直接准入另外两个平台：混淆共享版本合同与 adapter-scoped 平台证据。
+
+<a id="v1-28-d07"></a>
+## V1.28-D07：macOS Runtime Files identity 使用稳定卷 UUID，旧 marker 只在私有实例根内 rekey
+
+### 背景
+
+macOS 的 Runtime Files Root marker、SQLite View receipt 与 Entry physical identity 曾直接包含 Unix `st_dev`。
+本机重启实证显示，同一路径、inode、owner 与内容均未变化时，APFS mount assignment 仍会使 `st_dev` 改变，导致
+Core 在打开 SQLite 前误报 `root marker identity mismatch` 并退出。数据库 quick check 与 Data Contract 均正常；
+继续降级数据库既不能修复文件系统身份算法，也会再次丢弃新版本投影。
+
+### 决定
+
+macOS marker schema 升为 2。root 与 Entry 的持久 physical identity 使用 canonical path digest、inode、owner 和
+Darwin `getattrlist(ATTR_VOL_UUID)` 返回的稳定本地卷 UUID；`st_dev` 只保留为非持久诊断事实，不进入 digest。
+卷 UUID 改变、inode/owner/path 改变或 schema-2 marker digest 不匹配仍 fail closed。View contract、Runtime auth
+receipt schema 与 Data Contract 不变；新的 root digest 会自然 fence 旧物理 receipt 和当前 Core generation。
+
+schema-1 marker 的一次性兼容只在 Core 已证明 macOS deterministic instance path、当前用户 ownership、本地
+filesystem、无 symlink/nested marker 并取得独占 root lock 后发生。由于 View 是可从 SQLite/Authority 重建的
+派生物，旧 digest 可在该边界内原子 rekey；Database 随后以新 root identity 完整验证每个 Camp，并把旧 physical
+receipt 作为 integrity incident 受控重建。unmarked 非空 root、instance/platform 不匹配、未知 schema 与 schema-2
+identity mismatch 不进入该入口。
+
+### 后果
+
+同一 APFS 卷在重启后保持 root/Entry identity，App 不再因 boot-local device number 漂移退出。首次从 schema 1
+升级可能对已有 Published Attachment View 做一次受控重建并推进 physical generation，但不修改公共消息、
+Authority Attachment、semantic catalog、历史 Context bytes 或 Data Contract。重建失败保持 fail closed，原
+Authority 与审计数据不被删除。
+
+### 被拒绝方案
+
+- 继续持久化 `st_dev`：同一目录跨重启不稳定，会重复制造启动故障与无意义 rebuild；
+- 只删除 device 而不绑定卷：弱化了卷替换检测；
+- 对 schema-2 mismatch 也自动 rekey：会把真正的目录替换伪装成兼容迁移；
+- 再次降级 SQLite 或删除 Runtime Files Root：前者与根因无关，后者丢失诊断证据且绕过受控重建。
+
+<a id="v1-28-d08"></a>
+## V1.28-D08：startup rebuild failure 按已收敛的 Camp fail closed，不扩大为全局 Core 退出
+
+### 背景
+
+schema-1 marker rekey 后，Core 会按新稳定 root identity 重建旧 physical View receipt。真实日常库中有一个历史
+`message_attachment` 仍保留完整公共语义与审计记录，但其 Authority 目录在本次升级前已不存在。该 Camp 的
+controlled rebuild 正确失败并 rollback，旧实现却把这个已收敛的 Camp-local integrity failure 继续上抛为全局
+startup failure，导致所有无关 Camp 都无法使用。降级数据库、删除附件行或把派生 View 反向提升为 Authority 都会
+破坏现有权威边界。
+
+### 决定
+
+startup 仍逐 Camp 完整 reconciliation。单个 Camp 失败后，Core 只在数据库再次证明以下全部条件时隔离该错误：
+
+- View 已持久化为 `integrity_failed`，有稳定 `last_error_code` 且 `active_operation_id IS NULL`；
+- 该 Camp 没有 `completed/rolled_back` 之外的 operation，说明 copy/promote/rollback journal 已完全收敛；
+- 数据库本身仍可读取这些闭合事实。
+
+满足条件时，该 Camp 继续拒绝 Context freeze、Runtime authorization、launch/resume/dispatch；Core 记录不含 Authority
+locator 的私有启动诊断，并继续 reconciliation 其他 Camp。`message_attachment` 的 available 语义、公共消息、历史
+receipt、Authority locator 与审计行全部保留，不把缺失来源伪装成 terminal publication failure。root admission、未知
+orphan、数据库错误、缺少 View receipt、仍有 active/nonterminal operation 或不能证明 rollback 完整的错误继续阻断
+Core startup。
+
+### 后果
+
+一个历史 Camp 的 Authority 丢失不再使整个 App 退出；该 Camp 仍诚实显示为不可供 Runtime 使用，并可在 Authority
+恢复后的下一次 startup 自动重试 controlled rebuild。每次 startup 最多为该 Camp 追加一个已 rolled-back 的恢复
+operation，不会自动删除、改写或恢复业务数据。没有 Data Contract、View receipt wire、错误 closed set、Runtime
+compatibility 或 Renderer API 变化。
+
+### 被拒绝方案
+
+- 继续全局退出：把已持久化且无悬挂 operation 的 Camp-local failure 扩大到所有 Camp；
+- 把 `available` 直接改成 `failed`：会事后改写已提交的语义 ledger 与历史 receipt；
+- 从残留 Runtime View 反向恢复 Authority：派生只读副本不是业务 Authority，且当前实例中该副本也可能已损坏；
+- 忽略任意 reconciliation 错误：会掩盖 root compromise、数据库错误或未收敛 journal。
+
+<a id="v1-28-d09"></a>
+## V1.28-D09：零附件 Camp 的 controlled rebuild 允许空 completion，并提交当前 root receipt
+
+### 背景
+
+root marker rekey 会使每个旧 View 的 root receipt 需要受控重建，包括 Desired/Actual 都为空的零附件 Camp。现有
+rebuild pipeline 能建立空目录、提交空 catalog 并推进 generation，却复用了普通 publication completion 的“至少一条
+operation entry”前提，因而把已经 committed 的合法空 rebuild 转成 `recovery_required`。同时 View commit 没有写回
+当前 root identity，使非空健康 rebuild 在完成校验时也会继续看到旧 receipt。
+
+### 决定
+
+只有 `kind = controlled_rebuild` 的 committed operation 可以在零 operation entries 时进入 completion；普通 publish 与
+initial backfill 继续拒绝空 committed operation。空 rebuild 仍必须通过完整 ready View 校验：Desired、View receipts 和
+filesystem entries 都为空，root-relative path、root identity、catalog/semantic/resolution receipt 与目录权限全部一致。
+
+每次 controlled rebuild 的原子 View commit 除原有 generation、catalog 与 Entry identity 外，必须从当前已准入 Database
+connection 写回 `rovai_runtime_camp_files_root_identity_digest()`。completion 验证通过后 operation 才成为 `completed`；
+任何非空漂移、错误 kind、非法目录或 receipt mismatch 仍进入既有 integrity failure 路径。
+
+### 后果
+
+零附件 Camp 在 schema-1 rekey 后可以不制造 synthetic Entry 地收敛为 Ready；健康非空 Camp 也会把新 root identity 与
+新的 Entry physical identities 一起提交。该修复不改变 Desired 定义、semantic catalog、View receipt wire、Data Contract
+或 Runtime compatibility，只补齐 controlled rebuild 已有的空集与 physical receipt 语义。
+
+### 被拒绝方案
+
+- 为零附件 Camp 插入 synthetic Entry：污染 Runtime-visible catalog 与 semantic receipt；
+- 对所有 operation 删除非空检查：会让非法空 publish 伪装成已完成；
+- completion 时忽略旧 root digest：会绕过当前实例身份 fence；
+- 手工修改日常 View 行：缺少可复用 journal、测试和后续机器的确定性恢复路径。

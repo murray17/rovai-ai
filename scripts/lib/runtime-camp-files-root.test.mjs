@@ -52,7 +52,7 @@ test('removes only a marked Runtime Files Root owned by a temporary data directo
   const root = runtimeCampFilesRootForDataDirectory(dataDirectory, { homeDirectory })
   await mkdir(join(root, 'camps', 'camp', 'attachments'), { recursive: true })
   await writeFile(join(root, '.runtime-camp-files-root.json'), JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     instanceKey: basename(dirname(root)),
     platform: process.platform === 'darwin' ? 'macos' : process.platform
   }))
@@ -65,6 +65,20 @@ test('removes only a marked Runtime Files Root owned by a temporary data directo
       temporaryDirectory
     }), true)
     await assert.rejects(access(root), { code: 'ENOENT' })
+
+    await mkdir(root, { recursive: true })
+    await writeFile(join(root, '.runtime-camp-files-root.json'), JSON.stringify({
+      schemaVersion: 3,
+      instanceKey: basename(dirname(root)),
+      platform: process.platform === 'darwin' ? 'macos' : process.platform
+    }))
+    await assert.rejects(
+      removeEphemeralRuntimeCampFilesRoot(dataDirectory, {
+        homeDirectory,
+        temporaryDirectory
+      }),
+      /mismatched ownership marker/
+    )
   } finally {
     await rm(fixture, { recursive: true, force: true })
   }
