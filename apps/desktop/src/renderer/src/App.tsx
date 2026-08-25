@@ -898,7 +898,7 @@ export function App(): React.JSX.Element {
       const snapshot = await window.rovai.navigationPreferences.restoreProject(targetKey)
       applyNavigationPreferences(snapshot)
     } catch (nextError) {
-      setError(`项目未能恢复，尚未访问其目录：${errorMessage(nextError)}`)
+      setError(`项目访问状态未能恢复，已停止后续目录检查：${errorMessage(nextError)}`)
       throw nextError
     }
   }, [applyNavigationPreferences])

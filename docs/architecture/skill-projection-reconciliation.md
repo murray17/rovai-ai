@@ -83,9 +83,12 @@ Skill Library；Desktop 只要显式收到 `--user-data-dir`，以及所有开�
 Core 自动重启保留同一参数，任何一个实例的 `cleanup_orphan_revisions` 都只能清理本实例数据库拥有的
 私有 Library。
 
-Renderer 不能直接调用 `skills.projectAccess.*`。Project 移除和恢复由 Main process 先同步 Core
-access state，再提交本机 Navigation preference；写入失败时恢复 Core access state。该 ledger 不引入
-Project table、Project aggregate 或 Camp 删除语义。
+Renderer 不能直接调用 `skills.projectAccess.*`。Project 移除由 Main process 先关闭 Core access，再提交
+本机 Navigation preference；偏好写入失败时按偏好中的权威状态恢复 Core access。Project 恢复采用相反的
+fail-closed 顺序：先持久化恢复偏好，但在请求完整成功返回前继续让 Core ledger 和 Core 重启参数保留
+`removed`，随后才激活 Core access，最后发布新的 removed-root 集合。Core 激活失败时，Main 先重新关闭
+Core access，再把偏好补偿为 removed；补偿不完整必须显式失败，不得吞掉错误。该 ledger 不引入 Project
+table、Project aggregate 或 Camp 删除语义。
 
 Renderer 在 removed-Project preference 成为权威前，不得把缓存的 current Project 交给
 `workspaces.inspect`。已移除 Project 只能由用户重新选择目录或在新对话中显式选择 workspace 后恢复；
@@ -93,9 +96,9 @@ Renderer 在 removed-Project preference 成为权威前，不得把缓存的 cur
 preference snapshot 前，Renderer 继续保持访问门关闭；失败时不得以仅当前会话可见的方式乐观放行。
 
 Main 在启动 Core 时把 Navigation preference 中完整的 removed-root 集合作为显式启动参数传入，Core
-在创建 AgentRun scheduler 前完成 DB-only ledger 同步。每次移除或恢复成功后，Main 同步更新
-`CoreClient` 保存的启动参数副本，因此 Core 自动重启也不会短暂把已移除 root 当作 active，或把已经
-恢复的 root 再次标为 removed。
+在创建 AgentRun scheduler 前完成 DB-only ledger 同步。每次移除完成，或恢复的偏好持久化与 Core 激活
+均完成后，Main 才同步更新 `CoreClient` 保存的启动参数副本。因此 Core 自动重启也不会短暂把已移除
+root 当作 active，或把已经完整恢复的 root 再次标为 removed。
 
 ## Bundled bootstrap 与完整性门禁
 

@@ -39,6 +39,7 @@ import {
 import { legacyUserDataPath } from './user-data-path'
 import { deleteRetiredManagedDirectory } from './quick-chat-cutover'
 import { NavigationPreferencesStore } from './navigation-preferences'
+import { restoreProjectAccessFailClosed } from './project-access-restore'
 import { RUNTIME_RENDERER_CORE_METHODS } from './runtime-core-methods'
 import {
   GeneralPreferencesStore,
@@ -736,15 +737,18 @@ ipcMain.handle('rovai:navigation-preferences-restore-project', async (_event, ta
   if (typeof targetKey !== 'string') throw new Error('Invalid Project restore request')
   if (!targetKey.startsWith('directory:')) throw new Error('Invalid Project restore target')
   const executionRoot = targetKey.slice('directory:'.length)
-  await core.request('skills.projectAccess.restore', { executionRoot })
-  try {
-    const result = await requireNavigationPreferences().restoreProject(targetKey)
-    core.setRemovedSkillProjectRoots(removedSkillProjectRoots())
-    return result
-  } catch (error) {
-    await synchronizeCoreProjectAccessFromNavigation().catch(() => undefined)
-    throw error
-  }
+  const navigationPreferences = requireNavigationPreferences()
+  return restoreProjectAccessFailClosed({
+    persistRestoredPreference: () => navigationPreferences.restoreProject(targetKey),
+    activateExecutionRoot: async () => {
+      await core.request('skills.projectAccess.restore', { executionRoot })
+    },
+    suspendExecutionRoot: async () => {
+      await core.request('skills.projectAccess.remove', { executionRoot })
+    },
+    persistRemovedPreference: () => navigationPreferences.removeProject(targetKey, []),
+    publishRemovedRoots: () => core.setRemovedSkillProjectRoots(removedSkillProjectRoots())
+  })
 })
 
 ipcMain.handle('rovai:member-avatar-select-source', async () => {
