@@ -441,7 +441,16 @@ impl CampAttachmentViewStore {
         };
         self.remove_orphan_camp_directories(database, &camp_ids)?;
         for camp_id in camp_ids {
-            self.reconcile_camp(database, attachment_store, &camp_id)?;
+            if let Err(error) = self.reconcile_camp(database, attachment_store, &camp_id) {
+                let Some(error_code) =
+                    fail_closed_camp_reconciliation_error(database.connection(), &camp_id)?
+                else {
+                    return Err(error);
+                };
+                eprintln!(
+                    "Camp {camp_id} Published Attachment View remains fail closed after startup reconciliation: {error_code}"
+                );
+            }
         }
         Ok(())
     }
@@ -4510,6 +4519,46 @@ fn load_published_authority_rows(
     )
 }
 
+fn fail_closed_camp_reconciliation_error(
+    connection: &Connection,
+    camp_id: &str,
+) -> Result<Option<String>> {
+    let view_state = connection
+        .query_row(
+            r#"
+            SELECT state, active_operation_id, last_error_code
+            FROM camp_attachment_view WHERE camp_id = ?1
+            "#,
+            [camp_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        )
+        .optional()?;
+    let Some((state, active_operation_id, error_code)) = view_state else {
+        return Ok(None);
+    };
+    if state != "integrity_failed" || active_operation_id.is_some() || error_code.is_none() {
+        return Ok(None);
+    }
+    let unfinished_operations: i64 = connection.query_row(
+        r#"
+        SELECT COUNT(*) FROM camp_attachment_view_operation
+        WHERE camp_id = ?1 AND status NOT IN ('completed', 'rolled_back')
+        "#,
+        [camp_id],
+        |row| row.get(0),
+    )?;
+    if unfinished_operations != 0 {
+        return Ok(None);
+    }
+    Ok(error_code)
+}
+
 fn has_unresolved_publication(connection: &Connection, camp_id: &str) -> Result<bool> {
     connection
         .query_row(
@@ -7217,6 +7266,132 @@ mod tests {
         );
 
         cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
+    }
+
+    #[test]
+    fn startup_reconcile_quarantines_missing_authority_to_its_camp() {
+        let (mut database, data_dir, affected_camp_id, view) = fixture();
+        let attachment_store = CampAttachmentStore::new(&data_dir);
+        let source = data_dir.join("missing-authority.txt");
+        fs::write(&source, b"published before authority loss").unwrap();
+        let saved = attachment_store
+            .save_body(&mut database, &affected_camp_id, "Affected")
+            .unwrap();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &affected_camp_id,
+                saved.revision,
+                &source,
+                "missing-authority.txt",
+            )
+            .unwrap();
+        let attachment_id = draft.attachments[0].id.clone();
+        publish_current_draft(
+            &mut database,
+            &data_dir,
+            &affected_camp_id,
+            &view,
+            draft.revision,
+        );
+
+        let unaffected_workspace = data_dir.join("unaffected-workspace");
+        fs::create_dir_all(&unaffected_workspace).unwrap();
+        let unaffected = CollaborationService::default()
+            .create_camp(
+                &mut database,
+                &CommandEnvelope {
+                    command_id: Uuid::new_v4().to_string(),
+                    actor: ActorRef::User {
+                        user_id: "test-user".to_string(),
+                    },
+                    camp_id: None,
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: CreateCampCommand::for_test(
+                        unaffected_workspace.display().to_string(),
+                    ),
+                },
+            )
+            .unwrap();
+        let unaffected_camp_id = unaffected.result.payload["campId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        view.ensure_empty_camp_ready(&mut database, &unaffected_camp_id)
+            .unwrap();
+
+        let projected = resolve_published_attachment_path(
+            database.connection(),
+            &affected_camp_id,
+            &attachment_id,
+        )
+        .unwrap();
+        set_file_mode(Path::new(&projected), 0o600).unwrap();
+        fs::write(&projected, b"force controlled rebuild").unwrap();
+        set_file_mode(Path::new(&projected), 0o400).unwrap();
+        attachment_store.remove_camp(&affected_camp_id).unwrap();
+
+        view.reconcile(&mut database, &attachment_store).unwrap();
+
+        assert!(
+            view.verify_camp_ready(&database, &affected_camp_id)
+                .is_err()
+        );
+        view.verify_camp_ready(&database, &unaffected_camp_id)
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT state, active_operation_id, last_error_code
+                    FROM camp_attachment_view WHERE camp_id = ?1
+                    "#,
+                    [&affected_camp_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, Option<String>>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (
+                "integrity_failed".to_string(),
+                None,
+                Some("camp_attachment_view_backfill_failed".to_string()),
+            )
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT runtime_projection_state FROM message_attachment WHERE id = ?1",
+                    [&attachment_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "available"
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT COUNT(*) FROM camp_attachment_view_operation
+                    WHERE camp_id = ?1 AND status NOT IN ('completed', 'rolled_back')
+                    "#,
+                    [&affected_camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+
+        cleanup_fixture(&mut database, &data_dir, &affected_camp_id, &view);
+        cleanup_fixture(&mut database, &data_dir, &unaffected_camp_id, &view);
     }
 
     #[cfg(unix)]

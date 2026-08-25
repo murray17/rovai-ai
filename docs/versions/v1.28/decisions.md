@@ -252,3 +252,42 @@ Authority 与审计数据不被删除。
 - 只删除 device 而不绑定卷：弱化了卷替换检测；
 - 对 schema-2 mismatch 也自动 rekey：会把真正的目录替换伪装成兼容迁移；
 - 再次降级 SQLite 或删除 Runtime Files Root：前者与根因无关，后者丢失诊断证据且绕过受控重建。
+
+<a id="v1-28-d08"></a>
+## V1.28-D08：startup rebuild failure 按已收敛的 Camp fail closed，不扩大为全局 Core 退出
+
+### 背景
+
+schema-1 marker rekey 后，Core 会按新稳定 root identity 重建旧 physical View receipt。真实日常库中有一个历史
+`message_attachment` 仍保留完整公共语义与审计记录，但其 Authority 目录在本次升级前已不存在。该 Camp 的
+controlled rebuild 正确失败并 rollback，旧实现却把这个已收敛的 Camp-local integrity failure 继续上抛为全局
+startup failure，导致所有无关 Camp 都无法使用。降级数据库、删除附件行或把派生 View 反向提升为 Authority 都会
+破坏现有权威边界。
+
+### 决定
+
+startup 仍逐 Camp 完整 reconciliation。单个 Camp 失败后，Core 只在数据库再次证明以下全部条件时隔离该错误：
+
+- View 已持久化为 `integrity_failed`，有稳定 `last_error_code` 且 `active_operation_id IS NULL`；
+- 该 Camp 没有 `completed/rolled_back` 之外的 operation，说明 copy/promote/rollback journal 已完全收敛；
+- 数据库本身仍可读取这些闭合事实。
+
+满足条件时，该 Camp 继续拒绝 Context freeze、Runtime authorization、launch/resume/dispatch；Core 记录不含 Authority
+locator 的私有启动诊断，并继续 reconciliation 其他 Camp。`message_attachment` 的 available 语义、公共消息、历史
+receipt、Authority locator 与审计行全部保留，不把缺失来源伪装成 terminal publication failure。root admission、未知
+orphan、数据库错误、缺少 View receipt、仍有 active/nonterminal operation 或不能证明 rollback 完整的错误继续阻断
+Core startup。
+
+### 后果
+
+一个历史 Camp 的 Authority 丢失不再使整个 App 退出；该 Camp 仍诚实显示为不可供 Runtime 使用，并可在 Authority
+恢复后的下一次 startup 自动重试 controlled rebuild。每次 startup 最多为该 Camp 追加一个已 rolled-back 的恢复
+operation，不会自动删除、改写或恢复业务数据。没有 Data Contract、View receipt wire、错误 closed set、Runtime
+compatibility 或 Renderer API 变化。
+
+### 被拒绝方案
+
+- 继续全局退出：把已持久化且无悬挂 operation 的 Camp-local failure 扩大到所有 Camp；
+- 把 `available` 直接改成 `failed`：会事后改写已提交的语义 ledger 与历史 receipt；
+- 从残留 Runtime View 反向恢复 Authority：派生只读副本不是业务 Authority，且当前实例中该副本也可能已损坏；
+- 忽略任意 reconciliation 错误：会掩盖 root compromise、数据库错误或未收敛 journal。
