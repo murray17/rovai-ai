@@ -46,16 +46,18 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 - [x] Windows x64 客户端以 `grok 1.0.5` + BYOK 完成同等目标主机验收，并新增独立 digest-bound evidence；
 - [x] Windows x64 BYOK Camp 验收发现 Core 已成功持久化终态但 Renderer 未消费 `agent_run.terminal`；补齐通用
   Camp invalidation 与 Camp ID 过滤回归，macOS/Windows 和全部 Runtime 共用修复；
-- [ ] macOS x64 客户端补充 `grok >= 1.0.0` 的同等目标主机证据；
+- [x] macOS x64 使用原生 x86_64 `grok 1.0.5` 完成同等目标主机矩阵，并更新独立的 adapter-scoped v1 evidence；
 - [x] 以重启前后仅 `st_dev` 漂移的回归输入修复 macOS Runtime Files 启动失败；root/Entry identity 改用稳定
   volume UUID，schema-1 marker 在已准入私有实例根内原子 rekey，旧物理 receipt 由受控 rebuild 收敛；
 - [x] 以历史 `message_attachment` 保留但 Authority 目录缺失的真实输入修复 startup 全局退出；只有已完整
   rollback、`integrity_failed` 且没有 active/nonterminal operation 的 Camp-local rebuild failure 可被隔离，
   受影响 Camp 继续拒绝 Runtime，其他 Camp 与 Core 正常启动；
+- [x] 修复零附件 Camp 在 root rekey 后的空集 controlled rebuild：只为 controlled rebuild 接受零 Entry completion，
+  同一 View 提交写回当前 root identity、空 catalog receipt 并推进 physical generation；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则
 
 - 任一真实模型、权限、Tool、Session、进程清理或数据迁移门禁失败时，对应平台不得保持 `qualified`；
 - API Key、完整 Native ID、原始 Prompt 与本机绝对私有路径不得进入证据；
-- Usage/Cost 与 macOS x64 不因现有平台结果自动启用；Windows x64 仅凭自身独立证据晋升。
+- Usage/Cost 不因任一平台结果自动启用；三个宿主平台只凭自身独立证据晋升，不互相继承资格。

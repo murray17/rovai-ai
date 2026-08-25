@@ -25,7 +25,8 @@ Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN�
 第十三种为 Grok Build。
 Cursor 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。
-Grok Build 在各自 adapter-scoped 证据覆盖的 macOS arm64 与 Windows x64 为 `qualified`；macOS x64 不外推。
+Grok Build 在 adapter-scoped 证据分别覆盖的 macOS arm64、macOS x64 与 Windows x64 均为 `qualified`；
+三个宿主平台各自绑定独立 evidence digest，不互相外推。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
@@ -793,7 +794,7 @@ Grok continuation 为 compatible same-host Session → exact `session/resume` �
 creation-time roots，也不重新注入 creation-only rules。`grok-build:resume-v1` compatibility key 继续 fence
 官方配置、rules revision、Runtime identity、workspace、model 与 permission，变化时建立新 Session。
 
-当前开发机已升级到 `grok 1.0.5 (5115b46bc909)`。macOS arm64 真实 Deep Probe 在 Ready 前完成
+macOS arm64 客户端使用 `grok 1.0.5 (5115b46bc909)`。真实 Deep Probe 在 Ready 前完成
 `session/new → exact-ID session/resume([]) → session/set_model`；Core 与 ACP Host 重启后，Host ID 改变而 Native
 Session ID 和私密 marker 保持，恢复 Run 没有 replay Action/Approval。恢复后的新写入、审批与 cancel 通过，坏 ID
 只记录一次 continuity-lost 后 replacement-new。普通 AgentRun、十五项 Built-in CLI、历史 attachment、
@@ -806,10 +807,19 @@ Missing-Send、`.grok/skills`、Plugin MCP 以及隔离 packaged App planned shu
 active Grok execution，native stop 返回可靠 `planned_shutdown_cancelled` terminal，App 无 forced signal 退出，
 七个已观察后代进程全部回收，重启保持该终态。
 
-当前 adapter-scoped 证据为
-[`macos-arm64-grok-build-v2.json`](../qualification/runtime-platform/macos-arm64-grok-build-v2.json)与
-[`windows-x64-grok-build-v1.json`](../qualification/runtime-platform/windows-x64-grok-build-v1.json)；初始
-`0.2.118` macOS arm64 v1 artifact 保持不可变历史证据。macOS x64 仍为 `not_qualified`，不得从另外两端外推。
+macOS x64 客户端以原生 x86_64 `grok 1.0.5 (5115b46bc909)` 重复同级矩阵：Deep Probe、exact-ID cold resume、
+恢复后 Tool/Approval/cancel、坏 ID 单次 fallback、Built-in v20 十五项、Skill、External MCP、Missing-Send、六类
+Shell 输出和 structured compaction Redelivery 均通过。x64 打包 App 的包内 `rovai app` 自动创建成员和 Runtime，
+真实 AgentRun 分别调用 `/bin/bash`、`/bin/sh` 与 `/bin/cat`；三个非空 Tool ID 均从 `in_progress` 收敛为
+`completed`，View 为 `succeeded`。受控 App Quit 以 shutdown protocol v2 自然回收 App/Core/Grok/Helper，未使用
+forced signal。一次 cold-resume 初始 marker Run 在 Resume 前遇到 MiniMax 空 Tool 名；同一原命令立即完整通过，
+原始失败保持 `toolName=null / Tool not found`，不增加 Rovai 特例。
+
+当前三个 adapter-scoped 证据分别为
+[`macos-arm64-grok-build-v2.json`](../qualification/runtime-platform/macos-arm64-grok-build-v2.json)、
+[`macos-x64-grok-build-v1.json`](../qualification/runtime-platform/macos-x64-grok-build-v1.json)与
+[`windows-x64-grok-build-v1.json`](../qualification/runtime-platform/windows-x64-grok-build-v1.json)。初始
+`0.2.118` macOS arm64 v1 artifact 保持不可变历史证据；三个当前 artifact 互不继承 evidence digest。
 
 ## Grok Build macOS arm64 初始 `0.2.118` 接入证据（历史）
 
@@ -852,8 +862,8 @@ MiniMax-M3 真实调用；临时 Plugin 随 Host 删除。项目/用户 config �
 
 adapter-scoped 初始历史证据位于
 [`qualification/runtime-platform/macos-arm64-grok-build-v1.json`](../qualification/runtime-platform/macos-arm64-grok-build-v1.json)。
-当前 1.0.5 证据见上方 adapter-scoped artifacts；证据都不包含 Key、完整 Native ID、Prompt 或本机私有路径。
-macOS x64 保持未准入；原生 Usage/Cost 字段保持 Disabled。
+当前 1.0.5 三平台证据见上方三个独立 artifact；它们都不包含 Key、完整 Native ID、Prompt 或本机私有路径。
+原生 Usage/Cost 字段保持 Disabled。
 
 ## 历史：内置 MCP / Antigravity 专项复核
 

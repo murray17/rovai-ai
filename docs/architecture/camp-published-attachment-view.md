@@ -125,7 +125,9 @@ root/Entry identity、operation 和 physical generation；稳定 catalog revisio
 保持 fail closed，但该边界按 Camp 隔离：如果一次 startup rebuild 已完整 rollback、View 已持久化为
 `integrity_failed`、没有 active operation 且没有未终态 journal，Core 保留公共附件语义和 Authority 记录、拒绝该
 Camp 的 Runtime admission，并继续收敛其他 Camp。root admission、未知 orphan、数据库错误或仍有未终态 operation
-不能降级为 Camp-local failure，仍阻断 Core startup。Camp 存在期间 View Entry 不因 Run、Session、Context 或预算结束而删除；Camp 永久删除捕获
+不能降级为 Camp-local failure，仍阻断 Core startup。Desired 为空的 Camp 仍是合法 controlled rebuild：该
+operation 可以没有 Entry，但必须以当前 root identity、空 catalog receipt 和推进后的 physical generation 完成；
+普通 publish/initial backfill 不因此获得空 operation 准入。Camp 存在期间 View Entry 不因 Run、Session、Context 或预算结束而删除；Camp 永久删除捕获
 typed cleanup identity，业务事务提交后清理派生 View。未知名称、symlink/reparse 或 containment 异常保留并阻断，
 删除不会跟随链接或越出已准入实例根。
 
