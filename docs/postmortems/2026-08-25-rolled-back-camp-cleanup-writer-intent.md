@@ -190,18 +190,19 @@ local post-migration sample, both rolled-back cleanup rows were unresolved (`2/2
 selected sample confirms the mechanism but is not a population-wide probability estimate. Overall
 frequency depended on how often a prepared cleanup was cancelled.
 
-Source inspection found one plausible routine route with high conditional likelihood. The
-`CampWorkspace` draft cleanup effect depends on Camp ID only and captures the snapshot's
-`activationState`. A pending Camp's first accepted message activates the same Camp ID, so the effect
-is not recreated solely because activation changes. Leaving later with an empty draft can run the
-older closure and request `camps.discardPending`; Core correctly rejects the now-active Camp, then
-cancels the prepared cleanup.
+Source inspection found one routine route with high conditional likelihood. The `CampWorkspace`
+draft cleanup effect depends on Camp ID only and captures the snapshot's `activationState`. A
+pending Camp's first accepted message activates the same Camp ID, so the effect is not recreated
+solely because activation changes. Leaving later with an empty draft can run the older closure and
+request `camps.discardPending`; Core correctly rejects the now-active Camp, then cancels the
+prepared cleanup.
 
-The operation journal proves the generic cancelled-cleanup trigger but does not retain enough typed
-route evidence to prove that this Renderer sequence created either observed row. Deletion blockers,
-Runtime fencing failure, or another rejected pending-discard condition could reach the same
-cancellation function. The UI route is therefore the strongest source-supported hypothesis, not a
-confirmed incident fact.
+Persisted command evidence confirms this route for the second observed row: immediately after the
+cleanup operation was created, `camp.pending.discard` returned
+`camp.pending_discard_active`. The first row has no corresponding typed command result, so its exact
+caller remains unknown. Deletion blockers, Runtime fencing failure, or another rejected
+pending-discard condition could reach the same cancellation function. The lifecycle defect and its
+repair do not depend on which caller reached cancellation.
 
 After PR #59, all of these cancellation routes settle writer intent and no longer produce this
 admission failure. Existing contradictory rows are repaired during startup reconciliation.
