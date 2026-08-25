@@ -223,6 +223,26 @@ describe('active Camp event invalidation', () => {
     expect(refreshOnce).toHaveBeenNthCalledWith(2, 'camp-1')
   })
 
+  it('does not lose an invalidation at the refresh completion boundary', async () => {
+    let releaseFirstRead!: () => void
+    const firstRead = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve
+    })
+    const refreshOnce = vi.fn()
+      .mockImplementationOnce(() => firstRead)
+      .mockResolvedValue(undefined)
+    const coordinator = createActiveCampRefreshCoordinator(refreshOnce)
+
+    const first = coordinator.refresh('camp-1')
+    await Promise.resolve()
+    const boundaryRefresh = firstRead.then(() => coordinator.refresh('camp-1'))
+
+    releaseFirstRead()
+    await Promise.all([first, boundaryRefresh])
+
+    expect(refreshOnce).toHaveBeenCalledTimes(2)
+  })
+
   it('refreshes terminal state from camps.open and replaces the running Camp surface', async () => {
     const projection = (status: AgentRunView['status']): CampOpenProjection => {
       const terminal = status === 'succeeded'

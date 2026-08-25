@@ -170,20 +170,21 @@ export function createActiveCampRefreshCoordinator(
       activeRefreshes.set(campId, entry)
       entry.completion = Promise.resolve()
         .then(async () => {
-          let lastError: unknown = null
-          do {
-            entry.dirty = false
-            try {
-              await refreshOnce(campId)
-              lastError = null
-            } catch (nextError) {
-              lastError = nextError
-            }
-          } while (entry.dirty)
-          if (lastError !== null) throw lastError
-        })
-        .finally(() => {
-          if (activeRefreshes.get(campId) === entry) activeRefreshes.delete(campId)
+          try {
+            let lastError: unknown = null
+            do {
+              entry.dirty = false
+              try {
+                await refreshOnce(campId)
+                lastError = null
+              } catch (nextError) {
+                lastError = nextError
+              }
+            } while (entry.dirty)
+            if (lastError !== null) throw lastError
+          } finally {
+            if (activeRefreshes.get(campId) === entry) activeRefreshes.delete(campId)
+          }
         })
       return entry.completion
     }
