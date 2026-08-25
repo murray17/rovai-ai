@@ -28,7 +28,7 @@ use uuid::Uuid;
 
 use crate::{
     agent_profile::{AdapterKind, InstallationSource},
-    agent_runtime_adapter::executable_fingerprint,
+    agent_runtime_adapter::{executable_fingerprint, grok_build_minimum_version_satisfied},
     runtime_probe_process::{ProbeCommandLimits, run_bounded_command},
 };
 
@@ -468,6 +468,11 @@ pub async fn discover_runtime_version(
                 && (observation.runtime_kind != AdapterKind::CursorAgent
                     || is_cursor_agent_version(&version)) =>
         {
+            if observation.runtime_kind == AdapterKind::GrokBuild
+                && !grok_build_minimum_version_satisfied(Some(&version))
+            {
+                observation.diagnostic_code = Some("runtime_version_below_minimum".to_string());
+            }
             observation.reported_version = Some(version)
         }
         Ok(_) if observation.runtime_kind == AdapterKind::CursorAgent => {

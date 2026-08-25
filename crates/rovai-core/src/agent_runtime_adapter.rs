@@ -46,6 +46,45 @@ pub trait AgentRuntimeAdapter {
     ) -> Result<AdapterRuntimeProjection>;
 }
 
+pub const GROK_BUILD_MINIMUM_VERSION: [u64; 3] = [1, 0, 0];
+pub const GROK_BUILD_MINIMUM_VERSION_LABEL: &str = "1.0.0";
+
+pub fn grok_build_minimum_version_satisfied(reported_version: Option<&str>) -> bool {
+    reported_version
+        .and_then(parse_reported_runtime_version)
+        .is_some_and(|(version, prerelease)| {
+            version > GROK_BUILD_MINIMUM_VERSION
+                || (version == GROK_BUILD_MINIMUM_VERSION && !prerelease)
+        })
+}
+
+fn parse_reported_runtime_version(value: &str) -> Option<([u64; 3], bool)> {
+    value
+        .split(|character: char| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '+' | '_'))
+        })
+        .filter(|part| !part.is_empty())
+        .find_map(|part| {
+            let digit_start = part.find(|character: char| character.is_ascii_digit())?;
+            let version = &part[digit_start..];
+            let numeric_end = version
+                .find(|character: char| !character.is_ascii_digit() && character != '.')
+                .unwrap_or(version.len());
+            let numeric = &version[..numeric_end];
+            let suffix = &version[numeric_end..];
+            let mut components = numeric.split('.');
+            let version = [
+                components.next()?.parse().ok()?,
+                components.next()?.parse().ok()?,
+                components.next()?.parse().ok()?,
+            ];
+            if components.next().is_some() {
+                return None;
+            }
+            Some((version, suffix.starts_with('-')))
+        })
+}
+
 pub fn executable_fingerprint(path: &Path) -> Result<String> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut file = File::open(&canonical)
@@ -794,11 +833,17 @@ impl AgentRuntimeAdapterRegistry {
             AdapterKind::GrokBuild => grok_permission_options(),
         };
         let permission_schema_digest = adapter_permission_schema_digest(kind, &permission_options)?;
+        let grok_version_unsupported = kind == AdapterKind::GrokBuild
+            && !grok_build_minimum_version_satisfied(reported_version.as_deref());
         Ok(AdapterCapabilitySnapshot {
             reported_version,
             executable_fingerprint: Some(executable_fingerprint),
             authentication_status: "unknown".to_string(),
-            probe_status: "light_ready".to_string(),
+            probe_status: if grok_version_unsupported {
+                "light_failed".to_string()
+            } else {
+                "light_ready".to_string()
+            },
             permission_schema_version: 1,
             permission_schema_digest,
             capabilities: Vec::new(),
@@ -809,7 +854,8 @@ impl AgentRuntimeAdapterRegistry {
             last_attempted_at: observed_at,
             last_successful_probe_at: None,
             stale_at: None,
-            last_error: None,
+            last_error: grok_version_unsupported
+                .then(|| "runtime_version_below_minimum".to_string()),
             native_session_compatibility_key: None,
         })
     }
@@ -1523,6 +1569,20 @@ pub fn validate_machine_ready_snapshot(
         }
         return Ok(());
     }
+    if adapter_kind == AdapterKind::GrokBuild && snapshot.probe_status == "ready" {
+        validate_grok_machine_ready_evidence(
+            snapshot.reported_version.as_deref(),
+            snapshot.executable_fingerprint.as_deref(),
+            &snapshot.capabilities,
+        )?;
+        if snapshot.authentication_status != "authenticated"
+            || snapshot.models.is_empty()
+            || snapshot.permission_options.is_empty()
+        {
+            anyhow::bail!("Grok Build ready snapshot does not satisfy the machine Ready contract");
+        }
+        return Ok(());
+    }
     if adapter_kind != AdapterKind::TraeCnCli || snapshot.probe_status != "ready" {
         return Ok(());
     }
@@ -1536,6 +1596,38 @@ pub fn validate_machine_ready_snapshot(
         || snapshot.permission_options.is_empty()
     {
         anyhow::bail!("TRAE ready snapshot does not satisfy the machine Ready contract");
+    }
+    Ok(())
+}
+
+pub fn validate_grok_machine_ready_evidence(
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
+    capabilities: &[String],
+) -> Result<()> {
+    let required = [
+        "acp.initialize",
+        "grok.authenticate",
+        "session.new",
+        "session.resume",
+    ];
+    let missing = required
+        .into_iter()
+        .filter(|required| !capabilities.iter().any(|capability| capability == required))
+        .collect::<Vec<_>>();
+    if !grok_build_minimum_version_satisfied(reported_version)
+        || executable_fingerprint.is_none_or(|value| value.trim().is_empty())
+        || !missing.is_empty()
+    {
+        anyhow::bail!(
+            "Grok Build machine Ready evidence requires version >= {} and standard ACP resume{}",
+            GROK_BUILD_MINIMUM_VERSION_LABEL,
+            if missing.is_empty() {
+                String::new()
+            } else {
+                format!(": missing {}", missing.join(", "))
+            }
+        );
     }
     Ok(())
 }
@@ -1645,7 +1737,7 @@ fn acp_capability_snapshot(
             .and_then(|value| value.pointer("/agentCapabilities/loadSession"))
             .and_then(Value::as_bool)
             == Some(true);
-        if supports_load {
+        if supports_load && adapter_kind != AdapterKind::GrokBuild {
             capabilities.push("session.load".to_string());
         }
         let supports_resume = observation
@@ -2927,14 +3019,17 @@ mod tests {
         let snapshot = AgentRuntimeAdapterRegistry::default()
             .acp_capability_snapshot(AcpProbeObservation {
                 adapter_kind: AdapterKind::GrokBuild,
-                reported_version: Some("grok 0.2.118".to_string()),
+                reported_version: Some("grok 1.0.0".to_string()),
                 executable_fingerprint: Some("sha256:grok".to_string()),
                 authentication_status: "authenticated".to_string(),
                 probe_status: "ready".to_string(),
                 capabilities: vec!["grok.authenticate".to_string()],
                 initialize_result: Some(json!({
                     "protocolVersion": 1,
-                    "agentCapabilities": {"loadSession": true}
+                    "agentCapabilities": {
+                        "loadSession": true,
+                        "sessionCapabilities": {"resume": {}}
+                    }
                 })),
                 session_result: Some(json!({
                     "sessionId": "grok-test",
@@ -2971,9 +3066,53 @@ mod tests {
                 .contains(&"context.charter.native_append".to_string())
         );
         assert!(
+            snapshot
+                .capabilities
+                .contains(&"session.resume".to_string())
+        );
+        assert!(!snapshot.capabilities.contains(&"session.load".to_string()));
+        assert!(
             !snapshot
                 .capabilities
                 .contains(&"context.charter.first_payload".to_string())
+        );
+        validate_machine_ready_snapshot(AdapterKind::GrokBuild, &snapshot)
+            .expect("Grok >= 1.0.0 with ACP resume should satisfy Ready");
+
+        let mut load_only = snapshot;
+        load_only
+            .capabilities
+            .retain(|capability| capability != "session.resume");
+        assert!(validate_machine_ready_snapshot(AdapterKind::GrokBuild, &load_only).is_err());
+    }
+
+    #[test]
+    fn grok_minimum_version_gate_is_release_aware() {
+        assert!(!grok_build_minimum_version_satisfied(Some("grok 0.2.118")));
+        assert!(!grok_build_minimum_version_satisfied(Some(
+            "grok 1.0.0-beta.1"
+        )));
+        assert!(grok_build_minimum_version_satisfied(Some("grok 1.0.0")));
+        assert!(grok_build_minimum_version_satisfied(Some(
+            "grok v1.1.0 (build)"
+        )));
+        assert!(!grok_build_minimum_version_satisfied(Some(
+            "grok development"
+        )));
+        assert!(!grok_build_minimum_version_satisfied(None));
+
+        let old = AgentRuntimeAdapterRegistry::default()
+            .light_ready_snapshot(
+                AdapterKind::GrokBuild,
+                Some("grok 0.2.118".to_string()),
+                "sha256:grok-old".to_string(),
+                "2026-08-25T00:00:00Z".to_string(),
+            )
+            .unwrap();
+        assert_eq!(old.probe_status, "light_failed");
+        assert_eq!(
+            old.last_error.as_deref(),
+            Some("runtime_version_below_minimum")
         );
     }
 

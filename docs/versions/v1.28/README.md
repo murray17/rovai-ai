@@ -4,7 +4,7 @@ version: v1.28
 lifecycle: current
 authority: version-scope-and-status
 design_status: confirmed
-implementation_status: complete
+implementation_status: in_progress
 model_context_change: true
 last_updated: 2026-08-25
 ---
@@ -12,11 +12,14 @@ last_updated: 2026-08-25
 # Rovai-ai v1.28：Grok Build + MiniMax M3 本地 Runtime 接入
 
 > 当前状态：`grok-build` Product Runtime、Data Contract 迁移、官方 provider config、ACP Host、Renderer
-> catalog 和本机 macOS arm64 资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
-> `AdditivePerRun / NativeWinsSkip` External MCP；load-only cold continuation 复用 TRAE 的严格
-> `HistoryRestore` 隔离，但不冒充 `session/resume`。已确认的模型上下文 revision 2 保持 Bootstrap bytes
+> catalog 和本机 macOS arm64 平台资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
+> `AdditivePerRun / NativeWinsSkip` External MCP。当前 Grok 支持基线统一为 `>= 1.0.0`，Ready 要求正式广告并
+> 真实成功调用 ACP `session/resume`，cold continuation 不再保留 `0.2.118` 的 load-only fallback。已确认的模型上下文
+> revision 2 保持 Bootstrap bytes
 > 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
-> 独立 worktree 验收后通过 PR 交付 `main`。
+> 独立 worktree 验收后通过 PR 交付 `main`；`>= 1.0.0 / session.resume` clean break 的确定性实现已完成，
+> macOS arm64 已用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵；macOS x64、Windows x64 仍待
+> 各客户端分别补证。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
 
@@ -46,11 +49,13 @@ Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 cu
   `bypassPermissions`、`plan`，Product default 为 `bypassPermissions`，Core read-only 强制 `plan`；
 - Kimi/Grok 对 MiniMax 作为普通 ACP `agent_message_chunk` 返回的 `<think>` 或其他文本不做专用清洗、
   重分类或抑制；内容原样进入执行台 Evidence、terminal final 与 Missing-Send candidate；
-- 完成 Fleet LRU warm Host/同 Session 复用；`grok 0.2.118` 只广告 `loadSession`、不广告 resume，因此新
-  Host 用 exact `session/load` 进入 bounded replay quarantine，失败只记录一次 continuity-lost 后新建 Session；
+- 完成 Fleet LRU warm Host/同 Session 复用；三个宿主平台共享 `grok >= 1.0.0` 版本门，Deep Probe 与 Ready
+  必须观察 `sessionCapabilities.resume` 并对刚创建的 exact ID 成功调用。新 Host 用 exact `session/resume`，
+  其 `additionalDirectories=[]`；不声明或选择 Grok `session.load`；
+  失败只记录一次 continuity-lost 后新建 Session；其他 Runtime 的通用 load fallback 不变；
 - Native Session Bootstrap 的三个 section、顺序和 bytes 不变；新 Grok Session 只在
   `session/new._meta.rules` 原生追加一次，首轮及后继 user payload 均只含 Dynamic Context，不使用覆盖式
-  `systemPromptOverride`，same-host/load 不重复注入；
+  `systemPromptOverride`，same-host/resume 不重复注入；
 - `best_effort` detector 只接受无 request ID 的 `_x.ai/session_notification`、exact Session ID、
   `auto_compact_completed` 与非空 event ID。合格完成只推进 durable revision，下一次 Core-controlled input
   使用既有 Redelivery Envelope v2；真实强制压缩两轮产品 smoke 已通过 revision 1 accepted ACK；
@@ -83,8 +88,8 @@ External MCP 支持性裁决、文档治理与 Impeccable UI detector。
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
 | Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
-| Decisions | 已更新 | [V1.28-D01](decisions.md#v1-28-d01)冻结 provider/Home/auth 边界，[V1.28-D02](decisions.md#v1-28-d02)冻结公开输出与平台准入，[V1.28-D03](decisions.md#v1-28-d03)冻结 External MCP 的 Plugin 追加边界，[V1.28-D04](decisions.md#v1-28-d04)冻结 load-only HistoryRestore，[V1.28-D05](decisions.md#v1-28-d05)冻结 native rules 与 structured compaction redelivery，[V1.28-D06](decisions.md#v1-28-d06)冻结 macOS Runtime Files 稳定卷 identity 与旧 marker rekey。 |
-| Contracts | 已更新 | [Runtime Launch and Verification](../../contracts/runtime-launch-and-verification-v26.md)与[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)补充 Grok 行为；Runtime Files 修复不改变 View contract、receipt wire、错误 closed set 或 Data Contract，因此无需新建 Camp Published Attachment View contract。 |
+| Decisions | 已更新 | [V1.28-D01](decisions.md#v1-28-d01)冻结 provider/Home/auth 边界，[V1.28-D02](decisions.md#v1-28-d02)冻结公开输出与平台准入，[V1.28-D03](decisions.md#v1-28-d03)冻结 External MCP 的 Plugin 追加边界，[V1.28-D04](decisions.md#v1-28-d04)保存初始 load-only 取舍，[V1.28-D05](decisions.md#v1-28-d05)冻结 native rules 与 structured compaction redelivery，[V1.28-D06](decisions.md#v1-28-d06)冻结 `>= 1.0.0` 与标准 ACP resume clean break，[V1.28-D07](decisions.md#v1-28-d07)冻结 macOS Runtime Files 稳定卷 identity 与旧 marker rekey。 |
+| Contracts | 已更新 | [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)收敛 Grok 版本门、Ready 与 continuation；[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)的逐平台证据边界不变。Runtime Files 修复不改变 View contract、receipt wire、错误 closed set 或 Data Contract，因此无需新建 Camp Published Attachment View contract。 |
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)补充 Grok identity、provider 与原生状态边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)补充 Grok detector；[Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)补充稳定卷 identity、schema-1 rekey 与受控重建。 |
 | UI | 已更新 | 复用现有 Runtime catalog、状态与成员参数组件；member-workspace brief 明确 generic agent text 可原样进入执行台与 final。 |
 | Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增 Grok ACP run-level 映射。 |
