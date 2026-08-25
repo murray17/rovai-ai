@@ -49,6 +49,8 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 - [x] 以历史 `message_attachment` 保留但 Authority 目录缺失的真实输入修复 startup 全局退出；只有已完整
   rollback、`integrity_failed` 且没有 active/nonterminal operation 的 Camp-local rebuild failure 可被隔离，
   受影响 Camp 继续拒绝 Runtime，其他 Camp 与 Core 正常启动；
+- [x] 修复零附件 Camp 在 root rekey 后的空集 controlled rebuild：只为 controlled rebuild 接受零 Entry completion，
+  同一 View 提交写回当前 root identity、空 catalog receipt 并推进 physical generation；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则
