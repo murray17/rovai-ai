@@ -4151,12 +4151,16 @@ describe('task event projections', () => {
       run, progress, campId: 'camp-1', focused: true
     }))
     expect(markup).toContain('tool-call-static')
+    expect(markup).toContain('class="tool-activity-group status-running"')
+    expect(markup).toContain('aria-label="执行中：检查工作区状态；0 项已完成"')
+    expect(markup).toContain('aria-live="polite"')
+    expect(markup).not.toContain('<span>正在处理</span>')
     expect(markup).not.toContain('<details class="process-action tool-call-disclosure')
     expect(markup).toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).not.toContain('>execute<')
   })
 
-  it('opens complete Built-in Camp public results in their Tool rows', () => {
+  it('keeps complete Built-in Camp public results behind nested lazy Tool rows', () => {
     const readResult = {
       mode: 'item',
       message: { messageId: 'message-1', body: '完整消息正文' }
@@ -4247,12 +4251,14 @@ describe('task event projections', () => {
     const markup = renderToStaticMarkup(createElement(RunExecutionDisclosure, {
       run, progress, campId: 'camp-1', focused: true
     }))
+    expect(markup.match(/<details class="tool-activity-group/g)).toHaveLength(1)
+    expect(markup).toContain('aria-label="已执行 2 项操作；全部成功"')
     expect(markup.match(/<details class="process-action tool-call-disclosure/g)).toHaveLength(2)
     expect(markup).not.toContain('tool-output-copy-button')
-    expect(markup).toContain('search-result-1')
-    expect(markup).toContain('search-result-14')
-    expect(markup).toContain('role="region"')
-    expect(markup).toContain('的完整结果，可滚动')
+    expect(markup).not.toContain('search-result-1')
+    expect(markup).not.toContain('search-result-14')
+    expect(markup).not.toContain('role="region"')
+    expect(markup).not.toContain('tool-call-result-scroll')
     expect(markup).not.toContain('complete-evidence-control')
     expect(markup).not.toContain('complete-evidence-standalone')
     expect(markup).not.toContain('查看完整工具调用')
@@ -4307,15 +4313,17 @@ describe('task event projections', () => {
 
     for (const domain of domains) {
       expect(markup).toContain(`data-icon-domain="${domain}"`)
-      expect(markup).toContain(`${domain} complete result`)
+      expect(markup).not.toContain(`${domain} complete result`)
     }
+    expect(markup).toContain('aria-label="已执行 9 项操作；全部成功"')
+    expect(markup.match(/class="tool-group-icon"/g)).toHaveLength(1)
     expect(markup.match(/class="tool-call-icon"/g)).toHaveLength(domains.length)
     expect(markup.match(/<svg viewBox="0 0 16 16"/g)?.length).toBeGreaterThanOrEqual(domains.length)
     expect(markup.match(/<summary class="tool-call-summary">/g)).toHaveLength(domains.length)
     expect(markup.match(/class="tool-call-state status-completed"/g)).toHaveLength(domains.length)
     expect(markup.match(/class="tool-call-disclosure-slot"/g)).toHaveLength(domains.length)
     expect(markup).toMatch(/tool-call-icon[\s\S]*tool-call-title[\s\S]*tool-call-state[\s\S]*tool-call-disclosure-slot/)
-    expect(markup).not.toMatch(/<summary[^>]*aria-label=/)
+    expect(markup).not.toMatch(/<summary class="tool-call-summary"[^>]*aria-label=/)
   })
 
   it('keeps a Claude Bash command expandable when the tool result has no output', () => {
@@ -4381,7 +4389,8 @@ describe('task event projections', () => {
     expect(markup).not.toContain('tool-call-disclosure-slot is-placeholder')
     expect(markup).toContain('class="tool-call-state status-completed"')
     expect(markup).toContain('aria-label="成功"')
-    expect(markup).toContain('tool-call-result-scroll')
+    expect(markup).not.toContain('tool-call-result-scroll')
+    expect(markup).not.toContain('ROVAI_CLAUDE_EMPTY_OUTPUT_OK</pre>')
     expect(markup).toContain(
       'class="tool-call-title" title="printf &#x27;%s\\n&#x27; &#x27;ROVAI_CLAUDE_EMPTY_OUTPUT_OK&#x27;"'
     )

@@ -58,6 +58,8 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 - [x] 把已成功 resolved 附件的后置 Authority/digest 故障收窄为附件局部 `recovery_required`：startup 与
   pre-dispatch reconciliation 省略异常项、重建健康 catalog 并保持 Camp `ready`；新 Context 不投影 stale path，
   exact Authority 恢复后自动复活，unresolved writer intent 与 root/containment 安全错误继续 fail closed；
+- [x] 把同一 Run 内最大连续 Tool 收成 Renderer-only 摘要，保留 chronology 与 identity，活动态显示最后一条
+  非终态操作，精确 Tool 首次展开前不挂载完整结果，并覆盖失败、停止、仅记录、双主题、Inspector 与换位性能；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则
