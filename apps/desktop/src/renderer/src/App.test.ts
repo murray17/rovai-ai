@@ -642,6 +642,16 @@ describe('task event projections', () => {
       authorType: 'system' as const,
       authorId: 'camp-initializer'
     }
+    const legacyApprovalResolution = {
+      ...message('approval-resolved', 6, '2026-08-05T02:12:00Z'),
+      authorType: 'system' as const,
+      authorId: 'approval',
+      body: 'Approval approval-1 for action action-1 was approved.',
+      content: [{
+        kind: 'text' as const,
+        text: 'Approval approval-1 for action action-1 was approved.'
+      }]
+    }
     expect(campConversationHasVisibleHistory([])).toBe(false)
     expect(campConversationHasVisibleHistory(
       campConversationTimeline([initializationMessage])
@@ -653,6 +663,7 @@ describe('task event projections', () => {
       `task:${task.taskId}`,
       'after-task'
     ])
+    expect(campConversationTimeline([legacyApprovalResolution])).toEqual([])
     expect(projected[1]).toMatchObject({
       kind: 'task_card',
       timelineGlobalSequence: 2,
