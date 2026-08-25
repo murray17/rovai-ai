@@ -14,6 +14,7 @@ import {
 import { release, tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
+import { parse as parseYaml } from 'yaml'
 import { inspectPortableExecutable } from './lib/windows-pe.mjs'
 import { coreDataDirectoryArguments } from './lib/runtime-camp-files-root.mjs'
 
@@ -27,18 +28,30 @@ const packageMetadata = JSON.parse(await readFile(join(root, 'package.json'), 'u
 const requireSigned = process.argv.includes('--require-signed')
 const unpackedOnly = process.argv.includes('--unpacked-only')
 const appDirectory = join(dist, 'win-unpacked')
-const appExecutable = join(appDirectory, `${packageMetadata.build.productName}.exe`)
+const executableName = packageMetadata.build.win.executableName ?? packageMetadata.build.productName
+const appExecutable = join(appDirectory, `${executableName}.exe`)
 const coreExecutable = join(appDirectory, 'resources', 'bin', 'rovai-core.exe')
 const cliExecutable = join(appDirectory, 'resources', 'bin', 'rovai.exe')
 const installer = join(
   dist,
-  `${packageMetadata.build.productName}-${packageMetadata.version}-x64.exe`
+  artifactName('exe')
 )
+const installerBlockmap = `${installer}.blockmap`
+const updateInfoPath = join(dist, 'latest.yml')
 const reportPath = join(dist, 'windows-verification-report.txt')
 const manifestPath = join(dist, 'windows-release-manifest.json')
 const report = ['Rovai AI Windows x64 verification']
 let isolatedParent = null
 let core = null
+
+function artifactName(extension) {
+  return packageMetadata.build.win.artifactName
+    .replaceAll('${productName}', packageMetadata.build.productName)
+    .replaceAll('${name}', packageMetadata.name)
+    .replaceAll('${version}', packageMetadata.version)
+    .replaceAll('${arch}', 'x64')
+    .replaceAll('${ext}', extension)
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -55,14 +68,74 @@ function run(command, args, options = {}) {
 }
 
 async function sha256(path) {
-  const hash = createHash('sha256')
+  return fileHash(path, 'sha256', 'hex')
+}
+
+async function sha512(path) {
+  return fileHash(path, 'sha512', 'base64')
+}
+
+async function fileHash(path, algorithm, encoding) {
+  const hash = createHash(algorithm)
   await new Promise((resolveHash, rejectHash) => {
     createReadStream(path)
       .on('data', (chunk) => hash.update(chunk))
       .once('error', rejectHash)
       .once('end', resolveHash)
   })
-  return hash.digest('hex')
+  return hash.digest(encoding)
+}
+
+async function verifyUpdateArtifacts() {
+  const packagedUpdateInfoPath = join(appDirectory, 'resources', 'app-update.yml')
+  if (!existsSync(packagedUpdateInfoPath)) {
+    throw new Error(`packaged app-update.yml is missing: ${packagedUpdateInfoPath}`)
+  }
+  const packagedUpdateInfo = parseYaml(await readFile(packagedUpdateInfoPath, 'utf8'))
+  if (packagedUpdateInfo?.provider !== 'github'
+      || packagedUpdateInfo.owner !== 'murray17'
+      || packagedUpdateInfo.repo !== 'rovai-ai') {
+    throw new Error('packaged app-update.yml does not target the official GitHub release channel')
+  }
+  report.push('Packaged updater channel: github/murray17/rovai-ai')
+  if (unpackedOnly) return null
+
+  if (!existsSync(installerBlockmap)) {
+    throw new Error(`NSIS updater blockmap is missing: ${installerBlockmap}`)
+  }
+  if (!existsSync(updateInfoPath)) {
+    throw new Error(`Windows latest.yml is missing: ${updateInfoPath}`)
+  }
+  const updateInfo = parseYaml(await readFile(updateInfoPath, 'utf8'))
+  if (!updateInfo || updateInfo.version !== packageMetadata.version) {
+    throw new Error('latest.yml has the wrong version')
+  }
+  const installerName = basename(installer)
+  const installerEntry = Array.isArray(updateInfo.files)
+    ? updateInfo.files.find((entry) => entry?.url === installerName)
+    : null
+  if (!installerEntry || installerEntry.sha512 !== await sha512(installer)) {
+    throw new Error(`latest.yml has the wrong sha512 for ${installerName}`)
+  }
+  if (Number(installerEntry.size) !== (await stat(installer)).size) {
+    throw new Error(`latest.yml has the wrong size for ${installerName}`)
+  }
+  const blockmapSize = (await stat(installerBlockmap)).size
+  if (blockmapSize <= 0) throw new Error('NSIS updater blockmap is empty')
+  report.push('latest.yml: version, sha512 and size passed')
+  report.push(`NSIS updater blockmap: ${relative(root, installerBlockmap)}`)
+  return {
+    updateInfo: {
+      path: relative(root, updateInfoPath).replaceAll('\\', '/'),
+      bytes: (await stat(updateInfoPath)).size,
+      sha256: await sha256(updateInfoPath)
+    },
+    blockmap: {
+      path: relative(root, installerBlockmap).replaceAll('\\', '/'),
+      bytes: blockmapSize,
+      sha256: await sha256(installerBlockmap)
+    }
+  }
 }
 
 function authenticode(path) {
@@ -232,6 +305,7 @@ function startCore(executable, dataDirectory) {
 
 try {
   const installerConfiguration = verifyInstallerConfiguration()
+  const updaterArtifacts = await verifyUpdateArtifacts()
   const binaries = {
     app: await verifyBinary('App', appExecutable),
     core: await verifyBinary('rovai-core', coreExecutable),
@@ -290,7 +364,7 @@ try {
     },
     signedReleaseRequired: requireSigned,
     installerConfiguration,
-    files: { ...binaries, installer: installerFile },
+    files: { ...binaries, installer: installerFile, updater: updaterArtifacts },
     packagedCoreSmoke: {
       isolatedDataRoot: true,
       healthCheck: true,

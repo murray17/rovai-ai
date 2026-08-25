@@ -20,49 +20,19 @@ Context、Memory MCP transport、Bridge、Plugin 与 Runtime-native built-in MCP
 
 ## 当前 Product Runtime Catalog
 
-当前 closed `AdapterKind` 包含十三种 Product Runtime：Codex CLI、Pi Coding Agent、OpenCode、GitHub Copilot、
-Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent 与 Kimi Code。
+当前 closed `AdapterKind` 包含十四种 Runtime Adapter：Codex CLI、Pi Coding Agent、OpenCode、GitHub Copilot、
+Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN、Cursor Agent、Kimi Code 与
+Grok Build。closed identity 只证明实现存在，不等于新版 Checklist 的 First-Class admission。
 Cursor 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。
-Pi 只在 macOS arm64 为 digest-bound `qualified`；macOS x64 与 Windows x64 缺少独立资格证据。
+Grok Build 仅在 adapter-scoped 证据覆盖的 macOS arm64 为 `qualified`；macOS x64 与 Windows x64 不外推。
+Pi 当前代码把 macOS arm64 投影为 `qualified`，但合并后的新版 Checklist 复核只支持
+`core_compatible` 结论；该 product-visibility mismatch 是 v1.29 的显式未闭合项。macOS x64 与 Windows x64
+仍为 `not_qualified`。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
-
-### 2026-08-25 Pi `0.84.2` resident managed-input revision 1 复核
-
-本机 `/opt/homebrew/bin/pi` 报告 `0.84.2`。正式 Host 不再读取 Claude settings、复制 MiniMax key、创建
-provider overlay 或覆盖 `PI_CODING_AGENT_DIR`；它继承用户 Pi 原生 `~/.pi/agent` 的认证、model catalog 和
-default。真实 native-default Prompt 通过，当前用户原生默认实际解析到 MiniMax；该事实只说明本机 Pi 配置，
-Rovai 不读取、不复制也不输出其 key、URL 或认证文件正文。
-
-Pi 仍直接使用官方 LF JSONL RPC，而非 ACP。Revision 1 新增 `rovai-pi-host-v2`、workspace resident Host、
-per-run exact Session activation、Bootstrap Evidence v2、Managed Input Receipt v1 和 Core-owned stdio MCP。
-`prompt` response 只有在 receipt committed 后才成为 accepted；`message_end.message` 是权威 assistant snapshot，
-`agent_settled` 仍是唯一成功 terminal。
-
-| 能力轴 | revision 1 证据 | 当前产品边界 |
-| --- | --- | --- |
-| Identity / launch | `pi 0.84.2` 真实启动与 managed Extension receipt 通过；argv fixture 排除 provider/model/Bootstrap/Skill/Tool fixed state | `pi-jsonl-rpc-v1`；只显式加载 `rovai-pi-host-v2`；user/project third-party Extension 与 Package 关闭 |
-| Provider / secret | 不传 provider/model 的真实 Prompt 使用 Pi native default 成功；raw model catalog 可读 | `pi://runtime-default` 使用原生默认；显式 `pi://model?...` exact list/set/state；不回退 Claude overlay，显式选择会更新 Pi 全局默认 |
-| Bootstrap / identity | slow test 证明 full identity/Bootstrap 按 Binding 冻结，profile edit 不热更；managed receipt 前 accepted 被 trigger 拒绝 | `managed_system_prompt`，`P_final=Pi base+"\n\n"+B`；identity 不属于 Host；无 ordinary-message redelivery |
-| Resident LRU | deterministic Fleet test 证明同 Workspace Host 跨 Camp/member invalidation 继续复用 | workspace/process compatibility；Session/identity/Skills/MCP/model 不进 key；single-flight；并发分 Host、跨 Workspace 不复用 |
-| Session / resume | new Session 延迟 materialize file 的真实边界已修正；activation/release 核对 UUID/file/cwd/model | 每 Run exact `switch_session/new_session`；cold resume 只认 full UUID + canonical file；失败 fail closed，无 fuzzy/replay fallback |
-| Skill | `get_commands`/receipt fixture 验证 name、description digest、entry path 与 expected managed catalog | 每 Session 只发现 exact `W/.pi/skills`；project-native + Rovai ready 合并；collision/escape/missing stop Host |
-| External MCP | Core stdio fixture完成 initialize、initialized、分页 tools/list 和真实 tools/call；adapter matrix 断言 CoreManaged | `AdditivePerRun / RovaiWins / CoreManaged`；stdio supported，Streamable HTTP unsupported；每次 call durable approve |
-| Tool / Approval | 初版真实 Bash allow/write deny/cancel 证据保持；revision 1 的未知 UI/generation/receipt fail-closed fixture 通过 | native `bash/write/edit` blocking Approval；read/search no prompt；MCP 全部 blocking Approval；Pi 无 sandbox |
-| Missing-Send / final | 初版 zero-send/accepted-send 与 revision 1 ordinary真实 Prompt 均以 `agent_settled` 收敛 | `IfNoAcceptedSend`，boundary=`pi_agent_settled`；receipt/response/process exit 不代替 final |
-| Usage / compaction | ordinary managed prompt 真实 smoke 通过；manual/threshold/overflow+retry 完整矩阵未执行 | Usage/Cost Disabled；Compaction Disabled/unqualified；protected instruction layer，不创建 redelivery overlay |
-| Built-in CLI | 初版十五项 operation、三种输入、Gather、conflict、lease fence 与 continuation 真实矩阵保持 | bundled `rovai` CLI 经 native managed Bash；per-Run lease；不是 MCP |
-| Migration | Migration 108 与 v052–v108 synthetic fixtures 通过 | v1.22/schema 63；旧 nonterminal Pi state clean break；completed history 与非 Pi state 保留 |
-
-本轮真实命令只证明 native-default ordinary Prompt、managed receipt 和 `agent_settled`；stdio MCP 使用真实
-fixture server 验证，不冒充生产第三方 Server/model-call smoke；manual/threshold/overflow compaction 未执行，
-继续 Disabled。2026-08-24 初版的 allow/deny、cancel、Missing-Send、Built-in CLI 与 cold resume 证据仍证明未被
-revision 1 取消的轴，但其中 Claude overlay、一 Host 一 Session、explicit `--skill` 和 MCP Unsupported 结论已由
-本节替代。`pi × macos-arm64` 保持 qualified；macOS x64/Windows x64 继续
-`not_qualified / runtime_platform.qualification_evidence_missing`。
 
 ### 2026-08-24 Kimi Code macOS x64 准入晋升
 
@@ -75,6 +45,21 @@ macOS arm64 一样进入普通 discovery、检查、成员配置和 AgentRun 路
 是 macOS arm64，未在本提交内重跑 x86_64 真实模型 Smoke；x86_64 资格依据是维护者已完成验收后的明确发布
 确认，而不是把 arm64 结果静默外推。Windows x64 已由独立 Windows 资格证据准入，不受本次变更影响。
 
+### 2026-08-24 Kimi Code `0.38.0` ACP Client Terminal macOS arm64 产品 Smoke
+
+本机通过 Homebrew 将 `/opt/homebrew/bin/kimi` 从 `0.32.0` 升级到 `0.38.0`。Rovai 隔离开发 App 使用独立
+`userData` 与 managed Skill Library，Runtime Discovery 解析到 0.38.0 Cellar executable，Deep Probe 返回
+`authenticated / ready`。随后经 User Automation 创建专用 Kimi 成员、directory Camp 并投递真实 AgentRun；
+Runtime 建立新的 ACP Session，两次结构化 Bash 均以 `shell.execute / succeeded` 结束，实际返回 canonical
+workspace cwd 与 `ROVAI_KIMI_038_TERMINAL_OK`，AgentRun 最终为 `succeeded` 并发布 Camp final。
+
+该 workspace 除 Runtime 受管 Skill projection 外没有测试命令产生的写入；Run 结束后进程检查没有 Kimi 或
+Terminal 子进程。Kimi 0.38.0 在 `terminal=false` 时会走已确认的 capability-unavailable 分支，因此本次真实
+Shell 成功与标准 wire fixture 共同证明 `LocalBridged` negotiation 和 Client callbacks 的产品路径。此证据只属于
+macOS arm64，不替代 macOS x64 或 Windows x64 的独立资格证据，也不改变其他 ACP Runtime 的内部 Shell 路径。
+v1.28 合并验收又以当前 `0.38.0` 重跑 Missing-Send 三场景：zero-send 正常发布、accepted send 抑制 fallback、
+真实 tool→final fixture 通过并形成 6 条 ACP Tool event；generic agent text 仍不经过 provider 清洗。
+
 ### 2026-08-22 Kimi Code `0.32.0` + MiniMax M3 macOS arm64 完整资格复核
 
 本机 `/opt/homebrew/bin/kimi` 报告 `0.32.0`。Rovai 没有改写用户 `~/.kimi/config.toml`，而是从
@@ -82,14 +67,15 @@ macOS arm64 一样进入普通 discovery、检查、成员配置和 AgentRun 路
 diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Plan；国际 endpoint 对同一 token 返回
 未认证，因此本次只使用国内 OpenAI-compatible endpoint。
 
-`KIMI_MODEL_CAPABILITIES=thinking` 只声明 provider 能力；Rovai 不强制关闭 Kimi/MiniMax thinking。执行过程可
-保留在私有 observation/执行台，最终公开候选会剥离完整 `<think>...</think>` 块，未闭合推理块 fail closed。
+`KIMI_MODEL_CAPABILITIES=thinking` 只声明 provider 能力；Rovai 不强制关闭 Kimi/MiniMax thinking，也不再
+按 provider 或 `<think>` 标签清洗返回文本。Runtime 作为普通 `agent_message_chunk` 发出的内容原样进入执行台
+Evidence、terminal final 与 Missing-Send candidate。
 
 | 能力轴 | 本次证据 | 当前产品边界 |
 | --- | --- | --- |
 | Identity / launch | `kimi --version` 为 `0.32.0`；`kimi acp` 完成 ACP v1 initialize/session-new | canonical executable 为 `kimi`，wire identity 为 `kimi-code-cli`，覆盖键为 `ROVAI_KIMI_BIN` |
 | Provider / model | 私有配置注入 `MiniMax-M3`、`openai` provider、国内 endpoint；真实 Prompt `end_turn` 成功 | 六个 `KIMI_MODEL_*` 键严格 allowlist；Unix group/other 可访问、未知/重复/缺失键均 fail closed |
-| Prompt / final | 隔离 ACP 和项目级 Core AgentRun 都返回固定公开答案 | Kimi streamed text 保持私有；terminal 与 Missing-Send candidate 先清洗 reasoning block |
+| Prompt / final | 隔离 ACP 和项目级 Core AgentRun 都返回固定答案；v1.28 generic fixture 证明 `<think>` text 原样保留 | Kimi streamed text 走普通 `agent.text.delta`；terminal 与 Missing-Send candidate 不做 provider 清洗 |
 | Tool / permission | 显式 `permission_mode=default` 的 Shell allow-once、deny 与六类 terminal output 矩阵通过；另一个真实 smoke 直接读取 Core `memberRuntimeDefaults` 得到 `permission_mode=yolo`，固定 Prompt、Shell command 和文件写入均成功且产生 0 次交互式 Approval | 新队员默认原生最高权限 `yolo`，descriptor recommendation 保持 `default`，已有保存值不自动扩权，read-only effective mode 强制 `plan`；最高 Runtime 权限不绕过 Core 自有路径、凭据、Binding 与 execution fence |
 | Deny / filesystem | 独立 Camp 中真实 deny Approval 返回 `rovai_approval_denied`，Tool 为 `failed/not_executed`，目标文件不存在 | ACP Client fs write 没有匹配 one-time authorization 时由 Core 拒绝；Runtime Tool 前预拒绝仍可单独如实记录 |
 | Cancel / cleanup | `sleep 30` 获准后发送 `session/cancel`，约 6 ms 返回 `cancelled`，无目标残留进程 | cancel、terminal、planned shutdown、Camp 删除与 App shutdown 都停止私有 Host/进程树 |
@@ -97,7 +83,7 @@ diagnostics 或本文。国内 `https://api.minimaxi.com/v1` 接受该 Token Pla
 | Catalog | `session/new.configOptions` 报告 synthetic env model、thinking `on/off` 与四种 mode；Idle `available_commands_update` 报告内建 command 和 Skill command | Runtime advertisement 为 Verified；Host 安全路由为私有 async metadata。当前产品不消费该 catalog，不建立产品 snapshot，也不列为遗留问题 |
 | Skill | `.kimi-code/skills` 两次都被发现并返回唯一 marker，且正确选择 canonical `--to-principal` 但不触发当前用户注意力 | managed Skill discovery/invocation 与消息局部注意力教学均为 Verified |
 | External MCP | 原始 ACP stdio 与相邻空 Session 隔离通过；产品 smoke 经 Core、Assignment、AgentRun Projection、ContextManifest 和 MiniMax M3 真实 Tool call，同时返回 Rovai stdio、Streamable HTTP 与额外 stdio 三个 marker，项目同名 native 定义均未覆盖 Rovai 定义 | `AdditivePerRun / RovaiWins`；标准 ACP `session/new/resume/load.mcpServers`，三项 Manifest exposure 均为 `ready`，不写 Runtime 用户级配置 |
-| Missing-Send | zero-send publication、accepted-send suppression、ACP tool→final 三场景通过；Kimi private stream 未进入公共 fixture | `IfNoAcceptedSend` candidate 经过 thinking 清洗、terminal record 与既有 suppression gate |
+| Missing-Send | zero-send publication、accepted-send suppression、ACP tool→final 三场景通过；v1.28 generic agent-text fixture 覆盖 Kimi/Grok 原样 `<think>` text | `IfNoAcceptedSend` 使用通用 ACP assistant suffix 与既有 suppression gate，不做 provider 清洗 |
 | Usage / compaction | 多轮 Prompt、resume/load 与 MCP 调用均未观察到 `usage_update`；Kimi `0.32.0` 安装包与官方 `main` 证明 compact lifecycle 会降格为同形 text chunk，自动 compact 可与 Active Prompt 重叠；确定性 Host 回归已覆盖 started→blocked→completed | Usage/Cost Disabled；Compaction `best_effort`，Active Prompt 使用 Kimi-only exact lifecycle correlation，idle/detached 保留官方四行 completion detector；blocked 保持 pending，frame 不污染 final/Missing-Send；无 Hook、用户配置或 token heuristic；真实自动/手动完整 Core observation smoke 待执行 |
 | Built-in CLI | 早期 `0/15` fixture 把 legacy stdin 非法输入的当前退出码 `2` 错写为 `1`，Kimi 实际已执行 Shell 并在首项 canonical operation 前退出；修正后十五项 operation、三种输入、Gather、exact successor read、conflict、initial/resumed lease fencing、logical/native continuation 全部通过，共 56 条 full-run evidence | macOS arm64 Built-in transport 为 Verified；snapshot 声明 capability，默认 Built-in 与 Skill 资格集合包含 Kimi |
 
@@ -205,9 +191,8 @@ implementation `Disabled`，不是 `Unsupported`；usage/token 变化、历史�
 
 v1.05 设计冻结于仓库提交 `0e20ea154eb3110f46d3a18f695dc2217b4e801b` 时，尚无任一 Adapter 完成
 Windows 10 22H2/Windows 11 x64 的逐项真实资格证据。2026-08-23 复核既有 Windows 证据并在当前源码树完成
-逐 Runtime 两轮 Camp 目标确认后，当时设置页范围内的十一种 Runtime 已准入；`cursor-agent` 被明确排除。
-v1.28 新增的 `pi` 尚未运行独立 Windows Bash/Job Object 与真实模型资格矩阵，因此当前十三行中十一行
-qualified，`cursor-agent` 与 `pi` 不准入。下表是当前资格状态，不是本机
+逐 Runtime 两轮 Camp 目标确认后，设置页范围内的十一种 Runtime 已准入；明确不在本轮设置页范围的
+`cursor-agent` 仍不准入。下表是当前资格状态，不是本机
 `not_installed`、Probe 失败、上游不支持或 Renderer allowlist；唯一产品真源是 Rust Registry 的
 [Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)投影。
 
@@ -225,7 +210,6 @@ qualified，`cursor-agent` 与 `pi` 不准入。下表是当前资格状态，�
 | `cursor-agent` | `not_qualified` | — | 不在当前设置页范围，且本轮明确排除 |
 | `kimi-code-cli` | `qualified` | 同上 | 两轮纯消息与 Native Session 延续通过；本机 ACP terminal 不可用 |
 | `antigravity-app` | `qualified` | 同上 | 复用操作员确认的既有成功；当前额度下未重复模型输出 |
-| `pi` | `not_qualified` | — | v1.28 没有 Windows x64 独立 Bash、Job Object、Approval、Session 与 cleanup 资格证据 |
 
 公共 Named Pipe、Job Object 或三类 execution-shape 测试只能证明平台基础设施。任一行提升为 `qualified` 前，
 必须独立覆盖 discovery、executable identity、authentication、first run、Session continuation、Built-in Tool
@@ -250,8 +234,7 @@ terminal。凭据、原始 Prompt、本机用户路径、Session/Run ID 均未�
 Codex、OpenCode、Copilot、Kiro、Qoder、CodeBuddy、Qwen、TRAE 与 Kimi 都在各自隔离 Rovai Camp 完成两轮；
 第二轮与第一轮绑定同一 Native Session。除 Codex、Kimi 使用两轮纯消息外，其余当前可重复 Runtime 还确认了
 终端输出投影。Antigravity 按操作员明确确认复用此前成功运行，本次 companion 在当前额度状态下未返回模型
-输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，是该次冻结证据中唯一 Windows
-`not_qualified` 行；v1.28 后新增的 Pi 另因没有 Windows 独立证据保持不准入，不追溯改写旧冻结文件。
+输出；这一限制原样写入冻结证据。Cursor 不在本轮设置页范围，仍为唯一 Windows `not_qualified` 行。
 
 ### 2026-08-21 Windows 10 22H2 本机实施复核
 
@@ -340,7 +323,7 @@ Rovai smoke 通过；此前手写的无效重复 custom model 已从用户配置
 
 ### Camp Published Attachment View visibility 基线
 
-当前十三个 Adapter 在各自已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把
+当前十二个 Adapter 在各自已准入平台统一使用 `generation_fenced_v1`。每次 Camp 附件发布或受控 rebuild 都把
 旧 generation 的 Host/Binding 视为不兼容，并在 mutation gate 内停止或 fence；下一次 dispatch 仍只授权同一
 Camp 的精确 `attachments` root。该实现选择是保守 fallback，不是 Runtime snapshot 行为的实测结论。
 
@@ -753,7 +736,8 @@ response-before-forward、forward-without-response、new/resumed Session、早�
 
 2026-08-08 的 v0.48 qualification 对六个目标 Runtime 执行真实 compaction，并观察 Rovai 选择的
 官方结构化 surface；v1.27 另以 Kimi `0.32.0` 安装包、官方源码/E2E 和已有手动 wire 建立精确文本
-compatibility surface。detector 是 `best_effort` 内部增强能力；此表记录各目标版本的证据强度，不把
+compatibility surface；v1.28 以 Grok `0.2.118` no-leader live wire 与真实产品强制压缩建立 event-ID
+structured surface。detector 是 `best_effort` 内部增强能力；此表记录各目标版本的证据强度，不把
 detector readiness 提升为 Runtime admission 条件。
 
 | Runtime | 实测版本 | 真实操作与观察 | 当前 admission / transport | 结论与边界 |
@@ -762,6 +746,7 @@ detector readiness 提升为 Runtime admission 条件。
 | OpenCode | `1.18.10` | server summarize 完成并发出 native `session.compacted` | completed；隔离 native Plugin，prompt 保持 ACP | pass；ACP inbound 本身不转发该 native event |
 | Kiro | `2.16.1` | `_kiro.dev/commands/execute compact` 后观察 status `started`、`completed` | 仅 nested `params.status.type=completed`；现有 ACP inbound | pass；summary 不参与 admission 或 evidence digest |
 | Kimi Code | `0.32.0` | 手动 `/compact` 产生普通 lifecycle frame；安装包与官方 `main` 证明 native ACP server 把 started/completed/cancelled/blocked 降格为同形 `agent_message_chunk`，自动 compact 可在 turn 内完成；Host fixture 已覆盖 started→blocked→completed | `kimi.acp.compaction.completed_text.v1 / completed`；Kimi-only Prompt lifecycle correlation + idle/detached exact completion route | source-qualified best-effort；started 建 pending，blocked 保持，cancelled 清除，completed 仅在 pending 时 observation 并清除；相关 frame 不进入 final/Missing-Send。wire 无 provenance，模型逐字复现整套 frame 的歧义仍存在；无 Hook/用户配置/token heuristic；真实自动/手动完整 Core observation smoke 待执行 |
+| Grok Build | `0.2.118 (1e1687c1cf6a)` | 官方 debug arm 后真实发出 started 与 direct `auto_compact_completed`；completion 带 exact Session ID 与非空 event ID，当前 Prompt 正常完成 | `grok.acp.auto_compact_completed.v1 / completed`；现有 ACP Session metadata route | source-qualified best-effort pass；只认无 request ID、exact Session、non-replay completion 与非负 `tokens_after`，event ID 去重。下一轮同 Session/warm Host 的 Redelivery revision 1 accepted，requested/acknowledged 均为 1；无 Hook、用户配置、summary/text/token heuristic |
 | Qoder | `1.1.14` | 真实 `/compact` 触发 `PostCompact(manual)` | completed；隔离 `--settings` Hook | pass |
 | CodeBuddy | `2.133.1` | 强制真实 emergency auto compaction 完成后触发 `SessionStart(source=compact)` | completed；隔离 `--plugin-dir` Plugin Hook | best-effort pass；CLI additional settings 未进入 Hook registry。该版本 pre-message compaction 实测绕过 `PreCompact`、`PostCompact` 和 `SessionStart(compact)`，因此存在已记录的 detector coverage gap，不使用 token heuristic 补猜 |
 | Qwen Code | `0.21.5` | 真实 `/compress` 完成并触发 `PostCompact(manual)` | completed；私有 `QWEN_HOME` user-scope Hook | pass；HookRegistry 不读取 system Hook，trigger matcher 为 exact match，配置 `*` 后由 relay 校验 trigger |
@@ -794,6 +779,88 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | Antigravity | `Unsupported` | 无不修改 Global/Workspace 文件的逐 Run 动态通道 | 诊断披露；配置页保持中立 |
 | Cursor Agent | `Unsupported` | 当前未准入，不注入 External MCP | 完整 authenticated Session 与 same-name matrix 前保持 Disabled |
 | Kimi Code | `AdditivePerRun` / `RovaiWins` | ACP `session/new/resume/load.mcpServers`，不写用户级配置 | `0.32.0` + MiniMax M3 真实 Core smoke 已通过 stdio、Streamable HTTP、同名整项优先与三项 `ready` Manifest exposure |
+| Grok Build | `AdditivePerRun` / `NativeWinsSkip` | `0.2.118` 忽略 ACP Session `mcpServers`；Core 使用权限收窄的临时 Plugin 与 process `--plugin-dir`，不写 project/user config | MiniMax-M3 产品 smoke 保留两个原生同名 Server、skip 两个冲突 Assignment，并真实调用第三个不同名 Rovai stdio Server；三项 Manifest exposure 与 cleanup 通过 |
+| Pi Coding Agent | `AdditivePerRun` / `RovaiWins` / `CoreManaged` | `rovai-pi-host-v2` 按 binding 注册 proxy Tool；Core 拥有 stdio Server、JSON-RPC、Approval 与 cleanup；不写 Pi 全局配置 | initialize/list/call 与有界 result 的 Core fixture 通过；真实 Pi provider 的 assignment 增删、Tool call、相邻 Session 无泄漏和 cancel cleanup 尚未形成完整 Golden Flow，Streamable HTTP 未实现且未证明上游 Unsupported |
+
+## Grok Build macOS arm64 接入证据
+
+2026-08-24 的 v1.28 qualification 使用 `grok 0.2.118 (1e1687c1cf6a)`、MiniMax-M3 与本机私有
+OpenAI-compatible endpoint。生产 Host 直接继承官方 `$GROK_HOME/config.toml` 的 `[models]` /
+`[model.<id>]` 配置；mode-0600 `$GROK_HOME/.env` 只向目标进程提供 TOML `env_key` 引用的密钥。Core 不再
+定义或翻译 `GROK_MODEL_*` 私有三字段，不覆盖正式 `GROK_HOME`，也不改写用户配置。BYOK Probe 把官方
+配置层复制到临时 Home、只经环境传递密钥并选择 `xai.api_key`。无 BYOK 时实现保留原生 Home、选择
+advertised `cached_token` 的非交互 account-auth 分支；本机没有 cached token，因此该分支未做真实登录验收。
+
+真实产品链路通过 Deep Probe、标准 `session/set_model`、同一 Native Session 两轮对话与 Fleet LRU warm Host
+复用、allow/deny、取消、六类命令输出、Missing-Send、十五项 Built-in CLI 以及 `.grok/skills` 原生发现。
+新 Core/ACP Host 用 exact `session/load` 保持同一 ID 并恢复 session marker；17 条 replay event 被隔离，0 Action、
+0 Approval，恢复后写入/审批和 cancel 通过，错误 ID 只记录一次 continuity-lost 后新建 Session。该版本不广告
+resume，结论为 HistoryRestore。
+
+开发者确认的 v1.28 model-context revision 2 保持 Bootstrap Formatter 3 的完整 bytes 不变。新 Grok Session
+把该 payload 只放入一次 `session/new._meta.rules`，首轮及后继 `session/prompt` 均只发送 Dynamic Context；
+same-host 与 exact load 不重复注入，replacement new 按新 Binding/generation 注入一次。产品从不发送
+`systemPromptOverride`。Grok runtime/history compatibility 增加 native-rules revision 1，旧 `first_payload`
+Binding 不复用。
+
+该 compatibility 升版严格限定到 Grok：Grok Runtime payload 使用 schema 5、HistoryRestore key 使用 v3，并含
+官方配置摘要与 native-rules revision；非 Grok Runtime 仍使用原 schema 3 且不出现 Grok 字段，TRAE
+HistoryRestore 仍为 v1，因此其 canonical payload 与 digest 不变化。
+
+no-leader Probe 与产品链路都观察到 direct `_x.ai/session_notification` structured completion。detector 只接受
+`auto_compact_completed`、exact Session ID、非空 event ID、non-replay 与非负 `tokens_after`，并把 event ID 用作
+Runtime occurrence identity。官方 debug arm 的真实两轮产品 smoke 中，第一轮当前输出未被 metadata 污染，
+第二轮保持同一 Host/Session，并以 Redelivery revision 1 accepted；requested/acknowledged 均收敛为 1。
+Usage/Cost 仍保持 Disabled。
+
+MiniMax 可能把 `<think>` 作为普通 ACP agent text 返回。v1.28 不再删除、重分类或延迟 Kimi/Grok 的这类
+文本：标准 chunk 原样进入执行台 Evidence、final 与 Missing-Send candidate。该行为与其他 ACP Runtime
+一致；资格证据只陈述“观察到上游文本并按 generic path 投影”，不再声称存在私有 reasoning boundary。
+
+External MCP 先得到“Session `mcpServers` 被忽略”的负向证据，再验证 process `--plugin-dir` 的替代入口。
+产品 smoke 保留两个 native 同名定义并启动它们，两个冲突 Assignment 记为 skip，第三个不同名 Server 由
+MiniMax-M3 真实调用；临时 Plugin 随 Host 删除。项目/用户 config 仍不作为注入通道。
+
+adapter-scoped 原始证据位于
+[`qualification/runtime-platform/macos-arm64-grok-build-v1.json`](../qualification/runtime-platform/macos-arm64-grok-build-v1.json)。
+该证据不包含 Key、完整 Native ID、Prompt 或本机私有路径。macOS x64 与 Windows x64 保持未准入；原生
+Usage/Cost 字段保持 Disabled。
+
+## Pi Coding Agent v0.84.2 接入证据与新版 Checklist 差距
+
+Pi 使用官方 JSONL RPC 和用户原生 `~/.pi/agent` 认证/模型状态。正式 Host 不读取 Claude settings、不复制
+MiniMax key、不覆盖 `PI_CODING_AGENT_DIR`；本机 smoke 使用执行时的用户 Pi native default，不把当时 provider
+固化成产品结论。显式模型
+通过 `get_available_models`、`set_model` 与 `get_state` 核对，并诚实保留 Pi 会写入原生全局默认的副作用。
+
+revision 1 已实现 workspace 级 `resident_multi_session`：Host single-flight，同 Workspace 可串行复用；每个
+Run 发布递增 binding 后 exact `switch_session`/`new_session`，cold resume 只使用 full UUID 与 canonical file。
+Bootstrap Evidence v2 按 Binding 冻结完整身份和 full bytes，`rovai-pi-host-v2` 以
+`managed_system_prompt` 追加并在 provider request 前提交 blocking receipt；因此 resident Host 跨成员复用不等于
+身份跨 Session 热更新。
+
+项目 `.pi/skills` 与 Rovai ready Skills 每次 Session activation 由 Pi ResourceLoader 重扫，`get_commands` 和
+receipt 验证 catalog；合并后真实 Pi Skill smoke 已调用 managed Skill，并通过 restart、project-owned conflict
+与 hard-delete lifecycle。stdio MCP bridge 不仅在 Core fixture 中完成 initialize/initialized、分页
+tools/list、tools/call、Approval 与有界结果归一，真实 Pi `0.84.2` 也已调用两个 assigned stdio Tool 并逐次
+durable approve。它是实际实现，不应再写成“Pi 完全不支持 MCP”。但 assignment 更新/删除、deny/cancel 和相邻
+空 Session 无泄漏尚未闭合；Streamable HTTP 也只是未实现，尚无可靠证据把它判成上游 Unsupported。
+
+本机 `pnpm smoke:pi-runtime` 曾通过 native-default first run、Core/Host restart 后 exact resume、warm Host、
+managed allow/deny、cancel 与 descendant cleanup；确定性测试覆盖 receipt、身份冻结、Session switch、LRU 与
+MCP bridge。合并 `main` 后的新版 Checklist 还要求以下真实矩阵，现有 evidence 不足以标记 First-Class：
+
+- manual/threshold/overflow+retry Compaction 后的 Bootstrap、Skills、MCP、权限与 cold resume 连续性；
+- Pi structured Usage 的字段来源、Run scope、counter mode、retry/compaction/resume 去重；
+- 真实 Pi 的 Skill update/delete 后下一 Session 生效，以及 stdio MCP assignment 增删、deny/cancel、相邻 Session
+  无泄漏；基础 Skill 与 MCP Tool 调用已经通过；
+- stdout、stderr、mixed、empty、nonzero、large output，以及 Missing-Send tool→final；zero-send 与 accepted
+  suppression 已通过；
+- crash、protocol error、Probe timeout、App shutdown 与不可变 adapter-scoped platform artifact。
+
+因此 v1.29 的严格 admission 为 `core_compatible`。当前 macOS arm64 `qualified` 代码行早于新版清单，是已记录
+的 product-visibility mismatch；macOS x64、Windows x64 仍不准入。完整逐轴判断见
+[v1.29 Checklist 报告](versions/v1.29/checklist-report.md)。
 
 ## 历史：内置 MCP / Antigravity 专项复核
 
@@ -823,7 +890,6 @@ ADR-0189 只允许 Runtime 设置页追加严格 presentation-only 的 Preview�
 
 | Runtime | 调研版本 / 状态 | 观察结果 | 当前边界 / 未接入原因 | 复核条件 |
 |---|---:|---|---|---|
-| Grok CLI | 0.2.112；本机未登录 | ACP 可初始化；初始化阶段可观察到个人 MCP | 缺少登录后的完整 Session、工具与 additive precedence 证据 | 完成登录、真实 turn、恢复/取消与 MCP 行为复核 |
 | Cursor Agent | 2025.09.18-7ae6800 | 支持 headless 与 resume；已验证入口会读取项目 `.cursor/mcp.json` | 尚无稳定的逐 Run additive channel 与同名证据 | 上游提供动态追加入口并完成 native preservation、同名与恢复复核 |
 | DeepSeek Harness | Settings Preview；未实现 | 仅显示名称、图标、`待支持` 与 disabled 状态；没有 executable、Adapter、Probe 或 capability 结论 | Renderer-only preview，不属于 Product Runtime Catalog | 取得明确入口和协议后，完成 Adapter、认证、Session、终态、取消、Approval、Tool ID、MCP、Activity、Migration 与真实 AgentRun 准入 |
 

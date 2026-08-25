@@ -1,7 +1,7 @@
 ---
 document_type: architecture
 authority: native-session-bootstrap-redelivery
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Native Session Bootstrap Redelivery
@@ -9,7 +9,8 @@ last_updated: 2026-08-23
 本文维护 Native Session context compaction 后 Bootstrap 补发的长期组件边界、Runtime policy、
 detector transport 与输入时序。detector 基线实施以 [v0.48](../versions/v0.48/README.md)为准，Kimi
 completion-frame 扩展以 [v1.27](../versions/v1.27/README.md)为准；目标 Runtime smoke 见
-[Runtime 兼容性清单](../runtime-compatibility.md)。当前 Redelivery v2 实施状态以
+[Runtime 兼容性清单](../runtime-compatibility.md)。Grok structured completion 扩展以
+[v1.28](../versions/v1.28/README.md)为准。当前 Redelivery v2 实施状态以
 [v0.50](../versions/v0.50/README.md)为准。
 Bootstrap v3 的 Self/Peer identity 边界和当前 Dynamic Context ACK 见
 [成员投影不变量](foundational-invariants.md#member-projection)与
@@ -44,6 +45,7 @@ pending。
 | OpenCode | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_OPENCODE_COMPACTION_DETECTOR_POLICY` |
 | Kiro | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIRO_COMPACTION_DETECTOR_POLICY` |
 | Kimi Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_KIMI_COMPACTION_DETECTOR_POLICY` |
+| Grok Build | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_GROK_COMPACTION_DETECTOR_POLICY` |
 | Qoder | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QODER_COMPACTION_DETECTOR_POLICY` |
 | CodeBuddy | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_CODEBUDDY_COMPACTION_DETECTOR_POLICY` |
 | Qwen Code | `signal_driven` | `best_effort` | `ROVAI_INTERNAL_QWEN_COMPACTION_DETECTOR_POLICY` |
@@ -69,6 +71,7 @@ Bootstrap baseline；同一 epoch 重启幂等。尚未接受输入的新 Bindin
 | OpenCode | `session.compacted` / `completed` | 隔离 native Plugin event；prompt 仍走 ACP | ACP 主消息流不转发 native event，完成事件本身可靠 |
 | Kiro | `_kiro.dev/compaction/status` 且 `params.status.type=completed` | 当前 ACP inbound route | 目标版本真实 compact 明确发出 started 后 completed；忽略 started 与 summary |
 | Kimi Code | `kimi.acp.compaction.completed_text.v1` / `completed` | Kimi-only Prompt lifecycle correlation + idle/detached completion compatibility route | Kimi native ACP server 把内部 lifecycle 降格为同形 `agent_message_chunk`；Active Prompt 只有 exact started 建立 pending 后的 exact completed 才准入，blocked 保持 pending，cancelled 清除 pending；idle/detached 保留 exact completion detector |
+| Grok Build | `grok.acp.auto_compact_completed.v1` / `completed` | 当前 ACP `_x.ai/session_notification` inbound route | `0.2.118` no-leader live wire 提供 exact Session ID、`auto_compact_completed` 与非空 `_meta.eventId`；event ID 作为 Runtime occurrence identity，started/failed/cancelled/replay/unknown 全部忽略 |
 | Qoder | `PostCompact` / `completed` | 隔离 `--settings` Hook | 目标版本真实 `/compact` 完成态可靠 |
 | CodeBuddy | `SessionStart(source=compact)` / `completed` | 隔离 `--plugin-dir` Plugin Hook | `2.133.1` emergency auto compaction 完成后真实触发；CLI additional settings 未注册 lifecycle Hook。该版本 pre-message compaction 绕过全部相关 Hook，故 detector 仍是有明确 coverage gap 的 `best_effort`，不做 token 推断 |
 | Qwen Code | `PostCompact` / `completed` | 私有 `QWEN_HOME` user Hook | 上游 HookRegistry 不读取 system Hook；私有 user settings 保留原配置且不修改用户文件。trigger matcher 为 exact match，使用 `*` 后由 relay 校验 `manual|auto` |
@@ -87,6 +90,18 @@ Kimi detector 不安装 Hook、不修改用户 `KIMI_CODE_HOME/config.toml`，�
 等待 compaction，保持 pending；completed 产生一次 observation 并清除 pending；cancelled 只清除 pending。
 这些已相关的 lifecycle frame 作为 Session metadata 内部消费，不进入 streamed agent text、Runtime final 或
 Missing-Send。没有 pending 的 Active Prompt completed 保持普通 assistant output，不产生 observation。
+
+Grok detector 不安装 Hook、不修改 `$GROK_HOME`，只消费目标版本的 structured vendor notification。notification
+必须没有 JSON-RPC request ID，method 精确为 `_x.ai/session_notification`，`params.sessionId` 命中 active Lease，
+`params.update.sessionUpdate` 精确为 `auto_compact_completed`，`tokens_after` 为非负整数，且
+`params._meta.eventId` 为非空字符串；可选 `tokens_before` 必须是非负整数，可选 `elapsed_ms` 必须是非负整数。
+`_meta.isReplay=true`、leader nested envelope、started/failed/cancelled、ordinary agent text 与未知字段组合均不
+推进 revision。token、耗时和 summary 不进入 observation digest、模型输入或公开 Evidence。
+
+如果 completion 发生在 Grok 当前 Prompt 内部的 compact-and-resubmit，Core 不在通知栈中发送新 prompt。
+`_meta.rules` 继续承载该 Session 的 system-level Bootstrap；completion 只推进 Requirement，由下一次尚未
+prepared 的 Core-controlled input 使用既有 Redelivery Envelope v2。目标版本的 acceptance-only debug arm 只用于
+真实验收，不是产品能力、用户设置或 detector transport。
 
 Prompt 已结束或正常 AgentRun 已 detach、但 observer 仍绑定于同一 warm Host/Session 时，保留既有 exact
 completed compatibility route。Kimi ACP wire 没有 lifecycle source tag、occurrence ID 或 message provenance；

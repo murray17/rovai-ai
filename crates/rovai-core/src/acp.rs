@@ -1,6 +1,8 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    ffi::OsString,
     path::{Component, Path, PathBuf},
+    process::ExitStatus,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -21,8 +23,8 @@ use rovai_core::{
     },
     agent_profile::{AdapterKind, FrozenAgentRuntimeConfig},
     agent_runtime_adapter::{
-        acp_model_catalog_from_session, acp_runtime_model_id_from_session,
-        write_kiro_additive_agent_config,
+        AcpClientTerminalMode, AgentRuntimeAdapterRegistry, acp_model_catalog_from_session,
+        acp_runtime_model_id_from_session, write_kiro_additive_agent_config,
     },
     builtin_tool_transport::{BUILTIN_TOOL_CONTRACT_VERSION, builtin_tool_catalog_digest},
     camp_attachment_view::{
@@ -43,9 +45,9 @@ use rovai_core::{
 };
 use serde_json::{Value, json};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader},
     process::Command,
-    sync::{Mutex, RwLock, mpsc, oneshot},
+    sync::{Mutex, Notify, RwLock, mpsc, oneshot},
     time::timeout,
 };
 
@@ -59,6 +61,7 @@ use crate::{
     runtime_mcp::{
         EphemeralMcpConfigFile, external_acp_server, remove_stale_mcp_configs,
         write_ephemeral_additive_mcp_config, write_ephemeral_copilot_config,
+        write_ephemeral_grok_mcp_plugin,
     },
 };
 
@@ -80,6 +83,7 @@ pub enum AcpIncoming {
         execution_epoch: i64,
         native_prompt_id: String,
         delivery_id: String,
+        native_error_code: Option<i64>,
         error: String,
     },
     Message {
@@ -147,6 +151,7 @@ impl AcpRuntimeOwner {
         adapter_kind: AdapterKind,
         host_instance_id: &str,
         active_prompt: &AcpActivePrompt,
+        native_error_code: Option<i64>,
         error: String,
     ) -> AcpIncoming {
         AcpIncoming::InputNotAccepted {
@@ -156,6 +161,7 @@ impl AcpRuntimeOwner {
             execution_epoch: self.execution_epoch,
             native_prompt_id: active_prompt.prompt_id.clone(),
             delivery_id: active_prompt.delivery_id.clone(),
+            native_error_code,
             error,
         }
     }
@@ -197,6 +203,7 @@ struct AcpSessionRoute {
     owner: AcpRuntimeOwner,
     phase: AcpSessionPhase,
     sequence: u64,
+    client_terminal_create_cancelled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -231,6 +238,7 @@ struct AcpActivePrompt {
     prompt_id: String,
     delivery_id: String,
     acceptance_emitted: bool,
+    prompt_activity_observed: bool,
     kimi_compaction_lifecycle: KimiCompactionLifecycle,
 }
 
@@ -287,6 +295,17 @@ fn is_cursor_private_notification(method: &str) -> bool {
     )
 }
 
+fn is_acp_client_terminal_method(method: &str) -> bool {
+    matches!(
+        method,
+        "terminal/create"
+            | "terminal/output"
+            | "terminal/wait_for_exit"
+            | "terminal/kill"
+            | "terminal/release"
+    )
+}
+
 fn is_session_catalog_update(message: &Value) -> bool {
     message.get("id").is_none()
         && message.get("method").and_then(Value::as_str) == Some("session/update")
@@ -304,8 +323,13 @@ fn is_session_catalog_update(message: &Value) -> bool {
 }
 
 fn is_known_session_lifecycle_extension(adapter_kind: AdapterKind, message: &Value) -> bool {
-    message.get("id").is_none()
-        && matches!(
+    if message.get("id").is_some() {
+        return false;
+    }
+    let method = message.get("method").and_then(Value::as_str);
+    (adapter_kind == AdapterKind::GrokBuild
+        && method.is_some_and(|method| method.starts_with("_x.ai/")))
+        || matches!(
             (adapter_kind, message.get("method").and_then(Value::as_str)),
             (AdapterKind::KiroCli, Some("_kiro.dev/compaction/status"))
                 | (AdapterKind::KiroCli, Some("_kiro.dev/commands/available"))
@@ -410,6 +434,45 @@ fn is_kimi_compaction_completed_text(text: &str) -> bool {
         && lines.next().is_none()
 }
 
+fn grok_compaction_completed_occurrence_id(message: &Value) -> Option<String> {
+    if message.get("id").is_some()
+        || message.get("method").and_then(Value::as_str) != Some("_x.ai/session_notification")
+        || message
+            .pointer("/params/update/sessionUpdate")
+            .and_then(Value::as_str)
+            != Some("auto_compact_completed")
+        || message
+            .pointer("/params/sessionId")
+            .and_then(Value::as_str)
+            .is_none_or(|session_id| session_id.trim().is_empty())
+        || message
+            .pointer("/params/update/tokens_after")
+            .and_then(Value::as_u64)
+            .is_none()
+    {
+        return None;
+    }
+    if let Some(value) = message.pointer("/params/update/tokens_before")
+        && value.as_u64().is_none()
+    {
+        return None;
+    }
+    if let Some(value) = message.pointer("/params/update/elapsed_ms")
+        && value.as_i64().is_none_or(|elapsed_ms| elapsed_ms < 0)
+    {
+        return None;
+    }
+    if let Some(value) = message.pointer("/params/_meta/isReplay")
+        && value.as_bool() != Some(false)
+    {
+        return None;
+    }
+    let event_id = message
+        .pointer("/params/_meta/eventId")
+        .and_then(Value::as_str)?;
+    (!event_id.trim().is_empty()).then(|| event_id.to_string())
+}
+
 fn is_en_us_unsigned_integer(value: &str) -> bool {
     if value == "0" {
         return true;
@@ -445,6 +508,7 @@ const ACP_HISTORY_RESTORE_MAX_BYTES: u64 = 8 * 1024 * 1024;
 const ACP_HISTORY_RESTORE_TIMEOUT: Duration = Duration::from_secs(30);
 const ACP_HISTORY_RESTORE_POST_RESPONSE_GRACE: Duration = Duration::from_secs(2);
 const ACP_HISTORY_RESTORE_QUIET_PERIOD: Duration = Duration::from_millis(100);
+const GROK_NATIVE_RULES_REVISION: i64 = 1;
 
 fn replay_budget_violation(
     event_count: u64,
@@ -523,15 +587,579 @@ enum PendingRpc {
     },
 }
 
+const ACP_CLIENT_TERMINAL_DEFAULT_OUTPUT_BYTES: usize = 1024 * 1024;
+const ACP_CLIENT_TERMINAL_MAX_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+const ACP_CLIENT_TERMINAL_MAX_PER_HOST: usize = 16;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AcpClientTerminalExit {
+    exit_code: Option<u32>,
+    signal: Option<String>,
+}
+
+impl AcpClientTerminalExit {
+    fn from_status(status: ExitStatus) -> Self {
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt;
+
+            status.signal().map(unix_signal_name)
+        };
+        #[cfg(not(unix))]
+        let signal = None;
+        #[cfg(windows)]
+        let exit_code = status
+            .code()
+            .map(|code| u32::from_ne_bytes(code.to_ne_bytes()));
+        #[cfg(not(windows))]
+        let exit_code = status.code().and_then(|code| u32::try_from(code).ok());
+        Self { exit_code, signal }
+    }
+
+    fn wire_value(&self) -> Value {
+        json!({
+            "exitCode": self.exit_code,
+            "signal": self.signal,
+        })
+    }
+}
+
+#[cfg(unix)]
+fn unix_signal_name(signal: i32) -> String {
+    match signal {
+        libc::SIGHUP => "SIGHUP".to_string(),
+        libc::SIGINT => "SIGINT".to_string(),
+        libc::SIGQUIT => "SIGQUIT".to_string(),
+        libc::SIGKILL => "SIGKILL".to_string(),
+        libc::SIGTERM => "SIGTERM".to_string(),
+        other => format!("SIG{other}"),
+    }
+}
+
+#[derive(Debug)]
+struct AcpClientTerminalOutput {
+    bytes: VecDeque<u8>,
+    byte_limit: usize,
+    truncated: bool,
+}
+
+impl AcpClientTerminalOutput {
+    fn new(byte_limit: usize) -> Self {
+        Self {
+            bytes: VecDeque::with_capacity(byte_limit.min(64 * 1024)),
+            byte_limit,
+            truncated: false,
+        }
+    }
+
+    fn append(&mut self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        if self.byte_limit == 0 {
+            self.truncated = true;
+            return;
+        }
+        self.bytes.extend(bytes);
+        if self.bytes.len() > self.byte_limit {
+            let excess = self.bytes.len() - self.byte_limit;
+            self.bytes.drain(..excess);
+            self.truncated = true;
+        }
+    }
+
+    fn snapshot(&self) -> (String, bool) {
+        let bytes = self.bytes.iter().copied().collect::<Vec<_>>();
+        let mut output = String::from_utf8_lossy(&bytes).into_owned();
+        while output.len() > self.byte_limit {
+            let next = output
+                .char_indices()
+                .nth(1)
+                .map_or(output.len(), |(index, _)| index);
+            output.drain(..next);
+        }
+        (output, self.truncated)
+    }
+}
+
+enum AcpClientTerminalControl {
+    Kill(oneshot::Sender<std::result::Result<(), String>>),
+}
+
+struct AcpClientTerminal {
+    session_id: String,
+    owner: AcpRuntimeOwner,
+    output: Mutex<AcpClientTerminalOutput>,
+    completion: RwLock<Option<std::result::Result<AcpClientTerminalExit, String>>>,
+    completion_changed: Notify,
+    open_output_readers: AtomicU64,
+    output_readers_changed: Notify,
+    control: mpsc::UnboundedSender<AcpClientTerminalControl>,
+}
+
+impl AcpClientTerminal {
+    async fn output(&self) -> Value {
+        let (output, truncated) = self.output.lock().await.snapshot();
+        let completion = self.completion.read().await.clone();
+        let mut result = json!({"output": output, "truncated": truncated});
+        if let Some(Ok(exit)) = completion {
+            result["exitStatus"] = exit.wire_value();
+        }
+        result
+    }
+
+    async fn wait_for_exit(&self) -> Result<AcpClientTerminalExit> {
+        loop {
+            let notified = self.completion_changed.notified();
+            if let Some(completion) = self.completion.read().await.clone() {
+                let completion = completion.map_err(anyhow::Error::msg)?;
+                self.wait_for_output_readers().await;
+                return Ok(completion);
+            }
+            notified.await;
+        }
+    }
+
+    async fn wait_for_output_readers(&self) {
+        loop {
+            let notified = self.output_readers_changed.notified();
+            if self.open_output_readers.load(Ordering::Acquire) == 0 {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    async fn kill(&self) -> Result<()> {
+        if self.completion.read().await.is_some() {
+            return Ok(());
+        }
+        let (sender, receiver) = oneshot::channel();
+        if self
+            .control
+            .send(AcpClientTerminalControl::Kill(sender))
+            .is_err()
+        {
+            return if self.completion.read().await.is_some() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!("ACP Client Terminal supervisor stopped"))
+            };
+        }
+        receiver
+            .await
+            .context("ACP Client Terminal kill acknowledgement was dropped")?
+            .map_err(anyhow::Error::msg)
+    }
+}
+
+struct AcpClientTerminalBridge {
+    execution_root: PathBuf,
+    launch_template: ManagedProcessLaunchSpec,
+    state: Mutex<AcpClientTerminalBridgeState>,
+}
+
+#[derive(Default)]
+struct AcpClientTerminalBridgeState {
+    terminals: HashMap<String, Arc<AcpClientTerminal>>,
+    closed: bool,
+}
+
+impl AcpClientTerminalBridge {
+    fn new(execution_root: &Path, launch_template: ManagedProcessLaunchSpec) -> Result<Self> {
+        let execution_root = execution_root.canonicalize().with_context(|| {
+            format!(
+                "failed to resolve ACP Client Terminal execution root {}",
+                execution_root.display()
+            )
+        })?;
+        Ok(Self {
+            execution_root,
+            launch_template,
+            state: Mutex::new(AcpClientTerminalBridgeState::default()),
+        })
+    }
+
+    async fn create(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        params: &Value,
+    ) -> Result<Value> {
+        let command = params
+            .get("command")
+            .and_then(Value::as_str)
+            .context("terminal/create has no command")?;
+        let application = self.launch_template.resolve_child_application(command)?;
+        let arguments = terminal_arguments(params)?;
+        let environment = terminal_environment(params)?;
+        let working_directory = terminal_working_directory(&self.execution_root, params)?;
+        let output_byte_limit = terminal_output_byte_limit(params)?;
+        let terminal_id = format!("terminal-{}", uuid::Uuid::new_v4());
+        let spec = self.launch_template.derive_runtime_one_shot(
+            application,
+            arguments,
+            working_directory,
+            environment,
+            format!(
+                "agent-run:{}:{}:acp-client-terminal:{}",
+                owner.agent_run_id, owner.execution_epoch, terminal_id
+            ),
+        )?;
+        let mut state = self.state.lock().await;
+        if state.closed {
+            bail!("ACP Client Terminal Bridge is closed");
+        }
+        if state.terminals.len() >= ACP_CLIENT_TERMINAL_MAX_PER_HOST {
+            bail!("ACP Client Terminal limit was reached for this Host");
+        }
+        let mut child =
+            ManagedProcess::spawn(spec).context("failed to create ACP Client Terminal")?;
+        let stdout = child
+            .take_stdout()
+            .context("ACP Client Terminal stdout was unavailable")?;
+        let stderr = child
+            .take_stderr()
+            .context("ACP Client Terminal stderr was unavailable")?;
+        let (control, controls) = mpsc::unbounded_channel();
+        let terminal = Arc::new(AcpClientTerminal {
+            session_id: session_id.to_string(),
+            owner: owner.clone(),
+            output: Mutex::new(AcpClientTerminalOutput::new(output_byte_limit)),
+            completion: RwLock::new(None),
+            completion_changed: Notify::new(),
+            open_output_readers: AtomicU64::new(2),
+            output_readers_changed: Notify::new(),
+            control,
+        });
+        state
+            .terminals
+            .insert(terminal_id.clone(), terminal.clone());
+        drop(state);
+        spawn_acp_client_terminal_output_reader(terminal.clone(), stdout);
+        spawn_acp_client_terminal_output_reader(terminal.clone(), stderr);
+        tokio::spawn(supervise_acp_client_terminal(child, terminal, controls));
+        Ok(json!({"terminalId": terminal_id}))
+    }
+
+    async fn output(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        terminal_id: &str,
+    ) -> Result<Value> {
+        Ok(self
+            .terminal(session_id, owner, terminal_id)
+            .await?
+            .output()
+            .await)
+    }
+
+    async fn wait_for_exit(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        terminal_id: &str,
+    ) -> Result<Value> {
+        Ok(self
+            .terminal(session_id, owner, terminal_id)
+            .await?
+            .wait_for_exit()
+            .await?
+            .wire_value())
+    }
+
+    async fn kill(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        terminal_id: &str,
+    ) -> Result<Value> {
+        self.terminal(session_id, owner, terminal_id)
+            .await?
+            .kill()
+            .await?;
+        Ok(json!({}))
+    }
+
+    async fn release(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        terminal_id: &str,
+    ) -> Result<Value> {
+        let terminal = {
+            let state = self.state.lock().await;
+            match state.terminals.get(terminal_id) {
+                Some(terminal) if terminal.session_id == session_id && &terminal.owner == owner => {
+                    Some(terminal.clone())
+                }
+                Some(_) => bail!("ACP Client Terminal belongs to another Session"),
+                // Release is idempotent so a retried response cannot strand a
+                // process after the first request already removed its handle.
+                None => return Ok(json!({})),
+            }
+        };
+        if let Some(terminal) = terminal {
+            let settled =
+                cleanup_acp_client_terminals(vec![(terminal_id.to_string(), terminal)]).await;
+            if !settled.contains(terminal_id) {
+                bail!("ACP Client Terminal did not exit before its release deadline");
+            }
+            self.state.lock().await.terminals.remove(terminal_id);
+        }
+        Ok(json!({}))
+    }
+
+    async fn release_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
+        let terminals = {
+            let state = self.state.lock().await;
+            state
+                .terminals
+                .iter()
+                .filter(|(_, terminal)| {
+                    terminal.session_id == session_id && &terminal.owner == owner
+                })
+                .map(|(id, terminal)| (id.clone(), terminal.clone()))
+                .collect::<Vec<_>>()
+        };
+        let settled = cleanup_acp_client_terminals(terminals).await;
+        self.state
+            .lock()
+            .await
+            .terminals
+            .retain(|id, _| !settled.contains(id));
+    }
+
+    async fn release_all(&self) {
+        let terminals = {
+            let mut state = self.state.lock().await;
+            state.closed = true;
+            state
+                .terminals
+                .iter()
+                .map(|(id, terminal)| (id.clone(), terminal.clone()))
+                .collect::<Vec<_>>()
+        };
+        let settled = cleanup_acp_client_terminals(terminals).await;
+        self.state
+            .lock()
+            .await
+            .terminals
+            .retain(|id, _| !settled.contains(id));
+    }
+
+    async fn is_empty(&self) -> bool {
+        self.state.lock().await.terminals.is_empty()
+    }
+
+    async fn terminal(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+        terminal_id: &str,
+    ) -> Result<Arc<AcpClientTerminal>> {
+        let terminal = self
+            .state
+            .lock()
+            .await
+            .terminals
+            .get(terminal_id)
+            .cloned()
+            .context("ACP Client Terminal is unavailable or was released")?;
+        if terminal.session_id != session_id || &terminal.owner != owner {
+            bail!("ACP Client Terminal belongs to another Session or AgentRun");
+        }
+        Ok(terminal)
+    }
+}
+
+fn terminal_arguments(params: &Value) -> Result<Vec<OsString>> {
+    let Some(arguments) = params.get("args") else {
+        return Ok(Vec::new());
+    };
+    let arguments = arguments
+        .as_array()
+        .context("terminal/create args must be an array")?;
+    if arguments.len() > 4096 {
+        bail!("terminal/create has too many arguments");
+    }
+    arguments
+        .iter()
+        .map(|argument| {
+            argument
+                .as_str()
+                .map(OsString::from)
+                .context("terminal/create argument must be a string")
+        })
+        .collect()
+}
+
+fn terminal_id(params: &Value) -> Result<&str> {
+    params
+        .get("terminalId")
+        .and_then(Value::as_str)
+        .context("ACP Client Terminal request has no terminalId")
+}
+
+fn terminal_environment(params: &Value) -> Result<BTreeMap<OsString, OsString>> {
+    let Some(environment) = params.get("env") else {
+        return Ok(BTreeMap::new());
+    };
+    let environment = environment
+        .as_array()
+        .context("terminal/create env must be an array")?;
+    if environment.len() > 256 {
+        bail!("terminal/create has too many environment variables");
+    }
+    environment
+        .iter()
+        .map(|variable| {
+            let name = variable
+                .get("name")
+                .and_then(Value::as_str)
+                .context("terminal/create environment variable has no name")?;
+            let value = variable
+                .get("value")
+                .and_then(Value::as_str)
+                .context("terminal/create environment variable has no value")?;
+            Ok((OsString::from(name), OsString::from(value)))
+        })
+        .collect()
+}
+
+fn terminal_working_directory(execution_root: &Path, params: &Value) -> Result<PathBuf> {
+    let Some(cwd) = params.get("cwd").filter(|value| !value.is_null()) else {
+        return Ok(execution_root.to_path_buf());
+    };
+    let cwd = cwd
+        .as_str()
+        .context("terminal/create cwd must be a string")?;
+    if !Path::new(cwd).is_absolute() {
+        bail!("terminal/create cwd must be absolute");
+    }
+    let cwd = scoped_path(execution_root, cwd)?;
+    if !cwd.is_dir() {
+        bail!("terminal/create cwd is not an existing directory");
+    }
+    Ok(cwd)
+}
+
+fn terminal_output_byte_limit(params: &Value) -> Result<usize> {
+    let requested = match params.get("outputByteLimit") {
+        Some(Value::Null) | None => ACP_CLIENT_TERMINAL_DEFAULT_OUTPUT_BYTES as u64,
+        Some(value) => value
+            .as_u64()
+            .context("terminal/create outputByteLimit must be an unsigned integer")?,
+    };
+    Ok(usize::try_from(requested)
+        .unwrap_or(usize::MAX)
+        .min(ACP_CLIENT_TERMINAL_MAX_OUTPUT_BYTES))
+}
+
+fn spawn_acp_client_terminal_output_reader<R>(terminal: Arc<AcpClientTerminal>, mut reader: R)
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    tokio::spawn(async move {
+        let mut buffer = [0_u8; 16 * 1024];
+        loop {
+            match reader.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(read) => terminal.output.lock().await.append(&buffer[..read]),
+                Err(_) => break,
+            }
+        }
+        terminal.open_output_readers.fetch_sub(1, Ordering::AcqRel);
+        terminal.output_readers_changed.notify_waiters();
+    });
+}
+
+async fn supervise_acp_client_terminal(
+    mut child: ManagedProcess,
+    terminal: Arc<AcpClientTerminal>,
+    mut controls: mpsc::UnboundedReceiver<AcpClientTerminalControl>,
+) {
+    let completion = loop {
+        tokio::select! {
+            status = child.wait() => {
+                break status
+                    .map(AcpClientTerminalExit::from_status)
+                    .map_err(|error| format!("failed to wait for ACP Client Terminal: {error}"));
+            }
+            control = controls.recv() => match control {
+                Some(AcpClientTerminalControl::Kill(sender)) => {
+                    let result = child.force_terminate_tree().map_err(|error| error.to_string());
+                    let _ = sender.send(result);
+                }
+                None => {
+                    let _ = child.force_terminate_tree();
+                }
+            }
+        }
+    };
+    *terminal.completion.write().await = Some(completion);
+    terminal.completion_changed.notify_waiters();
+    while let Ok(AcpClientTerminalControl::Kill(sender)) = controls.try_recv() {
+        let _ = sender.send(Ok(()));
+    }
+}
+
+async fn cleanup_acp_client_terminals(
+    terminals: Vec<(String, Arc<AcpClientTerminal>)>,
+) -> HashSet<String> {
+    for (_, terminal) in &terminals {
+        let _ = terminal.kill().await;
+    }
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let mut settled = HashSet::new();
+    for (terminal_id, terminal) in terminals {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if timeout(remaining, terminal.wait_for_exit()).await.is_ok() {
+            settled.insert(terminal_id);
+        }
+    }
+    settled
+}
+
+#[derive(Debug, Clone)]
+struct AcpRpcError {
+    code: Option<i64>,
+    message: String,
+}
+
+impl AcpRpcError {
+    fn from_response(value: &Value) -> Self {
+        Self {
+            code: value.get("code").and_then(Value::as_i64),
+            message: value
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("ACP request failed")
+                .to_string(),
+        }
+    }
+
+    fn diagnostic(&self) -> String {
+        self.code.map_or_else(
+            || self.message.clone(),
+            |code| format!("ACP error {code}: {}", self.message),
+        )
+    }
+}
+
 pub(crate) struct AcpHost {
     adapter_kind: AdapterKind,
     reported_version: Option<String>,
+    client_terminal_mode: AcpClientTerminalMode,
+    client_terminal_bridge: Option<AcpClientTerminalBridge>,
     host_instance_id: String,
     child: Mutex<ManagedProcess>,
     stdin: Mutex<ManagedChildStdin>,
     pending: Mutex<HashMap<u64, PendingRpc>>,
     next_id: AtomicU64,
     next_compaction_observation_sequence: AtomicU64,
+    grok_acceptance_auto_compact_armed: AtomicBool,
     routes: RwLock<HashMap<String, AcpSessionRoute>>,
     compaction_observers: RwLock<HashMap<String, AcpCompactionObserverRoute>>,
     known_sessions: RwLock<HashSet<String>>,
@@ -588,6 +1216,8 @@ impl AcpHost {
             None
         };
         let host_instance_id = uuid::Uuid::new_v4().to_string();
+        let grok_byok_configured =
+            frozen_runtime.adapter_kind == AdapterKind::GrokBuild && grok_native_byok_configured()?;
         let mut command = Command::new(&frozen_runtime.executable_path);
         configure_active_runtime_command(&mut command);
         if let Some(config) = &builtin_tools {
@@ -648,6 +1278,16 @@ impl AcpHost {
             ManagedWindowsArgvDialect::MicrosoftCrt,
             format!("runtime-host:{}", frozen_runtime.adapter_kind.as_str()),
         )?;
+        let client_terminal_mode = AgentRuntimeAdapterRegistry::default()
+            .acp_client_terminal_mode(frozen_runtime.adapter_kind);
+        let client_terminal_bridge = if client_terminal_mode.is_available() {
+            Some(AcpClientTerminalBridge::new(
+                workspace.path(),
+                spec.clone(),
+            )?)
+        } else {
+            None
+        };
         let mut child = ManagedProcess::spawn(spec).with_context(|| {
             format!(
                 "failed to start {} as an ACP server",
@@ -660,12 +1300,15 @@ impl AcpHost {
         let host = Arc::new(Self {
             adapter_kind: frozen_runtime.adapter_kind,
             reported_version: frozen_runtime.reported_version.clone(),
+            client_terminal_mode,
+            client_terminal_bridge,
             host_instance_id,
             child: Mutex::new(child),
             stdin: Mutex::new(stdin),
             pending: Mutex::new(HashMap::new()),
             next_id: AtomicU64::new(1),
             next_compaction_observation_sequence: AtomicU64::new(1),
+            grok_acceptance_auto_compact_armed: AtomicBool::new(false),
             routes: RwLock::new(HashMap::new()),
             compaction_observers: RwLock::new(HashMap::new()),
             known_sessions: RwLock::new(HashSet::new()),
@@ -697,7 +1340,7 @@ impl AcpHost {
                             "readTextFile": allow_client_fs,
                             "writeTextFile": allow_client_fs
                         },
-                        "terminal": false
+                        "terminal": host.client_terminal_mode.is_available()
                     },
                     "clientInfo": {
                         "name": "rovai",
@@ -709,18 +1352,51 @@ impl AcpHost {
             .await;
         match initialized {
             Ok(result) if result.get("protocolVersion").and_then(Value::as_u64) == Some(1) => {
-                *host.initialize_result.write().await = Some(result);
-                if frozen_runtime.adapter_kind == AdapterKind::CursorAgent
-                    && let Err(error) = host
+                *host.initialize_result.write().await = Some(result.clone());
+                let auth_method = match frozen_runtime.adapter_kind {
+                    AdapterKind::CursorAgent => Ok(Some(("cursor_login", "Cursor"))),
+                    AdapterKind::GrokBuild => health::select_grok_noninteractive_auth_method(
+                        &result,
+                        grok_byok_configured,
+                    )
+                    .map(|method| Some((method, "Grok Build"))),
+                    _ => Ok(None),
+                };
+                let auth_method = match auth_method {
+                    Ok(auth_method) => auth_method,
+                    Err(error) => {
+                        host.shutdown().await;
+                        return Err(error);
+                    }
+                };
+                if let Some((method_id, runtime_name)) = auth_method {
+                    let advertised = result
+                        .get("authMethods")
+                        .and_then(Value::as_array)
+                        .is_some_and(|methods| {
+                            methods.iter().any(|method| {
+                                method.get("id").and_then(Value::as_str) == Some(method_id)
+                            })
+                        });
+                    if !advertised {
+                        host.shutdown().await;
+                        bail!(
+                            "{runtime_name} ACP did not advertise required authentication method {method_id}"
+                        );
+                    }
+                    if let Err(error) = host
                         .rpc_with_timeout(
                             "authenticate",
-                            json!({"methodId": "cursor_login"}),
+                            json!({"methodId": method_id, "_meta": {"headless": true}}),
                             Duration::from_secs(15),
                         )
                         .await
-                {
-                    host.shutdown().await;
-                    return Err(error.context("Cursor ACP authentication failed"));
+                    {
+                        host.shutdown().await;
+                        return Err(
+                            error.context(format!("{runtime_name} ACP authentication failed"))
+                        );
+                    }
                 }
                 if frozen_runtime.adapter_kind == AdapterKind::CopilotCli {
                     // Copilot eagerly loads --additional-mcp-config before it
@@ -786,6 +1462,16 @@ impl AcpHost {
                             continue;
                         }
                         let method = message.get("method").and_then(Value::as_str);
+                        if host.client_terminal_mode.is_available()
+                            && method.is_some_and(is_acp_client_terminal_method)
+                            && message.get("id").is_some()
+                        {
+                            let request_host = host.clone();
+                            tokio::spawn(async move {
+                                request_host.handle_client_terminal_request(message).await;
+                            });
+                            continue;
+                        }
                         if host.adapter_kind == AdapterKind::CursorAgent
                             && method.is_some_and(is_cursor_private_notification)
                         {
@@ -939,6 +1625,7 @@ impl AcpHost {
                 }
             }
             host.alive.store(false, Ordering::Release);
+            host.release_all_client_terminals().await;
             for (_, pending) in host.pending.lock().await.drain() {
                 if let PendingRpc::Response { sender, .. } = pending {
                     let _ = sender.send(Err("ACP Host exited".to_string()));
@@ -953,12 +1640,9 @@ impl AcpHost {
     }
 
     async fn complete_pending(&self, id: u64, pending: PendingRpc, message: Value) {
-        let response = if let Some(error) = message.get("error") {
-            Err(error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("ACP request failed")
-                .to_string())
+        let response_error = message.get("error").map(AcpRpcError::from_response);
+        let response = if let Some(error) = response_error.as_ref() {
+            Err(error.diagnostic())
         } else {
             Ok(message.get("result").cloned().unwrap_or(Value::Null))
         };
@@ -982,16 +1666,18 @@ impl AcpHost {
                     if route.owner != owner || active_prompt.prompt_id != prompt_id {
                         return;
                     }
-                    let should_emit_acceptance = !active_prompt.acceptance_emitted;
+                    let should_emit_input_disposition = !active_prompt.acceptance_emitted;
                     active_prompt.acceptance_emitted = true;
                     let active_prompt = active_prompt.clone();
                     route.phase = AcpSessionPhase::PromptCompleted(active_prompt.clone());
                     route.sequence = route.sequence.saturating_add(1);
-                    Some((active_prompt, should_emit_acceptance, route.sequence))
+                    Some((active_prompt, should_emit_input_disposition, route.sequence))
                 };
-                if let Some((active_prompt, should_emit_acceptance, sequence)) = active_prompt {
-                    match &response {
-                        Ok(_) if should_emit_acceptance => {
+                if let Some((active_prompt, should_emit_input_disposition, sequence)) =
+                    active_prompt
+                {
+                    match (&response, response_error.as_ref()) {
+                        (Ok(_), _) if should_emit_input_disposition => {
                             let _ = self.incoming.send(owner.input_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
@@ -999,27 +1685,54 @@ impl AcpHost {
                                 &active_prompt,
                             ));
                         }
-                        Err(error) if should_emit_acceptance => {
+                        (Err(_), Some(_))
+                            if should_emit_input_disposition
+                                && active_prompt.prompt_activity_observed =>
+                        {
+                            // A matching terminal response alone may be a pre-execution
+                            // rejection. Prompt-scoped activity observed before that matching
+                            // response proves the current input was processed; terminal failure
+                            // is recorded separately and must never make the input retryable.
+                            let _ = self.incoming.send(owner.input_accepted(
+                                self.adapter_kind,
+                                &self.host_instance_id,
+                                &session_id,
+                                &active_prompt,
+                            ));
+                        }
+                        (Err(error), Some(response_error)) if should_emit_input_disposition => {
                             let _ = self.incoming.send(owner.input_not_accepted(
                                 self.adapter_kind,
                                 &self.host_instance_id,
                                 &active_prompt,
+                                response_error.code,
                                 error.clone(),
                             ));
                         }
                         _ => {}
                     }
-                    let params = match response {
-                        Ok(result) => json!({
+                    let input_disposition =
+                        if response.is_ok() || active_prompt.prompt_activity_observed {
+                            "accepted"
+                        } else {
+                            "not_accepted"
+                        };
+                    let params = match (response, response_error) {
+                        (Ok(result), _) => json!({
                             "sessionId": session_id,
                             "promptId": prompt_id,
+                            "deliveryId": active_prompt.delivery_id,
                             "requestId": id,
+                            "inputDisposition": input_disposition,
                             "result": result
                         }),
-                        Err(error) => json!({
+                        (Err(error), response_error) => json!({
                             "sessionId": session_id,
                             "promptId": prompt_id,
+                            "deliveryId": active_prompt.delivery_id,
                             "requestId": id,
+                            "inputDisposition": input_disposition,
+                            "nativeErrorCode": response_error.and_then(|error| error.code),
                             "error": error
                         }),
                     };
@@ -1059,6 +1772,126 @@ impl AcpHost {
         });
     }
 
+    async fn handle_client_terminal_request(&self, request: Value) {
+        let request_id = request.get("id").cloned().unwrap_or(Value::Null);
+        let method = request
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let params = request.get("params").cloned().unwrap_or(Value::Null);
+        let result = self.dispatch_client_terminal_request(method, &params).await;
+        let response = match result {
+            Ok(result) => json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": result,
+            }),
+            Err(error) => json!({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32000,
+                    "message": format!("Rovai-ai ACP Client Terminal rejected the request: {error:#}"),
+                }
+            }),
+        };
+        if let Err(error) = self.send(response).await {
+            eprintln!("failed to send ACP Client Terminal response for {method}: {error:#}");
+        }
+    }
+
+    async fn dispatch_client_terminal_request(
+        &self,
+        method: &str,
+        params: &Value,
+    ) -> Result<Value> {
+        let bridge = self
+            .client_terminal_bridge
+            .as_ref()
+            .context("ACP Client Terminal is disabled for this Runtime")?;
+        let session_id = params
+            .get("sessionId")
+            .and_then(Value::as_str)
+            .context("ACP Client Terminal request has no sessionId")?;
+        match method {
+            "terminal/create" => {
+                let routes = self.routes.read().await;
+                let route = routes
+                    .get(session_id)
+                    .context("ACP Client Terminal Session is not bound to an AgentRun")?;
+                if route.client_terminal_create_cancelled {
+                    bail!("ACP Client Terminal Session is cancelling");
+                }
+                if !matches!(route.phase, AcpSessionPhase::PromptActive(_)) {
+                    bail!("terminal/create is outside the current AgentRun Prompt");
+                }
+                // Keep the route read fence through process insertion. Cancel
+                // and detach take the write fence before draining the Bridge,
+                // so a create cannot land after its Run cleanup completed.
+                bridge.create(session_id, &route.owner, params).await
+            }
+            "terminal/output" => {
+                let owner = self.client_terminal_owner(session_id).await?;
+                bridge
+                    .output(session_id, &owner, terminal_id(params)?)
+                    .await
+            }
+            "terminal/wait_for_exit" => {
+                let owner = self.client_terminal_owner(session_id).await?;
+                bridge
+                    .wait_for_exit(session_id, &owner, terminal_id(params)?)
+                    .await
+            }
+            "terminal/kill" => {
+                let owner = self.client_terminal_owner(session_id).await?;
+                bridge.kill(session_id, &owner, terminal_id(params)?).await
+            }
+            "terminal/release" => {
+                let owner = self.client_terminal_owner(session_id).await?;
+                bridge
+                    .release(session_id, &owner, terminal_id(params)?)
+                    .await
+            }
+            _ => bail!("unknown ACP Client Terminal method: {method}"),
+        }
+    }
+
+    async fn client_terminal_owner(&self, session_id: &str) -> Result<AcpRuntimeOwner> {
+        let routes = self.routes.read().await;
+        let route = routes
+            .get(session_id)
+            .context("ACP Client Terminal Session is not bound to an AgentRun")?;
+        if matches!(route.phase, AcpSessionPhase::ProtocolViolated { .. }) {
+            bail!("ACP Client Terminal Session is protocol-violated");
+        }
+        Ok(route.owner.clone())
+    }
+
+    async fn fence_client_terminal_create(&self, session_id: &str, owner: &AcpRuntimeOwner) {
+        let mut routes = self.routes.write().await;
+        if let Some(route) = routes.get_mut(session_id)
+            && &route.owner == owner
+        {
+            route.client_terminal_create_cancelled = true;
+        }
+    }
+
+    async fn release_client_terminals_for_session(
+        &self,
+        session_id: &str,
+        owner: &AcpRuntimeOwner,
+    ) {
+        if let Some(bridge) = &self.client_terminal_bridge {
+            bridge.release_session(session_id, owner).await;
+        }
+    }
+
+    async fn release_all_client_terminals(&self) {
+        if let Some(bridge) = &self.client_terminal_bridge {
+            bridge.release_all().await;
+        }
+    }
+
     async fn bind_session(
         &self,
         session_id: &str,
@@ -1077,6 +1910,7 @@ impl AcpHost {
                 owner: owner.clone(),
                 phase,
                 sequence: 0,
+                client_terminal_create_cancelled: false,
             },
         );
         Ok(())
@@ -1137,18 +1971,20 @@ impl AcpHost {
         let mut routes = self.routes.write().await;
         let Some(route) = routes.get_mut(session_id) else {
             drop(routes);
-            if self.adapter_kind == AdapterKind::KimiCodeCli
-                && is_kimi_compaction_completed_frame(message)
+            if ((self.adapter_kind == AdapterKind::KimiCodeCli
+                && is_kimi_compaction_completed_frame(message))
+                || (self.adapter_kind == AdapterKind::GrokBuild
+                    && grok_compaction_completed_occurrence_id(message).is_some()))
                 && self
                     .compaction_observers
                     .read()
                     .await
                     .contains_key(session_id)
             {
-                // Kimi compaction finishes outside the Prompt. A normally
-                // completed AgentRun may already have detached its owner while
-                // the compatibility-keyed Host remains warm, so the Session
-                // observer is the surviving authoritative route.
+                // Kimi and Grok compaction may finish outside the Prompt. A
+                // normally completed AgentRun may already have detached its
+                // owner while the compatibility-keyed Host remains warm, so
+                // the Session observer is the surviving authoritative route.
                 return AcpSessionMessageRoute::SessionMetadata;
             }
             return AcpSessionMessageRoute::Missing;
@@ -1168,6 +2004,7 @@ impl AcpHost {
                 {
                     return AcpSessionMessageRoute::SessionMetadata;
                 }
+                active_prompt.prompt_activity_observed = true;
                 route.sequence = route.sequence.saturating_add(1);
                 AcpSessionMessageRoute::Forward {
                     owner: route.owner.clone(),
@@ -1261,9 +2098,10 @@ impl AcpHost {
         }
         let session_id = session_ids.into_iter().next()?;
         let route = routes.get_mut(&session_id)?;
-        let AcpSessionPhase::PromptActive(active_prompt) = &route.phase else {
+        let AcpSessionPhase::PromptActive(active_prompt) = &mut route.phase else {
             return None;
         };
+        active_prompt.prompt_activity_observed = true;
         route.sequence = route.sequence.saturating_add(1);
         Some((
             session_id,
@@ -1412,8 +2250,16 @@ impl AcpHost {
 
     async fn unbind_session(&self, session_id: &str, owner: &AcpRuntimeOwner) {
         let mut routes = self.routes.write().await;
-        if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
+        let removed = if routes.get(session_id).map(|route| &route.owner) == Some(owner) {
             routes.remove(session_id);
+            true
+        } else {
+            false
+        };
+        drop(routes);
+        if removed {
+            self.release_client_terminals_for_session(session_id, owner)
+                .await;
         }
     }
 
@@ -1500,14 +2346,20 @@ impl AcpHost {
     }
 
     pub(crate) async fn is_quiescent(&self) -> bool {
+        let terminals_are_empty = match &self.client_terminal_bridge {
+            Some(bridge) => bridge.is_empty().await,
+            None => true,
+        };
         self.is_alive()
             && !self.protocol_violated.load(Ordering::Acquire)
             && self.pending.lock().await.is_empty()
             && self.routes.read().await.is_empty()
+            && terminals_are_empty
     }
 
     pub(crate) async fn shutdown_and_reap(&self) {
         self.alive.store(false, Ordering::Release);
+        self.release_all_client_terminals().await;
         let mut child = self.child.lock().await;
         let _ = child.request_graceful_termination();
         if timeout(Duration::from_secs(3), child.wait()).await.is_err() {
@@ -1600,6 +2452,7 @@ impl AcpHost {
                 prompt_id: prompt_id.clone(),
                 delivery_id: delivery_id.to_string(),
                 acceptance_emitted: false,
+                prompt_activity_observed: false,
                 kimi_compaction_lifecycle: KimiCompactionLifecycle::Idle,
             });
         }
@@ -1745,6 +2598,14 @@ fn detect_acp_compaction_signal(
                 runtime_occurrence_id: None,
             })
         }
+        AdapterKind::GrokBuild if surface == AcpCompactionSignalSurface::SessionMetadata => {
+            let runtime_occurrence_id = grok_compaction_completed_occurrence_id(message)?;
+            Some(DetectedAcpCompactionSignal {
+                source_signal: "grok.acp.auto_compact_completed.v1",
+                admission_point: "completed",
+                runtime_occurrence_id: Some(runtime_occurrence_id),
+            })
+        }
         _ => None,
     }
 }
@@ -1836,42 +2697,6 @@ impl AcpMissingSendRecoveryCollector {
     }
 }
 
-fn kimi_public_agent_text(text: &str) -> String {
-    const OPEN: &str = "<think>";
-    const CLOSE: &str = "</think>";
-
-    let mut public = String::new();
-    let mut remaining = text;
-    let mut closed_reasoning_block = false;
-    loop {
-        let Some(open) = remaining.find(OPEN) else {
-            if let Some(close) = remaining.find(CLOSE) {
-                if closed_reasoning_block {
-                    // Some providers have emitted a duplicate close tag after
-                    // already returning to public text. Preserve the public
-                    // prefix while dropping only that redundant delimiter.
-                    public.push_str(&remaining[..close]);
-                }
-                // Without an earlier complete block, a malformed leading
-                // reasoning fragment remains private and its prefix is dropped.
-                remaining = &remaining[close + CLOSE.len()..];
-                continue;
-            }
-            public.push_str(remaining);
-            break;
-        };
-        public.push_str(&remaining[..open]);
-        let after_open = &remaining[open + OPEN.len()..];
-        let Some(close) = after_open.find(CLOSE) else {
-            // Never publish an unterminated reasoning block.
-            break;
-        };
-        remaining = &after_open[close + CLOSE.len()..];
-        closed_reasoning_block = true;
-    }
-    public.trim().to_string()
-}
-
 pub struct AcpRuntime {
     owner: AcpRuntimeOwner,
     host: Arc<AcpHost>,
@@ -1937,7 +2762,53 @@ fn history_restore_allowed(adapter_kind: AdapterKind) -> bool {
             | AdapterKind::QwenCode
             | AdapterKind::TraeCnCli
             | AdapterKind::KimiCodeCli
+            | AdapterKind::GrokBuild
     )
+}
+
+fn validate_new_session_native_rules(
+    adapter_kind: AdapterKind,
+    continuation: AcpSessionContinuation,
+    native_rules: Option<&str>,
+) -> Result<Option<&str>> {
+    match (adapter_kind, continuation, native_rules) {
+        (AdapterKind::GrokBuild, AcpSessionContinuation::New, Some(rules))
+            if !rules.trim().is_empty() =>
+        {
+            Ok(Some(rules))
+        }
+        (AdapterKind::GrokBuild, AcpSessionContinuation::New, _) => {
+            bail!("new Grok ACP Session requires non-empty native rules")
+        }
+        (AdapterKind::GrokBuild, _, None) => Ok(None),
+        (AdapterKind::GrokBuild, _, Some(_)) => {
+            bail!("Grok native rules may only be supplied to session/new")
+        }
+        (_, _, None) => Ok(None),
+        (_, _, Some(_)) => {
+            bail!("ACP native rules are only supported for a new Grok Session")
+        }
+    }
+}
+
+fn build_acp_new_session_params(
+    adapter_kind: AdapterKind,
+    cwd: &str,
+    mcp_servers: &[Value],
+    additional_directories: &[String],
+    native_rules: Option<&str>,
+) -> Value {
+    let mut params = json!({
+        "cwd": cwd,
+        "mcpServers": mcp_servers,
+    });
+    if adapter_kind != AdapterKind::CursorAgent {
+        params["additionalDirectories"] = json!(additional_directories);
+    }
+    if let Some(rules) = native_rules {
+        params["_meta"] = json!({"rules": rules});
+    }
+    params
 }
 
 impl AcpRuntime {
@@ -1983,6 +2854,7 @@ impl AcpRuntime {
         )
     }
 
+    #[cfg(test)]
     pub async fn start_or_resume_session(
         &self,
         existing_session_id: Option<&str>,
@@ -1991,6 +2863,29 @@ impl AcpRuntime {
         model: &str,
         model_options: &Value,
         external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+    ) -> Result<String> {
+        self.start_or_resume_session_with_native_rules(
+            existing_session_id,
+            capabilities,
+            model_source,
+            model,
+            model_options,
+            external_mcp_servers,
+            None,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_or_resume_session_with_native_rules(
+        &self,
+        existing_session_id: Option<&str>,
+        capabilities: AcpSessionCapabilities,
+        model_source: &str,
+        model: &str,
+        model_options: &Value,
+        external_mcp_servers: &BTreeMap<String, McpServerDefinition>,
+        new_session_native_rules: Option<&str>,
     ) -> Result<String> {
         let cwd = acp_protocol_path(&self.execution_root);
         let run_tmp = self
@@ -2008,6 +2903,7 @@ impl AcpRuntime {
                 | AdapterKind::CodebuddyCli
                 | AdapterKind::QwenCode
                 | AdapterKind::CursorAgent
+                | AdapterKind::GrokBuild
         ) {
             external_mcp_servers
                 .iter()
@@ -2021,6 +2917,11 @@ impl AcpRuntime {
         let continuation = self
             .session_continuation(existing_session_id, capabilities)
             .await;
+        let new_session_native_rules = validate_new_session_native_rules(
+            self.host.adapter_kind,
+            continuation,
+            new_session_native_rules,
+        )?;
         let (session_id, prebound_session) = match continuation {
             AcpSessionContinuation::ReuseSameHost => (
                 existing_session_id
@@ -2077,13 +2978,13 @@ impl AcpRuntime {
                 (existing_session_id.to_string(), true)
             }
             AcpSessionContinuation::New => {
-                let mut params = json!({
-                    "cwd": cwd,
-                    "mcpServers": mcp_servers,
-                });
-                if self.host.adapter_kind != AdapterKind::CursorAgent {
-                    params["additionalDirectories"] = json!(additional_directories);
-                }
+                let params = build_acp_new_session_params(
+                    self.host.adapter_kind,
+                    &cwd,
+                    &mcp_servers,
+                    &additional_directories,
+                    new_session_native_rules,
+                );
                 let result = self.host.rpc("session/new", params).await?;
                 *self.session_result.write().await = Some(result.clone());
                 let session_id = result
@@ -2127,7 +3028,10 @@ impl AcpRuntime {
                     detail: "the real ACP Session did not advertise the saved model".to_string(),
                 }));
             }
-            if self.host.adapter_kind == AdapterKind::KiroCli {
+            if matches!(
+                self.host.adapter_kind,
+                AdapterKind::KiroCli | AdapterKind::GrokBuild
+            ) {
                 self.set_model(&session_id, model).await?;
             } else {
                 self.set_config_option(&session_id, "model", model).await?;
@@ -2136,15 +3040,24 @@ impl AcpRuntime {
             bail!("ACP model source is invalid");
         }
         if model_source == "explicit"
-            && self.host.adapter_kind == AdapterKind::KiroCli
+            && matches!(
+                self.host.adapter_kind,
+                AdapterKind::KiroCli | AdapterKind::GrokBuild
+            )
             && model_options
                 .as_object()
                 .is_some_and(|options| !options.is_empty())
         {
-            bail!("Kiro ACP does not support generic per-Session model options");
+            bail!(
+                "{} ACP does not support generic per-Session model options",
+                self.host.adapter_kind.as_str()
+            );
         }
         if model_source == "explicit"
-            && self.host.adapter_kind != AdapterKind::KiroCli
+            && !matches!(
+                self.host.adapter_kind,
+                AdapterKind::KiroCli | AdapterKind::GrokBuild
+            )
             && let Some(options) = model_options.as_object()
         {
             for (key, value) in options {
@@ -2276,14 +3189,47 @@ impl AcpRuntime {
         self.host.install_compaction_observer(lease).await
     }
 
+    pub async fn arm_grok_auto_compact_for_acceptance_if_requested(&self) -> Result<bool> {
+        if self.host.adapter_kind != AdapterKind::GrokBuild
+            || std::env::var("ROVAI_INTERNAL_GROK_COMPACTION_ACCEPTANCE").as_deref() != Ok("1")
+            || self
+                .host
+                .grok_acceptance_auto_compact_armed
+                .swap(true, Ordering::AcqRel)
+        {
+            return Ok(false);
+        }
+        let session_id = self
+            .session_id()
+            .await
+            .context("Grok Session is not ready for compaction acceptance arming")?;
+        self.host
+            .rpc_with_timeout(
+                "_x.ai/debug/arm_auto_compact",
+                json!({"sessionId": session_id}),
+                Duration::from_secs(30),
+            )
+            .await
+            .context("Grok compaction acceptance arming failed")?;
+        Ok(true)
+    }
+
     pub async fn cancel(&self) -> Result<()> {
         let session_id = self
             .session_id()
             .await
             .context("ACP Session is not ready")?;
         self.host
-            .notify("session/cancel", json!({"sessionId": session_id}))
-            .await
+            .fence_client_terminal_create(&session_id, &self.owner)
+            .await;
+        let cancellation = self
+            .host
+            .notify("session/cancel", json!({"sessionId": &session_id}))
+            .await;
+        self.host
+            .release_client_terminals_for_session(&session_id, &self.owner)
+            .await;
+        cancellation
     }
 
     pub async fn respond(&self, id: Value, result: Value) -> Result<()> {
@@ -2358,9 +3304,12 @@ impl AcpRuntime {
             .or_default();
         if let Some(reported_kind) = update.get("kind").and_then(Value::as_str) {
             let raw_input = update.get("rawInput").cloned().unwrap_or_else(|| json!({}));
-            observed.native_kind =
-                Some(effective_action_kind(reported_kind, &raw_input).to_string());
-        } else if public_acp_shell_command(update.get("rawInput")).is_some() {
+            observed.native_kind = Some(
+                effective_action_kind(self.host.adapter_kind, reported_kind, &raw_input)
+                    .to_string(),
+            );
+        } else if public_acp_shell_command(self.host.adapter_kind, update.get("rawInput")).is_some()
+        {
             observed.native_kind = Some("execute".to_string());
         }
         if let Some(raw_input) = update.get("rawInput").filter(|value| !value.is_null()) {
@@ -2384,10 +3333,11 @@ impl AcpRuntime {
             .observed_tools
             .remove(native_item_id)
             .unwrap_or_default();
-        let Some(mut completion) = completed_action(params)? else {
+        let Some(mut completion) = completed_action(self.host.adapter_kind, params)? else {
             return Ok(None);
         };
-        completion = reconcile_completed_action(update, observed, completion)?;
+        completion =
+            reconcile_completed_action(self.host.adapter_kind, update, observed, completion)?;
         Ok(Some(completion))
     }
 
@@ -2396,11 +3346,7 @@ impl AcpRuntime {
         let observation = observation
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)?;
-        let text = if self.host.adapter_kind == AdapterKind::KimiCodeCli {
-            kimi_public_agent_text(&observation.streamed_agent_text)
-        } else {
-            observation.streamed_agent_text.trim().to_string()
-        };
+        let text = observation.streamed_agent_text.trim().to_string();
         (!text.is_empty()).then_some(text)
     }
 
@@ -2412,14 +3358,7 @@ impl AcpRuntime {
             .as_ref()
             .filter(|observation| observation.prompt_id == native_prompt_id)
             .and_then(|observation| observation.missing_send_recovery.candidate());
-        candidate.and_then(|text| {
-            let text = if self.host.adapter_kind == AdapterKind::KimiCodeCli {
-                kimi_public_agent_text(&text)
-            } else {
-                text
-            };
-            (!text.is_empty()).then_some(text)
-        })
+        candidate.filter(|text| !text.is_empty())
     }
 
     pub async fn session_id(&self) -> Option<String> {
@@ -2820,21 +3759,22 @@ pub(crate) fn runtime_compatibility_digest(
             )
         })?;
     // TRAE's first real AgentRun upgrades an installed-unverified snapshot to
-    // Ready and therefore changes the full frozen config digest. TRAE and Kimi
-    // MCP projection digests are also Run-local because their evidence includes
-    // the AgentRun identity. Those values are not Host launch inputs. The
-    // concrete resolved MCP server set below remains compatibility-authoritative.
+    // Ready and therefore changes the full frozen config digest. Kimi and Grok MCP
+    // projection digests are also Run-local because their evidence includes the
+    // AgentRun identity. Those values are not Host launch inputs. The concrete
+    // resolved MCP server set below remains compatibility-authoritative.
     let excludes_runtime_config_digest = frozen_runtime.adapter_kind == AdapterKind::TraeCnCli;
     let excludes_mcp_projection_digest = matches!(
         frozen_runtime.adapter_kind,
-        AdapterKind::TraeCnCli | AdapterKind::KimiCodeCli
+        AdapterKind::TraeCnCli | AdapterKind::KimiCodeCli | AdapterKind::GrokBuild
     );
     let runtime_config_digest =
         (!excludes_runtime_config_digest).then_some(frozen_runtime.config_digest.as_str());
     let mcp_projection_compatibility_digest =
         (!excludes_mcp_projection_digest).then_some(mcp_projection_digest);
-    canonical_json_digest(&json!({
-        "schemaVersion": 3,
+    let is_grok = frozen_runtime.adapter_kind == AdapterKind::GrokBuild;
+    let mut compatibility = json!({
+        "schemaVersion": if is_grok { 5 } else { 3 },
         "adapterKind": frozen_runtime.adapter_kind,
         "runtimeConfigDigest": runtime_config_digest,
         "hostConfigDigest": frozen_runtime.host_config_digest,
@@ -2851,26 +3791,46 @@ pub(crate) fn runtime_compatibility_digest(
         "campAttachmentGeneration": attachment_authorization
             .visibility_mode
             .compatibility_generation(attachment_authorization.generation),
-    }))
+    });
+    if is_grok {
+        let compatibility = compatibility
+            .as_object_mut()
+            .context("Runtime compatibility payload must be an object")?;
+        compatibility.insert(
+            "grokNativeConfigurationDigest".to_string(),
+            json!(grok_native_configuration_compatibility_digest()?),
+        );
+        compatibility.insert(
+            "grokNativeRulesRevision".to_string(),
+            json!(GROK_NATIVE_RULES_REVISION),
+        );
+    }
+    canonical_json_digest(&compatibility)
 }
 
 pub(crate) fn freeze_history_restore_compatibility(
     mut frozen_runtime: FrozenAgentRuntimeConfig,
     workspace: &AgentRunWorkspace,
 ) -> Result<FrozenAgentRuntimeConfig> {
-    if frozen_runtime.adapter_kind != AdapterKind::TraeCnCli {
+    if !matches!(
+        frozen_runtime.adapter_kind,
+        AdapterKind::TraeCnCli | AdapterKind::GrokBuild
+    ) {
         return Ok(frozen_runtime);
     }
+    let adapter_kind = frozen_runtime.adapter_kind;
     let execution_root = PathBuf::from(&workspace.execution_root)
         .canonicalize()
         .with_context(|| {
             format!(
-                "failed to resolve TRAE History Restore workspace {}",
+                "failed to resolve {} HistoryRestore workspace {}",
+                adapter_kind.as_str(),
                 workspace.execution_root
             )
         })?;
-    let compatibility_digest = canonical_json_digest(&json!({
-        "schemaVersion": 1,
+    let is_grok = adapter_kind == AdapterKind::GrokBuild;
+    let mut compatibility = json!({
+        "schemaVersion": if is_grok { 3 } else { 1 },
         "adapterKind": frozen_runtime.adapter_kind,
         "installationId": &frozen_runtime.installation_id,
         "protocolVersion": &frozen_runtime.protocol_version,
@@ -2883,8 +3843,26 @@ pub(crate) fn freeze_history_restore_compatibility(
         },
         "model": &frozen_runtime.model,
         "permissions": &frozen_runtime.permissions,
-    }))?;
-    let compatibility_key = format!("trae-cn-cli:history-restore-v1:{compatibility_digest}");
+    });
+    if is_grok {
+        let compatibility = compatibility
+            .as_object_mut()
+            .context("HistoryRestore compatibility payload must be an object")?;
+        compatibility.insert(
+            "grokNativeConfigurationDigest".to_string(),
+            json!(grok_native_configuration_compatibility_digest()?),
+        );
+        compatibility.insert(
+            "grokNativeRulesRevision".to_string(),
+            json!(GROK_NATIVE_RULES_REVISION),
+        );
+    }
+    let compatibility_digest = canonical_json_digest(&compatibility)?;
+    let compatibility_revision = if is_grok { 3 } else { 1 };
+    let compatibility_key = format!(
+        "{}:history-restore-v{compatibility_revision}:{compatibility_digest}",
+        adapter_kind.as_str()
+    );
     if frozen_runtime.native_session_compatibility_key.as_deref()
         == Some(compatibility_key.as_str())
     {
@@ -3148,6 +4126,43 @@ fn configure_runtime_command(
             // process-local and must not replace Kimi's state/config home.
             configure_kimi_model_environment(command)?;
         }
+        AdapterKind::GrokBuild => {
+            let permission_mode = values
+                .get("permission_mode")
+                .and_then(Value::as_str)
+                .context("Grok Build Runtime requires permission_mode")?;
+            if !matches!(
+                permission_mode,
+                "default" | "acceptEdits" | "auto" | "dontAsk" | "bypassPermissions" | "plan"
+            ) {
+                bail!("Grok Build permission_mode is invalid");
+            }
+            let read_only = permission_semantics == PermissionSemantics::CoreEnforcedV1
+                && workspace.access == "read_only";
+            command
+                .arg("--permission-mode")
+                .arg(if read_only { "plan" } else { permission_mode });
+            // Grok's permission mode is a top-level option and must precede
+            // the `agent stdio` subcommand added by the ACP launcher. Dedicated
+            // no-leader Hosts keep process ownership inside Rovai's Fleet LRU.
+            let plugin = if external_mcp_servers.is_empty() {
+                None
+            } else {
+                Some(write_ephemeral_grok_mcp_plugin(
+                    private_runtime_dir,
+                    external_mcp_servers,
+                )?)
+            };
+            health::configure_grok_acp_command(
+                command,
+                plugin.as_ref().map(EphemeralMcpConfigFile::path),
+            );
+            // Formal AgentRun hosts inherit the user's official Grok Home and
+            // config.toml. Only environment names referenced by that native
+            // configuration are resolved from $GROK_HOME/.env for this child.
+            configure_grok_native_environment(command)?;
+            return Ok(plugin);
+        }
         AdapterKind::CodexCli
         | AdapterKind::Pi
         | AdapterKind::ClaudeCodeCli
@@ -3256,6 +4271,353 @@ fn configure_kimi_model_environment_from_path(command: &mut Command, path: &Path
         command.env(key, value);
     }
     Ok(())
+}
+
+const GROK_ENVIRONMENT_FILE_NAME: &str = ".env";
+const GROK_GLOBAL_API_KEY_ENVIRONMENT_KEYS: [&str; 2] = ["XAI_API_KEY", "GROK_CODE_XAI_API_KEY"];
+
+#[derive(Debug)]
+struct GrokNativeConfiguration {
+    byok_configured: bool,
+    environment: BTreeMap<String, String>,
+    compatibility_digest: String,
+}
+
+fn grok_home_path() -> Result<PathBuf> {
+    if let Some(home) = std::env::var_os("GROK_HOME").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(home));
+    }
+    Ok(dirs::home_dir()
+        .context("could not determine the user home directory for Grok Build configuration")?
+        .join(".grok"))
+}
+
+fn grok_native_config_path() -> Result<PathBuf> {
+    Ok(grok_home_path()?.join("config.toml"))
+}
+
+fn grok_environment_file_path() -> Result<PathBuf> {
+    Ok(grok_home_path()?.join(GROK_ENVIRONMENT_FILE_NAME))
+}
+
+fn portable_environment_key(value: &str) -> bool {
+    let mut characters = value.chars();
+    characters
+        .next()
+        .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+        && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+}
+
+fn collect_grok_env_key_value(
+    value: &toml::Value,
+    section: &str,
+    keys: &mut BTreeSet<String>,
+) -> Result<()> {
+    let values = if let Some(value) = value.as_str() {
+        vec![value]
+    } else if let Some(values) = value.as_array() {
+        values
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .with_context(|| format!("Grok Build {section} env_key must contain strings"))
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        bail!("Grok Build {section} env_key must be a string or string array");
+    };
+    for value in values {
+        let value = value.trim();
+        if value.is_empty() || !portable_environment_key(value) {
+            bail!("Grok Build {section} contains an invalid env_key");
+        }
+        keys.insert(value.to_string());
+    }
+    Ok(())
+}
+
+fn collect_grok_model_environment_keys(
+    config: &toml::Value,
+) -> Result<(BTreeSet<String>, BTreeSet<String>)> {
+    let mut credential_keys = GROK_GLOBAL_API_KEY_ENVIRONMENT_KEYS
+        .into_iter()
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    let mut injected_keys = credential_keys.clone();
+    for section_name in ["model", "model_providers"] {
+        let Some(entries) = config.get(section_name).and_then(toml::Value::as_table) else {
+            continue;
+        };
+        for (entry_name, entry) in entries {
+            let Some(entry) = entry.as_table() else {
+                continue;
+            };
+            if let Some(env_key) = entry.get("env_key") {
+                collect_grok_env_key_value(
+                    env_key,
+                    &format!("{section_name}.{entry_name}"),
+                    &mut credential_keys,
+                )?;
+            }
+            if let Some(headers) = entry.get("env_http_headers") {
+                let headers = headers.as_table().with_context(|| {
+                    format!(
+                        "Grok Build {section_name}.{entry_name}.env_http_headers must be a table"
+                    )
+                })?;
+                for environment_key in headers.values() {
+                    let environment_key = environment_key.as_str().with_context(|| {
+                        format!(
+                            "Grok Build {section_name}.{entry_name}.env_http_headers values must be strings"
+                        )
+                    })?;
+                    let environment_key = environment_key.trim();
+                    if environment_key.is_empty() || !portable_environment_key(environment_key) {
+                        bail!(
+                            "Grok Build {section_name}.{entry_name} contains an invalid env_http_headers value"
+                        );
+                    }
+                    injected_keys.insert(environment_key.to_string());
+                }
+            }
+        }
+    }
+    injected_keys.extend(credential_keys.iter().cloned());
+    Ok((credential_keys, injected_keys))
+}
+
+fn grok_config_has_literal_api_key(config: &toml::Value) -> bool {
+    ["model", "model_providers"]
+        .into_iter()
+        .any(|section_name| {
+            config
+                .get(section_name)
+                .and_then(toml::Value::as_table)
+                .is_some_and(|entries| {
+                    entries.values().any(|entry| {
+                        entry
+                            .get("api_key")
+                            .and_then(toml::Value::as_str)
+                            .is_some_and(|value| !value.trim().is_empty())
+                    })
+                })
+        })
+}
+
+fn grok_environment_value(raw: &str, path: &Path, line: usize) -> Result<String> {
+    let value = raw.trim();
+    if value.is_empty() {
+        bail!(
+            "empty Grok Build environment value at {}:{line}",
+            path.display()
+        );
+    }
+    let quoted = value.starts_with('"') || value.starts_with('\'');
+    if quoted {
+        let delimiter = value.as_bytes()[0] as char;
+        if value.len() < 2 || !value.ends_with(delimiter) {
+            bail!(
+                "unterminated Grok Build environment value at {}:{line}",
+                path.display()
+            );
+        }
+        return Ok(value[1..value.len() - 1].to_string());
+    }
+    Ok(value.to_string())
+}
+
+fn read_grok_environment_file(
+    path: &Path,
+    allowed_keys: &BTreeSet<String>,
+) -> Result<(BTreeMap<String, String>, Option<String>)> {
+    if !path.exists() {
+        return Ok((BTreeMap::new(), None));
+    }
+    let metadata =
+        std::fs::metadata(path).with_context(|| format!("failed to inspect {}", path.display()))?;
+    if !metadata.is_file() {
+        bail!(
+            "Grok Build environment source {} is not a file",
+            path.display()
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        if metadata.permissions().mode() & 0o077 != 0 {
+            bail!(
+                "Grok Build environment source {} must not be accessible by group or others",
+                path.display()
+            );
+        }
+    }
+    let contents = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
+    let mut values = BTreeMap::new();
+    let mut observed_keys = BTreeSet::new();
+    for (index, raw_line) in contents.lines().enumerate() {
+        let line_number = index + 1;
+        let mut line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(exported) = line.strip_prefix("export ") {
+            line = exported.trim_start();
+        }
+        let (key, value) = line.split_once('=').with_context(|| {
+            format!(
+                "invalid Grok Build environment source at {}:{line_number}",
+                path.display()
+            )
+        })?;
+        let key = key.trim();
+        if !portable_environment_key(key) {
+            bail!(
+                "invalid Grok Build environment key at {}:{line_number}",
+                path.display()
+            );
+        }
+        if !observed_keys.insert(key.to_string()) {
+            bail!(
+                "duplicate Grok Build environment key {key} at {}:{line_number}",
+                path.display()
+            );
+        }
+        if allowed_keys.contains(key) {
+            values.insert(
+                key.to_string(),
+                grok_environment_value(value, path, line_number)?,
+            );
+        }
+    }
+    Ok((values, Some(contents)))
+}
+
+fn load_grok_native_configuration_from_paths(
+    home: &Path,
+    config_path: &Path,
+    environment_path: &Path,
+    inherited_environment: &BTreeMap<String, String>,
+) -> Result<GrokNativeConfiguration> {
+    let config_contents = if config_path.exists() {
+        Some(
+            std::fs::read_to_string(config_path)
+                .with_context(|| format!("failed to read {}", config_path.display()))?,
+        )
+    } else {
+        None
+    };
+    let config = match config_contents.as_deref() {
+        Some(contents) => toml::from_str::<toml::Value>(contents).with_context(|| {
+            format!(
+                "failed to parse official Grok Build config {}",
+                config_path.display()
+            )
+        })?,
+        None => toml::Value::Table(toml::map::Map::new()),
+    };
+    let literal_api_key = grok_config_has_literal_api_key(&config);
+    let (credential_keys, injected_keys) = collect_grok_model_environment_keys(&config)?;
+    let (file_environment, environment_contents) =
+        read_grok_environment_file(environment_path, &injected_keys)?;
+    let environment = injected_keys
+        .iter()
+        .filter_map(|key| {
+            file_environment
+                .get(key)
+                .or_else(|| inherited_environment.get(key))
+                .filter(|value| !value.trim().is_empty())
+                .map(|value| (key.clone(), value.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let byok_configured = literal_api_key
+        || credential_keys
+            .iter()
+            .any(|key| environment.contains_key(key));
+    let compatibility_digest = canonical_json_digest(&json!({
+        "schemaVersion": 1,
+        "home": home,
+        "config": config_contents,
+        "environment": environment_contents,
+    }))?;
+    Ok(GrokNativeConfiguration {
+        byok_configured,
+        environment,
+        compatibility_digest,
+    })
+}
+
+fn load_grok_native_configuration() -> Result<GrokNativeConfiguration> {
+    let home = grok_home_path()?;
+    let config_path = grok_native_config_path()?;
+    let environment_path = grok_environment_file_path()?;
+    let inherited_environment = std::env::vars_os()
+        .filter_map(|(key, value)| Some((key.into_string().ok()?, value.into_string().ok()?)))
+        .collect::<BTreeMap<_, _>>();
+    load_grok_native_configuration_from_paths(
+        &home,
+        &config_path,
+        &environment_path,
+        &inherited_environment,
+    )
+}
+
+pub(crate) fn grok_native_byok_configured() -> Result<bool> {
+    Ok(load_grok_native_configuration()?.byok_configured)
+}
+
+fn apply_grok_native_configuration(command: &mut Command, configuration: GrokNativeConfiguration) {
+    for (key, value) in configuration.environment {
+        command.env(key, value);
+    }
+    command.env("GROK_DISABLE_AUTOUPDATER", "1");
+}
+
+pub(crate) fn configure_grok_native_environment(command: &mut Command) -> Result<()> {
+    let configuration = load_grok_native_configuration()?;
+    apply_grok_native_configuration(command, configuration);
+    Ok(())
+}
+
+fn grok_native_configuration_compatibility_digest() -> Result<String> {
+    Ok(load_grok_native_configuration()?.compatibility_digest)
+}
+
+fn prepare_grok_probe_home_from(source_home: &Path, probe_home: &Path) -> Result<()> {
+    std::fs::create_dir_all(probe_home)
+        .with_context(|| format!("failed to create {}", probe_home.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        std::fs::set_permissions(probe_home, std::fs::Permissions::from_mode(0o700))?;
+    }
+    for file_name in ["config.toml", "managed_config.toml", "requirements.toml"] {
+        let source = source_home.join(file_name);
+        if !source.is_file() {
+            continue;
+        }
+        let target = probe_home.join(file_name);
+        std::fs::copy(&source, &target).with_context(|| {
+            format!(
+                "failed to copy official Grok Build configuration {} into the isolated Probe Home",
+                source.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o600))?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn prepare_grok_probe_home(probe_home: &Path) -> Result<()> {
+    prepare_grok_probe_home_from(&grok_home_path()?, probe_home)
 }
 
 fn configure_compaction_detector_command(
@@ -3688,6 +5050,7 @@ pub struct InterceptedAcpActionRequest {
 }
 
 pub struct InterceptedAcpActionContext<'a> {
+    pub adapter_kind: AdapterKind,
     pub agent_run_id: &'a str,
     pub execution_epoch: i64,
     pub expected_session_id: &'a str,
@@ -3767,7 +5130,7 @@ pub fn intercepted_action_request(
         object.insert("toolCall".to_string(), effective_tool_call.clone());
     }
     let root = context.execution_root.to_string_lossy().to_string();
-    let kind = effective_action_kind(reported_kind, &raw_input);
+    let kind = effective_action_kind(context.adapter_kind, reported_kind, &raw_input);
     let input = match kind {
         "edit" | "move" => {
             let path = acp_tool_paths(&effective_params)
@@ -3794,16 +5157,19 @@ pub fn intercepted_action_request(
             }
         }
         "execute" => {
-            let argv = match raw_input.get("command") {
-                Some(Value::Array(values)) => values
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect::<Vec<_>>(),
-                Some(Value::String(command)) => {
-                    vec!["/bin/zsh".to_string(), "-lc".to_string(), command.clone()]
+            let argv = if let Some(command) =
+                public_acp_shell_command(context.adapter_kind, Some(&raw_input))
+            {
+                vec!["/bin/zsh".to_string(), "-lc".to_string(), command]
+            } else {
+                match raw_input.get("command") {
+                    Some(Value::Array(values)) => values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_string)
+                        .collect::<Vec<_>>(),
+                    _ => Vec::new(),
                 }
-                _ => Vec::new(),
             };
             if argv.is_empty() {
                 CanonicalActionInput::RuntimePermissionGrant {
@@ -3872,12 +5238,16 @@ fn requested_path(context: &InterceptedAcpActionContext<'_>, value: &str) -> Res
     })
 }
 
-fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a str {
+fn effective_action_kind<'a>(
+    adapter_kind: AdapterKind,
+    reported_kind: &'a str,
+    raw_input: &Value,
+) -> &'a str {
     if matches!(reported_kind, "edit" | "move" | "delete" | "execute") {
         return reported_kind;
     }
 
-    if public_acp_shell_command(Some(raw_input)).is_some() {
+    if public_acp_shell_command(adapter_kind, Some(raw_input)).is_some() {
         return "execute";
     }
 
@@ -3885,7 +5255,7 @@ fn effective_action_kind<'a>(reported_kind: &'a str, raw_input: &Value) -> &'a s
     // request as `other`, even when the request belongs to a file-edit tool call.
     // The stable file target remains present in rawInput. Classify that narrow
     // shape as a write so it receives Rovai-ai's normal path and approval checks.
-    if ["filepath", "filePath"]
+    if ["filepath", "filePath", "file_path"]
         .iter()
         .any(|key| raw_input.get(key).and_then(Value::as_str).is_some())
     {
@@ -4055,7 +5425,10 @@ pub struct CompletedAcpAction {
     pub effect_disposition: String,
 }
 
-pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
+pub fn completed_action(
+    adapter_kind: AdapterKind,
+    params: &Value,
+) -> Result<Option<CompletedAcpAction>> {
     let update = match params.get("update") {
         Some(update)
             if update.get("sessionUpdate").and_then(Value::as_str) == Some("tool_call_update") =>
@@ -4077,7 +5450,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .context("ACP tool_call_update has no toolCallId")?
         .to_string();
     let raw_input = update.get("rawInput");
-    let public_command = public_acp_shell_command(raw_input);
+    let public_command = public_acp_shell_command(adapter_kind, raw_input);
     let raw_input_digest = update
         .get("rawInput")
         .map(canonical_json_digest)
@@ -4090,8 +5463,12 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
         .get("kind")
         .and_then(Value::as_str)
         .unwrap_or("other");
-    let native_kind =
-        effective_action_kind(reported_kind, raw_input.unwrap_or(&Value::Null)).to_string();
+    let native_kind = effective_action_kind(
+        adapter_kind,
+        reported_kind,
+        raw_input.unwrap_or(&Value::Null),
+    )
+    .to_string();
     let status = effective_acp_tool_status(update, &native_kind);
     let succeeded = status == "completed";
     let observation_digest = canonical_json_digest(&json!({
@@ -4141,6 +5518,7 @@ pub fn completed_action(params: &Value) -> Result<Option<CompletedAcpAction>> {
 }
 
 fn reconcile_completed_action(
+    adapter_kind: AdapterKind,
     update: &Value,
     observed: ObservedToolMetadata,
     mut completion: CompletedAcpAction,
@@ -4151,7 +5529,8 @@ fn reconcile_completed_action(
         .map(canonical_json_digest)
         .transpose()?;
     if completion.public_command.is_none() {
-        completion.public_command = public_acp_shell_command(observed.raw_input.as_ref());
+        completion.public_command =
+            public_acp_shell_command(adapter_kind, observed.raw_input.as_ref());
     }
     if let Some(native_kind) = observed.native_kind {
         completion.native_kind = native_kind;
@@ -4208,22 +5587,36 @@ fn acp_effect_disposition(succeeded: bool, native_kind: &str) -> &'static str {
     }
 }
 
-pub fn public_acp_shell_command(raw_input: Option<&Value>) -> Option<String> {
-    raw_input?
+pub fn public_acp_shell_command(
+    adapter_kind: AdapterKind,
+    raw_input: Option<&Value>,
+) -> Option<String> {
+    let raw_input = raw_input?;
+    raw_input
         .get("command")
+        .or_else(|| {
+            if adapter_kind == AdapterKind::TraeCnCli {
+                raw_input.get("Command")
+            } else {
+                None
+            }
+        })
         .and_then(Value::as_str)
         .filter(|command| !command.trim().is_empty())
         .map(str::to_string)
 }
 
-pub fn public_acp_tool_kind(update: &Value) -> Option<String> {
+pub fn public_acp_tool_kind(adapter_kind: AdapterKind, update: &Value) -> Option<String> {
     update
         .get("kind")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|kind| !kind.is_empty())
         .map(str::to_string)
-        .or_else(|| public_acp_shell_command(update.get("rawInput")).map(|_| "execute".to_string()))
+        .or_else(|| {
+            public_acp_shell_command(adapter_kind, update.get("rawInput"))
+                .map(|_| "execute".to_string())
+        })
 }
 
 pub fn effective_acp_tool_status(update: &Value, native_kind: &str) -> String {
@@ -4265,7 +5658,7 @@ fn acp_tool_paths(request: &Value) -> Vec<String> {
         .map(str::to_string)
         .collect::<Vec<_>>();
     if let Some(raw) = tool_call.get("rawInput") {
-        for key in ["filepath", "filePath", "path"] {
+        for key in ["filepath", "filePath", "file_path", "path"] {
             if let Some(path) = raw.get(key).and_then(Value::as_str)
                 && !result.iter().any(|value| value == path)
             {
@@ -4327,6 +5720,92 @@ fn canonicalize_allow_missing(path: &Path) -> Result<PathBuf> {
 #[cfg(test)]
 mod route_policy_tests {
     use super::*;
+
+    #[test]
+    fn grok_new_session_uses_only_additive_native_rules() {
+        let bootstrap = "SESSION_CHARTER\nMEMBER_IDENTITY\nMEMORY_ENTRYPOINT";
+        let rules = validate_new_session_native_rules(
+            AdapterKind::GrokBuild,
+            AcpSessionContinuation::New,
+            Some(bootstrap),
+        )
+        .unwrap();
+        let params = build_acp_new_session_params(
+            AdapterKind::GrokBuild,
+            "/workspace",
+            &[],
+            &["/attachments".to_string(), "/run-tmp".to_string()],
+            rules,
+        );
+
+        assert_eq!(params.pointer("/_meta/rules"), Some(&json!(bootstrap)));
+        assert!(params.pointer("/_meta/systemPromptOverride").is_none());
+        assert!(params.get("systemPromptOverride").is_none());
+        assert_eq!(
+            serde_json::to_string(&params)
+                .unwrap()
+                .matches("SESSION_CHARTER")
+                .count(),
+            1
+        );
+        assert_eq!(params["additionalDirectories"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn grok_native_rules_fail_closed_outside_exact_session_new() {
+        assert!(
+            validate_new_session_native_rules(
+                AdapterKind::GrokBuild,
+                AcpSessionContinuation::New,
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_new_session_native_rules(
+                AdapterKind::GrokBuild,
+                AcpSessionContinuation::HistoryRestore,
+                Some("rules"),
+            )
+            .is_err()
+        );
+        assert_eq!(
+            validate_new_session_native_rules(
+                AdapterKind::GrokBuild,
+                AcpSessionContinuation::HistoryRestore,
+                None,
+            )
+            .unwrap(),
+            None
+        );
+        assert!(
+            validate_new_session_native_rules(
+                AdapterKind::KimiCodeCli,
+                AcpSessionContinuation::New,
+                Some("rules"),
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn grok_snake_case_file_path_is_an_authorizable_write_target() {
+        let request = json!({
+            "toolCall": {
+                "kind": "edit",
+                "rawInput": {"file_path": "/tmp/grok-write.txt"}
+            }
+        });
+        assert_eq!(acp_tool_paths(&request), ["/tmp/grok-write.txt"]);
+        assert_eq!(
+            effective_action_kind(
+                AdapterKind::GrokBuild,
+                "other",
+                &request["toolCall"]["rawInput"],
+            ),
+            "edit"
+        );
+    }
 
     #[test]
     fn codebuddy_private_command_notification_is_narrow_idle_metadata() {
@@ -4553,6 +6032,776 @@ mod tests {
         }
     }
 
+    fn frozen_grok_runtime(executable: &Path) -> FrozenAgentRuntimeConfig {
+        FrozenAgentRuntimeConfig {
+            adapter_kind: AdapterKind::GrokBuild,
+            installation_id: "installation-grok".to_string(),
+            installation_generation: 1,
+            search_environment_generation: 1,
+            executable_path: executable.to_string_lossy().to_string(),
+            auth_scope: "default".to_string(),
+            reported_version: Some("0.2.118".to_string()),
+            executable_fingerprint: "sha256:grok".to_string(),
+            capabilities: vec!["session.load".to_string()],
+            protocol_version: "acp-v1".to_string(),
+            model: ResolvedModelSelection {
+                source: "runtime_default".to_string(),
+                model_id: "MiniMax-M3".to_string(),
+                options: json!({}),
+            },
+            permissions: AdapterPermissionConfig {
+                adapter_kind: AdapterKind::GrokBuild,
+                schema_version: 1,
+                values: json!({"permission_mode": "bypassPermissions"}),
+            },
+            native_session_compatibility_key: Some("grok-build:acp-v1".to_string()),
+            binding_compatibility_digest: "sha256:binding".to_string(),
+            host_config_digest: "sha256:host".to_string(),
+            config_digest: "sha256:config".to_string(),
+        }
+    }
+
+    fn terminal_owner() -> AcpRuntimeOwner {
+        AcpRuntimeOwner {
+            agent_run_id: "run-client-terminal".to_string(),
+            execution_epoch: 7,
+        }
+    }
+
+    fn terminal_bridge(root: &Path) -> AcpClientTerminalBridge {
+        let mut command = Command::new("/bin/sh");
+        command
+            .current_dir(root)
+            .env("ROVAI_TERMINAL_BASE", "base-environment");
+        let template = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeHost,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "terminal-test-host",
+        )
+        .unwrap();
+        AcpClientTerminalBridge::new(root, template).unwrap()
+    }
+
+    fn process_is_alive(pid: i32) -> bool {
+        (unsafe { libc::kill(pid, 0) }) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+
+    async fn assert_runtime_terminal_capability(
+        root: &Path,
+        frozen: &FrozenAgentRuntimeConfig,
+        expected: bool,
+    ) {
+        let protocol_log = root.join("initialize.json");
+        make_executable(
+            Path::new(&frozen.executable_path),
+            &format!(
+                r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" > '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                protocol_log.display()
+            ),
+        );
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, _receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            frozen,
+            incoming,
+            Some(exact_builtin_tools(root)),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let initialize: Value =
+            serde_json::from_slice(&std::fs::read(&protocol_log).unwrap()).unwrap();
+        assert_eq!(
+            initialize
+                .pointer("/params/clientCapabilities/terminal")
+                .and_then(Value::as_bool),
+            Some(expected)
+        );
+        assert_eq!(host.client_terminal_bridge.is_some(), expected);
+        host.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn runtime_policy_negotiates_client_terminal_only_for_kimi() {
+        let kimi_root = std::env::temp_dir().join(format!(
+            "rovai-acp-terminal-capability-kimi-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let trae_root = std::env::temp_dir().join(format!(
+            "rovai-acp-terminal-capability-trae-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&kimi_root).unwrap();
+        std::fs::create_dir_all(&trae_root).unwrap();
+        let mut kimi = frozen_kimi_runtime(&kimi_root.join("kimi"));
+        // The compatibility regression was observed in Kimi Code 0.38.x.
+        // Version selection intentionally remains outside the wire bridge: the
+        // Runtime policy owns whether this generic client capability is enabled.
+        kimi.reported_version = Some("0.38.0".to_string());
+        let trae = frozen_trae_runtime(&trae_root.join("traecli"));
+
+        assert_runtime_terminal_capability(&kimi_root, &kimi, true).await;
+        assert_runtime_terminal_capability(&trae_root, &trae, false).await;
+
+        std::fs::remove_dir_all(kimi_root).unwrap();
+        std::fs::remove_dir_all(trae_root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn kimi_038_fixture_uses_the_standard_terminal_wire_lifecycle() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-kimi-038-wire-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("kimi");
+        let protocol_log = root.join("protocol.jsonl");
+        let create_request = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 91,
+            "method": "terminal/create",
+            "params": {
+                "sessionId": "session-kimi-038-terminal",
+                "command": "/bin/sh",
+                "args": [
+                    "-c",
+                    "printf wire-stdout; printf wire-stderr >&2; exit 7"
+                ],
+                "cwd": root,
+                "outputByteLimit": 65536,
+            }
+        }))
+        .unwrap();
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r session_new || exit 1
+printf '%s\n' "$session_new" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-kimi-038-terminal","configOptions":[{{"id":"mode","currentValue":"default","options":[{{"value":"default","name":"Default"}}]}}]}}}}'
+IFS= read -r mode || exit 1
+printf '%s\n' "$mode" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":null}}'
+IFS= read -r prompt || exit 1
+printf '%s\n' "$prompt" >> '{}'
+cat <<'ROVAI_CREATE_TERMINAL_REQUEST'
+{}
+ROVAI_CREATE_TERMINAL_REQUEST
+IFS= read -r create_response || exit 1
+printf '%s\n' "$create_response" >> '{}'
+terminal_id=$(printf '%s' "$create_response" | sed -n 's/.*"terminalId":"\([^"]*\)".*/\1/p')
+[ -n "$terminal_id" ] || exit 1
+printf '{{"jsonrpc":"2.0","id":92,"method":"terminal/output","params":{{"sessionId":"session-kimi-038-terminal","terminalId":"%s"}}}}\n' "$terminal_id"
+IFS= read -r initial_output || exit 1
+printf '%s\n' "$initial_output" >> '{}'
+printf '{{"jsonrpc":"2.0","id":93,"method":"terminal/wait_for_exit","params":{{"sessionId":"session-kimi-038-terminal","terminalId":"%s"}}}}\n' "$terminal_id"
+IFS= read -r wait_response || exit 1
+printf '%s\n' "$wait_response" >> '{}'
+printf '{{"jsonrpc":"2.0","id":94,"method":"terminal/output","params":{{"sessionId":"session-kimi-038-terminal","terminalId":"%s"}}}}\n' "$terminal_id"
+IFS= read -r final_output || exit 1
+printf '%s\n' "$final_output" >> '{}'
+printf '{{"jsonrpc":"2.0","id":95,"method":"terminal/kill","params":{{"sessionId":"session-kimi-038-terminal","terminalId":"%s"}}}}\n' "$terminal_id"
+IFS= read -r kill_response || exit 1
+printf '%s\n' "$kill_response" >> '{}'
+printf '{{"jsonrpc":"2.0","id":96,"method":"terminal/release","params":{{"sessionId":"session-kimi-038-terminal","terminalId":"%s"}}}}\n' "$terminal_id"
+IFS= read -r release_response || exit 1
+printf '%s\n' "$release_response" >> '{}'
+printf '{{"jsonrpc":"2.0","id":97,"method":"terminal/release","params":{{"sessionId":"session-kimi-038-terminal","terminalId":"%s"}}}}\n' "$terminal_id"
+IFS= read -r repeated_release_response || exit 1
+printf '%s\n' "$repeated_release_response" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":4,"result":{{"stopReason":"end_turn"}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                create_request,
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+            ),
+        );
+
+        let mut frozen = frozen_kimi_runtime(&executable);
+        frozen.reported_version = Some("0.38.0".to_string());
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(exact_builtin_tools(&root)),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-kimi-038-terminal-wire".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "runtime_managed".to_string(),
+        );
+        runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        runtime
+            .start_prompt(
+                "delivery-kimi-038-terminal",
+                "exercise standard ACP terminal",
+            )
+            .await
+            .unwrap();
+        receive_through_prompt_completion(&mut receiver).await;
+
+        let protocol = std::fs::read_to_string(&protocol_log).unwrap();
+        let response = |id| {
+            protocol
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .find(|message| message.get("id").and_then(Value::as_u64) == Some(id))
+                .unwrap_or_else(|| panic!("Kimi 0.38 fixture has no response {id}"))
+        };
+        assert!(response(91).pointer("/result/terminalId").is_some());
+        assert_eq!(response(93).pointer("/result/exitCode"), Some(&json!(7)));
+        let final_output = response(94);
+        assert!(
+            final_output
+                .pointer("/result/output")
+                .and_then(Value::as_str)
+                .is_some_and(|output| {
+                    output.contains("wire-stdout") && output.contains("wire-stderr")
+                })
+        );
+        assert_eq!(
+            final_output.pointer("/result/exitStatus/exitCode"),
+            Some(&json!(7))
+        );
+        assert_eq!(response(95).get("result"), Some(&json!({})));
+        assert_eq!(response(96).get("result"), Some(&json!({})));
+        assert_eq!(response(97).get("result"), Some(&json!({})));
+        assert!(
+            host.client_terminal_bridge
+                .as_ref()
+                .unwrap()
+                .is_empty()
+                .await
+        );
+
+        runtime.detach().await;
+        host.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn client_terminal_output_is_bounded_and_reports_truncation() {
+        let mut output = AcpClientTerminalOutput::new(4);
+        output.append(b"abcdef");
+        assert_eq!(output.snapshot(), ("cdef".to_string(), true));
+    }
+
+    #[tokio::test]
+    async fn client_terminal_create_output_wait_and_release_use_the_run_context() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-lifecycle-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let child_cwd = root.join("child");
+        std::fs::create_dir_all(&child_cwd).unwrap();
+        let bridge = terminal_bridge(&root);
+        let owner = terminal_owner();
+        let created = bridge
+            .create(
+                "session-terminal",
+                &owner,
+                &json!({
+                    "sessionId": "session-terminal",
+                    "command": "/bin/sh",
+                    "args": [
+                        "-c",
+                        "printf 'stdout:%s:%s:%s' \"$PWD\" \"$ROVAI_TERMINAL_BASE\" \"$TERMINAL_OVERRIDE\"; printf ':stderr' >&2; exit 7"
+                    ],
+                    "env": [{"name": "TERMINAL_OVERRIDE", "value": "request-environment"}],
+                    "cwd": child_cwd,
+                    "outputByteLimit": 65536,
+                }),
+            )
+            .await
+            .unwrap();
+        let terminal_id = created["terminalId"].as_str().unwrap();
+
+        let initial = bridge
+            .output("session-terminal", &owner, terminal_id)
+            .await
+            .unwrap();
+        assert_eq!(initial["truncated"], false);
+        let exit = bridge
+            .wait_for_exit("session-terminal", &owner, terminal_id)
+            .await
+            .unwrap();
+        assert_eq!(exit["exitCode"], 7);
+        assert!(exit["signal"].is_null());
+        let output = bridge
+            .output("session-terminal", &owner, terminal_id)
+            .await
+            .unwrap();
+        let text = output["output"].as_str().unwrap();
+        assert!(text.contains(&format!(
+            "stdout:{}",
+            child_cwd.canonicalize().unwrap().display()
+        )));
+        assert!(text.contains("base-environment"));
+        assert!(text.contains("request-environment"));
+        assert!(text.contains(":stderr"));
+        assert_eq!(output["exitStatus"]["exitCode"], 7);
+
+        bridge
+            .release("session-terminal", &owner, terminal_id)
+            .await
+            .unwrap();
+        bridge
+            .release("session-terminal", &owner, terminal_id)
+            .await
+            .expect("terminal/release must be idempotent");
+        assert!(
+            bridge
+                .output("session-terminal", &owner, terminal_id)
+                .await
+                .is_err()
+        );
+        assert!(bridge.is_empty().await);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_terminal_kill_is_safe_and_keeps_the_handle_until_release() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-kill-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let bridge = terminal_bridge(&root);
+        let owner = terminal_owner();
+        let created = bridge
+            .create(
+                "session-kill",
+                &owner,
+                &json!({
+                    "sessionId": "session-kill",
+                    "command": "/bin/sh",
+                    "args": ["-c", "printf started; sleep 30"],
+                    "cwd": root,
+                }),
+            )
+            .await
+            .unwrap();
+        let terminal_id = created["terminalId"].as_str().unwrap();
+        bridge
+            .kill("session-kill", &owner, terminal_id)
+            .await
+            .unwrap();
+        let exit = timeout(
+            Duration::from_secs(2),
+            bridge.wait_for_exit("session-kill", &owner, terminal_id),
+        )
+        .await
+        .expect("killed terminal must exit promptly")
+        .unwrap();
+        assert!(exit["exitCode"].is_null() || exit["exitCode"].as_u64() != Some(0));
+        bridge
+            .kill("session-kill", &owner, terminal_id)
+            .await
+            .expect("terminal/kill must be safe after exit");
+        let output = bridge
+            .output("session-kill", &owner, terminal_id)
+            .await
+            .unwrap();
+        assert!(output["exitStatus"].is_object());
+        bridge
+            .release("session-kill", &owner, terminal_id)
+            .await
+            .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_terminal_host_cleanup_reaps_processes_and_closes_the_bridge() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-host-cleanup-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let terminal_pid = root.join("terminal.pid");
+        let bridge = terminal_bridge(&root);
+        let owner = terminal_owner();
+        bridge
+            .create(
+                "session-host-cleanup",
+                &owner,
+                &json!({
+                    "sessionId": "session-host-cleanup",
+                    "command": "/bin/sh",
+                    "args": [
+                        "-c",
+                        format!("printf '%s' $$ > '{}'; exec sleep 30", terminal_pid.display())
+                    ],
+                    "cwd": root,
+                }),
+            )
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(2), async {
+            while !terminal_pid.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Host cleanup Terminal process did not start");
+        let pid = std::fs::read_to_string(&terminal_pid)
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+
+        bridge.release_all().await;
+
+        assert!(bridge.is_empty().await);
+        assert!(!process_is_alive(pid));
+        let late_create = bridge
+            .create(
+                "session-host-cleanup",
+                &owner,
+                &json!({
+                    "sessionId": "session-host-cleanup",
+                    "command": "/bin/sh",
+                    "args": ["-c", "exit 0"],
+                    "cwd": root,
+                }),
+            )
+            .await
+            .expect_err("closed Host must reject a late terminal/create");
+        assert!(late_create.to_string().contains("Bridge is closed"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_terminal_rejects_workspace_escape_and_cleans_a_run_session() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-scope-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-outside-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let symlink_escape = root.join("symlink-escape");
+        std::os::unix::fs::symlink(&outside, &symlink_escape).unwrap();
+        let bridge = terminal_bridge(&root);
+        let owner = terminal_owner();
+        let escaped = bridge
+            .create(
+                "session-scope",
+                &owner,
+                &json!({
+                    "sessionId": "session-scope",
+                    "command": "/bin/sh",
+                    "args": ["-c", "exit 0"],
+                    "cwd": outside,
+                }),
+            )
+            .await
+            .expect_err("workspace escape must fail closed");
+        assert!(
+            escaped
+                .to_string()
+                .contains("outside the AgentRun execution root")
+        );
+        let symlink_escaped = bridge
+            .create(
+                "session-scope",
+                &owner,
+                &json!({
+                    "sessionId": "session-scope",
+                    "command": "/bin/sh",
+                    "args": ["-c", "exit 0"],
+                    "cwd": symlink_escape,
+                }),
+            )
+            .await
+            .expect_err("cwd symlink escape must fail closed");
+        assert!(
+            symlink_escaped
+                .to_string()
+                .contains("outside the AgentRun execution root")
+        );
+
+        let created = bridge
+            .create(
+                "session-scope",
+                &owner,
+                &json!({
+                    "sessionId": "session-scope",
+                    "command": "/bin/sh",
+                    "args": ["-c", "sleep 30"],
+                    "cwd": root,
+                }),
+            )
+            .await
+            .unwrap();
+        let terminal_id = created["terminalId"].as_str().unwrap().to_string();
+        bridge.release_session("session-scope", &owner).await;
+        assert!(bridge.is_empty().await);
+        assert!(
+            bridge
+                .output("session-scope", &owner, &terminal_id)
+                .await
+                .is_err()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[tokio::test]
+    async fn runtime_cancellation_terminates_and_releases_client_terminals() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-acp-client-terminal-cancel-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("kimi");
+        let protocol_log = root.join("protocol.jsonl");
+        let terminal_pid = root.join("terminal.pid");
+        let late_terminal_pid = root.join("late-terminal.pid");
+        let terminal_request = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 91,
+            "method": "terminal/create",
+            "params": {
+                "sessionId": "session-kimi-terminal",
+                "command": "/bin/sh",
+                "args": [
+                    "-c",
+                    format!("printf '%s' $$ > '{}'; exec sleep 30", terminal_pid.display())
+                ],
+                "cwd": root,
+                "outputByteLimit": 65536,
+            }
+        }))
+        .unwrap();
+        let late_terminal_request = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 92,
+            "method": "terminal/create",
+            "params": {
+                "sessionId": "session-kimi-terminal",
+                "command": "/bin/sh",
+                "args": [
+                    "-c",
+                    format!(
+                        "printf '%s' $$ > '{}'; exec sleep 30",
+                        late_terminal_pid.display()
+                    )
+                ],
+                "cwd": root,
+            }
+        }))
+        .unwrap();
+        make_executable(
+            &executable,
+            &format!(
+                r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r session_new || exit 1
+printf '%s\n' "$session_new" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-kimi-terminal","configOptions":[{{"id":"mode","currentValue":"default","options":[{{"value":"default","name":"Default"}}]}}]}}}}'
+IFS= read -r mode || exit 1
+printf '%s\n' "$mode" >> '{}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":null}}'
+IFS= read -r prompt || exit 1
+printf '%s\n' "$prompt" >> '{}'
+cat <<'ROVAI_TERMINAL_REQUEST'
+{}
+ROVAI_TERMINAL_REQUEST
+IFS= read -r terminal_response || exit 1
+printf '%s\n' "$terminal_response" >> '{}'
+while IFS= read -r message; do
+  printf '%s\n' "$message" >> '{}'
+  if printf '%s' "$message" | grep -q '"method":"session/cancel"'; then
+    cat <<'ROVAI_LATE_TERMINAL_REQUEST'
+{}
+ROVAI_LATE_TERMINAL_REQUEST
+    IFS= read -r late_terminal_response || exit 1
+    printf '%s\n' "$late_terminal_response" >> '{}'
+  fi
+done
+"#,
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                protocol_log.display(),
+                terminal_request,
+                protocol_log.display(),
+                protocol_log.display(),
+                late_terminal_request,
+                protocol_log.display(),
+            ),
+        );
+
+        let frozen = frozen_kimi_runtime(&executable);
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let (incoming, mut receiver) = mpsc::unbounded_channel();
+        let host = AcpHost::spawn(
+            &root,
+            &workspace,
+            PermissionSemantics::RuntimeManagedV2,
+            &frozen,
+            incoming,
+            Some(exact_builtin_tools(&root)),
+            CompactionDetectorPolicy::Disabled,
+            true,
+            &BTreeMap::new(),
+            &root.join("private"),
+            None,
+        )
+        .await
+        .unwrap();
+        let runtime = AcpRuntime::from_host(
+            AcpRuntimeOwner {
+                agent_run_id: "run-kimi-terminal-cancel".to_string(),
+                execution_epoch: 1,
+            },
+            host.clone(),
+            "sha256:compatibility".to_string(),
+            "sha256:mcp".to_string(),
+            root.clone(),
+            Some(exact_attachment_root(&root)),
+            "runtime_managed".to_string(),
+        );
+        runtime
+            .start_or_resume_session(
+                None,
+                AcpSessionCapabilities::default(),
+                "runtime_default",
+                "runtime_default",
+                &json!({}),
+                &BTreeMap::new(),
+            )
+            .await
+            .unwrap();
+        runtime
+            .start_prompt("delivery-kimi-terminal", "run a shell command")
+            .await
+            .unwrap();
+
+        timeout(Duration::from_secs(2), async {
+            while !terminal_pid.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Kimi terminal process did not start");
+        let pid = std::fs::read_to_string(&terminal_pid)
+            .unwrap()
+            .parse::<i32>()
+            .unwrap();
+        runtime.cancel().await.unwrap();
+
+        assert!(
+            host.client_terminal_bridge
+                .as_ref()
+                .unwrap()
+                .is_empty()
+                .await
+        );
+        assert!(
+            receiver.try_recv().is_err(),
+            "Terminal output must stay protocol-private"
+        );
+        timeout(Duration::from_secs(2), async {
+            loop {
+                if !process_is_alive(pid) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("AgentRun cancellation left the Terminal process alive");
+        timeout(Duration::from_secs(2), async {
+            loop {
+                let protocol = std::fs::read_to_string(&protocol_log).unwrap_or_default();
+                let late_create_was_rejected = protocol.lines().any(|line| {
+                    serde_json::from_str::<Value>(line).is_ok_and(|message| {
+                        message.get("id").and_then(Value::as_u64) == Some(92)
+                            && message.get("error").is_some()
+                    })
+                });
+                if protocol.contains("\"terminalId\"")
+                    && protocol.contains("\"method\":\"session/cancel\"")
+                    && late_create_was_rejected
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Kimi fixture did not observe Terminal response and cancellation");
+        assert!(
+            !late_terminal_pid.exists(),
+            "terminal/create raced past the AgentRun cancellation fence"
+        );
+
+        host.shutdown().await;
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn kimi_provider_configuration_is_allowlisted_and_process_local() {
         let root = std::env::temp_dir().join(format!(
@@ -4658,6 +6907,186 @@ mod tests {
     }
 
     #[test]
+    fn grok_official_model_config_resolves_only_referenced_secure_environment() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-grok-provider-config-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let config_path = root.join("config.toml");
+        let environment_path = root.join(".env");
+        std::fs::write(
+            &config_path,
+            concat!(
+                "[models]\n",
+                "default = \"minimax-m3\"\n",
+                "\n",
+                "[model.minimax-m3]\n",
+                "model = \"MiniMax-M3\"\n",
+                "base_url = \"https://api.minimaxi.com/v1\"\n",
+                "env_key = \"MINIMAX_API_KEY\"\n",
+                "env_http_headers = { \"X-Tenant\" = \"MINIMAX_TENANT_TOKEN\" }\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &environment_path,
+            concat!(
+                "export MINIMAX_API_KEY='test-plan-key'\n",
+                "MINIMAX_TENANT_TOKEN=test-tenant\n",
+                "UNREFERENCED_SECRET=must-not-pass\n",
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&environment_path, std::fs::Permissions::from_mode(0o600))
+                .unwrap();
+        }
+
+        let configuration = load_grok_native_configuration_from_paths(
+            &root,
+            &config_path,
+            &environment_path,
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(configuration.byok_configured);
+        assert_eq!(configuration.environment.len(), 2);
+        assert_eq!(
+            configuration.environment["MINIMAX_API_KEY"],
+            "test-plan-key"
+        );
+        assert_eq!(
+            configuration.environment["MINIMAX_TENANT_TOKEN"],
+            "test-tenant"
+        );
+        assert!(
+            !configuration
+                .environment
+                .contains_key("UNREFERENCED_SECRET")
+        );
+
+        let mut command = Command::new("/usr/bin/true");
+        apply_grok_native_configuration(&mut command, configuration);
+        let environment = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().to_string(),
+                    value.unwrap().to_string_lossy().to_string(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(environment.len(), 3);
+        assert_eq!(environment["MINIMAX_API_KEY"], "test-plan-key");
+        assert_eq!(environment["MINIMAX_TENANT_TOKEN"], "test-tenant");
+        assert_eq!(environment["GROK_DISABLE_AUTOUPDATER"], "1");
+        assert!(!environment.contains_key("GROK_DEFAULT_MODEL"));
+        assert!(!environment.contains_key("GROK_MODELS_BASE_URL"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn grok_official_literal_api_key_is_byok_without_a_rovai_translation() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-grok-provider-config-literal-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let config_path = root.join("config.toml");
+        std::fs::write(
+            &config_path,
+            concat!(
+                "[model.minimax-m3]\n",
+                "model = \"MiniMax-M3\"\n",
+                "base_url = \"https://api.minimaxi.com/v1\"\n",
+                "api_key = \"test-plan-key\"\n",
+            ),
+        )
+        .unwrap();
+        let configuration = load_grok_native_configuration_from_paths(
+            &root,
+            &config_path,
+            &root.join(".env"),
+            &BTreeMap::new(),
+        )
+        .unwrap();
+        assert!(configuration.byok_configured);
+        assert!(configuration.environment.is_empty());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn grok_environment_source_rejects_group_readable_secrets() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-grok-provider-config-permissions-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let config_path = root.join("config.toml");
+        let environment_path = root.join(".env");
+        std::fs::write(
+            &config_path,
+            "[model.minimax-m3]\nenv_key = \"MINIMAX_API_KEY\"\n",
+        )
+        .unwrap();
+        std::fs::write(&environment_path, "MINIMAX_API_KEY=test-plan-key\n").unwrap();
+        std::fs::set_permissions(&environment_path, std::fs::Permissions::from_mode(0o640))
+            .unwrap();
+
+        let error = load_grok_native_configuration_from_paths(
+            &root,
+            &config_path,
+            &environment_path,
+            &BTreeMap::new(),
+        )
+        .expect_err("group-readable Grok environment secrets must fail closed");
+        assert!(error.to_string().contains("group or others"));
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn grok_byok_probe_copies_official_config_without_copying_the_env_file() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-grok-provider-probe-home-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let source_home = root.join("source");
+        let probe_home = root.join("probe");
+        std::fs::create_dir_all(&source_home).unwrap();
+        std::fs::write(
+            source_home.join("config.toml"),
+            "[model.minimax-m3]\nenv_key = \"MINIMAX_API_KEY\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            source_home.join("managed_config.toml"),
+            "[features]\ntelemetry = false\n",
+        )
+        .unwrap();
+        std::fs::write(source_home.join(".env"), "MINIMAX_API_KEY=test-plan-key\n").unwrap();
+
+        prepare_grok_probe_home_from(&source_home, &probe_home).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(probe_home.join("config.toml")).unwrap(),
+            "[model.minimax-m3]\nenv_key = \"MINIMAX_API_KEY\"\n"
+        );
+        assert!(probe_home.join("managed_config.toml").is_file());
+        assert!(!probe_home.join(".env").exists());
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn cursor_effective_launch_preserves_native_permissions_and_narrows_read_only() {
         let root =
             std::env::temp_dir().join(format!("rovai-cursor-launch-{}", uuid::Uuid::new_v4()));
@@ -4735,7 +7164,7 @@ mod tests {
                 r#"#!/bin/sh
 IFS= read -r initialize || exit 1
 printf '%s\n' "$initialize" >> '{}'
-printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}},"authMethods":[{{"id":"cursor_login","name":"Cursor"}}]}}}}'
 IFS= read -r authenticate || exit 1
 printf '%s\n' "$authenticate" >> '{}'
 printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":null}}'
@@ -4920,6 +7349,124 @@ while IFS= read -r ignored; do :; done
             ) {
                 return;
             }
+        }
+    }
+
+    #[tokio::test]
+    async fn prompt_error_after_activity_keeps_input_accepted_while_early_rejection_does_not() {
+        for (case_name, prompt_activity, error_code, expected_accepted) in [
+            (
+                "activity-before-error",
+                r#"printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-error","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"working"}}}}'"#,
+                -32603,
+                true,
+            ),
+            ("error-before-activity", ":", -32602, false),
+        ] {
+            let root = std::env::temp_dir().join(format!(
+                "rovai-acp-prompt-error-{case_name}-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            let executable = root.join("traecli");
+            make_executable(
+                &executable,
+                &format!(
+                    r#"#!/bin/sh
+IFS= read -r initialize || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{}}}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{"sessionId":"session-error","models":{{"currentModelId":"trae-default","availableModels":[{{"modelId":"trae-default","name":"TRAE Default"}}]}}}}}}'
+IFS= read -r prompt || exit 1
+{prompt_activity}
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"error":{{"code":{error_code},"message":"Internal error"}}}}'
+while IFS= read -r ignored; do :; done
+"#,
+                ),
+            );
+
+            let frozen = frozen_trae_runtime(&executable);
+            let workspace =
+                AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+            let (incoming, mut receiver) = mpsc::unbounded_channel();
+            let host = AcpHost::spawn(
+                &root,
+                &workspace,
+                PermissionSemantics::RuntimeManagedV2,
+                &frozen,
+                incoming,
+                Some(exact_builtin_tools(&root)),
+                CompactionDetectorPolicy::Disabled,
+                true,
+                &BTreeMap::new(),
+                &root.join("private"),
+                None,
+            )
+            .await
+            .unwrap();
+            let runtime = AcpRuntime::from_host(
+                AcpRuntimeOwner {
+                    agent_run_id: format!("run-{case_name}"),
+                    execution_epoch: 1,
+                },
+                host.clone(),
+                "sha256:compatibility".to_string(),
+                "sha256:mcp".to_string(),
+                root.clone(),
+                Some(exact_attachment_root(&root)),
+                "runtime_managed".to_string(),
+            );
+            runtime
+                .start_or_resume_session(
+                    None,
+                    AcpSessionCapabilities::default(),
+                    "runtime_default",
+                    TRAE_RUNTIME_DEFAULT_MODEL_ID,
+                    &json!({}),
+                    &BTreeMap::new(),
+                )
+                .await
+                .unwrap();
+            let prompt_id = runtime
+                .start_prompt(&format!("delivery-{case_name}"), "continue")
+                .await
+                .unwrap();
+
+            if expected_accepted {
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::Message { ref message, .. })
+                        if message.pointer("/params/update/content/text").and_then(Value::as_str)
+                            == Some("working")
+                ));
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::InputAccepted { native_prompt_id, .. })
+                        if native_prompt_id == prompt_id
+                ));
+            } else {
+                assert!(matches!(
+                    receiver.recv().await,
+                    Some(AcpIncoming::InputNotAccepted {
+                        native_prompt_id,
+                        native_error_code: Some(-32602),
+                        ..
+                    }) if native_prompt_id == prompt_id
+                ));
+            }
+            assert!(matches!(
+                receiver.recv().await,
+                Some(AcpIncoming::Message { message, .. })
+                    if message.get("method").and_then(Value::as_str)
+                        == Some("rovai/acp_prompt_completed")
+                        && message.pointer("/params/nativeErrorCode").and_then(Value::as_i64)
+                            == Some(error_code)
+                        && message.pointer("/params/inputDisposition").and_then(Value::as_str)
+                            == Some(if expected_accepted { "accepted" } else { "not_accepted" })
+            ));
+
+            host.shutdown().await;
+            std::fs::remove_dir_all(root).unwrap();
         }
     }
 
@@ -6107,6 +8654,7 @@ while IFS= read -r ignored; do :; done
             AdapterKind::QwenCode,
             AdapterKind::TraeCnCli,
             AdapterKind::KimiCodeCli,
+            AdapterKind::GrokBuild,
         ] {
             assert_eq!(
                 completed_run_release_disposition(adapter_kind),
@@ -6130,27 +8678,15 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn kimi_public_text_removes_reasoning_blocks_and_fails_closed_when_unterminated() {
-        assert_eq!(
-            kimi_public_agent_text("<think>private reasoning</think>\n\nPUBLIC"),
-            "PUBLIC"
+    fn recovery_collector_preserves_provider_text_without_reasoning_tag_cleanup() {
+        let mut collector = AcpMissingSendRecoveryCollector::default();
+        collector.observe_assistant_chunk(
+            Some("message-1"),
+            "<think>provider reasoning</think>\nPUBLIC",
         );
         assert_eq!(
-            kimi_public_agent_text("prefix<think>private</think>suffix"),
-            "prefixsuffix"
-        );
-        assert_eq!(kimi_public_agent_text("<think>unterminated"), "");
-        assert_eq!(
-            kimi_public_agent_text("<think>private</think>ROV</think>AI_KIMI_ACP_OK"),
-            "ROVAI_KIMI_ACP_OK"
-        );
-        assert_eq!(
-            kimi_public_agent_text("private fragment</think>PUBLIC"),
-            "PUBLIC"
-        );
-        assert_eq!(
-            kimi_public_agent_text("plain public answer"),
-            "plain public answer"
+            collector.candidate().as_deref(),
+            Some("<think>provider reasoning</think>\nPUBLIC")
         );
     }
 
@@ -6226,6 +8762,126 @@ while IFS= read -r ignored; do :; done
             )
             .is_none()
         );
+
+        let grok_completed = json!({
+            "jsonrpc": "2.0",
+            "method": "_x.ai/session_notification",
+            "params": {
+                "sessionId": "session-grok",
+                "_meta": {
+                    "eventId": "session-grok:42",
+                    "agentTimestampMs": 1_787_579_334_000_i64
+                },
+                "update": {
+                    "sessionUpdate": "auto_compact_completed",
+                    "tokens_before": 12_345,
+                    "tokens_after": 6_789,
+                    "elapsed_ms": 123,
+                    "summary_preview": "must not participate in signal admission"
+                }
+            }
+        });
+        let grok = detect_acp_compaction_signal(
+            AdapterKind::GrokBuild,
+            &grok_completed,
+            AcpCompactionSignalSurface::SessionMetadata,
+        )
+        .expect("Grok's exact structured completion should be detected");
+        assert_eq!(grok.source_signal, "grok.acp.auto_compact_completed.v1");
+        assert_eq!(grok.admission_point, "completed");
+        assert_eq!(
+            grok.runtime_occurrence_id.as_deref(),
+            Some("session-grok:42")
+        );
+        assert!(is_idle_session_metadata(
+            AdapterKind::GrokBuild,
+            &grok_completed
+        ));
+        assert!(
+            detect_acp_compaction_signal(
+                AdapterKind::GrokBuild,
+                &grok_completed,
+                AcpCompactionSignalSurface::ActivePrompt,
+            )
+            .is_none(),
+            "Grok completion must be consumed as private Session metadata"
+        );
+
+        let grok_malformed = [
+            {
+                let mut value = grok_completed.clone();
+                value["id"] = json!(7);
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["method"] = json!("x.ai/session_notification");
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["method"] = json!("x.ai/session_notification");
+                value["params"]["params"] = value["params"].clone();
+                value["params"].as_object_mut().unwrap().remove("sessionId");
+                value["params"].as_object_mut().unwrap().remove("_meta");
+                value["params"].as_object_mut().unwrap().remove("update");
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["update"]["sessionUpdate"] = json!("auto_compact_started");
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["sessionId"] = json!("");
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["_meta"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("eventId");
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["_meta"]["eventId"] = json!("  ");
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["_meta"]["isReplay"] = json!(true);
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["update"]["tokens_after"] = json!(-1);
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["update"]["tokens_before"] = json!("12345");
+                value
+            },
+            {
+                let mut value = grok_completed.clone();
+                value["params"]["update"]["elapsed_ms"] = json!(-1);
+                value
+            },
+        ];
+        for malformed in grok_malformed {
+            assert!(
+                detect_acp_compaction_signal(
+                    AdapterKind::GrokBuild,
+                    &malformed,
+                    AcpCompactionSignalSurface::SessionMetadata,
+                )
+                .is_none(),
+                "Grok compaction completion parsing must fail closed for {malformed}"
+            );
+        }
 
         let kimi_completed = json!({
             "method": "session/update",
@@ -6537,6 +9193,24 @@ while IFS= read -r ignored; do :; done
             AcpSessionContinuation::HistoryRestore
         );
         assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::GrokBuild,
+                false,
+                Some("session-1"),
+                load_only,
+            ),
+            AcpSessionContinuation::HistoryRestore
+        );
+        assert_eq!(
+            select_acp_session_continuation(
+                AdapterKind::GrokBuild,
+                false,
+                Some("session-1"),
+                resume_and_load,
+            ),
+            AcpSessionContinuation::Resume
+        );
+        assert_eq!(
             select_acp_session_continuation(AdapterKind::TraeCnCli, false, None, resume_and_load,),
             AcpSessionContinuation::New
         );
@@ -6598,6 +9272,27 @@ while IFS= read -r ignored; do :; done
             &attachment_authorization,
         )
         .unwrap();
+        let legacy_digest = canonical_json_digest(&json!({
+            "schemaVersion": 3,
+            "adapterKind": frozen.adapter_kind,
+            "runtimeConfigDigest": None::<&str>,
+            "hostConfigDigest": frozen.host_config_digest,
+            "executionRoot": root.canonicalize().unwrap(),
+            "workspace": workspace,
+            "permissionSemantics": PermissionSemantics::RuntimeManagedV2,
+            "builtinToolContractVersion": BUILTIN_TOOL_CONTRACT_VERSION,
+            "builtinToolCatalogDigest": builtin_tool_catalog_digest().unwrap(),
+            "externalMcpServers": BTreeMap::<String, McpServerDefinition>::new(),
+            "mcpProjectionDigest": None::<&str>,
+            "campAttachmentViewContractVersion": CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION,
+            "campAttachmentRoot": attachment_authorization.attachment_root,
+            "campAttachmentVisibilityMode": attachment_authorization.visibility_mode.as_str(),
+            "campAttachmentGeneration": attachment_authorization
+                .visibility_mode
+                .compatibility_generation(attachment_authorization.generation),
+        }))
+        .unwrap();
+        assert_eq!(first, legacy_digest);
 
         let mut upgraded = frozen.clone();
         upgraded.reported_version = Some("0.120.52".to_string());
@@ -6707,6 +9402,7 @@ while IFS= read -r ignored; do :; done
             .unwrap()
             .native_session_compatibility_key
             .unwrap();
+        assert!(history_key.starts_with("trae-cn-cli:history-restore-v1:"));
         let same_history_key = freeze_history_restore_compatibility(frozen.clone(), &workspace)
             .unwrap()
             .native_session_compatibility_key
@@ -6753,6 +9449,81 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
+    fn grok_history_restore_compatibility_fences_cold_load_inputs() {
+        let root = std::env::temp_dir().join(format!(
+            "rovai-grok-history-compatibility-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let executable = root.join("grok");
+        make_executable(&executable, "#!/bin/sh\nexit 0\n");
+        let workspace = AgentRunWorkspace::runtime_managed_path(root.to_string_lossy().to_string());
+        let frozen = frozen_grok_runtime(&executable);
+        let baseline = freeze_history_restore_compatibility(frozen.clone(), &workspace)
+            .unwrap()
+            .native_session_compatibility_key
+            .unwrap();
+        assert!(baseline.starts_with("grok-build:history-restore-v3:"));
+        assert_eq!(
+            freeze_history_restore_compatibility(frozen.clone(), &workspace)
+                .unwrap()
+                .native_session_compatibility_key
+                .unwrap(),
+            baseline
+        );
+
+        let mut changed_installation = frozen.clone();
+        changed_installation.installation_id = "installation-grok-other".to_string();
+        let mut changed_protocol = frozen.clone();
+        changed_protocol.protocol_version = "acp-v2".to_string();
+        let mut changed_executable = frozen.clone();
+        changed_executable.executable_fingerprint = "sha256:grok-other".to_string();
+        let mut changed_host = frozen.clone();
+        changed_host.host_config_digest = "sha256:host-other".to_string();
+        let mut changed_model = frozen.clone();
+        changed_model.model.model_id = "grok-4.5".to_string();
+        let mut changed_permissions = frozen.clone();
+        changed_permissions.permissions.values = json!({"permission_mode": "default"});
+        for changed in [
+            changed_installation,
+            changed_protocol,
+            changed_executable,
+            changed_host,
+            changed_model,
+            changed_permissions,
+        ] {
+            let changed_key = freeze_history_restore_compatibility(changed, &workspace)
+                .unwrap()
+                .native_session_compatibility_key
+                .unwrap();
+            assert_ne!(changed_key, baseline);
+        }
+
+        let other_root = root.join("other-workspace");
+        std::fs::create_dir_all(&other_root).unwrap();
+        let other_workspace =
+            AgentRunWorkspace::runtime_managed_path(other_root.to_string_lossy().to_string());
+        assert_ne!(
+            freeze_history_restore_compatibility(frozen.clone(), &other_workspace)
+                .unwrap()
+                .native_session_compatibility_key
+                .unwrap(),
+            baseline
+        );
+        let mut read_only_workspace = workspace.clone();
+        read_only_workspace.access = "read_only".to_string();
+        assert_ne!(
+            freeze_history_restore_compatibility(frozen, &read_only_workspace)
+                .unwrap()
+                .native_session_compatibility_key
+                .unwrap(),
+            baseline
+        );
+
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn approval_selects_the_exact_native_option_id() {
         let request = json!({
             "options": [
@@ -6788,6 +9559,7 @@ while IFS= read -r ignored; do :; done
             "options": [{"optionId": "once", "kind": "allow_once"}]
         });
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::OpencodeCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -6833,6 +9605,7 @@ while IFS= read -r ignored; do :; done
             "options": [{"optionId": "once", "kind": "allow_once"}]
         });
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::OpencodeCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -6870,12 +9643,13 @@ while IFS= read -r ignored; do :; done
         let observed = ObservedAcpToolContext {
             native_kind: Some("execute".to_string()),
             raw_input: Some(json!({
-                "command": command,
-                "cwd": root,
+                "Command": command,
+                "Description": "Read the approved fixture",
             })),
             locations: Some(json!([{"path": target}])),
         };
         let context = InterceptedAcpActionContext {
+            adapter_kind: AdapterKind::TraeCnCli,
             agent_run_id: "run-1",
             execution_epoch: 2,
             expected_session_id: "session-1",
@@ -6896,20 +9670,23 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn completed_action_keeps_only_public_command_and_persists_raw_payload_digests() {
-        let completion = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-1",
-                "status": "completed",
-                "kind": "execute",
-                "title": "Run command",
-                "rawInput": {"command": "echo TOP_SECRET_INPUT"},
-                "rawOutput": {
-                    "stdout": "TOP_SECRET_OUTPUT",
-                    "exitCode": 7
+        let completion = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "completed",
+                    "kind": "execute",
+                    "title": "Run command",
+                    "rawInput": {"command": "echo TOP_SECRET_INPUT"},
+                    "rawOutput": {
+                        "stdout": "TOP_SECRET_OUTPUT",
+                        "exitCode": 7
+                    }
                 }
-            }
-        }))
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
 
@@ -6934,15 +9711,19 @@ while IFS= read -r ignored; do :; done
             "status": "completed",
             "rawOutput": {"stdout": "failed output", "exitCode": 7}
         });
-        let sparse = completed_action(&json!({"update": sparse_update.clone()}))
-            .expect("sparse completion should normalize")
-            .expect("sparse terminal update should create a result");
+        let sparse = completed_action(
+            AdapterKind::TraeCnCli,
+            &json!({"update": sparse_update.clone()}),
+        )
+        .expect("sparse completion should normalize")
+        .expect("sparse terminal update should create a result");
         let observed_raw_input = json!({
-            "command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
-            "credential": "SPARSE_PRIVATE_FIELD"
+            "Command": "printf 'SPARSE_TERMINAL_COMMAND\\n'",
+            "Description": "SPARSE_PRIVATE_FIELD"
         });
         let observed_raw_input_digest = canonical_json_digest(&observed_raw_input).unwrap();
         let reconciled = reconcile_completed_action(
+            AdapterKind::TraeCnCli,
             &sparse_update,
             ObservedToolMetadata {
                 native_kind: Some("execute".to_string()),
@@ -6973,24 +9754,30 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn failed_side_effects_do_not_claim_that_nothing_happened() {
-        let execute = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-1",
-                "status": "failed",
-                "kind": "execute"
-            }
-        }))
+        let execute = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-1",
+                    "status": "failed",
+                    "kind": "execute"
+                }
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
-        let edit = completed_action(&json!({
-            "update": {
-                "sessionUpdate": "tool_call_update",
-                "toolCallId": "tool-2",
-                "status": "failed",
-                "kind": "edit"
-            }
-        }))
+        let edit = completed_action(
+            AdapterKind::OpencodeCli,
+            &json!({
+                "update": {
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "tool-2",
+                    "status": "failed",
+                    "kind": "edit"
+                }
+            }),
+        )
         .expect("completion should normalize")
         .expect("terminal tool update should create a result");
 

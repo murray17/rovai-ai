@@ -12,7 +12,7 @@ import {
 } from './lib/runtime-camp-files-root.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
+const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
 const fixtureRoot = process.env.ROVAI_RUNTIME_ACTIVITY_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-runtime-activity-ui-accept-'))
 const dataDir = join(fixtureRoot, 'user-data')
@@ -87,6 +87,11 @@ const runtimes = [
     runLevelOnly: true, expectedToolDisclosure: false, payload: { kind: 'runtime' }
   }),
   runtime('kimi', 'kimi-code-cli', 'Kimi Code', null, {
+    protocol: 'acp-v1', domain: 'runtime', semantic: 'runtime.run',
+    evidenceKind: 'runtime_activity', eventType: 'activity.completed',
+    runLevelOnly: true, expectedToolDisclosure: false, payload: { kind: 'runtime' }
+  }),
+  runtime('grok', 'grok-build', 'Grok Build', null, {
     protocol: 'acp-v1', domain: 'runtime', semantic: 'runtime.run',
     evidenceKind: 'runtime_activity', eventType: 'activity.completed',
     runLevelOnly: true, expectedToolDisclosure: false, payload: { kind: 'runtime' }
@@ -4031,7 +4036,7 @@ async function verifyExecutionPlacementWriteFailure(cdp) {
 }
 
 async function launchApp(port, width, height) {
-  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
   const child = spawn(executable, [
     `--remote-debugging-port=${port}`,

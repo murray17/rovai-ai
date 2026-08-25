@@ -433,23 +433,28 @@ Not qualified: macOS x64, Windows x64
 
 ## 16. 2026-08-25 revision 1 复核与实现回填
 
-开发者已确认 [model-context-change revision 1](../versions/v1.28/model-context-change.md)。源码和本机 Pi
+开发者已确认 [model-context-change revision 1](../versions/v1.29/model-context-change.md)。源码和本机 Pi
 `0.84.2` 复核得到以下新结论：
 
 | 轴 | revision 1 证据 | 当前实现结论 |
 | --- | --- | --- |
-| Auth/model | 不设置 `PI_CODING_AGENT_DIR`、provider 或 model 的真实 Prompt 使用用户 Pi native default 成功；当前 native default 由用户自己的 Pi 配置解析到 MiniMax | 不再读取 Claude settings或注入 token；支持 `pi://runtime-default` 与显式 `pi://model?...` exact list/set/state |
+| Auth/model | 不设置 `PI_CODING_AGENT_DIR`、provider 或 model 的真实 Prompt 使用用户 Pi native default 成功；执行时 provider 由用户自己的 Pi 配置决定，不固化到产品合同 | 不再读取 Claude settings或注入 token；支持 `pi://runtime-default` 与显式 `pi://model?...` exact list/set/state |
 | Resident Host | deterministic Fleet test 证明 workspace Host 跨 Camp/member invalidation 继续复用；Host 仍 single-flight | compatibility 只含 workspace/process state；Session/identity/Skills/MCP/model 逐 Run binding，不跨 Workspace复用 |
 | Session/identity | Host activation 使用 exact `switch_session/new_session`；new Session file 延迟 materialization 边界由真实 smoke 暴露并修复 | full UUID + canonical file；release 验证 header/UUID/cwd；Bootstrap Evidence v2 按 Binding 冻结身份 |
 | Bootstrap | slow test 证明 profile edit 不改变同 Binding full bytes、无 redelivery overlay、receipt 前不能 accepted | `managed_system_prompt` + `before_agent_start` append + blocking Managed Input Receipt v1 |
-| Skills | Session replacement 重建 ResourceLoader；`get_commands` 与 receipt 提供 actual catalog | exact `W/.pi/skills` 同时接纳 project-native 与 Rovai ready Skills；collision/escape/missing fail closed |
-| MCP | Core stdio fixture 完成 initialize/initialized/tools-list/tools-call；Pi capability matrix 断言 CoreManaged | `AdditivePerRun / RovaiWins / CoreManaged`；stdio supported、HTTP unsupported；每次 MCP call durable approve |
-| Migration | Migration 108 与 v052–v108 synthetic chain 定向回归通过 | v1.22/schema 63；旧 nonterminal Pi state clean break，completed history 与非 Pi state保留 |
+| Skills | Session replacement 重建 ResourceLoader；`get_commands` 与 receipt 提供 actual catalog；真实 Pi smoke 已调用 managed Skill并验证 restart/conflict/delete lifecycle | exact `W/.pi/skills` 同时接纳 project-native 与 Rovai ready Skills；collision/escape/missing fail closed；update/delete 后相邻 Session 隔离仍待闭合 |
+| MCP | Core stdio fixture 完成 initialize/initialized/tools-list/tools-call；真实 Pi `0.84.2` 已调用两个 assigned stdio Tool并逐次 durable approve | `AdditivePerRun / RovaiWins / CoreManaged`；stdio supported、HTTP adapter unsupported；assignment lifecycle、deny/cancel 与相邻 Session 隔离仍待闭合 |
+| Migration | Grok 107/108 后的 Pi Migration 109/110 与 synthetic chain 定向回归通过 | v1.24/schema 65；旧 nonterminal Pi state clean break，completed history 与非 Pi state保留 |
 | Compaction | ordinary managed prompt 真实 smoke 已通过；manual/threshold/overflow+retry 完整矩阵未执行 | protected instruction/no-redelivery 已实现，但 Compaction 继续 Disabled/unqualified |
 
 当前产品语义由
 [Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)拥有；本研究只保留证据、
 初始假设与后续验证轨迹。
+
+合并 `main` 后，新版 First-Class Checklist 不再允许以 Disabled/fixture 替代完整能力轴。现有 revision 1
+实现因此只达到 `core_compatible`：Compaction、结构化 Usage、Skill/MCP 完整 lifecycle、完整 Tool output、
+Missing-Send tool→final、shutdown/cleanup 与不可变平台资格矩阵仍需闭合。逐轴差距见
+[v1.29 Checklist 报告](../versions/v1.29/checklist-report.md)。
 
 ## 上游来源
 

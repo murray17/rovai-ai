@@ -184,6 +184,11 @@ Download the installer for your device from
 The Windows x64 installer is currently unsigned. Windows SmartScreen may show an unknown publisher
 warning. Download the installer only from the official Rovai AI GitHub Release.
 
+Rovai AI v0.0.2 adds manual “检查更新” in Settings → About & Updates. A found update downloads
+immediately, shows progress, and installs only after “安装并重启” is selected. The published v0.0.1
+does not contain the updater metadata or install flow, so moving from v0.0.1 to v0.0.2 remains a
+one-time manual installer upgrade; in-app upgrading starts with releases after v0.0.2.
+
 #### Run from source (for developers)
 
 For source installation, environment setup, isolated data directories, and build instructions,
@@ -227,7 +232,7 @@ depending on the team.
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [TRAE CLI CN](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
 | [Kimi Code](https://www.kimi.com/code/docs/) | Added alongside native | Added alongside native | Native resume; re-delivered after compaction |
-| [Pi Coding Agent](https://pi.dev/) | Core-managed stdio; HTTP unsupported | Native project + managed Skills | Native exact resume with binding-frozen identity |
+| [Pi Coding Agent](https://pi.dev/) *(Core-compatible; First-Class qualification pending)* | Core-managed stdio implemented; HTTP and real Golden Flow pending | Native project + managed Skills implemented; final real matrix pending | Native exact resume with binding-frozen identity |
 
 For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.

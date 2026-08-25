@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { seedCompletedOnboardingForAcceptance } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
+const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
 const dataDir = process.env.ROVAI_MEMORY_ACCEPT_DATA_DIR
   ?? await mkdtemp(join(tmpdir(), 'rovai-memory-ui-accept-'))
 const outputDir = process.env.ROVAI_MEMORY_ACCEPT_OUTPUT_DIR
@@ -647,7 +647,7 @@ async function assertNoHorizontalOverflow(cdp, context) {
 }
 
 async function launchApp(port, width, height) {
-  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+  const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   const stderr = []
   const child = spawn(executable, [
     `--remote-debugging-port=${port}`,

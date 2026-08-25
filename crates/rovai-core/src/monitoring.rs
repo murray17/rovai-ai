@@ -1665,7 +1665,8 @@ fn eligible_mask(runtime: AdapterKind, runtime_version: Option<&str>) -> i64 {
         AdapterKind::Pi
         | AdapterKind::AntigravityApp
         | AdapterKind::CursorAgent
-        | AdapterKind::KimiCodeCli => 0,
+        | AdapterKind::KimiCodeCli
+        | AdapterKind::GrokBuild => 0,
     }
 }
 

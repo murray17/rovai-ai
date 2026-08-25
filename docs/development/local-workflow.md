@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-19
+last_updated: 2026-08-24
 ---
 
 # 本地开发与 App 隔离流程
@@ -16,7 +16,7 @@ last_updated: 2026-08-19
 | --- | --- | --- | --- |
 | 日常安装版 | 仓库外的已安装 `.app`，通常位于 `/Applications` 或 `~/Applications` | Electron 日常数据目录 | 用户真实 Camp 和 Runtime 工作；开发任务默认只读 |
 | 开发版 | `pnpm dev` 使用 `resources/bin/` 与 Electron Vite | 启动器生成的逐仓库隔离目录 | HMR、功能开发、手工调试 |
-| 打包产物 | `dist/mac-arm64/Rovai-ai.app` | 每次验收显式创建的隔离目录 | 签名、打包和一次性 App 验收 |
+| 打包产物 | `dist/mac-arm64/Rovai AI.app` | 每次验收显式创建的隔离目录 | 签名、打包和一次性 App 验收 |
 | 自动验收 | 脚本声明的 App/Core 与 fixture | 脚本创建的临时目录 | Smoke、截图和回归测试 |
 
 `dist/` 是可被 `pnpm package:mac` 覆盖的生成目录，不是安装位置。日常 App 不得从仓库的
@@ -54,9 +54,26 @@ Windows 的 `--user-data-dir=<root>` 是隔离 data-root 开关，不直接等�
    “打包到 Applications”不构成退出、终止或重启该宿主的授权；用户已经明确要求安装或升级时，优先按
    [非终止安装交接](#当前会话中的非终止安装交接)保留当前进程并替换磁盘上的日常安装版。前置条件不满足时
    停在安装边界，交由用户手动处理，或先取得针对本次退出的明确即时授权；
-7. 不得为了方便直接调用 `electron-vite dev`、直接打开 `dist/.../Rovai-ai.app`，或让
+7. 不得为了方便直接调用 `electron-vite dev`、直接打开 `dist/.../Rovai AI.app`，或让
    `rovai-core --data-dir` 指向日常目录；
 8. 测试结束后只清理本次命令创建且路径已经确认的临时目录，不推测或递归删除日常目录。
+
+## 代码 Push 流程
+
+本仓库所有变更统一通过 Pull Request 合入 `main`。
+
+本地开发完成后的固定流程是：
+
+1. 从已同步的 `origin/main` 创建 `rovai/<task>` 任务分支。需要隔离目录时，按
+   [Git Worktree 生命周期与清理](worktrees.md)创建并记录分支、基线和绝对路径；
+2. 在任务分支实施、提交并完成与改动风险相称的本地门禁；
+3. 使用 `git push -u origin <任务分支>` 推送任务分支，然后创建以 `main` 为 base 的 PR，并向用户提供
+   PR 链接；
+4. 等待仓库要求的 Review 与 CI 通过后合并 PR；
+5. 合并后执行 `git fetch origin main`，确认任务提交已进入 `origin/main`，再同步本地主 checkout；
+6. 使用 worktree 时，确认远端已合入且工作目录干净后，再移除 worktree 与本地任务分支。
+
+若 PR 创建或合并受阻，保留已推送的任务分支并报告原因。
 
 ## 开发版：只使用 `pnpm dev`
 
@@ -101,10 +118,10 @@ pnpm package:mac
 需要运行刚生成的 App 时，必须显式使用隔离目录：
 
 ```bash
-ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai-ai.app"
+ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai AI.app"
 FIXTURE_ROOT="$(mktemp -d)"
 ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
-"$ROVAI_APP/Contents/MacOS/Rovai-ai" \
+"$ROVAI_APP/Contents/MacOS/Rovai AI" \
   --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
 
@@ -112,7 +129,7 @@ Desktop 检测到这组显式隔离标记后，会以
 `--skill-library-root "$FIXTURE_ROOT/user-data/managed-skill-library"` 启动 Core；验收脚本不得绕过
 Desktop 另起一个仍指向日常全局 Skill Library 的 Core。
 
-AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai-ai.app"` 当作打包验证，因为该命令没有证明
+AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验证，因为该命令没有证明
 `userData` 隔离。签名和二进制检查不需要启动 App，优先使用
 [macOS 构建与打包](packaging.md)中的只读命令。
 

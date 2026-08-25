@@ -87,6 +87,7 @@
   --shadow-dialog: var(--shadow-float);
   --shadow-card: none;
   --approval-line: #d8bd87;
+  --inline-code-canvas: #eef2f5;
   --evidence-canvas: #f4f6f3;
   --evidence-surface: #ffffff;
   --evidence-ink: #252a36;
@@ -197,6 +198,7 @@
   --overlay: rgba(0, 0, 0, 0.58);
   --shadow-float: 0 22px 64px rgba(0, 0, 0, 0.42);
   --approval-line: #8f7447;
+  --inline-code-canvas: #1d252b;
   --evidence-canvas: #12191d;
   --evidence-surface: #171f24;
   --evidence-ink: #dce4e9;
@@ -2021,7 +2023,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .safe-markdown li + li { margin-top: 3px; }
 .safe-markdown blockquote { margin: 8px 0; padding: 3px 10px; border-left: 3px solid var(--line-strong); color: var(--muted); }
 .safe-markdown pre { max-width: 100%; margin: 9px 0; overflow: auto; padding: 9px 10px; border: 1px solid var(--evidence-line); border-radius: 6px; color: var(--evidence-ink); background: var(--evidence-canvas); font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; }
-.safe-markdown code { padding: 1px 4px; border-radius: 4px; color: var(--evidence-ink); background: var(--evidence-canvas); font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.safe-markdown code { padding: 0 2px; border-radius: 3px; color: var(--evidence-ink); background: var(--inline-code-canvas); font: .9em/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .safe-markdown pre code { padding: 0; background: transparent; font-size: inherit; }
 .safe-markdown table { display: block; width: 100%; margin: 9px 0; overflow-x: auto; border-spacing: 0; border-collapse: collapse; font-size: 11px; }
 .safe-markdown th, .safe-markdown td { padding: 6px 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
@@ -3107,9 +3109,18 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .about-update-control strong { color: var(--ink); font-size: 12.5px; font-weight: 650; }
 .about-update-control p { max-width: 560px; margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.55; }
 .about-update-control > button { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 7px; justify-content: center; }
-.about-update-control > .primary-button[aria-disabled="true"],
-.about-update-control > .primary-button[aria-disabled="true"]:hover { border-color: var(--brand); background: var(--brand); cursor: wait; opacity: .76; }
-.about-update-control > .primary-button[aria-disabled="true"]:active { transform: none; }
+.about-update-control > .primary-button[aria-busy="true"]:disabled,
+.about-update-control > .primary-button[aria-busy="true"]:disabled:hover { border-color: var(--brand); background: var(--brand); cursor: wait; opacity: .76; }
+.about-update-control > .primary-button[aria-busy="true"]:disabled:active { transform: none; }
+.about-download-progress { display: grid; gap: 8px; padding: 12px 13px; border-radius: 9px; background: var(--workspace-surface-subtle); }
+.about-download-progress-heading,
+.about-download-progress-meta { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.about-download-progress-heading span { color: var(--muted); font-size: 10.5px; }
+.about-download-progress-heading strong { color: var(--ink); font: 650 10.5px/1.25 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+.about-download-progress progress { display: block; width: 100%; height: 6px; overflow: hidden; appearance: none; border: 0; border-radius: 999px; background: var(--surface-muted); }
+.about-download-progress progress::-webkit-progress-bar { border-radius: inherit; background: var(--surface-muted); }
+.about-download-progress progress::-webkit-progress-value { border-radius: inherit; background: var(--brand); }
+.about-download-progress-meta { color: var(--faint); font: 500 9.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
 .about-update-status { display: grid; min-height: 54px; grid-template-columns: 8px minmax(0, 1fr); align-items: start; gap: 10px; padding: 11px 13px; border-radius: 9px; color: var(--muted); background: var(--workspace-surface-subtle); }
 .about-update-status-mark { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; color: var(--neutral); background: currentColor; }
 .about-update-status > div { display: grid; min-width: 0; gap: 3px; }
@@ -3121,15 +3132,7 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
 .about-update-status.is-error .about-update-status-mark,
 .about-update-status.is-error strong,
 .about-update-status.is-error p { color: var(--danger); }
-.about-release-notes { display: grid; gap: 12px; margin-top: 3px; padding: 16px 17px; border-radius: 10px; background: var(--workspace-surface-subtle); }
-.about-release-notes-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
-.about-release-notes-heading > div { display: grid; min-width: 0; gap: 4px; }
-.about-release-notes-heading h3 { margin: 0; color: var(--ink); font-size: 12px; font-weight: 650; }
-.about-release-notes-heading p { overflow: hidden; margin: 0; color: var(--muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
-.about-release-notes-heading > span { flex: 0 0 auto; color: var(--faint); font: 550 9.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.about-release-notes-copy { max-width: 76ch; margin: 0; white-space: pre-line; overflow-wrap: anywhere; color: var(--muted); font-size: 10.5px; line-height: 1.65; }
-.about-release-notes-action { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding-top: 1px; }
-.about-release-notes-action > span { color: var(--danger); font-size: 10.5px; line-height: 1.45; }
+.about-update-source { margin: 0 2px; color: var(--faint); font-size: 9.5px; line-height: 1.45; }
 .about-update-spinner { width: 11px; height: 11px; border: 1.5px solid color-mix(in srgb, currentColor 36%, transparent); border-top-color: currentColor; border-radius: 50%; animation: about-update-spin 650ms linear infinite; }
 @keyframes about-update-spin { to { transform: rotate(360deg); } }
 .general-section-body { min-width: 0; }
@@ -6279,7 +6282,6 @@ button.attachment-open:disabled { cursor: wait; opacity: .76; }
   .about-update-control { align-items: flex-start; flex-direction: column; gap: 13px; }
   .about-version-value { justify-items: start; }
   .about-update-control > button { width: fit-content; }
-  .about-release-notes-heading { flex-direction: column; gap: 7px; }
   .startup-location-options { grid-template-columns: minmax(0, 1fr); }
   .general-default-member-list { grid-template-columns: minmax(0, 1fr); }
   .general-default-lead { grid-template-columns: minmax(0, 1fr); gap: 8px; }

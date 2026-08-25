@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   AppearanceSnapshot,
+  AppUpdateSnapshot,
   CoreEvent,
   CoreMethod,
   ExecutionConsolePlacement,
@@ -55,8 +56,16 @@ const api: RovaiApi = {
     check() {
       return ipcRenderer.invoke('rovai:app-updates-check')
     },
-    openReleasePage() {
-      return ipcRenderer.invoke('rovai:app-updates-open-release')
+    install() {
+      return ipcRenderer.invoke('rovai:app-updates-install')
+    },
+    onChanged(listener: (snapshot: AppUpdateSnapshot) => void): () => void {
+      const handler = (
+        _event: Electron.IpcRendererEvent,
+        value: AppUpdateSnapshot
+      ): void => listener(value)
+      ipcRenderer.on('rovai:app-updates-changed', handler)
+      return () => ipcRenderer.removeListener('rovai:app-updates-changed', handler)
     }
   },
   desktopSession: {

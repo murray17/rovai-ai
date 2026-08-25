@@ -1,0 +1,47 @@
+# Rovai AI v0.0.2 一键升级交互稿
+
+本交互稿严格沿用当前“关于与更新”设置面的布局、侧栏、字号和主题，只替换更新行为：
+
+- `v0.0.1 → v0.0.2`：由于已发布的 v0.0.1 只会打开 GitHub Release 页面，首次从
+  `Rovai-ai.app` 改名为 `Rovai AI.app` 必须是一次性的手动迁移；
+- `v0.0.2 → later`：v0.0.2 以 `Rovai AI.app` 为产品名，并从这个版本开始提供应用内升级。
+
+## 目标流程
+
+1. 用户点击“检查更新”。
+2. 检查到新版后立即开始下载，不增加确认步骤。
+3. 同一块稳定状态区域显示下载进度，不让页面跳动。
+4. 下载完成后显示“安装并重启”。
+5. 安装完成后回到“已是最新版本”；失败时只提供明确的“重试”。
+
+该模式参考 Chrome、Edge 和 Firefox 的 About 更新路径：进入或触发检查后下载更新，下载完成后
+通过重新启动应用完成安装。
+
+## 视觉边界
+
+- 使用当前设置页的真实侧栏文案、顺序和 270px 结构；
+- 页标题与分区标题没有蓝色竖线，也没有额外顶部分隔线；
+- 只保留现有的版本行、更新控制行和状态行，不增加阶段轨道、校验说明或任务等待列表；
+- 支持 Day/Night、键盘焦点、减少动态效果和最小窗口布局。
+
+## 状态入口
+
+点击页面内“检查更新”可完整演示检查、自动下载、下载进度、安装并重启和完成状态。右下角折叠的
+“原型状态”只用于快速切换评审状态和 Day/Night，不属于产品界面。
+
+原型示例版本、大小和速度仅用于交互评审，不是正式 Release 事实。
+
+## 对应生产实现
+
+- Renderer：`apps/desktop/src/renderer/src/AboutUpdatesSettings.tsx`；
+- Main 更新状态机：`apps/desktop/src/main/app-updates.ts`；
+- Preload/typed contract：`apps/desktop/src/preload/index.ts` 与 `packages/contracts/src/index.ts`；
+- Release 产物与双架构清单：`package.json`、`.github/workflows/macos-signed-build.yml` 与
+  `scripts/merge-macos-update-info.mjs`。
+
+## 正式实现的发布前置条件
+
+- 把 macOS 产品展示名与产物名统一为 `Rovai AI`，但保持既有 `ai.rovai.desktop` 应用身份与数据迁移兼容；
+- Release 同时发布 DMG、按架构匹配的 ZIP 更新包和 `latest-mac.yml` 更新元数据；
+- 对外安装包使用 Developer ID Application 签名并完成 Apple notarization；
+- Renderer 展示检查、下载、进度、待安装和错误状态，Main 负责实际下载、安装与重启。

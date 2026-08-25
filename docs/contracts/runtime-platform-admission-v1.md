@@ -2,8 +2,8 @@
 document_type: contract
 contract: runtime-platform-admission-v1
 status: accepted
-source_version: v1.05
-last_updated: 2026-08-18
+source_version: v1.28
+last_updated: 2026-08-24
 ---
 
 # Runtime Platform Admission v1
@@ -85,6 +85,10 @@ An Adapter becomes `qualified` only after its own reproducible evidence covers d
 authentication, first run, Session continuation, Built-in Tool v14, approval, cancellation, final boundary, process-tree
 cleanup and planned shutdown. Infrastructure tests for ACP, stdio or one-shot shapes are necessary but do not qualify
 other Adapter identities.
+
+Grok Build 使用独立的 `macos-arm64-grok-build-v1` digest-bound evidence；它只可使
+`grok-build × macos-arm64` 为 `qualified`。同一 Adapter 的 macOS x64、Windows x64，以及其他 Adapter 的
+任意平台行，都不能继承该结论。
 
 ## References
 

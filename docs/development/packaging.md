@@ -1,13 +1,13 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # macOS 构建、签名与打包
 
-当前仓库记录的桌面交付目标是 macOS 14+ Apple Silicon。`package:mac` 和 `dist:mac`
-固定生成 arm64 产物。
+当前本地桌面交付目标是 macOS 14+ Apple Silicon。`package:mac` 和 `dist:mac` 固定生成
+arm64 产物；正式签名 workflow 另外生成 x64 产物并组合两种架构的更新清单。
 
 ## 构建
 
@@ -69,8 +69,11 @@ CSC_IDENTITY_AUTO_DISCOVERY=false pnpm exec electron-builder \
 产物：
 
 ```text
-dist/mac-arm64/Rovai-ai.app
+dist/mac-arm64/Rovai AI.app
 ```
+
+外层产品名、App bundle、主可执行文件与 Helper 名统一为 `Rovai AI` / `Rovai AI.app`。Bundle ID
+继续使用 `ai.rovai.desktop`，旧的 `Rovai-ai` userData 由启动兼容层继续采用，不因产品名改动而丢失。
 
 生成 DMG：
 
@@ -78,38 +81,66 @@ dist/mac-arm64/Rovai-ai.app
 pnpm dist:mac
 ```
 
-DMG 文件位于 `dist/`，文件名由 `package.json#build.mac.artifactName` 决定。
+该命令同时生成安装用 DMG、自动更新用 ZIP 和 `latest-mac.yml`。DMG/ZIP 使用 URL 安全的
+`Rovai-AI-<version>-<arch>` 文件名；文件名由 `package.json#build.mac.artifactName` 决定，DMG
+内部仍是 `Rovai AI.app`。
+
+## 一键更新发布集合
+
+应用内“检查更新”只由用户触发。Main 通过打包进 App 的 `app-update.yml` 读取官方
+`murray17/rovai-ai` GitHub Release 通道；发现新版本后自动下载 ZIP，Renderer 显示进度，用户点击
+“安装并重启”后才进入受控关闭与安装。
+
+macOS 正式 Release 必须在同一个版本标签中上传以下完整集合：
+
+```text
+Rovai-AI-<version>-arm64.dmg
+Rovai-AI-<version>-arm64.zip
+Rovai-AI-<version>-x64.dmg
+Rovai-AI-<version>-x64.zip
+latest-mac.yml
+```
+
+`.github/workflows/macos-signed-build.yml` 分架构构建并验证后，生成一个名为
+`rovai-macos-signed` 的组合 artifact。它的 `latest-mac.yml` 由
+`scripts/merge-macos-update-info.mjs` 合并，必须同时包含 arm64 与 x64 ZIP；发布者只能上传这份
+组合清单，不能任选一个架构构建出的单架构 `latest-mac.yml`。少任一 ZIP 或清单时，另一架构可能
+拿到错误更新包，因此发布必须 fail closed。
+
+已发布的 v0.0.1 没有 ZIP/`latest-mac.yml`，旧 App 也没有自动安装能力，所以
+`v0.0.1 → v0.0.2` 是一次性手动迁移；从 v0.0.2 安装完成后，后续完整 Release 才能使用应用内升级。
 
 ## 本地签名
 
-当前本地脚本关闭自动证书发现，`package.json#build.mac.identity` 使用 `-`，因此生成
-ad-hoc 签名产物。它适合本机开发验收，不代表可以对外发布。
+当前普通本地脚本关闭自动证书发现并显式使用 `identity=-`，因此生成 ad-hoc 签名产物。它适合
+本机开发验收，不代表可以对外发布，也不能作为自动升级签名连续性的证据。
 
 检查签名：
 
 ```bash
-codesign --verify --deep --strict "dist/mac-arm64/Rovai-ai.app"
+codesign --verify --deep --strict "dist/mac-arm64/Rovai AI.app"
 codesign --verify --strict \
-  "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
+  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-core"
 codesign --verify --strict \
-  "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
+  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai"
 ```
 
-正式分发需要独立配置 Developer ID、Hardened Runtime entitlement 和 Apple
-Notarization 凭据，并验证公证结果。不要把证书、密码或 notarization 凭据写入仓库。
+仓库签名 workflow 使用固定 `Rovai Release Signing` 身份并校验其证书指纹，使相邻版本具备同一
+designated-requirement 根。正式公共分发仍需要独立配置 Developer ID、Hardened Runtime entitlement
+和 Apple Notarization 凭据，并验证公证结果。不要把证书、密码或 notarization 凭据写入仓库。
 
 ## 隔离运行打包 App
 
-`dist/mac-arm64/Rovai-ai.app` 是可被下次打包覆盖的生成产物，不得作为日常安装版运行。日常 App
+`dist/mac-arm64/Rovai AI.app` 是可被下次打包覆盖的生成产物，不得作为日常安装版运行。日常 App
 必须位于仓库外；完整边界见[本地开发与 App 隔离流程](local-workflow.md)。
 
 从仓库根目录运行刚生成的 App 时，显式创建隔离 `userData`：
 
 ```bash
-ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai-ai.app"
+ROVAI_APP="$(pwd)/dist/mac-arm64/Rovai AI.app"
 FIXTURE_ROOT="$(mktemp -d)"
 ROVAI_ALLOW_ISOLATED_INSTANCE=1 \
-"$ROVAI_APP/Contents/MacOS/Rovai-ai" \
+"$ROVAI_APP/Contents/MacOS/Rovai AI" \
   --user-data-dir="$FIXTURE_ROOT/user-data"
 ```
 
@@ -128,9 +159,9 @@ Ready。
 确认架构和内置 Core/CLI：
 
 ```bash
-file "dist/mac-arm64/Rovai-ai.app/Contents/MacOS/Rovai-ai"
-file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
-file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
+file "dist/mac-arm64/Rovai AI.app/Contents/MacOS/Rovai AI"
+file "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-core"
+file "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai"
 ```
 
 需要确认本次 release Core 已进入 App 时，可比较 Mach-O UUID：
@@ -138,10 +169,10 @@ file "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
 ```bash
 dwarfdump --uuid resources/bin/rovai-core
 dwarfdump --uuid \
-  "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai-core"
+  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai-core"
 dwarfdump --uuid resources/bin/rovai
 dwarfdump --uuid \
-  "dist/mac-arm64/Rovai-ai.app/Contents/Resources/bin/rovai"
+  "dist/mac-arm64/Rovai AI.app/Contents/Resources/bin/rovai"
 ```
 
 codesign 会修改签名相关字节，因此不要把签名后文件的逐字节 `cmp` 当作唯一一致性

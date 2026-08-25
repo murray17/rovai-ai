@@ -3,7 +3,7 @@ document_type: development-guide
 authority: windows-desktop-build-packaging-routing
 status: implemented-pending-release-qualification
 source_version: v1.15
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Windows x64 构建、打包与发布
@@ -36,13 +36,20 @@ pnpm accept:planned-shutdown
 pnpm accept:windows:installer
 ```
 
-`package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer。两条命令都验证
+`package:windows:x64` 生成 unpacked App 并执行 verifier；`dist:windows:x64` 生成 unsigned NSIS installer。外层产品名和安装目录为
+`Rovai AI`，内部兼容可执行文件继续是 `Rovai-ai.exe`，发布 artifact 使用 URL 安全的
+`Rovai-AI-<version>-x64.exe`。两条命令都验证
 App/Core/CLI 的 PE32+ 架构、icon/version/manifest、hash、CLI contract 与隔离 Core health。`accept:windows:installer`
 执行 per-user clean install、已安装 App Onboarding、同版本 upgrade、默认卸载和数据保留，并把报告与截图写入
 `dist/windows-installation-acceptance/`。`accept:planned-shutdown` 默认使用 `dist/win-unpacked/Rovai-ai.exe`，
 在隔离 `userData` 中验证真实 Runtime 运行期间的受控退出、子进程回收和重启恢复。正式签名构建使用
 `dist:windows:release:x64`，且必须提供签名材料和
 `ROVAI_WINDOWS_SIGNER_SHA256` allowlist；缺少任一发布条件时 verifier 必须失败。
+
+NSIS Release 还必须同版本上传 installer、`.exe.blockmap` 与 `latest.yml`。verifier 会检查 packaged
+`app-update.yml` 指向官方 GitHub 通道，并核对 `latest.yml` 中 installer 的版本、sha512 和大小；缺少
+任一更新文件时不得发布应用内升级。初始安装仍使用 assisted installer，应用内“安装并重启”使用
+silent upgrade，不再次展示安装向导。
 
 ## Target-isolated staging
 

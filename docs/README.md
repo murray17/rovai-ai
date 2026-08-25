@@ -1,7 +1,7 @@
 ---
 document_type: documentation-index
 authority: documentation-routing
-last_updated: 2026-08-23
+last_updated: 2026-08-24
 ---
 
 # Rovai-ai 文档导航
@@ -26,7 +26,7 @@ last_updated: 2026-08-23
 | 新增或修改 Version Decision、Architecture、Contract、版本文档或文档路由 | [决策治理与准入](decisions/README.md)、[当前决定导航](decisions/CURRENT.md)、对应目录 README，并运行通用文档门禁；禁止新增数字 ADR |
 | 判断当前版本目标、范围、进度或验收口径 | 从[版本索引中的唯一 `current` 条目](versions/README.md)进入对应版本概览与实施计划 |
 | 查询已接入与候选 Agent Runtime 的实测兼容性 | [Runtime 兼容性清单](runtime-compatibility.md) |
-| 新增 Agent Runtime、建立真实 Probe、判断 Settings Preview 或主机平台准入边界 | [Agent Runtime 接入与准入 Checklist](development/runtime-integration-checklist.md)、[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)、[Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)、[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[当前 Pi Runtime 版本](versions/v1.28/README.md)、[Pi Research](research/pi-runtime-research.md)、[Kimi Research](research/kimi-code-runtime-research.md)、[Cursor Research](research/cursor-agent-runtime-research.md)及[TRAE Research/Probe](research/trae-cli-runtime/README.md) |
+| 新增 Agent Runtime、建立真实 Probe、判断 Settings Preview 或主机平台准入边界 | [Agent Runtime 接入与准入 Checklist](development/runtime-integration-checklist.md)、[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)、[Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)、[Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[当前 Pi Runtime 版本](versions/v1.29/README.md)、[Pi Research](research/pi-runtime-research.md)、[Kimi Research](research/kimi-code-runtime-research.md)、[Cursor Research](research/cursor-agent-runtime-research.md)及[TRAE Research/Probe](research/trae-cli-runtime/README.md) |
 | 修改 Runtime Usage、监控 collection、Coverage、成本层或设置页运行监控 | [Evidence 与 Usage 不变量](architecture/foundational-invariants.md#evidence-usage)、[Runtime Monitoring 架构](architecture/runtime-monitoring.md)、[Runtime Usage Monitoring v3](contracts/runtime-usage-monitoring-v3.md)及[可采集性审计](research/runtime-monitoring/README.md) |
 | 修改 Runtime 子进程启动、主机平台准入、Camp attachment root、Run tmp writable root、浅检测/深检、模型目录缓存、检查 attempt、公开 Runtime failure/command、运行中 Runtime diagnostic、Session continuation/cold resume、replay quarantine、静态 Installation、`light_ready`/`installed_unverified`、执行期验证或 nullable Runtime version | [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[Runtime 进程与校验不变量](architecture/foundational-invariants.md#runtime-process-verification)、[Runtime 恢复与关闭不变量](architecture/foundational-invariants.md#runtime-recovery-shutdown)、[Managed Runtime Process v1](contracts/managed-runtime-process-v1.md)、[Runtime Platform Admission v1](contracts/runtime-platform-admission-v1.md)、[Runtime Launch and Verification v27](contracts/runtime-launch-and-verification-v27.md)、[Camp Published Attachment View](architecture/camp-published-attachment-view.md)及[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md) |
 | 修改队员 Runtime 权限默认、模型 Picker、Kiro trust-all、TRAE/Cursor/Kimi/Pi permission mode、Kimi/Pi provider 配置或 permission schema drift | [Runtime 平台安全不变量](architecture/foundational-invariants.md#runtime-platform-security)、[Runtime Launch and Verification v27](contracts/runtime-launch-and-verification-v27.md)、[Runtime Catalog Boundaries](architecture/runtime-catalog-boundaries.md)及[队员工作区 brief](../apps/desktop/.impeccable/surfaces/member-workspace.md) |

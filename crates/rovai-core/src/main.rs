@@ -111,7 +111,7 @@ use rovai_core::{
     context::{
         CharterDeliveryMode, ContextMaterialization, ContextPayloadTooLarge, ContextService,
         DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES, MaterializeContextRequest, PreparedContext,
-        RuntimeInputDelivery,
+        RuntimeInputDelivery, charter_delivery_mode_for_adapter,
     },
     core_data_dir_lock::CoreDataDirLock,
     current_user::CURRENT_USER_ID,
@@ -193,6 +193,7 @@ use rovai_core::{
     },
     runtime_failure::{
         RuntimeFailureError, RuntimeFailureOrigin, RuntimeFailurePhase, RuntimeFailureView,
+        public_runtime_failure_from_output,
     },
     runtime_platform_admission::RuntimePlatformAdmission,
     runtime_resolution::RuntimeResolutionService,
@@ -1310,6 +1311,7 @@ struct Core {
     trae_cn_cli: AcpCliRuntimeAdapter,
     cursor_agent: AcpCliRuntimeAdapter,
     kimi_code_cli: AcpCliRuntimeAdapter,
+    grok_build: AcpCliRuntimeAdapter,
     runtime_fleet: Arc<AgentRuntimeFleetManager>,
     builtin_tool_leases: Arc<BuiltinToolLeaseRegistry>,
     claude_code_cli: ClaudeCodeCliRuntimeAdapter,
@@ -1636,6 +1638,7 @@ fn runtime_display_name(kind: AdapterKind) -> &'static str {
         AdapterKind::TraeCnCli => "TRAE CLI",
         AdapterKind::CursorAgent => "Cursor Agent",
         AdapterKind::KimiCodeCli => "Kimi Code",
+        AdapterKind::GrokBuild => "Grok Build",
         AdapterKind::AntigravityApp => "Antigravity",
     }
 }
@@ -1839,6 +1842,7 @@ impl Core {
             self.stop_deleted_camp_runtime_kind(targets, AdapterKind::TraeCnCli),
             self.stop_deleted_camp_runtime_kind(targets, AdapterKind::CursorAgent),
             self.stop_deleted_camp_runtime_kind(targets, AdapterKind::KimiCodeCli),
+            self.stop_deleted_camp_runtime_kind(targets, AdapterKind::GrokBuild),
         );
         for target in targets {
             self.planned_shutdown
@@ -1857,6 +1861,7 @@ impl Core {
             ExecutionRuntimeService::default().expire_elapsed_camp_turn_execution_budgets(
                 &mut database,
                 observed_now,
+                chrono::Utc::now(),
                 100,
             )
         };
@@ -3360,7 +3365,14 @@ impl Core {
         {
             return Some(AgentRunRuntime::Acp(runtime));
         }
-        self.kimi_code_cli
+        if let Some(runtime) = self
+            .kimi_code_cli
+            .get_agent_run(agent_run_id, execution_epoch)
+            .await
+        {
+            return Some(AgentRunRuntime::Acp(runtime));
+        }
+        self.grok_build
             .get_agent_run(agent_run_id, execution_epoch)
             .await
             .map(AgentRunRuntime::Acp)
@@ -3474,6 +3486,7 @@ impl Core {
             self.trae_cn_cli.shutdown_all(),
             self.cursor_agent.shutdown_all(),
             self.kimi_code_cli.shutdown_all(),
+            self.grok_build.shutdown_all(),
             self.claude_code_cli.shutdown_all(),
             self.antigravity_app.shutdown_all(),
         );
@@ -3494,6 +3507,7 @@ impl Core {
                 self.trae_cn_cli.shutdown_all(),
                 self.cursor_agent.shutdown_all(),
                 self.kimi_code_cli.shutdown_all(),
+                self.grok_build.shutdown_all(),
                 self.claude_code_cli.shutdown_all(),
                 self.antigravity_app.shutdown_all(),
             );
@@ -3518,6 +3532,7 @@ impl Core {
             rovai_core::agent_profile::AdapterKind::TraeCnCli => Some(&self.trae_cn_cli),
             rovai_core::agent_profile::AdapterKind::CursorAgent => Some(&self.cursor_agent),
             rovai_core::agent_profile::AdapterKind::KimiCodeCli => Some(&self.kimi_code_cli),
+            rovai_core::agent_profile::AdapterKind::GrokBuild => Some(&self.grok_build),
             rovai_core::agent_profile::AdapterKind::CodexCli
             | rovai_core::agent_profile::AdapterKind::Pi
             | rovai_core::agent_profile::AdapterKind::ClaudeCodeCli
@@ -6283,7 +6298,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::QwenCode
             | rovai_core::agent_profile::AdapterKind::TraeCnCli
             | rovai_core::agent_profile::AdapterKind::CursorAgent
-            | rovai_core::agent_profile::AdapterKind::KimiCodeCli) => {
+            | rovai_core::agent_profile::AdapterKind::KimiCodeCli
+            | rovai_core::agent_profile::AdapterKind::GrokBuild) => {
                 let probe =
                     health::acp_capability_probe_at_for_purpose(executable_path, kind, purpose)
                         .await;
@@ -7142,7 +7158,8 @@ impl Core {
                 | rovai_core::agent_profile::AdapterKind::QwenCode
                 | rovai_core::agent_profile::AdapterKind::TraeCnCli
                 | rovai_core::agent_profile::AdapterKind::CursorAgent
-                | rovai_core::agent_profile::AdapterKind::KimiCodeCli) => {
+                | rovai_core::agent_profile::AdapterKind::KimiCodeCli
+                | rovai_core::agent_profile::AdapterKind::GrokBuild) => {
                     if let Some(adapter) = self.acp_adapter(kind) {
                         adapter
                             .forget_agent_run(&candidate.agent_run_id, candidate.execution_epoch)
@@ -7408,8 +7425,11 @@ impl Core {
             }
 
             let mut response_approved = approved;
-            if !runtime_managed
-                && approved
+            // Grok mediates the native decision itself, then delegates the
+            // approved write through ACP `fs/write_text_file`. Mirror the
+            // durable approval into that one-shot filesystem gate.
+            if approved
+                && (!runtime_managed || runtime.adapter_kind() == AdapterKind::GrokBuild)
                 && let Err(error) = runtime
                     .authorize_file_write(&candidate.action_kind, &candidate.response_context)
                     .await
@@ -7756,19 +7776,33 @@ impl Core {
         execution: &AgentRunExecution,
     ) -> Result<PreparedMcpProjection> {
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
-        let database = self.database.lock().await;
-        self.mcp_projection.prepare(
-            &database,
-            &self.mcp_config,
-            &McpProjectionRequest {
-                agent_run_id: &execution.agent_run_id,
-                execution_epoch: execution.execution_epoch,
-                agent_id: &execution.agent_id,
-                adapter_kind: execution.runtime.adapter_kind,
-                reported_runtime_version: execution.runtime.reported_version.as_deref(),
-                execution_root: &execution_root,
-            },
-        )
+        let mut projection = {
+            let database = self.database.lock().await;
+            self.mcp_projection.prepare(
+                &database,
+                &self.mcp_config,
+                &McpProjectionRequest {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    agent_id: &execution.agent_id,
+                    adapter_kind: execution.runtime.adapter_kind,
+                    reported_runtime_version: execution.runtime.reported_version.as_deref(),
+                    execution_root: &execution_root,
+                },
+            )?
+        };
+        if execution.runtime.adapter_kind == AdapterKind::GrokBuild
+            && !projection.servers.is_empty()
+        {
+            let native_names = health::inspect_grok_native_mcp_server_names(
+                Path::new(&execution.runtime.executable_path),
+                &execution_root,
+            )
+            .await
+            .context("failed to discover effective Grok native MCP names")?;
+            projection.finalize_native_name_conflicts(&native_names)?;
+        }
+        Ok(projection)
     }
 
     async fn persist_runtime_compatibility_digest(
@@ -7926,6 +7960,36 @@ impl Core {
                 )?,
             }
         })
+    }
+
+    async fn prepare_grok_native_session_rules(
+        &self,
+        execution: &AgentRunExecution,
+        credential: &BuiltinToolBindingCredential,
+    ) -> Result<String> {
+        if execution.runtime.adapter_kind != AdapterKind::GrokBuild {
+            anyhow::bail!("Grok native rules may only be prepared for grok-build");
+        }
+        let prepared = {
+            let mut database = self.database.lock().await;
+            ContextService.prepare_session_bootstrap(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                CharterDeliveryMode::NativeAppend,
+            )?
+        };
+        if prepared.native_binding_id != credential.native_binding_id
+            || prepared.native_binding_generation != credential.native_binding_generation
+            || prepared.delivery_mode != CharterDeliveryMode::NativeAppend
+        {
+            anyhow::bail!("Grok native rules Bootstrap does not match the prepared Native Binding");
+        }
+        if prepared.payload.trim().is_empty() {
+            anyhow::bail!("Grok native rules Bootstrap is empty");
+        }
+        Ok(prepared.payload)
     }
 
     fn prepare_builtin_tool_process_config(&self) -> Result<BuiltinToolProcessConfig> {
@@ -8121,7 +8185,7 @@ impl Core {
         Ok(())
     }
 
-    fn establish_acp_compaction_observer_best_effort(
+    async fn establish_acp_compaction_observer_best_effort(
         self: &Arc<Self>,
         execution: &AgentRunExecution,
         runtime: &Arc<AcpRuntime>,
@@ -8134,10 +8198,6 @@ impl Core {
         {
             return;
         }
-        let core = Arc::clone(self);
-        let runtime = Arc::clone(runtime);
-        let agent_run_id = execution.agent_run_id.clone();
-        let execution_epoch = execution.execution_epoch;
         let adapter_kind = execution.runtime.adapter_kind;
         let host_instance_id = runtime.host_instance_id().to_string();
         let relay_process_id = runtime
@@ -8145,38 +8205,35 @@ impl Core {
             .map(BuiltinToolProcessConfig::process_id)
             .unwrap_or_default()
             .to_string();
-        let native_session_id = native_session_id.to_string();
-        tokio::spawn(async move {
-            let lease = {
-                let mut database = core.database.lock().await;
-                establish_compaction_observer_lease(
-                    &mut database,
-                    &EstablishCompactionObserverLease {
-                        agent_run_id: &agent_run_id,
-                        execution_epoch,
-                        adapter_kind,
-                        host_instance_id: &host_instance_id,
-                        relay_process_id: &relay_process_id,
-                        native_session_id: &native_session_id,
-                    },
-                )
-            };
-            match lease {
-                Ok(Some(lease)) => {
-                    if let Err(error) = runtime.install_compaction_observer(lease).await {
-                        eprintln!(
-                            "{} Compaction Observer route is unavailable; AgentRun continues: {error:#}",
-                            adapter_kind.as_str()
-                        );
-                    }
+        let lease = {
+            let mut database = self.database.lock().await;
+            establish_compaction_observer_lease(
+                &mut database,
+                &EstablishCompactionObserverLease {
+                    agent_run_id: &execution.agent_run_id,
+                    execution_epoch: execution.execution_epoch,
+                    adapter_kind,
+                    host_instance_id: &host_instance_id,
+                    relay_process_id: &relay_process_id,
+                    native_session_id,
+                },
+            )
+        };
+        match lease {
+            Ok(Some(lease)) => {
+                if let Err(error) = runtime.install_compaction_observer(lease).await {
+                    eprintln!(
+                        "{} Compaction Observer route is unavailable; AgentRun continues: {error:#}",
+                        adapter_kind.as_str()
+                    );
                 }
-                Ok(None) => {}
-                Err(error) => eprintln!(
-                    "{} Compaction Observer Lease is unavailable; AgentRun continues: {error:#}",
-                    adapter_kind.as_str()
-                ),
             }
-        });
+            Ok(None) => {}
+            Err(error) => eprintln!(
+                "{} Compaction Observer Lease is unavailable; AgentRun continues: {error:#}",
+                adapter_kind.as_str()
+            ),
+        }
     }
 
     async fn prepare_runtime_for_dispatch(
@@ -10153,18 +10210,31 @@ impl Core {
             binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
             session_continuation = acp::AcpSessionContinuation::New;
         }
+        let charter_delivery_mode =
+            charter_delivery_mode_for_adapter(execution.runtime.adapter_kind);
+        let new_session_native_rules = if execution.runtime.adapter_kind == AdapterKind::GrokBuild
+            && session_continuation == acp::AcpSessionContinuation::New
+        {
+            Some(
+                self.prepare_grok_native_session_rules(execution, &binding_credential)
+                    .await?,
+            )
+        } else {
+            None
+        };
         self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
             .await?;
         let resumable_session_id = binding_credential.native_session_id.clone();
         let model = execution.runtime.model.model_id.as_str();
         let session = runtime
-            .start_or_resume_session(
+            .start_or_resume_session_with_native_rules(
                 resumable_session_id.as_deref(),
                 session_capabilities,
                 &execution.runtime.model.source,
                 model,
                 &execution.runtime.model.options,
                 &mcp_projection.servers,
+                new_session_native_rules.as_deref(),
             )
             .await;
         let session_id = match session {
@@ -10211,6 +10281,15 @@ impl Core {
                     .await;
                 let replacement_binding =
                     self.prepare_builtin_tool_binding(execution, true).await?;
+                let replacement_native_rules =
+                    if execution.runtime.adapter_kind == AdapterKind::GrokBuild {
+                        Some(
+                            self.prepare_grok_native_session_rules(execution, &replacement_binding)
+                                .await?,
+                        )
+                    } else {
+                        None
+                    };
                 runtime_compatibility_digest = acp::runtime_compatibility_digest(
                     &execution.runtime,
                     &execution.workspace,
@@ -10248,13 +10327,14 @@ impl Core {
                 )
                 .await?;
                 let session_id = runtime
-                    .start_or_resume_session(
+                    .start_or_resume_session_with_native_rules(
                         None,
                         session_capabilities,
                         &execution.runtime.model.source,
                         model,
                         &execution.runtime.model.options,
                         &mcp_projection.servers,
+                        replacement_native_rules.as_deref(),
                     )
                     .await
                     .with_context(|| {
@@ -10268,14 +10348,15 @@ impl Core {
         self.bind_prepared_native_session(execution, &binding_credential, &session_id)
             .await
             .context("failed to bind ACP Native Session")?;
-        self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id);
+        self.establish_acp_compaction_observer_best_effort(execution, &runtime, &session_id)
+            .await;
         let Some((prepared_context, delivery)) = self
             .materialize_and_prepare_agent_run_input(
                 execution,
                 attachment_access,
                 skill_exposure,
                 mcp_projection,
-                CharterDeliveryMode::FirstPayload,
+                charter_delivery_mode,
                 output,
             )
             .await
@@ -10294,6 +10375,9 @@ impl Core {
         if delivery.status != "prepared" {
             anyhow::bail!("Runtime Input Delivery is not ready to send");
         }
+        runtime
+            .arm_grok_auto_compact_for_acceptance_if_requested()
+            .await?;
         let native_prompt_id = match runtime
             .start_prompt(&delivery.id, &prepared_context.runtime_payload)
             .await
@@ -10478,7 +10562,8 @@ impl Core {
             | rovai_core::agent_profile::AdapterKind::QwenCode
             | rovai_core::agent_profile::AdapterKind::TraeCnCli
             | rovai_core::agent_profile::AdapterKind::CursorAgent
-            | rovai_core::agent_profile::AdapterKind::KimiCodeCli) => {
+            | rovai_core::agent_profile::AdapterKind::KimiCodeCli
+            | rovai_core::agent_profile::AdapterKind::GrokBuild) => {
                 if let Some(adapter) = self.acp_adapter(kind) {
                     adapter
                         .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
@@ -11222,11 +11307,20 @@ async fn run_core(
         )?,
         kimi_code_cli: AcpCliRuntimeAdapter::new(
             rovai_core::agent_profile::AdapterKind::KimiCodeCli,
-            acp_tx,
+            acp_tx.clone(),
             data_dir.join("runtime/kimi-code"),
             runtime_fleet.clone(),
             compaction_detector_policies
                 .policy_for(AdapterKind::KimiCodeCli)
+                .unwrap_or(CompactionDetectorPolicy::Disabled),
+        )?,
+        grok_build: AcpCliRuntimeAdapter::new(
+            rovai_core::agent_profile::AdapterKind::GrokBuild,
+            acp_tx,
+            data_dir.join("runtime/grok-build"),
+            runtime_fleet.clone(),
+            compaction_detector_policies
+                .policy_for(AdapterKind::GrokBuild)
                 .unwrap_or(CompactionDetectorPolicy::Disabled),
         )?,
         claude_code_cli,
@@ -11816,13 +11910,6 @@ fn acp_delta_batch_identity(
     let session_update = message
         .pointer("/params/update/sessionUpdate")
         .and_then(Value::as_str);
-    if *adapter_kind == AdapterKind::KimiCodeCli && session_update == Some("agent_message_chunk") {
-        // MiniMax OpenAI-compatible responses can expose <think> blocks as
-        // ordinary ACP agent text. Kimi text is therefore collected until the
-        // terminal boundary and sanitized there instead of being batched into
-        // public deltas.
-        return None;
-    }
     matches!(
         session_update,
         Some("agent_message_chunk" | "agent_thought_chunk")
@@ -11890,6 +11977,7 @@ fn prepare_codex_delta_batch(
 }
 
 fn prepare_acp_delta_batch(
+    adapter_kind: AdapterKind,
     messages: &[AcpRuntimeDeltaMessage],
 ) -> Result<Option<Vec<PreparedRuntimeDeltaMessage>>> {
     let mut total_bytes = 0_usize;
@@ -11902,7 +11990,7 @@ fn prepare_acp_delta_batch(
             .unwrap_or("unknown")
             .to_string();
         let params = message.get("params").cloned().unwrap_or(Value::Null);
-        let (event_type, payload) = normalize_acp_event(&native_method, &params);
+        let (event_type, payload) = normalize_acp_event(adapter_kind, &native_method, &params);
         let Some(evidence) =
             ExecutionEvidenceService.prepare_runtime_event(event_type, &payload)?
         else {
@@ -13037,6 +13125,7 @@ async fn process_acp_events(
                 execution_epoch,
                 native_prompt_id,
                 delivery_id,
+                native_error_code,
                 error,
             } => {
                 process_acp_input_not_accepted(
@@ -13047,6 +13136,7 @@ async fn process_acp_events(
                     execution_epoch,
                     &native_prompt_id,
                     &delivery_id,
+                    native_error_code,
                     &error,
                 )
                 .await;
@@ -13254,6 +13344,7 @@ async fn process_acp_input_not_accepted(
     execution_epoch: i64,
     native_prompt_id: &str,
     delivery_id: &str,
+    native_error_code: Option<i64>,
     error: &str,
 ) {
     if acp_runtime_on_host(
@@ -13273,7 +13364,10 @@ async fn process_acp_input_not_accepted(
         ContextService.mark_input_delivery_not_accepted(
             &mut database,
             delivery_id,
-            &format!("ACP prompt {native_prompt_id} was rejected: {error}"),
+            &format!(
+                "ACP prompt {native_prompt_id} was rejected{}: {error}",
+                native_error_code.map_or_else(String::new, |code| format!(" ({code})")),
+            ),
         )
     };
     if let Err(mark_error) = result {
@@ -13294,7 +13388,7 @@ async fn process_agent_run_acp_delta_batch(
     messages: Vec<AcpRuntimeDeltaMessage>,
     runtime_route_permit: &mut rovai_core::planned_shutdown::RuntimeRoutePermit,
 ) {
-    let prepared = match prepare_acp_delta_batch(&messages) {
+    let prepared = match prepare_acp_delta_batch(adapter_kind, &messages) {
         Ok(Some(prepared)) => prepared,
         Ok(None) => {
             for incoming in messages {
@@ -13615,17 +13709,12 @@ async fn process_agent_run_acp_message(
             None
         }
     };
-    if adapter_kind == AdapterKind::KimiCodeCli
-        && method == "session/update"
-        && params
-            .pointer("/update/sessionUpdate")
-            .and_then(Value::as_str)
-            == Some("agent_message_chunk")
-    {
-        return;
-    }
-    let (event_type, payload) =
-        normalize_acp_event_with_completion(&method, &params, completed_action.as_ref());
+    let (event_type, payload) = normalize_acp_event_with_completion(
+        adapter_kind,
+        &method,
+        &params,
+        completed_action.as_ref(),
+    );
     if event_type == "runtime.usage" {
         return;
     }
@@ -13715,11 +13804,16 @@ async fn process_agent_run_acp_message(
     }
 }
 
-fn normalize_acp_event(method: &str, params: &Value) -> (&'static str, Value) {
-    normalize_acp_event_with_completion(method, params, None)
+fn normalize_acp_event(
+    adapter_kind: AdapterKind,
+    method: &str,
+    params: &Value,
+) -> (&'static str, Value) {
+    normalize_acp_event_with_completion(adapter_kind, method, params, None)
 }
 
 fn normalize_acp_event_with_completion(
+    adapter_kind: AdapterKind,
     method: &str,
     params: &Value,
     completion: Option<&acp::CompletedAcpAction>,
@@ -13760,9 +13854,10 @@ fn normalize_acp_event_with_completion(
         }
         Some("agent_thought_chunk") => ("agent.thought.delta", update),
         Some("tool_call") | Some("tool_call_update") => {
-            let public_command = acp::public_acp_shell_command(update.get("rawInput"))
-                .or_else(|| completion.and_then(|value| value.public_command.clone()));
-            let public_kind = acp::public_acp_tool_kind(&update).or_else(|| {
+            let public_command =
+                acp::public_acp_shell_command(adapter_kind, update.get("rawInput"))
+                    .or_else(|| completion.and_then(|value| value.public_command.clone()));
+            let public_kind = acp::public_acp_tool_kind(adapter_kind, &update).or_else(|| {
                 completion
                     .map(|value| value.native_kind.as_str())
                     .filter(|kind| *kind != "other")
@@ -13847,8 +13942,9 @@ fn public_acp_content_text(value: Option<&Value>) -> Option<String> {
                 .and_then(Value::as_str)
                 .and_then(nonempty_public_text),
             // ACP terminal content is only a display anchor owned by the Agent.
-            // Rovai advertises no Client Terminal capability and must not treat a
-            // terminalId (or a diff/resource payload) as public command output.
+            // A Runtime-specific Client Terminal bridge may serve its output
+            // directly on the protocol, but terminalId (and diff/resource
+            // payloads) are never public command output by themselves.
             Some("terminal" | "diff" | "image" | "audio" | "resource" | "resource_link") => None,
             Some(_) => None,
             // Preserve the small legacy shapes emitted by older ACP adapters,
@@ -14128,6 +14224,7 @@ async fn process_agent_run_acp_approval_request(
     };
     let action_request = match acp::intercepted_action_request(
         &acp::InterceptedAcpActionContext {
+            adapter_kind: runtime.adapter_kind(),
             agent_run_id,
             execution_epoch,
             expected_session_id: &native_session_id,
@@ -14487,6 +14584,47 @@ async fn persist_acp_prompt_completion(
     } else {
         RuntimeTerminalOutcome::Failed
     };
+    let delivery_status = if planned_outcome == RuntimeTerminalOutcome::Failed {
+        let delivery_id = params
+            .get("deliveryId")
+            .and_then(Value::as_str)
+            .context("ACP prompt completion has no deliveryId")?;
+        let database = core.database.lock().await;
+        ContextService.runtime_input_delivery_status(&database, delivery_id)?
+    } else {
+        None
+    };
+    let manual_retry_allowed =
+        acp_prompt_manual_retry_allowed(planned_outcome, delivery_status.as_deref());
+    let base_error_code = if stop_reason == "end_turn" {
+        "runtime_missing_final_output".to_string()
+    } else {
+        format!("runtime_prompt_{stop_reason}")
+    };
+    let error_detail = response_error
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}"));
+    let mut public_failure = response_error.map(|detail| {
+        public_runtime_failure_from_output(
+            adapter_kind,
+            RuntimeFailureOrigin::Runtime,
+            RuntimeFailurePhase::Execution,
+            &base_error_code,
+            &format!("{} 未能完成运行", runtime_display_name(adapter_kind)),
+            Some(detail),
+            &[(&core.data_dir, "<data-dir>")],
+            manual_retry_allowed,
+        )
+    });
+    if let Some(failure) = public_failure.as_mut() {
+        // Provider retryability never overrides Core's delivery/effect safety. Once the input
+        // was accepted, a successor instruction is required instead of replaying the Run.
+        failure.retryable &= manual_retry_allowed;
+    }
+    let error_code = public_failure
+        .as_ref()
+        .map(|failure| failure.code.clone())
+        .unwrap_or(base_error_code);
     let terminal_discriminator =
         canonical_json_digest(params).unwrap_or_else(|_| format!("{prompt_id}:{stop_reason}"));
     if !core.planned_shutdown.shutdown_started() {
@@ -14531,18 +14669,10 @@ async fn persist_acp_prompt_completion(
                     agent_run_id: agent_run_id.to_string(),
                     execution_epoch,
                     outcome: planned_outcome,
-                    error_code: if stop_reason == "end_turn" {
-                        "runtime_missing_final_output".to_string()
-                    } else {
-                        format!("runtime_prompt_{stop_reason}")
-                    },
-                    error_detail: Some(
-                        response_error
-                            .map(str::to_string)
-                            .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
-                    ),
-                    failure: None,
-                    manual_retry_allowed: planned_outcome == RuntimeTerminalOutcome::Failed,
+                    error_code: error_code.clone(),
+                    error_detail: Some(error_detail.clone()),
+                    failure: public_failure.clone(),
+                    manual_retry_allowed,
                 },
             )
             .await?;
@@ -14637,8 +14767,8 @@ async fn persist_acp_prompt_completion(
                             error_detail: Some(
                                 "ACP Runtime ended the prompt without an Agent message".to_string(),
                             ),
-                            failure: None,
-                            manual_retry_allowed: true,
+                            failure: public_failure.clone(),
+                            manual_retry_allowed,
                             ending_git_observation: ending_git_observation.clone(),
                         },
                     },
@@ -14660,14 +14790,10 @@ async fn persist_acp_prompt_completion(
                         agent_run_id: agent_run_id.to_string(),
                         expected_version: execution.version,
                         execution_epoch,
-                        error_code: format!("runtime_prompt_{stop_reason}"),
-                        error_detail: Some(
-                            response_error
-                                .map(str::to_string)
-                                .unwrap_or_else(|| format!("ACP prompt ended as {stop_reason}")),
-                        ),
-                        failure: None,
-                        manual_retry_allowed: stop_reason != "cancelled",
+                        error_code: error_code.clone(),
+                        error_detail: Some(error_detail.clone()),
+                        failure: public_failure.clone(),
+                        manual_retry_allowed,
                         ending_git_observation,
                     },
                 },
@@ -14729,6 +14855,13 @@ async fn persist_acp_prompt_completion(
         }
     }
     Ok(())
+}
+
+fn acp_prompt_manual_retry_allowed(
+    outcome: RuntimeTerminalOutcome,
+    delivery_status: Option<&str>,
+) -> bool {
+    outcome == RuntimeTerminalOutcome::Failed && delivery_status == Some("not_accepted")
 }
 
 async fn process_acp_agent_run_exit(
@@ -16853,6 +16986,24 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     use std::fs;
 
+    #[test]
+    fn acp_prompt_failure_is_retryable_only_when_input_was_not_accepted() {
+        assert!(acp_prompt_manual_retry_allowed(
+            RuntimeTerminalOutcome::Failed,
+            Some("not_accepted")
+        ));
+        for delivery_status in [Some("accepted"), Some("delivery_unknown"), None] {
+            assert!(!acp_prompt_manual_retry_allowed(
+                RuntimeTerminalOutcome::Failed,
+                delivery_status,
+            ));
+        }
+        assert!(!acp_prompt_manual_retry_allowed(
+            RuntimeTerminalOutcome::Cancelled,
+            Some("not_accepted")
+        ));
+    }
+
     #[cfg(feature = "slow-tests")]
     #[tokio::test]
     async fn composer_prepare_releases_database_mutex_during_authority_file_io() {
@@ -17129,11 +17280,20 @@ mod tests {
             )?,
             kimi_code_cli: AcpCliRuntimeAdapter::new(
                 AdapterKind::KimiCodeCli,
-                acp_tx,
+                acp_tx.clone(),
                 data_dir.join("runtime/kimi-code"),
                 runtime_fleet.clone(),
                 compaction_detector_policies
                     .policy_for(AdapterKind::KimiCodeCli)
+                    .unwrap_or(CompactionDetectorPolicy::Disabled),
+            )?,
+            grok_build: AcpCliRuntimeAdapter::new(
+                AdapterKind::GrokBuild,
+                acp_tx,
+                data_dir.join("runtime/grok-build"),
+                runtime_fleet.clone(),
+                compaction_detector_policies
+                    .policy_for(AdapterKind::GrokBuild)
                     .unwrap_or(CompactionDetectorPolicy::Disabled),
             )?,
             claude_code_cli: ClaudeCodeCliRuntimeAdapter::new(&data_dir)?,
@@ -17811,13 +17971,16 @@ while IFS= read -r _ignored; do :; done
             unreachable!()
         };
         assert!(
-            prepare_acp_delta_batch(&[AcpRuntimeDeltaMessage {
-                native_session_id,
-                native_prompt_id,
-                delivery_id,
-                sequence,
-                message,
-            }])
+            prepare_acp_delta_batch(
+                AdapterKind::OpencodeCli,
+                &[AcpRuntimeDeltaMessage {
+                    native_session_id,
+                    native_prompt_id,
+                    delivery_id,
+                    sequence,
+                    message,
+                }]
+            )
             .unwrap()
             .is_some()
         );
@@ -17833,13 +17996,16 @@ while IFS= read -r _ignored; do :; done
             unreachable!()
         };
         assert!(
-            prepare_acp_delta_batch(&[AcpRuntimeDeltaMessage {
-                native_session_id,
-                native_prompt_id,
-                delivery_id,
-                sequence,
-                message,
-            }])
+            prepare_acp_delta_batch(
+                AdapterKind::OpencodeCli,
+                &[AcpRuntimeDeltaMessage {
+                    native_session_id,
+                    native_prompt_id,
+                    delivery_id,
+                    sequence,
+                    message,
+                }]
+            )
             .unwrap()
             .is_none()
         );
@@ -18669,6 +18835,7 @@ while IFS= read -r _ignored; do :; done
     #[test]
     fn acp_tool_events_expose_only_the_public_command_and_payload_digests() {
         let (_, payload) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "update": {
@@ -18701,6 +18868,37 @@ while IFS= read -r _ignored; do :; done
         assert!(payload["rawInputDigest"].is_string());
         assert!(payload["rawOutputDigest"].is_string());
 
+        let trae_params = json!({
+            "update": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "trae-bash-1",
+                "status": "in_progress",
+                "title": "bash",
+                "rawInput": {
+                    "Command": "printf 'TRAE_PUBLIC_COMMAND_OK\\n'",
+                    "Description": "TRAE_PRIVATE_DESCRIPTION_MUST_NOT_LEAK"
+                }
+            }
+        });
+        let (_, trae_payload) =
+            normalize_acp_event(AdapterKind::TraeCnCli, "session/update", &trae_params);
+        let serialized =
+            serde_json::to_string(&trae_payload).expect("TRAE event payload should serialize");
+        assert_eq!(trae_payload["input"], "printf 'TRAE_PUBLIC_COMMAND_OK\\n'");
+        assert_eq!(trae_payload["kind"], "execute");
+        assert!(trae_payload["rawInputDigest"].is_string());
+        assert!(!serialized.contains("TRAE_PRIVATE_DESCRIPTION_MUST_NOT_LEAK"));
+
+        let (_, foreign_payload) =
+            normalize_acp_event(AdapterKind::OpencodeCli, "session/update", &trae_params);
+        assert!(foreign_payload["input"].is_null());
+        assert!(foreign_payload["kind"].is_null());
+        assert!(
+            !serde_json::to_string(&foreign_payload)
+                .expect("foreign event payload should serialize")
+                .contains("TRAE_PRIVATE_DESCRIPTION_MUST_NOT_LEAK")
+        );
+
         let terminal_params = json!({
             "update": {
                 "sessionUpdate": "tool_call_update",
@@ -18712,7 +18910,7 @@ while IFS= read -r _ignored; do :; done
                 }
             }
         });
-        let mut completion = acp::completed_action(&terminal_params)
+        let mut completion = acp::completed_action(AdapterKind::OpencodeCli, &terminal_params)
             .expect("terminal update should normalize")
             .expect("terminal update should create a completion");
         completion.native_kind = "execute".to_string();
@@ -18720,6 +18918,7 @@ while IFS= read -r _ignored; do :; done
         completion.result_data["status"] = json!("failed");
         completion.result_data["rawInputDigest"] = payload["rawInputDigest"].clone();
         let (_, terminal_payload) = normalize_acp_event_with_completion(
+            AdapterKind::OpencodeCli,
             "session/update",
             &terminal_params,
             Some(&completion),
@@ -18778,6 +18977,7 @@ while IFS= read -r _ignored; do :; done
 
         for (adapter_kind, fixture, expected_output, secret) in fixtures {
             let (_, payload) = normalize_acp_event(
+                adapter_kind.parse::<AdapterKind>().unwrap(),
                 "session/update",
                 &json!({
                     "update": {
@@ -18801,6 +19001,7 @@ while IFS= read -r _ignored; do :; done
     #[test]
     fn acp_terminal_content_is_never_misrepresented_as_command_output() {
         let (_, payload) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "update": {
@@ -18826,6 +19027,7 @@ while IFS= read -r _ignored; do :; done
     #[test]
     fn acp_agent_message_events_preserve_only_safe_message_identity_metadata() {
         let (_, update_identity) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",
@@ -18840,6 +19042,7 @@ while IFS= read -r _ignored; do :; done
         assert_eq!(update_identity["messageIdSource"], "update");
 
         let (_, content_identity) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",
@@ -18853,6 +19056,7 @@ while IFS= read -r _ignored; do :; done
         assert_eq!(content_identity["messageIdSource"], "content");
 
         let (_, anonymous) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",
@@ -18866,6 +19070,7 @@ while IFS= read -r _ignored; do :; done
         assert!(anonymous["messageIdSource"].is_null());
 
         let (_, invalid_identity) = normalize_acp_event(
+            AdapterKind::OpencodeCli,
             "session/update",
             &json!({
                 "sessionId": "session-1",
@@ -18878,6 +19083,49 @@ while IFS= read -r _ignored; do :; done
         );
         assert!(invalid_identity["messageId"].is_null());
         assert!(invalid_identity["messageIdSource"].is_null());
+    }
+
+    #[test]
+    fn kimi_and_grok_agent_text_use_the_generic_acp_delta_path_verbatim() {
+        let text = "<think>provider reasoning</think>\nPUBLIC";
+        for adapter_kind in [AdapterKind::KimiCodeCli, AdapterKind::GrokBuild] {
+            let incoming = AcpIncoming::Message {
+                adapter_kind,
+                host_instance_id: "host-1".to_string(),
+                agent_run_id: "run-1".to_string(),
+                execution_epoch: 1,
+                native_session_id: "session-1".to_string(),
+                native_prompt_id: "prompt-1".to_string(),
+                delivery_id: "delivery-1".to_string(),
+                sequence: 1,
+                message: json!({
+                    "method": "session/update",
+                    "params": {
+                        "update": {
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": "message-1",
+                            "content": {"type": "text", "text": text}
+                        }
+                    }
+                }),
+            };
+            assert!(acp_delta_batch_identity(&incoming).is_some());
+
+            let (event_type, payload) = normalize_acp_event(
+                adapter_kind,
+                "session/update",
+                &json!({
+                    "sessionId": "session-1",
+                    "update": {
+                        "sessionUpdate": "agent_message_chunk",
+                        "messageId": "message-1",
+                        "content": {"type": "text", "text": text}
+                    }
+                }),
+            );
+            assert_eq!(event_type, "agent.text.delta");
+            assert_eq!(payload["delta"], text);
+        }
     }
 
     #[test]

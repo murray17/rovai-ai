@@ -165,7 +165,8 @@ describe('member runtime parameters', () => {
     ['codebuddy-cli', '权限模式', 'bypassPermissions'],
     ['qwen-code', '审批模式', 'yolo'],
     ['trae-cn-cli', '权限模式', 'bypass_permissions'],
-    ['kimi-code-cli', '权限模式', 'yolo']
+    ['kimi-code-cli', '权限模式', 'yolo'],
+    ['grok-build', '权限模式', 'bypassPermissions']
   ] as const)('renders %s with its native permission value', (kind, label, value) => {
     const installation = runtimeInstallation(kind)
     const markup = renderToStaticMarkup(createElement(MemberRuntimeParameters, {
@@ -372,6 +373,8 @@ function runtimePermissionDefaults(kind: AdapterKind): Record<string, unknown> {
       return { execution_mode: 'agent', approval_policy: 'force' }
     case 'kimi-code-cli':
       return { permission_mode: 'yolo' }
+    case 'grok-build':
+      return { permission_mode: 'bypassPermissions' }
     case 'antigravity-app':
       return {
         mode: 'accept-edits',

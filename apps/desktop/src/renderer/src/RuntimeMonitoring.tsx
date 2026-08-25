@@ -51,6 +51,7 @@ const ADAPTERS: Array<{ value: AdapterKind; label: string }> = [
   { value: 'trae-cn-cli', label: 'TRAE' },
   { value: 'cursor-agent', label: 'Cursor Agent' },
   { value: 'kimi-code-cli', label: 'Kimi Code' },
+  { value: 'grok-build', label: 'Grok Build' },
   { value: 'antigravity-app', label: 'Antigravity' }
 ]
 

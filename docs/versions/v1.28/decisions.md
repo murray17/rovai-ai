@@ -1,131 +1,175 @@
 ---
 document_type: version-decisions
 version: v1.28
-lifecycle: current
-last_updated: 2026-08-25
+lifecycle: historical
+last_updated: 2026-08-24
 ---
 
 # v1.28 决策记录
 
-本文件只记录本版本满足准入门槛的重要取舍；当前行为规范由链接的 Architecture 与 Contract 拥有。
-
 <a id="v1-28-d01"></a>
-## V1.28-D01：Pi 使用独立 JSONL RPC、受管 Approval 与 exact Session binding
+## V1.28-D01：Grok provider 采用官方 config.toml，密钥环境源归入原生 Home
 
 ### 背景
 
-Pi `0.84.2` 提供官方 LF JSONL RPC、结构化 Tool、Session file/UUID、Extension UI 和
-`agent_settled`，但不是 ACP，也没有内建 sandbox 或 permission system。用户要求沿用本机 Claude Code 的
-MiniMax API key 接入方式。直接继承 Pi 用户 Extension、把 token 写进 models.json/数据库，或把 RPC response、
-`agent_end`、process exit 当作 final，都会分别扩大代码执行/秘密面或破坏终态正确性。
-
-Pi 的 Skill 在 Session 启动时扫描，Session 可以由 exact file 恢复；公共 Runtime Fleet 已拥有 warm LRU、
-Host compatibility、process fencing 和 Built-in lease。上游也暴露 Usage/Compaction 候选，但当前没有证明
-per-Run attribution、occurrence/dedupe 与 resume 语义；Pi 核心不提供 External MCP。
+Grok Build 官方用户配置位于 `$GROK_HOME/config.toml`，自定义模型使用 `[models]`、`[model.<id>]` 或
+`[model_providers.<id>]`，凭据可由 `api_key` 或 `env_key` 提供。此前 Rovai 自定义
+`~/.config/rovai/grok-build.env` 三字段并翻译为 Grok 环境变量，虽然 BYOK 可运行，但不是 Grok 官方配置
+schema，普通 Grok 用户不能直接复用模型配置。官方 CLI 接受进程环境变量但不自动读取 `.env`。
 
 ### 决定
 
-1. Pi 作为独立 `pi-jsonl-rpc-v1` Adapter，不复用 ACP Host、不解析 TUI、不引入第三方 ACP shim；prompt
-   response 只表示 accepted，公开 assistant snapshot 来自 `message_end.message`，成功 terminal 只认
-   `agent_settled`；
-2. Core 只从权限收窄的 `~/.claude/settings.json` 读取 exact MiniMax 三字段；正式 Host 继承通用 `HOME`，
-   但必须使用 Rovai 私有 `PI_CODING_AGENT_DIR`、env-ref models.json 和 child-only token。该 Pi-specific
-   state/config 隔离用于禁止自动用户/项目 Extension、固定 provider 与 Session locator，Probe 另用临时 root；
-3. Pi 只有 `approval_mode=managed`。Rovai 受管 Extension 是 launch/Ready 硬门：read/search 类 Tool 不弹
-   Approval，文件可达性沿用 OS 用户与既有 Workspace/attachment 边界；`bash/write/edit` 在执行前桥接 durable
-   Approval，unknown mutating Tool、error、timeout 与 restart 均 fail closed；Pi 本身不提供 sandbox；
-4. Pi 使用公共 Fleet LRU，但首版一 Host 一 Native Session。continuation 只按 compatible warm reuse →
-   exact canonical `--session <file>` cold resume → new Session；恢复后核对 full UUID/file/provider/model，禁止
-   `--continue`、partial ID、最近 Session、目录扫描和 replay History Restore；
-5. `.pi/skills` 由 Rovai 管理并以 explicit `--skill` 在 Session start 投递，exposure digest 进入
-   compatibility。Built-in CLI 通过受管 Bash 与 per-Run lease；External MCP 为 Unsupported；Usage/Cost 与
-   Compaction 为 Disabled；
-6. 只有完成完整真实矩阵的 `macos-arm64` qualified。macOS x64 与 Windows x64 继续逐平台取证，不能从共享
-   Fleet 或 arm64 结果外推。
+正式 AgentRun 直接继承官方 `$GROK_HOME/config.toml`，不再定义或翻译 `GROK_MODEL_*` 私有 schema。
+Rovai 额外把 mode `0600` 的 `$GROK_HOME/.env` 作为本机密钥环境源，只读取官方 TOML 中 `env_key` /
+`env_http_headers` 明确引用的名称和 Grok 官方全局 API-key 名称，并只注入目标 Grok 子进程；未引用变量不注入。
+官方 `api_key` 字段也保持可用。Core 不写或改写这些用户文件。
 
-本决定形成时的规范见 [Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)与
-[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)。实测边界见
-[Runtime 兼容性清单](../../runtime-compatibility.md)。
+存在 BYOK 时 Probe 把 `config.toml`、`managed_config.toml` 与 `requirements.toml` 原样复制到一次性临时
+`GROK_HOME`，密钥文件不复制、只经进程环境传递，并优先已广告的 `xai.api_key`；没有 BYOK 时 Probe 保留
+原生 Grok Home，只选择已广告的安全非交互默认、`cached_token` 或 `xai.api_key`，不自动启动
+`grok.com`/device auth。官方配置与 `.env` 的摘要进入 warm Host 和 cold HistoryRestore compatibility。
 
 ### 后果
 
-- Pi 保留官方协议和原生 Session identity，同时秘密只存在于目标进程，用户 Claude/Pi 配置不被复制或改写；
-- 缺少原生 sandbox 不会转化为无审批执行；Extension 握手和所有 mutating Tool 都受 fail-closed 硬门；
-- warm Run 避免重复启动，Core/Host 重启后仍能精确恢复同一 Session；locator、provider 与 model drift 会 fence；
-- Skill 变化不会误复用旧 Session；MCP、Usage 与 Compaction 的产品声明不会超过真实证据；
-- 平台支持范围暂时小于大多数既有 Runtime，但准入陈述可复现且不会静默外推。
+普通 Grok CLI 与 Rovai 共用同一模型 schema；使用 `env_key` 时密钥只存在于权限收窄的原生 Home 文件与
+目标子进程，配置变化会 fence 旧 Host/Session。用户原生 Grok 状态和既有 account token 保持可用。BYOK
+已真实验收；当前机器没有 cached token，因此 account-auth 只具备实现与上游方法证据，不能冒充实测通过。
 
 ### 被拒绝方案
 
-- **把 Pi 当 ACP Runtime：** 上游官方合同是自己的 JSONL RPC，第三方 shim 会成为额外不受控协议真源；
-- **直接运行用户 Pi config/Extension：** Extension 在 Runtime 进程内执行代码，破坏受管 Approval 的完整覆盖；
-- **把 Claude token 写入 Pi models.json、成员配置或数据库：** 扩大秘密持久化、备份、诊断和 argv 暴露面；
-- **逐 Run 新 Session 或 fuzzy continue：** 前者丢失原生身份，后者可能恢复错误会话；exact locator 已可满足；
-- **仅依赖 Extension 内存批准：** Core restart 会丢失决定，不能满足 durable Approval 与 unknown-effect recovery；
-- **因为上游有 Usage/Compaction event 就立即启用：** 尚未证明 Run 归因和恢复去重，容易制造错误账单或上下文
-  事件；保守 Disabled 不阻断 Runtime 基础价值；
-- **通过第三方 MCP Extension 声明 External MCP：** 没有 Product-managed projection、隔离和真实资格矩阵。
+- 复用 Kimi env 文件或变量：会把两个 Adapter 的配置合同耦合；
+- 保留 Rovai 三字段并只把文件挪到 `.grok`：路径正确但 schema 仍不具备 Grok 官方通用性；
+- 由 Core 自动生成或覆盖 `config.toml`：会改变用户日常 Grok 行为；
+- CLI 参数传 Key：会进入进程参数和诊断面。
 
 <a id="v1-28-d02"></a>
-## V1.28-D02：Pi resident Host 使用原生状态与逐 Run managed model input
+## V1.28-D02：ACP agent text 不做 provider 清洗，平台资格按 Grok adapter-scoped 证据准入
 
 ### 背景
 
-D01 的独立 JSONL RPC、managed Approval、exact Session identity 和保守 Usage/Compaction 仍成立，但首版把
-provider、model、Bootstrap、Skills 和一个 Native Session 固定在 Host 启动参数中，并把 External MCP 声明为
-Unsupported。这样会把本应属于 Native Binding/AgentRun 的成员身份和模型输入误放进 resident process key，
-既不能在同一 Workspace 串行切换 Pi Session，也无法在不重启进程的情况下精确刷新 Skills/MCP。
-
-源码复核同时证明 Pi `0.84.2` 已提供 `switch_session/new_session`、每次 Session replacement 重建
-ResourceLoader、`before_agent_start` System Prompt override、Extension Tool registration 和原生 auth/model
-state。用户于 `2026-08-25T10:34:14+08:00` 确认
-[model-context-change revision 1](model-context-change.md)，明确接受 Bootstrap 位置、项目原生 Skills、MCP 模型
-输入、旧 Pi Session clean break 和显式 `set_model` 全局默认副作用。
+真实 Kimi/Grok ACP Probe 显示 MiniMax 可能把带 `<think>` 标签的内容作为普通
+`agent_message_chunk` 返回。仅凭 provider 与文本标签把该标准 ACP agent text 改写成私有推理，会产生
+Runtime 特例、丢失上游证据，并让执行台与实际 wire 不一致。平台上，已有 macOS/Windows 聚合证据均早于
+Grok identity，不能自动覆盖新 Adapter。
 
 ### 决定
 
-1. D01 第 2 项的 Claude settings/MiniMax overlay 与私有 `PI_CODING_AGENT_DIR` 正式启动方式被替代。Host
-   继承用户原生 `~/.pi/agent` 认证和默认模型；Core 不读取 Claude settings、不复制 token、不创建 models.json。
-2. D01 第 4 项的“一 Host 一 Native Session”被替代。Pi 使用 workspace/process 级 resident LRU key；每 Run
-   通过私有递增 binding 执行 exact `switch_session` 或 `new_session`。Session、Camp/member、identity、
-   Bootstrap、Skills、MCP、model 和 thinking 都不进入 Host key；同 Host 只串行执行，跨 Workspace 不复用。
-3. Pi 增加 `managed_system_prompt`。Bootstrap Evidence v2 冻结完整 Member Identity/full Bootstrap bytes；
-   `rovai-pi-host-v2` 在 `before_agent_start` 将其追加到 Pi base System Prompt 末尾，并在 provider request 前
-   通过 blocking Managed Input Receipt v1 证明实际 prompt、Skill 与 Tool catalog。Pi 不使用普通消息式
-   compaction redelivery。
-4. D01 第 5 项的 explicit `--skill`/Host compatibility 被替代。每次 Session activation 只发现 exact
-   Workspace `.pi/skills`，合并项目原生 Pi Skills 与 Rovai ready projection，并用 `get_commands`/receipt 验证。
-5. D01 第 5 项的 External MCP Unsupported 被替代为 `AdditivePerRun / RovaiWins / CoreManaged`。首版只支持
-   stdio：Core owns Server process/JSON-RPC，Extension 注册当前 Run proxy Tools，每次 MCP call 都 durable approve；
-   Streamable HTTP 仍 unsupported。
-6. cold resume 继续只使用 full UUID + exact canonical file，但失败不再按 D01 “至多新建一个 Session”降级；
-   当前输入 fail closed 并记录 controlled continuity loss。`agent_settled` final、Pi 无 sandbox、managed native
-   Tool Approval、Usage/Cost Disabled、Compaction Disabled 和非 arm64 平台未准入均不变。
-7. Migration 108 将 Data Contract 升至 `v1.22 / schema 63`，fence 缺少 frozen identity/managed receipt 的旧
-   nonterminal Pi state，并清理旧 locator；completed 业务历史与非 Pi technical state 不回写、不失效。
+Kimi 与 Grok 不再识别、删除、重分类或压制 provider 文本中的 `<think>` 块。两者与其他 ACP Runtime 一样，
+把 `agent_message_chunk` 原样投影为 `agent.text.delta` / Runtime Evidence；terminal final 与 Missing-Send
+candidate 只使用通用 whitespace trim。若上游发送 thinking text，执行台和最终公开候选都如实保留。
+`_x.ai/*` vendor notification 仍只作 metadata/lifecycle，不冒充 agent text。
 
-当前字段级规范见
-[Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)，精确模型可见 bytes、
-binding/receipt shape、MCP naming/result 和迁移规则见
-[model-context-change revision 1](model-context-change.md)。
+`grok-build × macos-arm64` 仅绑定本版本独立 evidence digest；macOS x64 与 Windows x64 保持
+`not_qualified`。Usage/Cost 在语义未验证前保持 Disabled。本决定同时取代 v1.27 冻结时的 Kimi
+provider-specific sanitizer 当前边界，但不改写历史验收事实。
 
 ### 后果
 
-- resident Host 只承载真实进程级状态，可以在同一 Workspace 安全串行服务不同成员和多个 exact Session；
-- identity 仍按 Native Binding 冻结，不会因 Host 跨成员复用而串线，也不会在既有 Session 中热更新；
-- Bootstrap、Skills 和 MCP 从“argv 猜测”变为跨进程 receipt 证明的实际模型输入；
-- Pi 直接使用用户已配置的原生 MiniMax/BYOK/OAuth/Subscription，不再依赖 Claude 配置；显式模型选择对 Pi
-  全局默认的修改必须由 UI/文档诚实披露；
-- stdio MCP 获得产品支持，但其每次调用都经过 Core durable Approval；HTTP、Usage/Cost、Compaction 与其他
-  平台没有被连带晋升。
+执行台可检查 Runtime 实际返回的完整 agent text；如果 provider 把 reasoning 标签混入普通文本，Camp final
+或 Missing-Send publication 也可能包含它。Rovai 不替 provider 猜测哪部分可公开。新增平台需要独立完成
+同级资格，不能借用共享进程基础设施或其他 Runtime 结果。
 
 ### 被拒绝方案
 
-- **继续把 Binding 输入放进 Host compatibility：** 会为身份、Skills、MCP 或模型变化重复启动进程，且无法
-  利用 Pi 已验证的 exact Session replacement；
-- **在普通 user message 重投 Bootstrap：** 改变消息历史和 authority，并与 `before_agent_start` 的 protected
-  instruction layer 重复；
-- **让 Pi Extension 直接连接 MCP：** Core 无法统一拥有进程树、Approval、generation fence、secret 和 cleanup；
-- **依赖 MCP readOnlyHint 免审批：** 首版没有足够信任链证明 annotation 与真实副作用一致；
-- **为无副作用显式模型选择继续维持私有 Pi Home：** 会失去用户原生认证/订阅/Session，且 Pi `0.84.2`
-  公开 RPC 本身会持久化默认；revision 1 已选择诚实披露该副作用。
+- terminal fail-closed sanitizer：会静默丢弃或改写 Runtime 声明为 agent text 的内容；
+- 按 `<think>` 重分类为 thought：仍是 MiniMax 专用协议推断，不是 ACP 事实；
+- 压制 Kimi/Grok assistant chunk、只在 terminal 发布：会造成执行台与其他 ACP Runtime 不一致；
+- 复用旧 macOS/Windows aggregate digest：其证据没有 Grok 行为样本。
+
+<a id="v1-28-d03"></a>
+## V1.28-D03：Grok External MCP 使用私有进程 Plugin 追加，原生同名优先
+
+### 背景
+
+Grok 的 ACP schema 接受 Session `mcpServers` 字段，但 `grok 0.2.118` 的真实产品链路会忽略该字段。原生
+project/user config 会修改用户状态且没有逐 Run 回收边界。该版本同时广告并实测了 process-level
+`--plugin-dir`，Plugin 内 `.mcp.json` 可以在不写用户目录的前提下加载 stdio/HTTP Server。
+
+### 决定
+
+`grok-build` 声明 `AdditivePerRun / NativeWinsSkip`。Core 在权限为 `0700/0600` 的私有 Runtime 目录生成临时
+Plugin，以 `--plugin-dir` 启动专属 `--no-leader` Host；Host compatibility 绑定完整 MCP 集合，RAII 与 Host
+cleanup 删除 Plugin。启动前 `grok inspect --json` 返回的全部已发现名称都保留给 native，包括 disabled 或
+untrusted 定义，因为 Grok 的同名合并先于 trust/enable gate；冲突 Assignment 显式 `skipped_native_name_conflict`。
+
+### 后果
+
+不同名 Rovai Server 可与两个原生 Server 同时启动并由 MiniMax-M3 真实调用；ContextManifest 如实记录两个
+冲突 skip 和一个 ready。代价是 MCP 集合变化会得到不兼容 Host，且同名时 Rovai 不覆盖原生定义。
+
+### 被拒绝方案
+
+- 继续使用 ACP Session `mcpServers`：真实 Runtime 静默忽略；
+- 写入 `.grok/config.toml` 或用户 `$GROK_HOME/config.toml`：污染用户状态且生命周期超过单次 Run；
+- RovaiWins：Grok 在 trust/enable gate 前按名称合并，覆盖会使 native 配置语义不可预测。
+
+<a id="v1-28-d04"></a>
+## V1.28-D04：load-only cold continuation 复用 TRAE HistoryRestore，不冒充 Resume
+
+### 背景
+
+`grok 0.2.118` 广告 `agentCapabilities.loadSession=true`，但不广告 ACP `sessionCapabilities.resume`，直接调用
+`session/resume` 返回 Method not found。新进程用相同原生 Home 和 exact Session ID 调用 `session/load` 时会
+回放历史 user/assistant/vendor 事件；如果普通路由接收这些事件，会污染当前 Run。
+
+### 决定
+
+Grok continuation 顺序为 compatible same-host Session → 未来真实广告并取证的 resume → exact
+`session/load` HistoryRestore → new Session。HistoryRestore 复用 TRAE 的 LoadingReplay quarantine、response
+后 bounded quiet window、exact returned-ID check 和一次性 continuity-lost fallback；兼容 key 绑定安装、协议、
+可执行 fingerprint、Host config、canonical workspace/access/isolation、模型、权限与 Grok 官方配置摘要。
+
+### 后果
+
+真实 Core/Host 重启后保持同一 Session ID 并找回 session marker；17 条 replay event 没有生成额外公开正文、Action、
+Approval 或 Missing-Send。恢复后的 Tool/Approval 与 cancel 正常；错误 ID 只记录一次 continuity-lost 并建立一个
+新 Session。产品和报告必须写 `HistoryRestore`，不能写 native/session resume。
+
+### 被拒绝方案
+
+- 把 `loadSession` 当 `resume`：混淆协议能力并遗漏 replay quarantine；
+- 解析“最近 Session”或私有数据库：不是 exact ID，且扩大用户状态读取面；
+- load 失败后反复重试：可能重复输入或副作用，只允许一次受控 fresh fallback。
+
+<a id="v1-28-d05"></a>
+## V1.28-D05：Grok Bootstrap 使用原生追加 rules，结构化 completion 驱动既有 Redelivery
+
+### 背景
+
+Grok `0.2.118` 的 `session/new._meta.rules` 会把字符串追加进 Runtime 内建 system prompt 的
+`<human_rules>`，而 `systemPromptOverride` 会替换整个上游 system prompt。真实 no-leader wire 同时提供
+`_x.ai/session_notification`：auto compaction 完成态带 exact Session ID、非空 `_meta.eventId` 与
+`auto_compact_completed`。此前产品仍把 Bootstrap 放在首轮 user payload，并把 Grok detector 保持 Disabled。
+
+### 决定
+
+按开发者明确确认的[模型上下文变更 revision 2](model-context-change-grok-native-rules.md)，继续由既有
+Formatter 3 生成完全相同的 `SESSION_CHARTER + MEMBER_IDENTITY + MEMORY_ENTRYPOINT` bytes。只有创建新 Grok
+Native Session 时，把完整 payload 原样放入 `session/new._meta.rules`；首轮和后继 `session/prompt` 只发送
+Dynamic Context。禁止使用 `systemPromptOverride`，same-host reuse 与 exact-ID `session/load` 不重复注入，load
+失败后的 replacement Session 对新 Binding/generation 注入一次。
+
+Grok compaction policy 为 `best_effort`。只准入无 JSON-RPC request ID 的
+`_x.ai/session_notification`，且 Session ID 命中 active Observer Lease、update 为
+`auto_compact_completed`、`tokens_after` 是非负整数、event ID 为非空字符串并且不是 replay。event ID 是 Runtime
+occurrence identity；started、failed、cancelled、nested envelope、未知 shape、文本或 token-drop heuristic 全部
+忽略。合格 completion 不打断 Grok 当前内部 compact-and-resubmit，只推进 durable requested revision；下一次
+尚未 prepared 的 Core 输入使用既有 Redelivery Envelope/Formatter v2，并在 accepted ACK 后确认 revision。
+
+Migration 108 只扩展三个 Adapter closed set，Data Contract 为 v1.22/schema 63。Grok Binding compatibility
+加入 native-rules revision 1；旧 `first_payload` Binding 不兼容。其他 Runtime 的 delivery mode、detector policy
+与模型输入全部不变。
+
+### 后果
+
+Bootstrap 获得 Grok 原生 system-level 权限层级，同时不覆盖 Runtime 自带工具、权限与 agent prompt。真实强制
+压缩产品 smoke 捕获结构化 completion，revision 1 在下一轮同 Session/warm Host 输入中恰好一次 accepted，
+requested 与 acknowledged 均收敛为 1。detector 丢失仍不阻断 Readiness 或 AgentRun；Usage/Cost 保持 Disabled。
+
+### 被拒绝方案
+
+- 继续首轮 user prompt 注入：权限层级低于 Grok 已验证的原生追加通道；
+- `systemPromptOverride`：会替换上游 system prompt，不满足追加语义；
+- load 时重发 rules：Grok 只在创建时折叠 rules，且 exact load 已保留原规则；
+- 在 completion 回调中立即插入 prompt：会与 Runtime 内部重采样竞态；
+- 根据 token、summary 或 assistant 文本猜测压缩：没有稳定 occurrence identity，无法幂等准入。

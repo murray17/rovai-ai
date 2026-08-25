@@ -7,7 +7,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { assertUserDataIsIsolated } from './lib/dev-desktop.mjs'
 
 const root = resolve(import.meta.dirname, '..')
-const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai-ai.app'))
+const appPath = resolve(process.argv[2] ?? join(root, 'dist', 'mac-arm64', 'Rovai AI.app'))
 const fixtureRoot = resolve(process.env.ROVAI_ONBOARDING_ACCEPT_FIXTURE_ROOT
   ?? await mkdtemp(join(tmpdir(), 'rovai-onboarding-ui-accept-')))
 const dataDir = assertUserDataIsIsolated(join(fixtureRoot, 'user-data'))
@@ -337,7 +337,7 @@ async function launchApp(port) {
   const stderr = []
   const executable = process.platform === 'win32'
     ? appPath
-    : join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+    : join(appPath, 'Contents', 'MacOS', 'Rovai AI')
   if (process.platform === 'win32' && !existsSync(dataDir)) {
     const preparer = join(dirname(executable), 'resources', 'bin', 'rovai-core.exe')
     const prepared = spawnSync(preparer, ['--prepare-windows-data-root', dataDir], {

@@ -12,6 +12,7 @@ import {
 import { tmpdir } from 'node:os'
 import { basename, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parse as parseYaml } from 'yaml'
 
 const EXPECTED_APP_ID = 'ai.rovai.desktop'
 const EXPECTED_AUTHORITY = 'Rovai Release Signing'
@@ -32,6 +33,7 @@ const distDir = join(root, 'dist')
 const reportPath = join(distDir, `signing-report-${arch}.txt`)
 const packageMetadata = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const productName = packageMetadata.build.productName
+const executableName = packageMetadata.build.mac.executableName ?? productName
 const appName = `${productName}.app`
 const expectedArchitecture = EXPECTED_ARCHITECTURES[arch]
 const mountPoint = mkdtempSync(join(tmpdir(), `rovai-release-${arch}-`))
@@ -60,18 +62,51 @@ function run(command, args) {
 function findDmg() {
   if (!existsSync(distDir)) throw new Error('dist directory does not exist')
 
-  const expectedName = `${productName}-${packageMetadata.version}-${arch}.dmg`
+  const expectedName = artifactName('dmg')
   const exactPath = join(distDir, expectedName)
   if (existsSync(exactPath)) return exactPath
 
   const candidates = readdirSync(distDir)
-    .filter((name) => name.startsWith(`${productName}-`) && name.endsWith(`-${arch}.dmg`))
+    .filter((name) => name.endsWith(`-${arch}.dmg`))
     .map((name) => join(distDir, name))
 
   if (candidates.length !== 1) {
     throw new Error(`expected exactly one ${arch} DMG in dist, found ${candidates.length}`)
   }
   return candidates[0]
+}
+
+function verifyUpdateArtifacts() {
+  const zipPath = join(distDir, artifactName('zip'))
+  const updateInfoPath = join(distDir, 'latest-mac.yml')
+  if (!existsSync(zipPath)) throw new Error(`macOS update ZIP is missing: ${zipPath}`)
+  if (!existsSync(updateInfoPath)) throw new Error(`latest-mac.yml is missing: ${updateInfoPath}`)
+
+  const updateInfo = parseYaml(readFileSync(updateInfoPath, 'utf8'))
+  if (!updateInfo || updateInfo.version !== packageMetadata.version) {
+    throw new Error('latest-mac.yml has the wrong version')
+  }
+  const zipName = basename(zipPath)
+  const zipEntry = Array.isArray(updateInfo.files)
+    ? updateInfo.files.find((entry) => entry?.url === zipName)
+    : null
+  if (!zipEntry || typeof zipEntry.sha512 !== 'string' || zipEntry.sha512.length < 80) {
+    throw new Error(`latest-mac.yml has no complete entry for ${zipName}`)
+  }
+  if (Number(zipEntry.size) !== statSync(zipPath).size) {
+    throw new Error(`latest-mac.yml has the wrong size for ${zipName}`)
+  }
+  report.push(`Update ZIP: ${relative(root, zipPath)}`)
+  report.push('latest-mac.yml: version, sha512 and size passed')
+}
+
+function artifactName(extension) {
+  return packageMetadata.build.mac.artifactName
+    .replaceAll('${productName}', productName)
+    .replaceAll('${name}', packageMetadata.name)
+    .replaceAll('${version}', packageMetadata.version)
+    .replaceAll('${arch}', arch)
+    .replaceAll('${ext}', extension)
 }
 
 function architectureOf(binaryPath) {
@@ -95,7 +130,7 @@ function findPackagedApp() {
     .filter((candidate) => existsSync(candidate))
 
   const matching = candidates.filter((candidate) => {
-    const executable = join(candidate, 'Contents', 'MacOS', productName)
+    const executable = join(candidate, 'Contents', 'MacOS', executableName)
     try {
       const actual = architectureOf(executable)
       return actual.length === 1 && actual[0] === expectedArchitecture
@@ -171,6 +206,17 @@ try {
   if (dmgSize <= 0) throw new Error('DMG is empty')
 
   const packagedAppPath = findPackagedApp()
+  verifyUpdateArtifacts()
+  const updateConfiguration = parseYaml(readFileSync(
+    join(packagedAppPath, 'Contents', 'Resources', 'app-update.yml'),
+    'utf8'
+  ))
+  if (updateConfiguration?.provider !== 'github'
+      || updateConfiguration.owner !== 'murray17'
+      || updateConfiguration.repo !== 'rovai-ai') {
+    throw new Error('packaged app-update.yml does not target the official GitHub release channel')
+  }
+  report.push('Packaged updater channel: github/murray17/rovai-ai')
   report.push(`DMG: ${relative(root, dmgPath)}`)
   report.push(`DMG size: ${dmgSize}`)
   report.push(`Unpacked app: ${relative(root, packagedAppPath)}`)
@@ -188,7 +234,7 @@ try {
   const appPath = join(mountPoint, appName)
   if (!existsSync(appPath)) throw new Error(`${appName} is missing from the mounted DMG`)
 
-  const appExecutable = join(appPath, 'Contents', 'MacOS', productName)
+  const appExecutable = join(appPath, 'Contents', 'MacOS', executableName)
   const corePath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai-core')
   const cliPath = join(appPath, 'Contents', 'Resources', 'bin', 'rovai')
   for (const requiredPath of [appExecutable, corePath, cliPath]) {

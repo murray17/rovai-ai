@@ -225,6 +225,8 @@ function runtimeParametersFor(
       return <CursorRuntimeParameters {...props} />
     case 'kimi-code-cli':
       return <KimiRuntimeParameters {...props} />
+    case 'grok-build':
+      return <GrokRuntimeParameters {...props} />
     case 'antigravity-app':
       return <AntigravityRuntimeParameters {...props} />
   }
@@ -340,6 +342,15 @@ function KimiRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element 
   )
 }
 
+function GrokRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
+  return (
+    <div className="runtime-parameter-form">
+      {modelFieldsFor('grok-build', props)}
+      <PermissionSelect {...props} fieldKey="permission_mode" label="权限模式" />
+    </div>
+  )
+}
+
 function AntigravityRuntimeParameters(props: RuntimeParameterProps): React.JSX.Element {
   return (
     <div className="runtime-parameter-form">
@@ -374,6 +385,7 @@ function modelFieldsFor(
     case 'trae-cn-cli':
     case 'cursor-agent':
     case 'kimi-code-cli':
+    case 'grok-build':
     case 'antigravity-app':
       return <ModelFields {...props} />
   }

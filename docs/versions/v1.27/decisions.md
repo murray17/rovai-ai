@@ -321,7 +321,7 @@ cancelled settle 这次等待。把 blocked 当终态会提前清除 pending，�
 
 当前规范见 [Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)、
 [Session 与 Bootstrap 不变量](../../architecture/foundational-invariants.md#context-session-bootstrap)与
-[Runtime 接入 Checklist](../../development/runtime-integration-checklist.md#8-compaction-信号)。
+[Runtime 接入 Checklist](../../development/runtime-integration-checklist.md#35-compaction-continuity)。
 
 ### 后果
 
@@ -431,3 +431,122 @@ D03 正确地拒绝把 Kimi macOS arm64 的资格自动外推到 macOS x64；当
 - **把 arm64 digest 直接套到 x64 而不记录平台晋升：** 会掩盖 D03 的独立取证边界与本次发布来源；
 - **新增第二个 Kimi AdapterKind：** CPU 架构是 HostPlatformKey，不是新的 Runtime 产品身份；
 - **同时修改 Runtime 能力或权限：** 平台准入不提供这些独立语义变化的证据。
+
+<a id="v1-27-d10"></a>
+## V1.27-D10：ACP matching error 与当前 Prompt activity 组合确认 input accepted
+
+### 背景
+
+ACP v1 的普通 `session/update` 只有 Session ID，旧合同因此只把成功 `session/prompt` response 当作 accepted ACK，
+并把 matching error 一律当作 `not_accepted`。本机 TRAE 运行暴露了反例：同一 active Prompt 已持续产生推理、
+十一次 Tool call 和文件写入，最后才返回 matching `-32603 Internal error`。把这个 Run 标成未接收会开放原输入
+重放，可能重复已经发生的外部效果；只把所有 error 改成 accepted 又会把真正的 Prompt 预拒绝推进水位。
+
+### 决定
+
+1. success response 继续产生 `InputAccepted`；response 前 Host loss 继续产生 `delivery_unknown`；
+2. matching error 到达前，若 Host 已在同一 Run/epoch/Session/Prompt/Delivery fence 下观察到非 metadata Prompt
+   activity，则产生 `InputAccepted`，error 只结算 AgentRun failure；
+3. matching error 前没有当前 Prompt activity 时产生 `InputNotAccepted`；activity 单独出现仍不是早期 ACK；
+4. accepted input 后的失败固定 `manualRetryAllowed=false`，Provider retryability 不能覆盖 Core 防重放门禁；
+5. ACP error 的安全数字 code 和有界 message 进入通用 `RuntimeFailureView`，原始 data、Prompt、Tool payload 和
+   私有日志不公开。
+
+当前规范见 [Built-in Tool Runtime](../../architecture/builtin-tool-runtime.md)、
+[Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与
+[Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)。
+
+### 后果
+
+- 已产生可审计 activity/effect 的失败不会再伪装成未投递，也不会提供危险的原 Run 重放；
+- 无 activity 的预拒绝仍可按既有 retry 流程处理，Host loss 仍诚实保留未知；
+- accepted ACK 仍只在 matching response 边界产生，不把普通 Session event 单独提升为 ACK；
+- 所有 Product Runtime 可以复用同一公开 failure shape，历史 null 不回填。
+
+### 被拒绝方案
+
+- **所有 matching error 都是 not accepted：** 与已经产生的 Prompt/Tool activity 和外部效果冲突；
+- **首个 Session event 立即 ACK：** event 缺少 Prompt ID，单独使用会扩大迟到事件误归因窗口；
+- **所有 matching error 都是 accepted：** 会把真正的参数/能力预拒绝错误推进 Context 水位；
+- **只关闭 UI 重试按钮而不修 Delivery：** 持久状态、恢复和后继输入仍会建立错误结论。
+
+<a id="v1-27-d11"></a>
+## V1.27-D11：业务审计时间使用 wall clock，Execution Budget 使用独立非倒退 observation
+
+### 背景
+
+旧实现以进程启动 UTC 加 Rust `Instant::elapsed()` 合成“当前 UTC”，并同时用于 Execution Budget 与
+CampMessage/CampTurn/AgentRun/Conversation 时间。macOS 深度睡眠期间该 awake elapsed 没有完整前进；唤醒后新输入
+实际发生在 20:00，Run 却持久化为 19:16。直接统一改回 wall clock 能修显示和 suspend，但 wall clock 回拨又可能
+延长预算；继续使用合成时间则会污染用户可见审计。
+
+### 决定
+
+1. 所有业务实体与 Domain Event 的 created/started/updated/ended 时间使用调用时 UTC wall clock；
+2. `AgentRun.created_at` 表示触发输入被接受并创建 Run，`started_at` 表示 Scheduler 实际 claim，二者不互相覆盖；
+3. Execution Budget 使用进程内非倒退 observation，取 wall clock、启动 wall anchor 加 awake elapsed、上次值的
+   最大值；系统 suspend 的 wall progress 必须计入，wall 回拨不得延长已观察预算；
+4. Budget deadline comparison 和 lease 可以使用该 observation，预算耗尽等审计字段仍写当时 wall clock；跨进程
+   恢复继续依赖持久 UTC deadline，不迁移历史时间。
+
+当前规范见[协作与执行准入不变量](../../architecture/foundational-invariants.md#collaboration-admission)与
+[Runtime Launch and Verification v26](../../contracts/runtime-launch-and-verification-v26.md)。
+
+### 后果
+
+- suspend 后新 Run 时间与用户输入一致，排队时 `started_at` 仍可诚实晚于 `created_at`；
+- Execution Budget 计入睡眠且不因本进程内 wall 回拨延长；
+- 已持久化的错误历史时间不批量重写，避免依据不完整 sleep offset 修改审计证据；
+- 调用点必须显式选择 wall/audit 或 budget clock，不能再用一个“now”同时承担两种语义。
+
+### 被拒绝方案
+
+- **只在 Renderer 加 43 分钟：** offset 随 sleep/dark wake 变化，且不能修预算与数据库事实；
+- **所有时间统一 `Utc::now()`：** suspend 正确，但 wall 回拨可能延长执行预算；
+- **所有时间统一非倒退合成 clock：** 会继续把进程 awake 时间伪装成用户审计 wall time；
+- **批量重写历史记录：** 日常数据库没有每条记录的可靠 suspend offset，迁移会制造新的猜测事实。
+
+<a id="v1-27-d12"></a>
+## V1.27-D12：Runtime-specific policy 选择通用本地 ACP Client Terminal
+
+### 背景
+
+Rovai 的 ACP Client 一直统一声明 `clientCapabilities.terminal=false`。Kimi Code 0.32.0 在该声明下仍使用内部
+Bash；0.38.x 的实际兼容回归则让 Shell 失败并返回 `ACP terminal capability is unavailable`。其他已资格验证
+ACP Runtime 在 `terminal=false` 下仍能沿原路径执行 Shell，因此全局开启 capability 会无依据地改变所有
+Runtime；为 Kimi 定义私有 Shell RPC 又会复制 ACP 标准和现有本地进程安全边界。
+
+### 决定
+
+1. Adapter compatibility registry 拥有 `AcpClientTerminalMode = Disabled | LocalBridged`；当前 Kimi Code 为
+   `LocalBridged`，其他 Runtime 为 `Disabled`。不按未经验证的版本范围硬编码分支；
+2. initialize 的 `clientCapabilities.terminal` 只由该 policy 导出。`true` 必须和真实的通用标准 ACP Client
+   Terminal callbacks 同时存在，禁止只改 capability bit；
+3. 通用 Bridge 实现 create/output/wait_for_exit/kill/release，且不包含 Kimi-specific wire。Terminal 使用
+   当前 Runtime Host launch snapshot 派生本地 ManagedProcess，继承环境、workspace、平台进程树和
+   protected-tree 边界；
+4. create 绑定当前 Host、Session、AgentRun owner/execution epoch 与 Active Prompt；cwd canonical 后不得逃逸
+   workspace。cancel、detach、EOF、shutdown/reap 清理遗留进程，Host 有 Terminal 时不进入 warm reuse；
+5. stdout/stderr 只进入有界协议 buffer。Terminal output/error 不投影为 Camp message 或 durable Evidence，
+   不增加云端执行路径，不改变其他 Runtime 的内部 Shell。
+
+当前规范见 [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)与
+[ACP Client Terminal v1](../../contracts/acp-client-terminal-v1.md)。
+
+### 后果
+
+- Kimi 0.38.x 可以按标准 ACP capability 请求 Rovai 本地 Terminal，0.32.0 也能在同一通用能力下保持兼容；
+- 其他 ACP Runtime 继续观测 `terminal=false`，既有 Shell、Session continuation、History Restore 和 Prompt
+  lifecycle 不变；
+- Core 新增 Host-local Terminal map 与有界输出窗口，生命周期必须随 Run/Host 清理；
+- 实际 Kimi Code 0.38.0 npm 发布包的只读复核和隔离 Home initialize 确认 exact standard wire、4 MiB limit、
+  capability failure 分支与 `terminal=true` negotiation；确定性 Host fixture 证明本地生命周期，macOS arm64
+  隔离开发 App 的真实 Camp AgentRun 进一步证明两次 Bash、固定输出、Run success 与进程回收。
+
+### 被拒绝方案
+
+- **全局 `terminal=true`：** 会改变其他已资格验证 Runtime 的 Shell 选择，且 capability bit 不能替代 callbacks；
+- **Kimi 私有 Shell 协议：** 重复标准 ACP wire 和进程设施，长期随 Runtime 版本漂移；
+- **硬编码 `>=0.38`：** 当前没有足够 qualification 证据证明完整版本范围，且旧版本收到标准 capability 无需
+  改变其他 Runtime；
+- **Bridge 自建 subprocess 系统：** 会绕过 ManagedProcess 的环境快照、进程树、Windows Job 与 macOS 本地安全边界。

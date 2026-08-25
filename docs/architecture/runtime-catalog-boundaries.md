@@ -3,7 +3,7 @@ document_type: architecture
 architecture: runtime-catalog-boundaries
 authority: runtime-catalog-and-preview-boundaries
 status: accepted
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Runtime Catalog Boundaries
@@ -26,7 +26,7 @@ last_updated: 2026-08-24
 | Product Runtime Availability | Core 对某一 Product Runtime 的 discovery、静态身份或 deep-verification snapshot | light ready、checking、legacy installed unverified、ready、needs login、not installed、incompatible、transient failure 等当前机器状态 | 新产品身份、把静态可尝试误作深检 Ready 或静默 Runtime fallback |
 | Settings Runtime Preview Catalog | Renderer 内受审查的静态 presentation rows | Runtime 设置页中的名称、图标、`待支持`文案和 disabled 状态 | Contracts、Core request、数据库、成员选择、诊断、Probe、AgentRun 或支持数量 |
 
-Product Runtime Catalog 当前包含十三种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
+Product Runtime Catalog 当前 closed set 包含十四种已实现 Adapter。Preview 与它不是“同一目录的另一种状态”；
 Renderer 只在绘制 Runtime 设置列表时组合两种 row。产品目录的机器可判数量、全量检查、诊断分母和
 普通执行仍只来自逐平台 Admission。Cursor 虽保留 closed identity 和历史 reader，但未完成产品资格前不进入
 Settings Runtime Preview Catalog；隐藏该 row 不删除持久 identity，也不改变未准入状态。普通成员 Runtime
@@ -141,10 +141,14 @@ Model 继续表达“Agent 运行时默认”，不会把缺失升级为 Runtime
 
 ## 内部诊断与公开 Runtime failure
 
-Claude Code 与 Antigravity 的执行或显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
+任一 Product Runtime 的真实执行失败，以及支持该边界的显式 Availability Check 失败时，Core 可以从 typed Runtime 证据形成
 `RuntimeFailureView`。该对象只保存 Runtime identity、origin、phase、稳定 code、安全 summary/detail 与
 retryable；完整 error chain、原始 stderr、私有日志、exit status、byte count 和 digest 仍属于内部诊断。
 公开 detail 必须先脱敏、去控制字符并有界化，不能包含 Prompt、用户消息、Tool input 或完整 Tool output。
+
+ACP matching Prompt error 至少保留安全数字 JSON-RPC error code 和有界 message；Prompt activity 与 matching
+response 已证明输入 accepted 时，公开 failure 的 retryable 必须为 false，不能用 Provider 可重试分类覆盖 Core
+的防重放门禁。原始 `error.data` 不进入公开投影。
 
 `runtime` 只表示 Runtime/Provider 明确报错；协议、参数和输出格式问题是 `compatibility`，executable/cwd/
 权限/附件目录问题是 `environment`，只有明确 Core 状态、持久化或配置生成证据才能是 `rovai`，否则为
@@ -219,42 +223,19 @@ Cursor。Settings 的 Agent Runtime 目录默认不展示 Cursor；closed identi
 字段级行为见 [Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)，
 证据状态见 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
-## Pi Coding Agent 当前边界
+## ACP Client Terminal 边界
 
-`pi` 使用独立 `pi-jsonl-rpc-v1` Host，不进入 ACP 路由。正式 AgentRun 保留用户通用 `HOME`，且不覆盖
-`PI_CODING_AGENT_DIR`；认证、provider catalog、模型目录和默认模型完全来自用户原生 `~/.pi/agent`。
-Core 不读取 Claude settings、不创建 MiniMax provider overlay、不复制 token，也不把 Pi Session 文件正文
-写入数据库或公开 Evidence。`--no-extensions` 后只显式加载 `rovai-pi-host-v2`，用户/项目第三方 Extension
-和 Package 不进入正式 Host。
+ACP Client Terminal 是 Runtime-specific compatibility capability，不是全局 ACP 开关。Adapter registry 为每种
+Runtime 返回 `disabled` 或 `local_bridged`：只有后者才同时在 initialize 声明 `terminal=true` 并在同一 Host
+安装通用标准 Bridge。当前只有 Kimi Code 使用 `local_bridged`；其他 ACP Runtime 继续声明 `terminal=false`，
+保留各自已资格验证的内部 Shell 路径。
 
-Pi 上游没有原生 sandbox/permission system，因此唯一产品权限值为 `approval_mode=managed`。受管 Extension
-握手是 Ready 与正式启动硬门：`bash/write/edit` 在执行前桥接 durable Approval，read/search 类 Tool 不弹
-Approval，其可达性仍由 OS 用户、冻结 cwd 与既有 Runtime Workspace/attachment 边界决定；Pi 本身没有 sandbox。
-未知 mutating Tool、Extension error、timeout 或 Core restart 一律阻断。
-`message_end.message` 提供权威 assistant snapshot，`agent_settled` 是唯一成功 terminal 和 Missing-Send final
-boundary；prompt response、`agent_end` 与 process exit 都不能替代。
-
-Pi 参加公共 Runtime Fleet LRU，但 compatibility key 是 workspace/process 级，不含 Camp、member、Session、
-identity、Bootstrap、Skill、MCP、model 或 thinking。同 Workspace 的 resident Host 串行执行：每个 Run 发布
-新的私有 binding，再以 `switch_session(<exact canonical file>)` 或 `new_session` 激活 Session；并发 Run 使用
-不同 Host，跨 Workspace 不复用。cold resume 只认 full UUID 与 exact canonical file，禁止 recent/partial ID、
-目录扫描或 replay History Restore；失败 fail closed，不在同一输入中悄悄降级到新 Session。
-
-Pi 单独使用 `managed_system_prompt`：`rovai-pi-host-v2` 在每次 `before_agent_start` 把当前 Native Binding 冻结的
-完整 Bootstrap 追加到 Pi base System Prompt 末尾，并先提交 blocking managed-input receipt。身份与完整
-Bootstrap bytes 冻结在 Native Binding Evidence v2，不属于 Host；既有 Session 不因 AgentProfile 编辑热更新。
-Dynamic Context 仍作为 exact `prompt.message`，Pi 不创建普通消息形式的 Bootstrap redelivery overlay。
-
-每次 Session activation 只发现 exact `W/.pi/skills`，因此既包含该 Workspace 合格的项目原生 Pi Skills，也
-包含 Rovai Reconciler 投递的 ready Skills；Core 以 `get_commands` 和 managed receipt 验证实际 catalog。
-External MCP 改为 `AdditivePerRun / RovaiWins / CoreManaged`：stdio Server 由 Core 启动并投影为 Extension proxy
-Tool，每次调用都走 durable Approval；Streamable HTTP 仍 unsupported。Built-in `rovai` CLI 继续经 native
-Bash 与 per-Run lease 工作，不冒充 MCP。Usage/Cost 与 Compaction 保持 Disabled。
-
-`pi × macos-arm64` 已由真实 first/warm/cold resume、allow/deny、cancel、Missing-Send、Skill 与十五项 Built-in
-CLI matrix 准入。macOS x64 与 Windows x64 缺少独立证据，保持 `not_qualified`。字段级行为见
-[Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)，证据状态见
-[Runtime 兼容性清单](../runtime-compatibility.md)。
+Bridge 只在当前 AgentRun owner、execution epoch、Session 与 Active Prompt fence 内创建本地进程。进程从已
+admitted Runtime Host 的 ManagedProcess launch snapshot 派生，继承其 workspace、provider/Built-in 环境、
+macOS protected-tree deny 和平台进程树所有权；cwd 经 canonical/symlink 检查后不得逃逸 workspace。Run cancel、
+detach、Host EOF/shutdown 与 fleet reap 回收遗留 Terminal，未清空的 Host 不得进入 warm reuse。stdout/stderr
+使用有界私有 buffer，Terminal wire、output 与 error 不进入 Camp message 或 durable Evidence。字段与幂等合同见
+[ACP Client Terminal v1](../contracts/acp-client-terminal-v1.md)。
 
 ## Kimi Code 当前边界
 
@@ -263,6 +244,14 @@ CLI matrix 准入。macOS x64 与 Windows x64 缺少独立证据，保持 `not_q
 `KIMI_MODEL_*` provider 字段，并只注入目标子进程。`KIMI_MODEL_CAPABILITIES=thinking` 只声明能力，
 Rovai 不强制关闭 Kimi/MiniMax thinking。未知、重复、缺失、格式错误或权限过宽均在 launch 前
 fail closed；秘密不进入数据库、Evidence、diagnostics 或公开 command。
+
+Kimi Code 的 ACP compatibility policy 使用通用 Client Terminal `local_bridged` 模式。初始化真实声明
+`clientCapabilities.terminal=true`，Shell 子进程由上述本地 Bridge 执行；这不是 Kimi 私有 Shell 协议，也不改变
+其他 Runtime 的 Shell 路径。实际 `@moonshot-ai/kimi-code@0.38.0` 发布包的只读复核确认其 exact
+create/output/wait/kill/release、4 MiB output limit 与 capability-unavailable 分支；一次性隔离 Home initialize
+也返回 0.38.0 且接受 `terminal=true`。确定性 Host fixture 覆盖完整 wire、Run cancellation 与 workspace
+escape。macOS arm64 本机随后通过 Homebrew 升级到 0.38.0；隔离开发 App 的 Deep Probe 返回 authenticated/ready，
+真实 Camp AgentRun 经两次 Bash 调用读取 workspace cwd 与固定 marker 后成功结束，且未遗留 Kimi/Terminal 子进程。
 
 Kimi 正式 AgentRun 不设置通用 `HOME` 或 `KIMI_CODE_HOME`：父进程已有 `KIMI_CODE_HOME` 时原样继承，未设置时
 由 Kimi 使用其原生默认 Home。Core 不复制、合并或改写该 Home 的配置、认证与 Session；`KIMI_MODEL_*`
@@ -275,8 +264,9 @@ Run 直接复用同一 Host/Session。Host 被停止、淘汰或失效后，后�
 Session ID 必须与原 ID 完全相同。v22 创建的 Rovai 私有 Home 不再被新 Host 使用，也不自动迁移或删除；旧
 Binding 不可见时沿用一次 continuity-lost replacement。
 
-Kimi/MiniMax 可能在普通文本中返回 `<think>` 块，因此 Kimi streamed text 只作为私有 observation；只有 terminal
-候选完成推理清洗后才能进入公开输出，未闭合块 fail closed。External MCP 以
+Kimi/MiniMax 可能在普通文本中返回 `<think>` 块。Core 不再以 provider 或标签推断私有推理：Kimi 的标准
+ACP `agent_message_chunk` 与其他 ACP Runtime 一样原样进入 `agent.text.delta`、Runtime Evidence、terminal
+final 与 Missing-Send candidate，只应用通用 whitespace trim。External MCP 以
 `AdditivePerRun / RovaiWins` 经标准 ACP `session/new/resume/load.mcpServers` 投递，不写用户级 Runtime
 配置；完整解析后的 Server 集合进入 Host compatibility，含 AgentRun identity 的 Run-local projection/evidence
 digest 不进入，Server 定义变化仍 fence 旧 Host。stdio、Streamable HTTP、同名整项优先、ContextManifest 和
@@ -296,6 +286,65 @@ lease fencing、exact successor read 与 logical/native continuation 全部通�
 x64 由独立 Windows 资格证据准入。三者都进入普通 discovery、检查、成员配置和 AgentRun 路径。字段级行为见
 [Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)，证据状态见
 [Runtime 兼容性清单](../runtime-compatibility.md)。
+
+## Grok Build 当前边界
+
+`grok-build` 通过 `grok --permission-mode <effective> --no-auto-update agent --no-leader [--plugin-dir
+<private-root>] stdio` 复用 ACP v1 Host。initialize 成功后，BYOK 优先已广告的 `xai.api_key`；没有 BYOK
+overlay 时只接受 Runtime 广告的安全非交互默认、`cached_token` 或 `xai.api_key`，不回退到浏览器/device
+login。模型目录来自真实 Session，显式模型使用标准 `session/set_model`。
+
+Grok 模型/provider 直接使用官方 `$GROK_HOME/config.toml` 的 `[models]`、`[model.<id>]` 与
+`[model_providers.<id>]`；Core 不再定义或翻译 `GROK_MODEL_*` 私有三字段，也不改写用户配置。权限收窄的
+`$GROK_HOME/.env` 只作为本机密钥环境源：Core 仅解析官方 TOML 的 `env_key` / `env_http_headers` 引用和
+官方全局 API-key 名称，并把对应值注入目标子进程；未引用变量不进入。官方 `api_key` 字段同样兼容。
+
+正式 AgentRun 继承用户原生 `HOME` / `GROK_HOME`。BYOK Probe 把官方 `config.toml`、managed config 与
+requirements config 复制到临时 `GROK_HOME`，不复制 `.env`；account-auth Probe 为读取既有 cached token
+保留原生 Home。官方配置摘要同时 fence warm Host 与 cold HistoryRestore。
+
+Grok/MiniMax `<think>` 若由 Runtime 作为普通 `agent_message_chunk` 发出，就与其他 ACP agent text 一样原样
+进入执行台 Evidence、Camp final 与 Missing-Send，不做 provider-specific 清洗或重分类。`_x.ai/*`
+notification 只作为已知 Session metadata/lifecycle 安全路由。Runtime Fleet LRU 保留 compatible warm
+Host/Session；当前版本没有
+resume advertisement，cold continuation 只用 exact `session/load` HistoryRestore，replay 在 bounded loading
+phase 隔离，失败后只允许一次 fresh fallback。
+
+External MCP 为 `AdditivePerRun / NativeWinsSkip`。`grok 0.2.118` 的 ACP Session 忽略 `mcpServers`，Core 因此
+在私有 Runtime 目录生成临时 Plugin 并用 process `--plugin-dir` 追加；`grok inspect --json` 已发现的所有
+native 名称都保留，冲突 Assignment skip，不同名 Server 可追加，完整集合进入 Host compatibility，Plugin 随
+Host 清理。Core 不写 project/user config。managed Skill 投影到 `.grok/skills`。Usage/Cost 保持 Disabled。
+
+`grok-build × macos-arm64` 只绑定独立 adapter-scoped qualification evidence；macOS x64 与 Windows x64
+保持 `not_qualified / runtime_platform.qualification_evidence_missing`。
+
+## Pi Coding Agent 当前边界
+
+`pi` 使用官方 LF JSONL `pi-jsonl-rpc-v1`，不是 ACP，也不解析 TUI。正式 Host 继承用户原生
+`~/.pi/agent` 的认证、Subscription/BYOK、模型目录与 native default，不读取 Claude settings、不复制 MiniMax
+token，也不覆盖 `PI_CODING_AGENT_DIR`。显式模型通过 `get_available_models -> set_model -> get_state` 精确验证；
+Pi `0.84.2` 会把显式选择持久化为用户全局默认，该副作用属于已确认产品语义。
+
+Pi 的 Host 策略为 `resident_multi_session`：共享 Runtime Fleet 只按 exact Workspace、可执行文件/版本/指纹、
+协议、平台、权限和 `rovai-pi-host-v2` digest 复用进程。同一 Host single-flight，每个 AgentRun 通过递增 private
+binding 执行 exact `switch_session` 或 `new_session`；Session、成员身份、Bootstrap、Skills、MCP、模型与 thinking
+均不进入 process key。cold resume 只接受 full UUID + canonical Session file，失败记录 continuity lost 并 fail
+closed，不使用 partial/recent/fuzzy resume。
+
+Pi 单独使用 `managed_system_prompt`。Bootstrap Evidence v2 按 Native Binding 冻结完整 Member Identity 与 full
+Bootstrap bytes；Extension 在 `before_agent_start` 把它追加到 Pi 当前 base System Prompt，并在 provider request
+前提交 blocking Managed Input Receipt v1。身份属于 Binding，不属于 resident Host；同一 Session 不因 Profile
+编辑热更，新 Session 才读取新身份。
+
+Skills 每次 Session activation 只发现 exact `<workspace>/.pi/skills`，合并项目原生与 Rovai ready projection，
+并由 `get_commands`/receipt 校验。External MCP 使用 `AdditivePerRun / RovaiWins / CoreManaged`：Core 拥有 stdio
+Server/JSON-RPC/cleanup，Pi Extension 注册 per-Run proxy Tool，每次调用都 durable approve；Streamable HTTP 尚未
+实现。Pi 本身没有 sandbox，native `bash/write/edit` 由 managed Approval fail closed。
+
+上述行为由 [Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)定义；但行为
+实现与 First-Class evidence 是两条轴。合并新版 Checklist 后，Pi 当前 admission 仍为 `core_compatible`：
+Compaction、结构化 Usage、Skill/MCP 完整 lifecycle、六类 output/Missing-Send/cleanup Golden Flows 和不可变平台证据尚未
+全部闭合。closed catalog 与 macOS arm64 admission row 是待验收实现，不能单独证明正式 First-Class 发布。
 
 ## 队员最高权限默认
 
@@ -317,8 +366,7 @@ discovery 或迁移扩权；permission schema digest
 Kimi 暴露 Session-scoped `permission_mode=default|plan|auto|yolo`，新 draft 默认原生最高权限 `yolo`；
 writable AgentRun 通过标准 ACP `session/set_config_option` 投递 `mode=yolo`，read-only AgentRun 强制
 `plan`。descriptor 的 `recommendedValue=default` 只是保守提示，不改变 Product default；已有成员保存的
-`default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。Pi 只有
-`approval_mode=managed`，不是可切换或可关闭的 Runtime-native permission mode。十三种 Runtime 的 exact 默认矩阵见
+`default`、`auto` 或 `plan` 不由 discovery、升级或 migration 静默扩权。Runtime 的 exact 默认矩阵见
 [Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)。
 
 ## Preview 呈现与晋升

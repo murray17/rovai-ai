@@ -31,8 +31,7 @@ use crate::{
     db::Database,
     execution_budget::{
         CampTurnExecutionBudgetExhaustionReason, CampTurnExecutionBudgetRequest,
-        FrozenCampTurnExecutionBudget, camp_turn_execution_budget_now,
-        freeze_camp_turn_execution_budget,
+        FrozenCampTurnExecutionBudget, freeze_camp_turn_execution_budget,
     },
     gather::cancel_gathers_for_initiator,
     message_delivery::cancel_pending_turn_deliveries,
@@ -2204,7 +2203,10 @@ impl CollaborationService {
                     } else {
                         None
                     };
-                    let now = camp_turn_execution_budget_now().to_rfc3339();
+                    // Domain and audit timestamps must reflect the user's wall clock. Execution
+                    // Budget observation has a separate non-decreasing clock because its elapsed
+                    // safety semantics are not a presentation timestamp.
+                    let now = chrono::Utc::now().to_rfc3339();
                     let created_conversation_ids = if command.execution.is_some() {
                         ensure_resolution_conversations(
                             transaction,
@@ -2941,74 +2943,6 @@ fn queue_camp_message_and_runs(
         camp_sequence,
         agent_run_ids,
     })
-}
-
-pub(crate) fn append_system_camp_message(
-    transaction: &Transaction<'_>,
-    camp_id: &str,
-    component_id: &str,
-    body: &str,
-) -> Result<String> {
-    let message_id = Uuid::new_v4().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-    let updated = transaction.execute(
-        r#"
-        UPDATE camp
-        SET last_message_sequence = last_message_sequence + 1,
-            version = version + 1,
-            updated_at = ?2
-        WHERE id = ?1
-        "#,
-        params![camp_id, now],
-    )?;
-    if updated != 1 {
-        anyhow::bail!("Camp does not exist while appending a system message");
-    }
-    let sequence: i64 = transaction.query_row(
-        "SELECT last_message_sequence FROM camp WHERE id = ?1",
-        [camp_id],
-        |row| row.get(0),
-    )?;
-    let addressed_agent_ids_json = "[]";
-    let structured_content = vec![StructuredCampMessageSegment::Text {
-        text: body.to_string(),
-    }];
-    let structured_content_json = serde_json::to_string(&structured_content)?;
-    transaction.execute(
-        r#"
-        INSERT INTO camp_message(
-            id, camp_id, sequence,
-            author_type, author_id, source_agent_run_id, body,
-            structured_content_json, content_digest,
-            address_mode, addressed_agent_ids_json,
-            reply_to_camp_message_id, camp_turn_id, agent_run_id,
-            tombstoned_at, presentation_json, version, created_at, updated_at
-        ) VALUES (
-            ?1, ?2, ?3, 'system', ?4, NULL, ?5, ?6, ?7,
-            'broadcast', ?8, NULL, NULL, NULL,
-            NULL, NULL, 1, ?9, ?9
-        )
-        "#,
-        params![
-            message_id,
-            camp_id,
-            sequence,
-            component_id,
-            body,
-            structured_content_json,
-            canonical_content_digest(&structured_content)?,
-            addressed_agent_ids_json,
-            now,
-        ],
-    )?;
-    index_camp_message(
-        transaction,
-        &message_id,
-        camp_id,
-        body,
-        addressed_agent_ids_json,
-    )?;
-    Ok(message_id)
 }
 
 #[derive(Debug, Clone)]

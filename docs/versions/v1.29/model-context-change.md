@@ -1,6 +1,6 @@
 ---
 document_type: model-context-change
-version: v1.28
+version: v1.29
 change_id: pi-resident-managed-model-input
 revision: 1
 confirmation_status: confirmed
@@ -12,7 +12,7 @@ implementation_baseline: 7261b0f3d412dbf1773b57397d9cb2e51c2bc82b
 last_updated: 2026-08-25
 ---
 
-# v1.28 核心模型上下文变更说明：Pi resident Host 动态模型输入
+# v1.29 核心模型上下文变更说明：Pi resident Host 动态模型输入
 
 本文冻结 Pi Runtime 从“一 Host 一 Session、启动参数固定模型输入”改为“同 Workspace resident Host
 串行切换 Session、每 AgentRun 动态绑定模型输入”的精确模型可见变化和 Evidence 边界。审阅基线为
@@ -196,9 +196,9 @@ MCP Projection:                   2 (unchanged)
 Pi Managed Input Receipt:         1
 Pi Managed Extension:             rovai-pi-host-v2
 Runtime Launch and Verification:  v27
-Data Contract:                    v1.22
-Projection Schema:                63
-Latest Migration:                 108
+Data Contract:                    v1.24
+Projection Schema:                65
+Latest Migration:                 110
 ```
 
 `CharterDeliveryMode` 增加 closed value `managed_system_prompt`，只由 Pi 使用。`native_append` 与
@@ -563,7 +563,9 @@ Runtime evidence 和 Pi Managed Input Receipt 所关联的 `get_state` 验证。
 
 ## 数据迁移、失效与兼容策略
 
-Migration 108 只在已完整安装 v1.21/schema 62/Migration 107 后运行，升级为 v1.22/schema 63：
+合并 `main` 后，Grok 已合法占用 Migration 107/108 并把 Data Contract 推进到 v1.22/schema 63。Pi 改为连续
+两步迁移：Migration 109 增加 Pi catalog/Skill group 并升级到 v1.23/schema 64；Migration 110 增加本 revision
+的 managed context，并升级到 v1.24/schema 65：
 
 - `native_session_bootstrap_evidence.delivery_mode` closed set 增加 `managed_system_prompt`，增加 Evidence v2
   的 Member Identity/full Bootstrap Blob 与 digest 字段；只有该 mode 必须完整非空；历史
@@ -579,6 +581,10 @@ Migration 108 只在已完整安装 v1.21/schema 62/Migration 107 后运行，�
 - 非 Pi Native Binding、Bootstrap Evidence、ContextManifest、Runtime Input Delivery、Conversation 和 Run 不失效；
 - App/Core 启动和 Migration 后都会停止遗留 Pi Host。Host compatibility 加入 qualified Pi version/protocol、
   executable fingerprint 和 `rovai-pi-host-v2` digest；旧 `rovai-pi-approval-v1` Host 永不复用。
+
+Migration 109 还兼容合并前开发分支已使用 107/108 标记的本机技术数据库：它按实际 closed-set/table shape
+幂等补齐 Grok 与 Pi catalog，而不把冲突的历史 marker 当作能力证据。该兼容仅保护开发期本机数据，不改变
+`main` 的 Grok 107/108 历史含义，也不允许新的迁移再次复用旧编号。
 
 新 Host LRU compatibility 只含真实进程级边界：
 
@@ -663,9 +669,9 @@ revision，旧确认不再有效。
 
 ## References
 
-- [v1.28 版本概览](README.md)
-- [v1.28 实施计划](implementation-plan.md)
-- [v1.28 版本决定](decisions.md)
+- [v1.29 版本概览](README.md)
+- [v1.29 实施计划](implementation-plan.md)
+- [v1.29 版本决定](decisions.md)
 - [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)
 - [Pi Runtime Research](../../research/pi-runtime-research.md)
 - [Runtime 接入与准入 Checklist](../../development/runtime-integration-checklist.md)

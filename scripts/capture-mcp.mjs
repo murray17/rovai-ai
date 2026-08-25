@@ -16,7 +16,7 @@ const outputPrefix = process.argv[3] ?? '/tmp/rovai-mcp'
 const port = Number(process.env.ROVAI_DEBUG_PORT ?? 9451)
 
 if (!appPath) {
-  throw new Error('Usage: node scripts/capture-mcp.mjs <Rovai-ai.app> [output-prefix]')
+  throw new Error('Usage: node scripts/capture-mcp.mjs <Rovai AI.app> [output-prefix]')
 }
 
 const fixtureRoot = await mkdtemp(join(tmpdir(), 'rovai-mcp-app-'))
@@ -35,7 +35,7 @@ await writeFile(join(codexHome, 'config.toml'), [
   ''
 ].join('\n'))
 
-const executable = join(appPath, 'Contents', 'MacOS', 'Rovai-ai')
+const executable = join(appPath, 'Contents', 'MacOS', 'Rovai AI')
 const app = spawn(executable, [
   `--remote-debugging-port=${port}`,
   `--user-data-dir=${userDataDir}`

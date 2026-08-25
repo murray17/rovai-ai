@@ -18,7 +18,7 @@ pub struct RuntimeActivityMappingDescriptor {
     pub registry_entry: &'static str,
 }
 
-pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 13] = [
+pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 14] = [
     descriptor(
         AdapterKind::CodexCli,
         "codex-app-server",
@@ -41,6 +41,7 @@ pub const RUNTIME_ACTIVITY_MAPPINGS: [RuntimeActivityMappingDescriptor; 13] = [
     descriptor(AdapterKind::TraeCnCli, "acp-v1", "fine_grained", "acp"),
     descriptor(AdapterKind::CursorAgent, "acp-v1", "run_level", "acp"),
     descriptor(AdapterKind::KimiCodeCli, "acp-v1", "run_level", "acp"),
+    descriptor(AdapterKind::GrokBuild, "acp-v1", "run_level", "acp"),
     descriptor(
         AdapterKind::AntigravityApp,
         "antigravity-stream-json-or-text",

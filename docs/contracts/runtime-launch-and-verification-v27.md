@@ -3,7 +3,7 @@ document_type: contract
 name: Runtime Launch and Verification
 version: v27
 status: accepted
-source_version: v1.28
+source_version: v1.29
 last_updated: 2026-08-25
 ---
 
@@ -12,7 +12,7 @@ last_updated: 2026-08-25
 v27 replaces [v26](runtime-launch-and-verification-v26.md). All non-Pi Runtime terms from v26 remain unchanged.
 For Pi, this version replaces the v26 provider overlay, one-Host/one-Session, fixed launch-time Bootstrap/Skill and
 unsupported-MCP terms with the confirmed
-[model-context-change revision 1](../versions/v1.28/model-context-change.md). If a v26 Pi term conflicts with this
+[model-context-change revision 1](../versions/v1.29/model-context-change.md). If a v26 Pi term conflicts with this
 document, v27 is authoritative.
 
 ## Product identity、discovery 与平台
@@ -168,7 +168,9 @@ causes ordinary-message redelivery.
 
 ## Data transition
 
-Migration 108 upgrades `v1.21 / schema 62 / migration 107` to `v1.22 / schema 63`:
+Migration 109 follows Grok's Migration 107/108 chain and upgrades `v1.22 / schema 63 / migration 108` to
+`v1.23 / schema 64` by adding the Pi adapter/catalog/Skill closed sets. Migration 110 then upgrades to
+`v1.24 / schema 65`:
 
 - adds `managed_system_prompt`, Bootstrap Evidence v2 identity/full-Bootstrap fields and the private one-to-one
   `pi_managed_input_receipt` acceptance gate;
@@ -186,10 +188,13 @@ Migration 108 upgrades `v1.21 / schema 62 / migration 107` to `v1.22 / schema 63
 - capability claims must distinguish these qualified paths from the still-disabled Usage/Cost and unqualified
   compaction/platform rows.
 
+This contract specifies the implemented Pi behavior; it does not by itself grant First-Class admission. The current
+[v1.29 checklist report](../versions/v1.29/checklist-report.md) remains authoritative for evidence completeness.
+
 ## References
 
 - [Runtime Launch and Verification v26](runtime-launch-and-verification-v26.md)
-- [Confirmed Pi model-context change](../versions/v1.28/model-context-change.md)
+- [Confirmed Pi model-context change](../versions/v1.29/model-context-change.md)
 - [Runtime Catalog Boundaries](../architecture/runtime-catalog-boundaries.md)
 - [Pi Runtime Research](../research/pi-runtime-research.md)
 - [Runtime 兼容性清单](../runtime-compatibility.md)

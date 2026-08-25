@@ -56,7 +56,8 @@ const allRuntimeSpecifications = [
   ['codebuddy-cli', 'CodeBuddy'],
   ['qwen-code', 'Qwen'],
   ['trae-cn-cli', 'TRAE'],
-  ['kimi-code-cli', 'Kimi Code']
+  ['kimi-code-cli', 'Kimi Code'],
+  ['grok-build', 'Grok Build']
 ].map(([adapterKind, label]) => ({ adapterKind, label, slug: adapterKind.replaceAll('-', '_') }))
 const defaultRuntimeSpecifications = allRuntimeSpecifications
 const selectedAdapters = new Set((process.env.ROVAI_BUILTIN_CLI_ADAPTERS
@@ -680,7 +681,7 @@ async function startVerificationRun(coreClient, specification, resumed) {
         'Growth topic: Practice concise handoffs.',
         'Avatar: none (use the product default).'
       ]
-  const body = specification.adapterKind === 'kimi-code-cli'
+  const body = ['kimi-code-cli', 'grok-build'].includes(specification.adapterKind)
     ? [
         'This is an automated Built-in CLI qualification. Act immediately; do not plan, inspect files, or explain.',
         ...confirmedMemberCard,

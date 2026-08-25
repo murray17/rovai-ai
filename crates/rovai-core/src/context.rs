@@ -88,6 +88,25 @@ impl CharterDeliveryMode {
     }
 }
 
+pub const fn charter_delivery_mode_for_adapter(adapter_kind: AdapterKind) -> CharterDeliveryMode {
+    match adapter_kind {
+        AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::GrokBuild => {
+            CharterDeliveryMode::NativeAppend
+        }
+        AdapterKind::Pi => CharterDeliveryMode::ManagedSystemPrompt,
+        AdapterKind::OpencodeCli
+        | AdapterKind::CopilotCli
+        | AdapterKind::AntigravityApp
+        | AdapterKind::KiroCli
+        | AdapterKind::QoderCli
+        | AdapterKind::CodebuddyCli
+        | AdapterKind::QwenCode
+        | AdapterKind::TraeCnCli
+        | AdapterKind::CursorAgent
+        | AdapterKind::KimiCodeCli => CharterDeliveryMode::FirstPayload,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MaterializeContextRequest<'a> {
     pub agent_run_id: &'a str,
@@ -2018,6 +2037,22 @@ impl ContextService {
         )?;
         transaction.commit()?;
         Ok(())
+    }
+
+    pub fn runtime_input_delivery_status(
+        &self,
+        database: &Database,
+        delivery_id: &str,
+    ) -> Result<Option<String>> {
+        database
+            .connection()
+            .query_row(
+                "SELECT status FROM runtime_input_delivery WHERE id = ?1",
+                [delivery_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(Into::into)
     }
 
     pub fn mark_input_delivery_not_accepted(
@@ -6353,6 +6388,28 @@ fn sha256_text(value: &str) -> String {
     format!("sha256:{:x}", Sha256::digest(value.as_bytes()))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn charter_delivery_modes_are_closed_over_the_product_runtime_catalog() {
+        for adapter_kind in AdapterKind::ALL {
+            let expected = if matches!(
+                adapter_kind,
+                AdapterKind::CodexCli | AdapterKind::ClaudeCodeCli | AdapterKind::GrokBuild
+            ) {
+                CharterDeliveryMode::NativeAppend
+            } else if adapter_kind == AdapterKind::Pi {
+                CharterDeliveryMode::ManagedSystemPrompt
+            } else {
+                CharterDeliveryMode::FirstPayload
+            };
+            assert_eq!(charter_delivery_mode_for_adapter(adapter_kind), expected);
+        }
+    }
+}
+
 #[cfg(all(test, feature = "slow-tests"))]
 mod slow_tests {
     use super::*;
@@ -7926,6 +7983,7 @@ mod slow_tests {
                 ],
             )
             .unwrap();
+        crate::db::downgrade_current_schema_to_v110_source_for_test(fixture.database.connection());
         fixture
             .database
             .connection()
@@ -7941,6 +7999,8 @@ mod slow_tests {
                 DELETE FROM schema_migration WHERE version = 69;
                 DELETE FROM schema_migration WHERE version = 70;
                 DELETE FROM schema_migration WHERE version = 71;
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
+                VALUES (110, datetime('now'));
                 PRAGMA foreign_keys = ON;
                 "#,
             )
@@ -8381,7 +8441,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.21".to_string(), 62, 1));
+        assert_eq!(contract, ("v1.24".to_string(), 65, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }
@@ -10724,7 +10784,12 @@ mod slow_tests {
             )
             .unwrap();
         let expired = runtime
-            .expire_elapsed_camp_turn_execution_budgets(&mut fixture.database, observed_now, 10)
+            .expire_elapsed_camp_turn_execution_budgets(
+                &mut fixture.database,
+                observed_now,
+                observed_now,
+                10,
+            )
             .unwrap();
         assert_eq!(expired.len(), 1);
         let candidate = runtime

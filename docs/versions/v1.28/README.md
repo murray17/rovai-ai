@@ -1,7 +1,7 @@
 ---
 document_type: version-overview
 version: v1.28
-lifecycle: current
+lifecycle: historical
 authority: version-scope-and-status
 design_status: confirmed
 implementation_status: complete
@@ -9,115 +9,83 @@ model_context_change: true
 last_updated: 2026-08-25
 ---
 
-# Rovai-ai v1.28：Pi Coding Agent Runtime 接入
+# Rovai-ai v1.28：Grok Build + MiniMax M3 本地 Runtime 接入
 
-> 当前状态：Pi Coding Agent `0.84.2` 已作为第十三种 Product Runtime 接入。经开发者确认的
-> [model-context-change revision 1](model-context-change.md)现已实施：正式 Host 使用 Pi 原生认证和默认模型，
-> 进入 workspace 级 resident LRU，并按 AgentRun 动态绑定 Bootstrap、Skills、stdio MCP、模型和 exact
-> Native Session。macOS arm64 本机 native-default（当前实际为用户 Pi 配置中的 MiniMax）真实调用与 managed
-> receipt 已通过；macOS x64、Windows x64 仍无独立资格证据。Usage/Cost 与 Compaction 保持 Disabled。
->
-> 前置版本：[v1.27 Kimi Code + MiniMax M3 本地 Runtime 接入](../v1.27/README.md)已按冻结时事实转为
-> historical。
+> 当前状态：`grok-build` Product Runtime、Data Contract 迁移、官方 provider config、ACP Host、Renderer
+> catalog 和本机 macOS arm64 资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
+> `AdditivePerRun / NativeWinsSkip` External MCP；load-only cold continuation 复用 TRAE 的严格
+> `HistoryRestore` 隔离，但不冒充 `session/resume`。已确认的模型上下文 revision 2 保持 Bootstrap bytes
+> 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
+> 独立 worktree 验收后通过 PR 交付 `main`。
+
+前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
 
 ## 版本目标
 
-依据 [Pi Runtime Research](../../research/pi-runtime-research.md)与
-[Runtime 接入与准入 Checklist](../../development/runtime-integration-checklist.md)，直接使用 Pi 官方 JSONL RPC，
-不抓取 TUI，也不引入第三方 ACP shim。Rovai 保留 Pi 原生 Session 和认证体系，同时以受管 Extension、私有
-binding/receipt、Core MCP bridge 和 durable Approval 补齐 Pi 没有原生 sandbox/permission system 的边界。
-
-Revision 1 的模型输入变化已在 `2026-08-25T10:34:14+08:00` 由 Murray Xue 二次确认。Bootstrap 在 Pi System
-Prompt 中的位置、项目原生 `.pi/skills`、MCP schema/result、身份冻结或模型选择副作用若再次改变，必须递增
-revision 并重新确认。
+依据 [Grok Build Runtime Research](../../research/grok-build-runtime-research.md)与
+[Runtime 接入与准入 Checklist](../../development/runtime-integration-checklist.md)，把 xAI Grok Build 作为独立
+Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 custom-model 配置 schema 和原生 Home
+内的权限收窄密钥环境源；不复用 Kimi/Claude 的 Runtime identity、变量或原生状态目录。
 
 ## 交付范围
 
-- 保留 `AdapterKind=pi`、`pi-jsonl-rpc-v1`、Runtime Activity descriptor、Renderer 目录和 macOS arm64
-  Admission；Data Contract 升级为 `v1.22 / schema 63 / migration 108`；
-- 正式启动只固定隔离门禁和 `rovai-pi-host-v2`，不再传 `--provider/--model/--append-system-prompt/--skill/
-  --tools`，也不覆盖 `PI_CODING_AGENT_DIR` 或读取 Claude settings；
-- `pi://runtime-default` 使用 Pi 原生默认；显式 `pi://model?...` 通过 `get_available_models -> set_model ->
-  get_state` 精确验证，并诚实保留 Pi 会更新原生全局默认的副作用；
-- Pi Host compatibility 改为 workspace/process 级。Camp、member、Session、identity、Bootstrap、Skills、MCP、
-  model 和 thinking 都由逐 Run binding/receipt fence，不污染 resident LRU key；
-- 每个 Run 先 `switch_session(<exact canonical file>)` 或 `new_session`，再验证 full UUID、file、cwd、模型、
-  Skill catalog 和 active Tools。一个 Host 只串行执行；并发 Run 分配不同 Host，跨 Workspace 不复用；
-- Pi 单独使用 `managed_system_prompt`。Bootstrap Evidence v2 冻结完整六字段 Member Identity 和 full Bootstrap
-  bytes；Extension 以 `P_final = Pi base prompt + "\n\n" + frozen Bootstrap` 投递，并在 provider request 前提交
-  blocking Managed Input Receipt v1；
-- `.pi/skills` 每次 Session activation 动态发现，包含 Workspace 合格的项目原生 Pi Skills和 Rovai
-  Reconciler 的 ready Skills；`get_commands` 与 receipt 验证 once-only、name、description、path 和 containment；
-- External MCP 改为 `AdditivePerRun / RovaiWins / CoreManaged`：stdio 由 Core 完成 initialize/list/call 并注册
-  Pi proxy Tools，每次调用都 durable approve；Streamable HTTP 继续 unsupported；
-- `bash/write/edit` 继续 blocking Approval，read/search 不弹审批；未知 Extension UI、Tool、mutation、超时、
-  restart、receipt/cleanup mismatch 全部 fail closed；Pi 本身仍没有 sandbox；
-- `message_end.message` 是权威 assistant snapshot，`agent_settled` 是唯一成功 terminal/Missing-Send boundary；
-  prompt response 只有在 managed receipt committed 后才可成为 accepted ACK；
-- Pi 不建立 Bootstrap ordinary-message redelivery 或 compaction Requirement。Usage/Cost Disabled；Compaction 在
-  ordinary/manual/threshold/overflow+retry 四类真实证据齐备前保持 Disabled/unqualified。
+- 新增 `AdapterKind = grok-build`、`SkillDeliveryGroupKey = grok` 与 Migration 107；Migration 108 扩展 Grok
+  compaction closed sets。当前 Data Contract 升级为 `v1.22 / projection schema 63`，既有 Runtime、成员、
+  Skill assignment、detector policy、requirement、observer lease 与 observation 必须无损保留；
+- 发现 `grok`，以 `grok --permission-mode <effective> --no-auto-update agent --no-leader [--plugin-dir
+  <private-root>] stdio` 启动 ACP v1；BYOK overlay 存在时选择 `xai.api_key`，否则只选择 Runtime 广告的安全
+  非交互默认或 `cached_token`，从不由 Probe 启动浏览器/设备登录；
+- 正式 AgentRun 继承用户原生 Grok Home 和官方 `$GROK_HOME/config.toml`；BYOK Probe 把官方配置层复制到
+  临时 `GROK_HOME`，account-auth Probe 为读取既有 cached token 保留原生 Home。当前机器没有 cached token，
+  因此 account-auth 产品路径已实现但未做真实登录验收；
+- 模型/provider 直接使用官方 `[models]`、`[model.<id>]`、`[model_providers.<id>]`。mode `0600` 的
+  `$GROK_HOME/.env` 只向目标子进程提供 TOML `env_key` / `env_http_headers` 明确引用的变量；官方
+  `api_key` 同样兼容，不再存在 Rovai `GROK_MODEL_*` 三字段翻译；
+- 模型目录来自真实 ACP Session，显式模型使用已实测的标准 `session/set_model`，不声明不存在的
+  `session/set_config_option`；权限支持 Grok 原生 `default`、`acceptEdits`、`auto`、`dontAsk`、
+  `bypassPermissions`、`plan`，Product default 为 `bypassPermissions`，Core read-only 强制 `plan`；
+- Kimi/Grok 对 MiniMax 作为普通 ACP `agent_message_chunk` 返回的 `<think>` 或其他文本不做专用清洗、
+  重分类或抑制；内容原样进入执行台 Evidence、terminal final 与 Missing-Send candidate；
+- 完成 Fleet LRU warm Host/同 Session 复用；`grok 0.2.118` 只广告 `loadSession`、不广告 resume，因此新
+  Host 用 exact `session/load` 进入 bounded replay quarantine，失败只记录一次 continuity-lost 后新建 Session；
+- Native Session Bootstrap 的三个 section、顺序和 bytes 不变；新 Grok Session 只在
+  `session/new._meta.rules` 原生追加一次，首轮及后继 user payload 均只含 Dynamic Context，不使用覆盖式
+  `systemPromptOverride`，same-host/load 不重复注入；
+- `best_effort` detector 只接受无 request ID 的 `_x.ai/session_notification`、exact Session ID、
+  `auto_compact_completed` 与非空 event ID。合格完成只推进 durable revision，下一次 Core-controlled input
+  使用既有 Redelivery Envelope v2；真实强制压缩两轮产品 smoke 已通过 revision 1 accepted ACK；
+- Grok Skill 投影到 `.grok/skills` 并完成原生发现实测；External MCP 使用私有临时 Plugin 的进程级
+  `--plugin-dir`，保留原生定义、同名 `NativeWinsSkip`、不同名逐 Run 追加并随 Host 清理；Usage/Cost 保持
+  Disabled，直到字段语义独立验证；
+- macOS arm64 只在本版本冻结的 adapter-scoped 证据通过后进入普通 discovery、检查、成员配置与执行路径；
+  macOS x64、Windows x64 不从本机证据外推。
 
-## Session、身份与迁移
+## 安全与兼容边界
 
-Native Session continuation 只保存 full Pi UUID 与 exact canonical Session file。cold resume 不使用 partial ID、
-`--continue`、recent scan、fuzzy match 或 portable history replay；失败记录 controlled continuity loss 并 fail
-closed，不为同一输入悄悄建立 replacement Session。
+- API Key 不进入仓库、数据库、CLI 参数、日志、diagnostics、qualification artifact 或公开 Evidence；
+- Core 不写 `$GROK_HOME/config.toml` / `.env`，正式 AgentRun 不覆盖 `HOME` / `GROK_HOME`，也不向用户目录安装 Hook 或
+  Plugin；逐 Run MCP Plugin 只存在于 Core 私有 Runtime 目录并由 RAII/Host cleanup 删除；
+- `_x.ai/*` vendor notification 只按已知 Session metadata/lifecycle 路由，不作为公开 assistant 输出；
+- 原生 Session ID 仅保留在既有绑定边界，资格证据不持久化完整 Native ID；
+- Cursor 与 Kimi 的平台准入、provider 和 continuation 结论不因新增 Grok identity 改变。
 
-Identity 属于 Native Binding，不属于 Host。同一 Binding 的后继 Run 复用 Evidence v2 冻结的 exact Member
-Identity/Bootstrap；AgentProfile 编辑不会热更既有 Pi Session。新 Native Session/Binding 才读取新身份，所以
-一个 resident Host 可以先后承载不同成员而不串身份。
+## 验收
 
-Migration 108 fence 所有缺少 frozen identity/managed receipt 的旧非终态 Pi technical state，使用稳定
-`pi_managed_context_v1_required` 失败码并清除旧 locator；已完成的 CampMessage、Task、Action/Approval、Activity、
-final 和历史 Evidence 保留只读。启动时旧 Pi session/config root 移入版本化 inactive-data quarantine；非 Pi
-Binding、ContextManifest 和 Runtime Input Delivery 不失效。
-
-## 验证状态
-
-- 真实本机 `/opt/homebrew/bin/pi` `0.84.2` 通过 native-default Prompt、`rovai-pi-host-v2` managed receipt 和
-  `agent_settled`；Rovai 未读取或输出本机认证秘密；
-- `pnpm smoke:pi-runtime` 的 Core→Pi→真实 provider 链路通过 cold exact resume、workspace resident warm reuse、
-  managed allow/deny 和取消后的 descendant cleanup；
-- Core stdio MCP fixture 通过 initialize、initialized、分页 catalog 和真实 tools/call；HTTP capability 保持
-  false；
-- Rust 回归覆盖 workspace resident reuse、member/camp invalidation 不淘汰 Pi Host、Bootstrap identity freeze、
-  accepted receipt gate、无 Pi redelivery overlay、Migration 108 与旧 Migration fixtures；
-- Core 全量 470 项非 ignored 测试、slow identity/receipt 定向测试、TypeScript typecheck、523 项 Vitest、完整
-  Node/资格套件和文档治理门禁通过；
-- revision 1 没有把 Usage/Cost 或 Compaction 晋升为产品能力，也没有把 arm64 结果外推到 macOS x64/Windows。
-
-## Pi 与其他 Runtime 的关键区别
-
-| 轴 | Pi | 其他主要 Runtime |
-| --- | --- | --- |
-| Resident LRU | workspace 级进程复用，Session/identity/model/MCP 都逐 Run 切换 | Codex/ACP 多按更完整的 Host compatibility 复用；Claude/Antigravity 为 one-shot，不进入 resident Fleet |
-| Bootstrap | `before_agent_start` 动态追加，完整身份/Bootstrap 冻结并有 cross-process receipt | 主要是 native append 或 first payload；没有 Pi managed receipt |
-| Skills | 每次 Session activation 只发现 exact `W/.pi/skills`，项目原生与 Rovai managed 合并验证 | 使用各 Runtime 原生目录/投影机制，常见为启动或 Session 参数固定 |
-| MCP | Core-owned stdio bridge + Pi proxy Tool + 每次 Core durable Approval；HTTP 不支持 | ACP/Claude/Codex 等多走 Runtime-native additive projection 与其原生 approval；Antigravity 当前仅 native MCP |
-| Resume | full UUID + exact canonical file，`switch_session`，失败 fail closed | ACP/Codex 使用各自 native resume/load；Claude/Antigravity one-shot 由新进程续接其原生 conversation |
-| Identity | 按 Native Binding 冻结，Host 可跨成员串行复用，不热更既有 Session | 通常与 Native Session Bootstrap 一起固定，但不会使用 Pi 的 per-run managed receipt |
+验收状态由 [实施计划](implementation-plan.md)维护。逐项结论见[接入 Checklist 报告](checklist-report.md)。
+交接前至少完成：静态检查、Rust/Renderer 定向测试、
+Migration 保留验证、真实 Deep Probe、两轮 AgentRun、命令与权限、cancel、Missing-Send、Built-in CLI、Skill、
+External MCP 支持性裁决、文档治理与 Impeccable UI detector。
 
 ## 跨版本文档影响
 
 | 范围 | 结论 | 证据或理由 |
 | --- | --- | --- |
-| Version lifecycle | 已更新 | v1.28 保持唯一 current；revision 1 在同一已确认版本内完成受治理的模型上下文修正。 |
-| Model context | 已确认并实施 | [Revision 1](model-context-change.md)冻结最终 System Prompt、Skills/MCP、receipt、迁移和模型副作用。 |
-| Decisions | 已更新 | [V1.28-D02](decisions.md#v1-28-d02)替代 D01 中的 provider overlay、一 Host 一 Session、fixed Skill 与 MCP Unsupported。 |
-| Contracts | 已更新 | [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)成为当前入口；v26 转为历史。 |
-| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)记录 Pi resident/process key 与 per-run binding。 |
-| UI | 确认无需更新 | 既有 Pi Runtime/模型/权限入口继续消费 capability snapshot；revision 1 只改变 Runtime 与 Evidence 语义。 |
-| Runtime Activity | 已更新 | [Mapping Registry](../../runtime-activity/registry.md)补充 managed receipt、MCP Approval 与当前真实证据层次。 |
-| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)区分旧完整资格矩阵与 revision 1 的新增真实/fixture 证据。 |
-| Documentation routing | 已更新 | 文档导航、Checklist、合同索引和当前决定导航全部路由到 Runtime Launch v27。 |
-| Root README | 已更新 | Pi 能力表改为 Core-managed stdio MCP、native+managed Skills 与 binding-frozen identity。 |
-
-## References
-
-- [确认的模型上下文变更](model-context-change.md)
-- [实施与验收计划](implementation-plan.md)
-- [版本决定](decisions.md)
-- [Runtime Launch and Verification v27](../../contracts/runtime-launch-and-verification-v27.md)
-- [Pi Runtime Research](../../research/pi-runtime-research.md)
-- [Runtime 接入与准入 Checklist](../../development/runtime-integration-checklist.md)
-- [Runtime Platform Admission v1](../../contracts/runtime-platform-admission-v1.md)
+| Version lifecycle | 已更新 | 本概览、[实施计划](implementation-plan.md)、[决定](decisions.md)与[版本索引](../README.md)共同切换 `current_version`。 |
+| Decisions | 已更新 | [V1.28-D01](decisions.md#v1-28-d01)冻结 provider/Home/auth 边界，[V1.28-D02](decisions.md#v1-28-d02)冻结公开输出与平台准入，[V1.28-D03](decisions.md#v1-28-d03)冻结 External MCP 的 Plugin 追加边界，[V1.28-D04](decisions.md#v1-28-d04)冻结 load-only HistoryRestore，[V1.28-D05](decisions.md#v1-28-d05)冻结 native rules 与 structured compaction redelivery。 |
+| Contracts | 已更新 | [Runtime Launch and Verification](../../contracts/runtime-launch-and-verification-v26.md)与[Runtime Platform Admission](../../contracts/runtime-platform-admission-v1.md)补充 Grok 行为。 |
+| Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)补充 Grok identity、provider 与原生状态边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)补充 Grok detector。 |
+| UI | 已更新 | 复用现有 Runtime catalog、状态与成员参数组件；member-workspace brief 明确 generic agent text 可原样进入执行台与 final。 |
+| Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增 Grok ACP run-level 映射。 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)与 adapter-scoped macOS arm64 证据记录实测边界。 |
+| Documentation routing | 确认无需更新 | 既有 Runtime checklist、Research、Architecture、Contract 与 Version 路由足以到达本版本。 |
+| Root README | 确认无需更新 | 本次新增兼容 Runtime，不改变项目定位或常青产品承诺。 |

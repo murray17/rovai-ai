@@ -332,10 +332,13 @@ Host 把 Delivery identity 绑定到当前 Session 的唯一 active prompt；ACP
 `session/update` 和 `session/request_permission` 只含 Session ID，无法单独证明它们属于当前输入，
 因此不再报告早期 accepted evidence。
 
-只有匹配 JSON-RPC request ID 的成功 `session/prompt` response 产生 `InputAccepted`；匹配的 error
-response 产生 `InputNotAccepted`。Host 在 response 前丢失时继续进入既有 runtime-loss /
-`delivery_unknown` 对账，不能以 pipe flush 或无 Prompt correlation 的 Session event 抑制重试或恢复。
-历史 load replay 仅能在 `LoadingReplay` route 中被丢弃，不能进入该 ACK 边界。
+匹配 JSON-RPC request ID 的成功 `session/prompt` response 产生 `InputAccepted`。匹配 error response 到达前，
+若同一个 fenced active Prompt 已观察到非 metadata assistant、Tool、permission 或其他 Prompt activity，则输入
+同样产生 `InputAccepted`，error 只结算 AgentRun failure，不能把已经处理的输入降级为未接收或开放重放；
+没有任何当前 Prompt activity 的 matching error 才产生 `InputNotAccepted`。activity 本身仍不产生早期 ACK。
+Host 在 response 前丢失时继续进入既有 runtime-loss / `delivery_unknown` 对账，不能以 pipe flush 抑制恢复。
+历史 load replay 仅能在 `LoadingReplay` route 中被丢弃，不能进入该 ACK 边界。字段级合同见
+[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)。
 
 ### Successful Run 的 Missing-Send Recovery
 
