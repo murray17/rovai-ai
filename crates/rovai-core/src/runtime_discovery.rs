@@ -936,19 +936,37 @@ fn known_runtime_directories() -> Vec<PathBuf> {
 
 #[cfg(windows)]
 fn known_runtime_directories() -> Vec<PathBuf> {
+    known_windows_runtime_directories(
+        env::var_os("PNPM_HOME"),
+        env::var_os("LOCALAPPDATA"),
+        env::var_os("APPDATA"),
+        env::var_os("USERPROFILE"),
+    )
+}
+
+#[cfg(windows)]
+fn known_windows_runtime_directories(
+    pnpm_home: Option<OsString>,
+    local_app_data: Option<OsString>,
+    app_data: Option<OsString>,
+    user_profile: Option<OsString>,
+) -> Vec<PathBuf> {
     let mut result = Vec::new();
-    if let Some(pnpm_home) = env::var_os("PNPM_HOME").filter(|value| !value.is_empty()) {
+    if let Some(pnpm_home) = pnpm_home.filter(|value| !value.is_empty()) {
         result.push(PathBuf::from(pnpm_home));
     }
-    if let Some(local_app_data) = env::var_os("LOCALAPPDATA").filter(|value| !value.is_empty()) {
+    if let Some(local_app_data) = local_app_data.filter(|value| !value.is_empty()) {
         let local_app_data = PathBuf::from(local_app_data);
         result.push(local_app_data.join("pnpm"));
         result.push(local_app_data.join("Microsoft/WinGet/Links"));
+        // The official Codex installer adds this directory to User PATH for
+        // future shells, so an already-running Desktop must know it directly.
+        result.push(local_app_data.join("Programs/OpenAI/Codex/bin"));
     }
-    if let Some(app_data) = env::var_os("APPDATA").filter(|value| !value.is_empty()) {
+    if let Some(app_data) = app_data.filter(|value| !value.is_empty()) {
         result.push(PathBuf::from(app_data).join("npm"));
     }
-    if let Some(user_profile) = env::var_os("USERPROFILE").filter(|value| !value.is_empty()) {
+    if let Some(user_profile) = user_profile.filter(|value| !value.is_empty()) {
         let user_profile = PathBuf::from(user_profile);
         result.push(user_profile.join(".cargo/bin"));
         result.push(user_profile.join(".local/bin"));
@@ -1463,6 +1481,27 @@ mod windows_tests {
         assert!(!is_executable_file(&command_shim));
 
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn windows_known_locations_include_codex_installer_directory() {
+        let local_app_data = env::temp_dir().join(format!(
+            "rovai-windows-codex-location-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let codex_bin = local_app_data.join("Programs/OpenAI/Codex/bin");
+        fs::create_dir_all(&codex_bin).unwrap();
+
+        let locations = known_windows_runtime_directories(
+            None,
+            Some(local_app_data.clone().into_os_string()),
+            None,
+            None,
+        );
+
+        assert_eq!(locations, [codex_bin]);
+
+        fs::remove_dir_all(local_app_data).unwrap();
     }
 
     #[test]
