@@ -17,8 +17,8 @@ last_updated: 2026-08-25
 | Checklist 轴 | 当前结论 | 自动化证据 | 仍需客户端补证 |
 | --- | --- | --- | --- |
 | 最低版本 | 三个宿主平台共用 `grok >= 1.0.0` | semver release gate；`0.2.118` 和 `1.0.0-beta` 拒绝，`1.0.0`/更高接受；light snapshot 为 `light_failed / runtime_version_below_minimum` | 每个平台记录实际 `grok --version` 与 fingerprint |
-| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象 | 低版本在启动 ACP 前拒绝；`1.0.0` load-only fixture 返回 `missing_capabilities: session.resume`；machine Ready 二次校验版本、fingerprint、auth、Session 与 resume | 三个平台各跑真实 initialize/auth/session-new，并冻结目标版本 capability |
-| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | Grok 从 HistoryRestore allowlist 移除；即使 Runtime 同时广告 load/resume，也只选 resume；只有 load 时直接 New，不调用 load | 三个平台各做新 Host/Core exact-ID resume、marker 与错误 ID fallback |
+| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象并真实 Resume 同一 ID 成功 | 低版本在启动 ACP 前拒绝；缺少广告返回 `missing_capabilities: session.resume`；广告但方法拒绝的 fixture 同样不能 Ready；Probe New 复用生产 wire 后以空 roots Resume | 三个平台各跑真实 initialize/auth/session-new/resume，并冻结目标版本 capability |
+| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | Grok 从 HistoryRestore allowlist 移除；即使 Runtime 同时广告 load/resume，也只选 resume；New 保留两个 roots，Resume 固定 `additionalDirectories=[]` 且不调用 load | 三个平台各做新 Host/Core exact-ID resume、marker、恢复后 attachment/Built-in CLI 与错误 ID fallback |
 | System Prompt | 不变：`session/new._meta.rules = Rovai Bootstrap`；resume 不重新注入 | creation-only rules fixture；Resume 携带 rules 会 fail closed，`None` 才通过；无 `systemPromptOverride` | 真实 resume 后冲突 prompt 继续服从原 Session rules |
 | Native Binding fence | `grok-build:resume-v1`；配置/rules generation 变化建新 Session | installation、protocol、fingerprint、Host config、workspace、model、permission、官方 config 与 rules revision 变化均改变 key | 客户端确认相同 key cold resume、变化后 new |
 | load / HistoryRestore | Grok 正常路径停用；其他 Runtime 不变 | Grok 不再把 `loadSession` 映射为产品 capability；TRAE/Kimi 等通用 load fallback 回归保留 | 无 Grok load smoke；只需验证 resume |

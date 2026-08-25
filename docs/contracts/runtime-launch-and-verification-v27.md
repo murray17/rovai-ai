@@ -87,11 +87,14 @@ Execution Budget 使用独立的进程内非倒退 observation：取当前 wall 
 - Kimi/Grok 不对 `<think>` 或其他 provider agent text 做专用清洗、重分类或抑制；标准
   `agent_message_chunk` 原样进入执行台 Evidence、final 与 Missing-Send candidate，只有通用 trim；
   `_x.ai/*` notification 不生成公开输出；
-- 三个宿主平台共用 `grok >= 1.0.0` 最低版本门；light discovery 低于门槛时为 `light_failed`，Deep Probe 与
-  Ready 还必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象，否则为 incompatible；
+- 三个宿主平台共用 `grok >= 1.0.0` 最低版本门；light discovery 低于门槛时为 `light_failed`。Deep Probe 与
+  Ready 必须同时观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象，并对刚创建的 exact Session ID
+  成功调用一次无 Prompt 的 `session/resume`；只广告但拒绝调用时仍为 incompatible；
 - warm Host 进入 Runtime Fleet LRU。compatible same-host Session 直接复用；cold exact continuation 使用标准
-  ACP `session/resume`。Grok 不声明或选择 `session/load` 产品能力；resume 失败只允许一次 continuity-lost
-  replacement `session/new`。其他 Runtime 的通用 load/HistoryRestore 路径不变；
+  ACP `session/resume`。Grok `session/new` 保留 attachment root 与 Run tmp，`session/resume` 必须发送空
+  `additionalDirectories`，不得尝试更新 creation-time roots。Grok 不声明或选择 `session/load` 产品能力；
+  resume 失败只允许一次 continuity-lost replacement `session/new`。其他 Runtime 的通用 load/HistoryRestore
+  路径不变；
 - Native Session Bootstrap 内容与 Formatter 3 不变。新 Grok Session 必须把完整 Bootstrap 原样追加到
   `session/new._meta.rules`，首轮与后继 `session/prompt` 只含 Dynamic Context；不得出现
   `systemPromptOverride`，same-host/resume 不得重复注入，replacement new 必须按新 Binding/generation 注入一次；
@@ -120,8 +123,9 @@ Execution Budget 使用独立的进程内非倒退 observation：取当前 wall 
 - Grok 新 draft 为 `permission_mode=bypassPermissions`；新 Session wire 只出现一次 `_meta.rules` 且不含
   `systemPromptOverride`；真实 structured completion 推进一次 revision，下一轮 accepted ACK 后
   requested/acknowledged 收敛且不重复；
-- Grok `>= 1.0.0` Deep Probe 必须广告标准 ACP resume；确定性 continuation fixture 证明 cold path 只调用
-  `session/resume`，不调用 `session/load`，且 resume params 不重新携带 creation-only `_meta.rules`；
+- Grok `>= 1.0.0` Deep Probe 必须广告标准 ACP resume，并以同一 Session ID 真实成功调用一次；确定性 fixture
+  必须证明只广告但拒绝 Resume 不能 Ready，cold path 只调用 `session/resume`、不调用 `session/load`，且
+  Resume params 为 `additionalDirectories=[]`、不重新携带 creation-only `_meta.rules`；
 - 私有 Plugin External MCP、Managed Skill、Built-in CLI、Missing-Send 与 generic ACP agent text 保持 v26 行为；
   每个平台的目标版本真实产品 Smoke 与 adapter-scoped qualification 仍分别记录，不互相外推。
 

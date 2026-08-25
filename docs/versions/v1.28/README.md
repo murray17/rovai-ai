@@ -13,8 +13,8 @@ last_updated: 2026-08-25
 
 > 当前状态：`grok-build` Product Runtime、Data Contract 迁移、官方 provider config、ACP Host、Renderer
 > catalog 和本机 macOS arm64 平台资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
-> `AdditivePerRun / NativeWinsSkip` External MCP。当前 Grok 支持基线统一为 `>= 1.0.0`，Ready 要求正式广告
-> ACP `session/resume`，cold continuation 不再保留 `0.2.118` 的 load-only fallback。已确认的模型上下文
+> `AdditivePerRun / NativeWinsSkip` External MCP。当前 Grok 支持基线统一为 `>= 1.0.0`，Ready 要求正式广告并
+> 真实成功调用 ACP `session/resume`，cold continuation 不再保留 `0.2.118` 的 load-only fallback。已确认的模型上下文
 > revision 2 保持 Bootstrap bytes
 > 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
 > 独立 worktree 验收后通过 PR 交付 `main`；`>= 1.0.0 / session.resume` clean break 的确定性实现已完成，
@@ -49,7 +49,8 @@ Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 cu
 - Kimi/Grok 对 MiniMax 作为普通 ACP `agent_message_chunk` 返回的 `<think>` 或其他文本不做专用清洗、
   重分类或抑制；内容原样进入执行台 Evidence、terminal final 与 Missing-Send candidate；
 - 完成 Fleet LRU warm Host/同 Session 复用；三个宿主平台共享 `grok >= 1.0.0` 版本门，Deep Probe 与 Ready
-  必须观察 `sessionCapabilities.resume`。新 Host 用 exact `session/resume`，不声明或选择 Grok `session.load`；
+  必须观察 `sessionCapabilities.resume` 并对刚创建的 exact ID 成功调用。新 Host 用 exact `session/resume`，
+  其 `additionalDirectories=[]`；不声明或选择 Grok `session.load`；
   失败只记录一次 continuity-lost 后新建 Session；其他 Runtime 的通用 load fallback 不变；
 - Native Session Bootstrap 的三个 section、顺序和 bytes 不变；新 Grok Session 只在
   `session/new._meta.rules` 原生追加一次，首轮及后继 user payload 均只含 Dynamic Context，不使用覆盖式

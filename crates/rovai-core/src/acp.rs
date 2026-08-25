@@ -2790,7 +2790,7 @@ fn validate_new_session_native_rules(
     }
 }
 
-fn build_acp_new_session_params(
+pub(crate) fn build_acp_new_session_params(
     adapter_kind: AdapterKind,
     cwd: &str,
     mcp_servers: &[Value],
@@ -2806,6 +2806,30 @@ fn build_acp_new_session_params(
     }
     if let Some(rules) = native_rules {
         params["_meta"] = json!({"rules": rules});
+    }
+    params
+}
+
+pub(crate) fn build_acp_resume_session_params(
+    adapter_kind: AdapterKind,
+    session_id: &str,
+    cwd: &str,
+    mcp_servers: &[Value],
+    additional_directories: &[String],
+) -> Value {
+    let mut params = json!({
+        "sessionId": session_id,
+        "cwd": cwd,
+        "mcpServers": mcp_servers,
+    });
+    if adapter_kind != AdapterKind::CursorAgent {
+        // Grok Build 1.x rejects session/resume whenever
+        // additionalDirectories is non-empty.
+        params["additionalDirectories"] = if adapter_kind == AdapterKind::GrokBuild {
+            json!([])
+        } else {
+            json!(additional_directories)
+        };
     }
     params
 }
@@ -2943,14 +2967,25 @@ impl AcpRuntime {
                 } else {
                     "session/load"
                 };
-                let mut params = json!({
-                    "sessionId": existing_session_id,
-                    "cwd": cwd,
-                    "mcpServers": mcp_servers,
-                });
-                if self.host.adapter_kind != AdapterKind::CursorAgent {
-                    params["additionalDirectories"] = json!(additional_directories);
-                }
+                let params = if continuation == AcpSessionContinuation::Resume {
+                    build_acp_resume_session_params(
+                        self.host.adapter_kind,
+                        existing_session_id,
+                        &cwd,
+                        &mcp_servers,
+                        &additional_directories,
+                    )
+                } else {
+                    let mut params = json!({
+                        "sessionId": existing_session_id,
+                        "cwd": cwd,
+                        "mcpServers": mcp_servers,
+                    });
+                    if self.host.adapter_kind != AdapterKind::CursorAgent {
+                        params["additionalDirectories"] = json!(additional_directories);
+                    }
+                    params
+                };
                 let result = match self
                     .host
                     .rpc_with_timeout(method, params, ACP_HISTORY_RESTORE_TIMEOUT)
@@ -5718,7 +5753,7 @@ mod route_policy_tests {
     use super::*;
 
     #[test]
-    fn grok_new_session_uses_only_additive_native_rules() {
+    fn grok_new_and_resume_sessions_use_their_exact_wire_shapes() {
         let bootstrap = "SESSION_CHARTER\nMEMBER_IDENTITY\nMEMORY_ENTRYPOINT";
         let rules = validate_new_session_native_rules(
             AdapterKind::GrokBuild,
@@ -5745,6 +5780,32 @@ mod route_policy_tests {
             1
         );
         assert_eq!(params["additionalDirectories"].as_array().unwrap().len(), 2);
+
+        let additional_directories = ["/attachments".to_string(), "/run-tmp".to_string()];
+        let resume = build_acp_resume_session_params(
+            AdapterKind::GrokBuild,
+            "grok-session",
+            "/workspace",
+            &[],
+            &additional_directories,
+        );
+        assert_eq!(resume["sessionId"], "grok-session");
+        assert_eq!(resume["cwd"], "/workspace");
+        assert_eq!(resume["mcpServers"], json!([]));
+        assert_eq!(resume["additionalDirectories"], json!([]));
+        assert!(resume.get("_meta").is_none());
+
+        let other = build_acp_resume_session_params(
+            AdapterKind::QwenCode,
+            "qwen-session",
+            "/workspace",
+            &[],
+            &additional_directories,
+        );
+        assert_eq!(
+            other["additionalDirectories"],
+            json!(["/attachments", "/run-tmp"])
+        );
     }
 
     #[test]

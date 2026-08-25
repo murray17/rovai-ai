@@ -25,8 +25,13 @@ compatible same-host Session
 ```
 
 Grok 不再声明或选择 `session.load` 产品能力，也不保留 `0.2.118` load-only fallback；通用 ACP load 能力仍供
-其他 Runtime 使用。light discovery 对低于门槛或不可解析的版本 fail closed，Deep Probe / machine Ready 还必须
-看到 resume capability 对象。
+其他 Runtime 使用。light discovery 对低于门槛或不可解析的版本 fail closed，Deep Probe / machine Ready 必须
+既看到 resume capability 对象，也对刚创建的 exact Session ID 成功调用一次 `session/resume`；不能只信广告。
+
+Grok `1.0.x` 明确拒绝 Resume 的非空 `additionalDirectories`。因此 `session/new` 继续携带 attachment root、Run tmp
+和 creation-only `_meta.rules`，`session/resume` 则固定发送 `additionalDirectories=[]`、空 `mcpServers` 且不带
+rules；其他 Runtime 的 Session 参数形状不变。Resume 后 attachment 与 Built-in CLI 是否仍满足运行边界必须由
+真实 cold-continuation 产品 smoke 证明，不能由 capability advertisement 推断。
 
 System Prompt 合同没有变化：只有新 Session 的 `session/new._meta.rules` 携带完全相同的 Rovai Bootstrap；
 resume 不重新注入 rules，恢复沿用原 Session 的 system prompt。Native Binding compatibility 改为

@@ -190,10 +190,12 @@ Provider 能力继续分叉。
 ### 决定
 
 三个宿主平台共用 `grok >= 1.0.0` 最低版本合同；light discovery 对更低或不可解析版本返回
-`light_failed / runtime_version_below_minimum`，Deep Probe 与 machine Ready 还必须观察 resume capability 对象。
+`light_failed / runtime_version_below_minimum`，Deep Probe 与 machine Ready 必须观察 resume capability 对象，并对
+刚创建的 exact Session ID 成功调用一次 `session/resume`，不得只信广告。
 Grok continuation 固定为 compatible same-host Session → exact `session/resume` → continuity-lost 后一次 replacement
 `session/new`。Grok 不再声明或选择 `session.load` 产品能力，也不保留 `0.2.118` fallback；其他 Runtime 的通用
-load/HistoryRestore 实现不变。
+load/HistoryRestore 实现不变。新 Session 继续携带两个 additional roots；Grok Resume 固定使用
+`additionalDirectories=[]`，不得尝试更新 creation-time roots。
 
 Bootstrap 内容和创建期投递不变：只有 `session/new._meta.rules` 携带 Rovai Bootstrap；resume 不重新提供 rules，
 由 Grok 恢复原 Session 已冻结的 system prompt。Grok Native Session compatibility key 切换为
