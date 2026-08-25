@@ -321,7 +321,7 @@ cancelled settle 这次等待。把 blocked 当终态会提前清除 pending，�
 
 当前规范见 [Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)、
 [Session 与 Bootstrap 不变量](../../architecture/foundational-invariants.md#context-session-bootstrap)与
-[Runtime 接入 Checklist](../../development/runtime-integration-checklist.md#8-compaction-信号)。
+[Runtime 接入 Checklist](../../development/runtime-integration-checklist.md#runtime-integration-compaction-signals)。
 
 ### 后果
 

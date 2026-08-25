@@ -288,6 +288,8 @@ Runtime 会刷新。同一输入可以同时约束多层；按真实加载行为
 - [ ] Eligibility 按 `Runtime × version × field` 冻结，并记录 Coverage。
 - [ ] 不持久化完整原始 Usage payload、Prompt、Output、Tool 内容或 Native ID。
 
+<a id="runtime-integration-compaction-signals"></a>
+
 ## 8. Compaction 信号
 
 本节是可选能力。没有产品需求或可靠 lifecycle signal 时保持 detector `Disabled`，不阻断 Runtime 基础准入。
