@@ -172,6 +172,7 @@ struct PiHostLaunch<'a> {
     executable: &'a Path,
     cwd: &'a Path,
     private_runtime_dir: &'a Path,
+    session_dir: Option<&'a Path>,
     initial_binding: &'a PiBindingSeed,
     incoming: mpsc::UnboundedSender<PiIncoming>,
     builtin_tools: Option<BuiltinToolProcessConfig>,
@@ -185,9 +186,18 @@ struct ActivatedPiSession {
     skill_command_catalog: Vec<PiReceiptSkill>,
 }
 
+fn append_session_directory_argument(command: &mut Command, session_dir: Option<&Path>) {
+    if let Some(session_dir) = session_dir {
+        command.arg("--session-dir").arg(session_dir);
+    }
+}
+
 impl PiHost {
     async fn spawn(launch: PiHostLaunch<'_>) -> Result<Arc<Self>> {
         create_private_directory(launch.private_runtime_dir)?;
+        if let Some(session_dir) = launch.session_dir {
+            create_private_directory(session_dir)?;
+        }
         let host_instance_id = uuid::Uuid::new_v4().to_string();
         let config_root = launch
             .private_runtime_dir
@@ -218,7 +228,9 @@ impl PiHost {
                 "--no-builtin-tools",
                 "--extension",
             ])
-            .arg(&extension_path)
+            .arg(&extension_path);
+        append_session_directory_argument(&mut command, launch.session_dir);
+        command
             .env("ROVAI_PI_HOST_BINDING_FILE", &binding_path)
             .env("PI_TELEMETRY", "0")
             .current_dir(launch.cwd);
@@ -1121,6 +1133,7 @@ impl PiRpcRuntimeAdapter {
                         executable: Path::new(&request.frozen_runtime.executable_path),
                         cwd: request.cwd,
                         private_runtime_dir: &self.private_runtime_dir,
+                        session_dir: None,
                         initial_binding: &seed,
                         incoming: self.incoming.clone(),
                         builtin_tools: Some(request.builtin_tools.clone()),
@@ -1327,6 +1340,7 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
 
     let probe_root = std::env::temp_dir().join(format!("rovai-pi-probe-{}", uuid::Uuid::new_v4()));
     let private_runtime_dir = probe_root.join("private");
+    let session_dir = probe_root.join("sessions");
     let skill_root = probe_root.join(".pi/skills");
     create_private_directory(&private_runtime_dir)?;
     std::fs::create_dir_all(&skill_root)?;
@@ -1350,6 +1364,7 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
         executable,
         cwd: &probe_root,
         private_runtime_dir: &private_runtime_dir,
+        session_dir: Some(&session_dir),
         initial_binding: &seed,
         incoming,
         builtin_tools: None,
@@ -1372,6 +1387,7 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
             &probe_root,
             PI_RUNTIME_DEFAULT_MODEL_ID,
         )?;
+        validate_probe_session_file_directory(&session_file, &session_dir)?;
         write_session_locator(
             &locator_root,
             &session_id,
@@ -1508,6 +1524,7 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
                 &probe_root,
                 PI_RUNTIME_DEFAULT_MODEL_ID,
             )?;
+            validate_probe_session_file_directory(&replacement_file, &session_dir)?;
             if replacement_id == session_id || replacement_file == canonical_session_file {
                 bail!("Pi probe new_session did not replace the Native Session identity");
             }
@@ -1723,6 +1740,21 @@ fn ensure_session_replacement_succeeded(response: &Value, command: &str) -> Resu
         || response.pointer("/data/cancelled").and_then(Value::as_bool) == Some(true)
     {
         bail!("Pi {command} did not establish the requested Session");
+    }
+    Ok(())
+}
+
+fn validate_probe_session_file_directory(session_file: &Path, session_dir: &Path) -> Result<()> {
+    let observed = session_file
+        .parent()
+        .context("Pi probe Session file has no parent")?
+        .canonicalize()
+        .context("Pi probe Session directory is unavailable")?;
+    let expected = session_dir
+        .canonicalize()
+        .context("Pi probe private Session directory is unavailable")?;
+    if observed != expected {
+        bail!("Pi probe Session escaped its private Session directory");
     }
     Ok(())
 }
@@ -1996,6 +2028,25 @@ fn is_hex_digest(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_launch_adds_a_session_directory_only_when_explicitly_requested() {
+        let session_dir = std::env::temp_dir().join("rovai-pi-probe-session-argument");
+        let mut production = Command::new("pi");
+        append_session_directory_argument(&mut production, None);
+        assert!(production.as_std().get_args().next().is_none());
+
+        let mut probe = Command::new("pi");
+        append_session_directory_argument(&mut probe, Some(&session_dir));
+        assert_eq!(
+            probe
+                .as_std()
+                .get_args()
+                .map(|argument| argument.to_os_string())
+                .collect::<Vec<_>>(),
+            vec!["--session-dir".into(), session_dir.into_os_string()]
+        );
+    }
 
     #[test]
     fn explicit_pi_model_identity_round_trips_reserved_characters() {
