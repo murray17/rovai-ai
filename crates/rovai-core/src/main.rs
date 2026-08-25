@@ -236,7 +236,7 @@ const RUNTIME_EVIDENCE_DELTA_BATCH_MAX_ITEMS: usize = 32;
 const CAMP_ATTACHMENT_VIEW_MUTATION_DEADLINE: Duration = Duration::from_secs(55);
 const CAMP_ATTACHMENT_VIEW_QUIESCENCE_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
-async fn claim_agent_run_under_attachment_admission<F, Fut, T>(
+async fn run_under_attachment_read_admission<F, Fut, T>(
     camp_id: String,
     gate: Arc<RwLock<()>>,
     claim: F,
@@ -1693,6 +1693,54 @@ impl Core {
             .await
             .map_err(|_| anyhow::anyhow!("camp_attachment_view_busy"))?;
         Ok((guard, deadline))
+    }
+
+    async fn verified_camp_attachment_admission(
+        &self,
+        camp_id: &str,
+        workspace: &Path,
+    ) -> Result<(
+        CampAttachmentReadAdmission,
+        CampAttachmentRuntimeAuthorization,
+    )> {
+        let gate = self.attachment_view_gate(camp_id).await;
+        for attempt in 0..2 {
+            let (admission, authorization) =
+                run_under_attachment_read_admission(camp_id.to_string(), gate.clone(), || {
+                    self.verified_camp_runtime_authorization(
+                        camp_id,
+                        workspace,
+                        CampAttachmentVisibilityMode::GenerationFencedV1,
+                    )
+                })
+                .await;
+            match authorization {
+                Ok(authorization) => return Ok((admission, authorization)),
+                Err(_) if attempt == 0 => {
+                    drop(admission);
+                    self.reconcile_camp_attachment_view_for_dispatch(camp_id)
+                        .await?;
+                }
+                Err(error) => {
+                    return Err(error).context(
+                        "Camp Attachment View remained unavailable after attachment-local reconciliation",
+                    );
+                }
+            }
+        }
+        unreachable!("the two-attempt attachment verification loop always returns")
+    }
+
+    async fn reconcile_camp_attachment_view_for_dispatch(&self, camp_id: &str) -> Result<()> {
+        let (_mutation, deadline) = self.acquire_camp_attachment_mutation(camp_id).await?;
+        self.wait_for_camp_attachment_quiescence(camp_id, deadline)
+            .await?;
+        let mut database = self.database.lock().await;
+        self.attachment_views.reconcile_camp(
+            &mut database,
+            &CampAttachmentStore::new(&self.data_dir),
+            camp_id,
+        )
     }
 
     async fn wait_for_camp_attachment_quiescence(
@@ -6468,12 +6516,24 @@ impl Core {
             }
         }
         let starting_git_observation = Some(git::observe_git(&workspace_path).await);
-        let attachment_view_gate = self.attachment_view_gate(&candidate.camp_id).await;
-        let (attachment_view_admission, claim) = claim_agent_run_under_attachment_admission(
-            candidate.camp_id.clone(),
-            attachment_view_gate,
-            || async {
-                let mut database = self.database.lock().await;
+        let (attachment_view_admission, attachment_authorization) = match self
+            .verified_camp_attachment_admission(&candidate.camp_id, &workspace_path)
+            .await
+        {
+            Ok(admission) => admission,
+            Err(error) => {
+                self.reject_agent_run_dispatch(
+                    &candidate,
+                    "camp_attachment_view_unavailable",
+                    &error,
+                )
+                .await;
+                return;
+            }
+        };
+        let claim = {
+            let mut database = self.database.lock().await;
+            (|| {
                 if database_has_unresolved_writer_intent(&database, &candidate.camp_id)? {
                     anyhow::bail!("camp_attachment_view_not_ready");
                 }
@@ -6501,9 +6561,8 @@ impl Core {
                         },
                     },
                 )
-            },
-        )
-        .await;
+            })()
+        };
         let claim = match claim {
             Ok(claim) if claim.result.status == CommandResultStatus::Accepted => claim,
             Ok(_) => return,
@@ -6598,6 +6657,7 @@ impl Core {
                 .launch_agent_run(
                     &execution,
                     &attachment_view_admission,
+                    &attachment_authorization,
                     &output,
                     &mut launch_permit,
                 )
@@ -8577,6 +8637,7 @@ impl Core {
         self: &Arc<Self>,
         execution: &AgentRunExecution,
         attachment_admission: &CampAttachmentReadAdmission,
+        attachment_authorization: &CampAttachmentRuntimeAuthorization,
         output: &mpsc::UnboundedSender<String>,
         launch_permit: &mut ExecutionLaunchPermit,
     ) -> Result<()> {
@@ -8592,19 +8653,9 @@ impl Core {
             .prepare_agent_run_mcp_projection(execution)
             .await
             .context("failed to prepare AgentRun MCP projection")?;
-        // No Adapter is promoted to live-append compatibility until a persisted,
-        // artifact-bound positive probe proves the required warm-host behavior.
-        let visibility_mode = CampAttachmentVisibilityMode::GenerationFencedV1;
-        let attachment_authorization = self
-            .verified_camp_runtime_authorization(
-                &execution.camp_id,
-                Path::new(&execution.workspace.execution_root),
-                visibility_mode,
-            )
-            .await?;
         let attachment_access = CampAttachmentRunAccess {
             admission: attachment_admission,
-            authorization: &attachment_authorization,
+            authorization: attachment_authorization,
         };
         let attachment_access_root = attachment_authorization.attachment_root.clone();
         let resume_disposition = {
@@ -8634,7 +8685,7 @@ impl Core {
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
                     attachment_admission,
-                    attachment_authorization: &attachment_authorization,
+                    attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -8648,7 +8699,7 @@ impl Core {
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
                     attachment_admission,
-                    attachment_authorization: &attachment_authorization,
+                    attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -8662,7 +8713,7 @@ impl Core {
                     skill_exposure: &skill_exposure,
                     mcp_projection: &mcp_projection,
                     attachment_admission,
-                    attachment_authorization: &attachment_authorization,
+                    attachment_authorization,
                     output,
                     launch_permit,
                 })
@@ -8685,7 +8736,7 @@ impl Core {
         let runtime_compatibility_digest = codex::runtime_compatibility_digest(
             &execution.runtime,
             &execution_root,
-            &attachment_authorization,
+            attachment_authorization,
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
             .await?;
@@ -16108,10 +16159,16 @@ mod tests {
     fn runtime_resolution_test_core(root: &Path) -> Result<Core> {
         let data_dir = root.join("data");
         let skill_library_root = root.join("skills");
+        let runtime_camp_files_root = root.join("runtime-files");
         std::fs::create_dir_all(&data_dir)?;
         std::fs::create_dir_all(&skill_library_root)?;
-        let database = Database::open(&data_dir)?;
-        let attachment_views = CampAttachmentViewStore::for_test(&database)?;
+        let attachment_views =
+            CampAttachmentViewStore::for_isolated_test_root(&runtime_camp_files_root)?;
+        let database = Database::open_with_runtime_camp_files_root(
+            &data_dir,
+            attachment_views.root(),
+            attachment_views.root_identity_digest(),
+        )?;
         let skill_library = SkillLibraryService::new(skill_library_root)?;
         let mcp_config = McpConfigStore::new(root.join("mcp.json"));
         let mcp_projection = McpProjectionService::new(&data_dir);
@@ -16615,13 +16672,178 @@ while IFS= read -r _ignored; do :; done
         ));
     }
 
+    #[cfg(all(target_os = "macos", feature = "slow-tests"))]
+    #[tokio::test]
+    async fn dispatch_attachment_admission_degrades_invalid_content_before_claim() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!(
+            "rovai-dispatch-attachment-degradation-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        let workspace = root.join("workspace");
+        fs::create_dir_all(&workspace).unwrap();
+        let core = runtime_resolution_test_core(&root).unwrap();
+        let source = root.join("published.txt");
+        fs::write(&source, b"published before authority loss").unwrap();
+
+        let camp_id = {
+            let mut database = core.database.lock().await;
+            let agent_id = AgentProfileService::default()
+                .list_profiles(&database)
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("the startup database should include a default member")
+                .agent_id;
+            let created = CollaborationService::default()
+                .create_camp(
+                    &mut database,
+                    &CommandEnvelope {
+                        command_id: uuid::Uuid::new_v4().to_string(),
+                        actor: ActorRef::User {
+                            user_id: "test-user".to_string(),
+                        },
+                        camp_id: None,
+                        expected_versions: Vec::new(),
+                        execution_epoch: None,
+                        payload: CreateCampCommand {
+                            name: None,
+                            project_binding_kind: ProjectBindingKind::Directory,
+                            project_path: workspace.display().to_string(),
+                            member_agent_ids: vec![agent_id.clone()],
+                            default_lead_agent_id: agent_id,
+                            collaboration_mode: CampCollaborationMode::Peer,
+                            activation_state: CampActivationState::Active,
+                        },
+                    },
+                )
+                .unwrap();
+            let camp_id = created.result.payload["campId"]
+                .as_str()
+                .unwrap()
+                .to_string();
+            core.attachment_views
+                .ensure_empty_camp_ready(&mut database, &camp_id)
+                .unwrap();
+            CampAttachmentStore::new(&core.data_dir)
+                .save_body(&mut database, &camp_id, "Use the published attachment")
+                .unwrap();
+            camp_id
+        };
+        let prepared = prepare_composer_attachment_from_path(
+            &core.database,
+            &core.data_dir,
+            PrepareAttachmentFromPathParams {
+                camp_id: CampId::parse(&camp_id).unwrap(),
+                expected_revision: 1,
+                source_path: source.display().to_string(),
+                display_name: "published.txt".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let draft_revision = prepared["revision"].as_i64().unwrap();
+        let attachment_id = prepared["attachments"][0]["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        core.send_test_camp_message_request(SendCampMessageParams {
+            command_id: uuid::Uuid::new_v4().to_string(),
+            camp_id: CampId::parse(&camp_id).unwrap(),
+            draft_revision,
+            execution: None,
+        })
+        .await
+        .unwrap();
+        core.drive_camp_attachment_publications(&camp_id)
+            .await
+            .unwrap();
+
+        let attachment_store = CampAttachmentStore::new(&core.data_dir);
+        let authority_candidate = {
+            let database = core.database.lock().await;
+            attachment_store
+                .desktop_open_candidate(&database, &camp_id, &attachment_id)
+                .unwrap()
+                .unwrap()
+        };
+        let authority_path = attachment_store
+            .verify_desktop_open_candidate(authority_candidate)
+            .unwrap()
+            .path;
+        let initial_authorization = core
+            .verified_camp_runtime_authorization(
+                &camp_id,
+                &workspace,
+                CampAttachmentVisibilityMode::GenerationFencedV1,
+            )
+            .await
+            .unwrap();
+        let projected_path = initial_authorization
+            .attachment_root
+            .join(&attachment_id)
+            .join("payload")
+            .join("published.txt");
+        assert!(projected_path.is_file());
+
+        fs::set_permissions(&projected_path, fs::Permissions::from_mode(0o600)).unwrap();
+        fs::write(&projected_path, b"corrupted projected bytes").unwrap();
+        let authority_container = authority_path.parent().unwrap();
+        fs::set_permissions(authority_container, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::remove_file(&authority_path).unwrap();
+        fs::set_permissions(authority_container, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let (admission, authorization) = core
+            .verified_camp_attachment_admission(&camp_id, &workspace)
+            .await
+            .expect("dispatch admission should omit the invalid attachment and keep Camp runnable");
+        admission.prove(&camp_id).unwrap();
+        assert_eq!(authorization.camp_id, camp_id);
+        assert!(authorization.attachment_root.is_dir());
+        assert!(
+            fs::read_dir(&authorization.attachment_root)
+                .unwrap()
+                .next()
+                .is_none()
+        );
+        {
+            let database = core.database.lock().await;
+            core.attachment_views
+                .verify_camp_ready(&database, &camp_id)
+                .unwrap();
+        }
+
+        let view_attachment_root = authorization.attachment_root.clone();
+        drop(admission);
+        fs::set_permissions(authority_container, fs::Permissions::from_mode(0o700)).unwrap();
+        CampAttachmentStore::new(&core.data_dir)
+            .remove_camp(&camp_id)
+            .unwrap();
+        drop(core);
+        fs::set_permissions(&view_attachment_root, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::set_permissions(
+            view_attachment_root.parent().unwrap().parent().unwrap(),
+            fs::Permissions::from_mode(0o700),
+        )
+        .unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn agent_run_claim_waits_for_attachment_read_admission_and_retains_it() {
         let gate = Arc::new(RwLock::new(()));
         let writer = gate.clone().write_owned().await;
         let claim_started = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let claim_started_in_task = claim_started.clone();
-        let claim_task = tokio::spawn(claim_agent_run_under_attachment_admission(
+        let claim_task = tokio::spawn(run_under_attachment_read_admission(
             "rvcamp_test".to_string(),
             gate.clone(),
             move || async move {

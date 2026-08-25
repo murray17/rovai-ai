@@ -324,3 +324,46 @@ connection 写回 `rovai_runtime_camp_files_root_identity_digest()`。completion
 - 对所有 operation 删除非空检查：会让非法空 publish 伪装成已完成；
 - completion 时忽略旧 root digest：会绕过当前实例身份 fence；
 - 手工修改日常 View 行：缺少可复用 journal、测试和后续机器的确定性恢复路径。
+
+<a id="v1-28-d10"></a>
+## V1.28-D10：已成功发布附件的当前完整性故障只降级附件，不阻断 Camp
+
+### 背景
+
+D08 先把旧二进制触发的 root rekey 与 Authority 缺失故障从全局 Core 退出收窄到单个 Camp fail closed，但该
+Camp 仍无法运行。真实故障表明 `message_attachment`、公共消息、成功 publication ledger 与审计记录都完整，只有
+一个派生 View entry 的 digest 校验失败且对应 Authority payload 已缺失。把“曾经成功发布”与“现在仍能为新
+Runtime 提供字节”当成同一个布尔值，使一个附件故障不必要地拒绝整个 Camp，也让无附件依赖的后续消息无法执行。
+
+### 决定
+
+成功 publication resolution 与当前 Runtime availability 分轴。成功 resolution、semantic revision、历史 receipt、
+CampMessage 和审计事实不可逆；当前 `runtime_projection_state` 可在后续完整性事件中从 `available` 变为
+`recovery_required`。只有 operation 仍 unresolved 的 `pending | recovery_required` 是 writer intent 并继续阻断
+调度；已成功 resolved operation 上的 `recovery_required` 只表示该附件当前没有 Runtime path。
+
+startup 与 pre-dispatch reconciliation 逐项用原 kind、byte size、digest 和 no-follow tree receipt 验证 Authority。
+健康项照常重建；缺失或不一致项只把自身改为 `recovery_required`，从 physical View、Published Attachment Path、
+新 Context current/history attachment refs 中省略。受控重建验证剩余 catalog 后把 Camp 提交为 `ready`，记录私有
+`camp_attachment_integrity_degraded` 诊断。Scheduler 在 Claim 前完成该校验/修复，成功 authorization 与同一 read
+admission 覆盖 Claim 和整个 Run。
+
+后续只有 exact Authority 再次通过原 receipt 时才能把附件恢复为 `available` 并受控重建原稳定 path；派生 View
+从不反向修复 Authority。root marker/identity、未知节点、symlink/reparse、containment、数据库错误、未收敛 journal
+或无法安全替换 View 的故障仍 fail closed。本决定以附件局部可用性规则替代 D08 中“Authority 缺失必然使整个 Camp
+继续拒绝 Runtime”的条款；D08 的跨 Camp 隔离与全局安全边界继续有效。
+
+### 后果
+
+一个坏附件不会再使 Camp、其他附件或无附件后续消息失效。模型不会收到坏附件的 stale path 或未验证字节；用户
+公共历史与审计也不会因修复被删除或伪造 terminal failure。语义 catalog 可以大于当前 physical catalog，因此
+`CampAttachmentViewReceiptV2` 历史语义仍有效，而新授权只包含当前 `available` 项。View contract 升到 v4 并 fence
+旧 Host；receipt wire、Runtime Auth Receipt、Data Contract 和 Renderer API 不变。
+
+### 被拒绝方案
+
+- 忽略 digest 并继续暴露现有 View bytes：会把未验证内容交给 Runtime；
+- 继续拒绝整个 Camp：把附件级可用性故障扩大为协作与执行故障；
+- 删除 `message_attachment` 或把成功 publication 改成 `failed`：会重写公共历史、ledger 与审计事实；
+- 从残留 View 复制回 Authority：颠倒 Authority/派生关系，且可能固化已损坏字节；
+- 对所有路径/根错误都局部降级：会掩盖 containment 或实例身份破坏。

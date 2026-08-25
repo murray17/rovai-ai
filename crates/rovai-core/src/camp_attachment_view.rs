@@ -25,7 +25,7 @@ use crate::{
     message_delivery::settle_attachment_projection_failure,
 };
 
-pub const CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION: i64 = 3;
+pub const CAMP_ATTACHMENT_VIEW_CONTRACT_VERSION: i64 = 4;
 pub const CAMP_ATTACHMENT_VIEW_RECEIPT_VERSION: i64 = 2;
 pub const RUNTIME_ATTACHMENT_AUTH_RECEIPT_VERSION: i64 = 1;
 pub const MAX_CAMP_VIEW_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -315,6 +315,24 @@ impl CampAttachmentViewStore {
     #[cfg(any(test, feature = "slow-tests"))]
     pub fn for_test(database: &Database) -> Result<Self> {
         let root = database.runtime_camp_files_root().to_path_buf();
+        Self::for_test_root_with_identity(
+            root,
+            database
+                .runtime_camp_files_root_identity_digest()
+                .to_string(),
+        )
+    }
+
+    #[cfg(any(test, feature = "slow-tests"))]
+    pub fn for_isolated_test_root(root: &Path) -> Result<Self> {
+        ensure_private_directory(root)?;
+        let root = fs::canonicalize(root)?;
+        let root_identity_digest = directory_identity_digest(&root)?;
+        Self::for_test_root_with_identity(root, root_identity_digest)
+    }
+
+    #[cfg(any(test, feature = "slow-tests"))]
+    fn for_test_root_with_identity(root: PathBuf, root_identity_digest: String) -> Result<Self> {
         ensure_private_directory(&root)?;
         let mut lock_file = private_open_read_write(&root.join(ROOT_LOCK))?;
         if !try_lock_exclusive(&lock_file)? {
@@ -325,9 +343,7 @@ impl CampAttachmentViewStore {
         ensure_private_directory(&root.join("camps"))?;
         Ok(Self {
             root,
-            root_identity_digest: database
-                .runtime_camp_files_root_identity_digest()
-                .to_string(),
+            root_identity_digest,
             instance_key: "test-instance".to_string(),
             lock_file,
         })
@@ -1877,12 +1893,13 @@ impl CampAttachmentViewStore {
         Ok(())
     }
 
-    fn reconcile_camp(
+    pub fn reconcile_camp(
         &self,
         database: &mut Database,
         attachment_store: &CampAttachmentStore,
         camp_id: &str,
     ) -> Result<()> {
+        self.restore_recoverable_authority_attachments(database, attachment_store, camp_id)?;
         let desired = load_published_authority_rows(database.connection(), camp_id)?;
         let desired_ids = desired
             .iter()
@@ -2005,6 +2022,12 @@ impl CampAttachmentViewStore {
             return self.verify_camp_ready(database, camp_id);
         }
 
+        let missing = self.retain_runtime_readable_authority_attachments(
+            database,
+            attachment_store,
+            camp_id,
+            &missing,
+        )?;
         let requested_bytes = missing.iter().try_fold(0_u64, |total, row| {
             total
                 .checked_add(row.byte_size)
@@ -2039,7 +2062,8 @@ impl CampAttachmentViewStore {
         )?;
         transaction.commit()?;
         self.complete_publication(database, &operation_id)?;
-        self.complete_superseded_committed_operations(database, camp_id)
+        self.complete_superseded_committed_operations(database, camp_id)?;
+        self.record_integrity_degradation(database, camp_id)
     }
 
     fn rebuild_integrity_failed_camp(
@@ -2050,6 +2074,12 @@ impl CampAttachmentViewStore {
         desired: &[AuthorityAttachmentRow],
         reason: &str,
     ) -> Result<()> {
+        let desired = self.retain_runtime_readable_authority_attachments(
+            database,
+            attachment_store,
+            camp_id,
+            desired,
+        )?;
         let now = chrono::Utc::now().to_rfc3339();
         database.connection().execute(
             r#"
@@ -2073,7 +2103,7 @@ impl CampAttachmentViewStore {
             camp_id,
             &operation_id,
             "controlled_rebuild",
-            desired,
+            &desired,
         )?;
 
         let publication = PreparedCampAttachmentPublication {
@@ -2095,7 +2125,138 @@ impl CampAttachmentViewStore {
         )?;
         transaction.commit()?;
         self.complete_publication(database, &operation_id)?;
-        self.complete_superseded_committed_operations(database, camp_id)
+        self.complete_superseded_committed_operations(database, camp_id)?;
+        self.record_integrity_degradation(database, camp_id)
+    }
+
+    fn restore_recoverable_authority_attachments(
+        &self,
+        database: &mut Database,
+        attachment_store: &CampAttachmentStore,
+        camp_id: &str,
+    ) -> Result<()> {
+        let recoverable = load_recoverable_authority_rows(database.connection(), camp_id)?;
+        for row in recoverable {
+            if let Err(error) = attachment_store.verify_authority_attachment_for_runtime(
+                &row.storage_path,
+                &row.media_type,
+                row.byte_size,
+                &row.content_digest,
+            ) {
+                eprintln!(
+                    "Camp {camp_id} Attachment {} remains unavailable to Runtime: {error:#}",
+                    row.attachment_id
+                );
+                continue;
+            }
+            let changed = database.connection().execute(
+                r#"
+                UPDATE message_attachment
+                SET runtime_projection_state = 'available'
+                WHERE camp_id = ?1 AND id = ?2
+                  AND runtime_projection_state = 'recovery_required'
+                  AND (
+                      publication_operation_id IS NULL
+                      OR EXISTS(
+                          SELECT 1 FROM camp_attachment_view_operation AS operation
+                          WHERE operation.id = message_attachment.publication_operation_id
+                            AND operation.camp_id = message_attachment.camp_id
+                            AND operation.resolution_state = 'available'
+                      )
+                  )
+                "#,
+                params![camp_id, row.attachment_id],
+            )?;
+            if changed != 1 {
+                anyhow::bail!("Camp Attachment recoverable state changed during verification");
+            }
+        }
+        Ok(())
+    }
+
+    fn retain_runtime_readable_authority_attachments(
+        &self,
+        database: &mut Database,
+        attachment_store: &CampAttachmentStore,
+        camp_id: &str,
+        rows: &[AuthorityAttachmentRow],
+    ) -> Result<Vec<AuthorityAttachmentRow>> {
+        let mut readable = Vec::with_capacity(rows.len());
+        let mut unavailable_ids = Vec::new();
+        for row in rows {
+            match attachment_store.verify_authority_attachment_for_runtime(
+                &row.storage_path,
+                &row.media_type,
+                row.byte_size,
+                &row.content_digest,
+            ) {
+                Ok(_) => readable.push(row.clone()),
+                Err(error) => {
+                    eprintln!(
+                        "Camp {camp_id} Attachment {} is omitted from Runtime after integrity verification failed: {error:#}",
+                        row.attachment_id
+                    );
+                    unavailable_ids.push(row.attachment_id.clone());
+                }
+            }
+        }
+        if unavailable_ids.is_empty() {
+            return Ok(readable);
+        }
+        let transaction = database.connection_mut().transaction()?;
+        for attachment_id in &unavailable_ids {
+            let changed = transaction.execute(
+                r#"
+                UPDATE message_attachment
+                SET runtime_projection_state = 'recovery_required'
+                WHERE camp_id = ?1 AND id = ?2
+                  AND runtime_projection_state = 'available'
+                "#,
+                params![camp_id, attachment_id],
+            )?;
+            if changed != 1 {
+                anyhow::bail!("Camp Attachment availability changed during integrity degradation");
+            }
+        }
+        transaction.commit()?;
+        Ok(readable)
+    }
+
+    fn record_integrity_degradation(&self, database: &mut Database, camp_id: &str) -> Result<()> {
+        let degraded_count: i64 = database.connection().query_row(
+            r#"
+            SELECT COUNT(*)
+            FROM message_attachment AS attachment
+            LEFT JOIN camp_attachment_view_operation AS operation
+              ON operation.id = attachment.publication_operation_id
+             AND operation.camp_id = attachment.camp_id
+            WHERE attachment.camp_id = ?1
+              AND attachment.runtime_projection_state = 'recovery_required'
+              AND (
+                  attachment.publication_operation_id IS NULL
+                  OR operation.resolution_state = 'available'
+              )
+            "#,
+            [camp_id],
+            |row| row.get(0),
+        )?;
+        if degraded_count == 0 {
+            return Ok(());
+        }
+        let changed = database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view
+            SET last_error_code = 'camp_attachment_integrity_degraded',
+                updated_at = ?2
+            WHERE camp_id = ?1 AND state = 'ready'
+              AND active_operation_id IS NULL
+            "#,
+            params![camp_id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        if changed != 1 {
+            anyhow::bail!("Camp Attachment degraded View did not become ready");
+        }
+        Ok(())
     }
 
     fn stage_backfill_operation(
@@ -3240,6 +3401,12 @@ pub fn load_camp_attachment_view_receipt(
                        root_relative_final_path || '/payload/' || authority_safe_leaf
                 FROM camp_attachment_view_entry
                 WHERE camp_id = ?1 AND attachment_id = ?2
+                  AND EXISTS(
+                      SELECT 1 FROM message_attachment AS attachment
+                      WHERE attachment.camp_id = camp_attachment_view_entry.camp_id
+                        AND attachment.id = camp_attachment_view_entry.attachment_id
+                        AND attachment.runtime_projection_state = 'available'
+                  )
                 "#,
                 params![camp_id, attachment_id],
                 |row| {
@@ -3263,7 +3430,7 @@ pub fn load_camp_attachment_view_receipt(
         .query_row(
             r#"
             SELECT state, root_relative_path, catalog_revision,
-                   entry_count, semantic_catalog_digest
+                   semantic_catalog_digest
             FROM camp_attachment_view WHERE camp_id = ?1
             "#,
             [camp_id],
@@ -3272,18 +3439,22 @@ pub fn load_camp_attachment_view_receipt(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
-                    row.get::<_, i64>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(3)?,
                 ))
             },
         )
         .optional()?
         .context("camp_attachment_view_not_ready")?;
-    if row.0 != "ready" || row.2 < 0 || row.3 < 0 {
+    if row.0 != "ready" || row.2 < 0 {
         anyhow::bail!("camp_attachment_view_not_ready");
     }
     if row.1 != camp_attachment_root_relative(camp_id) {
         anyhow::bail!("camp_attachment_view_not_ready: semantic root path is inconsistent");
+    }
+    let (semantic_entry_count, _, semantic_catalog_digest) =
+        semantic_catalog_state_through_revision(connection, camp_id, Some(row.2))?;
+    if semantic_catalog_digest != row.3 {
+        anyhow::bail!("camp_attachment_view_not_ready: semantic catalog is inconsistent");
     }
     let referenced_entries_digest = canonical_json_digest(&json!(referenced_entries))?;
     let receipt = CampAttachmentViewReceiptV2 {
@@ -3291,8 +3462,8 @@ pub fn load_camp_attachment_view_receipt(
         camp_id: camp_id.to_string(),
         attachment_root_relative_path: row.1,
         catalog_revision: row.2,
-        catalog_entry_count: row.3,
-        semantic_catalog_digest: row.4,
+        catalog_entry_count: semantic_entry_count,
+        semantic_catalog_digest: row.3,
         referenced_entries,
         referenced_entries_digest,
     };
@@ -3623,20 +3794,24 @@ fn commit_operation_entries(
     if operation_ids != attachment_ids {
         anyhow::bail!("camp_attachment_view_publish_failed: Draft and View entries differ");
     }
-    let (
-        current_generation,
-        current_catalog_revision,
-        current_semantic_entry_count,
-        current_semantic_digest,
-    ): (i64, i64, i64, String) = transaction.query_row(
+    let (current_generation, current_catalog_revision, current_semantic_digest): (
+        i64,
+        i64,
+        String,
+    ) = transaction.query_row(
         r#"
-        SELECT generation, catalog_revision, entry_count, semantic_catalog_digest
+        SELECT generation, catalog_revision, semantic_catalog_digest
         FROM camp_attachment_view
         WHERE camp_id = ?1 AND state = 'mutating' AND active_operation_id = ?2
         "#,
         params![camp_id, operation_id],
-        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
     )?;
+    let (current_semantic_entry_count, _, computed_semantic_digest) =
+        semantic_catalog_state(transaction, camp_id)?;
+    if computed_semantic_digest != current_semantic_digest {
+        anyhow::bail!("camp_attachment_view_integrity_failed: semantic catalog receipt changed");
+    }
     let next_generation = current_generation
         .checked_add(1)
         .context("Camp Attachment View generation overflow")?;
@@ -3736,11 +3911,8 @@ fn commit_operation_entries(
         }
     }
     let (entry_count, aggregate_bytes, catalog_digest) = catalog_state(transaction, camp_id)?;
-    let (semantic_entry_count, semantic_aggregate_bytes, semantic_catalog_digest) =
+    let (semantic_entry_count, _, semantic_catalog_digest) =
         semantic_catalog_state(transaction, camp_id)?;
-    if semantic_entry_count != entry_count || semantic_aggregate_bytes != aggregate_bytes {
-        anyhow::bail!("camp_attachment_view_publish_failed: semantic catalog aggregate differs");
-    }
     if operation_kind == "controlled_rebuild"
         && (semantic_entry_count != current_semantic_entry_count
             || semantic_catalog_digest != current_semantic_digest)
@@ -3816,14 +3988,27 @@ fn catalog_state_through_generation(
 ) -> Result<(i64, i64, String)> {
     let mut statement = connection.prepare(
         r#"
-        SELECT attachment_id, kind, byte_size, file_count, directory_count,
-               node_count, content_digest, authority_safe_leaf,
-               root_relative_final_path, entry_identity_digest,
-               published_generation, publication_operation_id
-        FROM camp_attachment_view_entry
-        WHERE camp_id = ?1
-          AND (?2 IS NULL OR published_generation <= ?2)
-        ORDER BY CAST(attachment_id AS BLOB)
+        SELECT entry.attachment_id, entry.kind, entry.byte_size, entry.file_count,
+               entry.directory_count, entry.node_count, entry.content_digest,
+               entry.authority_safe_leaf, entry.root_relative_final_path,
+               entry.entry_identity_digest, entry.published_generation,
+               entry.publication_operation_id
+        FROM camp_attachment_view_entry AS entry
+        JOIN message_attachment AS attachment
+          ON attachment.camp_id = entry.camp_id
+         AND attachment.id = entry.attachment_id
+        JOIN camp_attachment_view AS view
+          ON view.camp_id = entry.camp_id
+        WHERE entry.camp_id = ?1
+          AND (
+              attachment.runtime_projection_state IN ('available', 'pending')
+              OR (
+                  attachment.runtime_projection_state = 'recovery_required'
+                  AND entry.publication_operation_id = view.active_operation_id
+              )
+          )
+          AND (?2 IS NULL OR entry.published_generation <= ?2)
+        ORDER BY CAST(entry.attachment_id AS BLOB)
         "#,
     )?;
     let rows = statement
@@ -4023,12 +4208,8 @@ fn prepare_ready_camp_view_verification(
     {
         anyhow::bail!("Camp Attachment View aggregate receipt is inconsistent");
     }
-    let (semantic_entry_count, semantic_aggregate_bytes, semantic_catalog_digest) =
-        semantic_catalog_state(connection, camp_id)?;
-    if semantic_entry_count != receipt.entry_count
-        || semantic_aggregate_bytes != receipt.aggregate_bytes
-        || semantic_catalog_digest != receipt.semantic_catalog_digest
-    {
+    let (_, _, semantic_catalog_digest) = semantic_catalog_state(connection, camp_id)?;
+    if semantic_catalog_digest != receipt.semantic_catalog_digest {
         anyhow::bail!("Camp Attachment View semantic receipt is inconsistent");
     }
     verify_resolution_ledger(connection, camp_id, &receipt)?;
@@ -4191,7 +4372,12 @@ fn verify_resolution_ledger(
                 SELECT id FROM message_attachment
                 WHERE publication_operation_id = ?1
                   AND publication_semantic_revision = ?2
-                  AND runtime_projection_state = ?3
+                  AND (
+                      (?3 = 'available' AND runtime_projection_state IN (
+                          'available', 'recovery_required'
+                      ))
+                      OR (?3 = 'failed' AND runtime_projection_state = 'failed')
+                  )
                 ORDER BY id
                 "#,
             )?;
@@ -4324,6 +4510,7 @@ fn load_committed_view_entries(
           ON attachment.camp_id = entry.camp_id
          AND attachment.id = entry.attachment_id
         WHERE entry.camp_id = ?1
+          AND attachment.runtime_projection_state IN ('available', 'pending')
         ORDER BY CAST(entry.attachment_id AS BLOB)
         "#,
     )?;
@@ -4515,6 +4702,31 @@ fn load_published_authority_rows(
         FROM message_attachment
         WHERE camp_id = ?1 AND runtime_projection_state = 'available'
         ORDER BY CAST(id AS BLOB)
+        "#,
+        camp_id,
+    )
+}
+
+fn load_recoverable_authority_rows(
+    connection: &Connection,
+    camp_id: &str,
+) -> Result<Vec<AuthorityAttachmentRow>> {
+    load_authority_rows(
+        connection,
+        r#"
+        SELECT attachment.id, attachment.media_type, attachment.byte_size,
+               attachment.content_digest, attachment.storage_path
+        FROM message_attachment AS attachment
+        LEFT JOIN camp_attachment_view_operation AS operation
+          ON operation.id = attachment.publication_operation_id
+         AND operation.camp_id = attachment.camp_id
+        WHERE attachment.camp_id = ?1
+          AND attachment.runtime_projection_state = 'recovery_required'
+          AND (
+              attachment.publication_operation_id IS NULL
+              OR operation.resolution_state = 'available'
+          )
+        ORDER BY CAST(attachment.id AS BLOB)
         "#,
         camp_id,
     )
@@ -4745,7 +4957,16 @@ fn load_view_entry_ids(
     camp_id: &str,
 ) -> Result<std::collections::BTreeSet<String>> {
     let mut statement = connection.prepare(
-        "SELECT attachment_id FROM camp_attachment_view_entry WHERE camp_id = ?1 ORDER BY attachment_id",
+        r#"
+        SELECT entry.attachment_id
+        FROM camp_attachment_view_entry AS entry
+        JOIN message_attachment AS attachment
+          ON attachment.camp_id = entry.camp_id
+         AND attachment.id = entry.attachment_id
+        WHERE entry.camp_id = ?1
+          AND attachment.runtime_projection_state IN ('available', 'pending')
+        ORDER BY entry.attachment_id
+        "#,
     )?;
     Ok(statement
         .query_map([camp_id], |row| row.get::<_, String>(0))?
@@ -7270,11 +7491,13 @@ mod tests {
     }
 
     #[test]
-    fn startup_reconcile_quarantines_missing_authority_to_its_camp() {
+    fn startup_reconcile_degrades_missing_authority_without_blocking_camp() {
         let (mut database, data_dir, affected_camp_id, view) = fixture();
         let attachment_store = CampAttachmentStore::new(&data_dir);
         let source = data_dir.join("missing-authority.txt");
+        let valid_source = data_dir.join("still-readable.txt");
         fs::write(&source, b"published before authority loss").unwrap();
+        fs::write(&valid_source, b"peer attachment remains readable").unwrap();
         let saved = attachment_store
             .save_body(&mut database, &affected_camp_id, "Affected")
             .unwrap();
@@ -7287,7 +7510,29 @@ mod tests {
                 "missing-authority.txt",
             )
             .unwrap();
-        let attachment_id = draft.attachments[0].id.clone();
+        let draft = attachment_store
+            .prepare_from_path(
+                &mut database,
+                &affected_camp_id,
+                draft.revision,
+                &valid_source,
+                "still-readable.txt",
+            )
+            .unwrap();
+        let attachment_id = draft
+            .attachments
+            .iter()
+            .find(|attachment| attachment.display_name == "missing-authority.txt")
+            .unwrap()
+            .id
+            .clone();
+        let valid_attachment_id = draft
+            .attachments
+            .iter()
+            .find(|attachment| attachment.display_name == "still-readable.txt")
+            .unwrap()
+            .id
+            .clone();
         publish_current_draft(
             &mut database,
             &data_dir,
@@ -7295,6 +7540,12 @@ mod tests {
             &view,
             draft.revision,
         );
+        let (frozen_receipt, _) = load_camp_attachment_view_receipt(
+            database.connection(),
+            &affected_camp_id,
+            vec![attachment_id.clone(), valid_attachment_id.clone()],
+        )
+        .unwrap();
 
         let unaffected_workspace = data_dir.join("unaffected-workspace");
         fs::create_dir_all(&unaffected_workspace).unwrap();
@@ -7331,14 +7582,24 @@ mod tests {
         set_file_mode(Path::new(&projected), 0o600).unwrap();
         fs::write(&projected, b"force controlled rebuild").unwrap();
         set_file_mode(Path::new(&projected), 0o400).unwrap();
-        attachment_store.remove_camp(&affected_camp_id).unwrap();
+        let authority_path: String = database
+            .connection()
+            .query_row(
+                "SELECT storage_path FROM message_attachment WHERE id = ?1",
+                [&attachment_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let authority_path = PathBuf::from(authority_path);
+        let authority_container = authority_path.parent().unwrap();
+        set_directory_mode(authority_container, 0o700).unwrap();
+        fs::remove_file(&authority_path).unwrap();
+        set_directory_mode(authority_container, 0o500).unwrap();
 
         view.reconcile(&mut database, &attachment_store).unwrap();
 
-        assert!(
-            view.verify_camp_ready(&database, &affected_camp_id)
-                .is_err()
-        );
+        view.verify_camp_ready(&database, &affected_camp_id)
+            .unwrap();
         view.verify_camp_ready(&database, &unaffected_camp_id)
             .unwrap();
         assert_eq!(
@@ -7360,11 +7621,81 @@ mod tests {
                 )
                 .unwrap(),
             (
-                "integrity_failed".to_string(),
+                "ready".to_string(),
                 None,
-                Some("camp_attachment_view_backfill_failed".to_string()),
+                Some("camp_attachment_integrity_degraded".to_string()),
             )
         );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT runtime_projection_state FROM message_attachment WHERE id = ?1",
+                    [&attachment_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "recovery_required"
+        );
+        assert!(
+            resolve_published_attachment_path(
+                database.connection(),
+                &affected_camp_id,
+                &attachment_id,
+            )
+            .is_err()
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT runtime_projection_state FROM message_attachment WHERE id = ?1",
+                    [&valid_attachment_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "available"
+        );
+        let valid_projected = resolve_published_attachment_path(
+            database.connection(),
+            &affected_camp_id,
+            &valid_attachment_id,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(valid_projected).unwrap(),
+            "peer attachment remains readable"
+        );
+        runtime_attachment_auth_receipt(
+            database.connection(),
+            &affected_camp_id,
+            "sha256:degraded-camp-manifest",
+            CampAttachmentVisibilityMode::GenerationFencedV1,
+        )
+        .unwrap();
+        validate_append_only_view_receipt(database.connection(), &frozen_receipt).unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    r#"
+                    SELECT COUNT(*) FROM camp_attachment_view_operation
+                    WHERE camp_id = ?1 AND status NOT IN ('completed', 'rolled_back')
+                    "#,
+                    [&affected_camp_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+
+        set_directory_mode(authority_container, 0o700).unwrap();
+        fs::write(&authority_path, b"published before authority loss").unwrap();
+        set_file_mode(&authority_path, 0o400).unwrap();
+        set_directory_mode(authority_container, 0o500).unwrap();
+        view.reconcile(&mut database, &attachment_store).unwrap();
+        view.verify_camp_ready(&database, &affected_camp_id)
+            .unwrap();
         assert_eq!(
             database
                 .connection()
@@ -7380,16 +7711,24 @@ mod tests {
             database
                 .connection()
                 .query_row(
-                    r#"
-                    SELECT COUNT(*) FROM camp_attachment_view_operation
-                    WHERE camp_id = ?1 AND status NOT IN ('completed', 'rolled_back')
-                    "#,
+                    "SELECT last_error_code FROM camp_attachment_view WHERE camp_id = ?1",
                     [&affected_camp_id],
-                    |row| row.get::<_, i64>(0),
+                    |row| row.get::<_, Option<String>>(0),
                 )
                 .unwrap(),
-            0
+            None
         );
+        let restored_projected = resolve_published_attachment_path(
+            database.connection(),
+            &affected_camp_id,
+            &attachment_id,
+        )
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(restored_projected).unwrap(),
+            "published before authority loss"
+        );
+        validate_append_only_view_receipt(database.connection(), &frozen_receipt).unwrap();
 
         cleanup_fixture(&mut database, &data_dir, &affected_camp_id, &view);
         cleanup_fixture(&mut database, &data_dir, &unaffected_camp_id, &view);

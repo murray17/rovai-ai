@@ -131,7 +131,8 @@ Architecture 解释组件如何组成，Version 概览记录交付范围；它�
 | [Camp Attachment v4（历史）](camp-attachment-v4.md) | v3 publication 不变；Run tmp 逐 lease 隔离，并以共享 per-Camp gate 串行 Authority 权限切换与清理 |
 | [Camp Attachment v3（历史）](camp-attachment-v3.md) | v2 shape/limits/Authority 不变；统一 Composer/Agent ingress 与 pending/available/recovery/failed Runtime projection |
 | [Camp Attachment v2（历史）](camp-attachment-v2.md) | v1 ingress/限制/digest 不变；Draft 保持 Core-private，Published Attachment 成为 Camp-shared 并只通过 Runtime View 暴露 |
-| [Camp Published Attachment View v3（当前）](camp-published-attachment-view-v3.md) | v2 receipt wire 不变；semantic/resolved/catalog 三轴、FIFO worker、failed tombstone 与统一 available Desired set |
+| [Camp Published Attachment View v4（当前）](camp-published-attachment-view-v4.md) | v3 publication/receipt 不变；成功发布历史与当前可读性分轴，异常附件局部降级、Context 省略与自动恢复 |
+| [Camp Published Attachment View v3（历史）](camp-published-attachment-view-v3.md) | v2 receipt wire 不变；semantic/resolved/catalog 三轴、FIFO worker、failed tombstone 与统一 available Desired set |
 | [Camp Published Attachment View v2（历史）](camp-published-attachment-view-v2.md) | v1 root/journal/generation fence 不变；增加稳定 semantic catalog/receipt、可重建物理轴与无全局 DB 锁 copy phase |
 | [Camp Published Attachment View v1（历史）](camp-published-attachment-view-v1.md) | 实例/Camp 隔离 root、publication journal、ready catalog、generation、物理 Manifest receipt、quota、rebuild 与安全清理 |
 | [Camp Attachment v1（历史）](camp-attachment-v1.md) | 普通文件/目录联合、Core-owned 只读快照、限制、Draft 原子消费、Snapshot 29 与旧 Runtime Authority path |
