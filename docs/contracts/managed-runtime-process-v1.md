@@ -3,7 +3,7 @@ document_type: contract
 contract: managed-runtime-process-v1
 status: accepted
 source_version: v1.05
-last_updated: 2026-08-21
+last_updated: 2026-08-25
 ---
 
 # Managed Runtime Process v1
@@ -41,6 +41,12 @@ Windows 第一版的 launch policy 只允许：
 
 任意 `.com`、`.cmd`、`.bat`、`.ps1` 和通用 `cmd.exe /s /c` 不属于 v1。无法解析的 shim 保持 Runtime
 `not_qualified`。用户 prompt 只能经 stdin 投递。
+
+Discovery 可以把已知 npm/pnpm 生成的 Codex `codex.cmd` 作为只读 locator：有界验证精确模板、
+`@openai/codex` entrypoint、对应 Windows x64 platform package 与固定 vendor 路径后，只把最终 canonical
+`codex.exe` 交给 fingerprint、version probe、Installation 和本接口。该 locator 不是
+`ValidatedNodeShim`，不会执行 `.cmd`、`node.exe` 或 Node entrypoint；任一结构、范围或 metadata 校验失败都
+fail closed。
 
 ## 2. Windows atomic launch
 

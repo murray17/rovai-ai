@@ -26,6 +26,11 @@ use tokio::process::Command as TokioCommand;
 #[cfg(unix)]
 use uuid::Uuid;
 
+#[cfg(windows)]
+use crate::runtime_discovery_windows::{
+    WindowsRegistryPathValues, is_cmd_path, paths_equal, read_registry_path_values,
+    registry_path_directories, resolve_codex_cmd_shim,
+};
 use crate::{
     agent_profile::{AdapterKind, InstallationSource},
     agent_runtime_adapter::{executable_fingerprint, grok_build_minimum_version_satisfied},
@@ -221,6 +226,12 @@ impl RuntimeSearchEnvironment {
                 SearchPathSource::InheritedPath,
             );
         }
+        #[cfg(windows)]
+        {
+            let registry_paths = read_registry_path_values();
+            let environment = env::vars_os().collect::<Vec<_>>();
+            extend_windows_registry_paths(&mut entries, &registry_paths, &environment);
+        }
 
         let shell_start = Instant::now();
         let (shell_status, shell_name, shell_paths) = capture_shell_path(interactive);
@@ -329,22 +340,26 @@ impl RuntimeSearchEnvironment {
     ) -> Vec<RuntimeExecutableCandidate> {
         let mut candidates = Vec::new();
         for path in manual_candidates {
-            push_candidates_for_kind(
+            if !push_candidates_for_kind(
                 &mut candidates,
                 path,
                 InstallationSource::Manual,
                 kind,
                 &self.executable_suffixes,
-            );
+            ) {
+                return Vec::new();
+            }
         }
-        if let Some(path) = override_path {
-            push_candidates_for_kind(
+        if let Some(path) = override_path
+            && !push_candidates_for_kind(
                 &mut candidates,
                 path,
                 InstallationSource::Env,
                 kind,
                 &self.executable_suffixes,
-            );
+            )
+        {
+            return Vec::new();
         }
         for entry in &self.path_entries {
             let source = entry
@@ -394,8 +409,16 @@ pub fn discover_runtime_path(
     kind: AdapterKind,
     search: &RuntimeSearchEnvironment,
 ) -> RuntimeDiscoveryObservation {
+    discover_runtime_path_from_candidates(kind, search, search.candidates(kind, std::iter::empty()))
+}
+
+fn discover_runtime_path_from_candidates(
+    kind: AdapterKind,
+    search: &RuntimeSearchEnvironment,
+    candidates: impl IntoIterator<Item = RuntimeExecutableCandidate>,
+) -> RuntimeDiscoveryObservation {
     let observed_at = chrono::Utc::now().to_rfc3339();
-    for candidate in search.candidates(kind, std::iter::empty()) {
+    for candidate in candidates {
         if !is_executable_file(&candidate.path) {
             continue;
         }
@@ -762,7 +785,10 @@ fn extend_paths(
             continue;
         }
         let normalized = normalize_directory(path);
-        if let Some(existing) = entries.iter_mut().find(|entry| entry.path == normalized) {
+        if let Some(existing) = entries
+            .iter_mut()
+            .find(|entry| runtime_paths_equal(&entry.path, &normalized))
+        {
             if !existing.sources.contains(&source) {
                 existing.sources.push(source);
             }
@@ -772,6 +798,37 @@ fn extend_paths(
                 sources: vec![source],
             });
         }
+    }
+}
+
+#[cfg(windows)]
+fn extend_windows_registry_paths(
+    entries: &mut Vec<SearchPathEntry>,
+    registry_paths: &WindowsRegistryPathValues,
+    environment: &[(OsString, OsString)],
+) {
+    // Preserve the process's inherited PATH precedence. Fresh User and then
+    // Machine registry values fill in entries installed after Desktop startup.
+    extend_paths(
+        entries,
+        registry_path_directories(registry_paths.user.as_deref(), environment).into_iter(),
+        SearchPathSource::InheritedPath,
+    );
+    extend_paths(
+        entries,
+        registry_path_directories(registry_paths.machine.as_deref(), environment).into_iter(),
+        SearchPathSource::InheritedPath,
+    );
+}
+
+fn runtime_paths_equal(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        paths_equal(left, right)
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
     }
 }
 
@@ -818,7 +875,16 @@ fn push_candidates_for_kind(
     source: InstallationSource,
     kind: AdapterKind,
     executable_suffixes: &[OsString],
-) {
+) -> bool {
+    #[cfg(windows)]
+    if kind == AdapterKind::CodexCli && is_cmd_path(&path_or_directory) {
+        let Some(executable) = resolve_codex_cmd_shim(&path_or_directory) else {
+            return false;
+        };
+        push_concrete_candidate(candidates, executable, source);
+        return true;
+    }
+
     if path_or_directory.is_dir() {
         for command_name in kind.command_names() {
             push_candidates(
@@ -829,9 +895,19 @@ fn push_candidates_for_kind(
                 executable_suffixes,
             );
         }
-        return;
+        #[cfg(windows)]
+        if kind == AdapterKind::CodexCli {
+            let shim = path_or_directory.join("codex.cmd");
+            if shim.is_file()
+                && let Some(executable) = resolve_codex_cmd_shim(&shim)
+            {
+                push_concrete_candidate(candidates, executable, source);
+            }
+        }
+        return true;
     }
     push_concrete_candidate(candidates, path_or_directory, source);
+    true
 }
 
 /// Cursor's current CLI reports a date-based build such as
@@ -867,7 +943,7 @@ fn push_concrete_candidate(
     let canonical = runtime_visible_path(path.canonicalize().unwrap_or(path));
     if candidates
         .iter()
-        .any(|candidate| candidate.path == canonical)
+        .any(|candidate| runtime_paths_equal(&candidate.path, &canonical))
     {
         return;
     }
@@ -1466,6 +1542,103 @@ mod windows_path_tests {
 #[cfg(all(test, windows))]
 mod windows_tests {
     use super::*;
+    use serde_json::json;
+
+    fn test_search(
+        generation: u64,
+        path_entries: Vec<SearchPathEntry>,
+    ) -> RuntimeSearchEnvironment {
+        RuntimeSearchEnvironment {
+            generation,
+            path_value: env::join_paths(path_entries.iter().map(|entry| entry.path.as_os_str()))
+                .unwrap(),
+            path_entries,
+            executable_suffixes: vec![OsString::from(".exe")],
+            created_at: "2026-08-25T00:00:00Z".to_string(),
+            shell_diagnostic: ShellPathDiagnostic {
+                status: ShellPathStatus::Unavailable,
+                interactive: false,
+                shell_name: None,
+                entry_count: 0,
+                elapsed_millis: 0,
+            },
+        }
+    }
+
+    fn npm_codex_installation(root: &Path) -> (PathBuf, PathBuf) {
+        const VERSION: &str = "0.149.1";
+        let main_package = root.join("node_modules/@openai/codex");
+        let entrypoint = main_package.join("bin/codex.js");
+        fs::create_dir_all(entrypoint.parent().unwrap()).unwrap();
+        fs::write(&entrypoint, b"#!/usr/bin/env node\n").unwrap();
+        fs::write(
+            main_package.join("package.json"),
+            serde_json::to_vec_pretty(&json!({
+                "name": "@openai/codex",
+                "version": VERSION,
+                "bin": { "codex": "bin/codex.js" },
+                "optionalDependencies": {
+                    "@openai/codex-win32-x64": format!(
+                        "npm:@openai/codex@{VERSION}-win32-x64"
+                    )
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let platform_package = root.join("node_modules/@openai/codex-win32-x64");
+        let executable = platform_package.join("vendor/x86_64-pc-windows-msvc/bin/codex.exe");
+        fs::create_dir_all(executable.parent().unwrap()).unwrap();
+        fs::write(
+            platform_package.join("package.json"),
+            serde_json::to_vec_pretty(&json!({
+                "name": "@openai/codex",
+                "version": format!("{VERSION}-win32-x64"),
+                "os": ["win32"],
+                "cpu": ["x64"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(&executable, b"real native codex executable").unwrap();
+
+        let target = r"%dp0%\node_modules\@openai\codex\bin\codex.js";
+        let shim_content = format!(
+            concat!(
+                "@ECHO off\r\n",
+                "GOTO start\r\n",
+                ":find_dp0\r\n",
+                "SET dp0=%~dp0\r\n",
+                "EXIT /b\r\n",
+                ":start\r\n",
+                "SETLOCAL\r\n",
+                "CALL :find_dp0\r\n",
+                "\r\n",
+                "IF EXIST \"%dp0%\\node.exe\" (\r\n",
+                "  SET \"_prog=%dp0%\\node.exe\"\r\n",
+                ") ELSE (\r\n",
+                "  SET \"_prog=node\"\r\n",
+                ")\r\n",
+                "\r\n",
+                "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & set PATHEXT=%PATHEXT:;.JS;=;% & \"%_prog%\"  \"{target}\" %*\r\n"
+            ),
+            target = target
+        );
+        let shim = root.join("codex.cmd");
+        fs::write(&shim, shim_content).unwrap();
+        (shim, executable)
+    }
+
+    fn inherited_entries(paths: impl IntoIterator<Item = PathBuf>) -> Vec<SearchPathEntry> {
+        let mut entries = Vec::new();
+        extend_paths(
+            &mut entries,
+            paths.into_iter(),
+            SearchPathSource::InheritedPath,
+        );
+        entries
+    }
 
     #[test]
     fn executable_file_gate_accepts_exe_and_rejects_script_shims() {
@@ -1502,6 +1675,262 @@ mod windows_tests {
         assert_eq!(locations, [codex_bin]);
 
         fs::remove_dir_all(local_app_data).unwrap();
+    }
+
+    #[test]
+    fn windows_npm_shim_discovery_binds_path_and_fingerprint_to_real_executable() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-npm-discovery-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let (shim, executable) = npm_codex_installation(&root);
+        let search = test_search(3, inherited_entries([root.clone()]));
+        let canonical_executable = runtime_visible_path(executable.canonicalize().unwrap());
+
+        let explicit_candidates =
+            search.candidates_with_override(AdapterKind::CodexCli, [shim], None);
+        assert_eq!(explicit_candidates.len(), 2);
+        assert_eq!(explicit_candidates[0].path, canonical_executable);
+        assert_eq!(explicit_candidates[0].source, InstallationSource::Manual);
+
+        let candidates =
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[1].path, canonical_executable);
+        assert_eq!(candidates[1].source, InstallationSource::InheritedPath);
+
+        let observation =
+            discover_runtime_path_from_candidates(AdapterKind::CodexCli, &search, candidates);
+        assert_eq!(observation.discovery_status, RuntimeDiscoveryStatus::Found);
+        assert_eq!(
+            observation.executable_path.as_deref(),
+            Some(canonical_executable.to_string_lossy().as_ref())
+        );
+        assert_eq!(
+            observation.executable_fingerprint,
+            Some(executable_fingerprint(&canonical_executable).unwrap())
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_native_codex_executable_precedes_cmd_shim_in_same_directory() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-native-codex-priority-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let (_, shim_executable) = npm_codex_installation(&root);
+        let native_executable = root.join("codex.exe");
+        fs::write(&native_executable, b"official installer fixture").unwrap();
+        let search = test_search(4, inherited_entries([root.clone()]));
+
+        let candidates =
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates[0].path,
+            runtime_visible_path(native_executable.canonicalize().unwrap())
+        );
+        assert_eq!(
+            candidates[1].path,
+            runtime_visible_path(shim_executable.canonicalize().unwrap())
+        );
+
+        let observation =
+            discover_runtime_path_from_candidates(AdapterKind::CodexCli, &search, candidates);
+        assert_eq!(
+            observation.executable_path.as_deref(),
+            Some(
+                runtime_visible_path(native_executable.canonicalize().unwrap())
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn explicit_invalid_codex_cmd_fails_closed_without_path_fallback() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-explicit-codex-shim-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let explicit = root.join("explicit");
+        let fallback = root.join("fallback");
+        fs::create_dir_all(&explicit).unwrap();
+        fs::create_dir_all(&fallback).unwrap();
+        let invalid_shim = explicit.join("codex.cmd");
+        fs::write(&invalid_shim, b"@malformed shim\r\n").unwrap();
+        let unknown_shim = explicit.join("renamed.cmd");
+        fs::write(&unknown_shim, b"@malformed shim\r\n").unwrap();
+        fs::write(fallback.join("codex.exe"), b"fallback must not win").unwrap();
+        let search = test_search(5, inherited_entries([fallback]));
+
+        assert!(
+            search
+                .candidates_with_override(AdapterKind::CodexCli, [invalid_shim.clone()], None)
+                .is_empty()
+        );
+        assert!(
+            search
+                .candidates_with_override(
+                    AdapterKind::CodexCli,
+                    std::iter::empty(),
+                    Some(invalid_shim)
+                )
+                .is_empty()
+        );
+        assert!(
+            search
+                .candidates_with_override(AdapterKind::CodexCli, [unknown_shim], None)
+                .is_empty()
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_rescan_hydrates_new_user_path_without_restart() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-user-path-rescan-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let inherited = root.join("inherited");
+        let newly_installed = root.join("new-user-path");
+        fs::create_dir_all(&inherited).unwrap();
+        fs::create_dir_all(&newly_installed).unwrap();
+        fs::write(newly_installed.join("codex.exe"), b"newly installed").unwrap();
+
+        let initial = test_search(1, inherited_entries([inherited.clone()]));
+        let initial_candidates =
+            initial.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
+        assert_eq!(
+            discover_runtime_path_from_candidates(
+                AdapterKind::CodexCli,
+                &initial,
+                initial_candidates,
+            )
+            .discovery_status,
+            RuntimeDiscoveryStatus::Missing
+        );
+
+        let mut rescanned_entries = inherited_entries([inherited]);
+        extend_windows_registry_paths(
+            &mut rescanned_entries,
+            &WindowsRegistryPathValues {
+                user: Some(newly_installed.clone().into_os_string()),
+                machine: None,
+            },
+            &[],
+        );
+        let rescanned = test_search(2, rescanned_entries);
+        let rescanned_candidates =
+            rescanned.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
+        let observation = discover_runtime_path_from_candidates(
+            AdapterKind::CodexCli,
+            &rescanned,
+            rescanned_candidates,
+        );
+        assert_eq!(observation.discovery_status, RuntimeDiscoveryStatus::Found);
+        assert_eq!(observation.search_generation, 2);
+        assert_eq!(
+            observation.executable_path.as_deref(),
+            Some(
+                runtime_visible_path(newly_installed.join("codex.exe").canonicalize().unwrap())
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_hydration_order_is_inherited_user_machine_then_known() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-path-priority-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let inherited = root.join("inherited-current");
+        let user = root.join("user-current");
+        let machine = root.join("machine-old");
+        let known = root.join("known-fallback");
+        for (directory, body) in [
+            (&inherited, b"inherited".as_slice()),
+            (&user, b"user".as_slice()),
+            (&machine, b"machine".as_slice()),
+            (&known, b"known".as_slice()),
+        ] {
+            fs::create_dir_all(directory).unwrap();
+            fs::write(directory.join("codex.exe"), body).unwrap();
+        }
+
+        let mut entries = inherited_entries([inherited.clone()]);
+        extend_windows_registry_paths(
+            &mut entries,
+            &WindowsRegistryPathValues {
+                user: Some(user.clone().into_os_string()),
+                machine: Some(machine.clone().into_os_string()),
+            },
+            &[],
+        );
+        extend_paths(
+            &mut entries,
+            [known.clone()].into_iter(),
+            SearchPathSource::KnownLocation,
+        );
+        let expected_paths = [&inherited, &user, &machine, &known]
+            .into_iter()
+            .map(|path| normalize_directory(path.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.path.clone())
+                .collect::<Vec<_>>(),
+            expected_paths
+        );
+
+        let search = test_search(6, entries);
+        let candidates =
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
+        let observation =
+            discover_runtime_path_from_candidates(AdapterKind::CodexCli, &search, candidates);
+        assert_eq!(
+            observation.executable_path.as_deref(),
+            Some(
+                runtime_visible_path(inherited.join("codex.exe").canonicalize().unwrap())
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn unavailable_registry_keeps_inherited_path_and_case_duplicates_collapse() {
+        let mut entries = inherited_entries([PathBuf::from(r"C:\Users\Example\Codex\bin")]);
+        extend_windows_registry_paths(&mut entries, &WindowsRegistryPathValues::default(), &[]);
+        assert_eq!(entries.len(), 1);
+
+        extend_paths(
+            &mut entries,
+            [PathBuf::from(r"c:\users\example\codex\BIN")].into_iter(),
+            SearchPathSource::KnownLocation,
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].sources,
+            [
+                SearchPathSource::InheritedPath,
+                SearchPathSource::KnownLocation
+            ]
+        );
     }
 
     #[test]

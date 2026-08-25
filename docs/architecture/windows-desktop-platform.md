@@ -3,7 +3,7 @@ document_type: architecture
 architecture: windows-desktop-platform
 authority: windows-desktop-platform-composition
 status: accepted
-last_updated: 2026-08-22
+last_updated: 2026-08-25
 ---
 
 # Windows Desktop Platform
@@ -27,7 +27,7 @@ Host envelope 通过不等于 Runtime 可选。每个 Adapter 还必须通过
 | --- | --- | --- | --- |
 | Local IPC | Unix Socket | protected Named Pipe | `LocalIpcEndpoint` + async byte stream |
 | Managed process | process group + bounded signals | atomic Job-list `CreateProcessW` | `ManagedProcessLaunchSpec → ManagedProcess` |
-| Runtime search | inherited/login-shell PATH + known dirs | inherited PATH/PATHEXT + known dirs | immutable Runtime Search Environment |
+| Runtime search | inherited/login-shell PATH + known dirs | inherited PATH + per-capture HKCU User/HKLM Machine PATH hydration + known dirs | immutable Runtime Search Environment |
 | Executable identity | device/inode + fingerprint | opened volume/file ID + fingerprint | frozen executable identity |
 | Private storage | create-new + 0700/0600 | creation-time protected DACL | private create/atomic write helpers |
 | Attachment traversal | `openat`/no-follow | handle-relative reparse-safe traversal | bounded immutable snapshot |
@@ -43,6 +43,12 @@ use remains inside the corresponding adapter.
 Windows creates the child with its Job and explicit inheritable handles in one `CreateProcessW` operation. Runtime Platform
 Admission only permits native EXE or an Adapter-owned validated Node shim resolved to `node.exe + entry script`; there is
 no generic shell launcher.
+
+Windows Runtime Search Environment 每次 capture/rescan 都按 inherited process PATH、HKCU User PATH、HKLM Machine
+PATH、known locations 的稳定顺序生成新快照；Registry 只读失败不会阻断 inherited PATH，环境变量展开、目录存在性
+过滤与路径去重都在快照建立前完成。Codex 的已知 npm/pnpm `codex.cmd` 仅可被有界解析为
+`@openai/codex` 的 Windows x64 platform package 中真实 `codex.exe` 的定位证据；`.cmd`、`node.exe` 与 Node
+entrypoint 都不进入 Installation identity，也不经过 Managed Process 启动。
 
 Electron→Core stdin/stdout RPC remains. Main force-kill acceptance must prove Core observes EOF or a parent handle,
 executes bounded shutdown and closes every Runtime Job. Process exit and Job cleanup never invent a Provider terminal;
