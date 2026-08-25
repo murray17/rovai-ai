@@ -859,7 +859,9 @@ export function campConversationTimeline(
   const publicMessages: CampConversationTimelineItem[] = messages
     .filter((message) => {
       const kind = (message.presentation as { kind?: string } | null)?.kind
-      return kind !== 'a2a_event' && kind !== 'task_event'
+      const isLegacyApprovalResolution = message.authorType === 'system'
+        && message.authorId === 'approval'
+      return kind !== 'a2a_event' && kind !== 'task_event' && !isLegacyApprovalResolution
     })
     .map((message) => ({
       kind: 'camp_message',
