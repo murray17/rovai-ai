@@ -14,6 +14,21 @@ export type CurrentProject =
   | { kind: 'quick_chat' }
   | { kind: 'directory'; projectPath: string }
 
+export type CurrentProjectAccessDecision =
+  | 'wait'
+  | 'fallback'
+  | 'clear_hint'
+  | 'keep_hint'
+  | 'inspect'
+
+export interface CurrentProjectAccessInput {
+  currentProject: CurrentProject
+  currentWorkspaceHint: WorkspaceSelection | null
+  navigation: NavigationSnapshot | null
+  removedProjectKeys: ReadonlySet<string>
+  removedProjectAuthorityReady: boolean
+}
+
 export interface ResolvedNewConversationDefaults {
   defaults: NewConversationDefaults
   members: AgentProfile[]
@@ -84,6 +99,20 @@ export function navigationWithoutRemovedProjects(
     : { ...navigation, projects }
 }
 
+export function navigationWithProjectAuthority(
+  navigation: NavigationSnapshot | null,
+  removedProjectKeys: ReadonlySet<string>,
+  removedProjectAuthorityReady: boolean
+): NavigationSnapshot | null {
+  if (!navigation) return null
+  if (!removedProjectAuthorityReady) {
+    return navigation.projects.length === 0
+      ? navigation
+      : { ...navigation, projects: [] }
+  }
+  return navigationWithoutRemovedProjects(navigation, removedProjectKeys)
+}
+
 export function currentProjectGroup(
   navigation: NavigationSnapshot | null,
   currentProject: CurrentProject
@@ -106,6 +135,21 @@ export function currentProjectWorkspace(
 ): WorkspaceSelection | null {
   const project = currentProjectGroup(navigation, currentProject)
   return project ? { name: project.name, projectPath: project.projectPath } : null
+}
+
+export function currentProjectAccessDecision({
+  currentProject,
+  currentWorkspaceHint,
+  navigation,
+  removedProjectKeys,
+  removedProjectAuthorityReady
+}: CurrentProjectAccessInput): CurrentProjectAccessDecision {
+  if (!navigation || !removedProjectAuthorityReady) return 'wait'
+  if (currentProject.kind === 'quick_chat') return 'clear_hint'
+  if (removedProjectKeys.has(projectTargetKey(currentProject.projectPath))) return 'fallback'
+  if (currentProjectGroup(navigation, currentProject)) return 'clear_hint'
+  if (currentWorkspaceHint?.projectPath === currentProject.projectPath) return 'keep_hint'
+  return 'inspect'
 }
 
 export function navigationIncludingCurrentWorkspace(

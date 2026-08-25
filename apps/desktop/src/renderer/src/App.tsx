@@ -102,11 +102,12 @@ import {
 } from './OnboardingFlow'
 import { provisionFirstRun } from './onboarding-provisioning'
 import {
+  currentProjectAccessDecision,
   currentProjectForCamp,
   currentProjectGroup,
   currentProjectWorkspace,
   navigationIncludingCurrentWorkspace,
-  navigationWithoutRemovedProjects,
+  navigationWithProjectAuthority,
   persistCurrentProject,
   projectTargetKey,
   readCurrentProject,
@@ -525,6 +526,7 @@ export function App(): React.JSX.Element {
   const [navigation, setNavigation] = useState<NavigationSnapshot | null>(null)
   const [navigationPins, setNavigationPins] = useState<NavigationPin[]>([])
   const [removedProjectKeys, setRemovedProjectKeys] = useState<Set<string>>(() => new Set())
+  const [removedProjectAuthorityReady, setRemovedProjectAuthorityReady] = useState(false)
   const [pinnedCampItems, setPinnedCampItems] = useState<NavigationCampItem[]>([])
   const [pendingMemoryCount, setPendingMemoryCount] = useState(0)
   const [memoryReviewNotice, setMemoryReviewNotice] = useState(false)
@@ -803,6 +805,7 @@ export function App(): React.JSX.Element {
         setRemovedProjectKeys(new Set(
           resolvedNavigationPreferences.removedProjects.map((project) => project.targetKey)
         ))
+        setRemovedProjectAuthorityReady(true)
         setPinnedCampItems(resolvedPins.camps)
         await Promise.all([
           nextAgentsPromise,
@@ -886,24 +889,17 @@ export function App(): React.JSX.Element {
     setRemovedProjectKeys(new Set(
       snapshot.removedProjects.map((project) => project.targetKey)
     ))
+    setRemovedProjectAuthorityReady(true)
   }, [])
 
   const restoreNavigationProject = useCallback(async (projectPath: string): Promise<void> => {
     const targetKey = projectTargetKey(projectPath)
-    setRemovedProjectKeys((current) => {
-      if (!current.has(targetKey)) return current
-      const next = new Set(current)
-      next.delete(targetKey)
-      return next
-    })
     try {
       const snapshot = await window.rovai.navigationPreferences.restoreProject(targetKey)
       applyNavigationPreferences(snapshot)
     } catch (nextError) {
-      // A local navigation preference must never block opening or creating the
-      // Core-owned Camp. Keep the Project visible for this session and surface
-      // that only its cross-restart restoration could not be saved.
-      setError(`项目已重新显示，但侧栏恢复状态未能保存：${errorMessage(nextError)}`)
+      setError(`项目访问状态未能恢复，已停止后续目录检查：${errorMessage(nextError)}`)
+      throw nextError
     }
   }, [applyNavigationPreferences])
 
@@ -1043,10 +1039,6 @@ export function App(): React.JSX.Element {
         + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
       )
       void (async () => {
-        if (snapshot.camp.projectBindingKind === 'directory') {
-          await restoreNavigationProject(snapshot.camp.projectPath)
-          if (selectionGeneration !== campSelectionGeneration.current) return
-        }
         await loadNavigation()
         if (selectionGeneration !== campSelectionGeneration.current) return
         console.info(
@@ -1073,7 +1065,7 @@ export function App(): React.JSX.Element {
       }
       return false
     }
-  }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, restoreNavigationProject, setCampSnapshot])
+  }, [clearCampOpenFeedback, loadNavigation, requestCampProjection, setCampSnapshot])
 
   useEffect(() => window.rovai.userAutomation.onOpenCamp(({ campId }) => {
     void activateCamp(campId, { reconcileDefaultLead: false })
@@ -1228,31 +1220,36 @@ export function App(): React.JSX.Element {
     ? currentProject.projectPath
     : null
   const visibleNavigation = useMemo(
-    () => navigationWithoutRemovedProjects(navigation, removedProjectKeys),
-    [navigation, removedProjectKeys]
+    () => navigationWithProjectAuthority(
+      navigation,
+      removedProjectKeys,
+      removedProjectAuthorityReady
+    ),
+    [navigation, removedProjectAuthorityReady, removedProjectKeys]
   )
-  const authoritativeCurrentProjectPath = currentProjectGroup(
-    visibleNavigation,
-    currentProject
-  )?.projectPath ?? null
+  const currentProjectAccess = currentProjectAccessDecision({
+    currentProject,
+    currentWorkspaceHint,
+    navigation: visibleNavigation,
+    removedProjectKeys,
+    removedProjectAuthorityReady
+  })
 
   useEffect(() => {
-    if (!visibleNavigation) return undefined
-    if (
-      currentProject.kind === 'directory'
-      && removedProjectKeys.has(projectTargetKey(currentProject.projectPath))
-    ) {
+    if (currentProjectAccess === 'wait') return undefined
+    if (currentProjectAccess === 'fallback') {
       const fallback: CurrentProject = { kind: 'quick_chat' }
       setCurrentProject(fallback)
       setCurrentWorkspaceHint(null)
       persistCurrentProject(fallback)
       return undefined
     }
-    if (currentProject.kind === 'quick_chat' || authoritativeCurrentProjectPath) {
+    if (currentProjectAccess === 'clear_hint') {
       setCurrentWorkspaceHint(null)
       return undefined
     }
-    if (currentWorkspaceHint?.projectPath === currentProject.projectPath) return undefined
+    if (currentProjectAccess === 'keep_hint') return undefined
+    if (currentProject.kind !== 'directory') return undefined
 
     let cancelled = false
     void window.rovai.request<WorkspaceInspection>('workspaces.inspect', {
@@ -1268,12 +1265,10 @@ export function App(): React.JSX.Element {
     })
     return () => { cancelled = true }
   }, [
-    authoritativeCurrentProjectPath,
+    currentProjectAccess,
     currentProject.kind,
     currentProjectPath,
-    currentWorkspaceHint?.projectPath,
-    removedProjectKeys,
-    visibleNavigation !== null
+    currentWorkspaceHint?.projectPath
   ])
 
   useEffect(() => {
@@ -1397,10 +1392,6 @@ export function App(): React.JSX.Element {
           + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)}`
         )
         void (async () => {
-          if (snapshot.camp.projectBindingKind === 'directory') {
-            await restoreNavigationProject(snapshot.camp.projectPath)
-            if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
-          }
           await loadNavigation()
           if (cancelled || selectionGeneration !== campSelectionGeneration.current) return
           console.info(
@@ -1433,7 +1424,6 @@ export function App(): React.JSX.Element {
     loadNavigation,
     loadOverview,
     requestCampProjection,
-    restoreNavigationProject,
     setCampSnapshot,
     startupSnapshot
   ])
@@ -1800,6 +1790,7 @@ export function App(): React.JSX.Element {
   }
 
   const openProject = async (): Promise<void> => {
+    if (!removedProjectAuthorityReady) return
     setError(null)
     try {
       await selectProjectDirectory(
@@ -2983,6 +2974,7 @@ export function App(): React.JSX.Element {
         preflight={campCreationPreflight}
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}
+        projectAccessReady={removedProjectAuthorityReady}
         returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}

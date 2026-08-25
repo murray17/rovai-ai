@@ -34,6 +34,8 @@ arrow-key navigation, `Esc` dismissal and focus return.
    native folder-picker cancellation, directory safety validation and asynchronous Git capability. A valid
    ordinary directory is usable before Git detection completes; do not run `git init`. Valid Git metadata
    uses the semantic success foreground and surface, while the in-progress inspection state remains neutral.
+   Before removed-Project authority is ready, keep Project choices disabled, do not inspect or submit a cached
+   directory, and identify the wait with neutral loading copy; Quick Chat creation remains available.
 2. **队员与 Lead** — default to the saved valid team configuration, otherwise all active teammates.
    The set is non-empty and Lead remains inside it. Runtime availability is guidance, not a structural
    selector. Unavailable saved members are filtered while initializing the draft without adding a
