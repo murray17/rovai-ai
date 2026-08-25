@@ -291,3 +291,36 @@ compatibility 或 Renderer API 变化。
 - 把 `available` 直接改成 `failed`：会事后改写已提交的语义 ledger 与历史 receipt；
 - 从残留 Runtime View 反向恢复 Authority：派生只读副本不是业务 Authority，且当前实例中该副本也可能已损坏；
 - 忽略任意 reconciliation 错误：会掩盖 root compromise、数据库错误或未收敛 journal。
+
+<a id="v1-28-d09"></a>
+## V1.28-D09：零附件 Camp 的 controlled rebuild 允许空 completion，并提交当前 root receipt
+
+### 背景
+
+root marker rekey 会使每个旧 View 的 root receipt 需要受控重建，包括 Desired/Actual 都为空的零附件 Camp。现有
+rebuild pipeline 能建立空目录、提交空 catalog 并推进 generation，却复用了普通 publication completion 的“至少一条
+operation entry”前提，因而把已经 committed 的合法空 rebuild 转成 `recovery_required`。同时 View commit 没有写回
+当前 root identity，使非空健康 rebuild 在完成校验时也会继续看到旧 receipt。
+
+### 决定
+
+只有 `kind = controlled_rebuild` 的 committed operation 可以在零 operation entries 时进入 completion；普通 publish 与
+initial backfill 继续拒绝空 committed operation。空 rebuild 仍必须通过完整 ready View 校验：Desired、View receipts 和
+filesystem entries 都为空，root-relative path、root identity、catalog/semantic/resolution receipt 与目录权限全部一致。
+
+每次 controlled rebuild 的原子 View commit 除原有 generation、catalog 与 Entry identity 外，必须从当前已准入 Database
+connection 写回 `rovai_runtime_camp_files_root_identity_digest()`。completion 验证通过后 operation 才成为 `completed`；
+任何非空漂移、错误 kind、非法目录或 receipt mismatch 仍进入既有 integrity failure 路径。
+
+### 后果
+
+零附件 Camp 在 schema-1 rekey 后可以不制造 synthetic Entry 地收敛为 Ready；健康非空 Camp 也会把新 root identity 与
+新的 Entry physical identities 一起提交。该修复不改变 Desired 定义、semantic catalog、View receipt wire、Data Contract
+或 Runtime compatibility，只补齐 controlled rebuild 已有的空集与 physical receipt 语义。
+
+### 被拒绝方案
+
+- 为零附件 Camp 插入 synthetic Entry：污染 Runtime-visible catalog 与 semantic receipt；
+- 对所有 operation 删除非空检查：会让非法空 publish 伪装成已完成；
+- completion 时忽略旧 root digest：会绕过当前实例身份 fence；
+- 手工修改日常 View 行：缺少可复用 journal、测试和后续机器的确定性恢复路径。

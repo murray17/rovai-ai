@@ -1014,17 +1014,17 @@ impl CampAttachmentViewStore {
         operation_id: &str,
     ) -> Result<CampAttachmentPublicationCompletionVerification> {
         validate_operation_id(operation_id)?;
-        let camp_id: String = database.connection().query_row(
-            "SELECT camp_id FROM camp_attachment_view_operation WHERE id = ?1 AND status = 'committed'",
+        let (camp_id, operation_kind): (String, String) = database.connection().query_row(
+            "SELECT camp_id, kind FROM camp_attachment_view_operation WHERE id = ?1 AND status = 'committed'",
             [operation_id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
         let preparation = (|| {
             let operation_attachment_ids =
                 load_all_operation_attachment_ids(database.connection(), operation_id)?
                     .into_iter()
                     .collect::<std::collections::BTreeSet<_>>();
-            if operation_attachment_ids.is_empty() {
+            if operation_attachment_ids.is_empty() && operation_kind != "controlled_rebuild" {
                 anyhow::bail!(
                     "camp_attachment_view_recovery_required: committed publication has no entries"
                 );
@@ -3755,6 +3755,7 @@ fn commit_operation_entries(
         SET state = 'ready', generation = ?3, entry_count = ?4,
             aggregate_bytes = ?5, catalog_digest = ?6,
             catalog_revision = ?7, semantic_catalog_digest = ?8,
+            root_identity_digest = rovai_runtime_camp_files_root_identity_digest(),
             active_operation_id = NULL, last_error_code = NULL, updated_at = ?9
         WHERE camp_id = ?1 AND active_operation_id = ?2 AND state = 'mutating'
         "#,
@@ -7392,6 +7393,72 @@ mod tests {
 
         cleanup_fixture(&mut database, &data_dir, &affected_camp_id, &view);
         cleanup_fixture(&mut database, &data_dir, &unaffected_camp_id, &view);
+    }
+
+    #[test]
+    fn empty_camp_controlled_rebuild_completes_without_synthetic_entries() {
+        let (mut database, data_dir, camp_id, view) = fixture();
+        let generation_before: i64 = database
+            .connection()
+            .query_row(
+                "SELECT generation FROM camp_attachment_view WHERE camp_id = ?1",
+                [&camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_attachment_view SET root_identity_digest = 'legacy-root-identity' WHERE camp_id = ?1",
+                [&camp_id],
+            )
+            .unwrap();
+
+        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
+            .unwrap();
+
+        view.verify_camp_ready(&database, &camp_id).unwrap();
+        let (state, generation, entry_count, root_identity): (String, i64, i64, String) = database
+            .connection()
+            .query_row(
+                r#"
+                    SELECT state, generation, entry_count, root_identity_digest
+                    FROM camp_attachment_view WHERE camp_id = ?1
+                    "#,
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(state, "ready");
+        assert!(generation > generation_before);
+        assert_eq!(entry_count, 0);
+        assert_eq!(root_identity, view.root_identity_digest());
+        let (operation_id, status): (String, String) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT id, status FROM camp_attachment_view_operation
+                WHERE camp_id = ?1 AND kind = 'controlled_rebuild'
+                ORDER BY created_at DESC, id DESC LIMIT 1
+                "#,
+                [&camp_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "completed");
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM camp_attachment_view_operation_entry WHERE operation_id = ?1",
+                    [&operation_id],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+
+        cleanup_fixture(&mut database, &data_dir, &camp_id, &view);
     }
 
     #[cfg(unix)]
