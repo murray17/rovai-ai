@@ -1717,7 +1717,7 @@ impl CampAttachmentViewStore {
         transaction.execute(
             r#"
             UPDATE camp_attachment_view_operation
-            SET status = 'rolled_back', error_code = NULL,
+            SET status = 'rolled_back', resolution_state = 'failed', error_code = NULL,
                 completed_at = ?2, updated_at = ?2
             WHERE id = ?1 AND status IN ('planned','recovery_required')
             "#,
@@ -2526,6 +2526,19 @@ impl CampAttachmentViewStore {
     }
 
     fn recover_incomplete_operations(&self, database: &mut Database) -> Result<()> {
+        // Builds after Migration 102 could cancel a cleanup without settling
+        // its writer intent. Repair only that terminal legacy shape before the
+        // unresolved-operation scan so affected Camps can admit new Runs.
+        database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view_operation
+            SET resolution_state = 'failed'
+            WHERE kind = 'camp_delete_cleanup'
+              AND status = 'rolled_back'
+              AND resolution_state = 'unresolved'
+            "#,
+            [],
+        )?;
         let operations = {
             let mut statement = database.connection().prepare(
                 "SELECT id, camp_id, status, kind, command_id, source_kind, resolution_state FROM camp_attachment_view_operation WHERE status NOT IN ('completed','rolled_back') ORDER BY created_at, id",
@@ -7137,12 +7150,70 @@ mod tests {
             database
                 .connection()
                 .query_row(
-                    "SELECT state FROM camp_attachment_view WHERE camp_id = ?1",
-                    [&camp_id],
+                    r#"
+                    SELECT view.state, operation.status, operation.resolution_state
+                    FROM camp_attachment_view AS view
+                    JOIN camp_attachment_view_operation AS operation
+                      ON operation.camp_id = view.camp_id
+                    WHERE view.camp_id = ?1 AND operation.id = ?2
+                    "#,
+                    params![camp_id, cancelled.operation_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                        ))
+                    },
+                )
+                .unwrap(),
+            (
+                "ready".to_string(),
+                "rolled_back".to_string(),
+                "failed".to_string(),
+            )
+        );
+        assert!(
+            !crate::camp_attachment_publication::database_has_unresolved_writer_intent(
+                &database, &camp_id,
+            )
+            .unwrap()
+        );
+
+        // Simulate the stale writer intent produced by builds that rolled back
+        // Camp cleanup without settling its publication resolution. Startup
+        // reconciliation must repair the terminal operation before admission.
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_attachment_view_operation SET resolution_state = 'unresolved' WHERE id = ?1",
+                [&cancelled.operation_id],
+            )
+            .unwrap();
+        assert!(
+            crate::camp_attachment_publication::database_has_unresolved_writer_intent(
+                &database, &camp_id,
+            )
+            .unwrap()
+        );
+        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT resolution_state FROM camp_attachment_view_operation WHERE id = ?1",
+                    [&cancelled.operation_id],
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap(),
-            "ready"
+            "failed"
+        );
+        assert!(
+            !crate::camp_attachment_publication::database_has_unresolved_writer_intent(
+                &database, &camp_id,
+            )
+            .unwrap()
         );
 
         let delete_command_id = Uuid::new_v4().to_string();
