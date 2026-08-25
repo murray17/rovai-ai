@@ -294,6 +294,8 @@ fn runtime_entrypoint_kind(executable_path: &str) -> &'static str {
     if command_shim_extension(Path::new(executable_path)).is_some() {
         return "windows_command_shim";
     }
+    #[cfg(not(windows))]
+    let _ = executable_path;
     "native_executable"
 }
 

@@ -160,7 +160,10 @@ impl RuntimeExecutableCandidate {
                 == Some(expected)
         }
         #[cfg(not(windows))]
-        false
+        {
+            let _ = expected;
+            false
+        }
     }
 }
 
@@ -173,6 +176,7 @@ pub enum RuntimeDiscoveryEntrypointKind {
     WindowsCommandShim,
 }
 
+#[cfg(windows)]
 impl RuntimeDiscoveryEntrypointKind {
     fn as_str(self) -> &'static str {
         match self {
