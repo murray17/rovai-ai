@@ -329,7 +329,7 @@ fn read_json_bounded<T: for<'de> Deserialize<'de>>(path: &Path, limit: u64) -> O
 }
 
 fn known_package_manager_shim_template(shim: &str, target: &str) -> Option<PackageManagerShimKind> {
-    let npm = format!(
+    let npm_legacy = format!(
         concat!(
             "@ECHO off\n",
             "GOTO start\n",
@@ -350,7 +350,32 @@ fn known_package_manager_shim_template(shim: &str, target: &str) -> Option<Packa
         ),
         target = target
     );
-    if shim == npm {
+    if shim == npm_legacy {
+        return Some(PackageManagerShimKind::Npm);
+    }
+    let npm_current = format!(
+        concat!(
+            "@ECHO off\n",
+            "GOTO start\n",
+            ":find_dp0\n",
+            "SET dp0=%~dp0\n",
+            "EXIT /b\n",
+            ":start\n",
+            "SETLOCAL\n",
+            "CALL :find_dp0\n",
+            "\n",
+            "IF EXIST \"%dp0%\\node.exe\" (\n",
+            "  SET \"_prog=%dp0%\\node.exe\"\n",
+            ") ELSE (\n",
+            "  SET \"_prog=node\"\n",
+            "  SET PATHEXT=%PATHEXT:;.JS;=;%\n",
+            ")\n",
+            "\n",
+            "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"{target}\" %*\n"
+        ),
+        target = target
+    );
+    if shim == npm_current {
         return Some(PackageManagerShimKind::Npm);
     }
     let pnpm = format!(
@@ -658,6 +683,31 @@ mod tests {
         )
     }
 
+    fn npm_current_shim(target: &str) -> String {
+        format!(
+            concat!(
+                "@ECHO off\r\n",
+                "GOTO start\r\n",
+                ":find_dp0\r\n",
+                "SET dp0=%~dp0\r\n",
+                "EXIT /b\r\n",
+                ":start\r\n",
+                "SETLOCAL\r\n",
+                "CALL :find_dp0\r\n",
+                "\r\n",
+                "IF EXIST \"%dp0%\\node.exe\" (\r\n",
+                "  SET \"_prog=%dp0%\\node.exe\"\r\n",
+                ") ELSE (\r\n",
+                "  SET \"_prog=node\"\r\n",
+                "  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n",
+                ")\r\n",
+                "\r\n",
+                "endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"{target}\" %*\r\n"
+            ),
+            target = target
+        )
+    }
+
     fn pnpm_shim(target: &str) -> String {
         format!(
             concat!(
@@ -684,12 +734,11 @@ mod tests {
             r"%dp0%\{}",
             windows_relative(fixture.entrypoint.strip_prefix(&root).unwrap())
         );
-        fs::write(&shim, npm_shim(&target)).unwrap();
-
-        assert_eq!(
-            resolve_codex_cmd_shim(&shim),
-            Some(fixture.executable.canonicalize().unwrap())
-        );
+        let expected = Some(fixture.executable.canonicalize().unwrap());
+        for content in [npm_shim(&target), npm_current_shim(&target)] {
+            fs::write(&shim, content).unwrap();
+            assert_eq!(resolve_codex_cmd_shim(&shim), expected);
+        }
 
         fs::remove_dir_all(root).unwrap();
     }
