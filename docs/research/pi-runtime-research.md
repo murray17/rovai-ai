@@ -5,7 +5,7 @@ upstream: earendil-works/pi
 authority: research-evidence-only
 status: implemented
 admission: macos_arm64_qualified
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Pi Runtime 接入研究
@@ -13,7 +13,7 @@ last_updated: 2026-08-24
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
 > Pi 不是 ACP Runtime；应直接接入其官方 JSONL RPC，而不是通过 TUI 抓屏或把第三方 ACP shim 当作上游合同。
 > 第 1–13 节保留接入前研究快照；其 `NotImplemented` / `Blocked` 与未准入结论不能覆盖后续真实证据。
-> 当前实施与准入结论见第 14、15 节、[Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)
+> 当前实施与准入结论见第 14–16 节、[Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)
 > 和 [Runtime 兼容性清单](../runtime-compatibility.md)。
 
 ## 基本结论
@@ -24,10 +24,11 @@ Runtime: Pi Coding Agent
 上游源码快照: earendil-works/pi main；package version 0.84.2
 建议接入形态: other / pi_jsonl_rpc
 Exact launch command:
-  pi --mode rpc --session-dir <rovai-managed-session-dir> -e <rovai-managed-approval-extension>
+  pi --mode rpc --no-extensions --no-skills --no-context-files --no-prompt-templates --no-themes
+     --no-approve --no-builtin-tools --extension <rovai-pi-host-v2>
 Transport: strict LF-delimited JSON over stdin/stdout
 当前 Admission: macOS arm64 qualified；macOS x64 / Windows x64 not_qualified
-一句话结论: 独立 JSONL RPC、受管 Approval、warm/cold exact resume、Skill 与 Built-in CLI 已完成；External MCP Unsupported，Usage/Compaction Disabled。
+一句话结论: 独立 JSONL RPC、原生认证/默认模型、workspace resident Host、动态 Bootstrap/Skills、Core-managed stdio MCP 与 exact resume 已实现；Usage/Compaction Disabled。
 最接近的现有 Adapter: 新建 Pi RPC Transport；可复用 Runtime Fleet、Event normalization、process cleanup 与 Session fencing。
 ```
 
@@ -384,7 +385,7 @@ Blocking issues: 上游无内建权限；Extension isolation；全进程树清�
 Recommended admission decision: not_qualified；完成受管 Approval Extension 原型后再开展平台资格 Smoke
 ```
 
-## 14. 2026-08-24 实施与真实验收回填
+## 14. 2026-08-24 初版实施与真实验收回填（历史基线）
 
 研究阶段的硬阻断已经由当前实现闭合：
 
@@ -413,7 +414,7 @@ Recommended admission decision: not_qualified；完成受管 Approval Extension 
 以上 Smoke 使用隔离 Core data-dir、Session root 与 Git workspace，不启动日常 App，不读写日常数据库。公开报告
 只记录版本、安全 fingerprint 和相等性结论，不记录 token、原始 provider URL、Prompt、Session UUID 或 locator。
 
-## 15. 当前决定
+## 15. 2026-08-24 初版决定（已由 revision 1 局部替代）
 
 ```text
 Qualified platform: macOS arm64
@@ -427,8 +428,28 @@ Usage / Compaction: Disabled
 Not qualified: macOS x64, Windows x64
 ```
 
-当前产品语义由 [Runtime Launch and Verification v26](../contracts/runtime-launch-and-verification-v26.md)拥有；
-本研究只保留证据、初始假设与后续验证轨迹。
+上述 provider overlay、一 Host 一 Session、explicit `--skill` 和 MCP Unsupported 已由下节与 v27 替代；
+本节只保留当时证据，不再拥有当前产品语义。
+
+## 16. 2026-08-25 revision 1 复核与实现回填
+
+开发者已确认 [model-context-change revision 1](../versions/v1.28/model-context-change.md)。源码和本机 Pi
+`0.84.2` 复核得到以下新结论：
+
+| 轴 | revision 1 证据 | 当前实现结论 |
+| --- | --- | --- |
+| Auth/model | 不设置 `PI_CODING_AGENT_DIR`、provider 或 model 的真实 Prompt 使用用户 Pi native default 成功；当前 native default 由用户自己的 Pi 配置解析到 MiniMax | 不再读取 Claude settings或注入 token；支持 `pi://runtime-default` 与显式 `pi://model?...` exact list/set/state |
+| Resident Host | deterministic Fleet test 证明 workspace Host 跨 Camp/member invalidation 继续复用；Host 仍 single-flight | compatibility 只含 workspace/process state；Session/identity/Skills/MCP/model 逐 Run binding，不跨 Workspace复用 |
+| Session/identity | Host activation 使用 exact `switch_session/new_session`；new Session file 延迟 materialization 边界由真实 smoke 暴露并修复 | full UUID + canonical file；release 验证 header/UUID/cwd；Bootstrap Evidence v2 按 Binding 冻结身份 |
+| Bootstrap | slow test 证明 profile edit 不改变同 Binding full bytes、无 redelivery overlay、receipt 前不能 accepted | `managed_system_prompt` + `before_agent_start` append + blocking Managed Input Receipt v1 |
+| Skills | Session replacement 重建 ResourceLoader；`get_commands` 与 receipt 提供 actual catalog | exact `W/.pi/skills` 同时接纳 project-native 与 Rovai ready Skills；collision/escape/missing fail closed |
+| MCP | Core stdio fixture 完成 initialize/initialized/tools-list/tools-call；Pi capability matrix 断言 CoreManaged | `AdditivePerRun / RovaiWins / CoreManaged`；stdio supported、HTTP unsupported；每次 MCP call durable approve |
+| Migration | Migration 108 与 v052–v108 synthetic chain 定向回归通过 | v1.22/schema 63；旧 nonterminal Pi state clean break，completed history 与非 Pi state保留 |
+| Compaction | ordinary managed prompt 真实 smoke 已通过；manual/threshold/overflow+retry 完整矩阵未执行 | protected instruction/no-redelivery 已实现，但 Compaction 继续 Disabled/unqualified |
+
+当前产品语义由
+[Runtime Launch and Verification v27](../contracts/runtime-launch-and-verification-v27.md)拥有；本研究只保留证据、
+初始假设与后续验证轨迹。
 
 ## 上游来源
 

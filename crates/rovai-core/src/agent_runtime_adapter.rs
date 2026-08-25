@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use url::form_urlencoded;
 
 use crate::{
     agent_profile::{
@@ -335,6 +336,7 @@ pub enum McpSameNamePolicy {
 #[serde(rename_all = "snake_case")]
 pub enum McpApprovalControl {
     RuntimeNative,
+    CoreManaged,
     Unsupported,
 }
 
@@ -365,6 +367,16 @@ fn unsupported_external_mcp_projection() -> McpProjectionCapability {
         external_mcp_projection: ExternalMcpProjection::Unsupported,
         same_name_policy: None,
         approval_control: McpApprovalControl::Unsupported,
+    }
+}
+
+fn pi_core_managed_mcp_projection() -> McpProjectionCapability {
+    McpProjectionCapability {
+        supports_stdio: true,
+        supports_streamable_http: false,
+        external_mcp_projection: ExternalMcpProjection::AdditivePerRun,
+        same_name_policy: Some(McpSameNamePolicy::RovaiWins),
+        approval_control: McpApprovalControl::CoreManaged,
     }
 }
 
@@ -436,7 +448,7 @@ pub struct PiProbeObservation {
     pub authentication_status: String,
     pub probe_status: String,
     pub capabilities: Vec<String>,
-    pub provider_compatibility_key: Option<String>,
+    pub raw_model_catalog: Option<Value>,
     pub attempted_at: String,
     pub last_error: Option<String>,
 }
@@ -446,7 +458,7 @@ pub struct PiProbeObservation {
 /// omits that flag.
 pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
 pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
-pub const PI_RUNTIME_DEFAULT_MODEL_ID: &str = "pi://claude-minimax-default";
+pub const PI_RUNTIME_DEFAULT_MODEL_ID: &str = "pi://runtime-default";
 /// Frozen model identity used only while TRAE is statically installed but has
 /// not yet exposed its live model catalog. The first real ACP Session leaves
 /// the Runtime's current model untouched.
@@ -680,7 +692,7 @@ impl AgentRuntimeAdapterRegistry {
     pub fn mcp_projection(&self, kind: AdapterKind) -> McpProjectionCapability {
         match kind {
             AdapterKind::CodexCli => self.codex_cli.mcp_projection(),
-            AdapterKind::Pi => unsupported_external_mcp_projection(),
+            AdapterKind::Pi => pi_core_managed_mcp_projection(),
             AdapterKind::OpencodeCli => self.opencode_cli.mcp_projection(),
             AdapterKind::CopilotCli => self.copilot_cli.mcp_projection(),
             AdapterKind::ClaudeCodeCli => self.claude_code_cli.mcp_projection(),
@@ -869,15 +881,18 @@ impl AgentRuntimeAdapterRegistry {
                 "pi.rpc.agent_settled",
                 "pi.rpc.structured_tools",
                 "pi.rpc.extension_approval",
+                "pi.rpc.managed_input_receipt",
                 "conversation.exact_resume",
                 "process.interrupt",
-                "context.charter.native_append",
+                "context.charter.managed_system_prompt",
                 BUILTIN_TOOL_RUNTIME_CAPABILITY,
             ] {
                 if !capabilities.iter().any(|value| value == capability) {
                     capabilities.push(capability.to_string());
                 }
             }
+            append_additive_mcp_axes(&mut capabilities, McpSameNamePolicy::RovaiWins);
+            capabilities.push("mcp.approval.core_managed".to_string());
         }
         capabilities.sort();
         capabilities.dedup();
@@ -898,14 +913,7 @@ impl AgentRuntimeAdapterRegistry {
                 Vec::new()
             },
             models: if ready {
-                vec![ModelDescriptor {
-                    id: PI_RUNTIME_DEFAULT_MODEL_ID.to_string(),
-                    display_name: "Claude local MiniMax default".to_string(),
-                    is_default: true,
-                    hidden: false,
-                    deprecated: false,
-                    options: Vec::new(),
-                }]
+                pi_models(observation.raw_model_catalog.as_ref())?
             } else {
                 Vec::new()
             },
@@ -916,8 +924,7 @@ impl AgentRuntimeAdapterRegistry {
             stale_at: (!ready).then_some(observation.attempted_at),
             last_error: (!ready).then_some(observation.last_error).flatten(),
             native_session_compatibility_key: ready
-                .then_some(observation.provider_compatibility_key)
-                .flatten(),
+                .then(|| "pi-jsonl-rpc-v1:managed-system-prompt-v1".to_string()),
         })
     }
 
@@ -927,6 +934,66 @@ impl AgentRuntimeAdapterRegistry {
     ) -> Result<AdapterCapabilitySnapshot> {
         self.antigravity_app.capability_snapshot(observation)
     }
+}
+
+fn pi_models(catalog: Option<&Value>) -> Result<Vec<ModelDescriptor>> {
+    let mut models = vec![ModelDescriptor {
+        id: PI_RUNTIME_DEFAULT_MODEL_ID.to_string(),
+        display_name: "Pi native default".to_string(),
+        is_default: true,
+        hidden: false,
+        deprecated: false,
+        options: Vec::new(),
+    }];
+    let Some(values) = catalog.and_then(|value| value.as_array()) else {
+        return Ok(models);
+    };
+    for value in values {
+        let provider = value
+            .get("provider")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .context("Pi model catalog entry has no provider")?;
+        let model_id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .context("Pi model catalog entry has no id")?;
+        let id = form_urlencoded::Serializer::new("pi://model?".to_string())
+            .append_pair("provider", provider)
+            .append_pair("id", model_id)
+            .finish();
+        let options = value
+            .get("reasoning")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            .then(|| ModelOptionDescriptor {
+                key: "thinking_level".to_string(),
+                label: "Thinking level".to_string(),
+                value_type: "enum".to_string(),
+                values: ["off", "minimal", "low", "medium", "high", "xhigh"]
+                    .into_iter()
+                    .map(|choice_value| choice(choice_value, choice_value))
+                    .collect(),
+                default_value: None,
+                scope: RuntimeOptionScope::Run,
+            })
+            .into_iter()
+            .collect();
+        models.push(ModelDescriptor {
+            id,
+            display_name: value
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(model_id)
+                .to_string(),
+            is_default: false,
+            hidden: false,
+            deprecated: false,
+            options,
+        });
+    }
+    Ok(models)
 }
 
 #[derive(Debug, Default)]
@@ -2236,15 +2303,12 @@ fn resolve_pi_runtime(
     if approval_mode != "managed" {
         anyhow::bail!("Pi only supports the Rovai managed approval mode");
     }
-    let provider_compatibility_key = input
-        .native_session_compatibility_key
-        .context("Pi Ready evidence has no provider compatibility key")?;
     let binding_compatibility_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
         "installationId": input.installation_id,
         "protocolVersion": protocol_version,
-        "providerCompatibilityKey": provider_compatibility_key,
         "contextContract": native_binding_context_contract(),
+        "managedSystemPrompt": "rovai-pi-host-v2",
     }))?;
     let host_config_digest = canonical_json_digest(&json!({
         "adapterKind": AdapterKind::Pi,
@@ -2253,10 +2317,9 @@ fn resolve_pi_runtime(
         "executableFingerprint": input.executable_fingerprint,
         "authScope": input.auth_scope,
         "protocolVersion": protocol_version,
-        "providerCompatibilityKey": provider_compatibility_key,
         "permissionSchemaVersion": input.permissions.schema_version,
         "approvalMode": approval_mode,
-        "managedApprovalExtension": "rovai-pi-approval-v1",
+        "managedExtension": "rovai-pi-host-v2",
     }))?;
     Ok(AdapterRuntimeProjection {
         protocol_version,
@@ -3536,11 +3599,17 @@ mod tests {
                 McpApprovalControl::RuntimeNative
             );
         }
-        for kind in [
-            AdapterKind::Pi,
-            AdapterKind::AntigravityApp,
-            AdapterKind::CursorAgent,
-        ] {
+        let pi = registry.mcp_projection(AdapterKind::Pi);
+        assert!(pi.supports_stdio);
+        assert!(!pi.supports_streamable_http);
+        assert_eq!(
+            pi.external_mcp_projection,
+            ExternalMcpProjection::AdditivePerRun
+        );
+        assert_eq!(pi.same_name_policy, Some(McpSameNamePolicy::RovaiWins));
+        assert_eq!(pi.approval_control, McpApprovalControl::CoreManaged);
+
+        for kind in [AdapterKind::AntigravityApp, AdapterKind::CursorAgent] {
             let capability = registry.mcp_projection(kind);
             assert!(!capability.supports_stdio);
             assert!(!capability.supports_streamable_http);

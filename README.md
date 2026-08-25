@@ -227,7 +227,7 @@ depending on the team.
 | [Qwen Code](https://qwenlm.github.io/qwen-code-docs/en/users/quickstart/) | Added alongside native | Added alongside native | Re-delivered after compaction |
 | [TRAE CLI CN](https://www.trae.cn/) | Added alongside native | Added alongside native | Based on Runtime capabilities |
 | [Kimi Code](https://www.kimi.com/code/docs/) | Added alongside native | Added alongside native | Native resume; re-delivered after compaction |
-| [Pi Coding Agent](https://pi.dev/) | Not supported | Managed project Skills | Native exact resume |
+| [Pi Coding Agent](https://pi.dev/) | Core-managed stdio; HTTP unsupported | Native project + managed Skills | Native exact resume with binding-frozen identity |
 
 For exact versions, capabilities, and observed boundaries, see the
 [Agent Runtime Compatibility Register](docs/runtime-compatibility.md) *(Chinese)*.

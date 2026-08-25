@@ -50,8 +50,10 @@ pub struct Database {
     runtime_camp_files_root_identity_digest: String,
 }
 
-const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.21";
-const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 62;
+const CURRENT_DATA_CONTRACT_VERSION: &str = "v1.22";
+const CURRENT_PROJECTION_SCHEMA_VERSION: i64 = 63;
+const V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.21";
+const V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 62;
 const V107_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.20";
 const V107_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION: i64 = 61;
 const V106_MIGRATION_SOURCE_DATA_CONTRACT_VERSION: &str = "v1.19";
@@ -166,6 +168,7 @@ struct CurrentMigrationState {
     v105: bool,
     v106: bool,
     v107: bool,
+    v108: bool,
 }
 
 impl CurrentMigrationState {
@@ -175,6 +178,48 @@ impl CurrentMigrationState {
             return false;
         }
         if contract == CURRENT_DATA_CONTRACT_VERSION && schema == CURRENT_PROJECTION_SCHEMA_VERSION
+        {
+            return self.v70
+                && self.v71
+                && self.v76
+                && self.v77
+                && self.v78
+                && self.v79
+                && self.v80
+                && self.v81
+                && self.v82
+                && self.v83
+                && self.v84
+                && self.v85
+                && self.v86
+                && self.v87
+                && self.v88
+                && self.v89
+                && self.v90
+                && self.v91
+                && self.v92
+                && self.v93
+                && self.v94
+                && self.v95
+                && self.v96
+                && self.v97
+                && self.v98
+                && self.v99
+                && self.v100
+                && self.v101
+                && self.v102
+                && self.v103
+                && self.v104
+                && self.v105
+                && self.v106
+                && self.v107
+                && self.v108;
+        }
+        if self.v108 {
+            return false;
+        }
+        if contract == V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION
+            && schema == V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION
         {
             return self.v70
                 && self.v71
@@ -1025,6 +1070,8 @@ const V107_QUARANTINE_DIRECTORIES: &[&str] = &[
     "runtime/qwen",
 ];
 
+const V108_PI_RUNTIME_DIRECTORIES: &[&str] = &["runtime/pi/sessions", "runtime/pi/host-config"];
+
 fn has_admissible_data_contract(path: &Path) -> bool {
     if !path.exists() {
         return true;
@@ -1128,7 +1175,8 @@ fn load_current_migration_state(
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 104),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 105),
                EXISTS(SELECT 1 FROM schema_migration WHERE version = 106),
-               EXISTS(SELECT 1 FROM schema_migration WHERE version = 107)
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 107),
+               EXISTS(SELECT 1 FROM schema_migration WHERE version = 108)
         "#,
         [],
         |row| {
@@ -1171,6 +1219,7 @@ fn load_current_migration_state(
                 v105: row.get(35)?,
                 v106: row.get(36)?,
                 v107: row.get(37)?,
+                v108: row.get(38)?,
             })
         },
     )
@@ -1224,6 +1273,47 @@ fn quarantine_v107_owned_state(data_dir: &Path) -> Result<PathBuf> {
         })?;
     }
     Ok(quarantine_root)
+}
+
+fn quarantine_v108_pi_runtime_state(data_dir: &Path) -> Result<Option<PathBuf>> {
+    let quarantine_root = data_dir.join("inactive-data-quarantine").join(format!(
+        "v1.22-pi-runtime-{}-{}",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ"),
+        Uuid::new_v4()
+    ));
+    let mut moved = false;
+    for relative in V108_PI_RUNTIME_DIRECTORIES {
+        let source = data_dir.join(relative);
+        let metadata = match fs::symlink_metadata(&source) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error).with_context(|| source.display().to_string()),
+        };
+        if !metadata.file_type().is_symlink() && !metadata.is_dir() {
+            anyhow::bail!(
+                "refusing to quarantine unexpected Pi Runtime target {}",
+                source.display()
+            );
+        }
+        let destination = quarantine_root.join(relative);
+        let parent = destination
+            .parent()
+            .context("Pi Runtime quarantine target has no parent")?;
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "failed to create Pi Runtime quarantine {}",
+                parent.display()
+            )
+        })?;
+        fs::rename(&source, &destination).with_context(|| {
+            format!(
+                "failed to quarantine incompatible Pi Runtime state {}",
+                source.display()
+            )
+        })?;
+        moved = true;
+    }
+    Ok(moved.then_some(quarantine_root))
 }
 
 fn table_columns(connection: &Connection, table: &str) -> Result<Vec<String>> {
@@ -1801,6 +1891,17 @@ impl Database {
             runtime_camp_files_root_identity_digest: runtime_camp_files_root_identity_digest
                 .to_string(),
         };
+        let requires_pi_runtime_v108_fence = initialized_database != 0
+            && database.schema_migration_applied(107)?
+            && !database.schema_migration_applied(108)?;
+        if requires_pi_runtime_v108_fence
+            && let Some(quarantine_root) = quarantine_v108_pi_runtime_state(data_dir)?
+        {
+            eprintln!(
+                "incompatible Pi Runtime state is inactive at {}",
+                quarantine_root.display()
+            );
+        }
         database.migrate(initialized_database == 0)?;
         if let Some(reason) = reset_reason {
             database.connection.execute(
@@ -2619,6 +2720,9 @@ impl Database {
             if !self.schema_migration_applied(107)? {
                 self.migrate_pi_runtime_catalog_v107()?;
             }
+            if !self.schema_migration_applied(108)? {
+                self.migrate_pi_managed_context_v108()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -2989,6 +3093,9 @@ impl Database {
         }
         if !self.schema_migration_applied(107)? {
             self.migrate_pi_runtime_catalog_v107()?;
+        }
+        if !self.schema_migration_applied(108)? {
+            self.migrate_pi_managed_context_v108()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15364,6 +15471,233 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_pi_managed_context_v108(&mut self) -> Result<()> {
+        self.connection
+            .execute_batch("PRAGMA foreign_keys = OFF;")?;
+        let migration_result = (|| -> Result<()> {
+            let transaction = self
+                .connection
+                .transaction_with_behavior(TransactionBehavior::Immediate)?;
+            transaction.execute_batch(
+                r#"
+                CREATE TEMP TABLE pi_v108_binding_fence AS
+                SELECT conversation.id AS conversation_id,
+                       conversation.native_binding_id AS native_binding_id,
+                       conversation.native_binding_generation AS native_binding_generation
+                FROM conversation
+                JOIN adapter_installation
+                  ON adapter_installation.id = conversation.native_adapter_installation_id
+                WHERE adapter_installation.adapter_kind = 'pi';
+
+                UPDATE agent_run
+                SET status = 'failed', ended_at = datetime('now'),
+                    last_error_code = 'pi_managed_context_v1_required',
+                    wait_reason = NULL, wait_deadline_at = NULL,
+                    runtime_recovery_required = 0,
+                    execution_lease_owner = NULL,
+                    execution_lease_expires_at = NULL,
+                    manual_retry_allowed = 0,
+                    version = version + 1, updated_at = datetime('now')
+                WHERE status IN ('queued', 'running', 'waiting')
+                  AND json_extract(effective_config_json, '$.runtimeAdapter') = 'pi';
+
+                UPDATE camp_turn
+                SET status = 'failed', ended_at = datetime('now'),
+                    version = version + 1, updated_at = datetime('now')
+                WHERE status IN ('running', 'waiting')
+                  AND EXISTS(
+                      SELECT 1 FROM agent_run
+                      WHERE agent_run.camp_turn_id = camp_turn.id
+                        AND json_extract(agent_run.effective_config_json, '$.runtimeAdapter') = 'pi'
+                        AND agent_run.last_error_code = 'pi_managed_context_v1_required'
+                  );
+
+                DELETE FROM bootstrap_redelivery_requirement
+                WHERE EXISTS(
+                    SELECT 1 FROM pi_v108_binding_fence AS fence
+                    WHERE fence.native_binding_id = bootstrap_redelivery_requirement.native_binding_id
+                      AND fence.native_binding_generation = bootstrap_redelivery_requirement.native_binding_generation
+                );
+                DELETE FROM native_session_compaction_observation
+                WHERE EXISTS(
+                    SELECT 1 FROM pi_v108_binding_fence AS fence
+                    WHERE fence.native_binding_id = native_session_compaction_observation.native_binding_id
+                      AND fence.native_binding_generation = native_session_compaction_observation.native_binding_generation
+                );
+                DELETE FROM native_session_compaction_observer_lease
+                WHERE EXISTS(
+                    SELECT 1 FROM pi_v108_binding_fence AS fence
+                    WHERE fence.native_binding_id = native_session_compaction_observer_lease.native_binding_id
+                      AND fence.native_binding_generation = native_session_compaction_observer_lease.native_binding_generation
+                );
+
+                UPDATE conversation
+                SET native_adapter_installation_id = NULL,
+                    native_session_id = NULL,
+                    native_binding_compatibility_digest = NULL,
+                    native_binding_id = NULL,
+                    native_binding_generation = 0,
+                    native_binding_secret_digest = NULL,
+                    last_accepted_public_boundary_sequence = 0,
+                    native_charter_digest = NULL,
+                    native_collaboration_state_digest = NULL,
+                    native_installation_generation = NULL,
+                    native_session_compatibility_key = NULL,
+                    version = version + 1, updated_at = datetime('now')
+                WHERE id IN (SELECT conversation_id FROM pi_v108_binding_fence);
+
+                DROP INDEX IF EXISTS native_session_bootstrap_conversation_idx;
+                CREATE TABLE native_session_bootstrap_evidence_v108 (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    contract_version TEXT NOT NULL
+                        CHECK(contract_version = 'native_session_bootstrap_v3'),
+                    bootstrap_formatter_version INTEGER NOT NULL
+                        CHECK(bootstrap_formatter_version = 3),
+                    session_charter_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    session_charter_digest TEXT NOT NULL,
+                    memory_entrypoint_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    memory_entrypoint_digest TEXT NOT NULL,
+                    observed_memory_revisions_json TEXT NOT NULL,
+                    authorization_basis_digest TEXT NOT NULL,
+                    delivery_mode TEXT NOT NULL CHECK(delivery_mode IN (
+                        'native_append', 'first_payload', 'managed_system_prompt'
+                    )),
+                    evidence_version INTEGER NOT NULL DEFAULT 1
+                        CHECK(evidence_version IN (1, 2)),
+                    member_identity_blob_id TEXT REFERENCES managed_blob(id),
+                    member_identity_digest TEXT,
+                    full_bootstrap_blob_id TEXT REFERENCES managed_blob(id),
+                    full_bootstrap_digest TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(native_binding_id, native_binding_generation),
+                    CHECK(
+                        (delivery_mode = 'managed_system_prompt'
+                         AND evidence_version = 2
+                         AND member_identity_blob_id IS NOT NULL
+                         AND member_identity_digest IS NOT NULL
+                         AND full_bootstrap_blob_id IS NOT NULL
+                         AND full_bootstrap_digest IS NOT NULL)
+                        OR
+                        (delivery_mode <> 'managed_system_prompt'
+                         AND evidence_version = 1
+                         AND member_identity_blob_id IS NULL
+                         AND member_identity_digest IS NULL
+                         AND full_bootstrap_blob_id IS NULL
+                         AND full_bootstrap_digest IS NULL)
+                    )
+                );
+
+                INSERT INTO native_session_bootstrap_evidence_v108(
+                    id, conversation_id, native_binding_id, native_binding_generation,
+                    contract_version, bootstrap_formatter_version,
+                    session_charter_blob_id, session_charter_digest,
+                    memory_entrypoint_blob_id, memory_entrypoint_digest,
+                    observed_memory_revisions_json, authorization_basis_digest,
+                    delivery_mode, evidence_version,
+                    member_identity_blob_id, member_identity_digest,
+                    full_bootstrap_blob_id, full_bootstrap_digest, created_at
+                )
+                SELECT id, conversation_id, native_binding_id, native_binding_generation,
+                       contract_version, bootstrap_formatter_version,
+                       session_charter_blob_id, session_charter_digest,
+                       memory_entrypoint_blob_id, memory_entrypoint_digest,
+                       observed_memory_revisions_json, authorization_basis_digest,
+                       delivery_mode, 1, NULL, NULL, NULL, NULL, created_at
+                FROM native_session_bootstrap_evidence;
+
+                DROP TABLE native_session_bootstrap_evidence;
+                ALTER TABLE native_session_bootstrap_evidence_v108
+                    RENAME TO native_session_bootstrap_evidence;
+                CREATE INDEX native_session_bootstrap_conversation_idx
+                    ON native_session_bootstrap_evidence(
+                        conversation_id, native_binding_generation
+                    );
+
+                CREATE TABLE pi_managed_input_receipt (
+                    id TEXT PRIMARY KEY,
+                    runtime_input_delivery_id TEXT NOT NULL UNIQUE
+                        REFERENCES runtime_input_delivery(id) ON DELETE CASCADE,
+                    receipt_version INTEGER NOT NULL CHECK(receipt_version = 1),
+                    receipt_json TEXT NOT NULL CHECK(json_valid(receipt_json)),
+                    receipt_digest TEXT NOT NULL,
+                    commit_nonce TEXT NOT NULL,
+                    committed_at TEXT NOT NULL
+                );
+
+                CREATE TRIGGER pi_managed_input_receipt_insert_guard
+                BEFORE INSERT ON pi_managed_input_receipt
+                WHEN NOT EXISTS(
+                    SELECT 1
+                    FROM runtime_input_delivery AS delivery
+                    JOIN native_session_bootstrap_evidence AS bootstrap
+                      ON bootstrap.native_binding_id = delivery.native_binding_id
+                     AND bootstrap.native_binding_generation = delivery.native_binding_generation
+                    WHERE delivery.id = NEW.runtime_input_delivery_id
+                      AND delivery.status IN ('prepared', 'delivery_unknown')
+                      AND bootstrap.delivery_mode = 'managed_system_prompt'
+                      AND bootstrap.evidence_version = 2
+                )
+                BEGIN
+                    SELECT RAISE(ABORT, 'invalid Pi managed input receipt target');
+                END;
+
+                CREATE TRIGGER pi_managed_input_receipt_immutable
+                BEFORE UPDATE ON pi_managed_input_receipt
+                BEGIN
+                    SELECT RAISE(ABORT, 'Pi managed input receipt is immutable');
+                END;
+
+                CREATE TRIGGER pi_managed_input_acceptance_update_guard
+                BEFORE UPDATE OF status ON runtime_input_delivery
+                WHEN NEW.status = 'accepted'
+                  AND EXISTS(
+                      SELECT 1 FROM native_session_bootstrap_evidence AS bootstrap
+                      WHERE bootstrap.native_binding_id = NEW.native_binding_id
+                        AND bootstrap.native_binding_generation = NEW.native_binding_generation
+                        AND bootstrap.delivery_mode = 'managed_system_prompt'
+                  )
+                  AND NOT EXISTS(
+                      SELECT 1 FROM pi_managed_input_receipt AS receipt
+                      WHERE receipt.runtime_input_delivery_id = NEW.id
+                        AND receipt.receipt_version = 1
+                  )
+                BEGIN
+                    SELECT RAISE(ABORT, 'Pi managed input receipt is required');
+                END;
+
+                DROP TABLE pi_v108_binding_fence;
+
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.22', projection_schema_version = 63,
+                    reset_reason = NULL, updated_at = datetime('now')
+                WHERE singleton = 1;
+
+                INSERT INTO schema_migration(version, applied_at)
+                VALUES (108, datetime('now'));
+                "#,
+            )?;
+            transaction.commit()?;
+            Ok(())
+        })();
+        let foreign_keys_result = self.connection.execute_batch("PRAGMA foreign_keys = ON;");
+        migration_result?;
+        foreign_keys_result?;
+        if let Some((table, row_id)) = self
+            .connection
+            .query_row("PRAGMA foreign_key_check", [], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .optional()?
+        {
+            anyhow::bail!("v108 migration left a foreign-key violation in {table} row {row_id}");
+        }
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -19766,7 +20100,84 @@ impl Database {
 }
 
 #[cfg(test)]
+fn downgrade_current_schema_to_v108_source_for_test(connection: &Connection) {
+    let has_v108: bool = connection
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 108)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    if !has_v108 {
+        return;
+    }
+    connection
+        .execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            DROP TRIGGER pi_managed_input_acceptance_update_guard;
+            DROP TRIGGER pi_managed_input_receipt_immutable;
+            DROP TRIGGER pi_managed_input_receipt_insert_guard;
+            DROP TABLE pi_managed_input_receipt;
+            DROP INDEX native_session_bootstrap_conversation_idx;
+
+            CREATE TABLE native_session_bootstrap_evidence_v107_source (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                native_binding_id TEXT NOT NULL,
+                native_binding_generation INTEGER NOT NULL
+                    CHECK(native_binding_generation >= 1),
+                contract_version TEXT NOT NULL
+                    CHECK(contract_version = 'native_session_bootstrap_v3'),
+                bootstrap_formatter_version INTEGER NOT NULL
+                    CHECK(bootstrap_formatter_version = 3),
+                session_charter_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                session_charter_digest TEXT NOT NULL,
+                memory_entrypoint_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                memory_entrypoint_digest TEXT NOT NULL,
+                observed_memory_revisions_json TEXT NOT NULL,
+                authorization_basis_digest TEXT NOT NULL,
+                delivery_mode TEXT NOT NULL
+                    CHECK(delivery_mode IN ('native_append', 'first_payload')),
+                created_at TEXT NOT NULL,
+                UNIQUE(native_binding_id, native_binding_generation)
+            );
+            INSERT INTO native_session_bootstrap_evidence_v107_source(
+                id, conversation_id, native_binding_id, native_binding_generation,
+                contract_version, bootstrap_formatter_version,
+                session_charter_blob_id, session_charter_digest,
+                memory_entrypoint_blob_id, memory_entrypoint_digest,
+                observed_memory_revisions_json, authorization_basis_digest,
+                delivery_mode, created_at
+            )
+            SELECT id, conversation_id, native_binding_id, native_binding_generation,
+                   contract_version, bootstrap_formatter_version,
+                   session_charter_blob_id, session_charter_digest,
+                   memory_entrypoint_blob_id, memory_entrypoint_digest,
+                   observed_memory_revisions_json, authorization_basis_digest,
+                   delivery_mode, created_at
+            FROM native_session_bootstrap_evidence
+            WHERE delivery_mode <> 'managed_system_prompt';
+            DROP TABLE native_session_bootstrap_evidence;
+            ALTER TABLE native_session_bootstrap_evidence_v107_source
+                RENAME TO native_session_bootstrap_evidence;
+            CREATE INDEX native_session_bootstrap_conversation_idx
+                ON native_session_bootstrap_evidence(
+                    conversation_id, native_binding_generation
+                );
+            DELETE FROM schema_migration WHERE version = 108;
+            UPDATE rovai_data_contract
+            SET contract_version = 'v1.21', projection_schema_version = 62
+            WHERE singleton = 1;
+            PRAGMA foreign_keys = ON;
+            "#,
+        )
+        .unwrap();
+}
+
+#[cfg(test)]
 fn downgrade_current_schema_to_v102_source_for_test(connection: &Connection) {
+    downgrade_current_schema_to_v108_source_for_test(connection);
     let has_v102: bool = connection
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM schema_migration WHERE version = 102)",
@@ -20433,6 +20844,7 @@ mod tests {
             v105: version >= 105,
             v106: version >= 106,
             v107: version >= 107,
+            v108: version >= 108,
         }
     }
 
@@ -20443,6 +20855,12 @@ mod tests {
                 "current",
                 CURRENT_DATA_CONTRACT_VERSION,
                 CURRENT_PROJECTION_SCHEMA_VERSION,
+                108,
+            ),
+            (
+                "v1.21/schema-62",
+                V108_MIGRATION_SOURCE_DATA_CONTRACT_VERSION,
+                V108_MIGRATION_SOURCE_PROJECTION_SCHEMA_VERSION,
                 107,
             ),
             (
@@ -20721,7 +21139,7 @@ mod tests {
             )
             .expect("current contract marker should load");
 
-        assert_eq!(state, migration_state_through(107));
+        assert_eq!(state, migration_state_through(108));
         assert!(state.admits(&contract, schema));
         assert!(has_admissible_data_contract(
             &directory.join("rovai.sqlite")
@@ -22641,6 +23059,129 @@ mod tests {
     }
 
     #[test]
+    fn v108_adds_managed_bootstrap_evidence_and_receipt_acceptance_gate() {
+        let directory = std::env::temp_dir().join(format!("rovai-db-v108-test-{}", Uuid::new_v4()));
+        let mut database = crate::test_support::fresh_schema_database_fast_at(&directory);
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                PRAGMA foreign_keys = OFF;
+                DROP TRIGGER pi_managed_input_acceptance_update_guard;
+                DROP TRIGGER pi_managed_input_receipt_immutable;
+                DROP TRIGGER pi_managed_input_receipt_insert_guard;
+                DROP TABLE pi_managed_input_receipt;
+                DROP INDEX native_session_bootstrap_conversation_idx;
+
+                CREATE TABLE native_session_bootstrap_evidence_v107_source (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL REFERENCES conversation(id),
+                    native_binding_id TEXT NOT NULL,
+                    native_binding_generation INTEGER NOT NULL
+                        CHECK(native_binding_generation >= 1),
+                    contract_version TEXT NOT NULL
+                        CHECK(contract_version = 'native_session_bootstrap_v3'),
+                    bootstrap_formatter_version INTEGER NOT NULL
+                        CHECK(bootstrap_formatter_version = 3),
+                    session_charter_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    session_charter_digest TEXT NOT NULL,
+                    memory_entrypoint_blob_id TEXT NOT NULL REFERENCES managed_blob(id),
+                    memory_entrypoint_digest TEXT NOT NULL,
+                    observed_memory_revisions_json TEXT NOT NULL,
+                    authorization_basis_digest TEXT NOT NULL,
+                    delivery_mode TEXT NOT NULL
+                        CHECK(delivery_mode IN ('native_append', 'first_payload')),
+                    created_at TEXT NOT NULL,
+                    UNIQUE(native_binding_id, native_binding_generation)
+                );
+                INSERT INTO native_session_bootstrap_evidence_v107_source(
+                    id, conversation_id, native_binding_id, native_binding_generation,
+                    contract_version, bootstrap_formatter_version,
+                    session_charter_blob_id, session_charter_digest,
+                    memory_entrypoint_blob_id, memory_entrypoint_digest,
+                    observed_memory_revisions_json, authorization_basis_digest,
+                    delivery_mode, created_at
+                )
+                SELECT id, conversation_id, native_binding_id, native_binding_generation,
+                       contract_version, bootstrap_formatter_version,
+                       session_charter_blob_id, session_charter_digest,
+                       memory_entrypoint_blob_id, memory_entrypoint_digest,
+                       observed_memory_revisions_json, authorization_basis_digest,
+                       delivery_mode, created_at
+                FROM native_session_bootstrap_evidence
+                WHERE delivery_mode <> 'managed_system_prompt';
+                DROP TABLE native_session_bootstrap_evidence;
+                ALTER TABLE native_session_bootstrap_evidence_v107_source
+                    RENAME TO native_session_bootstrap_evidence;
+                CREATE INDEX native_session_bootstrap_conversation_idx
+                    ON native_session_bootstrap_evidence(
+                        conversation_id, native_binding_generation
+                    );
+                DELETE FROM schema_migration WHERE version = 108;
+                UPDATE rovai_data_contract
+                SET contract_version = 'v1.21', projection_schema_version = 62
+                WHERE singleton = 1;
+                PRAGMA foreign_keys = ON;
+                "#,
+            )
+            .unwrap();
+
+        database.migrate_pi_managed_context_v108().unwrap();
+
+        let contract: (String, i64, i64) = database
+            .connection()
+            .query_row(
+                r#"
+                SELECT contract_version, projection_schema_version,
+                       (SELECT COUNT(*) FROM schema_migration WHERE version = 108)
+                FROM rovai_data_contract WHERE singleton = 1
+                "#,
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(contract, ("v1.22".to_string(), 63, 1));
+        let bootstrap_schema: String = database
+            .connection()
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'native_session_bootstrap_evidence'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(bootstrap_schema.contains("'managed_system_prompt'"));
+        assert!(bootstrap_schema.contains("full_bootstrap_digest"));
+        assert!(
+            database
+                .connection()
+                .execute(
+                    r#"
+                INSERT INTO pi_managed_input_receipt(
+                    id, runtime_input_delivery_id, receipt_version,
+                    receipt_json, receipt_digest, commit_nonce, committed_at
+                ) VALUES ('invalid', 'missing-delivery', 1, '{}', 'digest',
+                          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                          datetime('now'))
+                "#,
+                    [],
+                )
+                .is_err()
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
+                    row.get::<_, i64>(0)
+                })
+                .unwrap(),
+            0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
     fn v99_preserves_legacy_evidence_classifies_unfinished_work_and_backfills_only_published_attachments()
      {
         use crate::{
@@ -23844,6 +24385,7 @@ mod tests {
     fn v052_marker_state_is_admitted_without_compatibility_rows() {
         let directory = std::env::temp_dir().join(format!("rovai-db-v71-test-{}", Uuid::new_v4()));
         let database = Database::open(&directory).expect("database should open");
+        downgrade_current_schema_to_v108_source_for_test(database.connection());
         // This intentionally exercises admission of the supported marker state.
         // It is not a real v0.52 schema fixture: the underlying schema is current.
         // A real historical fixture must be generated from an authoritative v0.52
@@ -23857,6 +24399,8 @@ mod tests {
                 WHERE singleton = 1;
                 DELETE FROM schema_migration WHERE version = 70;
                 DELETE FROM schema_migration WHERE version = 71;
+                INSERT OR IGNORE INTO schema_migration(version, applied_at)
+                VALUES (108, datetime('now'));
                 "#,
             )
             .unwrap();

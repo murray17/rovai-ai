@@ -191,7 +191,7 @@ try {
     adapterKind: 'pi',
     protocol: 'pi-jsonl-rpc-v1',
     reportedVersion: installation.snapshot.reportedVersion,
-    providerCompatibilityFingerprint: installation.snapshot.nativeSessionCompatibilityKey.slice(0, 12),
+    nativeSessionCompatibilityKey: installation.snapshot.nativeSessionCompatibilityKey,
     nativeSessionId: firstStart.params.nativeThreadId,
     firstHostInstanceId: firstStart.params.hostInstanceId,
     restoredHostInstanceId: restoredStart.params.hostInstanceId,
@@ -201,7 +201,11 @@ try {
     deniedActionCount: deniedApprovals.filter((approval) => approval.status === 'denied').length,
     cancelStatus: cancelledResult.run.status,
     cancelledFileCreated: cancelledBody !== null,
-    externalMcpProjection: 'unsupported',
+    externalMcpProjection: 'additive_per_run',
+    externalMcpSameNamePolicy: 'rovai_wins',
+    externalMcpApprovalControl: 'core_managed',
+    externalMcpStdio: true,
+    externalMcpStreamableHttp: false,
     managedSkillDelivery: '.pi/skills'
   }, null, 2))
 } finally {
@@ -216,17 +220,22 @@ function assertCapabilitySnapshot(snapshot) {
     'pi.rpc.agent_settled',
     'pi.rpc.structured_tools',
     'pi.rpc.extension_approval',
+    'pi.rpc.managed_input_receipt',
     'conversation.exact_resume',
     'process.interrupt',
+    'context.charter.managed_system_prompt',
+    'mcp.external_projection.additive_per_run',
+    'mcp.same_name_policy.rovai_wins',
+    'mcp.approval.core_managed',
     'builtin_cli.transport.v20'
   ]
   const approval = snapshot?.permissionOptions?.find((option) => option.key === 'approval_mode')
   if (snapshot?.probeStatus !== 'ready'
       || !snapshot.protocols?.includes('pi-jsonl-rpc-v1')
-      || !snapshot.models?.some((model) => model.id === 'pi://claude-minimax-default' && model.isDefault)
+      || !snapshot.models?.some((model) => model.id === 'pi://runtime-default' && model.isDefault)
       || !requiredCapabilities.every((capability) => snapshot.capabilities?.includes(capability))
       || approval?.recommendedValue !== 'managed'
-      || snapshot.nativeSessionCompatibilityKey?.length !== 64) {
+      || snapshot.nativeSessionCompatibilityKey !== 'pi-jsonl-rpc-v1:managed-system-prompt-v1') {
     throw new Error(`Pi capability snapshot is invalid: ${JSON.stringify(snapshot)}`)
   }
 }

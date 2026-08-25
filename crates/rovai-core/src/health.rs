@@ -153,7 +153,7 @@ pub struct ClaudeCodeCapabilityProbe {
 #[derive(Debug, Clone)]
 pub struct PiCapabilityProbe {
     pub result: AgentRuntimeProbeResult,
-    pub provider_compatibility_key: Option<String>,
+    pub raw_model_catalog: Option<Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -239,7 +239,7 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
                 Some("Configured Pi executable does not exist.".to_string()),
                 probed_at,
             ),
-            provider_compatibility_key: None,
+            raw_model_catalog: None,
         };
     }
     let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
@@ -272,29 +272,70 @@ pub async fn pi_capability_probe_at(path: &Path) -> PiCapabilityProbe {
                 )),
                 probed_at,
             ),
-            provider_compatibility_key: Some(observation.provider_compatibility_key),
+            raw_model_catalog: Some(observation.raw_model_catalog),
         },
-        Err(_) => PiCapabilityProbe {
-            result: agent_probe_result(
-                AdapterKind::Pi.as_str(),
-                Some(path_text),
-                version,
-                fingerprint,
-                AgentRuntimeProbeStatus::ProbeFailed,
-                Vec::new(),
-                vec![
-                    "pi.rpc.agent_settled".to_string(),
-                    "pi.rpc.extension_approval".to_string(),
-                ],
-                Some(
-                    "Pi could not verify the private Claude MiniMax source and behavioral RPC contract."
-                        .to_string(),
+        Err(error) => {
+            let (status, detail) = classify_pi_probe_failure(&format!("{error:#}"));
+            PiCapabilityProbe {
+                result: agent_probe_result(
+                    AdapterKind::Pi.as_str(),
+                    Some(path_text),
+                    version,
+                    fingerprint,
+                    status,
+                    Vec::new(),
+                    vec![
+                        "pi.rpc.agent_settled".to_string(),
+                        "pi.rpc.extension_approval".to_string(),
+                    ],
+                    Some(detail.to_string()),
+                    probed_at,
                 ),
-                probed_at,
-            ),
-            provider_compatibility_key: None,
-        },
+                raw_model_catalog: None,
+            }
+        }
     }
+}
+
+fn classify_pi_probe_failure(detail: &str) -> (AgentRuntimeProbeStatus, &'static str) {
+    let lower = detail.to_ascii_lowercase();
+    if [
+        "authentication_required",
+        "authentication required",
+        "not authenticated",
+        "unauthorized",
+        "not logged in",
+        "log in",
+        "login required",
+        "api key",
+        "credential",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return (
+            AgentRuntimeProbeStatus::AuthenticationRequired,
+            "authentication_required: Pi native authentication is unavailable.",
+        );
+    }
+    if [
+        "model_required",
+        "no selected provider/model",
+        "no model configured",
+        "model is not configured",
+    ]
+    .iter()
+    .any(|marker| lower.contains(marker))
+    {
+        return (
+            AgentRuntimeProbeStatus::ProbeFailed,
+            "model_required: Pi has no native model configured.",
+        );
+    }
+    (
+        AgentRuntimeProbeStatus::ProbeFailed,
+        "Pi could not verify native authentication, managed input, and the behavioral RPC contract.",
+    )
 }
 
 async fn claude_code_probe_at(path: &Path) -> ClaudeCodeCapabilityProbe {
@@ -2858,6 +2899,23 @@ mod tests {
             classify_acp_probe_failure("ACP probe timed out"),
             AgentRuntimeProbeStatus::ProbeFailed
         );
+    }
+
+    #[test]
+    fn pi_probe_failure_classification_separates_native_auth_model_and_transient_errors() {
+        let (status, detail) =
+            classify_pi_probe_failure("No API key found for the selected provider");
+        assert_eq!(status, AgentRuntimeProbeStatus::AuthenticationRequired);
+        assert!(detail.starts_with("authentication_required:"));
+
+        let (status, detail) =
+            classify_pi_probe_failure("model_required: Pi has no selected provider/model");
+        assert_eq!(status, AgentRuntimeProbeStatus::ProbeFailed);
+        assert!(detail.starts_with("model_required:"));
+
+        let (status, detail) = classify_pi_probe_failure("managed receipt timed out");
+        assert_eq!(status, AgentRuntimeProbeStatus::ProbeFailed);
+        assert!(!detail.contains("required:"));
     }
 
     #[test]

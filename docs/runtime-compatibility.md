@@ -1,7 +1,7 @@
 ---
 document_type: runtime-compatibility-register
 authority: runtime-validation-evidence
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Agent Runtime 兼容性清单
@@ -30,38 +30,39 @@ Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
 Probe、成员选择、诊断或 AgentRun 语义。
 
-### 2026-08-24 Pi `0.84.2` + Claude 本机 MiniMax provider macOS arm64 完整资格复核
+### 2026-08-25 Pi `0.84.2` resident managed-input revision 1 复核
 
-本机 `/opt/homebrew/bin/pi` 报告 `0.84.2`。Core 只从权限 `0600`、当前用户拥有的
-`~/.claude/settings.json` 读取 exact `ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL` 与
-`ANTHROPIC_MODEL`；真实 token 未进入仓库、数据库、argv、Evidence、diagnostics 或本文。正式 Pi Host 保留
-通用 `HOME`，但使用私有 `PI_CODING_AGENT_DIR` 和 env-ref `models.json`，provider identity 为
-`rovai-claude-minimax`、API dialect 为 `anthropic-messages`。该覆盖禁止自动执行用户/项目 Extension，只显式
-加载 Rovai Approval Extension 与 managed Skills；Probe 使用另一组临时 config/session root，结束后已清理。
+本机 `/opt/homebrew/bin/pi` 报告 `0.84.2`。正式 Host 不再读取 Claude settings、复制 MiniMax key、创建
+provider overlay 或覆盖 `PI_CODING_AGENT_DIR`；它继承用户 Pi 原生 `~/.pi/agent` 的认证、model catalog 和
+default。真实 native-default Prompt 通过，当前用户原生默认实际解析到 MiniMax；该事实只说明本机 Pi 配置，
+Rovai 不读取、不复制也不输出其 key、URL 或认证文件正文。
 
-Pi 不是 ACP Runtime。本轮直接使用官方 LF JSONL RPC，验证 split framing 与 `U+2028/U+2029`，prompt response
-只作为 accepted；最终公开 assistant snapshot 取自 `message_end.message`，成功 terminal 只认
-`agent_settled`。兼容性 fingerprint 为安全、非敏感的 `a8be25ed68ae`，不包含 provider key、原始 URL、Prompt、
-Session UUID 或 Session file。
+Pi 仍直接使用官方 LF JSONL RPC，而非 ACP。Revision 1 新增 `rovai-pi-host-v2`、workspace resident Host、
+per-run exact Session activation、Bootstrap Evidence v2、Managed Input Receipt v1 和 Core-owned stdio MCP。
+`prompt` response 只有在 receipt committed 后才成为 accepted；`message_end.message` 是权威 assistant snapshot，
+`agent_settled` 仍是唯一成功 terminal。
 
-| 能力轴 | 本次证据 | 当前产品边界 |
+| 能力轴 | revision 1 证据 | 当前产品边界 |
 | --- | --- | --- |
-| Identity / launch | `pi --version` 为 `0.84.2`；私有 Host 完成 state、provider/model 与 managed Extension handshake | wire identity `pi`，协议 `pi-jsonl-rpc-v1`，覆盖键 `ROVAI_PI_BIN`；旧 executable/fingerprint/extension schema 不复用 |
-| Provider / secret | Claude 本机 MiniMax Anthropic-compatible 三字段成功完成真实 Prompt；配置普通文件、owner、mode、HTTPS/no-credentials 负向 fixture 通过 | child-only token；私有 models.json 只含 env reference；不复制、合并或改写 Claude/Pi 用户配置 |
-| Prompt / final | first turn 返回固定公开结果；`response`、`message_end`、`agent_settled` 顺序通过，thinking 保持私有 | response 只表示 accepted；`message_end.message` 是权威消息，`agent_settled` 是 final/Missing-Send boundary；process exit 不代替 terminal |
-| Tool / Approval | 受管 Bash Approval roundtrip 通过；allow write 成功，deny write 目标文件不存在；Action output 不含 Extension envelope | 唯一权限为 `approval_mode=managed`；read/search 类不弹 Approval，沿用 OS 用户与既有 Workspace/attachment 边界；`bash/write/edit` 阻塞审批，unknown mutating Tool fail closed；Pi 无 sandbox |
-| Cancel / cleanup | 长时 Bash 进入执行后 cancel；延迟写入没有发生，Extension/Runtime 后代进程由 Fleet Stop 回收 | RPC `abort` 只 flush 不等待潜在迟到 response；cancel、failure、shutdown 都以进程树 stop 为权威 fence |
-| Session / identity | first Session 后兼容 Run 复用同一 Host/Session；Core restart 后新 Host 用 exact canonical Session file 恢复同一 Native Session UUID；删除源 marker 后仍只凭 Session 记忆返回 | 公共 Fleet LRU per-member 20/global 200/idle 30m/sweep 60s；首版一 Host 一 Session；warm → exact cold resume → new，禁止 fuzzy/recent/history replay；locator 私有 |
-| Skill | `.pi/skills` 唯一 marker、CLI help 调用、Core restart 后投影恢复与 lifecycle cleanup 通过 | Session start 以 exact `--skill` 投递；exposure digest 进入 compatibility，未证明 live refresh |
-| External MCP | Pi 核心没有 Product-managed MCP projection；真实资格 smoke 断言 capability projection 为 `unsupported` | `Unsupported`；不投递 Assignment MCP、不写用户配置，第三方 Extension 不自动晋升 |
-| Missing-Send | zero-send publication 与 accepted-send suppression 均通过 | `IfNoAcceptedSend`，final boundary=`pi_agent_settled`；cancel/error 不发布成功候选 |
-| Usage / compaction | 上游 RPC 有候选事件，但本轮未建立 per-Run attribution、occurrence/dedupe 与 resume 证据 | Usage/Cost Disabled；Compaction Disabled；不从 Session totals、文本或 token 差值推断 |
-| Built-in CLI | 十五项 current operation、三种输入、Gather、conflict、initial/resumed lease fencing、successor exact read、logical/native continuation 全部通过 | bundled `rovai` CLI 经 managed Bash Tool；per-Run lease 在 terminal 前解绑，后继 Run 获取新 lease；不是 MCP |
+| Identity / launch | `pi 0.84.2` 真实启动与 managed Extension receipt 通过；argv fixture 排除 provider/model/Bootstrap/Skill/Tool fixed state | `pi-jsonl-rpc-v1`；只显式加载 `rovai-pi-host-v2`；user/project third-party Extension 与 Package 关闭 |
+| Provider / secret | 不传 provider/model 的真实 Prompt 使用 Pi native default 成功；raw model catalog 可读 | `pi://runtime-default` 使用原生默认；显式 `pi://model?...` exact list/set/state；不回退 Claude overlay，显式选择会更新 Pi 全局默认 |
+| Bootstrap / identity | slow test 证明 full identity/Bootstrap 按 Binding 冻结，profile edit 不热更；managed receipt 前 accepted 被 trigger 拒绝 | `managed_system_prompt`，`P_final=Pi base+"\n\n"+B`；identity 不属于 Host；无 ordinary-message redelivery |
+| Resident LRU | deterministic Fleet test 证明同 Workspace Host 跨 Camp/member invalidation 继续复用 | workspace/process compatibility；Session/identity/Skills/MCP/model 不进 key；single-flight；并发分 Host、跨 Workspace 不复用 |
+| Session / resume | new Session 延迟 materialize file 的真实边界已修正；activation/release 核对 UUID/file/cwd/model | 每 Run exact `switch_session/new_session`；cold resume 只认 full UUID + canonical file；失败 fail closed，无 fuzzy/replay fallback |
+| Skill | `get_commands`/receipt fixture 验证 name、description digest、entry path 与 expected managed catalog | 每 Session 只发现 exact `W/.pi/skills`；project-native + Rovai ready 合并；collision/escape/missing stop Host |
+| External MCP | Core stdio fixture完成 initialize、initialized、分页 tools/list 和真实 tools/call；adapter matrix 断言 CoreManaged | `AdditivePerRun / RovaiWins / CoreManaged`；stdio supported，Streamable HTTP unsupported；每次 call durable approve |
+| Tool / Approval | 初版真实 Bash allow/write deny/cancel 证据保持；revision 1 的未知 UI/generation/receipt fail-closed fixture 通过 | native `bash/write/edit` blocking Approval；read/search no prompt；MCP 全部 blocking Approval；Pi 无 sandbox |
+| Missing-Send / final | 初版 zero-send/accepted-send 与 revision 1 ordinary真实 Prompt 均以 `agent_settled` 收敛 | `IfNoAcceptedSend`，boundary=`pi_agent_settled`；receipt/response/process exit 不代替 final |
+| Usage / compaction | ordinary managed prompt 真实 smoke 通过；manual/threshold/overflow+retry 完整矩阵未执行 | Usage/Cost Disabled；Compaction Disabled/unqualified；protected instruction layer，不创建 redelivery overlay |
+| Built-in CLI | 初版十五项 operation、三种输入、Gather、conflict、lease fence 与 continuation 真实矩阵保持 | bundled `rovai` CLI 经 native managed Bash；per-Run lease；不是 MCP |
+| Migration | Migration 108 与 v052–v108 synthetic fixtures 通过 | v1.22/schema 63；旧 nonterminal Pi state clean break；completed history 与非 Pi state 保留 |
 
-项目级 `smoke:pi-runtime` 还断言公共 trace 不出现 Claude 配置键名或私有 Host log；first/cold resume、allow/deny
-与 cancel 都使用隔离 Core data-dir 和 Git workspace。`smoke:skills`、`smoke:missing-send-recovery` 与
-`smoke:builtin-cli` 的 Pi 定向矩阵分别通过。以上证据足以准入 `pi × macos-arm64`，但不外推 macOS x64 或
-Windows x64；两者继续为 `not_qualified / runtime_platform.qualification_evidence_missing`。
+本轮真实命令只证明 native-default ordinary Prompt、managed receipt 和 `agent_settled`；stdio MCP 使用真实
+fixture server 验证，不冒充生产第三方 Server/model-call smoke；manual/threshold/overflow compaction 未执行，
+继续 Disabled。2026-08-24 初版的 allow/deny、cancel、Missing-Send、Built-in CLI 与 cold resume 证据仍证明未被
+revision 1 取消的轴，但其中 Claude overlay、一 Host 一 Session、explicit `--skill` 和 MCP Unsupported 结论已由
+本节替代。`pi × macos-arm64` 保持 qualified；macOS x64/Windows x64 继续
+`not_qualified / runtime_platform.qualification_evidence_missing`。
 
 ### 2026-08-24 Kimi Code macOS x64 准入晋升
 

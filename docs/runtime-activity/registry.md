@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Runtime Activity Mapping Registry
@@ -12,7 +12,7 @@ last_updated: 2026-08-24
 | Adapter kind | 产品显示名 | 协议族 | 基线 coverage | 细粒度工具名边界 | Fixture | 真实 smoke |
 |---|---|---|---|---|---|---|
 | `codex-cli` | Codex CLI | Codex app-server | `fine_grained` | MCP 使用结构化 `server/tool`；commandActions 全为 read/list/search 时使用中文语义 hint；其他 command 从公开 `command` 生成去 wrapper、保留完整序列并脱敏的 Renderer 标题，展开后分开显示命令与 output | 受控 fixture、Renderer 十 Runtime matrix 与 v1.18 命令/脱敏/详情回归通过 | manual completion/config/process + Skill turn 通过；MCP projection 通过；新版 Core 标题 post-fix smoke 待运行，Renderer fallback 已用真实 Camp Evidence 回归 |
-| `pi` | Pi Coding Agent | Pi JSONL RPC v1 | `fine_grained` | `toolCallId` 是生命周期 identity；`tool_execution_start/update/end` 投影为结构化 Tool Evidence；公开文本只取 `message_end.message`，thinking 保持私有；写入与 Shell 由 Rovai 托管 Extension 阻塞审批 | LF/Unicode framing、Approval envelope 与 provider 权限 fixture 通过 | `pi 0.84.2` + Claude 本机 MiniMax provider 的 first turn 与 exact cold resume 通过；完整 Action/Skill/cancel smoke 见 v1.28 证据 |
+| `pi` | Pi Coding Agent | Pi JSONL RPC v1 | `fine_grained` | `toolCallId` 是生命周期 identity；`tool_execution_start/update/end` 投影为结构化 Tool Evidence；公开文本只取 `message_end.message`，thinking 保持私有；native 写入/Shell 与全部 MCP proxy 由 Rovai Extension 阻塞审批 | LF/Unicode、managed receipt、Bootstrap identity freeze、workspace LRU 与 Core stdio MCP fixture 通过 | `pi 0.84.2` + 原生默认模型的 managed-input first turn 通过；初版 exact cold resume/Action/Skill/cancel/Built-in smoke 仍有效，revision 1 compaction 全矩阵未运行 |
 | `opencode-cli` | OpenCode | ACP v1 | `fine_grained` | 使用 ACP 结构化 `kind`；有 `toolName` 才作为精确名，否则显示 Runtime `title` hint；公开 output 只来自文本 Content block 或 `rawOutput.stdout/stderr/output/text` | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn 通过；MCP projection 通过；`1.18.15` 真实 command-output 与完整 allow/deny smoke 通过 |
 | `copilot-cli` | GitHub Copilot | ACP v1 | `fine_grained` | 同 ACP 合同；支持标准 `type: content` 嵌套文本；逻辑 MCP 名称通过 Context 的 `logicalName → runtimeName` 映射提示解析 | 受控 fixture 与固定 `printf` smoke 断言已建立 | manual completion + Skill turn + MCP projection 通过；`1.0.79` 真实 command-output smoke 通过 |
 | `kiro-cli` | Kiro | ACP v1 | `fine_grained` | 同 ACP 合同；Team bridge 使用 Kiro/Bedrock 兼容 input schema，不改变 Core canonical 校验 | 受控 fixture 通过 | ACP session + Skill turn + MCP projection 通过 |

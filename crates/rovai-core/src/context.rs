@@ -75,6 +75,7 @@ impl<'a> ContextReadConnection for Transaction<'a> {
 pub enum CharterDeliveryMode {
     NativeAppend,
     FirstPayload,
+    ManagedSystemPrompt,
 }
 
 impl CharterDeliveryMode {
@@ -82,6 +83,7 @@ impl CharterDeliveryMode {
         match self {
             Self::NativeAppend => "native_append",
             Self::FirstPayload => "first_payload",
+            Self::ManagedSystemPrompt => "managed_system_prompt",
         }
     }
 }
@@ -164,9 +166,16 @@ pub struct PreparedSessionBootstrap {
     pub evidence_id: String,
     pub payload: String,
     pub stable_evidence_digest: String,
+    pub payload_digest: String,
     pub native_binding_id: String,
     pub native_binding_generation: i64,
     pub delivery_mode: CharterDeliveryMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedPiManagedInputReceipt {
+    pub digest: String,
+    pub commit_nonce: String,
 }
 
 #[derive(Debug, Clone)]
@@ -174,6 +183,7 @@ struct PreparedBootstrapEvidence {
     evidence_id: String,
     session_charter: String,
     memory_entrypoint: String,
+    frozen_full_bootstrap: Option<String>,
     stable_evidence_digest: String,
     native_binding_id: String,
     native_binding_generation: i64,
@@ -556,11 +566,16 @@ impl ContextService {
         let run_facts =
             build_run_facts(database, &snapshot, requires_new_native_session, a2a_count)?;
         let rendered_run_facts = render_run_facts(&run_facts)?;
-        let bootstrap_redelivery_revision = pending_redelivery_revision(
-            database,
-            bootstrap_binding_id,
-            expected_binding_generation,
-        )?;
+        let bootstrap_redelivery_revision =
+            if request.charter_delivery_mode == CharterDeliveryMode::ManagedSystemPrompt {
+                None
+            } else {
+                pending_redelivery_revision(
+                    database,
+                    bootstrap_binding_id,
+                    expected_binding_generation,
+                )?
+            };
         let bootstrap_in_runtime_payload = (request.charter_delivery_mode
             == CharterDeliveryMode::FirstPayload
             && bootstrap_required)
@@ -1725,6 +1740,29 @@ impl ContextService {
         let transaction = database.connection_mut().transaction()?;
         let row = load_delivery_target(&transaction, delivery_id)?
             .context("Runtime Input Delivery does not exist")?;
+        let managed_system_prompt: bool = transaction.query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM native_session_bootstrap_evidence AS bootstrap
+                WHERE bootstrap.native_binding_id = ?1
+                  AND bootstrap.native_binding_generation = ?2
+                  AND bootstrap.delivery_mode = 'managed_system_prompt'
+            )
+            "#,
+            params![row.native_binding_id, row.native_binding_generation],
+            |query_row| query_row.get(0),
+        )?;
+        if managed_system_prompt {
+            let receipt_present: bool = transaction.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pi_managed_input_receipt WHERE runtime_input_delivery_id = ?1 AND receipt_version = 1)",
+                [delivery_id],
+                |query_row| query_row.get(0),
+            )?;
+            if !receipt_present {
+                anyhow::bail!("Pi managed input cannot be accepted without its committed receipt");
+            }
+        }
         if row.status == "accepted" {
             if row.native_input_id.as_deref() != Some(native_input_id) {
                 anyhow::bail!("Runtime Input Delivery was accepted with another Native Input ID");
@@ -1836,6 +1874,87 @@ impl ContextService {
             native_input_id: Some(native_input_id.to_string()),
             boundary_camp_message_sequence: row.boundary_camp_message_sequence,
             bootstrap_redelivery_revision: row.bootstrap_redelivery_revision,
+        })
+    }
+
+    pub fn commit_pi_managed_input_receipt(
+        &self,
+        database: &mut Database,
+        delivery_id: &str,
+        receipt: &Value,
+        commit_nonce: &str,
+    ) -> Result<CommittedPiManagedInputReceipt> {
+        let receipt_bytes = serde_json::to_vec(receipt)?;
+        if receipt_bytes.len() > 2 * 1024 * 1024 {
+            anyhow::bail!("Pi managed input receipt exceeds the private evidence limit");
+        }
+        let receipt_digest = canonical_json_digest(receipt)?;
+        if commit_nonce.len() != 64
+            || !commit_nonce
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            anyhow::bail!("Pi managed input receipt commit nonce is invalid");
+        }
+        let now = chrono::Utc::now().to_rfc3339();
+        let transaction = database.connection_mut().transaction()?;
+        let (status, current_request_digest): (String, String) = transaction
+            .query_row(
+                "SELECT status, runtime_request_digest FROM runtime_input_delivery WHERE id = ?1",
+                [delivery_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .context("Runtime Input Delivery does not exist")?;
+        if !matches!(status.as_str(), "prepared" | "delivery_unknown") {
+            anyhow::bail!("Pi managed input receipt belongs to a non-dispatchable Delivery");
+        }
+        if let Some((stored_digest, stored_nonce)) = transaction
+            .query_row(
+                "SELECT receipt_digest, commit_nonce FROM pi_managed_input_receipt WHERE runtime_input_delivery_id = ?1",
+                [delivery_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+        {
+            if stored_digest != receipt_digest || stored_nonce != commit_nonce {
+                anyhow::bail!("Pi managed input receipt changed after commit");
+            }
+            transaction.commit()?;
+            return Ok(CommittedPiManagedInputReceipt {
+                digest: receipt_digest,
+                commit_nonce: commit_nonce.to_string(),
+            });
+        }
+        let request_digest = canonical_json_digest(&json!({
+            "schemaVersion": 2,
+            "previousRuntimeRequestDigest": current_request_digest,
+            "piManagedInputReceiptDigest": receipt_digest,
+        }))?;
+        transaction.execute(
+            r#"
+            INSERT INTO pi_managed_input_receipt(
+                id, runtime_input_delivery_id, receipt_version,
+                receipt_json, receipt_digest, commit_nonce, committed_at
+            ) VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6)
+            "#,
+            params![
+                Uuid::new_v4().to_string(),
+                delivery_id,
+                serde_json::to_string(receipt)?,
+                receipt_digest,
+                commit_nonce,
+                now,
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE runtime_input_delivery SET runtime_request_digest = ?2, updated_at = ?3 WHERE id = ?1",
+            params![delivery_id, request_digest, now],
+        )?;
+        transaction.commit()?;
+        Ok(CommittedPiManagedInputReceipt {
+            digest: receipt_digest,
+            commit_nonce: commit_nonce.to_string(),
         })
     }
 
@@ -2242,7 +2361,7 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
             r#"
             SELECT id, session_charter_blob_id, session_charter_digest,
                    memory_entrypoint_blob_id, memory_entrypoint_digest,
-                   delivery_mode
+                   delivery_mode, full_bootstrap_blob_id, full_bootstrap_digest
             FROM native_session_bootstrap_evidence
             WHERE native_binding_id = ?1 AND native_binding_generation = ?2
             "#,
@@ -2255,6 +2374,8 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         )
@@ -2266,6 +2387,8 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         entrypoint_blob_id,
         entrypoint_digest,
         frozen_delivery_mode,
+        full_bootstrap_blob_id,
+        full_bootstrap_digest,
     )) = existing
     {
         if frozen_delivery_mode != delivery_mode.as_str() {
@@ -2277,10 +2400,22 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         {
             anyhow::bail!("Native Session Bootstrap evidence Blob digest mismatch");
         }
+        let frozen_full_bootstrap = match (full_bootstrap_blob_id, full_bootstrap_digest) {
+            (Some(blob_id), Some(digest)) => {
+                let payload = blob_store.read_text(database, &blob_id)?;
+                if sha256_text(&payload) != digest {
+                    anyhow::bail!("Native Session full Bootstrap Blob digest mismatch");
+                }
+                Some(payload)
+            }
+            (None, None) if delivery_mode != CharterDeliveryMode::ManagedSystemPrompt => None,
+            _ => anyhow::bail!("managed System Prompt Bootstrap evidence is incomplete"),
+        };
         return Ok(PreparedBootstrapEvidence {
             evidence_id,
             session_charter: charter,
             memory_entrypoint: entrypoint,
+            frozen_full_bootstrap,
             stable_evidence_digest: bootstrap_evidence_digest(&charter_digest, &entrypoint_digest),
             native_binding_id: native_binding_id.to_string(),
             native_binding_generation,
@@ -2305,6 +2440,34 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         "text/plain; charset=utf-8",
         "sensitive",
     )?;
+    let (member_identity_blob, member_identity_digest, full_bootstrap_blob, full_bootstrap_digest) =
+        if delivery_mode == CharterDeliveryMode::ManagedSystemPrompt {
+            let member_identity = load_latest_member_identity(database, &snapshot.agent_id)?;
+            let member_identity_json = serde_json::to_string_pretty(&member_identity)?;
+            let full_bootstrap = render_session_bootstrap(&charter, &member_identity, &entrypoint)?;
+            let member_identity_digest = sha256_text(&member_identity_json);
+            let full_bootstrap_digest = sha256_text(&full_bootstrap);
+            let member_identity_blob = blob_store.put_bytes(
+                database,
+                member_identity_json.as_bytes(),
+                "application/json; charset=utf-8",
+                "sensitive",
+            )?;
+            let full_bootstrap_blob = blob_store.put_bytes(
+                database,
+                full_bootstrap.as_bytes(),
+                "text/plain; charset=utf-8",
+                "sensitive",
+            )?;
+            (
+                Some(member_identity_blob),
+                Some(member_identity_digest),
+                Some((full_bootstrap_blob, full_bootstrap)),
+                Some(full_bootstrap_digest),
+            )
+        } else {
+            (None, None, None, None)
+        };
     let evidence_id = Uuid::new_v4().to_string();
     let created_at = chrono::Utc::now().to_rfc3339();
     let transaction = database.connection_mut().transaction()?;
@@ -2316,10 +2479,14 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
             session_charter_blob_id, session_charter_digest,
             memory_entrypoint_blob_id, memory_entrypoint_digest,
             observed_memory_revisions_json, authorization_basis_digest,
-            delivery_mode, created_at
+            delivery_mode, evidence_version,
+            member_identity_blob_id, member_identity_digest,
+            full_bootstrap_blob_id, full_bootstrap_digest,
+            created_at
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6,
-            ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14
+            ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14,
+            ?15, ?16, ?17, ?18, ?19
         )
         "#,
         params![
@@ -2336,6 +2503,17 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
             serde_json::to_string(&observed)?,
             authorization_basis_digest,
             delivery_mode.as_str(),
+            if delivery_mode == CharterDeliveryMode::ManagedSystemPrompt {
+                2
+            } else {
+                1
+            },
+            member_identity_blob.as_ref().map(|blob| blob.id.as_str()),
+            member_identity_digest,
+            full_bootstrap_blob
+                .as_ref()
+                .map(|(blob, _)| blob.id.as_str()),
+            full_bootstrap_digest,
             created_at,
         ],
     )?;
@@ -2370,6 +2548,7 @@ fn prepare_session_bootstrap_evidence_for_snapshot(
         evidence_id,
         session_charter: charter,
         memory_entrypoint: entrypoint,
+        frozen_full_bootstrap: full_bootstrap_blob.map(|(_, payload)| payload),
         stable_evidence_digest: bootstrap_evidence_digest(&charter_digest, &entrypoint_digest),
         native_binding_id: native_binding_id.to_string(),
         native_binding_generation,
@@ -2382,16 +2561,22 @@ fn format_session_bootstrap_for_snapshot(
     snapshot: &RunSnapshot,
     evidence: PreparedBootstrapEvidence,
 ) -> Result<PreparedSessionBootstrap> {
-    let member_identity = load_latest_member_identity(database, &snapshot.agent_id)?;
-    let payload = render_session_bootstrap(
-        &evidence.session_charter,
-        &member_identity,
-        &evidence.memory_entrypoint,
-    )?;
+    let payload = if let Some(payload) = evidence.frozen_full_bootstrap.clone() {
+        payload
+    } else {
+        let member_identity = load_latest_member_identity(database, &snapshot.agent_id)?;
+        render_session_bootstrap(
+            &evidence.session_charter,
+            &member_identity,
+            &evidence.memory_entrypoint,
+        )?
+    };
+    let payload_digest = sha256_text(&payload);
     Ok(PreparedSessionBootstrap {
         evidence_id: evidence.evidence_id,
         payload,
         stable_evidence_digest: evidence.stable_evidence_digest,
+        payload_digest,
         native_binding_id: evidence.native_binding_id,
         native_binding_generation: evidence.native_binding_generation,
         delivery_mode: evidence.delivery_mode,
@@ -5304,7 +5489,15 @@ fn load_existing_manifest(
     let bootstrap_digest = bootstrap_evidence_digest(&row.11, &row.13);
     let bootstrap_required = requires_new_native_session
         || snapshot.native_charter_digest.as_deref() != Some(bootstrap_digest.as_str());
-    let bootstrap_redelivery_revision = if row.19 {
+    let bootstrap_redelivery_revision = if delivery_mode == CharterDeliveryMode::ManagedSystemPrompt
+    {
+        if row.19 || row.20.is_some() {
+            anyhow::bail!(
+                "managed System Prompt ContextManifest cannot carry Bootstrap redelivery"
+            );
+        }
+        None
+    } else if row.19 {
         // Once an input has crossed the prepared cutoff, recovery must
         // reconstruct exactly that decision. A later observation belongs to
         // the next controllable prompt and cannot be pulled into this one.
@@ -5508,11 +5701,16 @@ fn materialize_frozen_delivery_context(
     {
         anyhow::bail!("Frozen Delivery Context no longer matches the AgentRun boundary");
     }
-    let bootstrap_redelivery_revision = pending_redelivery_revision(
-        database,
-        &bootstrap_evidence.native_binding_id,
-        expected_binding_generation,
-    )?;
+    let bootstrap_redelivery_revision =
+        if request.charter_delivery_mode == CharterDeliveryMode::ManagedSystemPrompt {
+            None
+        } else {
+            pending_redelivery_revision(
+                database,
+                &bootstrap_evidence.native_binding_id,
+                expected_binding_generation,
+            )?
+        };
     let bootstrap_in_runtime_payload =
         (request.charter_delivery_mode == CharterDeliveryMode::FirstPayload && bootstrap_required)
             || bootstrap_redelivery_revision.is_some();
@@ -11493,6 +11691,131 @@ mod slow_tests {
             blob_count_after_identity_update,
             blob_count_before_identity_update
         );
+        fixture.cleanup();
+    }
+
+    #[test]
+    fn pi_managed_bootstrap_evidence_v2_freezes_full_identity_bytes() {
+        let mut fixture = fixture();
+        let execution = bind_fixture_native_session(&mut fixture, "pi-managed-session");
+        let store = ManagedBlobStore::new(&fixture.directory);
+        let initial = ContextService
+            .prepare_session_bootstrap(
+                &mut fixture.database,
+                &store,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                CharterDeliveryMode::ManagedSystemPrompt,
+            )
+            .unwrap();
+        assert!(initial.payload.contains("\"name\": \"叮叮\""));
+        assert_eq!(initial.payload_digest, sha256_text(&initial.payload));
+        let evidence: (i64, String, String, String, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT evidence_version, member_identity_blob_id,
+                       member_identity_digest, full_bootstrap_blob_id,
+                       full_bootstrap_digest
+                FROM native_session_bootstrap_evidence WHERE id = ?1
+                "#,
+                [&initial.evidence_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(evidence.0, 2);
+        assert_eq!(
+            sha256_text(&store.read_text(&fixture.database, &evidence.1).unwrap()),
+            evidence.2
+        );
+        assert_eq!(
+            sha256_text(&store.read_text(&fixture.database, &evidence.3).unwrap()),
+            evidence.4
+        );
+        fixture
+            .database
+            .connection()
+            .execute(
+                "UPDATE agent_profile SET display_name = 'PI_EDITED_IDENTITY', version = version + 1 WHERE id = 'agent_1'",
+                [],
+            )
+            .unwrap();
+        let resumed = ContextService
+            .prepare_session_bootstrap(
+                &mut fixture.database,
+                &store,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                CharterDeliveryMode::ManagedSystemPrompt,
+            )
+            .unwrap();
+        assert_eq!(resumed.evidence_id, initial.evidence_id);
+        assert_eq!(resumed.payload, initial.payload);
+        assert_eq!(resumed.payload_digest, initial.payload_digest);
+        assert!(!resumed.payload.contains("PI_EDITED_IDENTITY"));
+
+        insert_redelivery_requirement(&mut fixture, &execution.conversation_id, 1);
+        let ContextMaterialization::Ready(prepared) = ContextService
+            .materialize(
+                &mut fixture.database,
+                &store,
+                &MaterializeContextRequest {
+                    agent_run_id: &fixture.run_id,
+                    execution_epoch: fixture.execution_epoch,
+                    charter_delivery_mode: CharterDeliveryMode::ManagedSystemPrompt,
+                    max_payload_bytes: DEFAULT_MAX_CONTEXT_PAYLOAD_BYTES,
+                },
+            )
+            .unwrap()
+        else {
+            panic!("Pi managed System Prompt Context should materialize")
+        };
+        assert_eq!(prepared.bootstrap_redelivery_revision, None);
+        assert!(!prepared.bootstrap_in_runtime_payload);
+        assert!(
+            !prepared
+                .runtime_payload
+                .contains("ROVAI_BOOTSTRAP_REDELIVERY")
+        );
+        let delivery = ContextService
+            .prepare_input_delivery_for_context(
+                &mut fixture.database,
+                &fixture.run_id,
+                fixture.execution_epoch,
+                &prepared,
+            )
+            .unwrap();
+        assert!(
+            ContextService
+                .acknowledge_input_delivery(
+                    &mut fixture.database,
+                    &delivery.id,
+                    "pi-native-prompt",
+                )
+                .is_err()
+        );
+        let receipt = json!({"schemaVersion":1, "privateMarker":"pi-managed-receipt"});
+        let committed = ContextService
+            .commit_pi_managed_input_receipt(
+                &mut fixture.database,
+                &delivery.id,
+                &receipt,
+                &"a".repeat(64),
+            )
+            .unwrap();
+        assert_eq!(committed.digest, canonical_json_digest(&receipt).unwrap());
+        ContextService
+            .acknowledge_input_delivery(&mut fixture.database, &delivery.id, "pi-native-prompt")
+            .unwrap();
         fixture.cleanup();
     }
 

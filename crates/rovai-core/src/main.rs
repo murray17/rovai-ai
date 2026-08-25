@@ -3177,6 +3177,13 @@ impl Core {
                     ("authentication_required", "runtime_authentication_required")
                 }
                 "missing_capabilities" => ("incompatible", "runtime_capability_incompatible"),
+                _ if snapshot
+                    .last_error
+                    .as_deref()
+                    .is_some_and(|detail| detail.starts_with("model_required:")) =>
+                {
+                    ("transient", "runtime_model_required")
+                }
                 _ if identity_changed => ("identity_changed", "runtime_identity_changed"),
                 _ => ("transient", "runtime_probe_transient_failure"),
             };
@@ -6261,7 +6268,7 @@ impl Core {
                             .to_string(),
                         probe_status: probe_status_name(probe.result.status).to_string(),
                         capabilities: probe.result.capabilities,
-                        provider_compatibility_key: probe.provider_compatibility_key,
+                        raw_model_catalog: probe.raw_model_catalog,
                         attempted_at,
                         last_error,
                     })?,
@@ -8951,9 +8958,6 @@ impl Core {
             authorization: attachment_authorization,
         }
         .prove(execution)?;
-        if !mcp_projection.servers.is_empty() {
-            anyhow::bail!("Pi does not support external MCP projection");
-        }
         let execution_root = PathBuf::from(&execution.workspace.execution_root);
         if !execution_root.is_dir() {
             anyhow::bail!(
@@ -8961,27 +8965,19 @@ impl Core {
                 execution_root.display()
             );
         }
-        let provider = pi::load_claude_minimax_provider()
-            .context("Pi could not load the private Claude MiniMax source")?;
-        let mut binding_credential = self
+        let binding_credential = self
             .prepare_initial_builtin_tool_binding(execution, resume_disposition)
             .await?;
-        let mut native_session_id = binding_credential
-            .native_session_id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
         let exact_resume = binding_credential.native_session_id.is_some();
         let session_bootstrap = {
             let mut database = self.database.lock().await;
-            ContextService
-                .prepare_session_bootstrap(
-                    &mut database,
-                    &ManagedBlobStore::new(&self.data_dir),
-                    &execution.agent_run_id,
-                    execution.execution_epoch,
-                    CharterDeliveryMode::NativeAppend,
-                )?
-                .payload
+            ContextService.prepare_session_bootstrap(
+                &mut database,
+                &ManagedBlobStore::new(&self.data_dir),
+                &execution.agent_run_id,
+                execution.execution_epoch,
+                CharterDeliveryMode::ManagedSystemPrompt,
+            )?
         };
         let Some(prepared_context) = self
             .materialize_agent_run_context(
@@ -8992,7 +8988,7 @@ impl Core {
                 },
                 skill_exposure,
                 mcp_projection,
-                CharterDeliveryMode::NativeAppend,
+                CharterDeliveryMode::ManagedSystemPrompt,
                 output,
             )
             .await?
@@ -9022,32 +9018,15 @@ impl Core {
             execution.execution_epoch,
             uuid::Uuid::new_v4()
         );
-        let skill_paths = skill_exposure
-            .snapshot
-            .skills
-            .iter()
-            .filter(|skill| skill.group_key == "pi" && skill.status == "ready")
-            .filter_map(|skill| skill.entry_path.as_deref())
-            .map(PathBuf::from)
-            .collect::<Vec<_>>();
-        if skill_paths
-            .iter()
-            .any(|path| !path.is_absolute() || !path.exists())
-        {
-            anyhow::bail!("Pi Skill exposure contains an unavailable explicit path");
-        }
         let runtime_compatibility_digest = pi::runtime_compatibility_digest(
             &execution.runtime,
             &execution_root,
             attachment_authorization,
-            provider.compatibility_key(),
-            &skill_exposure.digest,
-            &session_bootstrap,
         )?;
         self.persist_runtime_compatibility_digest(execution, &runtime_compatibility_digest)
             .await?;
         let builtin_tools = self.prepare_builtin_tool_process_config()?;
-        let first_runtime = self
+        let runtime_result = self
             .pi
             .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
                 agent_run_id: &execution.agent_run_id,
@@ -9057,57 +9036,34 @@ impl Core {
                 cwd: &execution_root,
                 frozen_runtime: &execution.runtime,
                 runtime_compatibility_digest: &runtime_compatibility_digest,
-                native_session_id: &native_session_id,
-                exact_resume,
+                native_session_id: binding_credential.native_session_id.as_deref(),
                 delivery_id: &delivery.id,
                 native_prompt_id: &native_prompt_id,
-                provider: &provider,
-                session_bootstrap: &session_bootstrap,
-                skill_paths: &skill_paths,
+                native_binding_id: &binding_credential.native_binding_id,
+                native_binding_generation: binding_credential.native_binding_generation,
+                bootstrap: &session_bootstrap,
+                skill_exposure,
+                mcp_projection,
                 builtin_tools: &builtin_tools,
             })
             .await;
-        let runtime = match first_runtime {
+        let runtime = match runtime_result {
             Ok(runtime) => runtime,
-            Err(error) if exact_resume => {
-                if resume_disposition == NativeSessionResumeDisposition::Controlled {
-                    let mut database = self.database.lock().await;
-                    ExecutionRuntimeService::default().record_native_session_resume_failure(
-                        &mut database,
-                        execution,
-                        classify_native_resume_failure(&error),
-                    )?;
+            Err(error) => {
+                if exact_resume {
+                    if resume_disposition == NativeSessionResumeDisposition::Controlled {
+                        let failure = classify_native_resume_failure(&error);
+                        let mut database = self.database.lock().await;
+                        ExecutionRuntimeService::default().record_native_session_resume_failure(
+                            &mut database,
+                            execution,
+                            failure,
+                        )?;
+                    }
+                    return Err(error).context("Pi exact Native Session resume failed closed");
                 }
-                self.pi
-                    .forget_agent_run(&execution.agent_run_id, execution.execution_epoch)
-                    .await;
-                self.runtime_fleet.invalidate_camp(&execution.camp_id).await;
-                binding_credential = self.prepare_builtin_tool_binding(execution, true).await?;
-                native_session_id = uuid::Uuid::new_v4().to_string();
-                self.pi
-                    .ensure_agent_run_runtime(PiAgentRunRuntimeRequest {
-                        agent_run_id: &execution.agent_run_id,
-                        execution_epoch: execution.execution_epoch,
-                        camp_id: &execution.camp_id,
-                        agent_id: &execution.agent_id,
-                        cwd: &execution_root,
-                        frozen_runtime: &execution.runtime,
-                        runtime_compatibility_digest: &runtime_compatibility_digest,
-                        native_session_id: &native_session_id,
-                        exact_resume: false,
-                        delivery_id: &delivery.id,
-                        native_prompt_id: &native_prompt_id,
-                        provider: &provider,
-                        session_bootstrap: &session_bootstrap,
-                        skill_paths: &skill_paths,
-                        builtin_tools: &builtin_tools,
-                    })
-                    .await
-                    .with_context(|| {
-                        format!("failed to replace unavailable Pi Native Session: {error:#}")
-                    })?
+                return Err(error);
             }
-            Err(error) => return Err(error),
         };
         let active_builtin_tools = runtime
             .builtin_tool_process_config()
@@ -9115,7 +9071,7 @@ impl Core {
             .clone();
         self.bind_builtin_tool_runtime(&active_builtin_tools, execution, &binding_credential)
             .await?;
-        self.bind_prepared_native_session(execution, &binding_credential, &native_session_id)
+        self.bind_prepared_native_session(execution, &binding_credential, runtime.session_id())
             .await?;
         let prompt_result = runtime
             .start_prompt(&prepared_context.rendered_payload)
@@ -9156,7 +9112,8 @@ impl Core {
                 "modelId": execution.runtime.model.model_id,
                 "modelOptions": execution.runtime.model.options,
                 "hostInstanceId": runtime.host_instance_id(),
-                "nativeThreadId": native_session_id,
+                "nativeThreadId": runtime.session_id(),
+                "nativeSessionFile": runtime.session_file(),
                 "nativeTurnId": native_prompt_id,
                 "providerModelFingerprint": runtime.model_fingerprint(),
             }),
@@ -12242,8 +12199,22 @@ async fn process_agent_run_pi_message(
                 .await?;
                 return Ok(());
             }
+            Some("input")
+                if message.get("title").and_then(Value::as_str)
+                    == Some("Rovai managed input receipt") =>
+            {
+                process_pi_managed_input_receipt(core, &runtime, delivery_id, &message).await?;
+                return Ok(());
+            }
+            Some("input")
+                if message.get("title").and_then(Value::as_str) == Some("Rovai MCP bridge") =>
+            {
+                process_pi_mcp_bridge_request(&runtime, &message).await?;
+                return Ok(());
+            }
             Some("notify" | "setWidget" | "setTitle" | "set_editor_text") => return Ok(()),
             _ => {
+                runtime.mark_failed_closed();
                 let id = message.get("id").cloned().unwrap_or(Value::Null);
                 if !id.is_null() {
                     runtime
@@ -12306,6 +12277,78 @@ async fn process_agent_run_pi_message(
     Ok(())
 }
 
+async fn process_pi_managed_input_receipt(
+    core: &Arc<Core>,
+    runtime: &PiRuntime,
+    delivery_id: &str,
+    request: &Value,
+) -> Result<()> {
+    let id = request
+        .get("id")
+        .cloned()
+        .context("Pi managed input receipt request omitted id")?;
+    let receipt: Value = serde_json::from_str(
+        request
+            .get("placeholder")
+            .and_then(Value::as_str)
+            .context("Pi managed input receipt request omitted evidence")?,
+    )
+    .context("Pi managed input receipt request is invalid")?;
+    let (expected_digest, commit_nonce) = runtime.validate_managed_receipt(&receipt)?;
+    let committed = {
+        let mut database = core.database.lock().await;
+        ContextService.commit_pi_managed_input_receipt(
+            &mut database,
+            delivery_id,
+            &receipt,
+            &commit_nonce,
+        )?
+    };
+    if committed.digest != expected_digest || committed.commit_nonce != commit_nonce {
+        anyhow::bail!("Pi managed input receipt commit evidence diverged");
+    }
+    runtime.mark_receipt_committed();
+    runtime
+        .respond(
+            id.clone(),
+            json!({"type":"extension_ui_response", "id":id, "value":commit_nonce}),
+        )
+        .await
+}
+
+async fn process_pi_mcp_bridge_request(runtime: &PiRuntime, request: &Value) -> Result<()> {
+    let id = request
+        .get("id")
+        .cloned()
+        .context("Pi MCP bridge request omitted id")?;
+    let envelope: Value = serde_json::from_str(
+        request
+            .get("placeholder")
+            .and_then(Value::as_str)
+            .context("Pi MCP bridge request omitted envelope")?,
+    )
+    .context("Pi MCP bridge request envelope is invalid")?;
+    let result = runtime
+        .execute_mcp_bridge(&envelope)
+        .await
+        .unwrap_or_else(|_| {
+            json!({
+                "content": [{"type":"text", "text": "Rovai MCP bridge rejected the call"}],
+                "isError": true,
+            })
+        });
+    runtime
+        .respond(
+            id.clone(),
+            json!({
+                "type":"extension_ui_response",
+                "id":id,
+                "value":serde_json::to_string(&result).unwrap_or_else(|_| "{\"content\":[],\"isError\":true}".to_string()),
+            }),
+        )
+        .await
+}
+
 async fn process_agent_run_pi_approval_request(
     core: &Arc<Core>,
     output: &mpsc::UnboundedSender<String>,
@@ -12349,6 +12392,9 @@ async fn process_agent_run_pi_approval_request(
     let action_request = match pi::intercepted_action_request(
         agent_run_id,
         execution_epoch,
+        runtime.host_instance_id(),
+        runtime.host_binding_generation(),
+        runtime.native_binding_generation(),
         runtime.session_id(),
         runtime.prompt_id(),
         Path::new(&execution.workspace.execution_root),
@@ -12368,6 +12414,17 @@ async fn process_agent_run_pi_approval_request(
             return Ok(());
         }
     };
+    if let Some(envelope) = action_request.mcp_envelope.as_ref() {
+        runtime
+            .register_mcp_approval(
+                request
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .context("Pi MCP Approval request omitted UI identity")?,
+                envelope,
+            )
+            .await?;
+    }
     if execution.workspace.access == "read_only"
         && matches!(
             &action_request.input,
