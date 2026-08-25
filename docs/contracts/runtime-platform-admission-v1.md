@@ -86,9 +86,10 @@ authentication, first run, Session continuation, Built-in Tool v14, approval, ca
 cleanup and planned shutdown. Infrastructure tests for ACP, stdio or one-shot shapes are necessary but do not qualify
 other Adapter identities.
 
-Grok Build 使用独立的 `macos-arm64-grok-build-v2` digest-bound evidence；v1 保留为历史 artifact。v2 只可使
-`grok-build × macos-arm64` 为 `qualified`。同一 Adapter 的 macOS x64、Windows x64，以及其他 Adapter 的
-任意平台行，都不能继承该结论。
+Grok Build 使用独立的 `macos-arm64-grok-build-v2` 与 `windows-x64-grok-build-v1` digest-bound evidence；
+macOS arm64 v1 保留为历史 artifact。每份证据只可提升其精确 `AdapterKind × HostPlatformKey` 行：当前
+`grok-build × macos-arm64` 与 `grok-build × windows-x64` 为 `qualified`，macOS x64 仍不能继承任一结论。
+其他 Adapter 的任意平台行同样不能继承 Grok 证据。
 
 ## References
 

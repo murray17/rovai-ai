@@ -59,8 +59,8 @@ Kimi 与 Grok 不再识别、删除、重分类或压制 provider 文本中的 `
 candidate 只使用通用 whitespace trim。若上游发送 thinking text，执行台和最终公开候选都如实保留。
 `_x.ai/*` vendor notification 仍只作 metadata/lifecycle，不冒充 agent text。
 
-`grok-build × macos-arm64` 仅绑定本版本独立 evidence digest；macOS x64 与 Windows x64 保持
-`not_qualified`。Usage/Cost 在语义未验证前保持 Disabled。本决定同时取代 v1.27 冻结时的 Kimi
+`grok-build × macos-arm64` 与 `grok-build × windows-x64` 分别绑定本版本独立 evidence digest；macOS x64
+保持 `not_qualified`。Usage/Cost 在语义未验证前保持 Disabled。本决定同时取代 v1.27 冻结时的 Kimi
 provider-specific sanitizer 当前边界，但不改写历史验收事实。
 
 ### 后果
@@ -206,8 +206,8 @@ Bootstrap 内容和创建期投递不变：只有 `session/new._meta.rules` 携�
 
 低于 `1.0.0` 的既有安装即使曾保存 Ready snapshot，也会在解析/dispatch 时要求重新 Probe 并被版本门拒绝。
 Grok cold continuation 与其他支持 ACP resume 的 Runtime 使用同一方法和 exact Session ID 规则；TRAE 等仍可独立
-使用其 load-only HistoryRestore。macOS arm64、macOS x64、Windows x64 的平台资格仍分别取证，版本门共享不代表
-平台验证可以互相外推。
+使用其 load-only HistoryRestore。macOS arm64 与 Windows x64 已分别取证；macOS x64 仍需独立取证，版本门共享不
+代表平台验证可以互相外推。
 
 ### 被拒绝方案
 

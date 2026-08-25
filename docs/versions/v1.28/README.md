@@ -12,14 +12,14 @@ last_updated: 2026-08-25
 # Rovai-ai v1.28：Grok Build + MiniMax M3 本地 Runtime 接入
 
 > 当前状态：`grok-build` Product Runtime、Data Contract 迁移、官方 provider config、ACP Host、Renderer
-> catalog 和本机 macOS arm64 平台资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
+> catalog、macOS arm64 与 Windows x64 平台资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
 > `AdditivePerRun / NativeWinsSkip` External MCP。当前 Grok 支持基线统一为 `>= 1.0.0`，Ready 要求正式广告并
 > 真实成功调用 ACP `session/resume`，cold continuation 不再保留 `0.2.118` 的 load-only fallback。已确认的模型上下文
 > revision 2 保持 Bootstrap bytes
 > 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
 > 独立 worktree 验收后通过 PR 交付 `main`；`>= 1.0.0 / session.resume` clean break 的确定性实现已完成，
-> macOS arm64 已用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵；macOS x64、Windows x64 仍待
-> 各客户端分别补证。
+> macOS arm64 与 Windows x64 已分别用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵；macOS x64
+> 仍待独立客户端补证。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
 
@@ -62,8 +62,8 @@ Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 cu
 - Grok Skill 投影到 `.grok/skills` 并完成原生发现实测；External MCP 使用私有临时 Plugin 的进程级
   `--plugin-dir`，保留原生定义、同名 `NativeWinsSkip`、不同名逐 Run 追加并随 Host 清理；Usage/Cost 保持
   Disabled，直到字段语义独立验证；
-- macOS arm64 只在本版本冻结的 adapter-scoped 证据通过后进入普通 discovery、检查、成员配置与执行路径；
-  macOS x64、Windows x64 不从本机证据外推。
+- macOS arm64 与 Windows x64 只在各自冻结的 adapter-scoped 证据通过后进入普通 discovery、检查、成员配置与
+  执行路径；macOS x64 不从任一平台证据外推。
 - 修复 macOS Runtime Files 持久身份误用 boot-local `st_dev` 的启动回归；marker schema 2 改用稳定卷 UUID，
   schema 1 只在确定性私有实例根内 rekey，并由 SQLite/Authority reconciliation 受控重建旧物理 View receipt。
 

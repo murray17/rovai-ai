@@ -16,16 +16,34 @@ last_updated: 2026-08-25
 
 | Checklist 轴 | 当前结论 | 自动化证据 | 仍需客户端补证 |
 | --- | --- | --- | --- |
-| 最低版本 | 三个宿主平台共用 `grok >= 1.0.0` | semver release gate；`0.2.118` 和 `1.0.0-beta` 拒绝，`1.0.0`/更高接受；macOS arm64 实测 `1.0.5 (5115b46bc909)` | macOS x64、Windows x64 记录实际版本与 fingerprint |
-| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象并真实 Resume 同一 ID 成功 | 缺少广告或广告但方法拒绝的 fixture 均不能 Ready；macOS arm64 1.0.5 真实完成生产形状 New、空 roots Resume 与 set-model | macOS x64、Windows x64 各跑真实 initialize/auth/session-new/resume |
-| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | macOS arm64 1.0.5 跨 Core/Host 保持 exact ID 和 marker；恢复后 Tool/Approval/cancel、Built-in CLI/attachment 与坏 ID 单次 fallback 通过 | macOS x64、Windows x64 重复同一矩阵 |
-| System Prompt | 不变：`session/new._meta.rules = Rovai Bootstrap`；resume 不重新注入 | creation-only rules fixture；Resume 携带 rules 会 fail closed，`None` 才通过；无 `systemPromptOverride` | 真实 resume 后冲突 prompt 继续服从原 Session rules |
-| Native Binding fence | `grok-build:resume-v1`；配置/rules generation 变化建新 Session | installation、protocol、fingerprint、Host config、workspace、model、permission、官方 config 与 rules revision 变化均改变 key | 客户端确认相同 key cold resume、变化后 new |
+| 最低版本 | 三个宿主平台共用 `grok >= 1.0.0` | semver release gate；`0.2.118` 和 `1.0.0-beta` 拒绝，`1.0.0`/更高接受；macOS arm64 实测 `1.0.5 (5115b46bc909)`，Windows x64 实测 `1.0.5 (5115b46bc9)`，各有独立 fingerprint | macOS x64 记录实际版本与 fingerprint |
+| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象并真实 Resume 同一 ID 成功 | 缺少广告或广告但方法拒绝的 fixture 均不能 Ready；macOS arm64/Windows x64 1.0.5 均真实完成生产形状 New、空 roots Resume 与 set-model | macOS x64 跑真实 initialize/auth/session-new/resume |
+| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | macOS arm64/Windows x64 1.0.5 均跨 Core/Host 保持 exact ID 和 marker；恢复后 Tool/Approval/cancel、Built-in CLI/attachment 与坏 ID 单次 fallback 通过 | macOS x64 重复同一矩阵 |
+| System Prompt | 不变：`session/new._meta.rules = Rovai Bootstrap`；resume 不重新注入 | creation-only rules fixture；Resume 携带 rules 会 fail closed，`None` 才通过；无 `systemPromptOverride`；两端 cold resume 保留原 Session context | macOS x64 重复验证 |
+| Native Binding fence | `grok-build:resume-v1`；配置/rules generation 变化建新 Session | installation、protocol、fingerprint、Host config、workspace、model、permission、官方 config 与 rules revision 变化均改变 key；两端相同 key cold resume | macOS x64 确认相同 key cold resume、变化后 new |
 | load / HistoryRestore | Grok 正常路径停用；其他 Runtime 不变 | Grok 不再把 `loadSession` 映射为产品 capability；TRAE/Kimi 等通用 load fallback 回归保留 | 无 Grok load smoke；只需验证 resume |
 
-本次开发机已升级为 `grok 1.0.5 (5115b46bc909)`，macOS arm64 已完成上表真实 Runtime 验收并更新为 v2
-qualification artifact。原 `0.2.118` v1 artifact 保留为不可变历史证据；macOS x64、Windows x64 仍为
+`grok 1.0.5` 已在 macOS arm64（`5115b46bc909`）与 Windows x64（`5115b46bc9`）完成上表真实 Runtime 验收并分别绑定独立
+qualification artifact。原 `0.2.118` macOS arm64 v1 artifact 保留为不可变历史证据；macOS x64 仍为
 `not_qualified`，待对应客户端完成同一矩阵后再更新。
+
+### Windows x64 独立资格
+
+Windows 10 22H2 / build 19045 x64 客户端以 `xai.api_key` BYOK 和独立 Grok executable fingerprint 完成：
+
+- Ready 前真实 `session/new → exact-ID session/resume([]) → session/set_model`；跨 Core/Host 恢复保持 Native
+  Session 与私密 marker，0 replay Action/Approval，坏 ID 只产生一次 continuity-lost 后 replacement-new；
+- 普通 AgentRun、PowerShell stdout/stderr/mixed/empty/nonzero/bounded-large、allow/deny、运行中 Tool cancel、
+  恢复后写入与运行中 Run cancel 均通过；
+- Built-in CLI 15 项、Gather captured return、successor lease、历史 attachment、Missing-Send 三路径、
+  `.grok/skills` 原生发现与 `AdditivePerRun / NativeWinsSkip` MCP 真实调用通过；
+- 隔离 packaged App 在一个 Grok execution active 时发起 planned shutdown。native stop 返回可靠 cancelled
+  Runtime terminal，311ms 内自然退出、无 forced signal、七个后代进程回收，重启后终态保持。
+- Registry 绑定证据 digest 后移除 Windows 本地资格 override，正式产品路径再次完成 Ready 与同 Native Session、
+  同 warm Host 的两轮 AgentRun。
+
+MiniMax BYOK 在验收中出现过空 Tool name 和一次缺少 `prompt_tokens` 的流式 usage chunk；Grok/Rovai 均
+fail closed，未增加 provider 专属修复，原命令有界重跑后必须完整通过才计为资格证据。
 
 ## 2026-08-24 原始 `0.2.118` 基本结论（历史证据）
 
@@ -53,7 +71,7 @@ Exact launch:                 grok --permission-mode <effective> --no-auto-updat
 | Native Session Bootstrap | Formatter 3 的完整 Bootstrap bytes 作为 Grok `session/new._meta.rules` 一次性追加；所有 Prompt 只发送当轮 Dynamic Context | 只改变 Grok 的投递层级；不使用覆盖式 `systemPromptOverride`，same-host/load 不重复注入 |
 | compaction | exact live `auto_compact_completed` → Observer → Requirement → 下一次 eligible input 的 Redelivery v2 | `best_effort` 且 fail closed；不会在当前 Runtime 内部重采样中插入 Prompt |
 | Built-in CLI | 当前 Charter/CLI contract；15 个 operation 的真实 Smoke 通过 | 无旧 alias 或旧 fixture 特例 |
-| Settings / 平台可见性 | macOS arm64 qualified 后进入 catalog、成员配置与检查；其他平台不展示为 qualified | macOS x64、Windows x64 无证据，不外推 |
+| Settings / 平台可见性 | macOS arm64/Windows x64 qualified 后进入各自 catalog、成员配置与检查；macOS x64 不展示为 qualified | 三个平台不共享证据 digest |
 
 ## 用户关注的五项结论
 
@@ -170,12 +188,15 @@ Agent 执行台已实际打开并核对：队员、Grok Build、实际模型、R
 
 - 当前资格证据：[macos-arm64-grok-build-v2.json](../../../qualification/runtime-platform/macos-arm64-grok-build-v2.json)，
   digest `sha256:6a2a96944ca7021f6e4c9c7289cdacde0e2077736a8e8af6bd247ce929e92b1e`；历史 v1 artifact 保持不可变；
+- Windows x64 资格证据：[windows-x64-grok-build-v1.json](../../../qualification/runtime-platform/windows-x64-grok-build-v1.json)，
+  digest `sha256:66f80ed14dc6c2903f86af29f8209c6bee6aa72340f09a8b2b52da335242c66b`；
 - 兼容性总表：[Runtime 兼容性清单](../../runtime-compatibility.md)，digest
-  `sha256:5d82ad48e6155ca6c4b90aaccc2a7d5c92eac7232c56c4ff8b2a4a6b4e03fed0`；
+  `sha256:9d50813f2dd5b18ca93b5e9e4fd05890a362594fd2879140560ecbf2ff9e0619`；
 - v2 implementation base revision：`8f0aad1b989ed7eccb695c131da964f6a6ac4d77`；
+- Windows x64 implementation base revision：`61a99977ad590c6e8a8f5c4f99b36d4dc0682801`；
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-grok-1-0-resume`；
 - Branch：`rovai/grok-1-0-resume`；由 PR #50 交付。
 
 revision 2 已明确确认并实施。以上 `0.2.118` load-only 结论已由当前 `>= 1.0.0 / session.resume` 合同取代，
 但它仍是 Plugin MCP、rules、compaction、BYOK 与 macOS arm64 原始平台资格的历史证据。Usage/Cost 未启用，
-account cached-token、macOS x64 与 Windows x64 的 `>= 1.0.0` 真实 continuation 仍需分别验收。
+account cached-token 与 macOS x64 的 `>= 1.0.0` 真实 continuation 仍需分别验收。

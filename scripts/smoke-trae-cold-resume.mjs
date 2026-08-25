@@ -41,6 +41,9 @@ const cancelPath = join(projectRoot, 'COLD_RESUME_CANCELLED_WRITE.txt')
 const markerReadCommand = process.platform === 'win32'
   ? 'type native-session-marker.txt'
   : 'cat native-session-marker.txt'
+const cancelToolCommand = process.platform === 'win32'
+  ? `Start-Sleep -Seconds 30; Set-Content -LiteralPath '${cancelPath.replaceAll("'", "''")}' -Value 'SHOULD_NOT_EXIST'`
+  : `sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'`
 const sessionMarker = `${adapterKind.replaceAll('-', '_').toUpperCase()}_SESSION_${crypto.randomUUID().replaceAll('-', '').toUpperCase()}`
 let client
 
@@ -98,7 +101,9 @@ try {
   const first = await createConfiguredCampAndSend(client.request, {
     commandId: crypto.randomUUID(),
     workspace,
-    body: `You do not know the session marker. You must actually use the Bash or terminal tool exactly once to run this command without changing files: ${markerReadCommand}. Do not simulate or skip the tool call, and do not call any other tool. After the tool returns, remember its exact single-line output. Then reply with MARKER_STORED.`,
+    body: adapterKind === 'grok-build'
+      ? `Memorize this opaque qualification token for the next turn: ${sessionMarker}. Do not call tools and do not repeat the token. Reply exactly MARKER_STORED.`
+      : `You do not know the session marker. You must actually use the Bash or terminal tool exactly once to run this command without changing files: ${markerReadCommand}. Do not simulate or skip the tool call, and do not call any other tool. After the tool returns, remember its exact single-line output. Then reply with MARKER_STORED.`,
     address: { mode: 'explicit', agentIds: [profile.agentId] },
     purpose: `Store a session marker in the ${runtime.label} Native Session before Core restart`
   })
@@ -119,8 +124,9 @@ try {
   )
   if (firstResult.run.status !== 'succeeded'
       || !firstOutput?.body
+      || (adapterKind === 'grok-build' && !firstOutput.body.includes('MARKER_STORED'))
       || (adapterKind !== 'grok-build' && firstOutput.body.includes(sessionMarker))
-      || !firstRuntimeAction
+      || (adapterKind !== 'grok-build' && !firstRuntimeAction)
       || !firstStart?.params?.nativeThreadId) {
     const runtimeEvents = client.events.filter((event) =>
       event.method === 'runtime.action' && event.params?.agentRunId === firstRunId
@@ -143,7 +149,9 @@ try {
   const restoredRequest = await sendExistingCampMessage(
     client.request,
     campId,
-    'Do not call tools or inspect files. Reply with exactly the session marker returned by the tool in the immediately preceding request, and nothing else.',
+    adapterKind === 'grok-build'
+      ? 'Do not call tools or inspect files. Reply with exactly the opaque qualification token from the immediately preceding request, and nothing else.'
+      : 'Do not call tools or inspect files. Reply with exactly the session marker returned by the tool in the immediately preceding request, and nothing else.',
     'Recover the session marker after a Core and ACP Host restart'
   )
   const restoredCommand = restoredRequest.commandResult ?? restoredRequest
@@ -220,12 +228,16 @@ try {
   const cancelRequest = await sendExistingCampMessage(
     client.request,
     campId,
-    `Use the Bash or terminal tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
+    adapterKind === 'grok-build'
+      ? 'Do not call tools or modify files. Write a detailed 4000-word explanation of Native Session continuation in one response.'
+      : `Use the Bash or terminal tool exactly once to run: ${cancelToolCommand}. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
     `Verify cancel after ${runtime.label} ${runtime.continuationName}`
   )
   const cancelCommand = cancelRequest.commandResult ?? cancelRequest
   const cancelRunId = cancelCommand.payload?.agentRunIds?.[0]
-  const cancelResult = await cancelRunningTool(client, campId, cancelRunId)
+  const cancelResult = adapterKind === 'grok-build'
+    ? await cancelRunningRun(client, campId, cancelRunId)
+    : await cancelRunningTool(client, campId, cancelRunId)
   await new Promise((resolveWait) => setTimeout(resolveWait, 1_000))
   const cancelledFile = await readFile(cancelPath, 'utf8').catch((error) => {
     if (error?.code === 'ENOENT') return null
@@ -469,16 +481,16 @@ async function cancelRunningTool(client, campId, agentRunId) {
       resolvedApprovals.add(approval.id)
     }
     run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    if (!cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
+      throw new Error(`AgentRun terminated before its Tool could be cancelled: ${JSON.stringify({
+        run,
+        actions
+      })}`)
+    }
     if (!cancellationRequested && resolvedApprovals.size > 0 && run) {
       const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
       if (!turn) throw new Error(`Cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
-      const cancellation = await client.request('campTurns.cancel', {
-        commandId: crypto.randomUUID(),
-        command: { campId, campTurnId: turn.id, expectedVersion: turn.version }
-      })
-      if (cancellation.status === 'rejected') {
-        throw new Error(`CampTurn cancellation was rejected: ${JSON.stringify(cancellation)}`)
-      }
+      await requestCampTurnCancellation(client, campId, turn)
       cancellationRequested = true
     }
     if (cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
@@ -487,6 +499,53 @@ async function cancelRunningTool(client, campId, agentRunId) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 250))
   }
   throw new Error(`Timed out cancelling AgentRun ${agentRunId}: ${JSON.stringify(run)}`)
+}
+
+async function cancelRunningRun(client, campId, agentRunId) {
+  const deadline = Date.now() + 180_000
+  let cancellationRequested = false
+  let runningObservedAt = null
+  let snapshot
+  let run
+  while (Date.now() < deadline) {
+    snapshot = await client.request('camps.snapshot', { campId })
+    run = snapshot.agentRuns.find((candidate) => candidate.id === agentRunId)
+    if (run?.status === 'running' && runningObservedAt === null) runningObservedAt = Date.now()
+    if (!cancellationRequested
+        && run?.status === 'running'
+        && runningObservedAt !== null
+        && Date.now() - runningObservedAt >= 1_000) {
+      const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
+      if (!turn) throw new Error(`Cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
+      await requestCampTurnCancellation(client, campId, turn)
+      cancellationRequested = true
+    }
+    if (!cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
+      throw new Error(`AgentRun terminated before running-state cancellation: ${JSON.stringify(run)}`)
+    }
+    if (cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
+      return { snapshot, run }
+    }
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250))
+  }
+  throw new Error(`Timed out cancelling running AgentRun ${agentRunId}: ${JSON.stringify(run)}`)
+}
+
+async function requestCampTurnCancellation(client, campId, turn) {
+  let expectedVersion = turn.version
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const cancellation = await client.request('campTurns.cancel', {
+      commandId: crypto.randomUUID(),
+      command: { campId, campTurnId: turn.id, expectedVersion }
+    })
+    if (cancellation.status !== 'rejected') return cancellation
+    if (cancellation.code !== 'command.version_conflict'
+        || !Number.isInteger(cancellation.payload?.currentVersion)) {
+      throw new Error(`CampTurn cancellation was rejected: ${JSON.stringify(cancellation)}`)
+    }
+    expectedVersion = cancellation.payload.currentVersion
+  }
+  throw new Error(`CampTurn cancellation remained version-conflicted after bounded retries: ${turn.id}`)
 }
 
 function outputForRun(snapshot, agentRunId) {

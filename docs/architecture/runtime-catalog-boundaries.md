@@ -316,8 +316,9 @@ External MCP 为 `AdditivePerRun / NativeWinsSkip`。`grok 0.2.118` 的 ACP Sess
 native 名称都保留，冲突 Assignment skip，不同名 Server 可追加，完整集合进入 Host compatibility，Plugin 随
 Host 清理。Core 不写 project/user config。managed Skill 投影到 `.grok/skills`。Usage/Cost 保持 Disabled。
 
-`grok-build × macos-arm64` 只绑定独立 adapter-scoped qualification evidence；macOS x64 与 Windows x64
-保持 `not_qualified / runtime_platform.qualification_evidence_missing`。
+`grok-build × macos-arm64` 与 `grok-build × windows-x64` 分别绑定独立、目标主机生成的
+adapter-scoped qualification evidence；macOS x64 仍保持
+`not_qualified / runtime_platform.qualification_evidence_missing`。
 
 ## 队员最高权限默认
 

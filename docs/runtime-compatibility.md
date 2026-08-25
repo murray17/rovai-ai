@@ -25,7 +25,7 @@ Claude Code、Antigravity、Kiro、Qoder、CodeBuddy、Qwen Code、TRAE CLI CN�
 第十三种为 Grok Build。
 Cursor 在三个目标平台均为 `not_qualified`。Kimi 在 macOS arm64、macOS x64 与 Windows x64 均为
 digest-bound `qualified`。
-Grok Build 仅在 adapter-scoped 证据覆盖的 macOS arm64 为 `qualified`；macOS x64 与 Windows x64 不外推。
+Grok Build 在各自 adapter-scoped 证据覆盖的 macOS arm64 与 Windows x64 为 `qualified`；macOS x64 不外推。
 Cursor identity 仅保留内部兼容与历史读取，默认不进入 discovery/check/AgentRun；Settings 的 Agent Runtime
 目录不展示该项。设置页的
 DeepSeek Harness “待支持”行是 Renderer-only Preview，不在这个目录中，也没有 Installation、
@@ -799,10 +799,17 @@ Session ID 和私密 marker 保持，恢复 Run 没有 replay Action/Approval。
 只记录一次 continuity-lost 后 replacement-new。普通 AgentRun、十五项 Built-in CLI、历史 attachment、
 `AdditivePerRun / NativeWinsSkip` MCP 和 `.grok/skills` 也在同一 1.0.5 候选上通过。
 
-macOS arm64 当前 adapter-scoped 证据为
-[`qualification/runtime-platform/macos-arm64-grok-build-v2.json`](../qualification/runtime-platform/macos-arm64-grok-build-v2.json)；
-初始 `0.2.118` v1 artifact 保持不可变历史证据。macOS x64、Windows x64 仍为 `not_qualified`，不得从 arm64
-外推。
+Windows x64 在 Windows 10 22H2 / build 19045 上以同一 `grok 1.0.5`、独立 executable fingerprint 与
+`xai.api_key` BYOK 重新完成真实 Deep Probe、PowerShell 六类 command-output、allow/deny、运行中 Tool cancel、
+跨 Core/Host exact-ID resume、坏 ID 单次 replacement、十五项 Built-in CLI/Gather/历史 attachment、
+Missing-Send、`.grok/skills`、Plugin MCP 以及隔离 packaged App planned shutdown。planned shutdown 观察到一个
+active Grok execution，native stop 返回可靠 `planned_shutdown_cancelled` terminal，App 无 forced signal 退出，
+七个已观察后代进程全部回收，重启保持该终态。
+
+当前 adapter-scoped 证据为
+[`macos-arm64-grok-build-v2.json`](../qualification/runtime-platform/macos-arm64-grok-build-v2.json)与
+[`windows-x64-grok-build-v1.json`](../qualification/runtime-platform/windows-x64-grok-build-v1.json)；初始
+`0.2.118` macOS arm64 v1 artifact 保持不可变历史证据。macOS x64 仍为 `not_qualified`，不得从另外两端外推。
 
 ## Grok Build macOS arm64 初始 `0.2.118` 接入证据（历史）
 
@@ -845,8 +852,8 @@ MiniMax-M3 真实调用；临时 Plugin 随 Host 删除。项目/用户 config �
 
 adapter-scoped 初始历史证据位于
 [`qualification/runtime-platform/macos-arm64-grok-build-v1.json`](../qualification/runtime-platform/macos-arm64-grok-build-v1.json)。
-当前 1.0.5 证据见上方 v2 artifact；两者都不包含 Key、完整 Native ID、Prompt 或本机私有路径。macOS x64 与
-Windows x64 保持未准入；原生 Usage/Cost 字段保持 Disabled。
+当前 1.0.5 证据见上方 adapter-scoped artifacts；证据都不包含 Key、完整 Native ID、Prompt 或本机私有路径。
+macOS x64 保持未准入；原生 Usage/Cost 字段保持 Disabled。
 
 ## 历史：内置 MCP / Antigravity 专项复核
 
