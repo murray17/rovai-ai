@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:5d82ad48e6155ca6c4b90aaccc2a7d5c92eac7232c56c4ff8b2a4a6b4e03fed0";
+    "sha256:cb02bfec2598f09a2c2460b1a37abfacd9e7ff2beaa48d084ca03f6d340a1625";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -18,6 +18,9 @@ pub const WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
 
 pub const GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION: &str =
     "sha256:6a2a96944ca7021f6e4c9c7289cdacde0e2077736a8e8af6bd247ce929e92b1e";
+
+pub const GROK_BUILD_MACOS_X64_EVIDENCE_REVISION: &str =
+    "sha256:6ce70fc844ef6f18327e5a23396072566fd907c972f273aeccfd987c87398879";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -163,6 +166,13 @@ mod tests {
             GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION,
             format!("sha256:{grok_digest:x}")
         );
+        let grok_x64_digest = Sha256::digest(include_bytes!(
+            "../../../qualification/runtime-platform/macos-x64-grok-build-v1.json"
+        ));
+        assert_eq!(
+            GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
+            format!("sha256:{grok_x64_digest:x}")
+        );
     }
 
     #[test]
@@ -225,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn macos_catalog_qualifies_every_runtime_except_cursor_and_grok_with_shared_evidence() {
+    fn macos_catalog_qualifies_each_runtime_only_with_its_bound_evidence() {
         let registry = AgentRuntimeAdapterRegistry::default();
 
         for runtime_kind in AdapterKind::ALL
@@ -262,17 +272,23 @@ mod tests {
             grok_arm.evidence_revision(),
             Some(GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION)
         );
-        for platform in [HostPlatformKey::MacosX64, HostPlatformKey::WindowsX64] {
-            let admission = registry.platform_admission(AdapterKind::GrokBuild, platform);
-            assert_eq!(
-                admission.status(),
-                RuntimePlatformAdmissionStatus::NotQualified
-            );
-            assert_eq!(
-                admission.reason_code(),
-                Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
-            );
-        }
+        let grok_x64 =
+            registry.platform_admission(AdapterKind::GrokBuild, HostPlatformKey::MacosX64);
+        assert!(grok_x64.is_qualified());
+        assert_eq!(
+            grok_x64.evidence_revision(),
+            Some(GROK_BUILD_MACOS_X64_EVIDENCE_REVISION)
+        );
+        let grok_windows =
+            registry.platform_admission(AdapterKind::GrokBuild, HostPlatformKey::WindowsX64);
+        assert_eq!(
+            grok_windows.status(),
+            RuntimePlatformAdmissionStatus::NotQualified
+        );
+        assert_eq!(
+            grok_windows.reason_code(),
+            Some(RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing)
+        );
     }
 
     #[test]
