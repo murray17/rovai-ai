@@ -44,14 +44,15 @@ use rovai_core::{
         RecordActionResultCommand, RecordObservedActionCommand, ResolveActionApprovalCommand,
     },
     agent_profile::{
-        AdapterInstallationView, AdapterKind, AdapterProbeAttempt, AgentProfileService,
-        ClearMemberRuntimeConfigurationCommand, CreateAdapterInstallationCommand,
-        CreateAgentProfileCommand, DiscoveredManagedInstallation, FrozenAgentRuntimeConfig,
-        InstallationClass, InstallationSource, ManagedProbeFailure,
+        AdapterCapabilitySnapshot, AdapterInstallationView, AdapterKind, AdapterProbeAttempt,
+        AgentProfileService, ClearMemberRuntimeConfigurationCommand,
+        CreateAdapterInstallationCommand, CreateAgentProfileCommand, DiscoveredManagedInstallation,
+        FrozenAgentRuntimeConfig, InstallationClass, InstallationSource, ManagedProbeFailure,
         RecordAdapterCapabilitySnapshotCommand, RemoveMemberCommand, ReorderAgentProfilesCommand,
-        RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus, SetAgentProfileAvatarCommand,
-        SetMemberPresenceCommand, SetMemberRuntimeConfigurationCommand,
-        UpdateAdapterInstallationCommand, UpdateAgentProfileCommand, VerifiedManagedInstallation,
+        RuntimeEntrypointLocatorIdentity, RuntimeModelCatalogCacheStatus, RuntimeReadinessStatus,
+        SetAgentProfileAvatarCommand, SetMemberPresenceCommand,
+        SetMemberRuntimeConfigurationCommand, UpdateAdapterInstallationCommand,
+        UpdateAgentProfileCommand, VerifiedManagedInstallation,
     },
     agent_runtime_adapter::{
         AcpProbeObservation, AgentRuntimeAdapterRegistry, AntigravityProbeObservation,
@@ -184,9 +185,10 @@ use rovai_core::{
         RestartNativeSessionCommand, SucceedAgentRunCommand,
     },
     runtime_discovery::{
-        RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeLaunchPurpose,
-        RuntimeSearchEnvironment, catalog_entries, discover_runtime_path, discover_runtime_version,
-        is_executable_file, runtime_launch_allowed, runtime_visible_path,
+        RuntimeDiscoveryObservation, RuntimeDiscoveryStatus, RuntimeExecutableCandidate,
+        RuntimeLaunchPurpose, RuntimeSearchEnvironment, catalog_entries, discover_runtime_path,
+        discover_runtime_path_with_manual_candidates, discover_runtime_version,
+        is_runtime_entrypoint_file, runtime_launch_allowed, runtime_visible_path,
         with_runtime_search_environment,
     },
     runtime_failure::{
@@ -1012,6 +1014,23 @@ const RUNTIME_CHECK_MAX_CONCURRENCY: usize = 2;
 const RUNTIME_PROBE_UPDATE_RETRY_DELAY: Duration = Duration::from_millis(300);
 const RUNTIME_PROBE_MAX_EXECUTIONS: usize = 2;
 const RUNTIME_CHECK_EXECUTION_COOLDOWN: Duration = Duration::from_secs(3);
+
+fn apply_entrypoint_locator_compatibility(
+    snapshot: &mut AdapterCapabilitySnapshot,
+    identity: Option<&RuntimeEntrypointLocatorIdentity>,
+) {
+    let Some(identity) = identity else {
+        return;
+    };
+    let base = snapshot
+        .native_session_compatibility_key
+        .take()
+        .unwrap_or_else(|| "runtime-entrypoint".to_string());
+    snapshot.native_session_compatibility_key = Some(format!(
+        "{base}:windows-resolved-command-shim-v1:{}",
+        identity.compatibility_fingerprint
+    ));
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RuntimeCheckOutcome {
@@ -1918,15 +1937,30 @@ impl Core {
         self.runtime_product_diagnostics.write().await.clear();
         let managed_installations = {
             let database = self.database.lock().await;
-            match AgentProfileService::default().list_installations(&database) {
-                Ok(installations) => installations
-                    .into_iter()
-                    .filter(|installation| {
+            let service = AgentProfileService::default();
+            match service.list_installations(&database) {
+                Ok(installations) => {
+                    let mut managed = HashMap::new();
+                    for installation in installations.into_iter().filter(|installation| {
                         installation.installation_class == InstallationClass::ManagedDefault
                             && installation.auth_scope == "default"
-                    })
-                    .map(|installation| (installation.adapter_kind, installation))
-                    .collect::<HashMap<_, _>>(),
+                    }) {
+                        let locator = match service
+                            .runtime_entrypoint_locator_identity(&database, &installation.id)
+                        {
+                            Ok(locator) => locator,
+                            Err(error) => {
+                                eprintln!(
+                                    "failed to load Runtime entrypoint locator for {}: {error:#}",
+                                    installation.adapter_kind.as_str()
+                                );
+                                continue;
+                            }
+                        };
+                        managed.insert(installation.adapter_kind, (installation, locator));
+                    }
+                    managed
+                }
                 Err(error) => {
                     eprintln!("failed to load managed Runtime discovery fallbacks: {error:#}");
                     HashMap::new()
@@ -1953,14 +1987,46 @@ impl Core {
             let search = search.clone();
             let managed_installation = managed_installations.get(&kind).cloned();
             let handle = path_tasks.spawn_blocking(move || {
-                let mut observation = discover_runtime_path(kind, &search);
+                let explicit_saved_path = managed_installation
+                    .as_ref()
+                    .filter(|(installation, _)| {
+                        matches!(
+                            installation.source,
+                            InstallationSource::Manual | InstallationSource::Custom
+                        )
+                    })
+                    .map(|(installation, locator)| {
+                        locator
+                            .as_ref()
+                            .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                            .unwrap_or_else(|| PathBuf::from(&installation.executable_path))
+                    });
+                let mut observation = if let Some(saved_path) = explicit_saved_path {
+                    let mut observation =
+                        discover_runtime_path_with_manual_candidates(kind, &search, [saved_path]);
+                    if observation.discovery_status == RuntimeDiscoveryStatus::Found {
+                        observation.source = managed_installation
+                            .as_ref()
+                            .map(|(installation, _)| installation.source);
+                    }
+                    observation
+                } else {
+                    discover_runtime_path(kind, &search)
+                };
                 let mut missing_managed_installation = None;
                 if observation.discovery_status == RuntimeDiscoveryStatus::Missing
-                    && let Some(installation) = managed_installation
+                    && let Some((installation, locator)) = managed_installation
                 {
-                    let saved_path = PathBuf::from(&installation.executable_path);
-                    if is_executable_file(&saved_path) {
-                        let canonical = canonical_runtime_path(&saved_path);
+                    let saved_path = locator
+                        .as_ref()
+                        .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                        .unwrap_or_else(|| PathBuf::from(&installation.executable_path));
+                    let saved_candidate = search
+                        .candidates(kind, [saved_path])
+                        .into_iter()
+                        .find(|candidate| is_runtime_entrypoint_file(&candidate.path));
+                    if let Some(candidate) = saved_candidate {
+                        let canonical = canonical_runtime_path(&candidate.path);
                         match fingerprint_executable(&canonical) {
                             Ok(fingerprint) => {
                                 observation.discovery_status = RuntimeDiscoveryStatus::Found;
@@ -1968,6 +2034,14 @@ impl Core {
                                     Some(canonical.to_string_lossy().to_string());
                                 observation.source = Some(installation.source);
                                 observation.executable_fingerprint = Some(fingerprint);
+                                observation.search_path_source = candidate.search_path_source;
+                                observation.entrypoint_kind = Some(candidate.entrypoint_kind);
+                                observation.candidate_extension =
+                                    Some(candidate.candidate_extension);
+                                observation.resolved_native_target =
+                                    candidate.resolved_native_target;
+                                observation.entrypoint_locator_identity =
+                                    candidate.entrypoint_locator_identity;
                                 observation.diagnostic_code = None;
                             }
                             Err(_) => {
@@ -2147,7 +2221,7 @@ impl Core {
             .source
             .context("light Runtime discovery did not include source")?;
         let registry = AgentRuntimeAdapterRegistry::default();
-        let snapshot =
+        let mut snapshot =
             if observation.reported_version.is_some() && observation.diagnostic_code.is_none() {
                 registry.light_ready_snapshot(
                     observation.runtime_kind,
@@ -2167,6 +2241,10 @@ impl Core {
                         .unwrap_or_else(|| "runtime_light_probe_incomplete".to_string()),
                 )?
             };
+        apply_entrypoint_locator_compatibility(
+            &mut snapshot,
+            observation.entrypoint_locator_identity.as_ref(),
+        );
         let mut database = self.database.lock().await;
         AgentProfileService::default().commit_discovered_managed_installation(
             &mut database,
@@ -2177,6 +2255,7 @@ impl Core {
                 source,
                 auth_scope: "default".to_string(),
                 snapshot,
+                entrypoint_locator_identity: observation.entrypoint_locator_identity.clone(),
             },
         )?;
         Ok(())
@@ -2188,15 +2267,20 @@ impl Core {
         executable_path: &Path,
         executable_fingerprint: &str,
         source: InstallationSource,
+        candidate: &RuntimeExecutableCandidate,
         search_generation: u64,
     ) -> Result<()> {
         let observed_at = chrono::Utc::now().to_rfc3339();
-        let snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
+        let mut snapshot = AgentRuntimeAdapterRegistry::default().light_ready_snapshot(
             kind,
             None,
             executable_fingerprint.to_string(),
             observed_at.clone(),
         )?;
+        apply_entrypoint_locator_compatibility(
+            &mut snapshot,
+            candidate.entrypoint_locator_identity.as_ref(),
+        );
         {
             let mut database = self.database.lock().await;
             AgentProfileService::default().commit_discovered_managed_installation(
@@ -2208,6 +2292,7 @@ impl Core {
                     source,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                 },
             )?;
         }
@@ -2219,9 +2304,15 @@ impl Core {
             source: Some(source),
             reported_version: None,
             executable_fingerprint: Some(executable_fingerprint.to_string()),
+            search_path_source: candidate.search_path_source,
+            entrypoint_kind: Some(candidate.entrypoint_kind),
+            candidate_extension: Some(candidate.candidate_extension),
+            resolved_native_target: candidate.resolved_native_target,
+            version_probe_succeeded: None,
             search_generation,
             observed_at,
             diagnostic_code: None,
+            entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
         })
         .await;
         Ok(())
@@ -2814,10 +2905,20 @@ impl Core {
         purpose: RuntimeLaunchPurpose,
         deadline: tokio::time::Instant,
     ) -> Result<RuntimeCheckOutcome> {
-        let (existing, search) = {
+        let (existing, existing_entrypoint_locator, search) = {
             let database = self.database.lock().await;
+            let service = AgentProfileService::default();
+            let existing = service.managed_installation(&database, kind, "default")?;
+            let existing_entrypoint_locator = existing
+                .as_ref()
+                .map(|installation| {
+                    service.runtime_entrypoint_locator_identity(&database, &installation.id)
+                })
+                .transpose()?
+                .flatten();
             (
-                AgentProfileService::default().managed_installation(&database, kind, "default")?,
+                existing,
+                existing_entrypoint_locator,
                 self.runtime_search_environment.read().await.clone(),
             )
         };
@@ -2825,21 +2926,20 @@ impl Core {
             .as_ref()
             .map(|installation| canonical_runtime_path(Path::new(&installation.executable_path)));
         let mut unresolved_diagnostic = None;
-        let mut candidates = Vec::new();
-        if let Some(installation) = existing.as_ref() {
-            candidates.push((
-                PathBuf::from(&installation.executable_path),
+        let candidates = if let Some(installation) = existing.as_ref().filter(|installation| {
+            matches!(
                 installation.source,
-            ));
-        }
-        candidates.extend(
-            search
-                .candidates(kind, std::iter::empty())
-                .into_iter()
-                .map(|candidate| (candidate.path, candidate.source)),
-        );
-        let mut dedupe = BTreeSet::new();
-        candidates.retain(|(path, _)| dedupe.insert(path.clone()));
+                InstallationSource::Manual | InstallationSource::Custom
+            )
+        }) {
+            let explicit_path = existing_entrypoint_locator
+                .as_ref()
+                .map(|identity| PathBuf::from(&identity.canonical_shim_path))
+                .unwrap_or_else(|| PathBuf::from(&installation.executable_path));
+            search.candidates(kind, [explicit_path])
+        } else {
+            search.candidates(kind, std::iter::empty())
+        };
 
         if candidates.is_empty() {
             let mut database = self.database.lock().await;
@@ -2886,8 +2986,10 @@ impl Core {
             return Ok(RuntimeCheckOutcome::StableFailure);
         }
 
-        'candidate: for (path, source) in candidates {
-            if !is_executable_file(&path) {
+        'candidate: for candidate in candidates {
+            let path = &candidate.path;
+            let source = candidate.source;
+            if !is_runtime_entrypoint_file(path) {
                 note_product_runtime_diagnostic(
                     &mut unresolved_diagnostic,
                     "path_missing",
@@ -2924,7 +3026,7 @@ impl Core {
                 }
                 continue;
             }
-            let mut canonical = canonical_runtime_path(&path);
+            let mut canonical = canonical_runtime_path(path);
             let mut candidate_fingerprint = match fingerprint_executable(&canonical) {
                 Ok(fingerprint) => fingerprint,
                 Err(error) => {
@@ -2966,18 +3068,27 @@ impl Core {
                 }
             };
             let targets_current_installation = existing_canonical_path.as_ref() == Some(&canonical);
-            let mut identity_changed = targets_current_installation
-                && existing
+            let executable_identity_changed = existing
+                .as_ref()
+                .and_then(|installation| installation.snapshot.as_ref())
+                .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
+                != Some(candidate_fingerprint.as_str());
+            let locator_identity_changed = existing_entrypoint_locator
+                .as_ref()
+                .map(|identity| identity.compatibility_fingerprint.as_str())
+                != candidate
+                    .entrypoint_locator_identity
                     .as_ref()
-                    .and_then(|installation| installation.snapshot.as_ref())
-                    .and_then(|snapshot| snapshot.executable_fingerprint.as_deref())
-                    != Some(candidate_fingerprint.as_str());
+                    .map(|identity| identity.compatibility_fingerprint.as_str());
+            let mut identity_changed = targets_current_installation
+                && (executable_identity_changed || locator_identity_changed);
             if identity_changed {
                 self.commit_rebound_runtime_candidate(
                     kind,
                     &canonical,
                     &candidate_fingerprint,
                     source,
+                    &candidate,
                     search.generation(),
                 )
                 .await?;
@@ -3070,8 +3181,8 @@ impl Core {
                         {
                             return Ok(RuntimeCheckOutcome::Superseded);
                         }
-                        if !is_executable_file(&path) {
-                            let rebound_path = canonical_runtime_path(&path);
+                        if !is_runtime_entrypoint_file(path) {
+                            let rebound_path = canonical_runtime_path(path);
                             let mut database = self.database.lock().await;
                             AgentProfileService::default().record_managed_probe_failure(
                                 &mut database,
@@ -3103,7 +3214,7 @@ impl Core {
                             );
                             continue 'candidate;
                         }
-                        canonical = canonical_runtime_path(&path);
+                        canonical = canonical_runtime_path(path);
                         candidate_fingerprint = match fingerprint_executable(&canonical) {
                             Ok(fingerprint) => fingerprint,
                             Err(error) => {
@@ -3156,6 +3267,7 @@ impl Core {
                                 &canonical,
                                 &candidate_fingerprint,
                                 source,
+                                &candidate,
                                 search.generation(),
                             )
                             .await?;
@@ -3164,7 +3276,17 @@ impl Core {
                     }
                 }
             };
-            let RuntimeDeepProbeResult { snapshot, failure } = deep_probe;
+            let RuntimeDeepProbeResult {
+                mut snapshot,
+                failure,
+            } = deep_probe;
+            if !candidate.entrypoint_locator_identity_is_current() {
+                return Ok(RuntimeCheckOutcome::Superseded);
+            }
+            apply_entrypoint_locator_compatibility(
+                &mut snapshot,
+                candidate.entrypoint_locator_identity.as_ref(),
+            );
             if !self
                 .runtime_probe_identity_is_current(
                     kind,
@@ -3188,6 +3310,7 @@ impl Core {
                         source,
                         auth_scope: "default".to_string(),
                         snapshot: snapshot.clone(),
+                        entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                     },
                 )?;
                 drop(database);
@@ -3198,9 +3321,15 @@ impl Core {
                     source: Some(source),
                     reported_version: snapshot.reported_version,
                     executable_fingerprint: snapshot.executable_fingerprint,
+                    search_path_source: candidate.search_path_source,
+                    entrypoint_kind: Some(candidate.entrypoint_kind),
+                    candidate_extension: Some(candidate.candidate_extension),
+                    resolved_native_target: candidate.resolved_native_target,
+                    version_probe_succeeded: Some(true),
                     search_generation: search.generation(),
                     observed_at: chrono::Utc::now().to_rfc3339(),
                     diagnostic_code: None,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity.clone(),
                 })
                 .await;
                 self.runtime_product_diagnostics.write().await.remove(&kind);
@@ -16334,6 +16463,7 @@ mod tests {
                     source: InstallationSource::Manual,
                     auth_scope: "default".to_string(),
                     snapshot,
+                    entrypoint_locator_identity: None,
                 },
             )
             .unwrap();

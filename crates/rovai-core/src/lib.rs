@@ -53,6 +53,8 @@ pub mod runtime;
 pub mod runtime_activity_mapping;
 pub mod runtime_basis;
 pub mod runtime_discovery;
+#[cfg(windows)]
+mod runtime_discovery_windows;
 pub mod runtime_failure;
 pub mod runtime_platform_admission;
 pub mod runtime_probe_process;
@@ -61,6 +63,8 @@ pub mod skill;
 pub mod skill_projection;
 pub mod team_tool;
 pub mod team_tool_catalog;
+#[cfg(windows)]
+mod windows_runtime_entrypoint;
 
 mod runtime_pricing;
 

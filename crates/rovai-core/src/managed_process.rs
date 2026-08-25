@@ -13,6 +13,12 @@ use std::{os::unix::process::CommandExt, process::Stdio};
 use anyhow::{Context, Result, bail};
 use tokio::process::Command;
 
+#[cfg(windows)]
+use crate::windows_runtime_entrypoint::{
+    WINDOWS_COMMAND_SHIM_PATH_ENVIRONMENT_KEY, WindowsCommandShimIdentity,
+    capture_windows_command_shim, command_shim_extension,
+};
+
 #[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 
@@ -58,6 +64,20 @@ pub enum ManagedWindowsArgvDialect {
     MicrosoftCrt,
 }
 
+#[cfg(windows)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WindowsRuntimeEntrypoint {
+    NativeExecutable {
+        executable: PathBuf,
+    },
+    CommandShim {
+        shim: PathBuf,
+        interpreter: PathBuf,
+        resolved_target: Option<PathBuf>,
+        identity: WindowsCommandShimIdentity,
+    },
+}
+
 /// Immutable launch snapshot consumed by the platform backend. Callers may use
 /// their existing adapter-specific command builders, but no mutable Command
 /// crosses the launch boundary.
@@ -72,6 +92,8 @@ pub struct ManagedProcessLaunchSpec {
     windows_argv_dialect: ManagedWindowsArgvDialect,
     #[cfg(windows)]
     application_identity: windows::WindowsApplicationIdentity,
+    #[cfg(windows)]
+    windows_entrypoint: WindowsRuntimeEntrypoint,
     #[cfg(target_os = "macos")]
     user_automation_denial_root: Option<PathBuf>,
     ownership: String,
@@ -130,23 +152,18 @@ impl ManagedProcessLaunchSpec {
         ownership: impl Into<String>,
     ) -> Result<Self> {
         let command = command.as_std();
-        let application = PathBuf::from(command.get_program());
-        if !application.is_absolute() || !application.is_file() {
+        let requested_application = PathBuf::from(command.get_program());
+        if !requested_application.is_absolute() || !requested_application.is_file() {
             bail!(
                 "managed_process.invalid_application: expected an absolute file, got {}",
-                application.display()
+                requested_application.display()
             );
         }
         #[cfg(windows)]
-        if !application
-            .extension()
-            .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
-        {
-            bail!(
-                "managed_process.invalid_application: expected a native Windows EXE, got {}",
-                application.display()
-            );
-        }
+        let (application, windows_entrypoint) =
+            capture_windows_runtime_entrypoint(&requested_application)?;
+        #[cfg(not(windows))]
+        let application = requested_application;
         #[cfg(windows)]
         let application_identity = windows::capture_application_identity(&application)?;
         let arguments = command.get_args().map(OsString::from).collect::<Vec<_>>();
@@ -185,6 +202,22 @@ impl ManagedProcessLaunchSpec {
                 }
             }
         }
+        #[cfg(windows)]
+        if let WindowsRuntimeEntrypoint::CommandShim {
+            shim, interpreter, ..
+        } = &windows_entrypoint
+        {
+            insert_environment(
+                &mut environment,
+                OsString::from("ComSpec"),
+                interpreter.as_os_str().to_os_string(),
+            );
+            insert_environment(
+                &mut environment,
+                OsString::from(WINDOWS_COMMAND_SHIM_PATH_ENVIRONMENT_KEY),
+                shim.as_os_str().to_os_string(),
+            );
+        }
         let ownership = ownership.into();
         if ownership.trim().is_empty() {
             bail!("managed_process.invalid_argument: ownership identity is empty");
@@ -200,6 +233,8 @@ impl ManagedProcessLaunchSpec {
             windows_argv_dialect,
             #[cfg(windows)]
             application_identity,
+            #[cfg(windows)]
+            windows_entrypoint,
             #[cfg(target_os = "macos")]
             user_automation_denial_root: USER_AUTOMATION_DENIAL_ROOT.get().cloned(),
             ownership,
@@ -293,6 +328,10 @@ impl ManagedProcessLaunchSpec {
         }
         #[cfg(windows)]
         let application_identity = windows::capture_application_identity(&application)?;
+        #[cfg(windows)]
+        let windows_entrypoint = WindowsRuntimeEntrypoint::NativeExecutable {
+            executable: application.clone(),
+        };
         Ok(Self {
             purpose: ManagedProcessPurpose::RuntimeOneShot,
             application,
@@ -303,6 +342,8 @@ impl ManagedProcessLaunchSpec {
             windows_argv_dialect: self.windows_argv_dialect,
             #[cfg(windows)]
             application_identity,
+            #[cfg(windows)]
+            windows_entrypoint,
             #[cfg(target_os = "macos")]
             user_automation_denial_root: self.user_automation_denial_root.clone(),
             ownership,
@@ -345,6 +386,50 @@ impl ManagedProcessLaunchSpec {
     fn application_identity(&self) -> &windows::WindowsApplicationIdentity {
         &self.application_identity
     }
+
+    #[cfg(windows)]
+    fn windows_entrypoint(&self) -> &WindowsRuntimeEntrypoint {
+        &self.windows_entrypoint
+    }
+}
+
+#[cfg(windows)]
+fn capture_windows_runtime_entrypoint(
+    requested_application: &Path,
+) -> Result<(PathBuf, WindowsRuntimeEntrypoint)> {
+    if requested_application
+        .extension()
+        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
+    {
+        let executable = requested_application.canonicalize().with_context(|| {
+            format!(
+                "managed_process.invalid_application: executable is unavailable: {}",
+                requested_application.display()
+            )
+        })?;
+        return Ok((
+            executable.clone(),
+            WindowsRuntimeEntrypoint::NativeExecutable { executable },
+        ));
+    }
+    if command_shim_extension(requested_application).is_some() {
+        let identity = capture_windows_command_shim(requested_application)?;
+        let interpreter = identity.interpreter.clone();
+        let shim = identity.shim.clone();
+        return Ok((
+            interpreter.clone(),
+            WindowsRuntimeEntrypoint::CommandShim {
+                shim,
+                interpreter,
+                resolved_target: None,
+                identity,
+            },
+        ));
+    }
+    bail!(
+        "managed_process.invalid_application: expected a native Windows EXE or a .cmd/.bat command shim, got {}",
+        requested_application.display()
+    )
 }
 
 fn environment_value<'a>(
@@ -855,6 +940,265 @@ mod tests {
         assert!(process.wait().await.unwrap().success());
         process.force_terminate_tree().unwrap();
         assert!(!reader.await.unwrap().is_empty());
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_bat_entrypoint_uses_system_cmd_and_preserves_batch_safe_argv() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai command shim %ROVAI_SHIM_PATH% ! & ^ {}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("argv fixture.bat");
+        let javascript = directory.join("argv.js");
+        std::fs::write(
+            &javascript,
+            concat!(
+                "var args = WScript.Arguments;\r\n",
+                "for (var i = 0; i < args.length; i++) {\r\n",
+                "  WScript.StdOut.WriteLine(i + '=' + encodeURIComponent(args(i)));\r\n",
+                "}\r\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            &script,
+            concat!(
+                "@echo off\r\n",
+                "\"%SystemRoot%\\System32\\cscript.exe\" //nologo \"%~dp0argv.js\" %*\r\n"
+            ),
+        )
+        .unwrap();
+
+        let arguments = [
+            "",
+            "two words",
+            r"middle\slash",
+            "amp&pipe|angle<>caret^",
+            "bang!ROVAI_SHIM_PATH!",
+            "Unicode雪",
+        ];
+        let mut command = Command::new(&script);
+        command
+            .args(arguments)
+            .env("ROVAI_SHIM_PATH", "must-not-rewrite-script-path");
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeProbe,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "probe:command-shim-argv",
+        )
+        .unwrap();
+        assert!(
+            spec.application()
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case("cmd.exe"))
+        );
+        assert_eq!(
+            environment_value(spec.environment(), std::ffi::OsStr::new("ComSpec")),
+            Some(
+                crate::windows_runtime_entrypoint::system_cmd_executable()
+                    .unwrap()
+                    .as_os_str()
+            )
+        );
+        let mut process = ManagedProcess::spawn(spec).unwrap();
+        let mut stdout = process.take_stdout().unwrap();
+        let mut stderr = process.take_stderr().unwrap();
+        let stdout_reader = tokio::spawn(async move {
+            let mut output = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut stdout, &mut output)
+                .await
+                .unwrap();
+            output
+        });
+        let stderr_reader = tokio::spawn(async move {
+            let mut output = Vec::new();
+            tokio::io::AsyncReadExt::read_to_end(&mut stderr, &mut output)
+                .await
+                .unwrap();
+            output
+        });
+        let status = process.wait().await.unwrap();
+        process.force_terminate_tree().unwrap();
+        let stdout = String::from_utf8_lossy(&stdout_reader.await.unwrap()).replace("\r\n", "\n");
+        let stderr = String::from_utf8_lossy(&stderr_reader.await.unwrap()).into_owned();
+        assert!(
+            status.success(),
+            "batch failed: {stderr}; stdout={stdout:?}"
+        );
+        assert_eq!(
+            stdout,
+            concat!(
+                "0=\n",
+                "1=two%20words\n",
+                "2=middle%5Cslash\n",
+                "3=amp%26pipe%7Cangle%3C%3Ecaret%5E\n",
+                "4=bang!ROVAI_SHIM_PATH!\n",
+                "5=Unicode%E9%9B%AA\n"
+            )
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_shim_rejects_quote_and_percent_before_process_creation() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai command shim rejected argv {}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("runtime.cmd");
+        std::fs::write(&script, "@echo off\r\nexit /b 0\r\n").unwrap();
+        for argument in ["say\"quoted", "%ROVAI_ARGUMENT%", "trailing\\"] {
+            let mut command = Command::new(&script);
+            command.arg(argument);
+            let spec = ManagedProcessLaunchSpec::capture(
+                &command,
+                ManagedProcessPurpose::RuntimeProbe,
+                ManagedStdinPolicy::Null,
+                ManagedWindowsArgvDialect::MicrosoftCrt,
+                "probe:command-shim-rejected-argv",
+            )
+            .unwrap();
+            let error = ManagedProcess::spawn(spec)
+                .err()
+                .expect("unrepresentable batch argv must fail before CreateProcessW");
+            assert!(
+                error
+                    .to_string()
+                    .contains("unrepresentable quote, percent, or trailing backslash")
+            );
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_command_shim_arguments_cannot_inject_cmd_metacharacters() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai command shim injection {}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("runtime fixture.cmd");
+        let sentinel = directory.join("injected.txt");
+        std::fs::write(&script, "@echo off\r\nexit /b 0\r\n").unwrap();
+        let injected_command = "echo injected>injected.txt";
+        let arguments = [
+            format!("& {injected_command}"),
+            format!("| {injected_command}"),
+            "> injected.txt".to_string(),
+            "< injected.txt".to_string(),
+            format!("^& {injected_command}"),
+            "!ROVAI_CMD_INJECTION!".to_string(),
+        ];
+        let mut command = Command::new(&script);
+        command
+            .args(arguments)
+            .current_dir(&directory)
+            .env("ROVAI_CMD_INJECTION", injected_command);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeProbe,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "probe:command-shim-injection",
+        )
+        .unwrap();
+        let mut process = ManagedProcess::spawn(spec).unwrap();
+        let status = process.wait().await.unwrap();
+        process.force_terminate_tree().unwrap();
+        assert!(status.success());
+        assert!(
+            !sentinel.exists(),
+            "command-shim argv escaped into cmd syntax"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_bat_entrypoint_job_owns_the_complete_child_tree() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai command shim tree {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let handshake = directory.join("grandchild.pid");
+        let script = directory.join("runtime tree.bat");
+        std::fs::write(
+            &script,
+            "@echo off\r\n\"%ROVAI_TEST_EXE%\" --exact managed_process::tests::windows_job_child_helper --ignored --nocapture\r\n",
+        )
+        .unwrap();
+        let mut command = Command::new(&script);
+        command
+            .env("ROVAI_TEST_EXE", std::env::current_exe().unwrap())
+            .env(WINDOWS_HELPER_MODE, "child")
+            .env(WINDOWS_HELPER_FILE, &handshake);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeProbe,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "probe:command-shim-tree",
+        )
+        .unwrap();
+        let mut process = ManagedProcess::spawn(spec).unwrap();
+        let leader_status = tokio::time::timeout(Duration::from_secs(10), process.wait())
+            .await
+            .expect("command shim leader did not exit")
+            .expect("command shim leader wait failed");
+        assert!(leader_status.success());
+        let grandchild_pid = std::fs::read_to_string(&handshake)
+            .expect("grandchild handshake was not written")
+            .trim()
+            .parse::<u32>()
+            .expect("grandchild handshake PID was invalid");
+        assert!(windows::process_is_running_for_test(grandchild_pid).unwrap());
+
+        process.force_terminate_tree().unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while windows::process_is_running_for_test(grandchild_pid).unwrap()
+            && tokio::time::Instant::now() < deadline
+        {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(!windows::process_is_running_for_test(grandchild_pid).unwrap());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_shim_change_invalidates_captured_launch() {
+        let directory = std::env::temp_dir().join(format!(
+            "rovai-command-shim-change-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("runtime.cmd");
+        std::fs::write(&script, "@echo first\r\n").unwrap();
+        let command = Command::new(&script);
+        let spec = ManagedProcessLaunchSpec::capture(
+            &command,
+            ManagedProcessPurpose::RuntimeProbe,
+            ManagedStdinPolicy::Null,
+            ManagedWindowsArgvDialect::MicrosoftCrt,
+            "probe:command-shim-change",
+        )
+        .unwrap();
+        std::fs::write(&script, "@echo other\r\n").unwrap();
+        let error = ManagedProcess::spawn(spec)
+            .err()
+            .expect("changed shim must fail before launch");
+        assert!(
+            error
+                .to_string()
+                .contains("command shim identity changed before launch")
+        );
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[cfg(windows)]

@@ -2669,6 +2669,9 @@ impl Database {
             if !self.schema_migration_applied(108)? {
                 self.migrate_grok_compaction_detector_v108()?;
             }
+            if !self.schema_migration_applied(109)? {
+                self.migrate_runtime_entrypoint_locator_identity_v109()?;
+            }
             if let Err(error) =
                 crate::notification::maintain_notification_episode_retention(self.connection())
             {
@@ -3042,6 +3045,9 @@ impl Database {
         }
         if !self.schema_migration_applied(108)? {
             self.migrate_grok_compaction_detector_v108()?;
+        }
+        if !self.schema_migration_applied(109)? {
+            self.migrate_runtime_entrypoint_locator_identity_v109()?;
         }
         if let Err(error) =
             crate::notification::maintain_notification_episode_retention(self.connection())
@@ -15371,6 +15377,36 @@ impl Database {
         Ok(())
     }
 
+    fn migrate_runtime_entrypoint_locator_identity_v109(&mut self) -> Result<()> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        transaction.execute_batch(
+            r#"
+            CREATE TABLE runtime_entrypoint_locator_identity (
+                installation_id TEXT PRIMARY KEY
+                    REFERENCES adapter_installation(id) ON DELETE CASCADE,
+                entrypoint_kind TEXT NOT NULL CHECK(entrypoint_kind IN (
+                    'npm_cmd_shim', 'pnpm_cmd_shim'
+                )),
+                canonical_shim_path TEXT NOT NULL,
+                shim_content_digest TEXT NOT NULL,
+                canonical_interpreter_path TEXT NOT NULL,
+                interpreter_fingerprint TEXT NOT NULL,
+                resolved_target_path TEXT NOT NULL,
+                resolved_target_fingerprint TEXT NOT NULL,
+                compatibility_fingerprint TEXT NOT NULL,
+                verified_at TEXT NOT NULL
+            );
+
+            INSERT INTO schema_migration(version, applied_at)
+            VALUES (109, datetime('now'));
+            "#,
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn migrate_pending_camp_activation_v67(&mut self) -> Result<()> {
         let transaction = self
             .connection
@@ -22948,6 +22984,52 @@ mod tests {
                 })
                 .unwrap(),
             0
+        );
+
+        drop(database);
+        std::fs::remove_dir_all(directory).expect("temporary database should be removable");
+    }
+
+    #[test]
+    fn v109_adds_durable_runtime_entrypoint_locator_identity() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai-db-v109-test-{}", uuid::Uuid::new_v4()));
+        let mut database = Database::open(&directory).expect("database should open");
+        database
+            .connection()
+            .execute_batch(
+                r#"
+                DROP TABLE runtime_entrypoint_locator_identity;
+                DELETE FROM schema_migration WHERE version = 109;
+                "#,
+            )
+            .unwrap();
+
+        database
+            .migrate_runtime_entrypoint_locator_identity_v109()
+            .unwrap();
+        let columns = database
+            .connection()
+            .prepare("PRAGMA table_info(runtime_entrypoint_locator_identity)")
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(columns.contains(&"canonical_shim_path".to_string()));
+        assert!(columns.contains(&"shim_content_digest".to_string()));
+        assert!(columns.contains(&"canonical_interpreter_path".to_string()));
+        assert!(columns.contains(&"resolved_target_fingerprint".to_string()));
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT COUNT(*) FROM schema_migration WHERE version = 109",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            1
         );
 
         drop(database);

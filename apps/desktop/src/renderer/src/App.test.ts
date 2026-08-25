@@ -5167,7 +5167,7 @@ describe('task event projections', () => {
     expect(markup).not.toContain('前往 Agent 运行时')
   })
 
-  it('keeps all product checks visible without exposing diagnostic or installation details', () => {
+  it('keeps all product checks visible with redacted discovery diagnostics', () => {
     const health: HealthStatus = {
       core: { ok: true, version: '0.0.1', dataDir: '/tmp/rovai' },
       database: { ok: true, path: '/tmp/rovai/rovai.db' },
@@ -5235,6 +5235,8 @@ describe('task event projections', () => {
     expect(markup.match(/检查可用性/g)).toHaveLength(12)
     expect(markup).not.toContain('重新扫描安装')
     expect(markup).toContain('codex-cli 1.0.0')
+    expect(markup).toContain('来源 inherited_path · 入口 native_executable · 后缀 native')
+    expect(markup).toContain('Native 目标 未解析 · Version Probe 成功')
     expect(markup).not.toContain('九种已支持产品')
     expect(markup).not.toContain('自查命令')
     expect(markup).not.toContain('command -v')
@@ -5374,6 +5376,11 @@ function productAvailability(
       source: status === 'missing' || status === 'detecting' ? null : 'inherited_path',
       reportedVersion: status === 'missing' || status === 'detecting' ? null : `${runtimeKind} 1.0.0`,
       executableFingerprint: status === 'missing' || status === 'detecting' ? null : `sha256:${runtimeKind}`,
+      searchPathSource: status === 'missing' || status === 'detecting' ? null : 'inherited_path',
+      entrypointKind: status === 'missing' || status === 'detecting' ? null : 'native_executable',
+      candidateExtension: status === 'missing' || status === 'detecting' ? null : 'native',
+      resolvedNativeTarget: false,
+      versionProbeSucceeded: status === 'missing' || status === 'detecting' ? null : true,
       searchGeneration: 1,
       observedAt: '2026-07-22T00:00:00Z',
       diagnosticCode: null
