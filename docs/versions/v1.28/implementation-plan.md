@@ -44,6 +44,8 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 - [x] macOS arm64 使用 `grok 1.0.5` 完成真实 Deep Probe、cold resume、AgentRun、Built-in CLI/attachment、
   External MCP 与 Skill smoke，并更新 adapter-scoped v2 evidence；
 - [ ] macOS x64 与 Windows x64 客户端分别补充 `grok >= 1.0.0` 的同等目标主机证据；
+- [x] 以重启前后仅 `st_dev` 漂移的回归输入修复 macOS Runtime Files 启动失败；root/Entry identity 改用稳定
+  volume UUID，schema-1 marker 在已准入私有实例根内原子 rekey，旧物理 receipt 由受控 rebuild 收敛；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则

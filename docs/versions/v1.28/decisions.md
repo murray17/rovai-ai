@@ -215,3 +215,40 @@ Grok cold continuation 与其他支持 ACP resume 的 Runtime 使用同一方法
 - resume 时重新注入 rules：违反 creation-only 语义，也可能在恢复 Session 中重复 system prompt；
 - 删除通用 `session/load`：会破坏 TRAE、Kimi 等仍使用的既有 fallback；
 - 用一个平台的 `1.0.0` 结果直接准入另外两个平台：混淆共享版本合同与 adapter-scoped 平台证据。
+
+<a id="v1-28-d07"></a>
+## V1.28-D07：macOS Runtime Files identity 使用稳定卷 UUID，旧 marker 只在私有实例根内 rekey
+
+### 背景
+
+macOS 的 Runtime Files Root marker、SQLite View receipt 与 Entry physical identity 曾直接包含 Unix `st_dev`。
+本机重启实证显示，同一路径、inode、owner 与内容均未变化时，APFS mount assignment 仍会使 `st_dev` 改变，导致
+Core 在打开 SQLite 前误报 `root marker identity mismatch` 并退出。数据库 quick check 与 Data Contract 均正常；
+继续降级数据库既不能修复文件系统身份算法，也会再次丢弃新版本投影。
+
+### 决定
+
+macOS marker schema 升为 2。root 与 Entry 的持久 physical identity 使用 canonical path digest、inode、owner 和
+Darwin `getattrlist(ATTR_VOL_UUID)` 返回的稳定本地卷 UUID；`st_dev` 只保留为非持久诊断事实，不进入 digest。
+卷 UUID 改变、inode/owner/path 改变或 schema-2 marker digest 不匹配仍 fail closed。View contract、Runtime auth
+receipt schema 与 Data Contract 不变；新的 root digest 会自然 fence 旧物理 receipt 和当前 Core generation。
+
+schema-1 marker 的一次性兼容只在 Core 已证明 macOS deterministic instance path、当前用户 ownership、本地
+filesystem、无 symlink/nested marker 并取得独占 root lock 后发生。由于 View 是可从 SQLite/Authority 重建的
+派生物，旧 digest 可在该边界内原子 rekey；Database 随后以新 root identity 完整验证每个 Camp，并把旧 physical
+receipt 作为 integrity incident 受控重建。unmarked 非空 root、instance/platform 不匹配、未知 schema 与 schema-2
+identity mismatch 不进入该入口。
+
+### 后果
+
+同一 APFS 卷在重启后保持 root/Entry identity，App 不再因 boot-local device number 漂移退出。首次从 schema 1
+升级可能对已有 Published Attachment View 做一次受控重建并推进 physical generation，但不修改公共消息、
+Authority Attachment、semantic catalog、历史 Context bytes 或 Data Contract。重建失败保持 fail closed，原
+Authority 与审计数据不被删除。
+
+### 被拒绝方案
+
+- 继续持久化 `st_dev`：同一目录跨重启不稳定，会重复制造启动故障与无意义 rebuild；
+- 只删除 device 而不绑定卷：弱化了卷替换检测；
+- 对 schema-2 mismatch 也自动 rekey：会把真正的目录替换伪装成兼容迁移；
+- 再次降级 SQLite 或删除 Runtime Files Root：前者与根因无关，后者丢失诊断证据且绕过受控重建。

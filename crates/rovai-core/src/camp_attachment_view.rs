@@ -35,7 +35,8 @@ pub const MAX_CONCURRENT_STAGING_OPERATIONS: i64 = 8;
 
 const ROOT_MARKER: &str = ".runtime-camp-files-root.json";
 const ROOT_LOCK: &str = ".runtime-camp-files.lock";
-const ROOT_MARKER_SCHEMA_VERSION: i64 = 1;
+const LEGACY_ROOT_MARKER_SCHEMA_VERSION: i64 = 1;
+const ROOT_MARKER_SCHEMA_VERSION: i64 = 2;
 const INSTANCE_KEY_DOMAIN: &[u8] = b"rovai-runtime-camp-files-instance-v1\0";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -4832,14 +4833,46 @@ fn admit_runtime_root_marker(
         }
         let marker: RuntimeFilesRootMarker = serde_json::from_slice(&fs::read(&marker_path)?)
             .context("runtime_camp_files_root_invalid: root marker is invalid")?;
-        if marker.schema_version != ROOT_MARKER_SCHEMA_VERSION
-            || marker.instance_key != instance_key
-            || marker.data_dir_identity_digest != data_dir_identity_digest
+        if marker.instance_key != instance_key
             || marker.platform != expected_platform
+            || !matches!(
+                marker.schema_version,
+                LEGACY_ROOT_MARKER_SCHEMA_VERSION | ROOT_MARKER_SCHEMA_VERSION
+            )
+        {
+            anyhow::bail!("runtime_camp_files_root_invalid: root marker identity mismatch");
+        }
+        if marker.schema_version == ROOT_MARKER_SCHEMA_VERSION {
+            if marker.data_dir_identity_digest != data_dir_identity_digest
+                || marker.root_identity_digest != root_identity_digest
+            {
+                anyhow::bail!("runtime_camp_files_root_invalid: root marker identity mismatch");
+            }
+            return Ok(());
+        }
+
+        // Schema 1 persisted macOS `st_dev`, whose APFS mount assignment may
+        // change across reboot. `CampAttachmentViewStore::admit` reaches this
+        // migration only after the deterministic instance path, current-user
+        // ownership, local filesystem, no-symlink tree, and exclusive root
+        // lock have all been admitted. The View is derived and is fully
+        // reconciled against SQLite/Authority after Database open.
+        #[cfg(not(target_os = "macos"))]
+        if marker.data_dir_identity_digest != data_dir_identity_digest
             || marker.root_identity_digest != root_identity_digest
         {
             anyhow::bail!("runtime_camp_files_root_invalid: root marker identity mismatch");
         }
+        let migrated = RuntimeFilesRootMarker {
+            schema_version: ROOT_MARKER_SCHEMA_VERSION,
+            instance_key: marker.instance_key,
+            data_dir_identity_digest: data_dir_identity_digest.to_string(),
+            platform: marker.platform,
+            root_identity_digest: root_identity_digest.to_string(),
+            created_at: marker.created_at,
+        };
+        crate::platform::private_storage::atomic_write_private_json(&marker_path, &migrated)?;
+        sync_directory(canonical_root)?;
         return Ok(());
     }
 
@@ -4978,7 +5011,16 @@ fn directory_identity_digest(path: &Path) -> Result<String> {
     if !metadata.is_dir() {
         anyhow::bail!("managed root is not a directory");
     }
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    let identity_digest = {
+        let path_digest = format!(
+            "sha256:{:x}",
+            Sha256::digest(canonical.to_string_lossy().as_bytes())
+        );
+        let facts = macos_filesystem_identity_facts(&canonical, &metadata)?;
+        persistent_directory_identity_digest(&path_digest, &facts)?
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
     let identity = {
         use std::os::unix::fs::MetadataExt;
         json!({
@@ -4988,11 +5030,13 @@ fn directory_identity_digest(path: &Path) -> Result<String> {
             "owner": metadata.uid(),
         })
     };
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, target_os = "macos")))]
     let identity = json!({
         "pathDigest": format!("sha256:{:x}", Sha256::digest(canonical.to_string_lossy().as_bytes())),
     });
-    canonical_json_digest(&identity)
+    #[cfg(not(target_os = "macos"))]
+    let identity_digest = canonical_json_digest(&identity)?;
+    Ok(identity_digest)
 }
 
 fn entry_identity_digest(path: &Path) -> Result<String> {
@@ -5000,7 +5044,20 @@ fn entry_identity_digest(path: &Path) -> Result<String> {
     if metadata.file_type().is_symlink() {
         anyhow::bail!("Camp Attachment View entry is a symlink");
     }
-    #[cfg(unix)]
+    #[cfg(target_os = "macos")]
+    let identity_digest = {
+        let facts = macos_filesystem_identity_facts(path, &metadata)?;
+        persistent_entry_identity_digest(
+            if metadata.is_dir() {
+                "directory"
+            } else {
+                "file"
+            },
+            metadata.len(),
+            &facts,
+        )?
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
     let identity = {
         use std::os::unix::fs::MetadataExt;
         json!({
@@ -5010,12 +5067,145 @@ fn entry_identity_digest(path: &Path) -> Result<String> {
             "size": metadata.len(),
         })
     };
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, target_os = "macos")))]
     let identity = json!({
         "kind": if metadata.is_dir() { "directory" } else { "file" },
         "size": metadata.len(),
     });
-    canonical_json_digest(&identity)
+    #[cfg(not(target_os = "macos"))]
+    let identity_digest = canonical_json_digest(&identity)?;
+    Ok(identity_digest)
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct UnixFilesystemIdentityFacts {
+    stable_volume_identity: String,
+    volatile_device: u64,
+    inode: u64,
+    owner: u32,
+}
+
+#[cfg(target_os = "macos")]
+fn macos_filesystem_identity_facts(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<UnixFilesystemIdentityFacts> {
+    use std::os::unix::fs::MetadataExt;
+    Ok(UnixFilesystemIdentityFacts {
+        stable_volume_identity: macos_volume_identity(path)?,
+        volatile_device: metadata.dev(),
+        inode: metadata.ino(),
+        owner: metadata.uid(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn persistent_directory_identity_digest(
+    path_digest: &str,
+    facts: &UnixFilesystemIdentityFacts,
+) -> Result<String> {
+    let _volatile_device = facts.volatile_device;
+    canonical_json_digest(&json!({
+        "pathDigest": path_digest,
+        "volumeIdentity": facts.stable_volume_identity,
+        "inode": facts.inode,
+        "owner": facts.owner,
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn persistent_entry_identity_digest(
+    kind: &str,
+    size: u64,
+    facts: &UnixFilesystemIdentityFacts,
+) -> Result<String> {
+    let _volatile_device = facts.volatile_device;
+    let _owner = facts.owner;
+    canonical_json_digest(&json!({
+        "volumeIdentity": facts.stable_volume_identity,
+        "inode": facts.inode,
+        "kind": kind,
+        "size": size,
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn macos_volume_identity(path: &Path) -> Result<String> {
+    use std::{ffi::CString, os::unix::ffi::OsStrExt};
+
+    const ATTR_BIT_MAP_COUNT: u16 = 5;
+    const ATTR_VOL_UUID: u32 = 0x0004_0000;
+    const ATTR_VOL_INFO: u32 = 0x8000_0000;
+
+    #[repr(C)]
+    struct AttributeList {
+        bitmap_count: u16,
+        reserved: u16,
+        common_attributes: u32,
+        volume_attributes: u32,
+        directory_attributes: u32,
+        file_attributes: u32,
+        fork_attributes: u32,
+    }
+
+    #[repr(C)]
+    struct VolumeUuidBuffer {
+        length: u32,
+        uuid: [u8; 16],
+    }
+
+    unsafe extern "C" {
+        #[link_name = "getattrlist"]
+        fn macos_getattrlist(
+            path: *const libc::c_char,
+            attributes: *mut libc::c_void,
+            buffer: *mut libc::c_void,
+            buffer_size: libc::size_t,
+            options: libc::c_uint,
+        ) -> libc::c_int;
+    }
+
+    let path =
+        CString::new(path.as_os_str().as_bytes()).context("managed root path contains NUL")?;
+    let mut attributes = AttributeList {
+        bitmap_count: ATTR_BIT_MAP_COUNT,
+        reserved: 0,
+        common_attributes: 0,
+        volume_attributes: ATTR_VOL_INFO | ATTR_VOL_UUID,
+        directory_attributes: 0,
+        file_attributes: 0,
+        fork_attributes: 0,
+    };
+    let mut buffer = VolumeUuidBuffer {
+        length: 0,
+        uuid: [0; 16],
+    };
+    let status = unsafe {
+        // SAFETY: `path` is NUL-terminated, the C layouts match Darwin's
+        // `attrlist` and fixed ATTR_VOL_UUID response, and both mutable
+        // buffers remain live for the duration of the call.
+        macos_getattrlist(
+            path.as_ptr(),
+            std::ptr::from_mut(&mut attributes).cast(),
+            std::ptr::from_mut(&mut buffer).cast(),
+            std::mem::size_of::<VolumeUuidBuffer>(),
+            0,
+        )
+    };
+    if status != 0 {
+        return Err(std::io::Error::last_os_error())
+            .context("managed root volume identity is unavailable");
+    }
+    if usize::try_from(buffer.length).ok() != Some(std::mem::size_of::<VolumeUuidBuffer>())
+        || buffer.uuid.iter().all(|byte| *byte == 0)
+    {
+        anyhow::bail!("managed root volume identity is invalid");
+    }
+    Ok(format!(
+        "volume:{}",
+        Uuid::from_bytes(buffer.uuid).hyphenated()
+    ))
 }
 
 fn ensure_private_directory(path: &Path) -> Result<()> {
@@ -5802,6 +5992,84 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn persistent_view_identities_and_legacy_marker_survive_device_drift() {
+        let before = UnixFilesystemIdentityFacts {
+            stable_volume_identity: "volume:01234567-89ab-cdef-0123-456789abcdef".to_string(),
+            volatile_device: 16_777_234,
+            inode: 42,
+            owner: 501,
+        };
+        let after = UnixFilesystemIdentityFacts {
+            volatile_device: 16_777_229,
+            ..before.clone()
+        };
+        let replaced_volume = UnixFilesystemIdentityFacts {
+            stable_volume_identity: "volume:fedcba98-7654-3210-fedc-ba9876543210".to_string(),
+            ..after.clone()
+        };
+        let legacy_before = canonical_json_digest(&json!({
+            "pathDigest": "sha256:path",
+            "device": before.volatile_device,
+            "inode": before.inode,
+            "owner": before.owner,
+        }))
+        .unwrap();
+        let legacy_after = canonical_json_digest(&json!({
+            "pathDigest": "sha256:path",
+            "device": after.volatile_device,
+            "inode": after.inode,
+            "owner": after.owner,
+        }))
+        .unwrap();
+
+        assert_ne!(legacy_before, legacy_after);
+        assert_eq!(
+            persistent_directory_identity_digest("sha256:path", &before).unwrap(),
+            persistent_directory_identity_digest("sha256:path", &after).unwrap()
+        );
+        assert_eq!(
+            persistent_entry_identity_digest("directory", 0, &before).unwrap(),
+            persistent_entry_identity_digest("directory", 0, &after).unwrap()
+        );
+        assert_ne!(
+            persistent_directory_identity_digest("sha256:path", &after).unwrap(),
+            persistent_directory_identity_digest("sha256:path", &replaced_volume).unwrap()
+        );
+
+        let fixture = std::env::temp_dir().join(format!(
+            "rovai-runtime-root-device-drift-test-{}",
+            Uuid::new_v4()
+        ));
+        fs::create_dir(&fixture).unwrap();
+        let marker = RuntimeFilesRootMarker {
+            schema_version: 1,
+            instance_key: "v1-rebooted-instance".to_string(),
+            data_dir_identity_digest: legacy_before.clone(),
+            platform: std::env::consts::OS.to_string(),
+            root_identity_digest: legacy_before,
+            created_at: "2026-08-24T00:00:00Z".to_string(),
+        };
+        write_new_private_json(&fixture.join(ROOT_MARKER), &marker).unwrap();
+
+        admit_runtime_root_marker(
+            &fixture,
+            "v1-rebooted-instance",
+            "sha256:stable-data-dir",
+            "sha256:stable-root",
+        )
+        .unwrap();
+        let migrated: RuntimeFilesRootMarker =
+            serde_json::from_slice(&fs::read(fixture.join(ROOT_MARKER)).unwrap()).unwrap();
+        assert_eq!(migrated.schema_version, ROOT_MARKER_SCHEMA_VERSION);
+        assert_eq!(migrated.data_dir_identity_digest, "sha256:stable-data-dir");
+        assert_eq!(migrated.root_identity_digest, "sha256:stable-root");
+        assert_eq!(migrated.created_at, marker.created_at);
+
+        fs::remove_dir_all(fixture).unwrap();
+    }
+
     #[test]
     fn relative_journal_paths_never_admit_parent_or_absolute_components() {
         assert!(validate_root_relative_path(Path::new("camps/camp/attachments/id")).is_ok());
@@ -5847,6 +6115,14 @@ mod tests {
             .unwrap();
         admit_runtime_root_marker(&marked_root, "v1-owner", "sha256:data", &marked_identity)
             .unwrap();
+        let error = admit_runtime_root_marker(
+            &marked_root,
+            "v1-owner",
+            "sha256:data",
+            "sha256:replacement-root",
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("root marker identity mismatch"));
         let error = admit_runtime_root_marker(
             &marked_root,
             "v1-different-owner",
