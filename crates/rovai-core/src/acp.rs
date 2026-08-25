@@ -2877,7 +2877,7 @@ impl AcpRuntime {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub async fn start_or_resume_session(
         &self,
         existing_session_id: Option<&str>,

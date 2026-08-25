@@ -16,16 +16,46 @@ last_updated: 2026-08-25
 
 | Checklist 轴 | 当前结论 | 自动化证据 | 仍需客户端补证 |
 | --- | --- | --- | --- |
-| 最低版本 | 三个宿主平台共用 `grok >= 1.0.0` | semver release gate；`0.2.118` 和 `1.0.0-beta` 拒绝，`1.0.0`/更高接受；macOS arm64/x64 分别实测原生架构 `1.0.5 (5115b46bc909)` | Windows x64 记录实际版本与 fingerprint |
-| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象并真实 Resume 同一 ID 成功 | 缺少广告或广告但方法拒绝的 fixture 均不能 Ready；macOS arm64/x64 1.0.5 均真实完成生产形状 New、空 roots Resume 与 set-model | Windows x64 跑真实 initialize/auth/session-new/resume |
-| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | macOS arm64/x64 1.0.5 均跨 Core/Host 保持 exact ID 和 marker；恢复后 Tool/Approval/cancel、Built-in CLI/attachment 与坏 ID 单次 fallback 通过 | Windows x64 重复同一矩阵 |
-| System Prompt | 不变：`session/new._meta.rules = Rovai Bootstrap`；resume 不重新注入 | creation-only rules fixture；Resume 携带 rules 会 fail closed，`None` 才通过；无 `systemPromptOverride`；macOS x64 原生 rules marker 与 cold continuation 均通过 | Windows x64 真实 resume 后冲突 prompt 继续服从原 Session rules |
-| Native Binding fence | `grok-build:resume-v1`；配置/rules generation 变化建新 Session | installation、protocol、fingerprint、Host config、workspace、model、permission、官方 config 与 rules revision 变化均改变 key；macOS x64 cold resume 观察到同一 key 与 exact Session | Windows x64 确认相同 key cold resume、变化后 new |
-| load / HistoryRestore | Grok 正常路径停用；其他 Runtime 不变 | Grok 不再把 `loadSession` 映射为产品 capability；TRAE/Kimi 等通用 load fallback 回归保留 | 无 Grok load smoke；只需验证 resume |
+| 最低版本 | 三个宿主平台共用 `grok >= 1.0.0` | semver release gate；`0.2.118` 和 `1.0.0-beta` 拒绝，`1.0.0`/更高接受；macOS arm64/x64 分别实测原生架构 `1.0.5 (5115b46bc909)`，Windows x64 实测 `1.0.5 (5115b46bc9)` | 无：三个目标平台均有独立版本与 fingerprint 证据 |
+| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象并真实 Resume 同一 ID 成功 | 缺少广告或广告但方法拒绝的 fixture 均不能 Ready；macOS arm64/x64 与 Windows x64 1.0.5 均真实完成生产形状 New、空 roots Resume 与 set-model | 无 |
+| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | 三个平台均跨 Core/Host 保持 exact ID 和 marker；恢复后 Tool/Approval/cancel、Built-in CLI/attachment 与坏 ID 单次 fallback 通过 | 无 |
+| System Prompt | 不变：`session/new._meta.rules = Rovai Bootstrap`；resume 不重新注入 | creation-only rules fixture；Resume 携带 rules 会 fail closed，`None` 才通过；无 `systemPromptOverride`；三平台 cold resume 保留原 Session context | 无 |
+| Native Binding fence | `grok-build:resume-v1`；配置/rules generation 变化建新 Session | installation、protocol、fingerprint、Host config、workspace、model、permission、官方 config 与 rules revision 变化均改变 key；三平台相同 key cold resume | 无 |
+| load / HistoryRestore | Grok 正常路径停用；其他 Runtime 不变 | Grok 不再把 `loadSession` 映射为产品 capability；TRAE/Kimi 等通用 load fallback 回归保留 | 无 Grok load smoke；当前合同只验证 resume |
 
-macOS arm64 已使用 `grok 1.0.5 (5115b46bc909)` 完成上表真实 Runtime 验收并更新为 v2 qualification
-artifact。macOS x64 随后在原生 x86_64 `grok 1.0.5` 上完成同级矩阵并新增独立 v1 artifact；原 arm64
-`0.2.118` v1 artifact 保留为不可变历史证据。Windows x64 仍为 `not_qualified`，待对应客户端补证。
+`grok 1.0.5` 已在 macOS arm64、macOS x64 与 Windows x64 完成上表真实 Runtime 验收并分别绑定独立
+qualification artifact。原 `0.2.118` macOS arm64 v1 artifact 保留为不可变历史证据。
+
+### Windows x64 独立资格
+
+Windows 10 22H2 / build 19045 x64 客户端以 `xai.api_key` BYOK 和独立 Grok executable fingerprint 完成：
+
+- Ready 前真实 `session/new → exact-ID session/resume([]) → session/set_model`；跨 Core/Host 恢复保持 Native
+  Session 与私密 marker，0 replay Action/Approval，坏 ID 只产生一次 continuity-lost 后 replacement-new；
+- 普通 AgentRun、PowerShell stdout/stderr/mixed/empty/nonzero/bounded-large、allow/deny、运行中 Tool cancel、
+  恢复后写入与运行中 Run cancel 均通过；
+- Built-in CLI 15 项、Gather captured return、successor lease、历史 attachment、Missing-Send 三路径、
+  `.grok/skills` 原生发现与 `AdditivePerRun / NativeWinsSkip` MCP 真实调用通过；
+- 隔离 packaged App 在一个 Grok execution active 时发起 planned shutdown。native stop 返回可靠 cancelled
+  Runtime terminal，311ms 内自然退出、无 forced signal、七个后代进程回收，重启后终态保持。
+- Registry 绑定证据 digest 后移除 Windows 本地资格 override，正式产品路径再次完成 Ready 与同 Native Session、
+  同 warm Host 的两轮 AgentRun。
+
+MiniMax BYOK 在验收中出现过空 Tool name 和一次缺少 `prompt_tokens` 的流式 usage chunk；Grok/Rovai 均
+fail closed，未增加 provider 专属修复，原命令有界重跑后必须完整通过才计为资格证据。
+
+### Windows Camp 终态显示跟进
+
+安装后的日常 App 使用 Grok 验收员运行 Camp `rvcamp_01m0vyc3hmeq9s8x32hv7pv7kh`。AgentRun
+`158b3951-32ae-427b-8c48-8b181d2fd27f` 在 13.4 秒内以 `succeeded` 持久化并保存
+`GROK_WINDOWS_BYOK_CAMP_OK`，但 Renderer 保留了发送后取得的非终态快照。原因是 Desktop/Core 已在可靠终态
+持久化后发出通用 `agent_run.terminal`，而 Active Camp 的事件 invalidation 列表未消费该通知；验收员记录始终为
+`present`、`removedAt = null` 且 Runtime ready，不是卡住原因。
+
+修复将 `agent_run.terminal` 纳入通用 Active Camp invalidation：通知无 `campId` 时对当前 Camp 做一次权威
+`camps.open` refresh，明确指向其他 Camp 时不刷新，`runtime_model_observed` 仍要求精确 Camp ID。该逻辑没有
+Windows 或 Grok 分支，因此 macOS 与其他 Runtime 同时覆盖；既有 Windows digest-bound qualification artifact
+保持字节不变。
 
 ## 2026-08-24 原始 `0.2.118` 基本结论（历史证据）
 
@@ -53,7 +83,7 @@ Exact launch:                 grok --permission-mode <effective> --no-auto-updat
 | Native Session Bootstrap | Formatter 3 的完整 Bootstrap bytes 作为 Grok `session/new._meta.rules` 一次性追加；所有 Prompt 只发送当轮 Dynamic Context | 只改变 Grok 的投递层级；不使用覆盖式 `systemPromptOverride`，same-host/resume 不重复注入 |
 | compaction | exact live `auto_compact_completed` → Observer → Requirement → 下一次 eligible input 的 Redelivery v2 | `best_effort` 且 fail closed；不会在当前 Runtime 内部重采样中插入 Prompt |
 | Built-in CLI | 当前 Charter/CLI contract；15 个 operation 的真实 Smoke 通过 | 无旧 alias 或旧 fixture 特例 |
-| Settings / 平台可见性 | macOS arm64/x64 仅在各自 evidence qualified 后进入 catalog、成员配置与检查 | Windows x64 无证据，不从任一 macOS 架构外推 |
+| Settings / 平台可见性 | macOS arm64/x64、Windows x64 仅在各自 evidence qualified 后进入 catalog、成员配置与检查 | 三个平台不共享证据 digest |
 
 ## 用户关注的五项结论
 
@@ -91,7 +121,7 @@ Exact launch:                 grok --permission-mode <effective> --no-auto-updat
 以下命令在本 worktree 执行；确定性门禁和真实 Runtime 验收均以实际退出码与结构化证据判定：
 
 ```text
-cargo fmt --all -- --check
+cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm test:rust:pr
 pnpm test:rust:core
@@ -120,10 +150,11 @@ ROVAI_GROK_PERMISSION_MODE=bypassPermissions \
 node scripts/smoke-acp-runtime.mjs
 ```
 
-确定性门禁最终计数：`pnpm test` 通过 76 个 Vitest 文件 / 525 个测试，以及 198 个 Node 测试；
-`pnpm test:rust:pr` 通过 library 310、CLI 25、slow 273 个测试；`pnpm test:rust:core` 通过 156 个测试，
-另有 4 个明确标记的 manual ignored 测试。`cargo fmt --check`、workspace/all-target Clippy `-D warnings`、
-TypeScript typecheck、Desktop build 与文档治理门禁均通过。
+最终分支的确定性门禁计数：`pnpm test` 通过 76 个 Vitest 文件（526 passed / 3 skipped）与 218 个选定
+Node 测试；`pnpm test:rust:pr` 通过 library 321（另 7 ignored）、CLI 27、slow 238 个测试；
+`pnpm test:rust:core` 通过 80 个测试，另有 2 个明确标记的 manual ignored 测试。`cargo fmt --all --check`、
+workspace/all-target Clippy `-D warnings`、TypeScript typecheck、Desktop build、CI 模式文档治理与 Grok 平台准入
+定向测试均通过。
 
 本机 `~/.grok/config.toml` 已迁到官方 `[models]` / `[model.minimax-m3]` shape，密钥文件位于
 `~/.grok/.env` 且权限为 `0600`；Core 不读取或回退到旧 `~/.config/rovai/grok-build.env`。官方 `grok models`
@@ -182,15 +213,18 @@ x64 cold-resume 原命令第一次在进入 Resume 前遇到 MiniMax-M3 空 Tool
 
 - 当前资格证据：[macos-arm64-grok-build-v2.json](../../../qualification/runtime-platform/macos-arm64-grok-build-v2.json)，
   digest `sha256:6a2a96944ca7021f6e4c9c7289cdacde0e2077736a8e8af6bd247ce929e92b1e`；历史 v1 artifact 保持不可变；
+- Windows x64 资格证据：[windows-x64-grok-build-v1.json](../../../qualification/runtime-platform/windows-x64-grok-build-v1.json)，
+  digest `sha256:66f80ed14dc6c2903f86af29f8209c6bee6aa72340f09a8b2b52da335242c66b`；
 - macOS x64 资格证据：[macos-x64-grok-build-v1.json](../../../qualification/runtime-platform/macos-x64-grok-build-v1.json)，
   digest `sha256:6ce70fc844ef6f18327e5a23396072566fd907c972f273aeccfd987c87398879`；
 - 兼容性总表：[Runtime 兼容性清单](../../runtime-compatibility.md)，digest
-  `sha256:cb02bfec2598f09a2c2460b1a37abfacd9e7ff2beaa48d084ca03f6d340a1625`；
+  `sha256:d0573aeaa59648975e10a4ded0d3643809fae161bc085180cd36d5ca4b59e5a8`；
 - v2 implementation base revision：`8f0aad1b989ed7eccb695c131da964f6a6ac4d77`；
 - macOS x64 implementation base revision：`61a99977ad590c6e8a8f5c4f99b36d4dc0682801`；
+- Windows x64 implementation base revision：`61a99977ad590c6e8a8f5c4f99b36d4dc0682801`；
 - Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-grok-1-0-resume`；
 - Branch：`rovai/grok-1-0-resume`；由 PR #50 交付。
 
 revision 2 已明确确认并实施。以上 `0.2.118` load-only 结论已由当前 `>= 1.0.0 / session.resume` 合同取代，
 但它仍是 Plugin MCP、rules、compaction、BYOK 与 macOS arm64 原始平台资格的历史证据。Usage/Cost 未启用，
-account cached-token 与 Windows x64 的 `>= 1.0.0` 真实 continuation 仍需分别验收。
+account cached-token 仍需独立验收。

@@ -57,9 +57,12 @@ Core event invalidates active Camp
   -> preserve explicitly loaded earlier message pages
 ```
 
-`agent_run.runtime_model_observed` 与其他 Run projection 变化共用上述 invalidation/refresh 路径。它只使
-`AgentRunView.runtimeModel` 从默认未观察态收敛到首个可信模型，不进入 timeline、CampMessage 或 Run detail
-Evidence，也不自动打开执行台或改变当前 selection。
+Core 在可靠终态持久化后发出的 `agent_run.terminal` 必须使 Renderer 重新读取当前 Camp 的权威投影；
+Renderer 不得从通知 payload 推导终态，也不得等待用户重进 Camp 才收敛。当前通知未必携带 `campId`，因此
+Renderer 可以对当前 Camp 做一次有界的额外 refresh；通知明确携带其他 Camp ID 时不得刷新当前 Camp。
+`agent_run.runtime_model_observed` 与其他 Run projection 变化共用上述 invalidation/refresh 路径，但必须精确匹配
+当前 Camp。它只使 `AgentRunView.runtimeModel` 从默认未观察态收敛到首个可信模型，不进入 timeline、
+CampMessage 或 Run detail Evidence，也不自动打开执行台或改变当前 selection。
 
 缓存只保存最近的 Camp 投影；除完整 non-terminal Evidence 外，其他 collection 保持有界。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把

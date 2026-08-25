@@ -38,11 +38,12 @@ resume 不重新注入 rules，恢复沿用原 Session 的 system prompt。Nativ
 `grok-build:resume-v1`，继续包含官方配置摘要与 native-rules revision，因此 Bootstrap generation 改变时仍会
 建立新 Session，未改变时才 resume。
 
-本机已升级到 `grok 1.0.5 (5115b46bc909)`，macOS arm64 真实通过生产形状 Deep Probe、普通 AgentRun、
-Core/ACP Host 重启后的 exact-ID cold resume、恢复后的 Tool/Approval/cancel、坏 ID 单次 fallback、十五项 Built-in
-CLI、历史 attachment、External MCP 同名矩阵与 `.grok/skills` 原生发现。BYOK 仍使用原有官方配置，account
-cached-token 因本机未登录而保持 `Unverified`。macOS x64 与 Windows x64 仍需各自补证；共享最低版本规则不改变
-逐平台 qualification 边界。
+`grok 1.0.5` 已在 macOS arm64（`5115b46bc909`）与 Windows x64（`5115b46bc9`）分别通过生产形状 Deep
+Probe、普通 AgentRun、Core/ACP Host 重启后的 exact-ID cold resume、恢复后的 Tool/Approval/cancel、坏 ID
+单次 fallback、十五项 Built-in
+CLI、历史 attachment、External MCP 同名矩阵与 `.grok/skills` 原生发现；Windows 还完成 PowerShell command-output
+与 packaged App planned shutdown。BYOK 仍使用官方配置，account cached-token 因两台宿主都未登录而保持
+`Unverified`。macOS x64 仍需独立补证；共享最低版本规则不改变逐平台 qualification 边界。
 
 ## 2026-08-24 历史目标版本实机复核
 
@@ -67,7 +68,7 @@ cached-token 因本机未登录而保持 `Unverified`。macOS x64 与 Windows x6
   均按 generic ACP agent-text 路径原样投影到执行台、final 与 Missing-Send；
 - no-leader live Probe 已取得 `_x.ai/session_notification` 的 structured `auto_compact_completed` 与稳定 event ID；
   产品 detector 为 `best_effort`，真实强制压缩后的下一轮 Redelivery revision 1 已 accepted。Usage/Cost 语义仍未
-  独立验证并保持 Disabled；macOS x64 与 Windows x64 不从本机证据外推。
+  独立验证并保持 Disabled；macOS x64 不从另外两个平台的证据外推。
 
 ## 基本结论（接入前研究基线）
 

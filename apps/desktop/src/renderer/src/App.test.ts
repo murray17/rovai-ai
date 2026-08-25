@@ -48,6 +48,7 @@ import {
   runtimeRecoveryFromCommandResult,
   selectProjectDirectory,
   SettingsView,
+  shouldRefreshActiveCampForCoreEvent,
   StartupRouteLoading,
   shouldLoadRuntimeHealth,
   startupGateShouldBeVisible,
@@ -147,6 +148,48 @@ import {
   selectCompleteExecutionEvidence,
   type LiveRuntimeEvent
 } from './ui-model'
+
+describe('active Camp event invalidation', () => {
+  it('refreshes the active Camp when a persisted AgentRun reaches terminal', () => {
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'agent_run.terminal',
+      params: { agentRunId: 'run-1' }
+    }, 'camp-1')).toBe(true)
+  })
+
+  it('keeps Camp-scoped invalidations on their target Camp', () => {
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'agent_run.terminal',
+      params: { campId: 'camp-2', agentRunId: 'run-2' }
+    }, 'camp-1')).toBe(false)
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'agent_run.cancelled',
+      params: { campId: 'camp-1', agentRunId: 'run-1' }
+    }, 'camp-1')).toBe(true)
+  })
+
+  it('requires an exact Camp for runtime model observation events', () => {
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'agent_run.runtime_model_observed',
+      params: { agentRunId: 'run-1' }
+    }, 'camp-1')).toBe(false)
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'agent_run.runtime_model_observed',
+      params: { campId: 'camp-1', agentRunId: 'run-1' }
+    }, 'camp-1')).toBe(true)
+  })
+
+  it('ignores unrelated events and missing active Camps', () => {
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'monitoring.changed',
+      params: {}
+    }, 'camp-1')).toBe(false)
+    expect(shouldRefreshActiveCampForCoreEvent({
+      method: 'agent_run.terminal',
+      params: { agentRunId: 'run-1' }
+    }, null)).toBe(false)
+  })
+})
 
 const TEST_EXECUTION_BUDGET = {
   schemaVersion: 1 as const,

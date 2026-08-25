@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "windows-x64-grok-build-v1",
+  "capturedAt": "2026-08-25",
+  "platform": "windows-x64",
+  "hostEnvelope": {
+    "os": "Windows 10 Pro 22H2",
+    "build": "10.0.19045",
+    "architecture": "x64",
+    "filesystem": "local NTFS"
+  },
+  "baseRevision": "61a99977ad590c6e8a8f5c4f99b36d4dc0682801",
+  "qualifiedRuntimeKinds": [
+    "grok-build"
+  ],
+  "runtimeEvidence": {
+    "runtimeVersion": "1.0.5 (5115b46bc9)",
+    "executableFingerprint": "sha256:da5a2fa7eacd5cade0b1664fcc58b793e134bbf5247c817df964be2aeb900811",
+    "minimumVersion": ">=1.0.0",
+    "protocol": "acp-v1",
+    "launch": "grok --permission-mode <effective> --no-auto-update agent --no-leader [--plugin-dir <private-root>] stdio",
+    "authenticationMethod": "xai.api_key BYOK verified; cached_token non-interactive product path implemented but not exercised on this host",
+    "provider": "MiniMax OpenAI-compatible endpoint",
+    "model": "MiniMax-M3 through the Runtime-default official custom-model configuration",
+    "providerConfiguration": "official $GROK_HOME/config.toml custom-model schema; env_key secret injected only into the Grok process",
+    "initialize": "passed and advertised agentCapabilities.sessionCapabilities.resume",
+    "sessionNew": "passed with production-shaped attachment root, Run tmp, and creation-only _meta.rules",
+    "sessionResume": "passed with the exact newly created Session ID, unchanged cwd, empty mcpServers, additionalDirectories=[], and no _meta.rules",
+    "promptEndTurn": "passed",
+    "dynamicModelCatalog": "passed with three models",
+    "explicitModelSelection": "passed through standard session/set_model",
+    "nativeStatePreserved": true,
+    "agentTextBoundary": "MiniMax think text remained ordinary ACP agent text and was preserved by the generic Evidence and final-output path"
+  },
+  "acceptance": {
+    "status": "qualified",
+    "coreDeepProbe": "passed a real no-prompt session/new then exact-ID session/resume before Ready",
+    "standardAgentRun": "passed no-tool completion, fixed terminal output, approved file write, denied file write, same-Host Native Session reuse, and running-Tool cancellation",
+    "commandOutputMatrix": "passed PowerShell stdout, stderr, mixed, empty, nonzero, and bounded-large cases with the expected terminal status and output markers",
+    "coldContinuation": "passed exact-ID session/resume across a Core and ACP Host restart; Host identity changed while Native Session identity and the private marker were preserved",
+    "historyReplayIsolation": "passed with zero restored Actions and Approvals; no session/load or HistoryRestore replay path was selected",
+    "postResumeToolPath": "passed a new approved file Tool and a bounded running-AgentRun cancellation after cold resume; cancellation created no target file",
+    "invalidSessionFallback": "passed with one continuity-lost event and one replacement session/new after an intentionally invalid persisted Session ID",
+    "builtInCli": "passed all 15 operations, Gather captured return, historical attachment read/search, and a successor active lease; logical Conversation and Native Session continuation remained intact",
+    "externalMcp": "passed AdditivePerRun/NativeWinsSkip: native same-name definitions were preserved, conflicts were skipped, and the distinct assigned stdio server was called",
+    "skillDiscovery": "passed native .grok/skills discovery, invocation, restart recovery, project-owned conflict preservation, and managed projection",
+    "missingSend": "passed zero-send publication, accepted-send fallback suppression, and real Tool-to-final protocol evidence",
+    "plannedShutdown": "passed in an isolated packaged Windows App using the debug-only local admission override: one active Grok execution received native stop, committed a reliable planned_shutdown_cancelled Runtime terminal, exited naturally without forced signal, reaped seven observed descendants, and retained the terminal across restart",
+    "processCleanup": "passed for the live smoke fixtures and both packaged-App generations; no qualification Grok, Core, Node, or packaged-App child remained",
+    "genericAgentText": "passed with provider think tags preserved verbatim"
+  },
+  "notQualified": [
+    {
+      "platform": "macos-x64",
+      "blocker": "no Grok >=1.0.0 target-host evidence"
+    }
+  ],
+  "limitations": [
+    "Credentials, raw prompts, machine paths, Session IDs, Run IDs, API keys, and raw host logs are intentionally excluded.",
+    "Usage and cost fields remain disabled until their provider semantics are independently verified.",
+    "Grok 1.x rejects non-empty additionalDirectories on session/resume; Rovai therefore sends an empty array and verifies real post-resume product behavior.",
+    "Compaction detection remains best-effort and fail-closed; the Windows qualification did not re-run the acceptance-only debug-arm compaction smoke.",
+    "Grok ignores ACP Session mcpServers; External MCP therefore uses a private process plugin-dir and rotates Host compatibility when the full server set changes.",
+    "Account cached-token authentication was not exercised because this host has no existing Grok login.",
+    "The MiniMax BYOK provider intermittently emitted empty Tool names and once emitted a malformed streaming usage chunk; Rovai/Grok failed closed, and the unchanged acceptance commands were required to pass cleanly on bounded reruns.",
+    "The packaged-App planned-shutdown run used the debug-only local Windows qualification override because Registry promotion is downstream of this evidence; the same base-revision Core and Runtime wire were exercised.",
+    "macOS x64 remains not qualified until its own target-host evidence is recorded."
+  ]
+}

@@ -732,10 +732,13 @@ try {
 
       if (cancelRunningTool) {
         const cancelPath = join(projectRoot, `ACP_CANCELLED_${adapterFileStem}.txt`)
+        const cancelCommand = process.platform === 'win32'
+          ? `Start-Sleep -Seconds 30; Set-Content -LiteralPath '${cancelPath.replaceAll("'", "''")}' -Value 'SHOULD_NOT_EXIST'`
+          : `sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'`
         const cancelRequest = await sendExistingCampMessage(
           request,
           camp.id,
-          `Use the Bash or terminal tool exactly once to run: sleep 30; printf 'SHOULD_NOT_EXIST\\n' > '${cancelPath}'. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
+          `Use the Bash or terminal tool exactly once to run: ${cancelCommand}. Do not call any other tool. After it completes, reply exactly CANCEL_TOOL_FINISHED.`,
           {
             taskId: null,
             purpose: 'Verify ACP running Tool cancellation and process cleanup',
@@ -825,13 +828,7 @@ async function cancelAgentRun(request, campId, agentRunId) {
     if (!cancellationRequested && resolvedApprovals.size > 0 && run) {
       const turn = snapshot.turns.find((candidate) => candidate.id === run.campTurnId)
       if (!turn) throw new Error(`ACP cancel smoke has no CampTurn: ${JSON.stringify(run)}`)
-      const cancellation = await request('campTurns.cancel', {
-        commandId: crypto.randomUUID(),
-        command: { campId, campTurnId: turn.id, expectedVersion: turn.version }
-      })
-      if (cancellation.status === 'rejected') {
-        throw new Error(`ACP CampTurn cancellation was rejected: ${JSON.stringify(cancellation)}`)
-      }
+      await requestCampTurnCancellation(request, campId, turn)
       cancellationRequested = true
     }
     if (cancellationRequested && run && ['cancelled', 'failed', 'succeeded'].includes(run.status)) {
@@ -842,9 +839,63 @@ async function cancelAgentRun(request, campId, agentRunId) {
   throw new Error(`Timed out cancelling ACP AgentRun ${agentRunId}: ${JSON.stringify(run)}`)
 }
 
+async function requestCampTurnCancellation(request, campId, turn) {
+  let expectedVersion = turn.version
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const cancellation = await request('campTurns.cancel', {
+      commandId: crypto.randomUUID(),
+      command: { campId, campTurnId: turn.id, expectedVersion }
+    })
+    if (cancellation.status !== 'rejected') return cancellation
+    if (cancellation.code !== 'command.version_conflict'
+        || !Number.isInteger(cancellation.payload?.currentVersion)) {
+      throw new Error(`ACP CampTurn cancellation was rejected: ${JSON.stringify(cancellation)}`)
+    }
+    expectedVersion = cancellation.payload.currentVersion
+  }
+  throw new Error(`ACP CampTurn cancellation remained version-conflicted after bounded retries: ${turn.id}`)
+}
+
 async function runCommandOutputMatrix({ request, events, campId, adapterKind }) {
   const stem = adapterKind.replaceAll('-', '_').toUpperCase()
-  const cases = [
+  const cases = process.platform === 'win32' ? [
+    {
+      name: 'stdout',
+      command: `Write-Output 'ROVAI_${stem}_STDOUT_OK'`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_STDOUT_OK`]
+    },
+    {
+      name: 'stderr',
+      command: `[Console]::Error.WriteLine('ROVAI_${stem}_STDERR_OK')`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_STDERR_OK`]
+    },
+    {
+      name: 'mixed',
+      command: `Write-Output 'ROVAI_${stem}_MIXED_STDOUT_OK'; [Console]::Error.WriteLine('ROVAI_${stem}_MIXED_STDERR_OK')`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_MIXED_STDOUT_OK`, `ROVAI_${stem}_MIXED_STDERR_OK`]
+    },
+    {
+      name: 'empty',
+      command: '$null = 1',
+      status: 'completed',
+      markers: []
+    },
+    {
+      name: 'nonzero',
+      command: `[Console]::Error.WriteLine('ROVAI_${stem}_NONZERO_OK'); exit 7`,
+      status: 'failed',
+      markers: [`ROVAI_${stem}_NONZERO_OK`]
+    },
+    {
+      name: 'large',
+      command: `Write-Output 'ROVAI_${stem}_LARGE_BEGIN'; [Console]::Out.Write(('0123456789abcdef' * 8192))`,
+      status: 'completed',
+      markers: [`ROVAI_${stem}_LARGE_BEGIN`]
+    }
+  ] : [
     {
       name: 'stdout',
       command: `printf '%s\\n' 'ROVAI_${stem}_STDOUT_OK'`,

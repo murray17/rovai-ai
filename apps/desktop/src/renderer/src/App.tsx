@@ -123,6 +123,25 @@ export function appendLiveRuntimeEvent(
   return [...current, event]
 }
 
+const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
+  'agent_run.cancelled',
+  'agent_run.recovery_blocker_resolved',
+  'agent_run.runtime_model_observed',
+  'agent_run.terminal'
+])
+
+export function shouldRefreshActiveCampForCoreEvent(
+  event: CoreEvent,
+  activeCampId: string | null
+): boolean {
+  if (!activeCampId || !ACTIVE_CAMP_INVALIDATION_EVENTS.has(event.method)) return false
+  const eventCampId = stringField(asRecord(event.params), 'campId')
+  if (event.method === 'agent_run.runtime_model_observed') {
+    return eventCampId === activeCampId
+  }
+  return !eventCampId || eventCampId === activeCampId
+}
+
 type LoadState = 'loading' | 'ready' | 'error'
 type StartupStatus = 'loading' | 'waiting' | 'resolved'
 export type View = 'compose' | 'camp' | 'members' | 'memory' | 'settings'
@@ -1501,21 +1520,11 @@ export function App(): React.JSX.Element {
           void Promise.all([loadHealth(), loadMemberData()]).catch(() => undefined)
         }, 80)
       }
-      if (
-        event.method === 'agent_run.cancelled'
-        || event.method === 'agent_run.recovery_blocker_resolved'
-        || event.method === 'agent_run.runtime_model_observed'
-      ) {
-        const eventCampId = stringField(params, 'campId')
-        const campId = activeCampIdRef.current
-        const targetsActiveCamp = event.method === 'agent_run.runtime_model_observed'
-          ? eventCampId === campId
-          : !eventCampId || eventCampId === campId
-        if (campId && targetsActiveCamp) {
-          void refreshActiveCampSnapshot(campId).catch((nextError) => {
-            if (activeCampIdRef.current === campId) setError(errorMessage(nextError))
-          })
-        }
+      const campId = activeCampIdRef.current
+      if (campId && shouldRefreshActiveCampForCoreEvent(event, campId)) {
+        void refreshActiveCampSnapshot(campId).catch((nextError) => {
+          if (activeCampIdRef.current === campId) setError(errorMessage(nextError))
+        })
       }
     })
   }, [loadHealth, loadMemberData, loadOverview, refreshActiveCampSnapshot])

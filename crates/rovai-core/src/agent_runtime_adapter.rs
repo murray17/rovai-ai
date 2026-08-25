@@ -25,8 +25,9 @@ use crate::{
     platform::HostPlatformKey,
     runtime_platform_admission::{
         GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION, GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
-        MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION, RuntimePlatformAdmission,
-        RuntimePlatformAdmissionReasonCode, WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+        GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION, MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
+        RuntimePlatformAdmission, RuntimePlatformAdmissionReasonCode,
+        WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION,
     },
 };
 
@@ -586,10 +587,10 @@ impl AgentRuntimeAdapterRegistry {
                     platform,
                     GROK_BUILD_MACOS_X64_EVIDENCE_REVISION,
                 ),
-                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::not_qualified(
+                HostPlatformKey::WindowsX64 => RuntimePlatformAdmission::qualified(
                     kind,
                     platform,
-                    RuntimePlatformAdmissionReasonCode::QualificationEvidenceMissing,
+                    GROK_BUILD_WINDOWS_X64_EVIDENCE_REVISION,
                 ),
             };
         }
