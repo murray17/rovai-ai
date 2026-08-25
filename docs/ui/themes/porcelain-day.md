@@ -4,7 +4,7 @@ authority: renderer-theme
 status: accepted
 theme_id: porcelain-day
 mode: light
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Porcelain Day
@@ -120,6 +120,7 @@ Light. `color-scheme: light`.
 | Token | Value |
 |---|---:|
 | `--inline-code-canvas` | `#eef2f5` |
+| `--code-block-canvas` | `#eef2f5` |
 | `--evidence-canvas` | `#f4f6f3` |
 | `--evidence-surface` | `#ffffff` |
 | `--evidence-ink` | `#252a36` |
@@ -160,8 +161,9 @@ Light. `color-scheme: light`.
 - `danger` is for stop, permanent deletion, forgetting and confirmed failure—not ordinary disabled state.
 - Stable IDs map to `--identity-1..8`; identity color never signals state or permission.
 - Evidence never inherits brand gradients, identity fills or portraits.
-- Narrative inline code uses the quieter `--inline-code-canvas`; fenced code and bounded evidence
-  surfaces continue to use `--evidence-canvas`.
+- Narrative inline code uses `--inline-code-canvas`; fenced code uses the bounded
+  `--code-block-canvas` with its evidence border, while other evidence surfaces continue to use
+  `--evidence-canvas`.
 
 ## Contrast requirements
 
