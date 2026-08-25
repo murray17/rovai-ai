@@ -1601,6 +1601,7 @@ button.camp-world-map-live-caption { cursor: pointer; font: inherit; }
 .quick-chat-continue-title { padding: 0 2px 6px; color: var(--faint); font-size: 10.5px; font-weight: 700; letter-spacing: 0.6px; }
 .quick-chat-continue-row { display: flex; width: 100%; min-height: 32px; align-items: center; gap: 8px; padding: 6px 8px; border: 0; border-radius: 6px; color: var(--ink); background: transparent; cursor: pointer; font-size: 12.5px; text-align: left; }
 .quick-chat-continue-row:hover { background: var(--surface-muted); }
+.quick-chat-continue-row .truncate { min-width: 0; flex: 1 1 auto; }
 .quick-chat-continue-row .camp-marker-slot { display: block; width: 7px; height: 7px; flex: 0 0 7px; }
 .quick-chat-continue-row .camp-marker-slot .task-dot { display: block; width: 7px; height: 7px; border: 0; border-radius: 50%; background: var(--info); }
 .quick-chat-continue-row .camp-loading-spinner { margin-left: auto; }
