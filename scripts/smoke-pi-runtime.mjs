@@ -182,6 +182,11 @@ try {
       throw new Error(`Pi public trace exposed private provider configuration: ${forbidden}`)
     }
   }
+  for (const forbiddenField of ['"nativeSessionFile":', '"sessionFile":']) {
+    if (publicTrace.includes(forbiddenField)) {
+      throw new Error(`Pi public trace exposed the private Native Session locator: ${forbiddenField}`)
+    }
+  }
   if (client.stderr.some((line) => line.includes('interrupt timed out'))) {
     throw new Error(`Pi abort did not acknowledge within the Core interrupt window: ${JSON.stringify(client.stderr)}`)
   }

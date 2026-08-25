@@ -18,9 +18,10 @@ use crate::{
     agent_runtime_adapter::{
         ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID, AdapterRuntimeResolutionInput,
         AgentRuntimeAdapterRegistry, CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID, ExecutableFileIdentity,
-        PI_RUNTIME_DEFAULT_MODEL_ID, TRAE_RUNTIME_DEFAULT_MODEL_ID,
-        observe_executable_file_identity, trae_static_permission_options,
-        validate_machine_ready_snapshot, validate_trae_machine_ready_evidence,
+        PI_MACHINE_PROTOCOL, PI_NATIVE_SESSION_COMPATIBILITY_KEY, PI_RUNTIME_DEFAULT_MODEL_ID,
+        TRAE_RUNTIME_DEFAULT_MODEL_ID, observe_executable_file_identity,
+        trae_static_permission_options, validate_machine_ready_snapshot,
+        validate_pi_machine_ready_evidence, validate_trae_machine_ready_evidence,
     },
     collaboration::end_camp_membership,
     command::{
@@ -1385,6 +1386,41 @@ impl AgentProfileService {
                     "probeStatus": probe_status,
                 }),
             )));
+        }
+        if runtime.adapter_kind == AdapterKind::Pi {
+            let result = validate_pi_machine_ready_evidence(
+                runtime.reported_version.as_deref(),
+                Some(&runtime.executable_fingerprint),
+                &runtime.capabilities,
+            )
+            .and_then(|_| {
+                if authentication_status.as_deref() != Some("authenticated")
+                    || runtime.protocol_version != PI_MACHINE_PROTOCOL
+                    || runtime.model.model_id.trim().is_empty()
+                    || runtime.permissions.adapter_kind != AdapterKind::Pi
+                    || runtime.permissions.schema_version != 1
+                    || runtime
+                        .permissions
+                        .values
+                        .get("approval_mode")
+                        .and_then(Value::as_str)
+                        != Some("managed")
+                    || runtime.native_session_compatibility_key.as_deref()
+                        != Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY)
+                {
+                    anyhow::bail!("Pi frozen Runtime does not satisfy the machine Ready contract");
+                }
+                Ok(())
+            });
+            if let Err(error) = result {
+                return Ok(Some(runtime_blocker(
+                    "runtime_probe_required",
+                    json!({
+                        "installationId": runtime.installation_id,
+                        "detail": error.to_string(),
+                    }),
+                )));
+            }
         }
         if runtime.adapter_kind == AdapterKind::TraeCnCli
             && let Err(error) = validate_trae_machine_ready_evidence(
@@ -5261,6 +5297,87 @@ mod slow_tests {
             last_error: None,
             native_session_compatibility_key: Some("codex-cli:app-server-v2".to_string()),
         }
+    }
+
+    fn ready_pi_snapshot() -> AdapterCapabilitySnapshot {
+        AgentRuntimeAdapterRegistry::default()
+            .pi_capability_snapshot(crate::agent_runtime_adapter::PiProbeObservation {
+                reported_version: Some("0.84.2".to_string()),
+                executable_fingerprint: Some("sha256:pi-ready".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: vec![
+                    PI_MACHINE_PROTOCOL.to_string(),
+                    "pi.rpc.prompt".to_string(),
+                    "pi.rpc.agent_settled".to_string(),
+                    "pi.rpc.structured_tools".to_string(),
+                    "pi.rpc.extension_approval".to_string(),
+                    "pi.rpc.managed_input_receipt".to_string(),
+                    "conversation.exact_resume".to_string(),
+                    "process.interrupt".to_string(),
+                ],
+                raw_model_catalog: Some(json!([])),
+                attempted_at: chrono::Utc::now().to_rfc3339(),
+                last_error: None,
+            })
+            .expect("complete Pi snapshot should map")
+    }
+
+    #[test]
+    fn pi_dispatch_rechecks_machine_ready_evidence() {
+        let (mut database, directory) = database();
+        let service = AgentProfileService::default();
+        let executable_path = test_executable_path(&directory, "pi-machine-ready");
+        std::fs::write(&executable_path, b"pi-test-runtime").unwrap();
+        #[cfg(unix)]
+        std::fs::set_permissions(&executable_path, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+        let installation_id = service
+            .commit_verified_managed_installation(
+                &mut database,
+                VerifiedManagedInstallation {
+                    adapter_kind: AdapterKind::Pi,
+                    executable_path: executable_path.to_string_lossy().to_string(),
+                    command_name: "pi".to_string(),
+                    source: InstallationSource::InheritedPath,
+                    auth_scope: "default".to_string(),
+                    snapshot: ready_pi_snapshot(),
+                },
+            )
+            .expect("complete Pi Machine Ready installation should commit");
+        let installation = service
+            .managed_installation(&database, AdapterKind::Pi, "default")
+            .unwrap()
+            .expect("Pi installation should exist");
+        let defaults = installation
+            .member_runtime_defaults
+            .expect("Pi installation should expose defaults");
+        let frozen = resolve_frozen_runtime_binding(
+            database.connection(),
+            &ResolvedRuntimeBinding {
+                adapter_kind: AdapterKind::Pi,
+                installation_id,
+                model: defaults.model,
+                permissions: defaults.permissions,
+            },
+        )
+        .unwrap()
+        .expect("complete Pi binding should freeze");
+        assert!(
+            service
+                .runtime_dispatch_blocker(&database, &frozen)
+                .unwrap()
+                .is_none()
+        );
+
+        let mut weak = frozen;
+        weak.capabilities
+            .retain(|capability| capability != "conversation.exact_resume");
+        let blocker = service
+            .runtime_dispatch_blocker(&database, &weak)
+            .unwrap()
+            .expect("Dispatch must reject weak Pi Machine Ready evidence");
+        assert_eq!(blocker.code, "runtime_probe_required");
     }
 
     #[test]

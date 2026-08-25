@@ -465,6 +465,8 @@ pub struct PiProbeObservation {
 pub const ANTIGRAVITY_RUNTIME_DEFAULT_MODEL_ID: &str = "antigravity://runtime-default";
 pub const CLAUDE_CODE_RUNTIME_DEFAULT_MODEL_ID: &str = "claude-code://runtime-default";
 pub const PI_RUNTIME_DEFAULT_MODEL_ID: &str = "pi://runtime-default";
+pub const PI_MACHINE_PROTOCOL: &str = "pi-jsonl-rpc-v1";
+pub const PI_NATIVE_SESSION_COMPATIBILITY_KEY: &str = "pi-jsonl-rpc-v1:managed-system-prompt-v1";
 /// Frozen model identity used only while TRAE is statically installed but has
 /// not yet exposed its live model catalog. The first real ACP Session leaves
 /// the Runtime's current model untouched.
@@ -937,13 +939,6 @@ impl AgentRuntimeAdapterRegistry {
         let mut capabilities = observation.capabilities;
         if ready {
             for capability in [
-                "pi.rpc.prompt",
-                "pi.rpc.agent_settled",
-                "pi.rpc.structured_tools",
-                "pi.rpc.extension_approval",
-                "pi.rpc.managed_input_receipt",
-                "conversation.exact_resume",
-                "process.interrupt",
                 "context.charter.managed_system_prompt",
                 BUILTIN_TOOL_RUNTIME_CAPABILITY,
             ] {
@@ -968,7 +963,7 @@ impl AgentRuntimeAdapterRegistry {
             permission_schema_digest,
             capabilities,
             protocols: if ready {
-                vec!["pi-jsonl-rpc-v1".to_string()]
+                vec![PI_MACHINE_PROTOCOL.to_string()]
             } else {
                 Vec::new()
             },
@@ -984,7 +979,7 @@ impl AgentRuntimeAdapterRegistry {
             stale_at: (!ready).then_some(observation.attempted_at),
             last_error: (!ready).then_some(observation.last_error).flatten(),
             native_session_compatibility_key: ready
-                .then(|| "pi-jsonl-rpc-v1:managed-system-prompt-v1".to_string()),
+                .then(|| PI_NATIVE_SESSION_COMPATIBILITY_KEY.to_string()),
         })
     }
 
@@ -1580,6 +1575,27 @@ pub fn trae_machine_ready_requirements() -> Vec<String> {
     .collect()
 }
 
+pub fn pi_machine_ready_requirements() -> Vec<String> {
+    [
+        PI_MACHINE_PROTOCOL,
+        "pi.rpc.prompt",
+        "pi.rpc.agent_settled",
+        "pi.rpc.structured_tools",
+        "pi.rpc.extension_approval",
+        "pi.rpc.managed_input_receipt",
+        "conversation.exact_resume",
+        "process.interrupt",
+        "context.charter.managed_system_prompt",
+        BUILTIN_TOOL_RUNTIME_CAPABILITY,
+        "mcp.external_projection.additive_per_run",
+        "mcp.same_name_policy.rovai_wins",
+        "mcp.approval.core_managed",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
 pub fn trae_machine_ready_capabilities(
     reported_version: Option<&str>,
     executable_fingerprint: Option<&str>,
@@ -1674,6 +1690,39 @@ pub fn validate_machine_ready_snapshot(
     adapter_kind: AdapterKind,
     snapshot: &AdapterCapabilitySnapshot,
 ) -> Result<()> {
+    if adapter_kind == AdapterKind::Pi && snapshot.probe_status == "ready" {
+        validate_pi_machine_ready_evidence(
+            snapshot.reported_version.as_deref(),
+            snapshot.executable_fingerprint.as_deref(),
+            &snapshot.capabilities,
+        )?;
+        let managed_approval = snapshot.permission_options.iter().any(|option| {
+            option.key == "approval_mode"
+                && option.required
+                && option.supported
+                && option.recommended_value == json!("managed")
+                && option
+                    .choices
+                    .iter()
+                    .any(|choice| choice.value == "managed")
+        });
+        let complete = snapshot.authentication_status == "authenticated"
+            && snapshot
+                .protocols
+                .iter()
+                .any(|protocol| protocol == PI_MACHINE_PROTOCOL)
+            && snapshot
+                .models
+                .iter()
+                .any(|model| model.id == PI_RUNTIME_DEFAULT_MODEL_ID && model.is_default)
+            && managed_approval
+            && snapshot.native_session_compatibility_key.as_deref()
+                == Some(PI_NATIVE_SESSION_COMPATIBILITY_KEY);
+        if !complete {
+            anyhow::bail!("Pi ready snapshot does not satisfy the machine Ready contract");
+        }
+        return Ok(());
+    }
     if adapter_kind == AdapterKind::CursorAgent && snapshot.probe_status == "ready" {
         let required = ["acp.initialize", "cursor.authenticate", "session.new"];
         let complete = snapshot.authentication_status == "authenticated"
@@ -1713,6 +1762,31 @@ pub fn validate_machine_ready_snapshot(
         || snapshot.permission_options.is_empty()
     {
         anyhow::bail!("TRAE ready snapshot does not satisfy the machine Ready contract");
+    }
+    Ok(())
+}
+
+pub fn validate_pi_machine_ready_evidence(
+    reported_version: Option<&str>,
+    executable_fingerprint: Option<&str>,
+    capabilities: &[String],
+) -> Result<()> {
+    let missing = pi_machine_ready_requirements()
+        .into_iter()
+        .filter(|required| !capabilities.contains(required))
+        .collect::<Vec<_>>();
+    if !missing.is_empty()
+        || reported_version.is_none_or(|value| value.trim().is_empty())
+        || executable_fingerprint.is_none_or(|value| value.trim().is_empty())
+    {
+        anyhow::bail!(
+            "Pi machine Ready evidence is incomplete{}",
+            if missing.is_empty() {
+                String::new()
+            } else {
+                format!(": {}", missing.join(", "))
+            }
+        );
     }
     Ok(())
 }
@@ -3647,6 +3721,49 @@ mod tests {
             validate_machine_ready_snapshot(AdapterKind::TraeCnCli, &snapshot).is_err(),
             "legacy weak TRAE ready must not suppress DispatchPreflight"
         );
+    }
+
+    #[test]
+    fn persisted_pi_ready_requires_observed_exact_resume_evidence() {
+        let registry = AgentRuntimeAdapterRegistry::default();
+        let mut snapshot = registry
+            .pi_capability_snapshot(PiProbeObservation {
+                reported_version: Some("0.84.2".to_string()),
+                executable_fingerprint: Some("sha256:pi-ready".to_string()),
+                authentication_status: "authenticated".to_string(),
+                probe_status: "ready".to_string(),
+                capabilities: vec![
+                    PI_MACHINE_PROTOCOL.to_string(),
+                    "pi.rpc.prompt".to_string(),
+                    "pi.rpc.agent_settled".to_string(),
+                    "pi.rpc.structured_tools".to_string(),
+                    "pi.rpc.extension_approval".to_string(),
+                    "pi.rpc.managed_input_receipt".to_string(),
+                    "process.interrupt".to_string(),
+                ],
+                raw_model_catalog: Some(json!([])),
+                attempted_at: "2026-08-25T00:00:00Z".to_string(),
+                last_error: None,
+            })
+            .expect("Pi snapshot should map without inventing probe evidence");
+
+        assert!(
+            !snapshot
+                .capabilities
+                .contains(&"conversation.exact_resume".to_string())
+        );
+        assert!(
+            validate_machine_ready_snapshot(AdapterKind::Pi, &snapshot).is_err(),
+            "Pi Ready must not be persisted before exact switch_session is observed"
+        );
+
+        snapshot
+            .capabilities
+            .push("conversation.exact_resume".to_string());
+        snapshot.capabilities.sort();
+        snapshot.capabilities.dedup();
+        validate_machine_ready_snapshot(AdapterKind::Pi, &snapshot)
+            .expect("complete Pi machine Ready evidence should validate");
     }
 
     #[test]

@@ -727,10 +727,6 @@ impl PiRuntime {
         &self.session_id
     }
 
-    pub fn session_file(&self) -> &Path {
-        &self.session_file
-    }
-
     pub fn model_fingerprint(&self) -> &str {
         &self.model_fingerprint
     }
@@ -1412,8 +1408,8 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
             .clone()
             .context("Pi probe Host binding disappeared")?;
         let activation = ActivatedPiSession {
-            session_id,
-            session_file,
+            session_id: session_id.clone(),
+            session_file: session_file.clone(),
             model_fingerprint: short_digest(format!("{provider}\0{model}\0{thinking}").as_bytes()),
             binding_document,
             skill_command_catalog,
@@ -1490,7 +1486,60 @@ pub(crate) async fn behavioral_probe(executable: &Path) -> Result<PiBehavioralPr
             bail!("Pi probe did not verify managed input and reliable final boundaries");
         }
         let model_fingerprint = runtime.model_fingerprint().to_string();
-        let _ = runtime.cleanup_for_release().await;
+        let exact_resume_result = async {
+            let canonical_session_file = session_file
+                .canonicalize()
+                .context("Pi probe Session file did not materialize canonically")?;
+            write_session_locator(
+                &locator_root,
+                &session_id,
+                &canonical_session_file,
+                &probe_root,
+                true,
+            )?;
+
+            let replacement = host.command("new_session", json!({})).await?;
+            ensure_session_replacement_succeeded(&replacement, "new_session")?;
+            let replacement_state = host.command("get_state", json!({})).await?;
+            let (replacement_id, replacement_file, _, _, _) = validate_host_state(
+                &replacement_state,
+                None,
+                &locator_root,
+                &probe_root,
+                PI_RUNTIME_DEFAULT_MODEL_ID,
+            )?;
+            if replacement_id == session_id || replacement_file == canonical_session_file {
+                bail!("Pi probe new_session did not replace the Native Session identity");
+            }
+
+            let switched = host
+                .command(
+                    "switch_session",
+                    json!({"sessionPath": canonical_session_file.to_string_lossy().to_string()}),
+                )
+                .await?;
+            ensure_session_replacement_succeeded(&switched, "switch_session")?;
+            let restored_state = host.command("get_state", json!({})).await?;
+            // Pi get_state reports the Session identity and file, but not cwd.
+            // validate_host_state therefore verifies cwd against the restored
+            // Session file header while also matching the private exact locator.
+            let (restored_id, restored_file, _, _, _) = validate_host_state(
+                &restored_state,
+                Some(&session_id),
+                &locator_root,
+                &probe_root,
+                PI_RUNTIME_DEFAULT_MODEL_ID,
+            )?;
+            if restored_id != session_id || restored_file.canonicalize()? != canonical_session_file
+            {
+                bail!("Pi probe switch_session did not restore the exact Native Session");
+            }
+            Ok::<(), anyhow::Error>(())
+        }
+        .await;
+        let cleanup_result = runtime.cleanup_for_release().await;
+        exact_resume_result.context("Pi exact Session resume capability probe failed")?;
+        cleanup_result.context("Pi capability probe cleanup failed")?;
         Ok(PiBehavioralProbe {
             model_fingerprint,
             raw_model_catalog,
@@ -1980,6 +2029,12 @@ mod tests {
                 .capabilities
                 .iter()
                 .any(|capability| capability == "pi.rpc.managed_input_receipt")
+        );
+        assert!(
+            observation
+                .capabilities
+                .iter()
+                .any(|capability| capability == "conversation.exact_resume")
         );
         assert!(observation.raw_model_catalog.is_array());
     }

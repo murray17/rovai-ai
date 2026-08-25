@@ -74,6 +74,15 @@ struct PiApprovalEnvelope {
     input: Value,
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PiBashInput {
+    command: String,
+    timeout: Option<f64>,
+}
+
+const PI_BASH_MAX_TIMEOUT_SECONDS: f64 = 2_147_483.647;
+
 #[allow(clippy::too_many_arguments)]
 pub fn intercepted_action_request(
     agent_run_id: &str,
@@ -127,20 +136,22 @@ pub fn intercepted_action_request(
         let root = execution_root.to_string_lossy().to_string();
         let input = match envelope.tool_name.as_str() {
             "bash" => {
-                let command = envelope
-                    .input
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .filter(|value| !value.trim().is_empty())
-                    .context("Pi bash Approval request has no command")?;
-                CanonicalActionInput::ShellCommand {
-                    argv: vec![
-                        "/bin/zsh".to_string(),
-                        "-lc".to_string(),
-                        command.to_string(),
-                    ],
+                let input: PiBashInput = serde_json::from_value(envelope.input)
+                    .context("Pi bash Approval input is invalid")?;
+                if input.command.trim().is_empty() {
+                    bail!("Pi bash Approval request has no command");
+                }
+                if input.timeout.is_some_and(|timeout| {
+                    !timeout.is_finite() || timeout <= 0.0 || timeout > PI_BASH_MAX_TIMEOUT_SECONDS
+                }) {
+                    bail!("Pi bash Approval timeout is invalid");
+                }
+                CanonicalActionInput::RuntimeNativeShellCommand {
+                    runtime_kind: AdapterKind::Pi.as_str().to_string(),
+                    native_tool: "bash".to_string(),
+                    command: input.command,
                     cwd: root,
-                    environment_refs: Vec::new(),
+                    timeout_seconds: input.timeout,
                 }
             }
             "write" | "edit" => {
@@ -588,5 +599,61 @@ mod tests {
         assert!(!source.contains("PI_CODING_AGENT_DIR"));
         assert!(!source.contains("ANTHROPIC_AUTH_TOKEN"));
         assert!(source.contains("Rovai managed input receipt"));
+    }
+
+    #[test]
+    fn bash_approval_uses_a_runtime_native_shell_action() {
+        let envelope = json!({
+            "schemaVersion": PI_APPROVAL_SCHEMA_VERSION,
+            "extensionVersion": PI_HOST_EXTENSION_VERSION,
+            "kind": "native_tool",
+            "hostInstanceId": "host-1",
+            "hostBindingGeneration": 4,
+            "agentRunId": "run-1",
+            "executionEpoch": 3,
+            "nativeBindingGeneration": 5,
+            "toolCallId": "tool-1",
+            "toolName": "bash",
+            "input": {
+                "command": "printf PI_NATIVE_SHELL_OK",
+                "timeout": 12.5,
+            },
+        });
+        let request = json!({
+            "type": "extension_ui_request",
+            "method": "confirm",
+            "title": "Rovai managed approval",
+            "id": "ui-1",
+            "message": serde_json::to_string(&envelope).unwrap(),
+        });
+
+        let action = intercepted_action_request(
+            "run-1",
+            3,
+            "host-1",
+            4,
+            5,
+            "session-1",
+            "prompt-1",
+            Path::new("/workspace"),
+            &request,
+        )
+        .expect("valid Pi bash request should be intercepted");
+
+        assert_eq!(
+            action.input,
+            CanonicalActionInput::RuntimeNativeShellCommand {
+                runtime_kind: "pi".to_string(),
+                native_tool: "bash".to_string(),
+                command: "printf PI_NATIVE_SHELL_OK".to_string(),
+                cwd: "/workspace".to_string(),
+                timeout_seconds: Some(12.5),
+            }
+        );
+        let serialized = serde_json::to_string(&action.input).unwrap();
+        assert!(serialized.contains("runtime_native_shell_command"));
+        assert!(!serialized.contains("/bin/zsh"));
+        assert!(!serialized.contains("argv"));
+        assert!(!serialized.contains("-lc"));
     }
 }

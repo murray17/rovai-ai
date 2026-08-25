@@ -42,6 +42,13 @@ pub enum CanonicalActionInput {
         #[serde(default)]
         environment_refs: Vec<String>,
     },
+    RuntimeNativeShellCommand {
+        runtime_kind: String,
+        native_tool: String,
+        command: String,
+        cwd: String,
+        timeout_seconds: Option<f64>,
+    },
     FileWrite {
         path: String,
         operation: String,
@@ -90,7 +97,7 @@ pub enum CanonicalActionInput {
 impl CanonicalActionInput {
     fn action_kind(&self) -> &'static str {
         match self {
-            Self::ShellCommand { .. } => "shell_command",
+            Self::ShellCommand { .. } | Self::RuntimeNativeShellCommand { .. } => "shell_command",
             Self::FileWrite { .. } => "file_write",
             Self::FileDelete { .. } => "file_delete",
             Self::GitMutation { .. } => "git_mutation",
@@ -115,6 +122,9 @@ impl CanonicalActionInput {
                     }
                     _ => argv.join(" "),
                 };
+                format!("Run {command} in {cwd}")
+            }
+            Self::RuntimeNativeShellCommand { command, cwd, .. } => {
                 format!("Run {command} in {cwd}")
             }
             Self::FileWrite {
@@ -160,6 +170,22 @@ impl CanonicalActionInput {
             Self::ShellCommand { argv, cwd, .. } => {
                 if argv.is_empty() || argv.iter().any(|part| part.is_empty()) {
                     anyhow::bail!("Shell action requires non-empty argv");
+                }
+                require_absolute_path(cwd, "shell cwd")?;
+            }
+            Self::RuntimeNativeShellCommand {
+                runtime_kind,
+                native_tool,
+                command,
+                cwd,
+                timeout_seconds,
+            } => {
+                if runtime_kind.trim().is_empty()
+                    || native_tool.trim().is_empty()
+                    || command.trim().is_empty()
+                    || timeout_seconds.is_some_and(|timeout| !timeout.is_finite() || timeout <= 0.0)
+                {
+                    anyhow::bail!("Runtime-native shell action is invalid");
                 }
                 require_absolute_path(cwd, "shell cwd")?;
             }
@@ -3209,7 +3235,8 @@ fn validate_workspace_scope(
     workspace: Option<&Value>,
 ) -> std::result::Result<(), String> {
     let target = match input {
-        CanonicalActionInput::ShellCommand { cwd, .. } => Some(cwd.as_str()),
+        CanonicalActionInput::ShellCommand { cwd, .. }
+        | CanonicalActionInput::RuntimeNativeShellCommand { cwd, .. } => Some(cwd.as_str()),
         CanonicalActionInput::FileWrite { path, .. }
         | CanonicalActionInput::FileDelete { path } => Some(path.as_str()),
         CanonicalActionInput::RuntimePermissionGrant { cwd, .. } => Some(cwd.as_str()),

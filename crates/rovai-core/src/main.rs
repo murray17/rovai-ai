@@ -9170,7 +9170,6 @@ impl Core {
                 "modelOptions": execution.runtime.model.options,
                 "hostInstanceId": runtime.host_instance_id(),
                 "nativeThreadId": runtime.session_id(),
-                "nativeSessionFile": runtime.session_file(),
                 "nativeTurnId": native_prompt_id,
                 "providerModelFingerprint": runtime.model_fingerprint(),
             }),
@@ -12519,6 +12518,7 @@ async fn process_agent_run_pi_approval_request(
             rovai_core::action::CanonicalActionInput::FileWrite { .. }
                 | rovai_core::action::CanonicalActionInput::FileDelete { .. }
                 | rovai_core::action::CanonicalActionInput::ShellCommand { .. }
+                | rovai_core::action::CanonicalActionInput::RuntimeNativeShellCommand { .. }
                 | rovai_core::action::CanonicalActionInput::GitMutation { .. }
                 | rovai_core::action::CanonicalActionInput::NetworkWrite { .. }
         )
@@ -14258,6 +14258,7 @@ async fn process_agent_run_acp_approval_request(
             rovai_core::action::CanonicalActionInput::FileWrite { .. }
                 | rovai_core::action::CanonicalActionInput::FileDelete { .. }
                 | rovai_core::action::CanonicalActionInput::ShellCommand { .. }
+                | rovai_core::action::CanonicalActionInput::RuntimeNativeShellCommand { .. }
                 | rovai_core::action::CanonicalActionInput::GitMutation { .. }
                 | rovai_core::action::CanonicalActionInput::NetworkWrite { .. }
         )
