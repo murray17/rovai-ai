@@ -18,3 +18,4 @@ code and reproducible validation.
 |---|---|---|
 | 2026-08-05 | [Codex MCP Configuration Collision and AgentRun Startup Failure](2026-08-05-codex-mcp-configuration-collision.md) | Closed; follow-up actions tracked |
 | 2026-08-25 | [Rolled-Back Camp Cleanup Writer Intent Blocked AgentRun Admission](2026-08-25-rolled-back-camp-cleanup-writer-intent.md) | Closed; follow-up actions tracked |
+| 2026-08-26 | [Windows Codex Runtime Discovery and Acceptance Isolation Gaps](2026-08-26-windows-codex-runtime-discovery-and-acceptance-isolation.md) | Closed; follow-up actions tracked |
