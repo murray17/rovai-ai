@@ -3,7 +3,7 @@ document_type: architecture
 architecture: camp-open-read-path
 authority: desktop-camp-enter-and-progressive-read-boundaries
 status: accepted
-last_updated: 2026-08-19
+last_updated: 2026-08-25
 ---
 
 # Camp Open Read Path 架构
@@ -63,6 +63,11 @@ Renderer 可以对当前 Camp 做一次有界的额外 refresh；通知明确携
 `agent_run.runtime_model_observed` 与其他 Run projection 变化共用上述 invalidation/refresh 路径，但必须精确匹配
 当前 Camp。它只使 `AgentRunView.runtimeModel` 从默认未观察态收敛到首个可信模型，不进入 timeline、
 CampMessage 或 Run detail Evidence，也不自动打开执行台或改变当前 selection。
+
+同一 Camp 的 event-driven refresh 只允许一个 `camps.open` 在途；在途期间到达的一个或多个 invalidation
+合并为 dirty 状态，并在当前读取完成后至多追加一次 trailing refresh。不能只复用旧 Promise 后丢弃新的
+invalidation，因为后一个终态可能在首个 read transaction 开始后才持久化。trailing refresh 期间再次变脏时，
+按同一规则继续到安静点；Camp 切换与 high-water fence 仍负责拒绝旧 Camp 或倒退投影。
 
 缓存只保存最近的 Camp 投影；除完整 non-terminal Evidence 外，其他 collection 保持有界。cache hit 可立即
 恢复阅读面，但仍由 high-water refresh 验证；cache miss 不把

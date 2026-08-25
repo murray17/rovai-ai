@@ -32,6 +32,7 @@ import type {
   NavigationSnapshot,
   ProjectNavigationGroup,
   RestorableLocation,
+  RovaiApi,
   HearthReviewItem,
   SendCampMessageResult,
   StoredCommandResult,
@@ -140,6 +141,72 @@ export function shouldRefreshActiveCampForCoreEvent(
     return eventCampId === activeCampId
   }
   return !eventCampId || eventCampId === activeCampId
+}
+
+export interface ActiveCampRefreshCoordinator {
+  refresh(campId: string): Promise<void>
+}
+
+export function createActiveCampRefreshCoordinator(
+  refreshOnce: (campId: string) => Promise<void>
+): ActiveCampRefreshCoordinator {
+  const activeRefreshes = new Map<string, {
+    dirty: boolean
+    completion: Promise<void>
+  }>()
+
+  return {
+    refresh(campId: string): Promise<void> {
+      const active = activeRefreshes.get(campId)
+      if (active) {
+        active.dirty = true
+        return active.completion
+      }
+
+      const entry = {
+        dirty: false,
+        completion: Promise.resolve()
+      }
+      activeRefreshes.set(campId, entry)
+      entry.completion = Promise.resolve()
+        .then(async () => {
+          try {
+            let lastError: unknown = null
+            do {
+              entry.dirty = false
+              try {
+                await refreshOnce(campId)
+                lastError = null
+              } catch (nextError) {
+                lastError = nextError
+              }
+            } while (entry.dirty)
+            if (lastError !== null) throw lastError
+          } finally {
+            if (activeRefreshes.get(campId) === entry) activeRefreshes.delete(campId)
+          }
+        })
+      return entry.completion
+    }
+  }
+}
+
+export function refreshActiveCampForCoreEvent(
+  event: CoreEvent,
+  activeCampId: string | null,
+  coordinator: ActiveCampRefreshCoordinator
+): Promise<void> | null {
+  return shouldRefreshActiveCampForCoreEvent(event, activeCampId) && activeCampId
+    ? coordinator.refresh(activeCampId)
+    : null
+}
+
+export function requestAuthoritativeCampOpenProjection(
+  api: Pick<RovaiApi, 'request'>,
+  campId: string,
+  traceId: string
+): Promise<CampOpenProjection> {
+  return api.request<CampOpenProjection>('camps.open', { traceId, campId })
 }
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -595,7 +662,7 @@ export function App(): React.JSX.Element {
           commandId: crypto.randomUUID(),
           command: { campId }
         })
-      : await window.rovai.request<CampOpenProjection>('camps.open', { traceId, campId })
+      : await requestAuthoritativeCampOpenProjection(window.rovai, campId, traceId)
     if (projection.schemaVersion !== 3) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
@@ -1012,7 +1079,7 @@ export function App(): React.JSX.Element {
     void activateCamp(campId, { reconcileDefaultLead: false })
   }), [activateCamp])
 
-  const refreshActiveCampSnapshot = useCallback(async (campId: string): Promise<void> => {
+  const refreshActiveCampSnapshotOnce = useCallback(async (campId: string): Promise<void> => {
     const { snapshot } = await requestCampProjection(campId, 'open')
     if (activeCampIdRef.current !== campId) return
     if (snapshot.throughGlobalSequence < campEventSequenceMarker.current) return
@@ -1020,6 +1087,16 @@ export function App(): React.JSX.Element {
     setCampSnapshot(snapshot)
     setConfirmingRunIds(new Set())
   }, [requestCampProjection, setCampSnapshot])
+
+  const activeCampRefreshCoordinator = useMemo(
+    () => createActiveCampRefreshCoordinator(refreshActiveCampSnapshotOnce),
+    [refreshActiveCampSnapshotOnce]
+  )
+
+  const refreshActiveCampSnapshot = useCallback(
+    (campId: string): Promise<void> => activeCampRefreshCoordinator.refresh(campId),
+    [activeCampRefreshCoordinator]
+  )
 
   const loadEarlierCampMessages = useCallback(async (): Promise<void> => {
     const requestedSnapshot = campSnapshotRef.current
@@ -1521,13 +1598,18 @@ export function App(): React.JSX.Element {
         }, 80)
       }
       const campId = activeCampIdRef.current
-      if (campId && shouldRefreshActiveCampForCoreEvent(event, campId)) {
-        void refreshActiveCampSnapshot(campId).catch((nextError) => {
+      const refresh = refreshActiveCampForCoreEvent(
+        event,
+        campId,
+        activeCampRefreshCoordinator
+      )
+      if (refresh && campId) {
+        void refresh.catch((nextError) => {
           if (activeCampIdRef.current === campId) setError(errorMessage(nextError))
         })
       }
     })
-  }, [loadHealth, loadMemberData, loadOverview, refreshActiveCampSnapshot])
+  }, [activeCampRefreshCoordinator, loadHealth, loadMemberData, loadOverview])
 
   useEffect(() => {
     if (!campSnapshot) {

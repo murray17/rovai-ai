@@ -1,6 +1,6 @@
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   ActionApprovalView,
   AdapterInstallation,
@@ -12,9 +12,11 @@ import type {
   CampOpenProjection,
   CampSnapshot,
   CanonicalRuntimeActivityView,
+  CoreMethod,
   HealthStatus,
   MessageDeliveryView,
-  NotificationActionView
+  NotificationActionView,
+  RovaiApi
 } from '@contracts'
 import {
   AppHeader,
@@ -36,6 +38,7 @@ import {
   campSnapshotWithCurrentAnchor,
   campSnapshotWithAnchoredMessages,
   commandFailureMessage,
+  createActiveCampRefreshCoordinator,
   effectiveCancellingRunIds,
   effectiveCancellingTurnIds,
   notificationFocusMatchesAction,
@@ -44,7 +47,9 @@ import {
   recentCampSnapshot,
   reconcileCancellingTurnIds,
   reconcileRunCancellationIds,
+  refreshActiveCampForCoreEvent,
   rememberCampSnapshot,
+  requestAuthoritativeCampOpenProjection,
   runtimeRecoveryFromCommandResult,
   selectProjectDirectory,
   SettingsView,
@@ -188,6 +193,182 @@ describe('active Camp event invalidation', () => {
       method: 'agent_run.terminal',
       params: { agentRunId: 'run-1' }
     }, null)).toBe(false)
+  })
+
+  it('coalesces an invalidation burst into one in-flight read and one trailing read', async () => {
+    let releaseFirstRead!: () => void
+    const firstRead = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve
+    })
+    const refreshOnce = vi.fn()
+      .mockImplementationOnce(() => firstRead)
+      .mockResolvedValue(undefined)
+    const coordinator = createActiveCampRefreshCoordinator(refreshOnce)
+
+    const first = coordinator.refresh('camp-1')
+    await Promise.resolve()
+    expect(refreshOnce).toHaveBeenCalledTimes(1)
+
+    const joinedSecond = coordinator.refresh('camp-1')
+    const joinedThird = coordinator.refresh('camp-1')
+    expect(joinedSecond).toBe(first)
+    expect(joinedThird).toBe(first)
+    expect(refreshOnce).toHaveBeenCalledTimes(1)
+
+    releaseFirstRead()
+    await first
+
+    expect(refreshOnce).toHaveBeenCalledTimes(2)
+    expect(refreshOnce).toHaveBeenNthCalledWith(1, 'camp-1')
+    expect(refreshOnce).toHaveBeenNthCalledWith(2, 'camp-1')
+  })
+
+  it('does not lose an invalidation at the refresh completion boundary', async () => {
+    let releaseFirstRead!: () => void
+    const firstRead = new Promise<void>((resolve) => {
+      releaseFirstRead = resolve
+    })
+    const refreshOnce = vi.fn()
+      .mockImplementationOnce(() => firstRead)
+      .mockResolvedValue(undefined)
+    const coordinator = createActiveCampRefreshCoordinator(refreshOnce)
+
+    const first = coordinator.refresh('camp-1')
+    await Promise.resolve()
+    const boundaryRefresh = firstRead.then(() => coordinator.refresh('camp-1'))
+
+    releaseFirstRead()
+    await Promise.all([first, boundaryRefresh])
+
+    expect(refreshOnce).toHaveBeenCalledTimes(2)
+  })
+
+  it('refreshes terminal state from camps.open and replaces the running Camp surface', async () => {
+    const projection = (status: AgentRunView['status']): CampOpenProjection => {
+      const terminal = status === 'succeeded'
+      const complete = {
+        loadedCount: 0,
+        totalCount: 0,
+        omittedCount: 0,
+        complete: true
+      }
+      return {
+        schemaVersion: 3,
+        throughGlobalSequence: terminal ? 12 : 10,
+        camp: {
+          id: 'camp-terminal-refresh', title: '终态刷新', activationState: 'active',
+          projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
+          defaultLeadAgentId: 'agent_2', version: 1,
+          createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:02Z'
+        },
+        members: [{
+          agentId: 'agent_2', displayName: '沐瓦', teamRole: '验收员', avatarRef: null,
+          accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null,
+          profilePresence: 'present', memberOrder: 0, isDefaultLead: true, version: 1
+        }],
+        tasks: [],
+        messages: [{
+          id: 'message-terminal-refresh', sequence: 1, timelineGlobalSequence: 1,
+          authorType: 'user', authorId: 'local_user', sourceAgentRunId: null,
+          body: '完成验收', content: [{ kind: 'text', text: '完成验收' }], attachments: [],
+          addressMode: 'default', addressedAgentIds: [], replyToCampMessageId: null,
+          campTurnId: 'turn-terminal-refresh', presentation: null,
+          createdAt: '2026-08-25T00:00:00Z'
+        }],
+        messageDeliveries: [],
+        turns: [{
+          id: 'turn-terminal-refresh', triggerType: 'camp_message',
+          triggerId: 'message-terminal-refresh', status: terminal ? 'completed' : 'running',
+          cancelRequestedAt: null, aggregateReasonCode: null,
+          executionBudget: TEST_EXECUTION_BUDGET, version: terminal ? 2 : 1,
+          createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:02Z',
+          endedAt: terminal ? '2026-08-25T00:00:02Z' : null
+        }],
+        agentRuns: [{
+          id: 'run-terminal-refresh', campTurnId: 'turn-terminal-refresh',
+          conversationId: 'conversation-terminal-refresh', agentId: 'agent_2', taskId: null,
+          responsibilityKey: 'direct:agent_2', responsibilityGeneration: 0,
+          purpose: '完成验收', completionRole: 'required', status,
+          waitReason: null, cancelRequestedAt: null, cancelReasonCode: null,
+          cancelAcknowledgedAt: null, terminalResolutionSource: null, terminalReasonCode: null,
+          failure: null, runtimeModel: null, executionEpoch: 1,
+          permissionSemantics: 'runtime_managed_v2', invocationKind: 'direct',
+          triggerDeliveryGeneration: 0, a2aParentAgentRunId: null,
+          a2aRootAgentRunId: null, a2aDepth: 0, executionEvidenceCount: 0,
+          hasUnsettledExternalEffects: false, workspace: { path: '/quick-chat' },
+          startingGitObservation: null, endingGitObservation: null,
+          version: terminal ? 2 : 1, createdAt: '2026-08-25T00:00:00Z',
+          startedAt: '2026-08-25T00:00:00Z',
+          endedAt: terminal ? '2026-08-25T00:00:02Z' : null,
+          updatedAt: '2026-08-25T00:00:02Z'
+        }],
+        executionEvidence: [], approvals: [], timeline: [],
+        coverage: {
+          tasks: complete,
+          messages: {
+            loadedCount: 1, totalCount: 1, omittedCount: 0, complete: true,
+            oldestLoadedSequence: 1, newestLoadedSequence: 1, hasEarlier: false
+          },
+          messageDeliveries: complete,
+          turns: { ...complete, loadedCount: 1, totalCount: 1 },
+          agentRuns: { ...complete, loadedCount: 1, totalCount: 1 },
+          executionEvidence: complete,
+          approvals: complete,
+          timeline: complete
+        }
+      }
+    }
+
+    let snapshot = campOpenProjectionAsSnapshot(projection('running'), null)
+    const renderCamp = (): string => renderToStaticMarkup(createElement(CampWorkspace, {
+      snapshot,
+      projectName: null,
+      agents: [agentProfile()],
+      busy: false,
+      onSend: async () => undefined,
+      onChangeLead: async () => undefined,
+      onTasksChanged: async () => undefined,
+      onResolveApproval: () => undefined,
+      stopping: false,
+      onStop: () => undefined
+    }))
+    const runningMarkup = renderCamp()
+    expect(runningMarkup).toContain('执行中')
+    expect(runningMarkup).toContain('status-running')
+
+    const request = vi.fn()
+    const api: Pick<RovaiApi, 'request'> = {
+      async request<T>(method: CoreMethod, params?: unknown): Promise<T> {
+        request(method, params)
+        return projection('succeeded') as T
+      }
+    }
+    const coordinator = createActiveCampRefreshCoordinator(async (campId) => {
+      const refreshed = await requestAuthoritativeCampOpenProjection(
+        api,
+        campId,
+        'trace-terminal-refresh'
+      )
+      snapshot = campOpenProjectionAsSnapshot(refreshed, snapshot)
+    })
+    const refresh = refreshActiveCampForCoreEvent({
+      method: 'agent_run.terminal',
+      params: { agentRunId: 'run-terminal-refresh' }
+    }, 'camp-terminal-refresh', coordinator)
+
+    expect(refresh).not.toBeNull()
+    await refresh
+
+    expect(request).toHaveBeenCalledWith('camps.open', {
+      traceId: 'trace-terminal-refresh',
+      campId: 'camp-terminal-refresh'
+    })
+    const refreshedMarkup = renderCamp()
+    expect(refreshedMarkup).toContain('已完成')
+    expect(refreshedMarkup).toContain('state-completed')
+    expect(refreshedMarkup).not.toContain('state-running')
+    expect(refreshedMarkup).not.toContain('execution-disclosure is-running')
+    expect(snapshot.agentRuns[0]?.status).toBe('succeeded')
   })
 })
 

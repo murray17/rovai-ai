@@ -45,7 +45,8 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   External MCP 与 Skill smoke，并更新 adapter-scoped v2 evidence；
 - [x] Windows x64 客户端以 `grok 1.0.5` + BYOK 完成同等目标主机验收，并新增独立 digest-bound evidence；
 - [x] Windows x64 BYOK Camp 验收发现 Core 已成功持久化终态但 Renderer 未消费 `agent_run.terminal`；补齐通用
-  Camp invalidation 与 Camp ID 过滤回归，macOS/Windows 和全部 Runtime 共用修复；
+  Camp invalidation、Camp ID 过滤、single-flight + trailing refresh，以及事件 → `camps.open` → `succeeded`
+  页面投影链路回归，macOS/Windows 和全部 Runtime 共用修复；
 - [x] macOS x64 使用原生 x86_64 `grok 1.0.5` 完成同等目标主机矩阵，并更新独立的 adapter-scoped v1 evidence；
 - [x] 以重启前后仅 `st_dev` 漂移的回归输入修复 macOS Runtime Files 启动失败；root/Entry identity 改用稳定
   volume UUID，schema-1 marker 在已准入私有实例根内原子 rekey，旧物理 receipt 由受控 rebuild 收敛；
