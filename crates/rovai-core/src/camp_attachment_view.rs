@@ -1685,13 +1685,22 @@ impl CampAttachmentViewStore {
             .optional()?
             .flatten();
         let Some(previous_state) = previous_state else {
+            transaction.execute(
+                r#"
+                UPDATE camp_attachment_view_operation
+                SET resolution_state = 'failed', updated_at = ?2
+                WHERE id = ?1 AND camp_id = ?3 AND kind = 'camp_delete_cleanup'
+                  AND status = 'rolled_back' AND resolution_state = 'unresolved'
+                "#,
+                params![cleanup.operation_id, now, cleanup.camp_id],
+            )?;
             transaction.commit()?;
             return Ok(());
         };
         transaction.execute(
             r#"
             UPDATE camp_attachment_view_operation
-            SET status = 'rolled_back', error_code = NULL,
+            SET status = 'rolled_back', resolution_state = 'failed', error_code = NULL,
                 completed_at = ?2, updated_at = ?2
             WHERE id = ?1 AND status IN ('planned','recovery_required')
             "#,
@@ -1766,7 +1775,8 @@ impl CampAttachmentViewStore {
             .connection()
             .query_row(
                 r#"
-                SELECT status, cleanup_root_relative_path, cleanup_root_identity_digest
+                SELECT status, cleanup_root_relative_path, cleanup_root_identity_digest,
+                       resolution_state
                 FROM camp_attachment_view_operation
                 WHERE id = ?1 AND camp_id = ?2 AND kind = 'camp_delete_cleanup'
                 "#,
@@ -1776,12 +1786,24 @@ impl CampAttachmentViewStore {
                         row.get::<_, String>(0)?,
                         row.get::<_, Option<String>>(1)?,
                         row.get::<_, Option<String>>(2)?,
+                        row.get::<_, String>(3)?,
                     ))
                 },
             )
             .optional()?
             .context("camp_attachment_view_recovery_required: cleanup operation is missing")?;
         if operation.0 == "completed" {
+            if operation.3 == "unresolved" {
+                database.connection().execute(
+                    r#"
+                    UPDATE camp_attachment_view_operation
+                    SET resolution_state = 'available', updated_at = ?2
+                    WHERE id = ?1 AND status = 'completed'
+                      AND resolution_state = 'unresolved'
+                    "#,
+                    params![cleanup.operation_id, chrono::Utc::now().to_rfc3339()],
+                )?;
+            }
             return Ok(());
         }
         if operation.0 != "committed" {
@@ -1831,7 +1853,8 @@ impl CampAttachmentViewStore {
         let changed = transaction.execute(
             r#"
             UPDATE camp_attachment_view_operation
-            SET status = 'completed', completed_at = ?2, updated_at = ?2
+            SET status = 'completed', resolution_state = 'available',
+                completed_at = ?2, updated_at = ?2
             WHERE id = ?1 AND status = 'committed'
             "#,
             params![cleanup.operation_id, now],
@@ -2355,6 +2378,21 @@ impl CampAttachmentViewStore {
     }
 
     fn recover_incomplete_operations(&self, database: &mut Database) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        database.connection().execute(
+            r#"
+            UPDATE camp_attachment_view_operation
+            SET resolution_state = CASE status
+                    WHEN 'rolled_back' THEN 'failed'
+                    WHEN 'completed' THEN 'available'
+                END,
+                updated_at = ?1
+            WHERE kind = 'camp_delete_cleanup'
+              AND resolution_state = 'unresolved'
+              AND status IN ('rolled_back','completed')
+            "#,
+            [now],
+        )?;
         let operations = {
             let mut statement = database.connection().prepare(
                 "SELECT id, camp_id, status, kind, command_id, source_kind, resolution_state FROM camp_attachment_view_operation WHERE status NOT IN ('completed','rolled_back') ORDER BY created_at, id",
@@ -6590,12 +6628,67 @@ mod tests {
             database
                 .connection()
                 .query_row(
+                    "SELECT status, resolution_state FROM camp_attachment_view_operation WHERE id = ?1",
+                    [&cancelled.operation_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .unwrap(),
+            ("rolled_back".to_string(), "failed".to_string())
+        );
+        assert!(!has_unresolved_publication(database.connection(), &camp_id).unwrap());
+        assert!(
+            !crate::camp_attachment_publication::database_has_unresolved_writer_intent(
+                &database, &camp_id
+            )
+            .unwrap()
+        );
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
                     "SELECT state FROM camp_attachment_view WHERE camp_id = ?1",
                     [&camp_id],
                     |row| row.get::<_, String>(0),
                 )
                 .unwrap(),
             "ready"
+        );
+
+        // Reproduce the pre-fix terminal journal drift. Startup reconciliation
+        // must repair it so a cancelled Camp delete cannot fence later Runs.
+        database
+            .connection()
+            .execute(
+                "UPDATE camp_attachment_view_operation SET resolution_state = 'unresolved' WHERE id = ?1",
+                [&cancelled.operation_id],
+            )
+            .unwrap();
+        assert!(has_unresolved_publication(database.connection(), &camp_id).unwrap());
+        assert!(
+            crate::camp_attachment_publication::database_has_unresolved_writer_intent(
+                &database, &camp_id
+            )
+            .unwrap()
+        );
+        view.reconcile(&mut database, &CampAttachmentStore::new(&data_dir))
+            .unwrap();
+        assert_eq!(
+            database
+                .connection()
+                .query_row(
+                    "SELECT resolution_state FROM camp_attachment_view_operation WHERE id = ?1",
+                    [&cancelled.operation_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .unwrap(),
+            "failed"
+        );
+        assert!(!has_unresolved_publication(database.connection(), &camp_id).unwrap());
+        assert!(
+            !crate::camp_attachment_publication::database_has_unresolved_writer_intent(
+                &database, &camp_id
+            )
+            .unwrap()
         );
 
         let delete_command_id = Uuid::new_v4().to_string();
@@ -6642,12 +6735,12 @@ mod tests {
             database
                 .connection()
                 .query_row(
-                    "SELECT status FROM camp_attachment_view_operation WHERE id = ?1",
+                    "SELECT status, resolution_state FROM camp_attachment_view_operation WHERE id = ?1",
                     [&cleanup.operation_id],
-                    |row| row.get::<_, String>(0),
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
                 )
                 .unwrap(),
-            "completed"
+            ("completed".to_string(), "available".to_string())
         );
         assert_eq!(
             database
