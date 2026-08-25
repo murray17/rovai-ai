@@ -45,6 +45,19 @@ Windows 10 22H2 / build 19045 x64 客户端以 `xai.api_key` BYOK 和独立 Grok
 MiniMax BYOK 在验收中出现过空 Tool name 和一次缺少 `prompt_tokens` 的流式 usage chunk；Grok/Rovai 均
 fail closed，未增加 provider 专属修复，原命令有界重跑后必须完整通过才计为资格证据。
 
+### Windows Camp 终态显示跟进
+
+安装后的日常 App 使用 Grok 验收员运行 Camp `rvcamp_01m0vyc3hmeq9s8x32hv7pv7kh`。AgentRun
+`158b3951-32ae-427b-8c48-8b181d2fd27f` 在 13.4 秒内以 `succeeded` 持久化并保存
+`GROK_WINDOWS_BYOK_CAMP_OK`，但 Renderer 保留了发送后取得的非终态快照。原因是 Desktop/Core 已在可靠终态
+持久化后发出通用 `agent_run.terminal`，而 Active Camp 的事件 invalidation 列表未消费该通知；验收员记录始终为
+`present`、`removedAt = null` 且 Runtime ready，不是卡住原因。
+
+修复将 `agent_run.terminal` 纳入通用 Active Camp invalidation：通知无 `campId` 时对当前 Camp 做一次权威
+`camps.open` refresh，明确指向其他 Camp 时不刷新，`runtime_model_observed` 仍要求精确 Camp ID。该逻辑没有
+Windows 或 Grok 分支，因此 macOS 与其他 Runtime 同时覆盖；既有 Windows digest-bound qualification artifact
+保持字节不变。
+
 ## 2026-08-24 原始 `0.2.118` 基本结论（历史证据）
 
 ```text
@@ -109,7 +122,7 @@ Exact launch:                 grok --permission-mode <effective> --no-auto-updat
 以下命令在本 worktree 执行；确定性门禁和真实 Runtime 验收均以实际退出码与结构化证据判定：
 
 ```text
-cargo fmt --all -- --check
+cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 pnpm test:rust:pr
 pnpm test:rust:core
@@ -138,10 +151,11 @@ ROVAI_GROK_PERMISSION_MODE=bypassPermissions \
 node scripts/smoke-acp-runtime.mjs
 ```
 
-确定性门禁最终计数：`pnpm test` 通过 76 个 Vitest 文件 / 525 个测试，以及 198 个 Node 测试；
-`pnpm test:rust:pr` 通过 library 310、CLI 25、slow 273 个测试；`pnpm test:rust:core` 通过 156 个测试，
-另有 4 个明确标记的 manual ignored 测试。`cargo fmt --check`、workspace/all-target Clippy `-D warnings`、
-TypeScript typecheck、Desktop build 与文档治理门禁均通过。
+最终分支的确定性门禁计数：`pnpm test` 通过 76 个 Vitest 文件（526 passed / 3 skipped）与 218 个选定
+Node 测试；`pnpm test:rust:pr` 通过 library 320（另 7 ignored）、CLI 27、slow 238 个测试；
+`pnpm test:rust:core` 通过 80 个测试，另有 2 个明确标记的 manual ignored 测试。`cargo fmt --all --check`、
+workspace/all-target Clippy `-D warnings`、TypeScript typecheck、Desktop build、CI 模式文档治理与 Grok 平台准入
+定向测试均通过。
 
 本机 `~/.grok/config.toml` 已迁到官方 `[models]` / `[model.minimax-m3]` shape，密钥文件位于
 `~/.grok/.env` 且权限为 `0600`；Core 不读取或回退到旧 `~/.config/rovai/grok-build.env`。官方 `grok models`
