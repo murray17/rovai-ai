@@ -2,7 +2,7 @@
 document_type: version-decisions
 version: v1.28
 lifecycle: current
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # v1.28 决策记录
@@ -27,7 +27,7 @@ Rovai 额外把 mode `0600` 的 `$GROK_HOME/.env` 作为本机密钥环境源，
 存在 BYOK 时 Probe 把 `config.toml`、`managed_config.toml` 与 `requirements.toml` 原样复制到一次性临时
 `GROK_HOME`，密钥文件不复制、只经进程环境传递，并优先已广告的 `xai.api_key`；没有 BYOK 时 Probe 保留
 原生 Grok Home，只选择已广告的安全非交互默认、`cached_token` 或 `xai.api_key`，不自动启动
-`grok.com`/device auth。官方配置与 `.env` 的摘要进入 warm Host 和 cold HistoryRestore compatibility。
+`grok.com`/device auth。官方配置与 `.env` 的摘要进入 warm Host 和 Native Session resume compatibility。
 
 ### 后果
 
@@ -104,7 +104,10 @@ untrusted 定义，因为 Grok 的同名合并先于 trust/enable gate；冲突 
 - RovaiWins：Grok 在 trust/enable gate 前按名称合并，覆盖会使 native 配置语义不可预测。
 
 <a id="v1-28-d04"></a>
-## V1.28-D04：load-only cold continuation 复用 TRAE HistoryRestore，不冒充 Resume
+## V1.28-D04：load-only cold continuation 复用 TRAE HistoryRestore，不冒充 Resume（已由 D06 替代）
+
+本节保存 `0.2.118` 接入时的真实取舍；`grok >= 1.0.0` 的当前产品 continuation 已由
+[V1.28-D06](#v1-28-d06) clean break 替代。TRAE 与其他 Runtime 的 HistoryRestore 结论不受影响。
 
 ### 背景
 
@@ -146,7 +149,7 @@ Grok `0.2.118` 的 `session/new._meta.rules` 会把字符串追加进 Runtime �
 按开发者明确确认的[模型上下文变更 revision 2](model-context-change-grok-native-rules.md)，继续由既有
 Formatter 3 生成完全相同的 `SESSION_CHARTER + MEMBER_IDENTITY + MEMORY_ENTRYPOINT` bytes。只有创建新 Grok
 Native Session 时，把完整 payload 原样放入 `session/new._meta.rules`；首轮和后继 `session/prompt` 只发送
-Dynamic Context。禁止使用 `systemPromptOverride`，same-host reuse 与 exact-ID `session/load` 不重复注入，load
+Dynamic Context。禁止使用 `systemPromptOverride`，same-host reuse 与 exact-ID `session/resume` 不重复注入，resume
 失败后的 replacement Session 对新 Binding/generation 注入一次。
 
 Grok compaction policy 为 `best_effort`。只准入无 JSON-RPC request ID 的
@@ -170,6 +173,45 @@ requested 与 acknowledged 均收敛为 1。detector 丢失仍不阻断 Readines
 
 - 继续首轮 user prompt 注入：权限层级低于 Grok 已验证的原生追加通道；
 - `systemPromptOverride`：会替换上游 system prompt，不满足追加语义；
-- load 时重发 rules：Grok 只在创建时折叠 rules，且 exact load 已保留原规则；
+- resume 时重发 rules：Grok 把 rules 定义为 creation-only，恢复保留原 Session 的 system prompt；
 - 在 completion 回调中立即插入 prompt：会与 Runtime 内部重采样竞态；
 - 根据 token、summary 或 assistant 文本猜测压缩：没有稳定 occurrence identity，无法幂等准入。
+
+<a id="v1-28-d06"></a>
+## V1.28-D06：Grok `>= 1.0.0` 只使用标准 ACP resume，删除 load-only fallback
+
+### 背景
+
+初始接入冻结在 `grok 0.2.118`，只能使用 `session/load`。Grok `1.0.0` 已正式在
+`initialize.agentCapabilities.sessionCapabilities.resume` 广告标准 ACP resume。继续同时支持旧版 load-only
+路径会保留两套 Grok cold continuation、HistoryRestore replay 语义和两种兼容 key，并让 Ready 文案与实际
+Provider 能力继续分叉。
+
+### 决定
+
+三个宿主平台共用 `grok >= 1.0.0` 最低版本合同；light discovery 对更低或不可解析版本返回
+`light_failed / runtime_version_below_minimum`，Deep Probe 与 machine Ready 必须观察 resume capability 对象，并对
+刚创建的 exact Session ID 成功调用一次 `session/resume`，不得只信广告。
+Grok continuation 固定为 compatible same-host Session → exact `session/resume` → continuity-lost 后一次 replacement
+`session/new`。Grok 不再声明或选择 `session.load` 产品能力，也不保留 `0.2.118` fallback；其他 Runtime 的通用
+load/HistoryRestore 实现不变。新 Session 继续携带两个 additional roots；Grok Resume 固定使用
+`additionalDirectories=[]`，不得尝试更新 creation-time roots。
+
+Bootstrap 内容和创建期投递不变：只有 `session/new._meta.rules` 携带 Rovai Bootstrap；resume 不重新提供 rules，
+由 Grok 恢复原 Session 已冻结的 system prompt。Grok Native Session compatibility key 切换为
+`grok-build:resume-v1`，继续绑定 installation、protocol、executable fingerprint、Host config、workspace、模型、
+权限、官方配置摘要和 native-rules revision。任一输入或 rules generation 改变都建立新 Binding/Session。
+
+### 后果
+
+低于 `1.0.0` 的既有安装即使曾保存 Ready snapshot，也会在解析/dispatch 时要求重新 Probe 并被版本门拒绝。
+Grok cold continuation 与其他支持 ACP resume 的 Runtime 使用同一方法和 exact Session ID 规则；TRAE 等仍可独立
+使用其 load-only HistoryRestore。macOS arm64、macOS x64、Windows x64 的平台资格仍分别取证，版本门共享不代表
+平台验证可以互相外推。
+
+### 被拒绝方案
+
+- 保留 `0.2.118` load fallback：会让已正式具备 resume 的当前合同继续承担旧双路径复杂度；
+- resume 时重新注入 rules：违反 creation-only 语义，也可能在恢复 Session 中重复 system prompt；
+- 删除通用 `session/load`：会破坏 TRAE、Kimi 等仍使用的既有 fallback；
+- 用一个平台的 `1.0.0` 结果直接准入另外两个平台：混淆共享版本合同与 adapter-scoped 平台证据。

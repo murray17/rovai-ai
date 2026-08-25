@@ -8232,7 +8232,7 @@ impl Core {
             })? {
             RuntimeIntegrityPreflight::Verified => {
                 let effective_runtime =
-                    acp::freeze_history_restore_compatibility(runtime.clone(), workspace).map_err(
+                    acp::freeze_native_session_compatibility(runtime.clone(), workspace).map_err(
                         |error| RuntimeDispatchFailure {
                             code: "runtime_configuration_invalid".to_string(),
                             error,
@@ -8385,7 +8385,7 @@ impl Core {
             effective_version: None,
         })?;
         let effective_runtime =
-            acp::freeze_history_restore_compatibility(effective_runtime, workspace).map_err(
+            acp::freeze_native_session_compatibility(effective_runtime, workspace).map_err(
                 |error| RuntimeDispatchFailure {
                     code: "runtime_configuration_invalid".to_string(),
                     error,

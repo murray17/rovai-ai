@@ -778,7 +778,33 @@ External MCP Library、Assignment 与 Runtime-native Projection 保持独立。v
 | Kimi Code | `AdditivePerRun` / `RovaiWins` | ACP `session/new/resume/load.mcpServers`，不写用户级配置 | `0.32.0` + MiniMax M3 真实 Core smoke 已通过 stdio、Streamable HTTP、同名整项优先与三项 `ready` Manifest exposure |
 | Grok Build | `AdditivePerRun` / `NativeWinsSkip` | `0.2.118` 忽略 ACP Session `mcpServers`；Core 使用权限收窄的临时 Plugin 与 process `--plugin-dir`，不写 project/user config | MiniMax-M3 产品 smoke 保留两个原生同名 Server、skip 两个冲突 Assignment，并真实调用第三个不同名 Rovai stdio Server；三项 Manifest exposure 与 cleanup 通过 |
 
-## Grok Build macOS arm64 接入证据
+## Grok Build `>= 1.0.0` 当前支持合同
+
+2026-08-25 起，macOS arm64、macOS x64、Windows x64 共用 `grok >= 1.0.0` 最低版本门；这只统一 Runtime
+版本合同，不合并三个平台的 qualification evidence。低版本或不可解析版本在 light discovery 中为
+`light_failed / runtime_version_below_minimum`；Deep Probe 和 machine Ready 必须观察
+`initialize.agentCapabilities.sessionCapabilities.resume` 对象，并对刚创建的 exact Session ID 成功执行一次无
+Prompt 的 `session/resume`。只广告但实际拒绝该方法时不得判 Ready。
+
+Grok continuation 为 compatible same-host Session → exact `session/resume` → 一次 continuity-lost replacement
+`session/new`。Grok 不再声明或选择 `session.load`，`0.2.118` HistoryRestore fallback 已删除；TRAE、Kimi 等
+其他 Runtime 的通用 load 路径不变。新 Session 继续携带 attachment root、Run tmp，并只在
+`session/new._meta.rules` 追加完整 Bootstrap；Grok Resume 固定发送 `additionalDirectories=[]`，不尝试更新
+creation-time roots，也不重新注入 creation-only rules。`grok-build:resume-v1` compatibility key 继续 fence
+官方配置、rules revision、Runtime identity、workspace、model 与 permission，变化时建立新 Session。
+
+当前开发机已升级到 `grok 1.0.5 (5115b46bc909)`。macOS arm64 真实 Deep Probe 在 Ready 前完成
+`session/new → exact-ID session/resume([]) → session/set_model`；Core 与 ACP Host 重启后，Host ID 改变而 Native
+Session ID 和私密 marker 保持，恢复 Run 没有 replay Action/Approval。恢复后的新写入、审批与 cancel 通过，坏 ID
+只记录一次 continuity-lost 后 replacement-new。普通 AgentRun、十五项 Built-in CLI、历史 attachment、
+`AdditivePerRun / NativeWinsSkip` MCP 和 `.grok/skills` 也在同一 1.0.5 候选上通过。
+
+macOS arm64 当前 adapter-scoped 证据为
+[`qualification/runtime-platform/macos-arm64-grok-build-v2.json`](../qualification/runtime-platform/macos-arm64-grok-build-v2.json)；
+初始 `0.2.118` v1 artifact 保持不可变历史证据。macOS x64、Windows x64 仍为 `not_qualified`，不得从 arm64
+外推。
+
+## Grok Build macOS arm64 初始 `0.2.118` 接入证据（历史）
 
 2026-08-24 的 v1.28 qualification 使用 `grok 0.2.118 (1e1687c1cf6a)`、MiniMax-M3 与本机私有
 OpenAI-compatible endpoint。生产 Host 直接继承官方 `$GROK_HOME/config.toml` 的 `[models]` /
@@ -799,7 +825,7 @@ same-host 与 exact load 不重复注入，replacement new 按新 Binding/genera
 `systemPromptOverride`。Grok runtime/history compatibility 增加 native-rules revision 1，旧 `first_payload`
 Binding 不复用。
 
-该 compatibility 升版严格限定到 Grok：Grok Runtime payload 使用 schema 5、HistoryRestore key 使用 v3，并含
+该次历史 compatibility 升版严格限定到 Grok：Grok Runtime payload 使用 schema 5、HistoryRestore key 使用 v3，并含
 官方配置摘要与 native-rules revision；非 Grok Runtime 仍使用原 schema 3 且不出现 Grok 字段，TRAE
 HistoryRestore 仍为 v1，因此其 canonical payload 与 digest 不变化。
 
@@ -817,10 +843,10 @@ External MCP 先得到“Session `mcpServers` 被忽略”的负向证据，再�
 产品 smoke 保留两个 native 同名定义并启动它们，两个冲突 Assignment 记为 skip，第三个不同名 Server 由
 MiniMax-M3 真实调用；临时 Plugin 随 Host 删除。项目/用户 config 仍不作为注入通道。
 
-adapter-scoped 原始证据位于
+adapter-scoped 初始历史证据位于
 [`qualification/runtime-platform/macos-arm64-grok-build-v1.json`](../qualification/runtime-platform/macos-arm64-grok-build-v1.json)。
-该证据不包含 Key、完整 Native ID、Prompt 或本机私有路径。macOS x64 与 Windows x64 保持未准入；原生
-Usage/Cost 字段保持 Disabled。
+当前 1.0.5 证据见上方 v2 artifact；两者都不包含 Key、完整 Native ID、Prompt 或本机私有路径。macOS x64 与
+Windows x64 保持未准入；原生 Usage/Cost 字段保持 Disabled。
 
 ## 历史：内置 MCP / Antigravity 专项复核
 

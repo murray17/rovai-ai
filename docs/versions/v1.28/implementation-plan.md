@@ -2,7 +2,7 @@
 document_type: implementation-plan
 version: v1.28
 authority: implementation-and-acceptance-status
-status: complete
+status: in_progress
 last_updated: 2026-08-25
 ---
 
@@ -23,8 +23,8 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 - [x] 完成 Migration 107 catalog 与 Migration 108 compaction closed sets，Data Contract v1.22/schema 63、
   Skill group、Desktop catalog、logo provenance 与 scripts closed set；
 - [x] 完成 Rust、TypeScript、Renderer、Migration、文档和 asset 自动化检查；
-- [x] 完成 Fleet LRU warm Host/同 Session 复用，以及 Core/Host 重启后的 exact `session/load` HistoryRestore、
-  replay quarantine、恢复后 Tool/Approval/cancel 和错误 ID fresh fallback；
+- [x] 完成 Fleet LRU warm Host/同 Session 复用；初始 `0.2.118` 的 exact `session/load` HistoryRestore、replay
+  quarantine 与错误 ID fallback 作为历史验收保留；
 - [x] 完成真实 Deep Probe、两轮 AgentRun、命令/权限、cancel、Built-in CLI、Skill、Missing-Send，并将
   ACP Session MCP 的负向结果收敛到已实测的 process `--plugin-dir`，通过 native preservation、同名 skip、
   不同名追加、ContextManifest 与真实 Tool call；
@@ -37,6 +37,13 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   compatibility revision fence 旧 `first_payload` Binding；
 - [x] 准入 exact structured `auto_compact_completed` + event ID，启用 Grok `best_effort` observer；真实 debug-arm
   产品两轮证明 next-input Redelivery revision 1 accepted 且 ACK 收敛；
+- [x] 将三个宿主平台的 Grok 最低版本合同统一为 `>= 1.0.0`；light/Deep/Ready 均 fail closed，Deep/Ready
+  要求 `sessionCapabilities.resume` 且真实调用同一 ID 成功；Grok continuation 改用标准 ACP `session/resume`，
+  Resume 固定使用空 `additionalDirectories`，并移除 load-only fallback；
+  `session/new._meta.rules` 与 creation-only / resume 不重注入语义保持不变；
+- [x] macOS arm64 使用 `grok 1.0.5` 完成真实 Deep Probe、cold resume、AgentRun、Built-in CLI/attachment、
+  External MCP 与 Skill smoke，并更新 adapter-scoped v2 evidence；
+- [ ] macOS x64 与 Windows x64 客户端分别补充 `grok >= 1.0.0` 的同等目标主机证据；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则

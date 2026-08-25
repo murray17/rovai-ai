@@ -5,7 +5,7 @@ upstream: Grok Build CLI
 authority: research-evidence-only
 status: validated
 admission: qualified
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # Grok Build Runtime 接入研究
@@ -13,7 +13,38 @@ last_updated: 2026-08-24
 > 本文按 [`runtime-integration-checklist.md`](https://github.com/murray17/rovai-ai/blob/main/docs/development/runtime-integration-checklist.md) 整理。
 > xAI 官方文档是主要来源；Multica/Botmux 代码只作为非合同参考，不替代当前 Grok 二进制的真实 Probe。
 
-## 2026-08-24 目标版本实机复核
+## 2026-08-25 `1.0.0` continuation 基线
+
+当前产品支持下限已切到 `grok >= 1.0.0`。该版本正式在
+`initialize.agentCapabilities.sessionCapabilities.resume` 广告标准 ACP resume，因此当前实现采用：
+
+```text
+compatible same-host Session
+  -> exact ACP session/resume
+  -> one continuity-lost replacement session/new
+```
+
+Grok 不再声明或选择 `session.load` 产品能力，也不保留 `0.2.118` load-only fallback；通用 ACP load 能力仍供
+其他 Runtime 使用。light discovery 对低于门槛或不可解析的版本 fail closed，Deep Probe / machine Ready 必须
+既看到 resume capability 对象，也对刚创建的 exact Session ID 成功调用一次 `session/resume`；不能只信广告。
+
+Grok `1.0.x` 明确拒绝 Resume 的非空 `additionalDirectories`。因此 `session/new` 继续携带 attachment root、Run tmp
+和 creation-only `_meta.rules`，`session/resume` 则固定发送 `additionalDirectories=[]`、空 `mcpServers` 且不带
+rules；其他 Runtime 的 Session 参数形状不变。Resume 后 attachment 与 Built-in CLI 是否仍满足运行边界必须由
+真实 cold-continuation 产品 smoke 证明，不能由 capability advertisement 推断。
+
+System Prompt 合同没有变化：只有新 Session 的 `session/new._meta.rules` 携带完全相同的 Rovai Bootstrap；
+resume 不重新注入 rules，恢复沿用原 Session 的 system prompt。Native Binding compatibility 改为
+`grok-build:resume-v1`，继续包含官方配置摘要与 native-rules revision，因此 Bootstrap generation 改变时仍会
+建立新 Session，未改变时才 resume。
+
+本机已升级到 `grok 1.0.5 (5115b46bc909)`，macOS arm64 真实通过生产形状 Deep Probe、普通 AgentRun、
+Core/ACP Host 重启后的 exact-ID cold resume、恢复后的 Tool/Approval/cancel、坏 ID 单次 fallback、十五项 Built-in
+CLI、历史 attachment、External MCP 同名矩阵与 `.grok/skills` 原生发现。BYOK 仍使用原有官方配置，account
+cached-token 因本机未登录而保持 `Unverified`。macOS x64 与 Windows x64 仍需各自补证；共享最低版本规则不改变
+逐平台 qualification 边界。
+
+## 2026-08-24 历史目标版本实机复核
 
 下文保留接入前研究假设；本节记录 `grok 0.2.118 (1e1687c1cf6a) × MiniMax-M3 × macOS arm64` 的后续
 实证，当前产品结论以 v1.28 Version、Contract 与 compatibility register 为准。

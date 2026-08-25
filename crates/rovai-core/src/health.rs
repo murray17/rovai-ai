@@ -11,7 +11,8 @@ use anyhow::{Context, Result, bail};
 use rovai_core::{
     agent_profile::AdapterKind,
     agent_runtime_adapter::{
-        KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint, trae_machine_ready_capabilities,
+        GROK_BUILD_MINIMUM_VERSION_LABEL, KIRO_ADDITIVE_AGENT_NAME, executable_fingerprint,
+        grok_build_minimum_version_satisfied, trae_machine_ready_capabilities,
         trae_machine_ready_requirements, write_kiro_additive_agent_config,
     },
     managed_process::{ManagedChildStdin, ManagedChildStdout},
@@ -1188,15 +1189,39 @@ async fn acp_probe_at(
             session_result: None,
         };
     }
+    if kind == AdapterKind::GrokBuild
+        && !grok_build_minimum_version_satisfied(reported_version.as_deref())
+    {
+        return AcpCapabilityProbe {
+            result: agent_probe_result(
+                kind.as_str(),
+                Some(path_text),
+                reported_version,
+                fingerprint,
+                AgentRuntimeProbeStatus::MissingCapabilities,
+                Vec::new(),
+                vec![format!(
+                    "runtime.version>={GROK_BUILD_MINIMUM_VERSION_LABEL}"
+                )],
+                Some(format!(
+                    "Grok Build >= {GROK_BUILD_MINIMUM_VERSION_LABEL} is required."
+                )),
+                probed_at,
+            ),
+            initialize_result: None,
+            session_result: None,
+        };
+    }
     let probe = run_acp_probe(&canonical, kind, include_session, purpose).await;
     match probe {
-        Ok((initialize_result, session_result)) => {
+        Ok((initialize_result, session_result, grok_resume_verified)) => {
             let mut capabilities = acp_observed_capabilities(
                 kind,
                 reported_version.as_deref(),
                 fingerprint.as_deref(),
                 &initialize_result,
                 session_result.as_ref(),
+                grok_resume_verified,
             );
             let additive_mcp = additive_acp_mcp_verified(kind);
             if additive_mcp {
@@ -1264,7 +1289,7 @@ async fn run_acp_probe(
     kind: AdapterKind,
     include_session: bool,
     purpose: RuntimeLaunchPurpose,
-) -> Result<(Value, Option<Value>)> {
+) -> Result<(Value, Option<Value>, bool)> {
     if !runtime_launch_allowed(kind, purpose) {
         bail!(runtime_launch_disallowed_detail(purpose));
     }
@@ -1349,7 +1374,7 @@ async fn run_acp_probe(
                 bail!("Runtime did not negotiate ACP v1");
             }
             if !include_session {
-                return Ok::<_, anyhow::Error>((initialize, None));
+                return Ok::<_, anyhow::Error>((initialize, None, false));
             }
             let auth_method = match kind {
                 AdapterKind::CursorAgent => Some(("cursor_login", "Cursor")),
@@ -1392,13 +1417,31 @@ async fn run_acp_probe(
             } else {
                 2
             };
+            let session_params = if kind == AdapterKind::GrokBuild {
+                let attachment_root = probe_root.join("attachments");
+                let run_tmp = probe_root.join("run-tmp");
+                std::fs::create_dir_all(&attachment_root)?;
+                std::fs::create_dir_all(&run_tmp)?;
+                crate::acp::build_acp_new_session_params(
+                    kind,
+                    &probe_root.to_string_lossy(),
+                    &[],
+                    &[
+                        attachment_root.to_string_lossy().into_owned(),
+                        run_tmp.to_string_lossy().into_owned(),
+                    ],
+                    Some("Rovai Grok Deep Probe native rules marker"),
+                )
+            } else {
+                json!({"cwd": probe_root, "mcpServers": []})
+            };
             write_json_line(
                 stdin,
                 &json!({
                     "jsonrpc": "2.0",
                     "id": session_request_id,
                     "method": "session/new",
-                    "params": {"cwd": probe_root, "mcpServers": []}
+                    "params": session_params
                 }),
             )
             .await?;
@@ -1408,6 +1451,43 @@ async fn run_acp_probe(
                 .and_then(Value::as_str)
                 .filter(|value| !value.trim().is_empty())
                 .context("ACP session/new did not return sessionId")?;
+            let mut next_request_id = session_request_id + 1;
+            let mut grok_resume_verified = false;
+            if kind == AdapterKind::GrokBuild
+                && initialize
+                    .pointer("/agentCapabilities/sessionCapabilities/resume")
+                    .is_some_and(Value::is_object)
+            {
+                let resume_params = crate::acp::build_acp_resume_session_params(
+                    kind,
+                    session_id,
+                    &probe_root.to_string_lossy(),
+                    &[],
+                    &[],
+                );
+                write_json_line(
+                    stdin,
+                    &json!({
+                        "jsonrpc": "2.0",
+                        "id": next_request_id,
+                        "method": "session/resume",
+                        "params": resume_params
+                    }),
+                )
+                .await?;
+                let resume = read_rpc_result(lines, next_request_id)
+                    .await
+                    .context("Grok ACP session/resume capability check failed")?;
+                if let Some(returned_session_id) = resume.get("sessionId").and_then(Value::as_str)
+                    && returned_session_id != session_id
+                {
+                    bail!(
+                        "Grok ACP session/resume capability check returned a different Session ID"
+                    );
+                }
+                grok_resume_verified = true;
+                next_request_id += 1;
+            }
             if matches!(kind, AdapterKind::KiroCli | AdapterKind::GrokBuild) {
                 let current_model = session
                     .pointer("/models/currentModelId")
@@ -1429,7 +1509,7 @@ async fn run_acp_probe(
                     stdin,
                     &json!({
                         "jsonrpc": "2.0",
-                        "id": session_request_id + 1,
+                        "id": next_request_id,
                         "method": "session/set_model",
                         "params": {
                             "sessionId": session_id,
@@ -1438,9 +1518,9 @@ async fn run_acp_probe(
                     }),
                 )
                 .await?;
-                read_rpc_result(lines, session_request_id + 1).await?;
+                read_rpc_result(lines, next_request_id).await?;
             }
-            Ok((initialize, Some(session)))
+            Ok((initialize, Some(session), grok_resume_verified))
         };
         match timeout(deadline, exchange).await {
             Ok(result) => result,
@@ -1949,6 +2029,7 @@ fn acp_observed_capabilities(
     executable_fingerprint: Option<&str>,
     initialize: &Value,
     session: Option<&Value>,
+    grok_resume_verified: bool,
 ) -> Vec<String> {
     let mut capabilities = if kind == AdapterKind::TraeCnCli {
         session.map_or_else(Vec::new, |session| {
@@ -1969,7 +2050,7 @@ fn acp_observed_capabilities(
     if kind == AdapterKind::GrokBuild && session.is_some() {
         capabilities.push("grok.authenticate".to_string());
     }
-    if kind != AdapterKind::KimiCodeCli
+    if !matches!(kind, AdapterKind::KimiCodeCli | AdapterKind::GrokBuild)
         && initialize
             .pointer("/agentCapabilities/loadSession")
             .and_then(Value::as_bool)
@@ -1981,6 +2062,7 @@ fn acp_observed_capabilities(
         && initialize
             .pointer("/agentCapabilities/sessionCapabilities/resume")
             .is_some_and(Value::is_object)
+        && (kind != AdapterKind::GrokBuild || grok_resume_verified)
     {
         capabilities.push("session.resume".to_string());
     }
@@ -2045,6 +2127,7 @@ fn acp_required_capabilities(kind: AdapterKind) -> Vec<String> {
             "structured_permission_request",
             "workspace.additional_roots",
             "session.set_model",
+            "session.resume",
             "mcp.additive_per_run",
         ]
         .into_iter()
@@ -2112,6 +2195,7 @@ fn classify_acp_probe_failure(detail: &str) -> AgentRuntimeProbeStatus {
         "trae behavioral capability missing",
         "did not negotiate acp v1",
         "session/new did not return sessionid",
+        "grok acp session/resume capability check",
         "invalid rpc response",
         "rpc result was missing",
         "method not found",
@@ -3229,7 +3313,7 @@ exit 0
         std::fs::set_permissions(&runtime, permissions).unwrap();
 
         let started = Instant::now();
-        let (initialize, session) = timeout(
+        let (initialize, session, grok_resume_verified) = timeout(
             Duration::from_secs(3),
             run_acp_probe(
                 &runtime,
@@ -3243,6 +3327,7 @@ exit 0
         .expect("the fixture must complete the ACP initialize handshake");
         assert_eq!(initialize["protocolVersion"], 1);
         assert!(session.is_none());
+        assert!(!grok_resume_verified);
         assert!(started.elapsed() < Duration::from_secs(3));
 
         let descendant_pid = std::fs::read_to_string(&descendant_pid_path)
@@ -3273,6 +3358,225 @@ exit 0
             "the inherited ACP descendant must be reaped"
         );
         std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn grok_deep_probe_rejects_pre_1_0_without_starting_acp() {
+        let directory = env::temp_dir().join(format!(
+            "rovai-grok-minimum-version-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let marker = directory.join("acp-started");
+        let runtime = directory.join("grok");
+        std::fs::write(
+            &runtime,
+            format!(
+                r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'grok 0.2.118'
+  exit 0
+fi
+touch '{}'
+exit 1
+"#,
+                marker.display()
+            ),
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&runtime).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&runtime, permissions).unwrap();
+
+        let probe = acp_capability_probe_at_for_purpose(
+            &runtime,
+            AdapterKind::GrokBuild,
+            RuntimeLaunchPurpose::HealthProbe,
+        )
+        .await;
+        assert_eq!(
+            probe.result.status,
+            AgentRuntimeProbeStatus::MissingCapabilities
+        );
+        assert_eq!(
+            probe.result.missing_capabilities,
+            vec!["runtime.version>=1.0.0".to_string()]
+        );
+        assert!(!marker.exists());
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn grok_deep_probe_requires_advertised_acp_resume() {
+        let directory = env::temp_dir().join(format!(
+            "rovai-grok-resume-capability-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let runtime = directory.join("grok");
+        std::fs::write(
+            &runtime,
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'grok 1.0.0'
+  exit 0
+fi
+IFS= read -r initialize || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true},"authMethods":[{"id":"cached_token"},{"id":"xai.api_key"}],"_meta":{"defaultAuthMethodId":"cached_token"}}}'
+IFS= read -r authenticate || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{}}'
+IFS= read -r session || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"sessionId":"grok-session","models":{"currentModelId":"minimax-m3","availableModels":[{"modelId":"minimax-m3","name":"MiniMax M3"}]}}}'
+IFS= read -r set_model || exit 1
+printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":null}'
+while IFS= read -r ignored; do :; done
+"#,
+        )
+        .unwrap();
+        let mut permissions = std::fs::metadata(&runtime).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&runtime, permissions).unwrap();
+
+        let probe = acp_capability_probe_at_for_purpose(
+            &runtime,
+            AdapterKind::GrokBuild,
+            RuntimeLaunchPurpose::HealthProbe,
+        )
+        .await;
+        assert_eq!(
+            probe.result.status,
+            AgentRuntimeProbeStatus::MissingCapabilities
+        );
+        assert_eq!(
+            probe.result.missing_capabilities,
+            vec!["session.resume".to_string()]
+        );
+        assert!(
+            !probe
+                .result
+                .capabilities
+                .contains(&"session.load".to_string())
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn grok_deep_probe_requires_a_successful_resume_call_with_production_wire_shape() {
+        for resume_accepted in [true, false] {
+            let directory = env::temp_dir().join(format!(
+                "rovai-grok-resume-behavior-{}",
+                uuid::Uuid::new_v4()
+            ));
+            std::fs::create_dir_all(&directory).unwrap();
+            let runtime = directory.join("grok");
+            let request_log = directory.join("requests.jsonl");
+            let resume_response = if resume_accepted {
+                r#"printf '%s\n' '{"jsonrpc":"2.0","id":4,"result":{"sessionId":"grok-session"}}'
+IFS= read -r set_model || exit 1
+printf '%s\n' "$set_model" >> "$request_log"
+printf '%s\n' '{"jsonrpc":"2.0","id":5,"result":null}'"#
+            } else {
+                r#"printf '%s\n' '{"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"session/resume rejected"}}'"#
+            };
+            std::fs::write(
+                &runtime,
+                format!(
+                    r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  printf '%s\n' 'grok 1.0.0'
+  exit 0
+fi
+request_log='{}'
+IFS= read -r initialize || exit 1
+printf '%s\n' "$initialize" >> "$request_log"
+printf '%s\n' '{{"jsonrpc":"2.0","id":1,"result":{{"protocolVersion":1,"agentCapabilities":{{"sessionCapabilities":{{"resume":{{}}}}}},"authMethods":[{{"id":"cached_token"}},{{"id":"xai.api_key"}}],"_meta":{{"defaultAuthMethodId":"cached_token"}}}}}}'
+IFS= read -r authenticate || exit 1
+printf '%s\n' "$authenticate" >> "$request_log"
+printf '%s\n' '{{"jsonrpc":"2.0","id":2,"result":{{}}}}'
+IFS= read -r session || exit 1
+printf '%s\n' "$session" >> "$request_log"
+printf '%s\n' '{{"jsonrpc":"2.0","id":3,"result":{{"sessionId":"grok-session","models":{{"currentModelId":"minimax-m3","availableModels":[{{"modelId":"minimax-m3","name":"MiniMax M3"}}]}}}}}}'
+IFS= read -r resume || exit 1
+printf '%s\n' "$resume" >> "$request_log"
+{}
+"#,
+                    request_log.display(),
+                    resume_response
+                ),
+            )
+            .unwrap();
+            let mut permissions = std::fs::metadata(&runtime).unwrap().permissions();
+            permissions.set_mode(0o755);
+            std::fs::set_permissions(&runtime, permissions).unwrap();
+
+            let probe = acp_capability_probe_at_for_purpose(
+                &runtime,
+                AdapterKind::GrokBuild,
+                RuntimeLaunchPurpose::HealthProbe,
+            )
+            .await;
+            if resume_accepted {
+                assert_eq!(probe.result.status, AgentRuntimeProbeStatus::Ready);
+                assert!(
+                    probe
+                        .result
+                        .capabilities
+                        .contains(&"session.resume".to_string())
+                );
+            } else {
+                assert_eq!(
+                    probe.result.status,
+                    AgentRuntimeProbeStatus::MissingCapabilities
+                );
+                assert!(
+                    probe
+                        .result
+                        .detail
+                        .as_deref()
+                        .unwrap()
+                        .contains("Grok ACP session/resume capability check failed")
+                );
+            }
+
+            let requests = std::fs::read_to_string(&request_log)
+                .unwrap()
+                .lines()
+                .map(|line| serde_json::from_str::<Value>(line).unwrap())
+                .collect::<Vec<_>>();
+            assert_eq!(requests[2]["method"], "session/new");
+            let new_params = &requests[2]["params"];
+            assert_eq!(
+                new_params["additionalDirectories"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2
+            );
+            assert!(
+                new_params
+                    .pointer("/_meta/rules")
+                    .and_then(Value::as_str)
+                    .is_some_and(|rules| !rules.trim().is_empty())
+            );
+            assert!(new_params.pointer("/_meta/systemPromptOverride").is_none());
+            assert!(new_params.get("systemPromptOverride").is_none());
+
+            assert_eq!(requests[3]["method"], "session/resume");
+            let resume_params = &requests[3]["params"];
+            assert_eq!(resume_params["sessionId"], "grok-session");
+            assert_eq!(resume_params["cwd"], new_params["cwd"]);
+            assert_eq!(resume_params["mcpServers"], json!([]));
+            assert_eq!(resume_params["additionalDirectories"], json!([]));
+            assert!(resume_params.get("_meta").is_none());
+            if resume_accepted {
+                assert_eq!(requests[4]["method"], "session/set_model");
+            }
+
+            std::fs::remove_dir_all(directory).unwrap();
+        }
     }
 
     #[test]
@@ -3326,7 +3630,10 @@ exit 0
     #[test]
     fn grok_capabilities_require_the_verified_standard_model_method() {
         let initialize = json!({
-            "agentCapabilities": {"loadSession": true}
+            "agentCapabilities": {
+                "loadSession": true,
+                "sessionCapabilities": {"resume": {}}
+            }
         });
         let session = json!({
             "sessionId": "grok-session",
@@ -3337,16 +3644,30 @@ exit 0
         });
         let observed = acp_observed_capabilities(
             AdapterKind::GrokBuild,
-            Some("0.2.118"),
+            Some("1.0.0"),
             Some("sha256:grok"),
             &initialize,
             Some(&session),
+            true,
         );
         let required = acp_required_capabilities(AdapterKind::GrokBuild);
         assert!(observed.contains(&"session.set_model".to_string()));
+        assert!(observed.contains(&"session.resume".to_string()));
+        assert!(!observed.contains(&"session.load".to_string()));
         assert!(!observed.contains(&"session.set_config_option".to_string()));
         assert!(required.contains(&"session.set_model".to_string()));
+        assert!(required.contains(&"session.resume".to_string()));
         assert!(!required.contains(&"session.set_config_option".to_string()));
+
+        let unverified = acp_observed_capabilities(
+            AdapterKind::GrokBuild,
+            Some("1.0.0"),
+            Some("sha256:grok"),
+            &initialize,
+            Some(&session),
+            false,
+        );
+        assert!(!unverified.contains(&"session.resume".to_string()));
     }
 
     #[test]
