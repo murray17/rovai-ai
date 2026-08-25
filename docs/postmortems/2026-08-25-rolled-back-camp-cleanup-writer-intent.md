@@ -7,6 +7,8 @@ systems:
   - camp-attachment-publication
   - camp-attachment-view-recovery
   - agent-run-admission
+  - agent-run-scheduler
+  - pending-camp-lifecycle
   - macos-packaged-app
 last_updated: 2026-08-26
 ---
@@ -15,10 +17,16 @@ last_updated: 2026-08-26
 
 ## Executive summary
 
-On 2026-08-25, an AgentRun in a Camp with no attachments failed before Runtime launch with the
-public error `camp_attachment_view_unavailable`. The Camp's Published Attachment View was `ready`
-and contained zero entries, but its journal retained a canceled `camp_delete_cleanup` operation in
-the contradictory terminal state `status = rolled_back, resolution_state = unresolved`.
+On 2026-08-25, an AgentRun remained `queued` from 17:20 while its CampTurn stayed `running`. It had
+no lease, `startedAt`, failure, or projected wait reason, although its Member and Runtime were ready
+and no other nonterminal Run was using capacity. The scheduler log snapshot contained 607 failed
+claim attempts with `camp_attachment_view_not_ready`. A later reproduction in a second Camp with no
+attachments, using the new pre-claim verification path, failed before Runtime launch with the public
+error `camp_attachment_view_unavailable` instead of remaining indefinitely queued.
+
+Both manifestations had the same blocker. The Camps' Published Attachment Views were `ready`, but
+their journals retained a canceled `camp_delete_cleanup` operation in the contradictory terminal
+state `status = rolled_back, resolution_state = unresolved`.
 
 The admission predicate treated every unresolved journal row as a live publication writer intent
 without considering operation kind or terminal status. It therefore rejected the Camp even though
@@ -36,8 +44,8 @@ The incident was resolved by settling canceled cleanup operations as `resolution
 repairing only the historical terminal shape during startup reconciliation, and extending the
 cleanup regression test through the actual writer-intent admission predicate. The fix was merged
 in [PR #59](https://github.com/murray17/rovai-ai/pull/59). The affected database retained its Camp,
-message, attachment, AgentRun, and audit records; the failed Run stopped before input delivery to a
-Runtime.
+message, attachment, AgentRun, and audit records. The initially blocked Run never acquired a lease,
+and the later failed Run stopped before input delivery to a Runtime.
 
 This is a blameless review. Cleanup cancellation and publication resolution were developed as
 separate lifecycle concerns, and the missing cross-axis invariant was not represented at their
@@ -48,22 +56,23 @@ criteria explicit.
 
 | Field | Value |
 |---|---|
-| Detection | User reported that a second Camp still failed after installing and starting the attachment-local degradation build |
+| Detection | User first reported an indefinitely queued Camp; a later confirming reproduction surfaced the same blocker as an explicit failure after the attachment-local degradation build |
 | Affected path | Camp Published Attachment View reconciliation before AgentRun claim |
 | Trigger condition | A canceled `camp_delete_cleanup` row remained `rolled_back / unresolved` |
-| User-visible symptom | The AgentRun failed with `camp_attachment_view_unavailable` before producing model output |
+| User-visible symptom | Older dispatch path: Run stayed queued without a wait reason; newer pre-claim path: Run failed with `camp_attachment_view_unavailable`; neither produced model output |
 | Directly affected population | Two live Camps matched the exact stale terminal state in the diagnosed database |
-| Runtime delivery | No evidence of Runtime input preparation or delivery for the failed Run |
+| Runtime delivery | The queued Run never acquired a lease; no evidence of Runtime input delivery existed for the later failed Run |
 | Data integrity | SQLite `quick_check` passed; persisted entity counts were unchanged across package installation |
 | Resolution | Lifecycle settlement and exact-shape startup repair in commit [`f1b0bb8`](https://github.com/murray17/rovai-ai/commit/f1b0bb8a541c1abda05ccf1ad0d79deb6bd62f0f), merged as [`67a51df`](https://github.com/murray17/rovai-ai/commit/67a51df29c581e5ece27c87737612ef48042c707) |
 | Incident duration | Not calculated because the first user-visible failure and verified daily-App recovery timestamps were not retained as structured incident data |
 
 ## Impact
 
-The affected AgentRun could not leave the queue/admission boundary, so the requested work did not
-execute. Retrying on the newly packaged attachment-degradation build produced the same terminal
-failure until the separate cleanup-lifecycle repair was installed and startup reconciliation could
-settle the historical row.
+The initial AgentRun could not leave the queue/admission boundary, so the requested work did not
+execute and its CampTurn appeared active without progress. The scheduler retried the same candidate
+without persisting a wait or terminal reason. Retrying on the newly packaged attachment-degradation
+build produced an explicit terminal failure until the separate cleanup-lifecycle repair was
+installed and startup reconciliation could settle the historical row.
 
 At diagnosis, exactly two live Camps had a `camp_delete_cleanup` operation in the
 `rolled_back / unresolved` state. Both Views were `ready`; the reported Camp had no View entries or
@@ -86,11 +95,15 @@ operation state and could have discarded newer derived projections.
 
 ## Detection and response
 
-The user detected the incident from the Camp failure after restarting a package that contained the
-latest attachment-local degradation fix. Build provenance was checked first to rule out an older
-Core: the running binary had the expected new Mach-O identity. The Camp's View and attachment rows
-were then inspected read-only, showing `ready`, zero entries, and no attachment source for a digest
-failure.
+The user first detected the incident from a Camp that stayed queued. The Run projection showed no
+lease, `startedAt`, failure, or wait reason; process logs showed 607 failed claims with
+`camp_attachment_view_not_ready`. Ready Member and Runtime projections, prior successful Runs, and
+the absence of another nonterminal Run ruled out capacity and Runtime readiness.
+
+The later confirming reproduction occurred after restarting a package that contained the latest
+attachment-local degradation fix. Build provenance was checked to rule out an older Core: the
+running binary had the expected new Mach-O identity. The Camp's View and attachment rows were then
+inspected read-only, showing `ready`, zero entries, and no attachment source for a digest failure.
 
 The latest AgentRun private detail narrowed the rejection to
 `camp_attachment_view_not_ready`. Comparing the broad admission predicate with two reduced
@@ -110,7 +123,8 @@ timestamps. Times not retained as structured evidence are left imprecise.
 | Time | Event |
 |---|---|
 | 2026-08-20 18:59 | Commit [`99df95b`](https://github.com/murray17/rovai-ai/commit/99df95b75c4a6fa8eda82f9cf254cdaf8ba679b2) unified attachment publication and Agent file delivery. Migration 102 added `resolution_state` with an `unresolved` default, while cleanup cancellation continued to update only `status`. |
-| 2026-08-25 17:13 | The first of two later-observed live Camps recorded a canceled cleanup as `rolled_back / unresolved`. |
+| 2026-08-25 17:13:05.778 | The first of two later-observed live Camps recorded a canceled cleanup as `rolled_back / unresolved`. Its View returned to `ready`. |
+| 2026-08-25 17:20:06.601 | A later AgentRun in that Camp entered `queued`. It never acquired a lease or `startedAt`; the sampled log accumulated 607 rejected claims with `camp_attachment_view_not_ready`. |
 | 2026-08-25 17:21 | The reported Camp recorded the same stale cleanup shape. Its View returned to `ready` and remained empty. |
 | 2026-08-25 17:33 | [PR #58](https://github.com/murray17/rovai-ai/pull/58) merged attachment-local degradation and pre-claim verification. It did not change cleanup cancellation settlement. |
 | 2026-08-25 17:44 | The newly packaged Core from PR #58 started against the daily data directory. |
@@ -161,6 +175,37 @@ semantic failure resolution, but a canceled cleanup has no such publication work
 coverage proved that cancellation restored the View to `ready`, but did not cross the writer-intent
 predicate that the scheduler actually used.
 
+## Trigger conditions and likelihood
+
+The defect required all of the following in a build containing Migration 102 but not PR #59:
+
+1. the Camp had a Published Attachment View row, so cleanup preparation returned an operation;
+2. Core prepared `camp_delete_cleanup` before a delete or pending-discard business mutation;
+3. the business mutation did not apply, or pre-mutation fencing failed, so Core cancelled cleanup;
+4. a later AgentRun in the same Camp reached dispatch admission.
+
+Given a prepared cleanup reached the affected cancellation function, recurrence was deterministic:
+the old SQL always left the new operation's default resolution as `unresolved`. In the measured
+local post-migration sample, both rolled-back cleanup rows were unresolved (`2/2`). That small,
+selected sample confirms the mechanism but is not a population-wide probability estimate. Overall
+frequency depended on how often a prepared cleanup was cancelled.
+
+Source inspection found one plausible routine route with high conditional likelihood. The
+`CampWorkspace` draft cleanup effect depends on Camp ID only and captures the snapshot's
+`activationState`. A pending Camp's first accepted message activates the same Camp ID, so the effect
+is not recreated solely because activation changes. Leaving later with an empty draft can run the
+older closure and request `camps.discardPending`; Core correctly rejects the now-active Camp, then
+cancels the prepared cleanup.
+
+The operation journal proves the generic cancelled-cleanup trigger but does not retain enough typed
+route evidence to prove that this Renderer sequence created either observed row. Deletion blockers,
+Runtime fencing failure, or another rejected pending-discard condition could reach the same
+cancellation function. The UI route is therefore the strongest source-supported hypothesis, not a
+confirmed incident fact.
+
+After PR #59, all of these cancellation routes settle writer intent and no longer produce this
+admission failure. Existing contradictory rows are repaired during startup reconciliation.
+
 ## Contributing factors
 
 ### Resolution state was added to a shared operation table
@@ -186,6 +231,12 @@ The cleanup rollback test asserted that the Camp View returned to `ready`. It di
 operation's resolution state, exercise the shared writer-intent predicate, or attempt a subsequent
 AgentRun admission.
 
+### A Renderer lifecycle callback can exercise cancellation routinely
+
+The pending-Camp leave callback can outlive the pending-to-active transition because its effect is
+keyed only by Camp ID. Core rejection is the correct authority boundary, but it made the faulty
+cleanup-cancellation path more likely to execute during ordinary navigation.
+
 ### The earlier symptom involved real attachment integrity
 
 The immediately preceding incident involved an Authority/View digest mismatch. Seeing the same
@@ -201,6 +252,8 @@ kind and lifecycle state.
   resolution field.
 - The writer-intent check failed closed, but its match set was wider than the unsafe state it was
   intended to guard.
+- The older claim path logged the unexpected writer-intent error and returned without persisting a
+  wait or terminal result, so repeated safe refusal appeared as an infinite queue.
 - PR #58 correctly moved verification before Run claim and added attachment-local repair, but it had
   no reason to rewrite unrelated terminal cleanup rows without evidence of this lifecycle defect.
 - CI covered cleanup rollback and publication resolution separately, not the full sequence
@@ -263,6 +316,10 @@ cancellation should have recorded originally.
   of relying on each caller to remember fields added by later migrations.
 - Tests for journal rollback and cancellation should end at the next public seam—Run admission or
   publication eligibility—not only at local View state.
+- Renderer leave callbacks should use current activation state or be invalidated when a pending Camp
+  activates without changing identity.
+- Unexpected dispatch-check failures need a bounded persisted result or stable wait reason, plus
+  rate-limited diagnostics, instead of an unbounded stderr loop.
 - Private diagnostics should identify the blocking operation kind, status, and resolution state in
   a redacted form so an empty Camp is not initially diagnosed as an attachment digest failure.
 - Startup and support diagnostics should count contradictory terminal/unresolved rows without
@@ -294,6 +351,8 @@ be mapped to a named maintainer before an open action starts.
 | PM-05 | Centralize or type transitions that are terminal on both axes so status and resolution cannot be settled independently by accident | Camp Attachment Lifecycle | P1 | Planned | Target: next journal lifecycle change |
 | PM-06 | Add redacted startup diagnostics for terminal/unresolved contradictions and admission-blocking operation class | Core Observability | P1 | Planned | Target: diagnostics contract review before implementation |
 | PM-07 | Record structured detection, mitigation, package activation, and verified recovery milestones for local release incidents | Release Engineering | P2 | Planned | Target: incident and local release checklist update |
+| PM-08 | Invalidate or refresh pending-Camp leave cleanup when the same Camp activates; add a Renderer lifecycle regression | Camp Renderer | P1 | Planned | Target: next pending-Camp lifecycle change |
+| PM-09 | Give unexpected dispatch-check failures a bounded persisted outcome or stable wait reason with rate-limited diagnostics | Scheduler Observability | P1 | Planned | Target: scheduler error-handling design and regression |
 
 ## Recurrence criteria
 
@@ -303,6 +362,8 @@ This incident is considered to have recurred if any of the following is observed
   `database_has_unresolved_writer_intent` return true for its Camp;
 - a canceled Camp cleanup leaves `resolution_state = unresolved`;
 - startup reconciliation leaves the exact historical cleanup shape unrepaired;
+- a scheduler repeatedly logs the same terminal-cleanup writer-intent rejection while leaving its
+  Run queued without a persisted wait or failure reason;
 - a zero-attachment, `ready` Camp is rejected solely because of a terminal cleanup journal row; or
 - a cleanup rollback test passes at the View state but the Camp cannot admit the next eligible Run.
 
@@ -332,5 +393,10 @@ require preserving a stale gate.
 - [Fix commit `f1b0bb8`](https://github.com/murray17/rovai-ai/commit/f1b0bb8a541c1abda05ccf1ad0d79deb6bd62f0f)
 - [Camp Published Attachment View architecture](../architecture/camp-published-attachment-view.md)
 - [Camp Published Attachment View v4 contract](../contracts/camp-published-attachment-view-v4.md)
+- [Camp Permanent Deletion v2 contract](../contracts/camp-permanent-deletion-v2.md)
 - [Camp Attachment v5 contract](../contracts/camp-attachment-v5.md)
 - [V1.28-D10: attachment-local integrity degradation](../versions/v1.28/decisions.md#v1-28-d10)
+- [Cleanup lifecycle implementation and regression](../../crates/rovai-core/src/camp_attachment_view.rs)
+- [Writer-intent admission predicate](../../crates/rovai-core/src/camp_attachment_publication.rs)
+- [Pending-Camp leave lifecycle](../../apps/desktop/src/renderer/src/CampWorkspace.tsx)
+- [Pending-Camp discard caller](../../apps/desktop/src/renderer/src/App.tsx)
