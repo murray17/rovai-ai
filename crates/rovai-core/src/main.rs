@@ -87,9 +87,10 @@ use rovai_core::{
     camp_id::CampId,
     camp_open::CampOpenService,
     collaboration::{
-        CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand, CollaborationService,
-        CreateCampCommand, CreateTaskCommand, DeleteCampCommand, DiscardPendingCampCommand,
-        ExecutionRequest, ProjectBindingKind, ReconcileDefaultLeadCommand, RenameCampCommand,
+        AddCampMemberCommand, CampActivationState, CampCollaborationMode, ChangeDefaultLeadCommand,
+        CollaborationService, CreateCampCommand, CreateTaskCommand, DeleteCampCommand,
+        DiscardPendingCampCommand, ExecutionRequest, ProjectBindingKind,
+        ReconcileDefaultLeadCommand, RemoveCampMemberCommand, RenameCampCommand,
         SendUserAutomationCampMessageCommand, SendUserCampDraftCommand,
         TaskAcceptanceCriteriaUpdate, TaskAssigneeFilter, TaskAssigneeUpdate, TaskListQuery,
         TaskStatus, UpdateTaskCommand,
@@ -537,6 +538,13 @@ struct CampCreationMember {
 #[serde(rename_all = "camelCase")]
 struct CampIdParams {
     camp_id: CampId,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CampMemberRemovalPreviewParams {
+    camp_id: CampId,
+    agent_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -5148,6 +5156,49 @@ impl Core {
                     &mut database,
                     &user_camp_command_envelope(params.command_id, camp_id, params.command),
                 )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.members.add" => {
+                let params: UserCommandParams<AddCampMemberCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().add_camp_member(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                Ok(serde_json::to_value(execution.result)?)
+            }
+            "camps.members.removalPreview" => {
+                let params: CampMemberRemovalPreviewParams =
+                    serde_json::from_value(request.params.clone())?;
+                let database = self.database.lock().await;
+                Ok(serde_json::to_value(
+                    CollaborationService::default().camp_member_removal_preview(
+                        &database,
+                        params.camp_id.as_str(),
+                        &params.agent_id,
+                    )?,
+                )?)
+            }
+            "camps.members.remove" => {
+                let params: UserCommandParams<RemoveCampMemberCommand> =
+                    serde_json::from_value(request.params.clone())?;
+                let camp_id = params.command.camp_id.clone();
+                let mut database = self.database.lock().await;
+                let execution = CollaborationService::default().remove_camp_member(
+                    &mut database,
+                    &user_camp_command_envelope(params.command_id, camp_id, params.command),
+                )?;
+                let should_dispatch_cancellation = execution.result.status
+                    != CommandResultStatus::Rejected
+                    && execution.result.payload["cancelRequestedRunCount"]
+                        .as_u64()
+                        .is_some_and(|count| count > 0);
+                drop(database);
+                if should_dispatch_cancellation {
+                    self.agent_run_cancellation_notify.notify_one();
+                }
                 Ok(serde_json::to_value(execution.result)?)
             }
             "camps.changeDefaultLead" => {

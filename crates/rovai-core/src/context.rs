@@ -8239,7 +8239,7 @@ mod slow_tests {
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(contract, ("v1.22".to_string(), 63, 1));
+        assert_eq!(contract, ("v1.23".to_string(), 64, 1));
         drop(reopened);
         std::fs::remove_dir_all(directory).unwrap();
     }

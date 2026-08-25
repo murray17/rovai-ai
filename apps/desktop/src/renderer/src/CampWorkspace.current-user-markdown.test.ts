@@ -59,7 +59,7 @@ function renderAgentMessage(
     createdAt: '2026-08-13T00:00:00Z'
   }
   const snapshot: CampSnapshot = {
-    schemaVersion: 32,
+    schemaVersion: 33,
     throughGlobalSequence: 1,
     camp: {
       id: 'camp-current-user-markdown',
@@ -68,11 +68,13 @@ function renderAgentMessage(
       projectBindingKind: 'quick_chat',
       projectPath: '/quick-chat',
       defaultLeadAgentId: 'agent_author',
+      membershipGeneration: 1,
       version: 1,
       createdAt: '2026-08-13T00:00:00Z',
       updatedAt: '2026-08-13T00:00:00Z'
     },
     members,
+    membershipReconciliations: [],
     tasks: [],
     messages: [message],
     messageDeliveries: [],

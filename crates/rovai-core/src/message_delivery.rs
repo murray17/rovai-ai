@@ -113,7 +113,9 @@ impl MessageDeliveryService {
                 .query_row(
                     r#"
                     SELECT camp_id, status, version, retry_generation,
-                           delivery_kind, gather_id, failure_code
+                           delivery_kind, gather_id, failure_code,
+                           recipient_agent_id,
+                           recipient_membership_version_at_admission
                     FROM message_delivery WHERE id = ?1
                     "#,
                     [&envelope.payload.delivery_id],
@@ -126,6 +128,8 @@ impl MessageDeliveryService {
                             row.get::<_, String>(4)?,
                             row.get::<_, Option<String>>(5)?,
                             row.get::<_, Option<String>>(6)?,
+                            row.get::<_, String>(7)?,
+                            row.get::<_, Option<i64>>(8)?,
                         ))
                     },
                 )
@@ -138,6 +142,8 @@ impl MessageDeliveryService {
                 delivery_kind,
                 gather_id,
                 failure_code,
+                recipient_agent_id,
+                recipient_membership_version_at_admission,
             )) = target
             else {
                 return Ok(rejected(
@@ -167,6 +173,21 @@ impl MessageDeliveryService {
                 return Ok(rejected(
                     "message_delivery.retry_not_allowed",
                     "The message attachment projection failed permanently",
+                ));
+            }
+            let membership_matches = match recipient_membership_version_at_admission {
+                Some(version) => recipient_membership_matches(
+                    transaction,
+                    &camp_id,
+                    &recipient_agent_id,
+                    version,
+                )?,
+                None => false,
+            };
+            if !membership_matches {
+                return Ok(rejected(
+                    "message_delivery.recipient_membership_changed",
+                    "The recipient membership changed after this Delivery was admitted",
                 ));
             }
             if delivery_kind == "gather_completion"
@@ -487,6 +508,7 @@ struct DispatchDelivery {
     message_id: String,
     camp_message_boundary_sequence: i64,
     recipient_agent_id: String,
+    recipient_membership_version_at_admission: i64,
     task_id: Option<String>,
     task_version_at_admission: Option<i64>,
     assignee_agent_id_at_admission: Option<String>,
@@ -1224,6 +1246,9 @@ pub fn persist_public_a2a_message(
     };
     let mut delivery_ids = Vec::with_capacity(effective_recipients.len());
     for (position, recipient_agent_id) in effective_recipients.iter().enumerate() {
+        let recipient_membership_version =
+            current_recipient_membership_version(transaction, request.camp_id, recipient_agent_id)?
+                .context("accepted recipient has no active Camp membership version")?;
         let lineage = if !is_gather
             && let Some(caller) = immediate_caller
                 .as_ref()
@@ -1305,6 +1330,7 @@ pub fn persist_public_a2a_message(
             "campId": request.camp_id,
             "campTurnId": request.camp_turn_id,
             "recipientAgentId": recipient_agent_id,
+            "recipientMembershipVersionAtAdmission": recipient_membership_version,
             "recipientCanonicalPosition": position,
             "recipientDigest": recipient_digest,
             "messageBodyDigest": content_digest,
@@ -1341,7 +1367,8 @@ pub fn persist_public_a2a_message(
                 scheduler_correlation_id, context_manifest_id,
                 target_agent_run_id, retry_generation,
                 manual_intervention_required, failure_code, failure_detail_json,
-                version, created_at, updated_at, ended_at
+                version, created_at, updated_at, ended_at,
+                recipient_membership_version_at_admission
             ) VALUES (
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                 ?9, ?10, ?23, ?24, ?11, ?12, ?13, ?14, ?15, ?16,
@@ -1349,7 +1376,7 @@ pub fn persist_public_a2a_message(
                 'public_a2a', ?25, ?26, ?27, ?28, NULL, ?20, ?21,
                 ?29, ?30, NULL,
                 0, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL,
-                1, ?22, ?22, ?31
+                1, ?22, ?22, ?31, ?32
             )
             "#,
             params![
@@ -1386,6 +1413,7 @@ pub fn persist_public_a2a_message(
                 initial_status,
                 initial_phase,
                 capture.map(|_| now.as_str()),
+                recipient_membership_version,
             ],
         )?;
         if is_gather {
@@ -2227,17 +2255,18 @@ fn process_dispatch_attempt(
         return Ok(outcome);
     }
 
-    if !recipient_is_eligible(
+    if !recipient_membership_matches(
         &transaction,
         &delivery.camp_id,
         &delivery.recipient_agent_id,
+        delivery.recipient_membership_version_at_admission,
     )? {
         let outcome = terminal_dispatch(
             &transaction,
             &delivery,
             attempt_id,
             "failed",
-            "recipient_no_longer_eligible",
+            "recipient_membership_changed",
             &actor,
             &now,
         )?;
@@ -2696,7 +2725,8 @@ fn load_dispatch_delivery(
                    delivery.target_parent_agent_run_id,
                    delivery.return_to_agent_run_id,
                    delivery.a2a_root_agent_run_id,
-                   delivery.a2a_depth, delivery.retry_generation
+                   delivery.a2a_depth, delivery.retry_generation,
+                   delivery.recipient_membership_version_at_admission
             FROM message_delivery AS delivery
             WHERE delivery.id = ?1 AND delivery.status = 'pending'
               AND delivery.dispatch_phase = 'attempting'
@@ -2725,6 +2755,7 @@ fn load_dispatch_delivery(
                     a2a_root_agent_run_id: row.get(17)?,
                     a2a_depth: row.get(18)?,
                     retry_generation: row.get(19)?,
+                    recipient_membership_version_at_admission: row.get(20)?,
                 })
             },
         )
@@ -2880,29 +2911,40 @@ fn terminal_dispatch(
     })
 }
 
-fn recipient_is_eligible(
+pub(crate) fn current_recipient_membership_version(
     transaction: &Transaction<'_>,
     camp_id: &str,
     agent_id: &str,
-) -> Result<bool> {
+) -> Result<Option<i64>> {
     transaction
         .query_row(
             r#"
-            SELECT EXISTS(
-                SELECT 1
-                FROM camp_member
-                JOIN agent_profile ON agent_profile.id = camp_member.agent_id
-                WHERE camp_member.camp_id = ?1
-                  AND camp_member.agent_id = ?2
-                  AND camp_member.status = 'active'
-                  AND camp_member.leave_requested_at IS NULL
-                  AND agent_profile.profile_status = 'present'
-            )
+            SELECT camp_member.version
+            FROM camp_member
+            JOIN agent_profile ON agent_profile.id = camp_member.agent_id
+            WHERE camp_member.camp_id = ?1
+              AND camp_member.agent_id = ?2
+              AND camp_member.status = 'active'
+              AND camp_member.leave_requested_at IS NULL
+              AND agent_profile.profile_status = 'present'
             "#,
             params![camp_id, agent_id],
             |row| row.get(0),
         )
+        .optional()
         .map_err(Into::into)
+}
+
+fn recipient_membership_matches(
+    transaction: &Transaction<'_>,
+    camp_id: &str,
+    agent_id: &str,
+    membership_version: i64,
+) -> Result<bool> {
+    Ok(
+        current_recipient_membership_version(transaction, camp_id, agent_id)?
+            == Some(membership_version),
+    )
 }
 
 fn ensure_delivery_conversation(

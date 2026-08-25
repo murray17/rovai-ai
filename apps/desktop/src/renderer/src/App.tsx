@@ -12,6 +12,7 @@ import type {
   CampMessagePage,
   CampMessageAroundSnapshot,
   CampMessageView,
+  CampMemberRemovalPreview,
   CampOpenProjection,
   CampSnapshot,
   CreateCampRequest,
@@ -54,6 +55,8 @@ import {
   QuickChatWorkspace,
   composerHasSendablePayload,
   type CampMessageSendReceipt,
+  type CampMemberAddOutcome,
+  type CampMemberRemoveOutcome,
   type CampInspectorTab,
   type CampRuntimeRecovery,
   type NotificationFocusTarget,
@@ -125,6 +128,11 @@ export function appendLiveRuntimeEvent(
 }
 
 const ACTIVE_CAMP_INVALIDATION_EVENTS = new Set([
+  'camp.member_added',
+  'camp.member_removed',
+  'camp.membership_reconciliation_started',
+  'camp.membership_reconciliation_completed',
+  'camp.default_lead_reconciled',
   'agent_run.cancelled',
   'agent_run.recovery_blocker_resolved',
   'agent_run.runtime_model_observed',
@@ -318,10 +326,11 @@ export function campOpenProjectionAsSnapshot(
   const totalCount = Math.max(projection.coverage.messages.totalCount, loadedCount)
   const omittedCount = Math.max(0, totalCount - loadedCount)
   return {
-    schemaVersion: 32,
+    schemaVersion: 33,
     throughGlobalSequence: projection.throughGlobalSequence,
     camp: projection.camp,
     members: projection.members,
+    membershipReconciliations: projection.membershipReconciliations,
     tasks: projection.tasks,
     messages,
     messageDeliveries: projection.messageDeliveries,
@@ -663,7 +672,7 @@ export function App(): React.JSX.Element {
           command: { campId }
         })
       : await requestAuthoritativeCampOpenProjection(window.rovai, campId, traceId)
-    if (projection.schemaVersion !== 3) throw new Error('会话打开数据版本不兼容。')
+    if (projection.schemaVersion !== 4) throw new Error('会话打开数据版本不兼容。')
     console.info(
       `[camp-open] trace=${traceId} stage=renderer_received method=${method} `
       + `elapsed_ms=${(performance.now() - startedAt).toFixed(1)} `
@@ -2339,6 +2348,135 @@ export function App(): React.JSX.Element {
     }
   }
 
+  const addCampMembers = async (agentIds: string[]): Promise<CampMemberAddOutcome> => {
+    const campId = activeCampIdRef.current
+    const currentSnapshot = campSnapshotRef.current
+    if (!campId || currentSnapshot?.camp.id !== campId) {
+      throw new Error('当前会话尚未准备好。')
+    }
+    setBusy('camp-membership')
+    setError(null)
+    const outcome: CampMemberAddOutcome = {
+      addedAgentIds: [],
+      unchangedAgentIds: [],
+      failures: []
+    }
+    let membershipGeneration = currentSnapshot.camp.membershipGeneration
+    try {
+      for (let index = 0; index < agentIds.length; index += 1) {
+        const agentId = agentIds[index]
+        try {
+          const result = await window.rovai.request<StoredCommandResult>('camps.members.add', {
+            commandId: crypto.randomUUID(),
+            command: {
+              campId,
+              agentId,
+              expectedMembershipGeneration: membershipGeneration
+            }
+          })
+          if (result.status === 'rejected') {
+            const message = commandFailureMessage(result)
+            outcome.failures.push({ agentId, message })
+            if (membershipConflictCode(result.code)) {
+              for (const remainingAgentId of agentIds.slice(index + 1)) {
+                outcome.failures.push({
+                  agentId: remainingAgentId,
+                  message: '名册已发生变化，请在刷新后重试。'
+                })
+              }
+              break
+            }
+            continue
+          }
+          const payload = asRecord(result.payload)
+          if (typeof payload.membershipGeneration === 'number') {
+            membershipGeneration = payload.membershipGeneration
+          }
+          if (payload.changed === false) outcome.unchangedAgentIds.push(agentId)
+          else outcome.addedAgentIds.push(agentId)
+        } catch (error) {
+          outcome.failures.push({ agentId, message: errorMessage(error) })
+        }
+      }
+      try {
+        await Promise.all([
+          refreshActiveCampSnapshot(campId),
+          loadNavigation()
+        ])
+      } catch {
+        // The per-command outcomes are authoritative; normal event refresh will converge the surface.
+      }
+      return outcome
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const previewCampMemberRemoval = async (agentId: string): Promise<CampMemberRemovalPreview> => {
+    const campId = activeCampIdRef.current
+    if (!campId || campSnapshotRef.current?.camp.id !== campId) {
+      throw new Error('当前会话尚未准备好。')
+    }
+    const preview = await window.rovai.request<CampMemberRemovalPreview | null>(
+      'camps.members.removalPreview',
+      { campId, agentId }
+    )
+    if (!preview) throw new Error('这位队员已不在当前会话中。')
+    return preview
+  }
+
+  const removeCampMember = async (
+    preview: CampMemberRemovalPreview
+  ): Promise<CampMemberRemoveOutcome> => {
+    const campId = activeCampIdRef.current
+    if (!campId || preview.campId !== campId || campSnapshotRef.current?.camp.id !== campId) {
+      return { status: 'conflict', message: '当前会话已发生变化，请重新读取影响。' }
+    }
+    setBusy('camp-membership')
+    setError(null)
+    try {
+      const result = await window.rovai.request<StoredCommandResult>('camps.members.remove', {
+        commandId: crypto.randomUUID(),
+        command: {
+          campId,
+          agentId: preview.agentId,
+          expectedMembershipGeneration: preview.membershipGeneration,
+          expectedMembershipVersion: preview.membershipVersion,
+          replacementDefaultLeadAgentId: preview.nextDefaultLeadAgentId,
+          reason: 'removed_from_camp'
+        }
+      })
+      if (result.status === 'rejected') {
+        try {
+          await refreshActiveCampSnapshot(campId)
+        } catch {
+          // Keep the deterministic command result when the follow-up projection is unavailable.
+        }
+        return {
+          status: membershipConflictCode(result.code) ? 'conflict' : 'failed',
+          message: commandFailureMessage(result)
+        }
+      }
+      try {
+        await Promise.all([
+          refreshActiveCampSnapshot(campId),
+          loadNavigation()
+        ])
+      } catch {
+        // The accepted cutover is authoritative; reconciliation events will refresh the surface.
+      }
+      const reconciliationStatus = stringField(asRecord(result.payload), 'reconciliationStatus')
+      return {
+        status: 'removed',
+        reconciliationStatus: reconciliationStatus === 'reconciling' ? 'reconciling' : 'settled'
+      }
+    } catch (error) {
+      return { status: 'failed', message: errorMessage(error) }
+    } finally {
+      setBusy(null)
+    }
+  }
+
   async function createCamp(
     draft: Omit<CreateCampRequest, 'commandId'>
   ): Promise<void> {
@@ -2847,11 +2985,14 @@ export function App(): React.JSX.Element {
             agents={agents}
             installations={installations}
             liveRuntimeEvents={liveRuntimeEvents}
-            busy={busy === 'camp-message' || busy === 'change-default-lead' || busy?.startsWith('action-approval-') === true}
+            busy={busy === 'camp-message' || busy === 'change-default-lead' || busy === 'camp-membership' || busy?.startsWith('action-approval-') === true}
             onSend={sendCampMessage}
             onPendingDraftPersisted={refreshPendingCampNavigation}
             onPendingCampLeave={settlePendingCampOnLeave}
             onChangeLead={changeDefaultLead}
+            onAddMembers={addCampMembers}
+            onPreviewMemberRemoval={previewCampMemberRemoval}
+            onRemoveMember={removeCampMember}
             onTasksChanged={() => activateCamp(activeCampId).then(() => undefined)}
             onResolveApproval={(approval, decision) => {
               void resolveActionApproval(approval, decision)
@@ -3466,7 +3607,20 @@ export function commandFailureMessage(result: StoredCommandResult): string {
   if (result.code === 'agent_run.runtime_not_ready') {
     return '目标队员的 Agent 运行时暂不可用。'
   }
+  if (result.code === 'camp.last_member_required') {
+    return '会话至少保留 1 位队员。'
+  }
+  if (membershipConflictCode(result.code)) {
+    return '名册已发生变化。请重新读取最新状态后再试。'
+  }
   return localizeExecutionEngineTerms(stringField(result.payload, 'message') ?? `操作未完成：${result.code}`)
+}
+
+function membershipConflictCode(code: string): boolean {
+  return code === 'camp.membership_generation_conflict'
+    || code === 'camp.membership_version_conflict'
+    || code === 'camp.member_not_found'
+    || code === 'camp.member_not_active'
 }
 
 export function campDeleteCommand(

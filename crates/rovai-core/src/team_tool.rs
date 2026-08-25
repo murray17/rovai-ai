@@ -807,6 +807,10 @@ impl TeamToolService {
                   AND camp_turn.execution_budget_deadline_at > ?3
                   AND camp_member.status = 'active'
                   AND camp_member.leave_requested_at IS NULL
+                  AND camp_member.version = CAST(
+                      json_extract(agent_run.effective_config_json, '$.campMemberVersion')
+                      AS INTEGER
+                  )
                 "#,
                 params![agent_run_id, execution_epoch, now],
                 |row| {
@@ -1857,6 +1861,10 @@ fn resolve_sender_identity_by_digest(
               AND camp_turn.cancel_requested_at IS NULL
               AND camp_member.status = 'active'
               AND camp_member.leave_requested_at IS NULL
+              AND camp_member.version = CAST(
+                  json_extract(agent_run.effective_config_json, '$.campMemberVersion')
+                  AS INTEGER
+              )
             "#,
             params![
                 native_binding_id,
@@ -1999,12 +2007,14 @@ mod tests {
     #[cfg(feature = "slow-tests")]
     use crate::{
         agent_profile::configure_test_runtime,
-        collaboration::end_camp_membership,
+        collaboration::{RemoveCampMemberCommand, end_camp_membership},
         context::ContextMaterialization,
         memory::{MEMORY_AGENT_MUTATIONS_PER_RUN, MemoryCreationOrigin, RetireMemoryCommand},
         memory_retrieval::{MemoryCacheState, MemoryReadInput, MemorySearchInput},
         message_delivery::{DeliveryDispatchTrigger, dispatch_pending_for_recipient},
-        runtime::{CancelCampTurnCommand, FailAgentRunCommand},
+        runtime::{
+            AcknowledgeAgentRunCancellationCommand, CancelCampTurnCommand, FailAgentRunCommand,
+        },
     };
     use crate::{
         camp_attachment_view::CampAttachmentViewStore,
@@ -2128,7 +2138,9 @@ mod tests {
                             AddCampMemberCommand {
                                 camp_id: camp_id.clone(),
                                 agent_id: (*agent_id).to_string(),
+                                expected_membership_generation: 1,
                                 capability_overrides: json!({}),
+                                source: None,
                             },
                         ),
                     )
@@ -4143,32 +4155,97 @@ mod tests {
             &transaction,
             &fixture.camp_id,
             "agent_1",
+            None,
+            "test_membership_ended",
+            "gather-initiator-membership-ended",
             &actor,
             None,
             &now,
         )
         .unwrap();
         transaction.commit().unwrap();
-        fixture.succeed_run(&member_run_id, member_epoch, "成员稍后完成");
+        let (run_status, run_version, cancel_requested_at): (String, i64, Option<String>) = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT status, version, cancel_requested_at FROM agent_run WHERE id = ?1",
+                [&member_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(run_status, "running");
+        assert!(cancel_requested_at.is_some());
+        let settled = ExecutionRuntimeService::default()
+            .acknowledge_agent_run_cancellation(
+                &mut fixture.database,
+                &CommandEnvelope {
+                    command_id: "ack-gather-initiator-membership-ended".to_string(),
+                    actor: ActorRef::System {
+                        component_id: "runtime-cancellation-coordinator".to_string(),
+                    },
+                    camp_id: Some(fixture.camp_id.clone()),
+                    expected_versions: Vec::new(),
+                    execution_epoch: None,
+                    payload: AcknowledgeAgentRunCancellationCommand {
+                        agent_run_id: member_run_id.clone(),
+                        expected_version: run_version,
+                        execution_epoch: member_epoch,
+                        ending_git_observation: None,
+                    },
+                },
+            )
+            .unwrap();
+        assert_eq!(settled.result.status, CommandResultStatus::Applied);
 
-        let final_state: (String, Option<String>, Option<String>, String) = fixture
+        let final_state: (
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+            String,
+            String,
+        ) = fixture
             .database
             .connection()
             .query_row(
                 r#"
                 SELECT gather.status, gather.completion_delivery_id,
-                       gather.completion_run_id, camp.default_lead_agent_id
+                       gather.completion_run_id, camp.default_lead_agent_id,
+                       (SELECT status FROM message_delivery WHERE id = ?2),
+                       (SELECT status FROM agent_run WHERE id = ?3),
+                       (SELECT status || ':' || settled_run_count || '/' || target_run_count
+                        FROM camp_membership_reconciliation
+                        WHERE command_id = 'gather-initiator-membership-ended')
                 FROM gather_record AS gather
                 JOIN camp ON camp.id = gather.camp_id
                 WHERE gather.id = ?1
                 "#,
-                [&gather_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                params![gather_id, dispatch_delivery_id, member_run_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(
             final_state,
-            ("cancelled".into(), None, None, "agent_2".into())
+            (
+                "cancelled".into(),
+                None,
+                None,
+                "agent_2".into(),
+                "cancelled".into(),
+                "cancelled".into(),
+                "completed:1/1".into(),
+            )
         );
     }
 
@@ -5752,6 +5829,108 @@ Use this exact public input @agent_2";
     }
 
     #[cfg(feature = "slow-tests")]
+    fn terminal_evidence_cannot_publish_after_the_run_membership_is_replaced() {
+        let mut fixture = Fixture::new();
+        let now = chrono::Utc::now().to_rfc3339();
+        let actor = ActorRef::User {
+            user_id: "local_user".to_string(),
+        };
+        let transaction = fixture
+            .database
+            .connection_mut()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        end_camp_membership(
+            &transaction,
+            &fixture.camp_id,
+            "agent_1",
+            Some("agent_2"),
+            "test_membership_ended",
+            "terminal-publication-membership-ended",
+            &actor,
+            None,
+            &now,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        let membership_generation: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT membership_generation FROM camp WHERE id = ?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        CollaborationService::default()
+            .add_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "terminal-publication-membership-readded",
+                    Some(&fixture.camp_id),
+                    AddCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_1".to_string(),
+                        expected_membership_generation: membership_generation,
+                        capability_overrides: json!({}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+
+        // Fault-inject an already-arriving Runtime terminal after the cancellation
+        // request. Terminal evidence remains independently testable, while every
+        // public output path must still honor the frozen membership revision.
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET cancel_requested_at = NULL, cancel_reason_code = NULL
+                WHERE id = ?1
+                "#,
+                [&fixture.source_run_id],
+            )
+            .unwrap();
+        let source_run_id = fixture.source_run_id.clone();
+        let completed = fixture.succeed_run_with_candidate(
+            &source_run_id,
+            fixture.source_epoch,
+            "这份终态证据可以结算，但不能再公开",
+            Some(MissingSendRecoveryCandidate::new(
+                MissingSendRecoveryBoundary::CodexCompletedTurn,
+                "这份终态证据可以结算，但不能再公开",
+            )),
+        );
+        assert_eq!(completed.result.status, CommandResultStatus::Applied);
+        assert!(completed.result.payload["finalCampMessageId"].is_null());
+        assert_eq!(
+            completed.result.payload["missingSendRecovery"]["decision"],
+            "skipped_membership_fenced"
+        );
+        let state: (String, i64, String) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT run.status,
+                       (SELECT COUNT(*) FROM camp_message
+                        WHERE source_agent_run_id = run.id),
+                       (SELECT status || ':' || settled_run_count || '/' || target_run_count
+                        FROM camp_membership_reconciliation
+                        WHERE command_id = 'terminal-publication-membership-ended')
+                FROM agent_run AS run WHERE run.id = ?1
+                "#,
+                [&fixture.source_run_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(state, ("succeeded".into(), 0, "completed:1/1".into()));
+    }
+
+    #[cfg(feature = "slow-tests")]
     fn accepted_recipient_free_send_suppresses_missing_send_recovery() {
         let mut fixture = Fixture::new();
         let service = TeamToolService::default();
@@ -6483,6 +6662,318 @@ Use this exact public input @agent_2";
             .create_task(&mut fixture.database, &forbidden_invocation)
             .unwrap();
         assert_eq!(forbidden.result.code, "task.create_forbidden");
+    }
+
+    #[cfg(feature = "slow-tests")]
+    fn every_agent_business_tool_binding_is_fenced_after_leave_and_readd() {
+        let mut fixture = Fixture::new();
+        let now = chrono::Utc::now().to_rfc3339();
+        let actor = ActorRef::User {
+            user_id: "local_user".to_string(),
+        };
+        let transaction = fixture
+            .database
+            .connection_mut()
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .unwrap();
+        end_camp_membership(
+            &transaction,
+            &fixture.camp_id,
+            "agent_1",
+            Some("agent_2"),
+            "test_membership_ended",
+            "team-tool-membership-ended",
+            &actor,
+            None,
+            &now,
+        )
+        .unwrap();
+        transaction.commit().unwrap();
+        let membership_generation: i64 = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT membership_generation FROM camp WHERE id = ?1",
+                [&fixture.camp_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        CollaborationService::default()
+            .add_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "team-tool-membership-readd",
+                    Some(&fixture.camp_id),
+                    AddCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_1".to_string(),
+                        expected_membership_generation: membership_generation,
+                        capability_overrides: json!({}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        fixture
+            .database
+            .connection()
+            .execute(
+                r#"
+                UPDATE agent_run
+                SET status = 'running', cancel_requested_at = NULL,
+                    cancel_reason_code = NULL, ended_at = NULL
+                WHERE id = ?1
+                "#,
+                [&fixture.source_run_id],
+            )
+            .unwrap();
+
+        let list_error = TeamToolService::default()
+            .list_tasks(
+                &fixture.database,
+                &fixture.task_invocation(
+                    "membership-fenced-task-list",
+                    TeamListTasksInput {
+                        statuses: None,
+                        assignee_agent_id: None,
+                        unassigned_only: false,
+                        limit: 10,
+                        cursor: None,
+                    },
+                ),
+            )
+            .unwrap_err();
+        assert_eq!(
+            list_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_fenced"
+        );
+        let binding_error = match TeamToolService::default().prepare_binding_credential(
+            &mut fixture.database,
+            &fixture.source_run_id,
+            fixture.source_epoch,
+            false,
+        ) {
+            Ok(_) => panic!("a stale Agent Run must not receive a fresh binding credential"),
+            Err(error) => error,
+        };
+        assert_eq!(
+            binding_error
+                .downcast_ref::<TeamToolInvocationError>()
+                .unwrap()
+                .code,
+            "team_tool.binding_unavailable"
+        );
+    }
+
+    #[cfg(feature = "slow-tests")]
+    fn a_terminal_delivery_cannot_be_retried_after_the_recipient_leaves_and_rejoins() {
+        let mut fixture = Fixture::new();
+        let invocation = fixture.public_send_invocation(
+            "delivery-before-membership-cutover",
+            "这条旧投递不能跨成员任期复活",
+            &["agent_2"],
+        );
+        let sent = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &invocation)
+            .unwrap();
+        assert_eq!(sent.result.status, CommandResultStatus::Accepted);
+        let delivery_id = sent.result.payload["deliveryIds"][0]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let target_run_id: String = fixture
+            .database
+            .connection()
+            .query_row(
+                "SELECT target_agent_run_id FROM message_delivery WHERE id = ?1",
+                [&delivery_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let target_epoch = fixture
+            .claim_bind_and_issue(&target_run_id, "native-delivery-before-membership-cutover")
+            .0;
+        fixture.fail_run(
+            &target_run_id,
+            target_epoch,
+            "recipient_failed_before_membership_cutover",
+        );
+
+        let collaboration = CollaborationService::default();
+        let preview = collaboration
+            .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_2")
+            .unwrap()
+            .unwrap();
+        let removed = collaboration
+            .remove_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "remove-delivery-recipient",
+                    Some(&fixture.camp_id),
+                    RemoveCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: preview.membership_generation,
+                        expected_membership_version: preview.membership_version,
+                        replacement_default_lead_agent_id: None,
+                        reason: Some("test membership cutover".to_string()),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(removed.result.status, CommandResultStatus::Accepted);
+        let readded = collaboration
+            .add_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "readd-delivery-recipient",
+                    Some(&fixture.camp_id),
+                    AddCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation:
+                            removed.result.payload["membershipGeneration"]
+                                .as_i64()
+                                .unwrap(),
+                        capability_overrides: json!({}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(readded.result.status, CommandResultStatus::Applied);
+
+        let delivery_state: (String, Option<String>, i64, Option<i64>, i64) = fixture
+            .database
+            .connection()
+            .query_row(
+                r#"
+                SELECT delivery.status, delivery.failure_code, delivery.version,
+                       delivery.recipient_membership_version_at_admission,
+                       member.version
+                FROM message_delivery AS delivery
+                JOIN camp_member AS member
+                  ON member.camp_id = delivery.camp_id
+                 AND member.agent_id = delivery.recipient_agent_id
+                WHERE delivery.id = ?1
+                "#,
+                [&delivery_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(delivery_state.0, "failed");
+        assert_eq!(delivery_state.1.as_deref(), Some("target_agent_run_failed"));
+        assert_ne!(delivery_state.3, Some(delivery_state.4));
+        let retried = MessageDeliveryService::default()
+            .retry(
+                &mut fixture.database,
+                &user_envelope(
+                    "retry-delivery-after-rejoin",
+                    Some(&fixture.camp_id),
+                    RetryMessageDeliveryCommand {
+                        delivery_id,
+                        expected_version: delivery_state.2,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(retried.result.status, CommandResultStatus::Rejected);
+        assert_eq!(
+            retried.result.code,
+            "message_delivery.recipient_membership_changed"
+        );
+    }
+
+    #[cfg(feature = "slow-tests")]
+    fn public_send_rejects_a_left_recipient_and_accepts_a_new_membership() {
+        let mut fixture = Fixture::new();
+        let collaboration = CollaborationService::default();
+        let preview = collaboration
+            .camp_member_removal_preview(&fixture.database, &fixture.camp_id, "agent_2")
+            .unwrap()
+            .unwrap();
+        let removed = collaboration
+            .remove_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "remove-public-send-recipient",
+                    Some(&fixture.camp_id),
+                    RemoveCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation: preview.membership_generation,
+                        expected_membership_version: preview.membership_version,
+                        replacement_default_lead_agent_id: None,
+                        reason: Some("test send admission".to_string()),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        assert_eq!(removed.result.status, CommandResultStatus::Accepted);
+
+        let rejected_invocation = fixture.public_send_invocation(
+            "send-to-left-recipient",
+            "离队后不能收到这次 send",
+            &["agent_2"],
+        );
+        let rejected = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &rejected_invocation)
+            .unwrap();
+        assert_eq!(rejected.result.status, CommandResultStatus::Rejected);
+        assert_eq!(rejected.result.code, "message.addressing_invalid");
+        assert_eq!(
+            rejected.result.payload["details"]["offending"][0]["reason"],
+            "not_current_camp_member"
+        );
+
+        collaboration
+            .add_camp_member(
+                &mut fixture.database,
+                &user_envelope(
+                    "add-new-public-send-recipient-membership",
+                    Some(&fixture.camp_id),
+                    AddCampMemberCommand {
+                        camp_id: fixture.camp_id.clone(),
+                        agent_id: "agent_2".to_string(),
+                        expected_membership_generation:
+                            removed.result.payload["membershipGeneration"]
+                                .as_i64()
+                                .unwrap(),
+                        capability_overrides: json!({}),
+                        source: None,
+                    },
+                ),
+            )
+            .unwrap();
+        let accepted_invocation = fixture.public_send_invocation(
+            "send-to-new-recipient-membership",
+            "重新加入后，这次 send 成立",
+            &["agent_2"],
+        );
+        let accepted = TeamToolService::default()
+            .send_public_message(&mut fixture.database, &accepted_invocation)
+            .unwrap();
+        assert_eq!(accepted.result.status, CommandResultStatus::Accepted);
+        assert_eq!(
+            accepted.result.payload["deliveryIds"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
     }
 
     #[cfg(feature = "slow-tests")]
@@ -8602,6 +9093,10 @@ Use this exact public input @agent_2";
             super::missing_send_recovery_publishes_one_literal_recipient_free_message();
         }
         #[test]
+        fn terminal_evidence_cannot_publish_after_the_run_membership_is_replaced() {
+            super::terminal_evidence_cannot_publish_after_the_run_membership_is_replaced();
+        }
+        #[test]
         fn accepted_send_suppresses_missing_send_recovery_for_recipient_matrix() {
             let cases: [(&str, fn()); 2] = [
                 (
@@ -8636,6 +9131,18 @@ Use this exact public input @agent_2";
         #[test]
         fn task_tool_reads_are_camp_wide_without_audit_writes() {
             super::task_tool_reads_are_camp_wide_without_audit_writes();
+        }
+        #[test]
+        fn every_agent_business_tool_binding_is_fenced_after_leave_and_readd() {
+            super::every_agent_business_tool_binding_is_fenced_after_leave_and_readd();
+        }
+        #[test]
+        fn a_terminal_delivery_cannot_be_retried_after_the_recipient_leaves_and_rejoins() {
+            super::a_terminal_delivery_cannot_be_retried_after_the_recipient_leaves_and_rejoins();
+        }
+        #[test]
+        fn public_send_rejects_a_left_recipient_and_accepts_a_new_membership() {
+            super::public_send_rejects_a_left_recipient_and_accepts_a_new_membership();
         }
         #[test]
         fn task_tool_lead_creation_ignores_capability_catalog_and_keeps_version_fencing() {

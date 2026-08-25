@@ -1,7 +1,7 @@
 ---
 document_type: architecture-index
 authority: long-lived-architecture-routing
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # 长期系统架构
@@ -17,6 +17,7 @@ last_updated: 2026-08-25
 | [AgentRun Recovery](agent-run-recovery.md) | AgentRun、Native Session、Runtime Input Delivery 与 Native Turn 分离，accepted-input blocker、Scheduler fence、用户/预算安全收敛与未来 reconcile capability |
 | [Built-in Tool Runtime](builtin-tool-runtime.md) | 十五项固定 Agent CLI operation、`camp.read` 安全 Timeline 默认、single-Camp History target、safe Agent output projection、Core Router、Runtime Fleet、精确 help、Dynamic Context、ContextManifest/ACK 与外部 MCP 的关系 |
 | [Camp Identity](camp-identity.md) | 唯一 `rvcamp_` CampId 的生成、持久化、Context/Tool/path 流转、clean break 与 Native Session identity seam |
+| [动态 Camp 队员关系](dynamic-camp-membership.md) | 添加/移除、membership generation/lifetime、原子 cutover、持久 reconciliation、外部来源绑定与 Renderer 权威预览边界 |
 | [持久 Gather Barrier](durable-gather-barrier.md) | 一条公共请求、N 个 Item/forward Delivery、持久 return capture、原子 Barrier、Completion FIFO 与 mandatory typed Current Input 的组件权威 |
 | [Runtime Catalog Boundaries](runtime-catalog-boundaries.md) | 可执行 Product Runtime Catalog、机器 Availability 与 Renderer-only Settings Preview 的权威分层、准入和晋升边界 |
 | [Runtime Monitoring](runtime-monitoring.md) | 五表 clean-break Usage metering、内存 parser/buffer、短 Flush、稀疏 Rollup、单 Snapshot 与 Renderer 边界 |

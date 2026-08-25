@@ -215,7 +215,9 @@ mod slow_tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_1".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )

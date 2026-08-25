@@ -173,6 +173,20 @@ describe('active Camp event invalidation', () => {
     }, 'camp-1')).toBe(true)
   })
 
+  it('refreshes membership cutover and reconciliation projections', () => {
+    for (const method of [
+      'camp.member_added',
+      'camp.member_removed',
+      'camp.membership_reconciliation_started',
+      'camp.membership_reconciliation_completed'
+    ]) {
+      expect(shouldRefreshActiveCampForCoreEvent({
+        method,
+        params: { campId: 'camp-1' }
+      }, 'camp-1')).toBe(true)
+    }
+  })
+
   it('requires an exact Camp for runtime model observation events', () => {
     expect(shouldRefreshActiveCampForCoreEvent({
       method: 'agent_run.runtime_model_observed',
@@ -253,12 +267,12 @@ describe('active Camp event invalidation', () => {
         complete: true
       }
       return {
-        schemaVersion: 3,
+        schemaVersion: 4,
         throughGlobalSequence: terminal ? 12 : 10,
         camp: {
           id: 'camp-terminal-refresh', title: '终态刷新', activationState: 'active',
           projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-          defaultLeadAgentId: 'agent_2', version: 1,
+          defaultLeadAgentId: 'agent_2', membershipGeneration: 1, version: 1,
           createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:02Z'
         },
         members: [{
@@ -266,6 +280,7 @@ describe('active Camp event invalidation', () => {
           accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null,
           profilePresence: 'present', memberOrder: 0, isDefaultLead: true, version: 1
         }],
+        membershipReconciliations: [],
         tasks: [],
         messages: [{
           id: 'message-terminal-refresh', sequence: 1, timelineGlobalSequence: 1,
@@ -577,15 +592,17 @@ describe('Camp snapshot cache', () => {
       projectBindingKind: 'quick_chat' as const,
       projectPath: '/quick-chat',
       defaultLeadAgentId: null,
+      membershipGeneration: 1,
       version: 1,
       createdAt: '2026-08-14T00:00:00Z',
       updatedAt: '2026-08-14T00:00:00Z'
     }
     const previous = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 10,
       camp,
       members: [],
+      membershipReconciliations: [],
       tasks: [],
       messages: [message('older', 1)],
       messageDeliveries: [],
@@ -604,10 +621,11 @@ describe('Camp snapshot cache', () => {
       complete: true
     }
     const projection = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       throughGlobalSequence: 20,
       camp,
       members: [],
+      membershipReconciliations: [],
       tasks: [],
       messages: [message('recent', 101)],
       messageDeliveries: [],
@@ -2343,13 +2361,15 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'runtime_not_configured', blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-1', title: 'Lead 调整', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
+        membershipGeneration: 1,
         version: 2, createdAt: '2026-07-22T00:00:00Z', updatedAt: '2026-07-22T00:00:00Z'
       },
+      membershipReconciliations: [],
       members: [{
         agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present', memberOrder: 0,
@@ -2538,13 +2558,15 @@ describe('task event projections', () => {
       presence: 'away'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-empty', title: '暂无可用队员', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: null,
+        membershipGeneration: 1,
         version: 2, createdAt: '2026-07-27T00:00:00Z', updatedAt: '2026-07-27T00:00:00Z'
       },
+      membershipReconciliations: [],
       members: [{
         agentId: profile.agentId, displayName: profile.displayName, teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'away', memberOrder: 0,
@@ -2590,13 +2612,15 @@ describe('task event projections', () => {
       runtimeReadiness: { status: 'ready' as const, blockers: [] }
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-live', title: '实现功能', activationState: 'active', projectBindingKind: 'directory', projectPath: '/repo',
         defaultLeadAgentId: 'agent_2',
+        membershipGeneration: 1,
         version: 1, createdAt: '2026-07-28T05:00:00Z', updatedAt: '2026-07-28T05:01:00Z'
       },
+      membershipReconciliations: [],
       members: [{
         agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
@@ -3303,13 +3327,15 @@ describe('task event projections', () => {
       resolvedAt: null
     }))
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 2,
       camp: {
         id: 'camp-approval', title: '审批停靠区', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
+        membershipGeneration: 1,
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
+      membershipReconciliations: [],
       members: profiles.map((profile, index) => ({
         agentId: profile.agentId,
         displayName: profile.displayName,
@@ -3391,13 +3417,14 @@ describe('task event projections', () => {
       createdAt: '2026-08-20T00:00:00Z'
     }
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-attachment-only', title: '附件消息', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
-        defaultLeadAgentId: 'agent_1', version: 1,
+        defaultLeadAgentId: 'agent_1', membershipGeneration: 1, version: 1,
         createdAt: '2026-08-20T00:00:00Z', updatedAt: '2026-08-20T00:00:00Z'
       },
+      membershipReconciliations: [],
       members: [{
         agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#526f88', membershipStatus: 'active', leaveRequestedAt: null,
@@ -3472,6 +3499,7 @@ describe('task event projections', () => {
       campTurnId: 'turn-a2a',
       taskId: null,
       recipientAgentId: 'agent_2',
+      recipientMembershipVersionAtAdmission: 1,
       deliveryKind: 'public_a2a',
       dispatchDisposition: 'dispatch',
       completionRole: 'required',
@@ -3509,13 +3537,15 @@ describe('task event projections', () => {
     expect(campConversationTimeline([publicMessage]).map((item) => item.id)).toEqual([publicMessage.id])
 
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 3,
       camp: {
         id: 'camp-a2a', title: 'Agent 协作', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_1',
+        membershipGeneration: 1,
         version: 1, createdAt: '2026-07-30T03:00:00Z', updatedAt: '2026-07-30T03:00:01Z'
       },
+      membershipReconciliations: [],
       members: [{
         agentId: 'agent_1', displayName: '洛可', teamRole: 'Lead',
         avatarRef: null, accent: '#D56A4A', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present',
@@ -3634,13 +3664,15 @@ describe('task event projections', () => {
 
   it('renders durable Task records below a single explicit creation action', () => {
     const snapshot: CampSnapshot = {
-      schemaVersion: 32,
+      schemaVersion: 33,
       throughGlobalSequence: 1,
       camp: {
         id: 'camp-task', title: 'Task 管理', activationState: 'active', projectBindingKind: 'quick_chat', projectPath: '/quick-chat',
         defaultLeadAgentId: 'agent_2',
+        membershipGeneration: 1,
         version: 1, createdAt: '2026-07-23T00:00:00Z', updatedAt: '2026-07-23T00:00:00Z'
       },
+      membershipReconciliations: [],
       members: [{
         agentId: 'agent_2', displayName: '沐瓦', teamRole: '开发者',
         avatarRef: null, accent: '#39777a', membershipStatus: 'active', leaveRequestedAt: null, profilePresence: 'present', memberOrder: 0,

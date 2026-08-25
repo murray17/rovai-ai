@@ -3237,12 +3237,15 @@ impl ExecutionRuntimeService {
             let public_output_mode = adapter_kind
                 .map(AdapterKind::public_output_mode)
                 .unwrap_or(PublicOutputMode::ExplicitSendOnly);
+            let publication_allowed = terminal_publication_allowed(transaction, &target)?;
             let final_output_digest =
                 canonical_content_digest(&[StructuredCampMessageSegment::Text {
                     text: envelope.payload.final_output.clone(),
                 }])?;
             let (ordinary_final_camp_message_id, automatic_public_output_suppressed) =
-                if public_output_mode == PublicOutputMode::AssistantFinalVisible {
+                if public_output_mode == PublicOutputMode::AssistantFinalVisible
+                    && publication_allowed
+                {
                     // A Runtime may have already made the exact final answer public through
                     // `camp.message.send`. Suppress only that same Run + canonical body digest;
                     // never deduplicate across Runs, recipients, time windows, or semantics.
@@ -3284,6 +3287,8 @@ impl ExecutionRuntimeService {
                         )?;
                         (Some(final_camp_message_id), false)
                     }
+                } else if public_output_mode == PublicOutputMode::AssistantFinalVisible {
+                    (None, true)
                 } else {
                     (None, false)
                 };
@@ -3291,8 +3296,8 @@ impl ExecutionRuntimeService {
                 transaction,
                 &target,
                 &envelope.actor,
-                envelope.payload.execution_epoch,
                 adapter_kind,
+                publication_allowed,
                 ordinary_final_camp_message_id.as_deref(),
                 envelope.payload.missing_send_recovery_candidate.as_ref(),
             )?;
@@ -4571,8 +4576,8 @@ fn decide_missing_send_recovery(
     transaction: &Transaction<'_>,
     target: &TerminalTarget,
     actor: &ActorRef,
-    execution_epoch: i64,
     adapter_kind: Option<AdapterKind>,
+    publication_allowed: bool,
     ordinary_publication_id: Option<&str>,
     candidate: Option<&MissingSendRecoveryCandidate>,
 ) -> Result<MissingSendRecoveryOutcome> {
@@ -4609,6 +4614,9 @@ fn decide_missing_send_recovery(
     if mode == MissingSendRecoveryMode::Disabled {
         return Ok(outcome("skipped_policy_disabled", None, None));
     }
+    if !publication_allowed {
+        return Ok(outcome("skipped_membership_fenced", None, None));
+    }
     if accepted_send_detected {
         return Ok(outcome("suppressed_accepted_send", None, None));
     }
@@ -4639,7 +4647,7 @@ fn decide_missing_send_recovery(
         &candidate.body,
         &candidate_digest,
         actor,
-        execution_epoch,
+        target.execution_epoch,
         "missing_send_recovery",
         None,
         Some(candidate.boundary.as_str()),
@@ -4649,6 +4657,36 @@ fn decide_missing_send_recovery(
         Some(candidate_digest),
         Some(message_id),
     ))
+}
+
+fn terminal_publication_allowed(
+    transaction: &Transaction<'_>,
+    target: &TerminalTarget,
+) -> Result<bool> {
+    transaction
+        .query_row(
+            r#"
+            SELECT EXISTS(
+                SELECT 1
+                FROM agent_run
+                JOIN conversation ON conversation.id = agent_run.conversation_id
+                JOIN camp_member
+                  ON camp_member.camp_id = ?2
+                 AND camp_member.agent_id = conversation.agent_id
+                WHERE agent_run.id = ?1
+                  AND conversation.agent_id = ?3
+                  AND camp_member.status = 'active'
+                  AND camp_member.leave_requested_at IS NULL
+                  AND camp_member.version = CAST(
+                      json_extract(agent_run.effective_config_json, '$.campMemberVersion')
+                      AS INTEGER
+                  )
+            )
+            "#,
+            params![target.agent_run_id, target.camp_id, target.agent_id],
+            |row| row.get(0),
+        )
+        .map_err(Into::into)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6129,7 +6167,9 @@ mod tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -7439,7 +7479,9 @@ mod tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -7735,7 +7777,9 @@ mod tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -7871,7 +7915,9 @@ mod tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -8072,7 +8118,9 @@ mod tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -8287,7 +8335,9 @@ mod tests {
                         AddCampMemberCommand {
                             camp_id: camp_id.clone(),
                             agent_id: agent_id.to_string(),
+                            expected_membership_generation: 1,
                             capability_overrides: json!({}),
+                            source: None,
                         },
                     ),
                 )
@@ -8548,7 +8598,9 @@ mod tests {
                     AddCampMemberCommand {
                         camp_id: camp_id.clone(),
                         agent_id: "agent_2".to_string(),
+                        expected_membership_generation: 1,
                         capability_overrides: json!({}),
+                        source: None,
                     },
                 ),
             )
@@ -8738,7 +8790,9 @@ mod tests {
                         AddCampMemberCommand {
                             camp_id: camp_id.clone(),
                             agent_id: agent_id.to_string(),
+                            expected_membership_generation: 1,
                             capability_overrides: json!({}),
+                            source: None,
                         },
                     ),
                 )

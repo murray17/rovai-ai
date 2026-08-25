@@ -3,7 +3,7 @@ document_type: architecture
 architecture: public-a2a-message-delivery
 authority: public-message-and-delivery-boundaries
 status: accepted
-last_updated: 2026-08-20
+last_updated: 2026-08-26
 ---
 
 # Public A2A Message 与 Message Delivery 架构
@@ -11,8 +11,8 @@ last_updated: 2026-08-20
 本文件定义 v0.45 以后 Agent-to-Agent 协作的长期组件边界。字段级输入、错误和状态合同
 分别见 [Camp Message Send v12](../contracts/camp-message-send-v12.md)、
 [Current User Attention v4](../contracts/current-user-attention-v4.md)、
-[Message Delivery v5](../contracts/message-delivery-v5.md)、
-[Missing-Send Recovery Publication v1](../contracts/missing-send-recovery-publication-v1.md)、
+[Message Delivery v6](../contracts/message-delivery-v6.md)、
+[Missing-Send Recovery Publication v2](../contracts/missing-send-recovery-publication-v2.md)、
 [Camp History Retrieval v2](../contracts/camp-history-v2.md)；决策理由见
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)、
 [Message Delivery 不变量](foundational-invariants.md#collaboration-delivery)、
@@ -101,7 +101,8 @@ Message Delivery Dispatch Pump 是投递、排队和物化的唯一权威。它�
 recipient、message、Task、`forward | return` edge、target lineage 和 presentation snapshot，不重新
 解析正文或扩大目标。
 
-Message Delivery v5 以 `deliveryKind`、`dispatchDisposition`、`completionRole` 和可选 pre-dispatch gate 形成 closed union。普通
+Message Delivery v6 以 `deliveryKind`、`dispatchDisposition`、`completionRole`、可选 pre-dispatch gate 和冻结的
+`recipientMembershipVersionAtAdmission` 形成 closed union。普通
 public A2A 继续拥有 message/edge/lineage；Gather 的精确 return 可以作为 `gather_captured` 直接 settled，
 但其 CampMessage 始终公开；Barrier 创建的 `gather_completion` 没有公开 recipient/edge lineage，却继续进入
 同一 recipient FIFO 与 Dispatch Pump。Delivery-level completionRole 让 pre-run terminal 也能被 CampTurn
@@ -236,7 +237,7 @@ Agent routing 与 User attention 不能相互推导。exact `camp.read item` 分
 `effectiveAgentRecipients` 与从 Structured Content 派生的 `mentionsCurrentUser`；notification clear、
 retention 或 source unavailable 不改变后者。Renderer 展示名称只是当前 presentation，不能改写
 `local_user` segment、消息 digest 或 Runtime 已冻结的 Context bytes。同一 Structured CurrentUserMention 在
-Human body/FTS/UI 显示 `@你`，在 Agent Context、Camp History 与 Gather v3 输入显示 `@Principal`；Agent
+Human body/FTS/UI 显示 `@你`，在 Agent Context、Camp History 与 Gather v4 输入显示 `@Principal`；Agent
 snippet、Unicode-scalar offset 和 projected digest 均在 `agent_v1` 空间计算，禁止字符串替换 Human cache。
 
 `camp.read item` 对当前 Run 自己已提交的 accepted send 具有一条 command-result-bound 的窄
