@@ -38,9 +38,11 @@ resume 不重新注入 rules，恢复沿用原 Session 的 system prompt。Nativ
 `grok-build:resume-v1`，继续包含官方配置摘要与 native-rules revision，因此 Bootstrap generation 改变时仍会
 建立新 Session，未改变时才 resume。
 
-本机截至本次变更仍为 `grok 0.2.118 (1e1687c1cf6a)`，只能验证旧版本会在启动 ACP 前被最低版本门拒绝；
-`>= 1.0.0` 的真实 Deep Probe、cold resume 与 AgentRun 需要由 macOS arm64、macOS x64、Windows x64 客户端
-分别补证。共享最低版本规则不改变逐平台 qualification 边界。
+本机已升级到 `grok 1.0.5 (5115b46bc909)`，macOS arm64 真实通过生产形状 Deep Probe、普通 AgentRun、
+Core/ACP Host 重启后的 exact-ID cold resume、恢复后的 Tool/Approval/cancel、坏 ID 单次 fallback、十五项 Built-in
+CLI、历史 attachment、External MCP 同名矩阵与 `.grok/skills` 原生发现。BYOK 仍使用原有官方配置，account
+cached-token 因本机未登录而保持 `Unverified`。macOS x64 与 Windows x64 仍需各自补证；共享最低版本规则不改变
+逐平台 qualification 边界。
 
 ## 2026-08-24 历史目标版本实机复核
 

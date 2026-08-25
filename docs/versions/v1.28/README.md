@@ -18,7 +18,8 @@ last_updated: 2026-08-25
 > revision 2 保持 Bootstrap bytes
 > 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
 > 独立 worktree 验收后通过 PR 交付 `main`；`>= 1.0.0 / session.resume` clean break 的确定性实现已完成，
-> 三个平台的目标版本真实 Deep Probe、cold resume 与 AgentRun 仍待各客户端分别补证。
+> macOS arm64 已用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵；macOS x64、Windows x64 仍待
+> 各客户端分别补证。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
 

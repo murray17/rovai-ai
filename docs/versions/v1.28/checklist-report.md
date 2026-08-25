@@ -16,16 +16,16 @@ last_updated: 2026-08-25
 
 | Checklist 轴 | 当前结论 | 自动化证据 | 仍需客户端补证 |
 | --- | --- | --- | --- |
-| 最低版本 | 三个宿主平台共用 `grok >= 1.0.0` | semver release gate；`0.2.118` 和 `1.0.0-beta` 拒绝，`1.0.0`/更高接受；light snapshot 为 `light_failed / runtime_version_below_minimum` | 每个平台记录实际 `grok --version` 与 fingerprint |
-| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象并真实 Resume 同一 ID 成功 | 低版本在启动 ACP 前拒绝；缺少广告返回 `missing_capabilities: session.resume`；广告但方法拒绝的 fixture 同样不能 Ready；Probe New 复用生产 wire 后以空 roots Resume | 三个平台各跑真实 initialize/auth/session-new/resume，并冻结目标版本 capability |
-| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | Grok 从 HistoryRestore allowlist 移除；即使 Runtime 同时广告 load/resume，也只选 resume；New 保留两个 roots，Resume 固定 `additionalDirectories=[]` 且不调用 load | 三个平台各做新 Host/Core exact-ID resume、marker、恢复后 attachment/Built-in CLI 与错误 ID fallback |
+| 最低版本 | 三个宿主平台共用 `grok >= 1.0.0` | semver release gate；`0.2.118` 和 `1.0.0-beta` 拒绝，`1.0.0`/更高接受；macOS arm64 实测 `1.0.5 (5115b46bc909)` | macOS x64、Windows x64 记录实际版本与 fingerprint |
+| Ready / Deep Probe | 必须观察 `initialize.agentCapabilities.sessionCapabilities.resume` 对象并真实 Resume 同一 ID 成功 | 缺少广告或广告但方法拒绝的 fixture 均不能 Ready；macOS arm64 1.0.5 真实完成生产形状 New、空 roots Resume 与 set-model | macOS x64、Windows x64 各跑真实 initialize/auth/session-new/resume |
+| cold continuation | compatible same-host → exact `session/resume` → 一次 replacement `session/new` | macOS arm64 1.0.5 跨 Core/Host 保持 exact ID 和 marker；恢复后 Tool/Approval/cancel、Built-in CLI/attachment 与坏 ID 单次 fallback 通过 | macOS x64、Windows x64 重复同一矩阵 |
 | System Prompt | 不变：`session/new._meta.rules = Rovai Bootstrap`；resume 不重新注入 | creation-only rules fixture；Resume 携带 rules 会 fail closed，`None` 才通过；无 `systemPromptOverride` | 真实 resume 后冲突 prompt 继续服从原 Session rules |
 | Native Binding fence | `grok-build:resume-v1`；配置/rules generation 变化建新 Session | installation、protocol、fingerprint、Host config、workspace、model、permission、官方 config 与 rules revision 变化均改变 key | 客户端确认相同 key cold resume、变化后 new |
 | load / HistoryRestore | Grok 正常路径停用；其他 Runtime 不变 | Grok 不再把 `loadSession` 映射为产品 capability；TRAE/Kimi 等通用 load fallback 回归保留 | 无 Grok load smoke；只需验证 resume |
 
-本次开发机实际安装仍是 `grok 0.2.118 (1e1687c1cf6a)`，所以没有声称完成 `>= 1.0.0` 真实 Runtime
-验收。macOS arm64 的既有平台 qualification artifact 保留；macOS x64、Windows x64 仍为 `not_qualified`，
-待各客户端完成上表真实步骤后再更新平台文档/证据。
+本次开发机已升级为 `grok 1.0.5 (5115b46bc909)`，macOS arm64 已完成上表真实 Runtime 验收并更新为 v2
+qualification artifact。原 `0.2.118` v1 artifact 保留为不可变历史证据；macOS x64、Windows x64 仍为
+`not_qualified`，待对应客户端完成同一矩阵后再更新。
 
 ## 2026-08-24 原始 `0.2.118` 基本结论（历史证据）
 
@@ -168,14 +168,14 @@ Agent 执行台已实际打开并核对：队员、Grok Build、实际模型、R
 
 ## 证据与交接
 
-- 资格证据：[macos-arm64-grok-build-v1.json](../../../qualification/runtime-platform/macos-arm64-grok-build-v1.json)，
-  digest `sha256:4af780448b73c2e8878cd63b298620ebf46b1e1f2181b7c44a0ab5cac9c28c21`；
+- 当前资格证据：[macos-arm64-grok-build-v2.json](../../../qualification/runtime-platform/macos-arm64-grok-build-v2.json)，
+  digest `sha256:6a2a96944ca7021f6e4c9c7289cdacde0e2077736a8e8af6bd247ce929e92b1e`；历史 v1 artifact 保持不可变；
 - 兼容性总表：[Runtime 兼容性清单](../../runtime-compatibility.md)，digest
-  `sha256:52a77b5ff6f8331d45f21d594b6f2830a737ab87656e98ca0e51dad48d1d3ab8`；
-- Base revision：`c5c745bf19745a2ca20a44f534aedcac843e4725`；
-- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-grok-build`；
-- Branch：`codex/grok-build-runtime`；通过 PR 交付并合并 `main`。
+  `sha256:5d82ad48e6155ca6c4b90aaccc2a7d5c92eac7232c56c4ff8b2a4a6b4e03fed0`；
+- v2 implementation base revision：`8f0aad1b989ed7eccb695c131da964f6a6ac4d77`；
+- Worktree：`/Users/murray.xue/VSCodeProjects/opensource/rovai-ai-grok-1-0-resume`；
+- Branch：`rovai/grok-1-0-resume`；由 PR #50 交付。
 
 revision 2 已明确确认并实施。以上 `0.2.118` load-only 结论已由当前 `>= 1.0.0 / session.resume` 合同取代，
 但它仍是 Plugin MCP、rules、compaction、BYOK 与 macOS arm64 原始平台资格的历史证据。Usage/Cost 未启用，
-account cached-token 与三个平台的 `>= 1.0.0` 真实 continuation 仍需分别验收。
+account cached-token、macOS x64 与 Windows x64 的 `>= 1.0.0` 真实 continuation 仍需分别验收。

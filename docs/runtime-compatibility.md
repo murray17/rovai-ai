@@ -793,10 +793,16 @@ Grok continuation 为 compatible same-host Session → exact `session/resume` �
 creation-time roots，也不重新注入 creation-only rules。`grok-build:resume-v1` compatibility key 继续 fence
 官方配置、rules revision、Runtime identity、workspace、model 与 permission，变化时建立新 Session。
 
-当前开发机仍安装 `grok 0.2.118 (1e1687c1cf6a)`；确定性测试已经证明版本门、resume capability、无 Grok load
-fallback 和 creation-only rules，尚未声称 `>= 1.0.0` 真实 Runtime 已在任一平台跑通。macOS arm64 的原平台
-artifact 保留，macOS x64、Windows x64 仍为 `not_qualified`，三端目标版本 Deep Probe/cold resume/AgentRun
-证据待各客户端分别补充。
+当前开发机已升级到 `grok 1.0.5 (5115b46bc909)`。macOS arm64 真实 Deep Probe 在 Ready 前完成
+`session/new → exact-ID session/resume([]) → session/set_model`；Core 与 ACP Host 重启后，Host ID 改变而 Native
+Session ID 和私密 marker 保持，恢复 Run 没有 replay Action/Approval。恢复后的新写入、审批与 cancel 通过，坏 ID
+只记录一次 continuity-lost 后 replacement-new。普通 AgentRun、十五项 Built-in CLI、历史 attachment、
+`AdditivePerRun / NativeWinsSkip` MCP 和 `.grok/skills` 也在同一 1.0.5 候选上通过。
+
+macOS arm64 当前 adapter-scoped 证据为
+[`qualification/runtime-platform/macos-arm64-grok-build-v2.json`](../qualification/runtime-platform/macos-arm64-grok-build-v2.json)；
+初始 `0.2.118` v1 artifact 保持不可变历史证据。macOS x64、Windows x64 仍为 `not_qualified`，不得从 arm64
+外推。
 
 ## Grok Build macOS arm64 初始 `0.2.118` 接入证据（历史）
 
@@ -837,10 +843,10 @@ External MCP 先得到“Session `mcpServers` 被忽略”的负向证据，再�
 产品 smoke 保留两个 native 同名定义并启动它们，两个冲突 Assignment 记为 skip，第三个不同名 Server 由
 MiniMax-M3 真实调用；临时 Plugin 随 Host 删除。项目/用户 config 仍不作为注入通道。
 
-adapter-scoped 原始证据位于
+adapter-scoped 初始历史证据位于
 [`qualification/runtime-platform/macos-arm64-grok-build-v1.json`](../qualification/runtime-platform/macos-arm64-grok-build-v1.json)。
-该证据不包含 Key、完整 Native ID、Prompt 或本机私有路径。macOS x64 与 Windows x64 保持未准入；原生
-Usage/Cost 字段保持 Disabled。
+当前 1.0.5 证据见上方 v2 artifact；两者都不包含 Key、完整 Native ID、Prompt 或本机私有路径。macOS x64 与
+Windows x64 保持未准入；原生 Usage/Cost 字段保持 Disabled。
 
 ## 历史：内置 MCP / Antigravity 专项复核
 

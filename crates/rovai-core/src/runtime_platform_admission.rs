@@ -8,7 +8,7 @@ use crate::{agent_profile::AdapterKind, platform::HostPlatformKey};
 /// that evidence even when their Adapter identity exists in the Product Catalog.
 /// Every register revision receives a new digest.
 pub const MACOS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
-    "sha256:0b60175d752e6ce6fd26816bec40144c2fff9a1eb6d643221406fdf923ecf690";
+    "sha256:5d82ad48e6155ca6c4b90aaccc2a7d5c92eac7232c56c4ff8b2a4a6b4e03fed0";
 
 /// Immutable digest of the sanitized, adapter-scoped Windows x64 evidence.
 /// The source qualifies only the Runtime rows named in that evidence; shared
@@ -17,7 +17,7 @@ pub const WINDOWS_RUNTIME_COMPATIBILITY_EVIDENCE_REVISION: &str =
     "sha256:fe7e375313d4ba0eeefd0ad69304523414ebd2a0bd72efba8814af3732382054";
 
 pub const GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION: &str =
-    "sha256:4af780448b73c2e8878cd63b298620ebf46b1e1f2181b7c44a0ab5cac9c28c21";
+    "sha256:6a2a96944ca7021f6e4c9c7289cdacde0e2077736a8e8af6bd247ce929e92b1e";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -157,7 +157,7 @@ mod tests {
             format!("sha256:{windows_digest:x}")
         );
         let grok_digest = Sha256::digest(include_bytes!(
-            "../../../qualification/runtime-platform/macos-arm64-grok-build-v1.json"
+            "../../../qualification/runtime-platform/macos-arm64-grok-build-v2.json"
         ));
         assert_eq!(
             GROK_BUILD_MACOS_ARM64_EVIDENCE_REVISION,

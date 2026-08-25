@@ -41,8 +41,9 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   要求 `sessionCapabilities.resume` 且真实调用同一 ID 成功；Grok continuation 改用标准 ACP `session/resume`，
   Resume 固定使用空 `additionalDirectories`，并移除 load-only fallback；
   `session/new._meta.rules` 与 creation-only / resume 不重注入语义保持不变；
-- [ ] 由 macOS arm64、macOS x64 与 Windows x64 客户端分别补充 `grok >= 1.0.0` 的真实 Deep Probe、cold resume
-  与 AgentRun smoke；当前开发机仍安装 `0.2.118`，只能验证版本门会在启动 ACP 前拒绝，不能冒充目标版本实测；
+- [x] macOS arm64 使用 `grok 1.0.5` 完成真实 Deep Probe、cold resume、AgentRun、Built-in CLI/attachment、
+  External MCP 与 Skill smoke，并更新 adapter-scoped v2 evidence；
+- [ ] macOS x64 与 Windows x64 客户端分别补充 `grok >= 1.0.0` 的同等目标主机证据；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则
