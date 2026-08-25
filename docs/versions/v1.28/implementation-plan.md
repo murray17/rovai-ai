@@ -37,6 +37,8 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   compatibility revision fence 旧 `first_payload` Binding；
 - [x] 准入 exact structured `auto_compact_completed` + event ID，启用 Grok `best_effort` observer；真实 debug-arm
   产品两轮证明 next-input Redelivery revision 1 accepted 且 ACK 收敛；
+- [x] 以重启前后仅 `st_dev` 漂移的回归输入修复 macOS Runtime Files 启动失败；root/Entry identity 改用稳定
+  volume UUID，schema-1 marker 在已准入私有实例根内原子 rekey，旧物理 receipt 由受控 rebuild 收敛；
 - [x] 运行 Impeccable detector，整理 worktree 交接，并通过 PR 交付 `main`。
 
 ## 验收原则
