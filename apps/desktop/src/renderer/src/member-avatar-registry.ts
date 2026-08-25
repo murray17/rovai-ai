@@ -3,13 +3,13 @@ import {
   type BuiltinMemberAvatarRole
 } from '@contracts'
 import luokeIcon from './assets/characters/luoke/icon-192.png'
-import luokeSource from './assets/characters/luoke/source.png'
+import luokeSource from './assets/characters/luoke/source.avif'
 import mianzhiIcon from './assets/characters/mianzhi/icon-192.png'
-import mianzhiSource from './assets/characters/mianzhi/source.png'
+import mianzhiSource from './assets/characters/mianzhi/source.avif'
 import muwaIcon from './assets/characters/muwa/icon-192.png'
-import muwaSource from './assets/characters/muwa/source.png'
+import muwaSource from './assets/characters/muwa/source.avif'
 import qiluIcon from './assets/characters/qilu/icon-192.png'
-import qiluSource from './assets/characters/qilu/source.png'
+import qiluSource from './assets/characters/qilu/source.avif'
 
 export interface BuiltinMemberAvatarAssets {
   icon: string
