@@ -6,6 +6,7 @@ import type {
   NavigationSnapshot
 } from '@contracts'
 import {
+  currentProjectAccessDecision,
   currentProjectForCamp,
   currentProjectWorkspace,
   defaultsNeedInvalidation,
@@ -86,6 +87,45 @@ describe('new conversation preferences', () => {
     expect(displayed?.quickChat).toBe(navigation.quickChat)
     expect(displayed?.projects.map((candidate) => candidate.projectPath)).toEqual(['/repo/b'])
     expect(navigation.projects).toHaveLength(2)
+  })
+
+  it('does not inspect a cached Project until removed-Project authority is ready', () => {
+    const navigation: NavigationSnapshot = {
+      schemaVersion: 3,
+      throughGlobalSequence: 7,
+      quickChat: { totalCount: 0, recentCamps: [] },
+      projects: []
+    }
+    const currentProject = { kind: 'directory', projectPath: '/Users/person/Downloads' } as const
+
+    expect(currentProjectAccessDecision({
+      currentProject,
+      currentWorkspaceHint: null,
+      navigation,
+      removedProjectKeys: new Set(),
+      removedProjectAuthorityReady: false
+    })).toBe('wait')
+    expect(currentProjectAccessDecision({
+      currentProject,
+      currentWorkspaceHint: null,
+      navigation,
+      removedProjectKeys: new Set([projectTargetKey(currentProject.projectPath)]),
+      removedProjectAuthorityReady: true
+    })).toBe('fallback')
+    expect(currentProjectAccessDecision({
+      currentProject,
+      currentWorkspaceHint: null,
+      navigation,
+      removedProjectKeys: new Set(),
+      removedProjectAuthorityReady: true
+    })).toBe('inspect')
+    expect(currentProjectAccessDecision({
+      currentProject,
+      currentWorkspaceHint: { name: 'Downloads', projectPath: currentProject.projectPath },
+      navigation,
+      removedProjectKeys: new Set(),
+      removedProjectAuthorityReady: true
+    })).toBe('keep_hint')
   })
 
   it('ignores runtime readiness but latches missing, away, removed, and invalid Lead configurations', () => {

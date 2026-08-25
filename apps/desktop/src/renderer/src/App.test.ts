@@ -509,6 +509,19 @@ describe('Project directory selection', () => {
     expect(outcome).toBe('cancelled')
     expect(effects).toEqual([])
   })
+
+  it('does not select or inspect a Project when restoring its access state fails', async () => {
+    const workspace = { name: 'Downloads', projectPath: '/Users/person/Downloads' }
+    const selectProject = vi.fn()
+
+    await expect(selectProjectDirectory(
+      async () => workspace,
+      async () => { throw new Error('restore failed') },
+      selectProject
+    )).rejects.toThrow('restore failed')
+
+    expect(selectProject).not.toHaveBeenCalled()
+  })
 })
 
 describe('Camp snapshot cache', () => {

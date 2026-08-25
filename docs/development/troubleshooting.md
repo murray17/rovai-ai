@@ -158,8 +158,9 @@ codesign --verify --deep --strict "dist/mac-arm64/Rovai AI.app"
 codesign -dv --verbose=4 "dist/mac-arm64/Rovai AI.app"
 ```
 
-本地 `package:mac` 是 ad-hoc 签名，不会产生 Notarization 票据。正式证书或公证问题按
-[打包文档](packaging.md)单独处理。
+本地 `package:mac` 是仅供隔离验收的 ad-hoc 签名，不会产生 Notarization 票据，也不得替换日常
+`/Applications`。日常安装构建使用 `pnpm package:mac:daily`；它要求固定 `Rovai Release Signing`
+identity 并在打包后执行证书根验证。正式证书或公证问题按[打包文档](packaging.md)单独处理。
 
 ## SQLite 被占用或验收修改了日常数据
 

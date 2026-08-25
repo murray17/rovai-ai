@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: local-development-workflow
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # 本地开发与 App 隔离流程
@@ -136,7 +136,9 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验�
 ## 日常安装版：显式提升，不参与开发循环
 
 日常安装版必须位于仓库和生成目录之外。把一个已验收构建提升为日常安装版属于显式用户操作，
-不是 `pnpm build`、`pnpm package:mac`、测试或 AI 收尾步骤。提升前必须：
+不是 `pnpm build`、`pnpm package:mac`、测试或 AI 收尾步骤。`package:mac` 是隔离验收用 ad-hoc 产物，
+不得复制到日常安装位置；日常提升只能使用 `pnpm package:mac:daily` 生成的固定签名产物和
+`pnpm install:mac:daily` 安装门。提升前必须：
 
 1. 完成隔离 App 验收；
 2. 验证待安装 `.app`、内置 Core 和 CLI 的签名与目标架构，并把它暂存到日常安装目录所在文件系统中的
@@ -148,17 +150,27 @@ AI Agent 不得把 `open "$(pwd)/dist/mac-arm64/Rovai AI.app"` 当作打包验�
 
 除非用户明确要求安装或升级，AI Agent 不复制、替换、移动或删除日常 `.app`。
 
+典型命令（备份路径必须是本次解析出的、尚不存在的绝对路径）：
+
+```bash
+pnpm package:mac:daily
+pnpm install:mac:daily -- --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
+```
+
+安装脚本在源、同文件系统暂存和最终目标三个位置执行固定签名验证，并在最终验证失败时自动恢复旧安装。
+需要管理员权限时，只提升安装脚本本身；不要以管理员身份执行依赖安装或构建。
+
 ### 当前会话中的非终止安装交接
 
 用户明确要求把新构建安装到日常位置、而当前日常 App 正承载同一 AI/Camp 会话时，按以下顺序完成安装，
 无需终止当前进程：
 
-1. 记录当前 App、Core 和 Helper 的 PID，并确认它们都来自同一个日常 `.app`；新构建必须已经在唯一暂存
-   路径完成签名与架构验证，旧安装、暂存和备份必须位于同一文件系统；
-2. 将当前日常 `.app` 从规范安装路径原子改名到不存在的显式备份路径，再将暂存的新 `.app` 原子改名到
-   原规范安装路径；不得覆盖已有备份，也不得在这一步修改 `userData`；
-3. 从规范安装路径重新验证新 App、Core 和 CLI，并确认记录的旧进程仍存活。任一改名或验证失败时，使用
-   这三个已解析的精确路径立即恢复旧安装，不扩大清理范围；
+1. 记录当前 App、Core 和 Helper 的 PID，并确认它们都来自同一个日常 `.app`；新构建必须通过
+   `package:mac:daily` 的固定签名与架构验证；
+2. 用 `install:mac:daily` 把新 bundle 复制到日常安装目录的唯一暂存路径；脚本验证暂存 bundle 后，将旧
+   App 原子改名到不存在的显式备份路径，再把暂存 App 原子改名到规范路径，不修改 `userData`；
+3. 脚本从规范安装路径第三次验证新 App、Core 和 CLI；任一复制、改名或验证失败时恢复旧安装，不扩大
+   清理范围。随后确认记录的旧进程仍存活；
 4. 将结果表述为“新版本已安装、当前进程仍是旧版本”，不把磁盘替换误报为热升级，也不在旧实例仍运行时
    打开第二个日常实例；
 5. 用户稍后自行退出后，应从规范安装路径显式打开新 App，不能依赖可能仍指向已改名备份的 Dock、Spotlight

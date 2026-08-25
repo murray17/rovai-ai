@@ -1,7 +1,7 @@
 ---
 document_type: development-guide
 authority: macos-build-and-packaging
-last_updated: 2026-08-24
+last_updated: 2026-08-25
 ---
 
 # macOS 构建、签名与打包
@@ -112,8 +112,9 @@ latest-mac.yml
 
 ## 本地签名
 
-当前普通本地脚本关闭自动证书发现并显式使用 `identity=-`，因此生成 ad-hoc 签名产物。它适合
-本机开发验收，不代表可以对外发布，也不能作为自动升级签名连续性的证据。
+普通本地 `package:mac` / `package:mac:unsigned` 关闭自动证书发现并显式使用 `identity=-`，因此生成
+ad-hoc 签名产物。它们只适合隔离开发验收，不得提升到日常 `/Applications`，也不能作为自动升级签名
+连续性的证据。
 
 检查签名：
 
@@ -128,6 +129,19 @@ codesign --verify --strict \
 仓库签名 workflow 使用固定 `Rovai Release Signing` 身份并校验其证书指纹，使相邻版本具备同一
 designated-requirement 根。正式公共分发仍需要独立配置 Developer ID、Hardened Runtime entitlement
 和 Apple Notarization 凭据，并验证公证结果。不要把证书、密码或 notarization 凭据写入仓库。
+
+本机需要把已验收构建提升为日常安装版时，使用专用固定签名入口：
+
+```bash
+pnpm package:mac:daily
+pnpm install:mac:daily -- --backup "/Applications/Rovai AI.backup-before-<timestamp>.app"
+```
+
+`package:mac:daily` 要求本机 Keychain 中存在同一 `Rovai Release Signing` identity，构建后立即验证 App、
+Core、CLI 的架构、Authority、固定 certificate root、Bundle ID，并拒绝 ad-hoc 或 CDHash-only requirement。
+`install:mac:daily` 在修改日常路径前验证源 bundle，复制到 `/Applications` 同文件系统暂存路径后再次验证，
+原子替换后第三次验证；失败时恢复旧安装并保留验证失败的新候选供诊断。已有备份路径会 fail closed，脚本
+不会覆盖备份或修改日常 `userData`。普通 `package:mac` 产物不能通过这条安装门。
 
 ## 隔离运行打包 App
 
