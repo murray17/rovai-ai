@@ -2,7 +2,7 @@
 document_type: runtime-activity-mapping-registry
 authority: runtime-activity-mapping-catalog
 classifier_version: activity-v1
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # Runtime Activity Mapping Registry
@@ -92,6 +92,26 @@ command output 与生命周期投影，不把一次 pass 扩大为所有模型�
 均证明 `commandExecution.title` 可以为空，而 `commandActions` 是协议必填字段；修复 fixture 使用该真实
 wire shape，Core post-fix live smoke 仍需单独运行。
 
+### Command output durability audit
+
+2026-08-26 对全部 13 个 Adapter 的归一化路径逐项核验后，terminal output 权威如下：
+
+| 协议路径 | Adapter identities | terminal semantic output | 临时输出片段 |
+|---|---|---|---|
+| Codex app-server | identity：`codex-cli` | `item/completed` 的 `commandExecution.aggregatedOutput`，并保留 `command`、`status`、`exitCode` | `command.output.delta` 通过 Host/Run/epoch/Thread/Turn/active-route/Run-state fence 后直接丢弃 |
+| ACP v1 | identities：`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build` | terminal `tool_call_update` 归一为一条 `runtime.action.payload.output` | 这十个 Adapter 不产生 `command.output.delta` |
+| Claude stream-json | identity：`claude-code-cli` | terminal Bash `tool_result` 归一为一条 `runtime.action.payload.output` | 不产生 `command.output.delta` |
+| Antigravity stream-json | identity：`antigravity-app` | terminal tool step 归一为一条 `runtime.action.payload.output` | 不产生 `command.output.delta` |
+
+因此当前 Adapter 均不需要输出 spool。未来只有在原生 terminal 无法给出完整 aggregate 时，才允许 Adapter-owned
+临时 spool；它必须有明确硬上限、生成完整或明确 truncated 的 terminal result，并在 Run 结束后删除。Core 或
+Renderer 不得用无界字符串 accumulator 补偿协议缺口，也不得把片段逐条持久化。
+
+Codex 的 transport-only delta 不写 Execution Evidence、不更新 Canonical Activity、不创建 Managed Blob，也不进入
+Renderer `liveRuntimeEvents`。终态、取消请求、Host unbind/exit、Turn 替换、epoch supersede 或 route/lease fence
+关闭后到达的旧片段直接拒绝。既有历史 `command.output.delta` Evidence/Blob 不迁移、不删除、不重写，并继续由
+历史只读展示路径解析。
+
 ### ACP v1
 
 | ACP `kind` | activityDomain | semanticKind |
@@ -164,6 +184,9 @@ Canonical Activity 分类，结构化 kind 仍映射 `shell.execute`。
 - 只有相同 operationId 合并；
 - lifecycle completion 可以只报告 identity/status；这类稀疏更新只推进 phase/outcome，不得用 Evidence-kind fallback 覆盖同一 operation 已报告的结构化 domain、semantic kind 或 title；
 - terminal 冲突为 `unsettled`；
+- Runtime 明确报告 interruption 时，已 started 且尚未结算的 operation 归约为
+  `phase=terminal / outcome=unsettled / reasonCode=runtime_interrupted`，Renderer 显示 stopped/interrupted；
+  只有 Runtime 权威取消终态才归约为 `cancelled`；
 - 无结构化工具名时显示 presentation hint 或 activity-domain fallback，不伪造函数名；
 - title、provider 和 Runtime 名称永远不决定 domain 或 identity；唯一例外是 Adapter 白名单公开的 ACP
   `rawInput.command`，以及仅 `trae-cn-cli` 的 `rawInput.Command`，可在原生 kind 缺失时证明

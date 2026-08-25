@@ -4,7 +4,7 @@ contract: run-process-detail-surface-v20
 authority: agent-process-tool-grouping
 status: accepted
 source_version: v1.28
-last_updated: 2026-08-25
+last_updated: 2026-08-26
 ---
 
 # Run Process Detail Surface v20（连续 Tool 聚合）
@@ -29,6 +29,9 @@ Tool 组默认收起。存在 running 或 waiting Tool 时，摘要显示最后�
 停止和仅记录必须分别进入摘要，不能统一写成成功。新 Tool 只原位更新组摘要；用户手动展开后保持展开，
 组完成时不自动收起、不抢焦点。
 
+Runtime 明确报告 `runtime_interrupted` 时，未结算 Tool 显示为 stopped/interrupted，使用中性状态；它不能因
+AgentRun 的存储状态为 failed 或进程已经消失而显示为 cancelled。只有 Runtime 权威取消终态才显示 cancelled。
+
 ## 3. 两级 disclosure 与性能边界
 
 点击 Tool 组只展开全部 Tool summary；单条 Tool 的完整公开结果仍由第二级 disclosure 独立打开。完整
@@ -41,6 +44,12 @@ Tool 组默认收起。存在 running 或 waiting Tool 时，摘要显示最后�
 不把该最坏情况误报为虚拟化。terminal Run 的 Evidence history 仍只在用户打开精确 Run 后读取，
 non-terminal Run 的完整 Evidence open projection 不变。
 
+未来新产生的 Codex `command.output.delta` 不属于 Renderer live event 输入，不追加到 `liveRuntimeEvents`，也不触发
+排序或 progress rebuild。Command 详情只消费 terminal semantic result 的 `aggregatedOutput`；超过既有阈值时仍在
+用户首次展开精确 Tool 后惰性读取 Managed Blob。历史 Evidence 中已有的 delta 保持可读，但不迁移、不改写，
+也不因此恢复新事件的 live path。删除 delta durability 不改变 Tool identity、chronology、分组、计数或精确 Tool
+结果 disclosure。
+
 ## 4. 键盘与辅助技术
 
 组 summary 使用原生 disclosure 键盘语义和可见焦点。摘要的辅助技术名称包含未视觉截断的当前操作与真实
@@ -51,7 +60,10 @@ Home/End；Escape 返回对应 Tool summary，而不是跳过 Tool 层直接返�
 
 - `Tool → Tool → narration → Tool` 派生为两个组，展开后的 Tool 顺序与 identity 完整保留；
 - running、waiting、succeeded、failed、cancelled 与 recorded 组摘要均诚实，活动组后不重复“正在处理”；
+- `runtime_interrupted` 投影为 stopped/interrupted 与 unsettled，不投影为 cancelled；
 - 默认收起时不挂载任何完整结果 region；首次打开精确 Tool 才显示本地结果或读取 Managed Blob；
+- 100,000 个 `command.output.delta` 不新增任何 Renderer live event，terminal Command 仍显示正确 command、status、
+  exitCode 与 `aggregatedOutput`；
 - 新 Tool 与组终态更新不改变用户的展开状态或焦点；
 - 同一个 Drawer 在底部与 Inspector 之间移动后保持组、Tool、结果和阅读状态；
 - Day/Night、310px/260px Inspector、`1040×700`、200% zoom、reduced motion 与 Forced Colors 无页面级横向溢出。

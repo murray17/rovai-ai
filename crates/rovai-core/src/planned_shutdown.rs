@@ -40,6 +40,7 @@ pub enum RuntimeTerminalOutcome {
     Succeeded,
     Failed,
     Cancelled,
+    Interrupted,
 }
 
 impl RuntimeTerminalOutcome {
@@ -48,6 +49,7 @@ impl RuntimeTerminalOutcome {
             Self::Succeeded => "succeeded",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
+            Self::Interrupted => "interrupted",
         }
     }
 }

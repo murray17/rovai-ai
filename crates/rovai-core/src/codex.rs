@@ -823,6 +823,12 @@ impl CodexRuntime {
         self.host.active_turn(&thread_id, &self.owner).await
     }
 
+    pub async fn active_command_output_route(&self) -> Option<(String, String)> {
+        let thread_id = self.thread_id().await?;
+        let turn_id = self.host.active_turn(&thread_id, &self.owner).await?;
+        Some((thread_id, turn_id))
+    }
+
     pub async fn observe_agent_message(&self, method: &str, params: &Value) {
         match method {
             "item/started" => {
@@ -844,13 +850,15 @@ impl CodexRuntime {
                     self.streamed_agent_text.lock().await.push_str(delta);
                 }
             }
-            "item/completed"
-                if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") =>
-            {
-                if let Some(text) = params.pointer("/item/text").and_then(Value::as_str)
-                    && !text.trim().is_empty()
-                {
-                    *self.completed_agent_message.write().await = Some(text.to_string());
+            "item/completed" => {
+                if params.pointer("/item/type").and_then(Value::as_str) == Some("agentMessage") {
+                    if let Some(text) = params.pointer("/item/text").and_then(Value::as_str)
+                        && !text.trim().is_empty()
+                    {
+                        *self.completed_agent_message.write().await = Some(text.to_string());
+                    }
+                } else if let Some(item_id) = params.pointer("/item/id").and_then(Value::as_str) {
+                    self.action_items.lock().await.remove(item_id);
                 }
             }
             _ => {}
@@ -859,6 +867,22 @@ impl CodexRuntime {
 
     pub async fn action_item(&self, item_id: &str) -> Option<Value> {
         self.action_items.lock().await.get(item_id).cloned()
+    }
+
+    pub async fn open_action_items(&self) -> Vec<Value> {
+        let mut items = self
+            .action_items
+            .lock()
+            .await
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            left.get("id")
+                .and_then(Value::as_str)
+                .cmp(&right.get("id").and_then(Value::as_str))
+        });
+        items
     }
 
     pub async fn final_agent_message(&self) -> Option<String> {
@@ -2295,14 +2319,19 @@ while IFS= read -r ignored; do :; done
     }
 
     #[test]
-    fn shared_host_route_rejects_events_from_an_old_native_turn() {
-        let route = CodexThreadRoute {
-            owner: CodexRuntimeOwner::AgentRun {
-                agent_run_id: "run-current".to_string(),
-                execution_epoch: 4,
-            },
-            active_turn_id: Some("turn-current".to_string()),
+    fn shared_host_route_rejects_old_terminalized_and_unbound_events() {
+        let owner = CodexRuntimeOwner::AgentRun {
+            agent_run_id: "run-current".to_string(),
+            execution_epoch: 4,
         };
+        let mut routes = HashMap::from([(
+            "thread-current".to_string(),
+            CodexThreadRoute {
+                owner: owner.clone(),
+                active_turn_id: Some("turn-current".to_string()),
+            },
+        )]);
+        let route = routes.get("thread-current").unwrap();
         assert!(route.owner_for_message(Some("turn-old")).is_none());
         assert!(matches!(
             route.owner_for_message(Some("turn-current")),
@@ -2311,6 +2340,22 @@ while IFS= read -r ignored; do :; done
                 execution_epoch: 4,
             }) if agent_run_id == "run-current"
         ));
+
+        routes.get_mut("thread-current").unwrap().active_turn_id = None;
+        assert!(
+            routes["thread-current"]
+                .owner_for_message(Some("turn-current"))
+                .is_none()
+        );
+        routes.remove("thread-current");
+        assert!(!routes.contains_key("thread-current"));
+        assert_eq!(
+            owner,
+            CodexRuntimeOwner::AgentRun {
+                agent_run_id: "run-current".to_string(),
+                execution_epoch: 4,
+            }
+        );
     }
 
     #[test]
@@ -2449,30 +2494,47 @@ while IFS= read -r ignored; do :; done
 
     #[test]
     fn completed_command_is_normalized_without_persisting_raw_output() {
-        let completed = completed_intercepted_action(
-            &json!({
-                "threadId": "thread-1",
-                "turnId": "turn-1",
-                "item": {
-                    "id": "item-1",
-                    "type": "commandExecution",
-                    "status": "completed",
-                    "exitCode": 0,
-                    "durationMs": 42,
-                    "aggregatedOutput": "secret output"
-                }
-            }),
-            "thread-1",
-            "turn-1",
-        )
-        .expect("valid completion should normalize")
-        .expect("command is an intercepted Action type");
+        let terminal_params = json!({
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "item": {
+                "id": "item-1",
+                "type": "commandExecution",
+                "status": "completed",
+                "exitCode": 0,
+                "durationMs": 42,
+                "aggregatedOutput": "secret output"
+            }
+        });
+        let completed = completed_intercepted_action(&terminal_params, "thread-1", "turn-1")
+            .expect("valid completion should normalize")
+            .expect("command is an intercepted Action type");
         assert_eq!(completed.native_item_id, "item-1");
         assert!(matches!(completed.outcome, ActionResultOutcome::Succeeded));
         assert_eq!(completed.effect_disposition, "complete");
         assert_eq!(completed.result_data["exitCode"], 0);
         assert!(completed.result_data["outputDigest"].is_string());
         assert!(!completed.result_data.to_string().contains("secret output"));
+
+        let (delta_event_type, _) = normalize_event(
+            "item/commandExecution/outputDelta",
+            &json!({
+                "threadId": "thread-1",
+                "turnId": "turn-1",
+                "itemId": "item-1",
+                "delta": "secret",
+            }),
+        );
+        assert_eq!(delta_event_type, "command.output.delta");
+        let (terminal_event_type, terminal_payload) =
+            normalize_event("item/completed", &terminal_params);
+        assert_eq!(terminal_event_type, "activity.completed");
+        assert_eq!(terminal_payload["item"]["status"], "completed");
+        assert_eq!(terminal_payload["item"]["exitCode"], 0);
+        assert_eq!(
+            terminal_payload["item"]["aggregatedOutput"],
+            "secret output"
+        );
     }
 
     #[test]

@@ -1522,6 +1522,51 @@ mod tests {
     }
 
     #[test]
+    fn command_terminal_carries_the_complete_public_output() {
+        let conversation_id = "0bdd2166-d420-40c6-94be-70b93eb290c5";
+        let mut capture = AntigravityStreamCapture::default();
+        let started = normalize_antigravity_tool_step(
+            &serde_json::json!({
+                "conversation_id": conversation_id,
+                "step_index": 4,
+                "state": "RUNNING",
+                "step_type": "tool",
+                "tool_name": "run_command",
+                "tool_info": {
+                    "name": "run_command",
+                    "parameters": {"CommandLine": "pnpm test"}
+                }
+            }),
+            &mut capture,
+        )
+        .unwrap()
+        .unwrap();
+        let completed = normalize_antigravity_tool_step(
+            &serde_json::json!({
+                "conversation_id": conversation_id,
+                "step_index": 4,
+                "state": "DONE",
+                "step_type": "tool",
+                "tool_name": "run_command",
+                "tool_info": {
+                    "name": "run_command",
+                    "output": "complete Antigravity output"
+                }
+            }),
+            &mut capture,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(started.event_type, "runtime.action");
+        assert_eq!(started.payload["status"], "in_progress");
+        assert_eq!(completed.event_type, "runtime.action");
+        assert_eq!(completed.payload["status"], "completed");
+        assert_eq!(completed.payload["input"]["command"], "pnpm test");
+        assert_eq!(completed.payload["output"], "complete Antigravity output");
+    }
+
+    #[test]
     fn workspace_roots_include_canonical_execution_attachment_and_run_tmp_directories() {
         let root = std::env::temp_dir().join(format!(
             "rovai-antigravity-workspace-roots-test-{}",
