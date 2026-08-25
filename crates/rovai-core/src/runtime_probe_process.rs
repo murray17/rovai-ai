@@ -447,6 +447,96 @@ mod tests {
         assert!(gone.is_ok(), "cancelled probe descendant must be gone");
     }
 
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn timed_out_bat_probe_cleans_its_complete_process_tree() {
+        let directory =
+            std::env::temp_dir().join(format!("rovai bat probe timeout {}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let script = directory.join("runtime probe.bat");
+        let pid_file = directory.join("descendant.pid");
+        std::fs::write(
+            &script,
+            concat!(
+                "@echo off\r\n",
+                "\"%ROVAI_TEST_EXE%\" --exact managed_process::tests::windows_job_child_helper --ignored --nocapture\r\n",
+                "\"%SystemRoot%\\System32\\ping.exe\" -t 127.0.0.1 >nul\r\n"
+            ),
+        )
+        .unwrap();
+        let task = tokio::spawn({
+            let script = script.clone();
+            let pid_file = pid_file.clone();
+            async move {
+                let mut command = Command::new(script);
+                command
+                    .env("ROVAI_TEST_EXE", std::env::current_exe().unwrap())
+                    .env("ROVAI_MANAGED_PROCESS_HELPER_MODE", "child")
+                    .env("ROVAI_MANAGED_PROCESS_HELPER_FILE", pid_file);
+                run_bounded_command(
+                    &mut command,
+                    ProbeCommandLimits {
+                        deadline: Duration::from_secs(1),
+                        stdout_bytes: 1024,
+                        stderr_bytes: 1024,
+                        cleanup_timeout: Duration::from_secs(1),
+                    },
+                )
+                .await
+            }
+        });
+        let descendant_pid = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Ok(value) = std::fs::read_to_string(&pid_file)
+                    && let Ok(pid) = value.trim().parse::<u32>()
+                {
+                    break pid;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("batch descendant PID was not published");
+        let error = task
+            .await
+            .unwrap()
+            .expect_err("bounded batch probe must time out");
+        assert!(error.to_string().contains("runtime_probe_timed_out"));
+        let gone = tokio::time::timeout(Duration::from_secs(2), async {
+            while windows_process_is_running(descendant_pid) {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+        assert!(gone.is_ok(), "timed-out batch descendant must be gone");
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    fn windows_process_is_running(pid: u32) -> bool {
+        use windows_sys::Win32::{
+            Foundation::{CloseHandle, WAIT_TIMEOUT},
+            System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+        };
+
+        let process = unsafe {
+            // SAFETY: the PID was written by the exact descendant created by the fixture.
+            OpenProcess(PROCESS_SYNCHRONIZE, 0, pid)
+        };
+        if process.is_null() {
+            return false;
+        }
+        let running = unsafe {
+            // SAFETY: `process` is a valid synchronization handle until closed below.
+            WaitForSingleObject(process, 0) == WAIT_TIMEOUT
+        };
+        unsafe {
+            // SAFETY: `process` is owned by this function and closed exactly once.
+            CloseHandle(process);
+        }
+        running
+    }
+
     #[tokio::test]
     async fn bounded_reader_reports_truncation_before_allocating_past_limit() {
         let input = vec![b'a'; 4097];

@@ -28,11 +28,15 @@ use uuid::Uuid;
 
 #[cfg(windows)]
 use crate::runtime_discovery_windows::{
-    WindowsRegistryPathValues, is_cmd_path, paths_equal, read_registry_path_values,
-    registry_path_directories, resolve_codex_cmd_shim,
+    PackageManagerShimKind, WindowsRegistryPathValues, classify_package_manager_cmd_shim,
+    inspect_codex_cmd_shim, paths_equal, read_registry_path_values, registry_path_directories,
+};
+#[cfg(windows)]
+use crate::windows_runtime_entrypoint::{
+    ResolvedWindowsCommandShimIdentity, capture_resolved_windows_command_shim,
 };
 use crate::{
-    agent_profile::{AdapterKind, InstallationSource},
+    agent_profile::{AdapterKind, InstallationSource, RuntimeEntrypointLocatorIdentity},
     agent_runtime_adapter::{executable_fingerprint, grok_build_minimum_version_satisfied},
     runtime_probe_process::{ProbeCommandLimits, run_bounded_command},
 };
@@ -55,6 +59,8 @@ tokio::task_local! {
 #[serde(rename_all = "snake_case")]
 pub enum SearchPathSource {
     InheritedPath,
+    UserRegistryPath,
+    MachineRegistryPath,
     LoginShell,
     KnownLocation,
 }
@@ -63,6 +69,7 @@ impl SearchPathSource {
     fn installation_source(self) -> InstallationSource {
         match self {
             Self::InheritedPath => InstallationSource::InheritedPath,
+            Self::UserRegistryPath | Self::MachineRegistryPath => InstallationSource::InheritedPath,
             Self::LoginShell => InstallationSource::LoginShell,
             Self::KnownLocation => InstallationSource::KnownLocation,
         }
@@ -118,6 +125,72 @@ pub struct RuntimeSearchEnvironmentSummary {
 pub struct RuntimeExecutableCandidate {
     pub path: PathBuf,
     pub source: InstallationSource,
+    pub search_path_source: Option<SearchPathSource>,
+    pub entrypoint_kind: RuntimeDiscoveryEntrypointKind,
+    pub candidate_extension: RuntimeCandidateExtension,
+    pub resolved_native_target: bool,
+    pub entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
+}
+
+impl RuntimeExecutableCandidate {
+    pub fn entrypoint_locator_identity_is_current(&self) -> bool {
+        let Some(expected) = self.entrypoint_locator_identity.as_ref() else {
+            return true;
+        };
+        #[cfg(windows)]
+        {
+            let Some(resolved) = inspect_codex_cmd_shim(Path::new(&expected.canonical_shim_path))
+            else {
+                return false;
+            };
+            let expected_kind = match resolved.package_manager {
+                PackageManagerShimKind::Npm => "npm_cmd_shim",
+                PackageManagerShimKind::Pnpm => "pnpm_cmd_shim",
+            };
+            if expected.entrypoint_kind != expected_kind {
+                return false;
+            }
+            capture_resolved_windows_command_shim(
+                Path::new(&expected.canonical_shim_path),
+                &resolved.executable,
+            )
+            .ok()
+            .map(|identity| resolved_locator_identity(expected_kind, identity))
+            .as_ref()
+                == Some(expected)
+        }
+        #[cfg(not(windows))]
+        false
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeDiscoveryEntrypointKind {
+    NativeExecutable,
+    NpmCmdShim,
+    PnpmCmdShim,
+    WindowsCommandShim,
+}
+
+impl RuntimeDiscoveryEntrypointKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeExecutable => "native_executable",
+            Self::NpmCmdShim => "npm_cmd_shim",
+            Self::PnpmCmdShim => "pnpm_cmd_shim",
+            Self::WindowsCommandShim => "windows_command_shim",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCandidateExtension {
+    Native,
+    Exe,
+    Cmd,
+    Bat,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -160,9 +233,16 @@ pub struct RuntimeDiscoveryObservation {
     pub source: Option<InstallationSource>,
     pub reported_version: Option<String>,
     pub executable_fingerprint: Option<String>,
+    pub search_path_source: Option<SearchPathSource>,
+    pub entrypoint_kind: Option<RuntimeDiscoveryEntrypointKind>,
+    pub candidate_extension: Option<RuntimeCandidateExtension>,
+    pub resolved_native_target: bool,
+    pub version_probe_succeeded: Option<bool>,
     pub search_generation: u64,
     pub observed_at: String,
     pub diagnostic_code: Option<String>,
+    #[serde(skip)]
+    pub entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
 }
 
 impl RuntimeDiscoveryObservation {
@@ -174,9 +254,15 @@ impl RuntimeDiscoveryObservation {
             source: None,
             reported_version: None,
             executable_fingerprint: None,
+            search_path_source: None,
+            entrypoint_kind: None,
+            candidate_extension: None,
+            resolved_native_target: false,
+            version_probe_succeeded: None,
             search_generation,
             observed_at: chrono::Utc::now().to_rfc3339(),
             diagnostic_code: None,
+            entrypoint_locator_identity: None,
         }
     }
 }
@@ -220,9 +306,15 @@ impl RuntimeSearchEnvironment {
     fn capture(generation: u64, interactive: bool) -> Self {
         let mut entries = Vec::new();
         if let Some(inherited) = env::var_os("PATH") {
+            #[cfg(windows)]
+            let inherited_paths = env::split_paths(&inherited)
+                .filter(|path| path.is_absolute() && path.is_dir())
+                .collect::<Vec<_>>();
+            #[cfg(not(windows))]
+            let inherited_paths = env::split_paths(&inherited).collect::<Vec<_>>();
             extend_paths(
                 &mut entries,
-                env::split_paths(&inherited),
+                inherited_paths.into_iter(),
                 SearchPathSource::InheritedPath,
             );
         }
@@ -339,27 +431,62 @@ impl RuntimeSearchEnvironment {
         override_path: Option<PathBuf>,
     ) -> Vec<RuntimeExecutableCandidate> {
         let mut candidates = Vec::new();
-        for path in manual_candidates {
-            if !push_candidates_for_kind(
-                &mut candidates,
-                path,
-                InstallationSource::Manual,
-                kind,
-                &self.executable_suffixes,
-            ) {
-                return Vec::new();
+        let manual_candidates = manual_candidates.into_iter().collect::<Vec<_>>();
+        #[cfg(windows)]
+        {
+            if !manual_candidates.is_empty() {
+                if manual_candidates.iter().any(|path| !path.is_absolute()) {
+                    return Vec::new();
+                }
+                for path in manual_candidates {
+                    push_candidates_for_kind(
+                        &mut candidates,
+                        path,
+                        InstallationSource::Manual,
+                        None,
+                        kind,
+                        &self.executable_suffixes,
+                    );
+                }
+                return candidates;
+            }
+            if let Some(path) = override_path {
+                if !path.is_absolute() {
+                    return Vec::new();
+                }
+                push_candidates_for_kind(
+                    &mut candidates,
+                    path,
+                    InstallationSource::Env,
+                    None,
+                    kind,
+                    &self.executable_suffixes,
+                );
+                return candidates;
             }
         }
-        if let Some(path) = override_path
-            && !push_candidates_for_kind(
-                &mut candidates,
-                path,
-                InstallationSource::Env,
-                kind,
-                &self.executable_suffixes,
-            )
+        #[cfg(not(windows))]
         {
-            return Vec::new();
+            for path in manual_candidates {
+                push_candidates_for_kind(
+                    &mut candidates,
+                    path,
+                    InstallationSource::Manual,
+                    None,
+                    kind,
+                    &self.executable_suffixes,
+                );
+            }
+            if let Some(path) = override_path {
+                push_candidates_for_kind(
+                    &mut candidates,
+                    path,
+                    InstallationSource::Env,
+                    None,
+                    kind,
+                    &self.executable_suffixes,
+                );
+            }
         }
         for entry in &self.path_entries {
             let source = entry
@@ -372,6 +499,7 @@ impl RuntimeSearchEnvironment {
                 &mut candidates,
                 entry.path.clone(),
                 source,
+                entry.sources.first().copied(),
                 kind,
                 &self.executable_suffixes,
             );
@@ -412,6 +540,14 @@ pub fn discover_runtime_path(
     discover_runtime_path_from_candidates(kind, search, search.candidates(kind, std::iter::empty()))
 }
 
+pub fn discover_runtime_path_with_manual_candidates(
+    kind: AdapterKind,
+    search: &RuntimeSearchEnvironment,
+    manual_candidates: impl IntoIterator<Item = PathBuf>,
+) -> RuntimeDiscoveryObservation {
+    discover_runtime_path_from_candidates(kind, search, search.candidates(kind, manual_candidates))
+}
+
 fn discover_runtime_path_from_candidates(
     kind: AdapterKind,
     search: &RuntimeSearchEnvironment,
@@ -419,7 +555,7 @@ fn discover_runtime_path_from_candidates(
 ) -> RuntimeDiscoveryObservation {
     let observed_at = chrono::Utc::now().to_rfc3339();
     for candidate in candidates {
-        if !is_executable_file(&candidate.path) {
+        if !is_runtime_entrypoint_file(&candidate.path) {
             continue;
         }
         let canonical = candidate
@@ -436,9 +572,15 @@ fn discover_runtime_path_from_candidates(
                     source: Some(candidate.source),
                     reported_version: None,
                     executable_fingerprint: Some(fingerprint),
+                    search_path_source: candidate.search_path_source,
+                    entrypoint_kind: Some(candidate.entrypoint_kind),
+                    candidate_extension: Some(candidate.candidate_extension),
+                    resolved_native_target: candidate.resolved_native_target,
+                    version_probe_succeeded: None,
                     search_generation: search.generation,
                     observed_at,
                     diagnostic_code: None,
+                    entrypoint_locator_identity: candidate.entrypoint_locator_identity,
                 };
             }
             Err(_) => continue,
@@ -451,9 +593,15 @@ fn discover_runtime_path_from_candidates(
         source: None,
         reported_version: None,
         executable_fingerprint: None,
+        search_path_source: None,
+        entrypoint_kind: None,
+        candidate_extension: None,
+        resolved_native_target: false,
+        version_probe_succeeded: None,
         search_generation: search.generation,
         observed_at,
         diagnostic_code: Some("runtime_not_found".to_string()),
+        entrypoint_locator_identity: None,
     }
 }
 
@@ -470,6 +618,7 @@ pub async fn discover_runtime_version(
     ) {
         observation.reported_version =
             discover_static_runtime_version(observation.runtime_kind, Path::new(path));
+        observation.version_probe_succeeded = Some(observation.reported_version.is_some());
         observation.diagnostic_code = observation
             .reported_version
             .is_none()
@@ -496,13 +645,21 @@ pub async fn discover_runtime_version(
             {
                 observation.diagnostic_code = Some("runtime_version_below_minimum".to_string());
             }
-            observation.reported_version = Some(version)
+            observation.reported_version = Some(version);
+            observation.version_probe_succeeded = Some(true);
         }
         Ok(_) if observation.runtime_kind == AdapterKind::CursorAgent => {
-            observation.diagnostic_code = Some("runtime_identity_mismatch".to_string())
+            observation.diagnostic_code = Some("runtime_identity_mismatch".to_string());
+            observation.version_probe_succeeded = Some(false);
         }
-        Ok(_) => observation.diagnostic_code = Some("runtime_version_empty".to_string()),
-        Err(error) => observation.diagnostic_code = Some(format!("{error:#}")),
+        Ok(_) => {
+            observation.diagnostic_code = Some("runtime_version_empty".to_string());
+            observation.version_probe_succeeded = Some(false);
+        }
+        Err(error) => {
+            observation.diagnostic_code = Some(format!("{error:#}"));
+            observation.version_probe_succeeded = Some(false);
+        }
     }
     observation.observed_at = chrono::Utc::now().to_rfc3339();
 }
@@ -812,12 +969,12 @@ fn extend_windows_registry_paths(
     extend_paths(
         entries,
         registry_path_directories(registry_paths.user.as_deref(), environment).into_iter(),
-        SearchPathSource::InheritedPath,
+        SearchPathSource::UserRegistryPath,
     );
     extend_paths(
         entries,
         registry_path_directories(registry_paths.machine.as_deref(), environment).into_iter(),
-        SearchPathSource::InheritedPath,
+        SearchPathSource::MachineRegistryPath,
     );
 }
 
@@ -855,59 +1012,63 @@ fn push_candidates(
     candidates: &mut Vec<RuntimeExecutableCandidate>,
     path_or_directory: PathBuf,
     source: InstallationSource,
+    search_path_source: Option<SearchPathSource>,
     command_name: &str,
+    kind: AdapterKind,
     executable_suffixes: &[OsString],
 ) {
     if path_or_directory.is_dir() {
         for suffix in executable_suffixes {
             let mut executable_name = OsString::from(command_name);
             executable_name.push(suffix);
-            push_concrete_candidate(candidates, path_or_directory.join(executable_name), source);
+            push_candidate_for_kind(
+                candidates,
+                path_or_directory.join(executable_name),
+                source,
+                search_path_source,
+                kind,
+            );
         }
         return;
     }
-    push_concrete_candidate(candidates, path_or_directory, source);
+    push_candidate_for_kind(
+        candidates,
+        path_or_directory,
+        source,
+        search_path_source,
+        kind,
+    );
 }
 
 fn push_candidates_for_kind(
     candidates: &mut Vec<RuntimeExecutableCandidate>,
     path_or_directory: PathBuf,
     source: InstallationSource,
+    search_path_source: Option<SearchPathSource>,
     kind: AdapterKind,
     executable_suffixes: &[OsString],
-) -> bool {
-    #[cfg(windows)]
-    if kind == AdapterKind::CodexCli && is_cmd_path(&path_or_directory) {
-        let Some(executable) = resolve_codex_cmd_shim(&path_or_directory) else {
-            return false;
-        };
-        push_concrete_candidate(candidates, executable, source);
-        return true;
-    }
-
+) {
     if path_or_directory.is_dir() {
         for command_name in kind.command_names() {
             push_candidates(
                 candidates,
                 path_or_directory.clone(),
                 source,
+                search_path_source,
                 command_name,
+                kind,
                 executable_suffixes,
             );
         }
-        #[cfg(windows)]
-        if kind == AdapterKind::CodexCli {
-            let shim = path_or_directory.join("codex.cmd");
-            if shim.is_file()
-                && let Some(executable) = resolve_codex_cmd_shim(&shim)
-            {
-                push_concrete_candidate(candidates, executable, source);
-            }
-        }
-        return true;
+        return;
     }
-    push_concrete_candidate(candidates, path_or_directory, source);
-    true
+    push_candidate_for_kind(
+        candidates,
+        path_or_directory,
+        source,
+        search_path_source,
+        kind,
+    );
 }
 
 /// Cursor's current CLI reports a date-based build such as
@@ -935,10 +1096,16 @@ pub fn is_cursor_agent_version(version: &str) -> bool {
             .all(|value| value.is_ascii_alphanumeric() || value == b'.')
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_concrete_candidate(
     candidates: &mut Vec<RuntimeExecutableCandidate>,
     path: PathBuf,
     source: InstallationSource,
+    search_path_source: Option<SearchPathSource>,
+    entrypoint_kind: RuntimeDiscoveryEntrypointKind,
+    candidate_extension: RuntimeCandidateExtension,
+    resolved_native_target: bool,
+    entrypoint_locator_identity: Option<RuntimeEntrypointLocatorIdentity>,
 ) {
     let canonical = runtime_visible_path(path.canonicalize().unwrap_or(path));
     if candidates
@@ -950,7 +1117,128 @@ fn push_concrete_candidate(
     candidates.push(RuntimeExecutableCandidate {
         path: canonical,
         source,
+        search_path_source,
+        entrypoint_kind,
+        candidate_extension,
+        resolved_native_target,
+        entrypoint_locator_identity,
     });
+}
+
+#[cfg(windows)]
+fn resolved_locator_identity(
+    entrypoint_kind: &str,
+    identity: ResolvedWindowsCommandShimIdentity,
+) -> RuntimeEntrypointLocatorIdentity {
+    let compatibility_fingerprint = identity.compatibility_fingerprint();
+    RuntimeEntrypointLocatorIdentity {
+        entrypoint_kind: entrypoint_kind.to_string(),
+        canonical_shim_path: identity.locator.shim.to_string_lossy().to_string(),
+        shim_content_digest: identity.locator.content_digest,
+        canonical_interpreter_path: identity.locator.interpreter.to_string_lossy().to_string(),
+        interpreter_fingerprint: identity.locator.interpreter_fingerprint,
+        resolved_target_path: identity.target.to_string_lossy().to_string(),
+        resolved_target_fingerprint: identity.target_fingerprint,
+        compatibility_fingerprint,
+    }
+}
+
+fn push_candidate_for_kind(
+    candidates: &mut Vec<RuntimeExecutableCandidate>,
+    path: PathBuf,
+    source: InstallationSource,
+    search_path_source: Option<SearchPathSource>,
+    kind: AdapterKind,
+) {
+    #[cfg(windows)]
+    {
+        let Some(extension) = path.extension().map(|value| value.to_string_lossy()) else {
+            return;
+        };
+        if extension.eq_ignore_ascii_case("exe") {
+            push_concrete_candidate(
+                candidates,
+                path,
+                source,
+                search_path_source,
+                RuntimeDiscoveryEntrypointKind::NativeExecutable,
+                RuntimeCandidateExtension::Exe,
+                false,
+                None,
+            );
+            return;
+        }
+        if extension.eq_ignore_ascii_case("cmd") {
+            if kind == AdapterKind::CodexCli
+                && let Some(resolved) = inspect_codex_cmd_shim(&path)
+            {
+                let entrypoint_kind = match resolved.package_manager {
+                    PackageManagerShimKind::Npm => RuntimeDiscoveryEntrypointKind::NpmCmdShim,
+                    PackageManagerShimKind::Pnpm => RuntimeDiscoveryEntrypointKind::PnpmCmdShim,
+                };
+                if let Ok(identity) =
+                    capture_resolved_windows_command_shim(&path, &resolved.executable)
+                {
+                    let target = identity.target.clone();
+                    let locator_identity =
+                        resolved_locator_identity(entrypoint_kind.as_str(), identity);
+                    push_concrete_candidate(
+                        candidates,
+                        target,
+                        source,
+                        search_path_source,
+                        entrypoint_kind,
+                        RuntimeCandidateExtension::Cmd,
+                        true,
+                        Some(locator_identity),
+                    );
+                    return;
+                }
+            }
+            let entrypoint_kind = match classify_package_manager_cmd_shim(&path) {
+                Some(PackageManagerShimKind::Npm) => RuntimeDiscoveryEntrypointKind::NpmCmdShim,
+                Some(PackageManagerShimKind::Pnpm) => RuntimeDiscoveryEntrypointKind::PnpmCmdShim,
+                None => RuntimeDiscoveryEntrypointKind::WindowsCommandShim,
+            };
+            push_concrete_candidate(
+                candidates,
+                path,
+                source,
+                search_path_source,
+                entrypoint_kind,
+                RuntimeCandidateExtension::Cmd,
+                false,
+                None,
+            );
+            return;
+        }
+        if extension.eq_ignore_ascii_case("bat") {
+            push_concrete_candidate(
+                candidates,
+                path,
+                source,
+                search_path_source,
+                RuntimeDiscoveryEntrypointKind::WindowsCommandShim,
+                RuntimeCandidateExtension::Bat,
+                false,
+                None,
+            );
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = kind;
+        push_concrete_candidate(
+            candidates,
+            path,
+            source,
+            search_path_source,
+            RuntimeDiscoveryEntrypointKind::NativeExecutable,
+            RuntimeCandidateExtension::Native,
+            false,
+            None,
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -964,6 +1252,21 @@ pub fn is_executable_file(path: &Path) -> bool {
     path.extension()
         .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
         && fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
+#[cfg(windows)]
+pub fn is_runtime_entrypoint_file(path: &Path) -> bool {
+    path.extension().is_some_and(|extension| {
+        let extension = extension.to_string_lossy();
+        extension.eq_ignore_ascii_case("exe")
+            || extension.eq_ignore_ascii_case("cmd")
+            || extension.eq_ignore_ascii_case("bat")
+    }) && fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+}
+
+#[cfg(not(windows))]
+pub fn is_runtime_entrypoint_file(path: &Path) -> bool {
+    is_executable_file(path)
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -1047,7 +1350,7 @@ fn known_windows_runtime_directories(
         result.push(user_profile.join(".cargo/bin"));
         result.push(user_profile.join(".local/bin"));
     }
-    result.retain(|path| path.is_dir());
+    result.retain(|path| path.is_absolute() && path.is_dir());
     result
 }
 
@@ -1068,22 +1371,12 @@ fn runtime_executable_suffixes() -> Vec<OsString> {
 
 #[cfg(any(windows, test))]
 fn windows_executable_suffixes_from(path_ext: Option<&OsStr>) -> Vec<OsString> {
-    let Some(path_ext) = path_ext.filter(|value| !value.is_empty()) else {
-        return vec![OsString::from(".exe")];
-    };
-    let mut executable = Vec::new();
-    for suffix in path_ext.to_string_lossy().split(';') {
-        let suffix = suffix.trim();
-        let normalized = if suffix.starts_with('.') {
-            suffix.to_string()
-        } else {
-            format!(".{suffix}")
-        };
-        if normalized.eq_ignore_ascii_case(".exe") && executable.is_empty() {
-            executable.push(OsString::from(".exe"));
-        }
-    }
-    executable
+    let _ = path_ext;
+    vec![
+        OsString::from(".exe"),
+        OsString::from(".cmd"),
+        OsString::from(".bat"),
+    ]
 }
 
 pub fn catalog_entries() -> Vec<BTreeMap<&'static str, &'static str>> {
@@ -1154,23 +1447,25 @@ mod tests {
     }
 
     #[test]
-    fn windows_pathext_keeps_only_native_exe_candidates() {
+    fn windows_entrypoint_suffixes_are_closed_and_ignore_pathext_expansion() {
+        let supported = [
+            OsString::from(".exe"),
+            OsString::from(".cmd"),
+            OsString::from(".bat"),
+        ];
         assert_eq!(
             windows_executable_suffixes_from(Some(OsStr::new(".COM;.EXE;.CMD;.BAT;.PS1;.exe"))),
-            [OsString::from(".exe")]
+            supported
         );
         assert_eq!(
             windows_executable_suffixes_from(Some(OsStr::new("COM;CMD;BAT;PS1"))),
-            Vec::<OsString>::new()
+            supported
         );
-        assert_eq!(
-            windows_executable_suffixes_from(None),
-            [OsString::from(".exe")]
-        );
+        assert_eq!(windows_executable_suffixes_from(None), supported);
     }
 
     #[test]
-    fn windows_directory_search_materializes_only_the_native_exe_name() {
+    fn windows_directory_search_materializes_only_exe_cmd_and_bat_in_order() {
         let directory = env::temp_dir().join(format!("rovai-windows-search-{}", Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
         fs::write(directory.join("codex.exe"), b"native fixture").unwrap();
@@ -1187,10 +1482,16 @@ mod tests {
 
         let candidates =
             search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
-        assert_eq!(candidates.len(), 1);
         assert_eq!(
-            candidates[0].path.file_name(),
-            Some(OsStr::new("codex.exe"))
+            candidates
+                .iter()
+                .map(|candidate| candidate.path.file_name().unwrap())
+                .collect::<Vec<_>>(),
+            [
+                OsStr::new("codex.exe"),
+                OsStr::new("codex.cmd"),
+                OsStr::new("codex.bat")
+            ]
         );
 
         fs::remove_dir_all(directory).unwrap();
@@ -1553,7 +1854,7 @@ mod windows_tests {
             path_value: env::join_paths(path_entries.iter().map(|entry| entry.path.as_os_str()))
                 .unwrap(),
             path_entries,
-            executable_suffixes: vec![OsString::from(".exe")],
+            executable_suffixes: windows_executable_suffixes_from(None),
             created_at: "2026-08-25T00:00:00Z".to_string(),
             shell_diagnostic: ShellPathDiagnostic {
                 status: ShellPathStatus::Unavailable,
@@ -1641,7 +1942,7 @@ mod windows_tests {
     }
 
     #[test]
-    fn executable_file_gate_accepts_exe_and_rejects_script_shims() {
+    fn windows_entrypoint_gate_keeps_native_and_command_shim_identity_distinct() {
         let directory =
             env::temp_dir().join(format!("rovai-windows-executable-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&directory).unwrap();
@@ -1652,6 +1953,8 @@ mod windows_tests {
 
         assert!(is_executable_file(&executable));
         assert!(!is_executable_file(&command_shim));
+        assert!(is_runtime_entrypoint_file(&executable));
+        assert!(is_runtime_entrypoint_file(&command_shim));
 
         fs::remove_dir_all(directory).unwrap();
     }
@@ -1689,14 +1992,33 @@ mod windows_tests {
         let canonical_executable = runtime_visible_path(executable.canonicalize().unwrap());
 
         let explicit_candidates =
-            search.candidates_with_override(AdapterKind::CodexCli, [shim], None);
-        assert_eq!(explicit_candidates.len(), 2);
+            search.candidates_with_override(AdapterKind::CodexCli, [shim.clone()], None);
+        assert_eq!(explicit_candidates.len(), 1);
         assert_eq!(explicit_candidates[0].path, canonical_executable);
         assert_eq!(explicit_candidates[0].source, InstallationSource::Manual);
+        assert_eq!(
+            explicit_candidates[0].entrypoint_kind,
+            RuntimeDiscoveryEntrypointKind::NpmCmdShim
+        );
+        assert!(explicit_candidates[0].resolved_native_target);
+        let locator = explicit_candidates[0]
+            .entrypoint_locator_identity
+            .as_ref()
+            .expect("resolved npm discovery must retain its shim locator identity");
+        assert_eq!(locator.entrypoint_kind, "npm_cmd_shim");
+        assert_eq!(
+            locator.resolved_target_path,
+            canonical_executable.to_string_lossy()
+        );
+        assert_eq!(
+            locator.resolved_target_fingerprint,
+            executable_fingerprint(&canonical_executable).unwrap()
+        );
+        assert!(explicit_candidates[0].entrypoint_locator_identity_is_current());
 
         let candidates =
             search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
-        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates.len(), 3);
         assert_eq!(candidates[1].path, canonical_executable);
         assert_eq!(candidates[1].source, InstallationSource::InheritedPath);
 
@@ -1710,6 +2032,62 @@ mod windows_tests {
         assert_eq!(
             observation.executable_fingerprint,
             Some(executable_fingerprint(&canonical_executable).unwrap())
+        );
+        assert_eq!(
+            observation.entrypoint_locator_identity,
+            Some(locator.clone())
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn resolved_npm_shim_content_change_invalidates_locator_identity_and_snapshot_key() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-npm-locator-change-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let (shim, executable) = npm_codex_installation(&root);
+        let search = test_search(4, inherited_entries([root.clone()]));
+        let first = search
+            .candidates_with_override(AdapterKind::CodexCli, [shim.clone()], None)
+            .into_iter()
+            .next()
+            .unwrap();
+        let first_compatibility = first
+            .entrypoint_locator_identity
+            .as_ref()
+            .unwrap()
+            .compatibility_fingerprint
+            .clone();
+
+        let original = fs::read(&shim).unwrap();
+        let mut rewritten = vec![0xef, 0xbb, 0xbf];
+        rewritten.extend_from_slice(&original);
+        fs::write(&shim, rewritten).unwrap();
+        assert!(
+            !first.entrypoint_locator_identity_is_current(),
+            "a captured candidate must become stale when its shim locator changes"
+        );
+
+        let second = search
+            .candidates_with_override(AdapterKind::CodexCli, [shim], None)
+            .into_iter()
+            .next()
+            .unwrap();
+        assert_eq!(
+            second.path,
+            runtime_visible_path(executable.canonicalize().unwrap())
+        );
+        assert_ne!(
+            first_compatibility,
+            second
+                .entrypoint_locator_identity
+                .as_ref()
+                .unwrap()
+                .compatibility_fingerprint,
+            "a package-manager rewrite must fence the old Runtime snapshot even when codex.exe is unchanged"
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -1729,7 +2107,7 @@ mod windows_tests {
 
         let candidates =
             search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None);
-        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates.len(), 3);
         assert_eq!(
             candidates[0].path,
             runtime_visible_path(native_executable.canonicalize().unwrap())
@@ -1770,24 +2148,47 @@ mod windows_tests {
         fs::write(fallback.join("codex.exe"), b"fallback must not win").unwrap();
         let search = test_search(5, inherited_entries([fallback]));
 
-        assert!(
-            search
-                .candidates_with_override(AdapterKind::CodexCli, [invalid_shim.clone()], None)
-                .is_empty()
+        let manual =
+            search.candidates_with_override(AdapterKind::CodexCli, [invalid_shim.clone()], None);
+        assert_eq!(manual.len(), 1);
+        assert_eq!(
+            manual[0].path,
+            runtime_visible_path(invalid_shim.canonicalize().unwrap())
         );
+        assert_eq!(
+            manual[0].entrypoint_kind,
+            RuntimeDiscoveryEntrypointKind::WindowsCommandShim
+        );
+        assert!(!manual[0].resolved_native_target);
+
+        let overridden = search.candidates_with_override(
+            AdapterKind::CodexCli,
+            std::iter::empty(),
+            Some(invalid_shim),
+        );
+        assert_eq!(
+            overridden.len(),
+            1,
+            "override must not append PATH fallback"
+        );
+        assert_eq!(overridden[0].source, InstallationSource::Env);
         assert!(
             search
                 .candidates_with_override(
                     AdapterKind::CodexCli,
                     std::iter::empty(),
-                    Some(invalid_shim)
+                    Some(PathBuf::from("codex.cmd")),
                 )
-                .is_empty()
+                .is_empty(),
+            "relative override must fail closed instead of searching PATH"
         );
-        assert!(
-            search
-                .candidates_with_override(AdapterKind::CodexCli, [unknown_shim], None)
-                .is_empty()
+
+        let renamed =
+            search.candidates_with_override(AdapterKind::CodexCli, [unknown_shim.clone()], None);
+        assert_eq!(renamed.len(), 1);
+        assert_eq!(
+            renamed[0].path,
+            runtime_visible_path(unknown_shim.canonicalize().unwrap())
         );
 
         fs::remove_dir_all(root).unwrap();
@@ -1837,6 +2238,10 @@ mod windows_tests {
         );
         assert_eq!(observation.discovery_status, RuntimeDiscoveryStatus::Found);
         assert_eq!(observation.search_generation, 2);
+        assert_eq!(
+            observation.search_path_source,
+            Some(SearchPathSource::UserRegistryPath)
+        );
         assert_eq!(
             observation.executable_path.as_deref(),
             Some(
@@ -1894,6 +2299,8 @@ mod windows_tests {
                 .collect::<Vec<_>>(),
             expected_paths
         );
+        assert_eq!(entries[1].sources, [SearchPathSource::UserRegistryPath]);
+        assert_eq!(entries[2].sources, [SearchPathSource::MachineRegistryPath]);
 
         let search = test_search(6, entries);
         let candidates =
@@ -1931,6 +2338,151 @@ mod windows_tests {
                 SearchPathSource::KnownLocation
             ]
         );
+    }
+
+    #[test]
+    fn windows_entrypoint_priority_is_exe_then_cmd_then_bat_and_ps1_is_closed() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-entrypoint-priority-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let command_shim = root.join("codex.cmd");
+        let batch_shim = root.join("codex.bat");
+        let powershell_shim = root.join("codex.ps1");
+        fs::write(&command_shim, b"@echo codex 1.0.0\r\n").unwrap();
+        fs::write(&batch_shim, b"@echo codex 1.0.0\r\n").unwrap();
+        fs::write(&powershell_shim, b"Write-Output 'codex 1.0.0'\r\n").unwrap();
+        let search = test_search(8, inherited_entries([root.clone()]));
+
+        let cmd_observation = discover_runtime_path_from_candidates(
+            AdapterKind::CodexCli,
+            &search,
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None),
+        );
+        assert_eq!(
+            cmd_observation.executable_path.as_deref(),
+            Some(
+                runtime_visible_path(command_shim.canonicalize().unwrap())
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert_eq!(
+            cmd_observation.candidate_extension,
+            Some(RuntimeCandidateExtension::Cmd)
+        );
+        assert!(is_runtime_entrypoint_file(&command_shim));
+        assert!(is_runtime_entrypoint_file(&batch_shim));
+        assert!(!is_runtime_entrypoint_file(&powershell_shim));
+
+        fs::remove_file(&command_shim).unwrap();
+        let bat_observation = discover_runtime_path_from_candidates(
+            AdapterKind::CodexCli,
+            &search,
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None),
+        );
+        assert_eq!(
+            bat_observation.executable_path.as_deref(),
+            Some(
+                runtime_visible_path(batch_shim.canonicalize().unwrap())
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+        assert_eq!(
+            bat_observation.candidate_extension,
+            Some(RuntimeCandidateExtension::Bat)
+        );
+
+        fs::remove_file(&batch_shim).unwrap();
+        let ps1_only = discover_runtime_path_from_candidates(
+            AdapterKind::CodexCli,
+            &search,
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None),
+        );
+        assert_eq!(ps1_only.discovery_status, RuntimeDiscoveryStatus::Missing);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn windows_command_shim_content_changes_compatibility_fingerprint() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-shim-fingerprint-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        for extension in ["cmd", "bat"] {
+            let shim = root.join(format!("runtime.{extension}"));
+            fs::write(&shim, b"@echo version-one\r\n").unwrap();
+            let first = executable_fingerprint(&shim).unwrap();
+            fs::write(&shim, b"@echo version-two\r\n").unwrap();
+            let second = executable_fingerprint(&shim).unwrap();
+            assert_ne!(first, second, "{extension} content must fence snapshots");
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn hydrated_path_reaches_bat_version_probe_and_agent_run_command_snapshot() {
+        let root = env::temp_dir().join(format!(
+            "rovai-windows-hydrated-child-path-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let script = root.join("codex.bat");
+        let captured_path = root.join("captured-path.txt");
+        fs::write(
+            &script,
+            format!(
+                "@echo off\r\n> \"{}\" echo %PATH%\r\necho codex-cli 9.8.7\r\n",
+                captured_path.display()
+            ),
+        )
+        .unwrap();
+        let search = test_search(
+            9,
+            vec![SearchPathEntry {
+                path: root.clone(),
+                sources: vec![SearchPathSource::UserRegistryPath],
+            }],
+        );
+        let mut observation = discover_runtime_path_from_candidates(
+            AdapterKind::CodexCli,
+            &search,
+            search.candidates_with_override(AdapterKind::CodexCli, std::iter::empty(), None),
+        );
+        discover_runtime_version(&mut observation, &search).await;
+        assert_eq!(
+            observation.reported_version.as_deref(),
+            Some("codex-cli 9.8.7")
+        );
+        assert_eq!(observation.version_probe_succeeded, Some(true));
+        assert_eq!(
+            fs::read_to_string(&captured_path).unwrap().trim(),
+            search.path_value().to_string_lossy()
+        );
+
+        let inherited_path = with_runtime_search_environment(&search, async {
+            let mut command = TokioCommand::new(&script);
+            configure_active_runtime_command(&mut command);
+            let spec = crate::managed_process::ManagedProcessLaunchSpec::capture(
+                &command,
+                crate::managed_process::ManagedProcessPurpose::RuntimeOneShot,
+                crate::managed_process::ManagedStdinPolicy::Null,
+                crate::managed_process::ManagedWindowsArgvDialect::MicrosoftCrt,
+                "agent-run:path-inheritance-test",
+            )
+            .unwrap();
+            spec.environment()
+                .iter()
+                .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("PATH"))
+                .map(|(_, value)| value.clone())
+                .unwrap()
+        })
+        .await;
+        assert_eq!(inherited_path, search.path_value());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

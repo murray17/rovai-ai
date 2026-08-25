@@ -367,3 +367,51 @@ admission 覆盖 Claim 和整个 Run。
 - 删除 `message_attachment` 或把成功 publication 改成 `failed`：会重写公共历史、ledger 与审计事实；
 - 从残留 View 复制回 Authority：颠倒 Authority/派生关系，且可能固化已损坏字节；
 - 对所有路径/根错误都局部降级：会掩盖 containment 或实例身份破坏。
+
+<a id="v1-28-d11"></a>
+## V1.28-D11：Windows Runtime discovery 冻结 `.exe/.cmd/.bat` closed set 与 Registry PATH hydration
+
+### 背景
+
+Windows 官方 Codex installer 将 binary 安装到 `%LOCALAPPDATA%\Programs\OpenAI\Codex\bin` 并只为后续进程更新
+User PATH；npm/pnpm 的常见入口则是 `codex.cmd`。Desktop 已启动后仅复用 inherited PATH、Discovery 只接受
+`.exe`，会让其他新开的工具可找到 Codex 而 Agent Runtime rescan 仍显示 Missing。另一方面，直接扩大 PATHEXT 或
+把任意脚本伪装成 executable 会破坏 executable identity、argv 安全与 Job ownership。
+
+### 决定
+
+Windows 每次 Runtime Search Environment capture/rescan 只读读取 HKCU User PATH 与 HKLM Machine PATH，在当前
+环境变量快照下展开 `REG_SZ/REG_EXPAND_SZ`，过滤空、相对、未展开与不存在目录，并按 inherited、HKCU、HKLM、
+known locations 稳定、大小写不敏感去重。该 PATH 快照显式进入 discovery、version/deep/health Probe、AgentRun 与
+Runtime 子命令，不修改 Registry 或 Core 全局环境。Codex installer 默认目录继续作为 known-location fallback。
+
+entrypoint closed set 固定为 `.exe/.cmd/.bat`，同目录按该顺序；`.ps1/.com` 与 PowerShell fallback 不开放。手动绝对
+路径和 Adapter override 各自是 terminal candidate set，错误或 Probe 失败不回退自动 PATH。已知 Codex npm/pnpm
+`.cmd` 只能在有界、exact-template、package containment 与 metadata 校验全部通过后解析到 platform package 的真实
+`codex.exe`，正式 path、fingerprint、Probe 与 launch 均绑定 native target。不能验证为 native target 的 bounded
+`.cmd` 与 `.bat` 保持 `windows_command_shim` identity。
+
+`windows_command_shim` 只通过 Managed Runtime Process 启动：固定 canonical System32 `cmd.exe` 为
+`lpApplicationName`，使用 `/e:on /v:off /d /c` 与 Core-owned batch serializer，拒绝 raw command fragment 和
+NUL/CR/LF。compatibility composite fingerprint 覆盖 shim kind、canonical path、content digest、interpreter path
+及 fingerprint；CreateProcess 前在打开 identity 下复核。已解析为 native target 的 Codex shim 另存不公开的 durable
+locator identity，覆盖 shim path/content、interpreter path/fingerprint、resolved target path/fingerprint；其 composite
+digest 进入 Installation generation、snapshot Session key 与 Host compatibility，因此只改 shim 也会撤销旧 Ready 并
+重新 Deep Probe。现有原子 Job-list、stdio handle list、cancel、timeout 与 cleanup 不变。诊断只新增 source、
+entrypoint kind、candidate extension、native target resolution 与 version Probe 结果，并继续经过既有路径脱敏。
+
+### 后果
+
+Desktop 无需重启即可发现 installer 写入 User/Machine PATH 的 Runtime；npm/pnpm Codex 优先绕过 Node wrapper并获得
+native identity；只有 `.bat` 或通用 `.cmd` 的 Runtime 也能被明确发现、Probe 和正式运行。shim 内容、native target、
+interpreter、PATH winner 或 reported version 变化都会触发新 Probe/Host compatibility。batch 脚本内部若再次使用
+`%*` 或自定义变量展开，其二次解析语义仍属于脚本，不由 Core 伪装成 native argv 保证；generic shim argv 中无法
+普遍无损表示的字面引号、`%` 与末尾反斜杠会在 CreateProcess 前 fail closed，因此 prompt 继续只经 stdin。
+
+### 被拒绝方案
+
+- 只增加 Codex known location：仍无法解决 Rovai 启动后新增 User/Machine PATH 与其他 Runtime；
+- 直接按 PATHEXT 启动 `.cmd/.bat/.ps1`：扩大解释器面且丢失真实 entrypoint identity；
+- 使用 `cmd.exe /c` 字符串拼接：允许 metacharacter 注入、AutoRun 改义与不可验证 argv；
+- 对 npm shim 执行后观察 child 来猜 target：执行了未验证脚本，也可能把任意 executable 误绑定为 Codex；
+- 显式路径失败后继续 PATH：把用户选择静默替换成另一安装，破坏 fail-closed 语义。

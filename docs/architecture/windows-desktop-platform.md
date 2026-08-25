@@ -40,15 +40,18 @@ use remains inside the corresponding adapter.
 ## 3. Managed processes and shutdown
 
 [Managed Runtime Process v1](../contracts/managed-runtime-process-v1.md) is the only Runtime/Probe launch interface.
-Windows creates the child with its Job and explicit inheritable handles in one `CreateProcessW` operation. Runtime Platform
-Admission only permits native EXE or an Adapter-owned validated Node shim resolved to `node.exe + entry script`; there is
-no generic shell launcher.
+Windows creates the child with its Job and explicit inheritable handles in one `CreateProcessW` operation. Runtime entrypoint
+is a closed `native_executable | windows_command_shim` union: native `.exe` remains direct; `.cmd/.bat` uses canonical
+System32 `cmd.exe` with a Core-owned batch serializer, disabled AutoRun/delayed expansion and a composite shim/interpreter
+identity. `.com/.ps1` and PowerShell fallback remain unsupported.
 
 Windows Runtime Search Environment 每次 capture/rescan 都按 inherited process PATH、HKCU User PATH、HKLM Machine
 PATH、known locations 的稳定顺序生成新快照；Registry 只读失败不会阻断 inherited PATH，环境变量展开、目录存在性
-过滤与路径去重都在快照建立前完成。Codex 的已知 npm/pnpm `codex.cmd` 仅可被有界解析为
-`@openai/codex` 的 Windows x64 platform package 中真实 `codex.exe` 的定位证据；`.cmd`、`node.exe` 与 Node
-entrypoint 都不进入 Installation identity，也不经过 Managed Process 启动。
+过滤与路径去重都在快照建立前完成。同一目录严格按 `.exe → .cmd → .bat`，不同目录保持来源原顺序；手动绝对路径与
+Adapter override 是 terminal candidate set，失败时不回退另一个同名 Runtime。Codex 的已知 npm/pnpm `codex.cmd`
+仅可被有界解析为 `@openai/codex` 的 Windows x64 platform package 中真实 `codex.exe` 的定位证据；解析成功后
+`.cmd`、`node.exe` 与 Node entrypoint 都不进入 Installation/launch identity。其他 bounded `.cmd/.bat` 保持明确的
+`windows_command_shim` identity，不伪装成 native executable。
 
 Electron→Core stdin/stdout RPC remains. Main force-kill acceptance must prove Core observes EOF or a parent handle,
 executes bounded shutdown and closes every Runtime Job. Process exit and Job cleanup never invent a Provider terminal;

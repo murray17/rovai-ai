@@ -11,6 +11,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
+#[cfg(windows)]
+use crate::windows_runtime_entrypoint::{
+    capture_windows_command_shim, command_shim_extension, system_cmd_executable,
+};
+
 use crate::{
     agent_profile::{
         AdapterCapabilitySnapshot, AdapterKind, AdapterPermissionConfig, ModelDescriptor,
@@ -87,6 +92,14 @@ fn parse_reported_runtime_version(value: &str) -> Option<([u64; 3], bool)> {
 }
 
 pub fn executable_fingerprint(path: &Path) -> Result<String> {
+    #[cfg(windows)]
+    if command_shim_extension(path).is_some() {
+        return Ok(capture_windows_command_shim(path)?.compatibility_fingerprint());
+    }
+    file_content_fingerprint(path)
+}
+
+fn file_content_fingerprint(path: &Path) -> Result<String> {
     let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut file = File::open(&canonical)
         .with_context(|| format!("failed to open {}", canonical.display()))?;
@@ -127,14 +140,21 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
         anyhow::bail!("Runtime executable is not a file: {}", canonical.display());
     }
     #[cfg(windows)]
-    if !canonical
-        .extension()
-        .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
+    let is_command_shim = command_shim_extension(&canonical).is_some();
+    #[cfg(windows)]
+    if !is_command_shim
+        && !canonical
+            .extension()
+            .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("exe"))
     {
         anyhow::bail!(
-            "Runtime executable is not a native Windows EXE: {}",
+            "Runtime entrypoint is not a native Windows EXE or .cmd/.bat shim: {}",
             canonical.display()
         );
+    }
+    #[cfg(windows)]
+    if is_command_shim {
+        capture_windows_command_shim(&canonical)?;
     }
     #[cfg(unix)]
     {
@@ -162,12 +182,35 @@ pub fn observe_executable_file_identity(path: &Path) -> Result<ExecutableFileIde
         Some(format!("unix:{}:{}", metadata.dev(), metadata.ino()))
     };
     #[cfg(windows)]
-    let file_id = Some(windows_executable_file_id(&file).with_context(|| {
-        format!(
-            "failed to read opened Runtime identity for {}",
-            canonical.display()
-        )
-    })?);
+    let file_id = {
+        let entrypoint_file_id = windows_executable_file_id(&file).with_context(|| {
+            format!(
+                "failed to read opened Runtime identity for {}",
+                canonical.display()
+            )
+        })?;
+        if is_command_shim {
+            let interpreter = system_cmd_executable()?;
+            let interpreter_file = File::open(&interpreter).with_context(|| {
+                format!(
+                    "failed to open command interpreter {}",
+                    interpreter.display()
+                )
+            })?;
+            let interpreter_metadata = interpreter_file.metadata()?;
+            let interpreter_file_id = windows_executable_file_id(&interpreter_file)?;
+            let interpreter_modified = interpreter_metadata
+                .modified()?
+                .duration_since(UNIX_EPOCH)?
+                .as_nanos();
+            Some(format!(
+                "windows_command_shim:{entrypoint_file_id}:{interpreter_file_id}:{}:{interpreter_modified}",
+                interpreter_metadata.len()
+            ))
+        } else {
+            Some(entrypoint_file_id)
+        }
+    };
     #[cfg(not(any(unix, windows)))]
     let file_id = None;
     Ok(ExecutableFileIdentity {
@@ -218,7 +261,11 @@ pub fn verify_executable_integrity(
     expected_fingerprint: &str,
 ) -> Result<ExecutableIntegrityStatus> {
     let observed = observe_executable_file_identity(path)?;
-    if verified_identity == Some(&observed) {
+    #[cfg(windows)]
+    let requires_full_dependency_check = command_shim_extension(path).is_some();
+    #[cfg(not(windows))]
+    let requires_full_dependency_check = false;
+    if !requires_full_dependency_check && verified_identity == Some(&observed) {
         return Ok(ExecutableIntegrityStatus::Unchanged);
     }
     let current_fingerprint = executable_fingerprint(path)?;
@@ -234,11 +281,45 @@ pub struct AdapterRuntimeResolutionInput<'a> {
     pub installation_id: &'a str,
     pub executable_path: &'a str,
     pub auth_scope: &'a str,
+    pub reported_version: Option<&'a str>,
     pub executable_fingerprint: &'a str,
     pub protocols: &'a [String],
     pub native_session_compatibility_key: Option<&'a str>,
     pub permissions: &'a AdapterPermissionConfig,
     pub permission_descriptors: &'a [PermissionOptionDescriptor],
+}
+
+fn runtime_entrypoint_kind(executable_path: &str) -> &'static str {
+    #[cfg(windows)]
+    if command_shim_extension(Path::new(executable_path)).is_some() {
+        return "windows_command_shim";
+    }
+    "native_executable"
+}
+
+fn runtime_entrypoint_compatibility(input: &AdapterRuntimeResolutionInput<'_>) -> Result<Value> {
+    #[cfg(windows)]
+    if command_shim_extension(Path::new(input.executable_path)).is_some() {
+        let identity = capture_windows_command_shim(Path::new(input.executable_path))?;
+        let compatibility_fingerprint = identity.compatibility_fingerprint();
+        if compatibility_fingerprint != input.executable_fingerprint {
+            anyhow::bail!("Runtime command shim compatibility identity changed before freeze");
+        }
+        return Ok(json!({
+            "entrypointKind": "windows_command_shim",
+            "canonicalShimPath": identity.shim,
+            "shimContentDigest": identity.content_digest,
+            "canonicalInterpreterPath": identity.interpreter,
+            "interpreterFingerprint": identity.interpreter_fingerprint,
+            "resolvedTarget": Value::Null,
+            "compatibilityFingerprint": compatibility_fingerprint,
+        }));
+    }
+    Ok(json!({
+        "entrypointKind": "native_executable",
+        "canonicalExecutablePath": input.executable_path,
+        "executableFingerprint": input.executable_fingerprint,
+    }))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1218,7 +1299,11 @@ impl AgentRuntimeAdapter for CodexCliAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "executablePath": input.executable_path,
+            "entrypointKind": runtime_entrypoint_kind(input.executable_path),
             "executableFingerprint": input.executable_fingerprint,
+            "reportedVersion": input.reported_version,
+            "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
+            "nativeSessionCompatibilityKey": input.native_session_compatibility_key,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -2355,7 +2440,10 @@ fn resolve_acp_runtime(
         "adapterKind": expected_kind,
         "installationId": input.installation_id,
         "executablePath": input.executable_path,
+        "entrypointKind": runtime_entrypoint_kind(input.executable_path),
         "executableFingerprint": input.executable_fingerprint,
+        "reportedVersion": input.reported_version,
+        "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
         "authScope": input.auth_scope,
         "protocolVersion": protocol_version,
         "permissionSchemaVersion": input.permissions.schema_version,
@@ -2476,7 +2564,10 @@ impl AgentRuntimeAdapter for ClaudeCodeCliAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "executablePath": input.executable_path,
+            "entrypointKind": runtime_entrypoint_kind(input.executable_path),
             "executableFingerprint": input.executable_fingerprint,
+            "reportedVersion": input.reported_version,
+            "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -2549,7 +2640,10 @@ impl AgentRuntimeAdapter for AntigravityAppAdapterPolicy {
             "adapterKind": self.kind(),
             "installationId": input.installation_id,
             "executablePath": input.executable_path,
+            "entrypointKind": runtime_entrypoint_kind(input.executable_path),
             "executableFingerprint": input.executable_fingerprint,
+            "reportedVersion": input.reported_version,
+            "runtimeEntrypoint": runtime_entrypoint_compatibility(&input)?,
             "authScope": input.auth_scope,
             "protocolVersion": protocol_version,
             "permissionSchemaVersion": input.permissions.schema_version,
@@ -2724,6 +2818,61 @@ mod tests {
         std::fs::remove_file(path).expect("remove Runtime fixture");
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn windows_command_shim_compatibility_exposes_every_fenced_identity_component() {
+        let path = std::env::temp_dir().join(format!(
+            "rovai-runtime-command-shim-{}.cmd",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&path, b"@echo runtime 1.0.0\r\n").unwrap();
+        let fingerprint = executable_fingerprint(&path).unwrap();
+        let executable_path = path.to_string_lossy().into_owned();
+        let protocols = Vec::new();
+        let permissions = AdapterPermissionConfig {
+            adapter_kind: AdapterKind::CodexCli,
+            schema_version: 1,
+            values: json!({}),
+        };
+        let permission_descriptors = Vec::new();
+        let input = AdapterRuntimeResolutionInput {
+            installation_id: "command-shim-test",
+            executable_path: &executable_path,
+            auth_scope: "local_user",
+            reported_version: Some("1.0.0"),
+            executable_fingerprint: &fingerprint,
+            protocols: &protocols,
+            native_session_compatibility_key: None,
+            permissions: &permissions,
+            permission_descriptors: &permission_descriptors,
+        };
+        let compatibility = runtime_entrypoint_compatibility(&input).unwrap();
+        assert_eq!(
+            compatibility["entrypointKind"],
+            json!("windows_command_shim")
+        );
+        for key in [
+            "canonicalShimPath",
+            "shimContentDigest",
+            "canonicalInterpreterPath",
+            "interpreterFingerprint",
+            "compatibilityFingerprint",
+        ] {
+            assert!(
+                compatibility.get(key).is_some_and(|value| !value.is_null()),
+                "missing command-shim compatibility field {key}"
+            );
+        }
+        assert!(compatibility["resolvedTarget"].is_null());
+
+        std::fs::write(&path, b"@echo runtime 2.0.0\r\n").unwrap();
+        assert!(
+            runtime_entrypoint_compatibility(&input).is_err(),
+            "stale shim fingerprint must fail Runtime freeze"
+        );
+        std::fs::remove_file(path).unwrap();
+    }
+
     fn descriptor(key: &str, scope: RuntimeOptionScope) -> PermissionOptionDescriptor {
         PermissionOptionDescriptor {
             key: key.to_string(),
@@ -2761,6 +2910,7 @@ mod tests {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
                 auth_scope: "local_user",
+                reported_version: Some("1.0.0"),
                 executable_fingerprint: "sha256:one",
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2"),
@@ -2774,6 +2924,7 @@ mod tests {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
                 auth_scope: "local_user",
+                reported_version: Some("1.0.0"),
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v2"),
                 permissions: &permissions,
@@ -2785,9 +2936,23 @@ mod tests {
                 installation_id: "codex-local",
                 executable_path: "/opt/bin/codex",
                 auth_scope: "local_user",
+                reported_version: Some("1.0.0"),
                 executable_fingerprint: "sha256:one",
                 protocols: &protocols,
                 native_session_compatibility_key: Some("codex-cli:app-server-v3"),
+                permissions: &permissions,
+                permission_descriptors: &descriptors,
+            })
+            .expect("runtime should resolve");
+        let changed_reported_version = adapter
+            .resolve_runtime(AdapterRuntimeResolutionInput {
+                installation_id: "codex-local",
+                executable_path: "/opt/bin/codex",
+                auth_scope: "local_user",
+                reported_version: Some("1.1.0"),
+                executable_fingerprint: "sha256:one",
+                protocols: &protocols,
+                native_session_compatibility_key: Some("codex-cli:app-server-v2"),
                 permissions: &permissions,
                 permission_descriptors: &descriptors,
             })
@@ -2800,9 +2965,17 @@ mod tests {
             resolved.host_config_digest,
             upgraded_host.host_config_digest
         );
+        assert_ne!(
+            resolved.host_config_digest, changed_reported_version.host_config_digest,
+            "reported version must fence the Runtime Host configuration"
+        );
         assert_eq!(
             resolved.binding_compatibility_digest, changed_session_key.binding_compatibility_digest,
             "the Adapter session key is persisted and evaluated independently"
+        );
+        assert_ne!(
+            resolved.host_config_digest, changed_session_key.host_config_digest,
+            "the native session key must fence a Runtime Host"
         );
         let current_contract_digest = canonical_json_digest(&json!({
             "adapterKind": AdapterKind::CodexCli,
@@ -3343,6 +3516,7 @@ mod tests {
                         installation_id: "copilot-local",
                         executable_path: "/opt/bin/copilot",
                         auth_scope: "local_user",
+                        reported_version: Some("1.0.0"),
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("copilot-cli:acp-v1"),
@@ -3384,6 +3558,7 @@ mod tests {
                         installation_id: "kiro-local",
                         executable_path: "/opt/bin/kiro-cli",
                         auth_scope: "local_user",
+                        reported_version: Some("1.0.0"),
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("kiro-cli:acp-v1"),
@@ -3468,6 +3643,7 @@ mod tests {
                         installation_id: "agy-local",
                         executable_path: "/opt/bin/agy",
                         auth_scope: "local_user",
+                        reported_version: Some("1.0.0"),
                         executable_fingerprint: "sha256:test",
                         protocols: &protocols,
                         native_session_compatibility_key: Some("antigravity-app:cli-v1"),

@@ -63,6 +63,8 @@ pub mod skill;
 pub mod skill_projection;
 pub mod team_tool;
 pub mod team_tool_catalog;
+#[cfg(windows)]
+mod windows_runtime_entrypoint;
 
 mod runtime_pricing;
 

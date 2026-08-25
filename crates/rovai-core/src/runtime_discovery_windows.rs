@@ -4,7 +4,10 @@ use std::{
     ffi::{OsStr, OsString},
     fs::{self, File},
     io::Read,
-    os::windows::ffi::{OsStrExt, OsStringExt},
+    os::windows::{
+        ffi::{OsStrExt, OsStringExt},
+        fs::MetadataExt,
+    },
     path::{Component, Path, PathBuf},
 };
 
@@ -12,6 +15,7 @@ use serde::Deserialize;
 use windows_sys::Win32::{
     Foundation::{ERROR_SUCCESS, TRUE},
     Globalization::{CSTR_EQUAL, CompareStringOrdinal},
+    Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT,
     System::Registry::{
         HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_EXPAND_SZ, REG_SZ, RRF_NOEXPAND,
         RRF_RT_REG_EXPAND_SZ, RRF_RT_REG_SZ, RRF_ZEROONFAILURE, RegGetValueW,
@@ -28,6 +32,18 @@ const CODEX_PLATFORM_PACKAGE: &str = "@openai/codex-win32-x64";
 const CODEX_PLATFORM_DEPENDENCY_PREFIX: &str = "npm:@openai/codex@";
 const CODEX_PLATFORM_VERSION_SUFFIX: &str = "-win32-x64";
 const CODEX_PLATFORM_EXECUTABLE: &str = "vendor/x86_64-pc-windows-msvc/bin/codex.exe";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackageManagerShimKind {
+    Npm,
+    Pnpm,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedCodexCmdShim {
+    pub(crate) executable: PathBuf,
+    pub(crate) package_manager: PackageManagerShimKind,
+}
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct WindowsRegistryPathValues {
@@ -104,12 +120,14 @@ pub(crate) fn is_codex_cmd_path(path: &Path) -> bool {
 /// The shim is never executed. Every path-bearing layer is bounded and must
 /// remain under the canonical shim directory, and the final executable is
 /// derived from the verified package layout instead of script commands.
-pub(crate) fn resolve_codex_cmd_shim(shim_path: &Path) -> Option<PathBuf> {
+pub(crate) fn inspect_codex_cmd_shim(shim_path: &Path) -> Option<ResolvedCodexCmdShim> {
     if !is_codex_cmd_path(shim_path) {
         return None;
     }
     let shim_metadata = fs::symlink_metadata(shim_path).ok()?;
-    if !shim_metadata.is_file() || shim_metadata.file_type().is_symlink() {
+    if !shim_metadata.is_file()
+        || shim_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    {
         return None;
     }
     let shim_root = shim_path.parent()?.canonicalize().ok()?;
@@ -120,9 +138,7 @@ pub(crate) fn resolve_codex_cmd_shim(shim_path: &Path) -> Option<PathBuf> {
     }
     let normalized = shim.replace("\r\n", "\n").replace('\r', "\n");
     let target = unique_codex_entrypoint_target(&normalized)?;
-    if !is_known_codex_shim_template(&normalized, &target) {
-        return None;
-    }
+    let package_manager = known_package_manager_shim_template(&normalized, &target)?;
     let entrypoint = resolve_shim_entrypoint(&shim_root, &target)?;
     if !path_is_within(&entrypoint, &shim_root) || !entrypoint.is_file() {
         return None;
@@ -139,7 +155,28 @@ pub(crate) fn resolve_codex_cmd_shim(shim_path: &Path) -> Option<PathBuf> {
         return None;
     }
 
-    resolve_platform_executable(package_root, &shim_root, &package)
+    Some(ResolvedCodexCmdShim {
+        executable: resolve_platform_executable(package_root, &shim_root, &package)?,
+        package_manager,
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn resolve_codex_cmd_shim(shim_path: &Path) -> Option<PathBuf> {
+    inspect_codex_cmd_shim(shim_path).map(|resolved| resolved.executable)
+}
+
+pub(crate) fn classify_package_manager_cmd_shim(
+    shim_path: &Path,
+) -> Option<PackageManagerShimKind> {
+    if !is_cmd_path(shim_path) {
+        return None;
+    }
+    let shim = read_bounded_utf8(shim_path, MAX_CODEX_SHIM_BYTES)?
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
+    let target = unique_node_entrypoint_target(&shim)?;
+    known_package_manager_shim_template(&shim, &target)
 }
 
 fn read_registry_string(root: HKEY, subkey: &str, value_name: &str) -> Option<OsString> {
@@ -291,7 +328,7 @@ fn read_json_bounded<T: for<'de> Deserialize<'de>>(path: &Path, limit: u64) -> O
     serde_json::from_str(&text).ok()
 }
 
-fn is_known_codex_shim_template(shim: &str, target: &str) -> bool {
+fn known_package_manager_shim_template(shim: &str, target: &str) -> Option<PackageManagerShimKind> {
     let npm = format!(
         concat!(
             "@ECHO off\n",
@@ -314,7 +351,7 @@ fn is_known_codex_shim_template(shim: &str, target: &str) -> bool {
         target = target
     );
     if shim == npm {
-        return true;
+        return Some(PackageManagerShimKind::Npm);
     }
     let pnpm = format!(
         concat!(
@@ -328,7 +365,37 @@ fn is_known_codex_shim_template(shim: &str, target: &str) -> bool {
         ),
         target = target
     );
-    shim == pnpm
+    (shim == pnpm).then_some(PackageManagerShimKind::Pnpm)
+}
+
+#[cfg(test)]
+fn is_known_codex_shim_template(shim: &str, target: &str) -> bool {
+    known_package_manager_shim_template(shim, target).is_some()
+}
+
+fn unique_node_entrypoint_target(shim: &str) -> Option<String> {
+    if !shim.matches('"').count().is_multiple_of(2) {
+        return None;
+    }
+    let mut targets = Vec::<String>::new();
+    for quoted in shim.split('"').skip(1).step_by(2) {
+        let normalized = quoted.replace('/', "\\");
+        let lower = normalized.to_ascii_lowercase();
+        if !lower.ends_with(".js")
+            || (!lower.contains(r"\node_modules\")
+                && !lower.starts_with(r"%dp0%\")
+                && !lower.starts_with(r"%~dp0\"))
+        {
+            continue;
+        }
+        if !targets
+            .iter()
+            .any(|existing| os_strings_equal(OsStr::new(existing), OsStr::new(&normalized)))
+        {
+            targets.push(normalized);
+        }
+    }
+    (targets.len() == 1).then(|| targets.remove(0))
 }
 
 fn unique_codex_entrypoint_target(shim: &str) -> Option<String> {
