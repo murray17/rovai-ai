@@ -107,7 +107,7 @@ import {
   currentProjectGroup,
   currentProjectWorkspace,
   navigationIncludingCurrentWorkspace,
-  navigationWithoutRemovedProjects,
+  navigationWithProjectAuthority,
   persistCurrentProject,
   projectTargetKey,
   readCurrentProject,
@@ -1220,8 +1220,12 @@ export function App(): React.JSX.Element {
     ? currentProject.projectPath
     : null
   const visibleNavigation = useMemo(
-    () => navigationWithoutRemovedProjects(navigation, removedProjectKeys),
-    [navigation, removedProjectKeys]
+    () => navigationWithProjectAuthority(
+      navigation,
+      removedProjectKeys,
+      removedProjectAuthorityReady
+    ),
+    [navigation, removedProjectAuthorityReady, removedProjectKeys]
   )
   const currentProjectAccess = currentProjectAccessDecision({
     currentProject,
@@ -1786,6 +1790,7 @@ export function App(): React.JSX.Element {
   }
 
   const openProject = async (): Promise<void> => {
+    if (!removedProjectAuthorityReady) return
     setError(null)
     try {
       await selectProjectDirectory(
@@ -2969,6 +2974,7 @@ export function App(): React.JSX.Element {
         preflight={campCreationPreflight}
         agents={agents}
         busy={busy === 'create-camp' || busy === 'open-project'}
+        projectAccessReady={removedProjectAuthorityReady}
         returnFocusElement={newConversationReturnFocus.current}
         onOpenChange={setNewConversationOpen}
         onChooseWorkspaceDirectory={chooseWorkspaceDirectory}

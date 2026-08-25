@@ -11,6 +11,7 @@ import {
   currentProjectWorkspace,
   defaultsNeedInvalidation,
   navigationIncludingCurrentWorkspace,
+  navigationWithProjectAuthority,
   navigationWithoutRemovedProjects,
   parseCurrentProject,
   projectTargetKey,
@@ -87,6 +88,22 @@ describe('new conversation preferences', () => {
     expect(displayed?.quickChat).toBe(navigation.quickChat)
     expect(displayed?.projects.map((candidate) => candidate.projectPath)).toEqual(['/repo/b'])
     expect(navigation.projects).toHaveLength(2)
+  })
+
+  it('keeps Project navigation hidden until removed authority is ready', () => {
+    const navigation: NavigationSnapshot = {
+      schemaVersion: 3,
+      throughGlobalSequence: 7,
+      quickChat: { totalCount: 1, recentCamps: [] },
+      projects: [project('/repo/a'), project('/repo/b')]
+    }
+
+    expect(navigationWithProjectAuthority(navigation, new Set(), false)?.projects).toEqual([])
+    expect(navigationWithProjectAuthority(
+      navigation,
+      new Set([projectTargetKey('/repo/a')]),
+      true
+    )?.projects.map((candidate) => candidate.projectPath)).toEqual(['/repo/b'])
   })
 
   it('does not inspect a cached Project until removed-Project authority is ready', () => {

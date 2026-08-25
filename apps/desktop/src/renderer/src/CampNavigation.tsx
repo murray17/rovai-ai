@@ -611,7 +611,7 @@ export function CampNavigation({
           </section>
         )}
         <section className="navigation-projects" aria-labelledby="projects-heading">
-          <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button className="section-create-button" aria-label="选择工作目录" title="选择工作目录" onClick={onOpenProject}>＋</button></div>
+          <div className="sidebar-group-title navigation-section-title"><span id="projects-heading">项目</span><button className="section-create-button" type="button" aria-label="选择工作目录" title="选择工作目录" onClick={onOpenProject} disabled={state !== 'ready'}>＋</button></div>
           {navigation?.projects.map((project) => {
             const groupKey = projectKey(project)
             if (pins.some((pin) => pin.kind === 'project' && pin.targetKey === project.projectKey)) return null

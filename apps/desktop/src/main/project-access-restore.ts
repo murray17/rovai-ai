@@ -1,18 +1,24 @@
 export interface ProjectAccessRestoreOperations<Snapshot> {
+  previousSnapshot: Snapshot
+  restorationRequired: boolean
   persistRestoredPreference: () => Promise<Snapshot>
   activateExecutionRoot: () => Promise<void>
   suspendExecutionRoot: () => Promise<void>
-  persistRemovedPreference: () => Promise<Snapshot>
+  persistPreviousPreference: () => Promise<Snapshot>
   publishRemovedRoots: (snapshot: Snapshot) => void
 }
 
 export async function restoreProjectAccessFailClosed<Snapshot>({
+  previousSnapshot,
+  restorationRequired,
   persistRestoredPreference,
   activateExecutionRoot,
   suspendExecutionRoot,
-  persistRemovedPreference,
+  persistPreviousPreference,
   publishRemovedRoots
 }: ProjectAccessRestoreOperations<Snapshot>): Promise<Snapshot> {
+  if (!restorationRequired) return previousSnapshot
+
   const restoredSnapshot = await persistRestoredPreference()
   try {
     await activateExecutionRoot()
@@ -24,13 +30,13 @@ export async function restoreProjectAccessFailClosed<Snapshot>({
       rollbackErrors.push(error)
     }
 
-    let removedSnapshot: Snapshot | null = null
+    let recoveredSnapshot: Snapshot | null = null
     try {
-      removedSnapshot = await persistRemovedPreference()
+      recoveredSnapshot = await persistPreviousPreference()
     } catch (error) {
       rollbackErrors.push(error)
     }
-    if (removedSnapshot) publishRemovedRoots(removedSnapshot)
+    if (recoveredSnapshot) publishRemovedRoots(recoveredSnapshot)
 
     if (rollbackErrors.length === 0) throw activationError
     throw new AggregateError(
@@ -41,6 +47,24 @@ export async function restoreProjectAccessFailClosed<Snapshot>({
 
   publishRemovedRoots(restoredSnapshot)
   return restoredSnapshot
+}
+
+export class ProjectAccessTransactionCoordinator {
+  #tail: Promise<void> = Promise.resolve()
+
+  run<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.#tail.then(operation, operation)
+    this.#tail = result.then(() => undefined, () => undefined)
+    return result
+  }
+}
+
+export function removedProjectRootsFromSnapshot<Snapshot extends {
+  removedProjects: ReadonlyArray<{ targetKey: string }>
+}>(snapshot: Snapshot): string[] {
+  return snapshot.removedProjects
+    .filter((project) => project.targetKey.startsWith('directory:'))
+    .map((project) => project.targetKey.slice('directory:'.length))
 }
 
 function errorMessage(error: unknown): string {

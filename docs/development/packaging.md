@@ -140,9 +140,10 @@ pnpm install:mac:daily -- --backup "/Applications/Rovai AI.backup-before-<timest
 `package:mac:daily` 要求本机 Keychain 中存在同一 `Rovai Release Signing` identity，构建后立即验证 App、
 Core、CLI 的架构、Authority、固定 certificate root、Bundle ID，并拒绝 ad-hoc 或 CDHash-only requirement。
 `install:mac:daily` 只接受 `/Applications/Rovai AI.app` 作为规范目标；它在修改日常路径前验证源 bundle，
-复制到目标同文件系统暂存路径后再次验证，原子替换后第三次验证。失败时尽力恢复旧安装并保留验证失败的
-新候选供诊断；若宿主在回滚期间继续拒绝改名，错误会明确报告规范路径是旧安装、未验证候选或缺失，以及
-旧备份是否仍被保留，不会误报已恢复。已有备份路径会 fail closed，脚本不会覆盖备份或修改日常
+并用 no-follow 路径项检查拒绝任何已有 backup 和符号链接 target，包括 dangling symlink。复制到目标同
+文件系统暂存路径后再次验证，原子替换后第三次验证。交换前失败会报告旧安装未改变；交换后失败时尽力
+恢复旧安装并保留验证失败的新候选供诊断。若宿主在回滚期间继续拒绝改名，错误会明确报告规范路径是旧
+安装、未验证候选或缺失，以及旧备份是否仍被保留，不会误报已恢复。脚本不会覆盖备份或修改日常
 `userData`。普通 `package:mac` 产物不能通过这条安装门。
 
 ## 隔离运行打包 App

@@ -83,15 +83,20 @@ Skill Library；Desktop 只要显式收到 `--user-data-dir`，以及所有开�
 Core 自动重启保留同一参数，任何一个实例的 `cleanup_orphan_revisions` 都只能清理本实例数据库拥有的
 私有 Library。
 
-Renderer 不能直接调用 `skills.projectAccess.*`。Project 移除由 Main process 先关闭 Core access，再提交
-本机 Navigation preference；偏好写入失败时按偏好中的权威状态恢复 Core access。Project 恢复采用相反的
-fail-closed 顺序：先持久化恢复偏好，但在请求完整成功返回前继续让 Core ledger 和 Core 重启参数保留
-`removed`，随后才激活 Core access，最后发布新的 removed-root 集合。Core 激活失败时，Main 先重新关闭
-Core access，再把偏好补偿为 removed；补偿不完整必须显式失败，不得吞掉错误。该 ledger 不引入 Project
-table、Project aggregate 或 Camp 删除语义。
+Renderer 不能直接调用 `skills.projectAccess.*`。Main process 以同一事务队列串行 Navigation preference 的
+读取、pin 替换、Project 移除和恢复，使一次操作跨越 preference 与 Core 往返期间不会向其它请求暴露中间
+snapshot。Project 移除先关闭 Core access，再提交本机 Navigation preference；偏好写入失败时按偏好中的
+权威状态恢复 Core access。Project 恢复先读取事务前 snapshot；只有其中确实存在该 removed record 时才进入
+恢复事务，原本 active 或从未 removed 的 root 直接返回前态且不调用 Core。恢复事务先持久化恢复偏好，但在
+请求完整成功返回前继续让 Core ledger 和 Core 重启参数保留 `removed`，随后才激活 Core access，最后直接从
+本次提交 snapshot 发布新的 removed-root 集合。Core 激活失败时，Main 先重新关闭 Core access，再恢复包含
+原 `removedAt` 的精确前态；补偿不完整必须显式失败，不得吞掉错误。该 ledger 不引入 Project table、
+Project aggregate 或 Camp 删除语义。
 
-Renderer 在 removed-Project preference 成为权威前，不得把缓存的 current Project 交给
-`workspaces.inspect`。已移除 Project 只能由用户重新选择目录或在新对话中显式选择 workspace 后恢复；
+Renderer 在 removed-Project preference 成为权威前，不得显示 Project 导航、启用 Project 选择/提交动作，
+或把缓存的 current Project 交给 `workspaces.inspect`；New Conversation 的目录控件以中性 loading/disabled
+状态说明正在确认本机 Project access，Quick Chat 创建仍可继续。已移除 Project 只能由用户重新选择目录或在
+新对话中显式选择 workspace 后恢复；
 窗口启动、上次 Camp 恢复和普通 Camp 打开不得隐式恢复 root access。恢复请求成功并返回新的 Navigation
 preference snapshot 前，Renderer 继续保持访问门关闭；失败时不得以仅当前会话可见的方式乐观放行。
 

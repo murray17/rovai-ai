@@ -99,6 +99,20 @@ export function navigationWithoutRemovedProjects(
     : { ...navigation, projects }
 }
 
+export function navigationWithProjectAuthority(
+  navigation: NavigationSnapshot | null,
+  removedProjectKeys: ReadonlySet<string>,
+  removedProjectAuthorityReady: boolean
+): NavigationSnapshot | null {
+  if (!navigation) return null
+  if (!removedProjectAuthorityReady) {
+    return navigation.projects.length === 0
+      ? navigation
+      : { ...navigation, projects: [] }
+  }
+  return navigationWithoutRemovedProjects(navigation, removedProjectKeys)
+}
+
 export function currentProjectGroup(
   navigation: NavigationSnapshot | null,
   currentProject: CurrentProject

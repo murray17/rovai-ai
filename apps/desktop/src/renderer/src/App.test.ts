@@ -123,7 +123,10 @@ import {
   limitDraftNameInput,
   normalizeDraftName,
   planInitialCampSelection,
+  projectWorkspaceActionsDisabled,
   toggleCampMemberSelection,
+  workspaceInspectionShouldStart,
+  workspaceSubmissionBlocked,
   workspaceGitPresentation
 } from './NewConversationDialog'
 import {
@@ -480,6 +483,17 @@ describe('cold startup route presentation', () => {
 })
 
 describe('Project directory selection', () => {
+  it('blocks Project actions and inspection until removed authority is ready', () => {
+    const workspace = { name: 'Downloads', projectPath: '/Users/person/Downloads' }
+
+    expect(projectWorkspaceActionsDisabled(false, false)).toBe(true)
+    expect(projectWorkspaceActionsDisabled(false, true)).toBe(false)
+    expect(workspaceInspectionShouldStart(true, false, workspace.projectPath)).toBe(false)
+    expect(workspaceInspectionShouldStart(true, true, workspace.projectPath)).toBe(true)
+    expect(workspaceSubmissionBlocked(workspace, false)).toBe(true)
+    expect(workspaceSubmissionBlocked(null, false)).toBe(false)
+  })
+
   it('selects the Project without entering the new-conversation flow', async () => {
     const workspace = { name: 'rovai-ai', projectPath: '/repo/rovai-ai' }
     const effects: unknown[] = []
@@ -2344,6 +2358,28 @@ describe('task event projections', () => {
     expect(markup).toContain('设置')
     expect(markup).toContain('should-not-render')
     expect(markup).toContain('id="projects-heading"')
+  })
+
+  it('disables the sidebar Project picker while navigation authority is loading', () => {
+    const markup = renderToStaticMarkup(createElement(CampNavigation, {
+      view: 'compose',
+      state: 'loading',
+      navigation: null,
+      activeCampId: null,
+      onNewConversation: () => undefined,
+      onMembers: () => undefined,
+      onMemory: () => undefined,
+      pendingMemoryCount: 0,
+      onSettings: () => undefined,
+      onOpenProject: () => undefined,
+      onCamp: () => undefined,
+      onRemoveProject: async () => undefined,
+      onRename: async () => undefined,
+      onDelete: async () => undefined,
+      onError: () => undefined
+    }))
+
+    expect(markup).toMatch(/aria-label="选择工作目录"[^>]*disabled=""/)
   })
 
   it('keeps an unready Default Lead selectable while warning that execution is blocked', () => {

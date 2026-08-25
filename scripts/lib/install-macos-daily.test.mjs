@@ -3,10 +3,13 @@ import test from 'node:test'
 import {
   cpSync,
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync
 } from 'node:fs'
 import { join } from 'node:path'
@@ -62,7 +65,13 @@ test('refuses an unverified source before changing the daily installation', (con
     arch: 'arm64',
     verifyApp() { throw new Error('App uses an ad-hoc signature') },
     copyApp() { throw new Error('copy must not run') }
-  }), /ad-hoc signature/)
+  }), (error) => {
+    assert.ok(error instanceof DailyMacosInstallError)
+    assert.equal(error.recovery.canonicalTarget, 'original_unchanged')
+    assert.equal(error.recovery.originalInstallation, 'unchanged_at_canonical_path')
+    assert.match(error.message, /original installation remains unchanged at the canonical target/)
+    return true
+  })
 
   assert.equal(readFileSync(target, 'utf8'), 'old')
   assert.equal(existsSync(backup), false)
@@ -105,6 +114,90 @@ test('rejects a non-App destructive target before verification or copy', (contex
     () => assertAdmittedDailyInstallTarget(join(directory, 'dist', 'Rovai AI.app')),
     /admitted daily App target/
   )
+})
+
+test('rejects a dangling backup path entry without following or replacing it', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'rovai-daily-backup-symlink-'))
+  context.after(() => rmSync(directory, { recursive: true, force: true }))
+  const source = join(directory, 'source.app')
+  const target = join(directory, 'target.app')
+  const backup = join(directory, 'backup.app')
+  writeFileSync(source, 'new')
+  writeFileSync(target, 'old')
+  symlinkSync(join(directory, 'missing-backup-target'), backup)
+  let verificationCount = 0
+
+  assert.throws(() => installMacosDailyTransactionForTest({
+    sourcePath: source,
+    targetPath: target,
+    backupPath: backup,
+    arch: 'arm64',
+    verifyApp() { verificationCount += 1 },
+    copyApp(from, to) { cpSync(from, to) }
+  }), /backup path already exists/)
+
+  assert.equal(verificationCount, 0)
+  assert.equal(readFileSync(target, 'utf8'), 'old')
+  assert.equal(existsSync(backup), false)
+  assert.equal(readlinkSync(backup), join(directory, 'missing-backup-target'))
+})
+
+test('rejects a dangling canonical target without replacing it as an empty install', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'rovai-daily-target-symlink-'))
+  context.after(() => rmSync(directory, { recursive: true, force: true }))
+  const source = join(directory, 'source.app')
+  const target = join(directory, 'target.app')
+  const backup = join(directory, 'backup.app')
+  const missingTarget = join(directory, 'missing-installed-target')
+  writeFileSync(source, 'new')
+  symlinkSync(missingTarget, target)
+  let verificationCount = 0
+
+  assert.throws(() => installMacosDailyTransactionForTest({
+    sourcePath: source,
+    targetPath: target,
+    backupPath: backup,
+    arch: 'arm64',
+    verifyApp() { verificationCount += 1 },
+    copyApp(from, to) { cpSync(from, to) }
+  }), /canonical target path entry must not be a symbolic link/)
+
+  assert.equal(verificationCount, 0)
+  assert.equal(existsSync(target), false)
+  assert.equal(readlinkSync(target), missingTarget)
+  assert.equal(existsSync(backup), false)
+})
+
+test('reports the original installation unchanged when stage verification fails', (context) => {
+  const directory = mkdtempSync(join(tmpdir(), 'rovai-daily-stage-reject-'))
+  context.after(() => rmSync(directory, { recursive: true, force: true }))
+  const source = join(directory, 'source.app')
+  const target = join(directory, 'target.app')
+  const backup = join(directory, 'backup.app')
+  writeFileSync(source, 'new')
+  writeFileSync(target, 'old')
+  let verificationCount = 0
+
+  assert.throws(() => installMacosDailyTransactionForTest({
+    sourcePath: source,
+    targetPath: target,
+    backupPath: backup,
+    arch: 'arm64',
+    verifyApp() {
+      verificationCount += 1
+      if (verificationCount === 2) throw new Error('stage verification failed')
+    },
+    copyApp(from, to) { cpSync(from, to) }
+  }), (error) => {
+    assert.ok(error instanceof DailyMacosInstallError)
+    assert.equal(error.recovery.canonicalTarget, 'original_unchanged')
+    assert.equal(error.recovery.originalInstallation, 'unchanged_at_canonical_path')
+    assert.equal(error.recovery.stageCleanup, 'removed')
+    return true
+  })
+
+  assert.equal(readFileSync(target, 'utf8'), 'old')
+  assert.equal(existsSync(backup), false)
 })
 
 test('restores the original target when installed verification fails', (context) => {
@@ -165,7 +258,7 @@ test('reports an occupied canonical target when the failed candidate cannot be m
     },
     copyApp(from, to) { cpSync(from, to) },
     fileSystem: {
-      exists: existsSync,
+      pathEntry: noFollowPathEntry,
       remove(path) { rmSync(path, { recursive: true }) },
       rename(from, to) {
         if (from === target && to.includes('.failed-')) throw new Error('candidate move denied')
@@ -206,7 +299,7 @@ test('reports a missing canonical target when restoring the backup fails', (cont
     },
     copyApp(from, to) { cpSync(from, to) },
     fileSystem: {
-      exists: existsSync,
+      pathEntry: noFollowPathEntry,
       remove(path) { rmSync(path, { recursive: true }) },
       rename(from, to) {
         if (from === backup && to === target) throw new Error('restore denied')
@@ -225,3 +318,12 @@ test('reports a missing canonical target when restoring the backup fails', (cont
   assert.equal(existsSync(target), false)
   assert.equal(readFileSync(backup, 'utf8'), 'old')
 })
+
+function noFollowPathEntry(path) {
+  try {
+    return lstatSync(path).isSymbolicLink() ? 'symbolic_link' : 'present'
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return 'absent'
+    throw error
+  }
+}
