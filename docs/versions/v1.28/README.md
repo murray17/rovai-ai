@@ -12,14 +12,14 @@ last_updated: 2026-08-25
 # Rovai-ai v1.28：Grok Build + MiniMax M3 本地 Runtime 接入
 
 > 当前状态：`grok-build` Product Runtime、Data Contract 迁移、官方 provider config、ACP Host、Renderer
-> catalog 和本机 macOS arm64 平台资格已按完整 Runtime checklist 验收通过。进程级 `--plugin-dir` 已建立
+> catalog 和 macOS arm64/x64 平台资格已按完整 Runtime checklist 分别验收通过。进程级 `--plugin-dir` 已建立
 > `AdditivePerRun / NativeWinsSkip` External MCP。当前 Grok 支持基线统一为 `>= 1.0.0`，Ready 要求正式广告并
 > 真实成功调用 ACP `session/resume`，cold continuation 不再保留 `0.2.118` 的 load-only fallback。已确认的模型上下文
 > revision 2 保持 Bootstrap bytes
 > 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
 > 独立 worktree 验收后通过 PR 交付 `main`；`>= 1.0.0 / session.resume` clean break 的确定性实现已完成，
-> macOS arm64 已用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵；macOS x64、Windows x64 仍待
-> 各客户端分别补证。
+> macOS arm64 与 macOS x64 已分别用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵；
+> Windows x64 仍待对应客户端补证。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
 
@@ -62,8 +62,8 @@ Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 cu
 - Grok Skill 投影到 `.grok/skills` 并完成原生发现实测；External MCP 使用私有临时 Plugin 的进程级
   `--plugin-dir`，保留原生定义、同名 `NativeWinsSkip`、不同名逐 Run 追加并随 Host 清理；Usage/Cost 保持
   Disabled，直到字段语义独立验证；
-- macOS arm64 只在本版本冻结的 adapter-scoped 证据通过后进入普通 discovery、检查、成员配置与执行路径；
-  macOS x64、Windows x64 不从本机证据外推。
+- macOS arm64 与 macOS x64 只在各自冻结的 adapter-scoped 证据通过后进入普通 discovery、检查、成员配置与
+  执行路径；Windows x64 不从任一 macOS 证据外推。
 - 修复 macOS Runtime Files 持久身份误用 boot-local `st_dev` 的启动回归；marker schema 2 改用稳定卷 UUID，
   schema 1 只在确定性私有实例根内 rekey，并由 SQLite/Authority reconciliation 受控重建旧物理 View receipt。
 
@@ -93,6 +93,6 @@ External MCP 支持性裁决、文档治理与 Impeccable UI detector。
 | Architecture | 已更新 | [Runtime Catalog Boundaries](../../architecture/runtime-catalog-boundaries.md)补充 Grok identity、provider 与原生状态边界；[Native Session Bootstrap Redelivery](../../architecture/native-session-bootstrap-redelivery.md)补充 Grok detector；[Camp Published Attachment View](../../architecture/camp-published-attachment-view.md)补充稳定卷 identity、schema-1 rekey、空集受控重建与 Camp-local fail-closed startup 隔离。 |
 | UI | 已更新 | 复用现有 Runtime catalog、状态与成员参数组件；member-workspace brief 明确 generic agent text 可原样进入执行台与 final。 |
 | Runtime Activity | 已更新 | [Registry](../../runtime-activity/registry.md)新增 Grok ACP run-level 映射。 |
-| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)与 adapter-scoped macOS arm64 证据记录实测边界。 |
+| Runtime compatibility | 已更新 | [兼容性清单](../../runtime-compatibility.md)与两份 adapter-scoped macOS 架构证据记录各自实测边界。 |
 | Documentation routing | 确认无需更新 | 既有 Runtime checklist、Research、Architecture、Contract 与 Version 路由足以到达本版本。 |
 | Root README | 确认无需更新 | 本次新增兼容 Runtime，不改变项目定位或常青产品承诺。 |

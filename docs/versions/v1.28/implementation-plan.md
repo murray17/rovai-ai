@@ -43,7 +43,8 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
   `session/new._meta.rules` 与 creation-only / resume 不重注入语义保持不变；
 - [x] macOS arm64 使用 `grok 1.0.5` 完成真实 Deep Probe、cold resume、AgentRun、Built-in CLI/attachment、
   External MCP 与 Skill smoke，并更新 adapter-scoped v2 evidence；
-- [ ] macOS x64 与 Windows x64 客户端分别补充 `grok >= 1.0.0` 的同等目标主机证据；
+- [x] macOS x64 使用原生 x86_64 `grok 1.0.5` 完成同等目标主机矩阵，并更新独立的 adapter-scoped v1 evidence；
+- [ ] Windows x64 客户端补充 `grok >= 1.0.0` 的同等目标主机证据；
 - [x] 以重启前后仅 `st_dev` 漂移的回归输入修复 macOS Runtime Files 启动失败；root/Entry identity 改用稳定
   volume UUID，schema-1 marker 在已准入私有实例根内原子 rekey，旧物理 receipt 由受控 rebuild 收敛；
 - [x] 以历史 `message_attachment` 保留但 Authority 目录缺失的真实输入修复 startup 全局退出；只有已完整
@@ -55,6 +56,6 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 
 ## 验收原则
 
-- 任一真实模型、权限、Tool、Session、进程清理或数据迁移门禁失败时，macOS arm64 不得保持 `qualified`；
+- 任一真实模型、权限、Tool、Session、进程清理或数据迁移门禁失败时，对应 macOS 架构不得保持 `qualified`；
 - API Key、完整 Native ID、原始 Prompt 与本机绝对私有路径不得进入证据；
-- Usage/Cost、macOS x64 与 Windows x64 均不因本版本的 arm64 结果自动启用。
+- Usage/Cost 与 Windows x64 均不因任一 macOS 结果自动启用；两个 macOS 架构也不互相继承资格。

@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "evidenceId": "macos-x64-grok-build-v1",
+  "capturedAt": "2026-08-25",
+  "platform": "macos-x64",
+  "hostEnvelope": {
+    "os": "macOS 15.7.4",
+    "build": "24G517",
+    "architecture": "x86_64"
+  },
+  "baseRevision": "61a99977ad590c6e8a8f5c4f99b36d4dc0682801",
+  "qualifiedRuntimeKinds": [
+    "grok-build"
+  ],
+  "runtimeEvidence": {
+    "runtimeVersion": "1.0.5 (5115b46bc909)",
+    "executableFingerprint": "sha256:21cbb063c6167175ba00a67f64ac638af8f79a44aef816cfd5b4915c77528e60",
+    "minimumVersion": ">=1.0.0",
+    "protocol": "acp-v1",
+    "launch": "grok --permission-mode <effective> --no-auto-update agent --no-leader [--plugin-dir <private-root>] stdio",
+    "authenticationMethod": "xai.api_key BYOK verified; interactive authentication was not started",
+    "provider": "MiniMax OpenAI-compatible endpoint",
+    "model": "MiniMax-M3 through the Runtime-default official custom-model configuration",
+    "providerConfiguration": "official $GROK_HOME/config.toml custom-model schema; env_key secrets resolved process-locally from a mode-0600 $GROK_HOME/.env",
+    "initialize": "passed and advertised agentCapabilities.sessionCapabilities.resume",
+    "sessionNew": "passed with production-shaped attachment root, Run tmp, and creation-only _meta.rules",
+    "sessionResume": "passed with the exact newly created Session ID, unchanged cwd, empty mcpServers, additionalDirectories=[], and no _meta.rules",
+    "promptEndTurn": "passed",
+    "dynamicModelCatalog": "passed with three models",
+    "explicitModelSelection": "passed through standard session/set_model",
+    "nativeStatePreserved": true,
+    "nativeSystemRules": "deterministic production-wire tests passed; cold resume retained the original Native Session context without reinjecting creation-only rules or using systemPromptOverride",
+    "agentTextBoundary": "MiniMax think text remained ordinary ACP agent text and was preserved by the generic Evidence and final-output path"
+  },
+  "acceptance": {
+    "status": "qualified",
+    "coreDeepProbe": "passed a real no-prompt session/new then exact-ID session/resume before Ready",
+    "standardAgentRun": "passed a packaged-App Automation CLI Run with three distinct Shell operations: /bin/bash, /bin/sh, and /bin/cat; all three unique Tool IDs transitioned from in_progress to completed and the AgentRun View ended succeeded",
+    "coldContinuation": "passed exact-ID session/resume across a Core and ACP Host restart; Host identity changed while Native Session identity and the private marker were preserved",
+    "historyReplayIsolation": "passed with zero restored Actions and Approvals; no session/load or HistoryRestore replay path was selected",
+    "postResumeToolPath": "passed a new approved file Tool and a bounded cancellation after cold resume; cancellation created no target file",
+    "invalidSessionFallback": "passed with one continuity-lost event and one replacement session/new after an intentionally invalid persisted Session ID",
+    "builtInCli": "passed all 15 operations plus a successor active lease; logical Conversation and Native Session continuation remained intact",
+    "externalMcp": "passed AdditivePerRun/NativeWinsSkip: native same-name definitions were preserved, conflicts were skipped, and the distinct assigned stdio server was called",
+    "skillDiscovery": "passed native .grok/skills discovery, invocation, restart recovery, and managed-projection checks",
+    "commandOutputMatrix": "passed stdout, stderr, mixed, empty, nonzero, and bounded-large output with distinct non-empty Tool IDs and terminal status",
+    "missingSend": "passed zero-send publication, accepted-send suppression, and real ACP tool-to-final settlement",
+    "compactionRedelivery": "passed one structured auto_compact_completed admission and next-input Redelivery revision 1 accepted acknowledgement",
+    "plannedShutdown": "passed packaged-App controlled shutdown protocol v2 with no forced signal, no expired deadline, and no remaining App, Core, Runtime, or Helper process",
+    "deterministicRegression": "27 focused Grok and platform tests passed; the final PR suite passed 311 library, 25 bundled CLI, and 273 slow tests"
+  },
+  "observedTransient": {
+    "shape": "one initial cold-continuation attempt produced repeated empty native Tool names and failed before resume was exercised",
+    "disposition": "the identical unmodified command immediately passed the complete cold-resume matrix; the raw failure remained upstream Tool not found with an empty Tool name and Rovai did not synthesize or rewrite it"
+  },
+  "notQualified": [
+    {
+      "platform": "windows-x64",
+      "blocker": "no Grok >=1.0.0 target-host evidence"
+    }
+  ],
+  "limitations": [
+    "Credentials, raw prompts, machine paths, Session IDs, Run IDs, Tool IDs, and API keys are intentionally excluded.",
+    "Usage and cost fields remain disabled until their provider semantics are independently verified.",
+    "Grok 1.x rejects non-empty additionalDirectories on session/resume; Rovai therefore sends an empty array and relies on real post-resume product smokes rather than claiming that Resume updates roots.",
+    "Grok ignores ACP Session mcpServers; External MCP therefore uses a private process plugin-dir and rotates Host compatibility when the full server set changes.",
+    "Account cached-token authentication was not exercised because this host has no existing Grok login; health and AgentRun select only advertised non-interactive methods and never initiate interactive login.",
+    "Windows x64 remains not qualified until its own target-host evidence is recorded."
+  ]
+}
