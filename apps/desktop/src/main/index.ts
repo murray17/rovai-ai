@@ -81,7 +81,11 @@ import {
   prepareWindowsDataRoot,
   resolveWindowsDataRoot
 } from './windows-data-root'
-import { AppUpdatesService, type DesktopAutoUpdater } from './app-updates'
+import {
+  AppUpdatesService,
+  createAppUpdatesServiceFailOpen,
+  type DesktopAutoUpdater
+} from './app-updates'
 import { AppQuitCoordinator } from './app-quit-coordinator'
 
 const mainStartupStartedAt = performance.now()
@@ -255,7 +259,7 @@ async function initializeAppUpdates(): Promise<void> {
   } catch (error) {
     console.warn('[rovai] Application updater is unavailable; startup will continue.', error)
   }
-  const service = new AppUpdatesService({
+  const service = createAppUpdatesServiceFailOpen({
     currentVersion: () => app.getVersion(),
     isPackaged: () => app.isPackaged,
     updater: autoUpdater as unknown as DesktopAutoUpdater | null,
@@ -263,6 +267,8 @@ async function initializeAppUpdates(): Promise<void> {
       isolatedAcceptanceInstance
       && process.env.ROVAI_DISABLE_AUTO_UPDATE_CHECKS === '1'
     )
+  }, (error) => {
+    console.warn('[rovai] Application updater initialization failed; startup will continue.', error)
   })
   service.onChanged((snapshot) => {
     if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isDestroyed()) return

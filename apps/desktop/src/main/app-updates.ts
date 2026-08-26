@@ -55,6 +55,18 @@ interface AppUpdatesServiceOptions {
 type SnapshotListener = (snapshot: AppUpdateSnapshot) => void
 type FailedOperation = 'check' | 'download' | 'install'
 
+export function createAppUpdatesServiceFailOpen(
+  options: AppUpdatesServiceOptions,
+  reportFailure: (error: unknown) => void
+): AppUpdatesService {
+  try {
+    return new AppUpdatesService(options)
+  } catch (error) {
+    reportFailure(error)
+    return new AppUpdatesService({ ...options, updater: null })
+  }
+}
+
 export class AppUpdatesService {
   readonly #currentVersion: () => string
   readonly #isPackaged: () => boolean

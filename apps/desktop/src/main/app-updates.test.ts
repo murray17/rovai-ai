@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   AppUpdatesService,
   CHECK_INTERVAL_MS,
+  createAppUpdatesServiceFailOpen,
   FIRST_CHECK_DELAY_MS,
   type DesktopAutoUpdater
 } from './app-updates'
@@ -52,6 +53,34 @@ function emitAvailable(updater: FakeUpdater, overrides: Record<string, unknown> 
 }
 
 describe('AppUpdatesService', () => {
+  it('falls back to an unavailable service when updater binding throws', async () => {
+    const updater = new FakeUpdater()
+    const reportFailure = vi.fn()
+    Object.defineProperty(updater, 'autoDownload', {
+      configurable: true,
+      get: () => true,
+      set: () => { throw new Error('native updater binding failed') }
+    })
+
+    const updates = createAppUpdatesServiceFailOpen({
+      currentVersion: () => '0.0.2',
+      isPackaged: () => true,
+      updater: updater as unknown as DesktopAutoUpdater,
+      now: () => NOW
+    }, reportFailure)
+
+    expect(reportFailure).toHaveBeenCalledOnce()
+    expect(reportFailure.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      message: 'native updater binding failed'
+    }))
+    expect(updates.startAutomaticChecks()).toBe(false)
+    await expect(updates.check()).resolves.toMatchObject({
+      status: 'check_failed',
+      failureReason: 'updater_unavailable',
+      availableRelease: null
+    })
+  })
+
   it('keeps downloading and installation user-controlled', () => {
     const updater = new FakeUpdater()
     const updates = service(updater)
