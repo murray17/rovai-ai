@@ -417,7 +417,7 @@ interpreter、PATH winner 或 reported version 变化都会触发新 Probe/Host 
 - 显式路径失败后继续 PATH：把用户选择静默替换成另一安装，破坏 fail-closed 语义。
 
 <a id="v1-28-d12"></a>
-## V1.28-D12：Command output delta 改为 fenced transient，terminal aggregate 是唯一输出权威
+## V1.28-D12：Command output delta 在 Host ingress 丢弃，terminal aggregate 是唯一输出权威
 
 ### 背景
 
@@ -435,11 +435,17 @@ output 的单一 `runtime.action`。当前没有 Adapter 需要额外 accumulato
 只对未来新产生的数据采用 clean break。既有历史 Evidence、Managed Blob 与 Canonical Activity 不迁移、不删除、
 不改写、不重建，旧 Camp 的历史性能问题留待独立治理，历史 delta 继续可读。
 
-Codex `command.output.delta` 仍须通过现有 Host instance、AgentRun、execution epoch、Native Thread/Turn、delivery、
-active route 与 lease/Run-state fence。route 与 Run-state 准入在 transient path 的唯一临界读取中完成；任何 terminal、
-cancel request、Host unbind/exit、Turn replacement、epoch supersede 或 route/lease fence 关闭后到达的片段都直接拒绝。
-通过 fence 的片段同样直接丢弃：不写 Execution Evidence、不更新 Canonical Activity、不创建 Managed Blob，也不进入
-Renderer `liveRuntimeEvents`。该路径没有接受后的可变输出状态，因此 fence 检查之后不存在可被迟到片段更新的窗口。
+Codex Host 必须先处理既有 JSON-RPC response，再对无 `id` notification 识别
+`item/commandExecution/outputDelta` 与 `command/exec/outputDelta`。识别和 route 验证分离：精确匹配当前 Native
+Thread/Turn 且 `itemId` 非空时分类为 current delta；旧 Turn、已 deactivate/unbind、字段缺失或 legacy shape 分类为
+rejected delta。两类都必须在同一 route 读锁临界区内消费并直接丢弃，不构造或发送 `CodexIncoming`。带 `id` 的
+同名 server request 不参与 early-drop，继续走既有 request routing / unsupported-request response。
+
+Host ingress 不因看到 `turn/completed` 提前 deactivate Turn；Core 继续拥有既有 terminal 顺序。在 terminal 通知已到达、
+但 Core 尚未消费的窗口内，delta 可能仍分类为 current，但结果同样是丢弃。由于该 transport 没有接受态、accumulator
+或其他可变 sink，不再执行 AgentRun/execution epoch/lease/Run-state 数据库 admission。Core 仍保留无条件漏网 guard，
+并把它放在 shutdown route permit、batching、Runtime lookup 与数据库读取之前。最终效果仍是不写 Execution Evidence、
+不更新 Canonical Activity、不创建 Managed Blob，也不进入 Renderer `liveRuntimeEvents`。
 
 Codex `item/completed.commandExecution.aggregatedOutput` 是最终 Command 输出的唯一权威，terminal semantic record 继续
 保留 `command`、`status` 与 `exitCode`；超过现有阈值时继续写 Managed Blob，并只在用户展开精确 Tool 时惰性读取。
@@ -456,14 +462,16 @@ PR #63 的每个 Tool identity、chronology、状态、结果与 Renderer-only �
 
 ### 后果
 
-一个产生 100,000 个 output delta 的 Command 对未来数据库与 Renderer live state 都新增 0 个 delta 项，只留下单一
-terminal semantic result。数据库写放大和 React state/排序风险不再随 stdout/stderr frame 数增长；大输出容量仍由
-Managed Blob 合同承担。历史数据量不会因本决定缩小。
+一个产生 100,000 个 output delta 的 Command 向 Core `codex_tx` 发送 0 条 delta，对未来数据库与 Renderer live
+state 也都新增 0 个 delta 项，只留下单一 terminal semantic result。无界队列、数据库写放大和 React state/排序风险
+均不再随 stdout/stderr frame 数增长；大输出容量仍由 Managed Blob 合同承担。历史数据量不会因本决定缩小。
 
 ### 被拒绝方案
 
 - 把 delta 继续写 Evidence，只在读取时合并：仍保留数据库写放大和历史恢复成本；
 - 把每个 delta 改放 Renderer state：把膨胀从 SQLite 转移到 React 内存、排序与 progress rebuild；
 - 在 Core 中无限拼接完整 output：把协议流量变成无界常驻内存；
+- 把整个 `codex_tx` 改成 bounded blocking channel：stdout reader 还负责 JSON-RPC response 与 terminal event，阻塞
+  会把 output flood 的背压扩散到控制与终态路径；
 - 借本次修改清理或重写历史：扩大故障面并改变既有 Evidence/Blob 审计事实；
 - 将 interruption 写成 cancelled：把连续性未知伪装成 Runtime 权威取消。
