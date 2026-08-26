@@ -112,31 +112,6 @@ impl ExecutionEvidenceService {
         )
     }
 
-    pub fn command_output_delta_admission_open(
-        &self,
-        database: &Database,
-        agent_run_id: &str,
-        execution_epoch: i64,
-    ) -> Result<bool> {
-        database
-            .connection()
-            .query_row(
-                r#"
-                SELECT EXISTS(
-                    SELECT 1
-                    FROM agent_run
-                    WHERE id = ?1
-                      AND execution_epoch = ?2
-                      AND status IN ('running', 'waiting')
-                      AND cancel_requested_at IS NULL
-                )
-                "#,
-                params![agent_run_id, execution_epoch],
-                |row| row.get(0),
-            )
-            .map_err(Into::into)
-    }
-
     pub fn prepare_runtime_event(
         &self,
         event_type: &str,
@@ -1341,19 +1316,17 @@ mod tests {
             .unwrap();
         let blob_store = ManagedBlobStore::new(&directory);
         let output_delta = json!({ "itemId": "command-1", "delta": "transport only" });
-        for _ in 0..100_000 {
-            let evidence = ExecutionEvidenceService
-                .record_runtime_event(
-                    &mut database,
-                    &blob_store,
-                    &run_id,
-                    execution_epoch,
-                    "command.output.delta",
-                    &output_delta,
-                )
-                .unwrap();
-            assert!(evidence.is_none());
-        }
+        let evidence = ExecutionEvidenceService
+            .record_runtime_event(
+                &mut database,
+                &blob_store,
+                &run_id,
+                execution_epoch,
+                "command.output.delta",
+                &output_delta,
+            )
+            .unwrap();
+        assert!(evidence.is_none());
         let durable_delta_count: i64 = database
             .connection()
             .query_row(
@@ -1363,44 +1336,6 @@ mod tests {
             )
             .unwrap();
         assert_eq!(durable_delta_count, 0);
-        assert!(
-            ExecutionEvidenceService
-                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
-                .unwrap()
-        );
-        assert!(
-            !ExecutionEvidenceService
-                .command_output_delta_admission_open(&database, &run_id, execution_epoch + 1)
-                .unwrap()
-        );
-        database
-            .connection()
-            .execute_batch("SAVEPOINT command_output_terminal_fence")
-            .unwrap();
-        let terminal_probe_at = chrono::Utc::now().to_rfc3339();
-        database
-            .connection()
-            .execute(
-                "UPDATE agent_run SET status = 'failed', ended_at = ?2, updated_at = ?2 WHERE id = ?1",
-                params![run_id, terminal_probe_at],
-            )
-            .unwrap();
-        assert!(
-            !ExecutionEvidenceService
-                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
-                .unwrap()
-        );
-        database
-            .connection()
-            .execute_batch(
-                "ROLLBACK TO command_output_terminal_fence; RELEASE command_output_terminal_fence",
-            )
-            .unwrap();
-        assert!(
-            ExecutionEvidenceService
-                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
-                .unwrap()
-        );
 
         let secret = format!("EVIDENCE_ONLY_{}", "x".repeat(573_647));
         let started_command = ExecutionEvidenceService
@@ -1641,11 +1576,6 @@ mod tests {
                 },
             )
             .unwrap();
-        assert!(
-            !ExecutionEvidenceService
-                .command_output_delta_admission_open(&database, &run_id, execution_epoch)
-                .unwrap()
-        );
         let interrupted = ExecutionEvidenceService
             .record_interrupted_runtime_activity(
                 &mut database,

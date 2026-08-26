@@ -71,13 +71,16 @@ Checklist 仍拥有完整通用步骤，本页只记录本版本的具体状态�
 
 - [x] 逐项核验 13 个 Adapter：仅 Codex 产生 `command.output.delta`；十个 ACP Adapter、Claude Code 与
   Antigravity 都已有完整 terminal semantic output，当前无需 spool；
-- [x] 对未来 Codex delta 保留 Host/Run/epoch/Thread/Turn/route/Run-state fence 后直接丢弃，停止 Evidence、
-  Canonical、Managed Blob 与 Renderer live-state 写入；历史 Evidence/Blob 保持原样；
+- [x] 对未来 Codex delta 在 Host stdout ingress 完成三态 method/route 分类并直接丢弃：精确当前 route 与
+  stale/malformed/legacy 都不构造 `CodexIncoming`；下游漏网 guard 早于 shutdown route permit、batching、
+  Runtime lookup 与数据库读取，停止 Evidence、Canonical、Managed Blob 与 Renderer live-state 写入；历史
+  Evidence/Blob 保持原样；
 - [x] 保留 terminal Command 的 command/status/exitCode/aggregatedOutput，大输出继续进入精确 Tool 的 Managed Blob；
 - [x] 将 Runtime interruption 投影为 terminal/unsettled + `runtime_interrupted`，Renderer 显示
   stopped/interrupted，不伪造 cancelled；
-- [x] 覆盖 100,000 delta 零 DB/Renderer 项、cancel/terminal/Host/epoch/route fence、terminal aggregate/blob、
-  interruption 与 PR #63 Tool chronology/grouping/lazy disclosure 回归。
+- [x] 覆盖真实 Host ingress 连续 100,000 delta 零 `CodexIncoming`、零 DB/Renderer 项，current/old/deactivate/
+  unbind/malformed/legacy 分类、带 `id` request 保留、flood 后 terminal 顺序、terminal aggregate/blob、interruption
+  与 PR #63 Tool chronology/grouping/lazy disclosure 回归。
 
 ## 验收原则
 

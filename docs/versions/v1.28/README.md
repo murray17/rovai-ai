@@ -20,7 +20,7 @@ last_updated: 2026-08-26
 > 不变，把 Grok 首次交付改为原生 `_meta.rules`，并以结构化 completion 驱动 Redelivery v2。实现经
 > 独立 worktree 验收后通过 PR 交付 `main`；`>= 1.0.0 / session.resume` clean break 的确定性实现已完成，
 > macOS arm64/x64 与 Windows x64 已分别用 `grok 1.0.5` 完成真实 Deep Probe、cold resume 与产品矩阵。
-> 新产生的 Codex command output delta 已改为 fence 后直接丢弃；Command terminal aggregate 保持唯一输出权威，
+> 新产生的 Codex command output delta 已改为 Host stdout ingress route 分类后直接丢弃，不进入 Core 无界队列；Command terminal aggregate 保持唯一输出权威，
 > 历史 Evidence/Blob 不迁移。全部 13 个 Adapter 的 terminal output 路径已逐项核验，无 Adapter 需要新增 spool。
 
 前置版本：[v1.27 Kimi Code + MiniMax M3](../v1.27/README.md)已按冻结时事实转为 historical。
@@ -81,8 +81,10 @@ Product Runtime 接入。复用本机 MiniMax API Key，但改用 Grok 官方 cu
 - Camp 执行台把同一 Run 内最大连续的 Tool 派生为默认收起的摘要，运行中显示最后一条非终态操作，展开后
   保留完整 chronology，并把完整 Tool 结果延迟到精确 Tool 首次展开；分组不改变 Core Evidence、Tool identity
   或 non-terminal open projection。
-- Codex `command.output.delta` 对未来数据采用 transport-only clean break：通过 Host/Run/epoch/Thread/Turn、
-  active route 与 Run-state fence 后直接丢弃，不写 Evidence/Canonical/Blob，也不进入 Renderer live state；
+- Codex `command.output.delta` 对未来数据采用 transport-only clean break：Host stdout ingress 在处理 JSON-RPC response
+  后识别无 `id` notification，按当前 Thread/Turn route 把精确与 stale/malformed/legacy delta 分类并全部丢弃，
+  不构造 `CodexIncoming`、不进入 Core 无界队列，也不写 Evidence/Canonical/Blob 或 Renderer live state；带 `id`
+  的同名 request 保留既有 response 路径，下游漏网 guard 早于 batching、Runtime lookup 与数据库读取；
   terminal `aggregatedOutput` 继续作为 Command 输出唯一权威并沿用大正文 Managed Blob 阈值。十个 ACP Adapter、
   Claude Code 与 Antigravity 已在各自 terminal semantic event 中给出完整公开输出，不需要临时 spool。
 - Runtime 明确报告 interruption 时，尚未结算的 Activity 记录为 terminal/unsettled，reason code 为

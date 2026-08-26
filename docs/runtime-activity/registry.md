@@ -98,7 +98,7 @@ wire shape，Core post-fix live smoke 仍需单独运行。
 
 | 协议路径 | Adapter identities | terminal semantic output | 临时输出片段 |
 |---|---|---|---|
-| Codex app-server | identity：`codex-cli` | `item/completed` 的 `commandExecution.aggregatedOutput`，并保留 `command`、`status`、`exitCode` | `command.output.delta` 通过 Host/Run/epoch/Thread/Turn/active-route/Run-state fence 后直接丢弃 |
+| Codex app-server | identity：`codex-cli` | `item/completed` 的 `commandExecution.aggregatedOutput`，并保留 `command`、`status`、`exitCode` | 无 `id` 的 `command.output.delta` 在 Host stdout ingress 按当前 Thread/Turn route 分类后直接丢弃，不进入 `CodexIncoming`；legacy shape fail closed |
 | ACP v1 | identities：`opencode-cli`、`copilot-cli`、`kiro-cli`、`qoder-cli`、`codebuddy-cli`、`qwen-code`、`trae-cn-cli`、`cursor-agent`、`kimi-code-cli`、`grok-build` | terminal `tool_call_update` 归一为一条 `runtime.action.payload.output` | 这十个 Adapter 不产生 `command.output.delta` |
 | Claude stream-json | identity：`claude-code-cli` | terminal Bash `tool_result` 归一为一条 `runtime.action.payload.output` | 不产生 `command.output.delta` |
 | Antigravity stream-json | identity：`antigravity-app` | terminal tool step 归一为一条 `runtime.action.payload.output` | 不产生 `command.output.delta` |
@@ -108,9 +108,11 @@ wire shape，Core post-fix live smoke 仍需单独运行。
 Renderer 不得用无界字符串 accumulator 补偿协议缺口，也不得把片段逐条持久化。
 
 Codex 的 transport-only delta 不写 Execution Evidence、不更新 Canonical Activity、不创建 Managed Blob，也不进入
-Renderer `liveRuntimeEvents`。终态、取消请求、Host unbind/exit、Turn 替换、epoch supersede 或 route/lease fence
-关闭后到达的旧片段直接拒绝。既有历史 `command.output.delta` Evidence/Blob 不迁移、不删除、不重写，并继续由
-历史只读展示路径解析。
+Renderer `liveRuntimeEvents`。Host ingress 对精确当前 Thread/Turn + 非空 `itemId` 与 stale/malformed/unbound/legacy
+分别给出 current/rejected 分类，但两者都在同一 route 读锁下消费并丢弃；因此 terminal 尚未被 Core 消费前的 delta
+即使仍分类为 current，也没有可更新的状态。带 `id` 的同名 request 保持 request response 路径，下游漏网 guard 位于
+shutdown route permit、batching、Runtime lookup 与数据库之前。既有历史 `command.output.delta` Evidence/Blob 不迁移、
+不删除、不重写，并继续由历史只读展示路径解析。
 
 ### ACP v1
 
