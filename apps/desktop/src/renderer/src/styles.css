@@ -2251,11 +2251,11 @@ button.task-event-card:focus-visible .task-card-chevron { color: var(--brand-ink
 .tool-activity-group > summary::marker { display: none; content: ""; }
 .tool-group-summary { display: grid; min-width: 0; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) 16px 20px; align-items: center; column-gap: 8px; padding: 2px; border-radius: 6px; color: var(--muted); }
 .tool-activity-group > summary:hover { color: var(--ink); background: var(--surface-hover); }
-.tool-group-icon { display: inline-grid; width: 16px; height: 24px; place-items: center; color: var(--muted); }
+.tool-group-icon { display: inline-grid; width: 16px; height: 16px; align-self: center; place-items: center; color: var(--muted); }
 .tool-group-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; vector-effect: non-scaling-stroke; }
 .tool-group-icon circle { fill: currentColor; stroke: none; }
-.tool-group-copy { min-width: 0; overflow: hidden; }
-.tool-group-line { display: flex; min-width: 0; align-items: baseline; gap: 5px; overflow: hidden; white-space: nowrap; }
+.tool-group-copy { display: flex; min-width: 0; min-height: 16px; align-items: center; overflow: hidden; }
+.tool-group-line { display: flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; line-height: 16px; white-space: nowrap; }
 .tool-group-line strong { flex: 0 0 auto; color: var(--ink); font-size: 10.5px; font-weight: 670; }
 .tool-group-separator { flex: 0 0 auto; color: var(--faint); }
 .tool-group-current { min-width: 0; overflow: hidden; color: var(--evidence-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }

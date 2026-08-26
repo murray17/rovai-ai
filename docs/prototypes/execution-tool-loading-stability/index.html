@@ -231,10 +231,7 @@
     .drawer-title-line h2 { overflow: hidden; margin: 0; color: var(--ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
     .model { color: var(--brand-ink); font: 600 9.5px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; }
     .drawer-agent-copy p { display: flex; min-height: 14px; align-items: center; gap: 4px; overflow: hidden; margin: 0; color: var(--faint); font-size: 9.5px; line-height: 1.4; white-space: nowrap; }
-    .header-gap-status { display: inline-flex; width: 78px; align-items: center; gap: 4px; color: var(--info); visibility: hidden; }
-    .header-gap-status.is-visible { visibility: visible; animation: delayed-reveal 1ms 520ms both; }
-    .micro-spinner, .process-spinner { flex: 0 0 auto; border: 1.5px solid var(--line-strong); border-top-color: var(--muted); border-radius: 50%; animation: spin 900ms linear infinite; }
-    .micro-spinner { width: 9px; height: 9px; }
+    .process-spinner { flex: 0 0 auto; border: 1.5px solid var(--line-strong); border-top-color: var(--muted); border-radius: 50%; animation: spin 900ms linear infinite; }
     .drawer-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 5px; }
     .quiet-button { min-width: 42px; min-height: 28px; padding: 0 8px; border: 0; border-radius: 6px; color: var(--muted); background: transparent; font-size: 9.5px; font-weight: 680; }
     .quiet-button:hover { color: var(--ink); background: var(--surface-hover); }
@@ -263,10 +260,10 @@
     .tool-group > summary::marker { display: none; content: ""; }
     .tool-group-summary { display: grid; min-width: 0; min-height: 28px; grid-template-columns: 16px minmax(0, 1fr) 16px 20px; align-items: center; column-gap: 8px; padding: 2px; border-radius: 6px; color: var(--muted); }
     .tool-group-summary:hover { color: var(--ink); background: var(--surface-hover); }
-    .group-icon { display: grid; width: 16px; height: 24px; place-items: center; color: var(--muted); }
+    .group-icon { display: grid; width: 16px; height: 16px; align-self: center; place-items: center; color: var(--muted); }
     .group-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
     .group-icon circle { fill: currentColor; stroke: none; }
-    .group-line { display: flex; min-width: 0; align-items: baseline; gap: 5px; overflow: hidden; white-space: nowrap; }
+    .group-line { display: flex; min-width: 0; min-height: 16px; align-items: center; gap: 5px; overflow: hidden; line-height: 16px; white-space: nowrap; }
     .group-line strong { flex: 0 0 auto; color: var(--ink); font-size: 10.5px; font-weight: 670; }
     .group-separator { flex: 0 0 auto; color: var(--faint); }
     .group-current { min-width: 0; overflow: hidden; color: var(--evidence-muted); font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap; }
@@ -295,9 +292,7 @@
     .activity-tail { min-height: 24px; align-items: center; gap: 8px; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
     .activity-tail .process-spinner { width: 11px; height: 11px; margin: 1px; }
     .activity-tail.is-hidden { display: none; }
-    .activity-tail.is-reserved { display: flex; visibility: hidden; }
     .activity-tail.is-visible { display: flex; }
-    .floating-gap-status { display: none; }
 
     .right-host .execution-drawer { height: 100%; border-top: 0; }
     .right-host .execution-resize { display: none; }
@@ -305,8 +300,6 @@
     .right-host .drawer-title-line { display: grid; gap: 1px; }
     .right-host .drawer-agent { align-items: flex-start; }
     .right-host .drawer-agent-copy p { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
-    .right-host .header-gap-status { display: inline-flex; width: 12px; overflow: hidden; vertical-align: middle; }
-    .right-host .header-gap-status > span { flex: 0 0 9px; }
     .right-host .quiet-button { min-width: 28px; padding: 0 6px; }
     .right-host .execution-drawer-body { padding: 10px 10px 17px; }
     .right-host .process-card { padding: 9px; }
@@ -328,7 +321,6 @@
       52% { opacity: .62; transform: scale(1.18); }
       100% { opacity: .28; transform: scale(.82); }
     }
-    @keyframes delayed-reveal { from { opacity: 0; } to { opacity: 1; } }
 
     @media (max-width: 1160px) {
       .review-bar { align-items: flex-start; flex-direction: column; }
@@ -355,7 +347,7 @@
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
-      .micro-spinner, .process-spinner { border-color: var(--muted); border-top-color: transparent; }
+      .process-spinner { border-color: var(--muted); border-top-color: transparent; }
     }
   </style>
 </head>
@@ -372,14 +364,6 @@
         </span>
       </div>
       <div class="review-controls">
-        <div class="control-group">
-          <span class="control-label">方案</span>
-          <div class="segmented" aria-label="选择方案">
-            <button type="button" data-variant="a" aria-pressed="true">A 延迟收口</button>
-            <button type="button" data-variant="b" aria-pressed="false">B 固定尾槽</button>
-            <button type="button" data-variant="c" aria-pressed="false">C 延迟提示</button>
-          </div>
-        </div>
         <div class="control-group">
           <span class="control-label">位置</span>
           <div class="segmented" aria-label="执行台位置">
@@ -484,7 +468,6 @@
               </div>
               <p>
                 <span>共 1 次执行 · 当前正在执行</span>
-                <span class="header-gap-status" id="headerGapStatus" role="status"><span class="micro-spinner" aria-hidden="true"></span>正在处理</span>
               </p>
             </div>
           </div>
@@ -520,9 +503,10 @@
                       </span>
                       <span class="group-line">
                         <strong id="groupPrimary">执行中</strong>
-                        <span class="group-separator" id="groupSeparator">·</span>
+                        <span class="group-separator" id="groupCurrentSeparator">·</span>
                         <span class="group-current" id="groupCurrent">pnpm test</span>
-                        <span class="group-count" id="groupCount">已执行 3 项操作</span>
+                        <span class="group-separator" id="groupCountSeparator" hidden>·</span>
+                        <span class="group-count" id="groupCount" hidden>已执行 3 项操作</span>
                       </span>
                       <span class="group-state is-running" id="groupState" role="img" aria-label="执行中"></span>
                       <span class="disclosure" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="m4.75 6.25 3.25 3.5 3.25-3.5"/></svg></span>
@@ -559,31 +543,21 @@
 
     <footer class="decision-footer">
       <div class="decision-copy">
-        <strong id="decisionTitle">A · 尾组延迟收口（推荐）</strong>
+        <strong id="decisionTitle">A · 尾组延迟收口</strong>
         <p id="decisionDescription">只要 Run 仍可能产生连续 Tool，尾组就保持运行态；遇到真实边界后才收口，布局与状态语义都不往返。</p>
       </div>
       <div class="decision-metrics">
         <output class="height-readout" id="heightReadout" aria-live="polite">过程区高度 —</output>
-        <button class="review-action" id="copyButton" type="button">复制“选择 A”</button>
+        <button class="review-action" id="copyButton" type="button">复制方案 A</button>
       </div>
     </footer>
   </main>
 
   <script>
     (() => {
-      const variants = {
-        a: {
-          title: 'A · 尾组延迟收口（推荐）',
-          description: '只要 Run 仍可能产生连续 Tool，尾组就保持运行态；遇到真实边界后才收口，布局与状态语义都不往返。'
-        },
-        b: {
-          title: 'B · 固定尾槽',
-          description: '保留现在的 Loading 位置，但整个 Run 始终预留 24px 尾槽；最接近现状，代价是执行中会多一行空白。'
-        },
-        c: {
-          title: 'C · 延迟头部提示',
-          description: '短间隙不提示，超过 520ms 才在固定头部位置显示“正在处理”；更克制，但反馈存在时间延迟。'
-        }
+      const solution = {
+        title: 'A · 尾组延迟收口',
+        description: '只要 Run 仍可能产生连续 Tool，尾组就保持运行态；遇到真实边界后才收口，布局与状态语义都不往返。'
       }
       const phases = [
         { primary: '执行中', command: 'pnpm test', settled: 3, state: 'running', label: '第 4 项执行中' },
@@ -592,12 +566,10 @@
         { primary: '已执行 5 项操作', command: null, settled: 5, state: 'closed', label: '工具组已收口' }
       ]
       const params = new URLSearchParams(window.location.search)
-      const requestedVariant = params.get('variant')
       const requestedPlacement = params.get('placement')
       const requestedTheme = params.get('theme')
       const requestedPhase = Number(params.get('phase'))
       const state = {
-        variant: requestedVariant && Object.hasOwn(variants, requestedVariant) ? requestedVariant : 'a',
         placement: requestedPlacement === 'right' ? 'right' : 'bottom',
         theme: requestedTheme === 'night' ? 'night' : 'day',
         phase: Number.isInteger(requestedPhase) && requestedPhase >= 0 && requestedPhase < phases.length ? requestedPhase : 0,
@@ -615,15 +587,15 @@
         processContent: document.getElementById('processContent'),
         groupSummary: document.getElementById('groupSummary'),
         groupPrimary: document.getElementById('groupPrimary'),
-        groupSeparator: document.getElementById('groupSeparator'),
+        groupCurrentSeparator: document.getElementById('groupCurrentSeparator'),
         groupCurrent: document.getElementById('groupCurrent'),
+        groupCountSeparator: document.getElementById('groupCountSeparator'),
         groupCount: document.getElementById('groupCount'),
         groupState: document.getElementById('groupState'),
         fourthState: document.getElementById('fourthState'),
         fifthTool: document.getElementById('fifthTool'),
         fifthState: document.getElementById('fifthState'),
         activityTail: document.getElementById('activityTail'),
-        headerGapStatus: document.getElementById('headerGapStatus'),
         decisionTitle: document.getElementById('decisionTitle'),
         decisionDescription: document.getElementById('decisionDescription'),
         heightReadout: document.getElementById('heightReadout'),
@@ -663,9 +635,6 @@
         elements.root.dataset.theme = state.theme
         moveDrawer()
 
-        document.querySelectorAll('[data-variant]').forEach((button) => {
-          button.setAttribute('aria-pressed', String(button.dataset.variant === state.variant))
-        })
         document.querySelectorAll('[data-placement]').forEach((button) => {
           button.setAttribute('aria-pressed', String(button.dataset.placement === state.placement))
         })
@@ -673,24 +642,26 @@
           button.setAttribute('aria-pressed', String(button.dataset.themeValue === state.theme))
         })
 
-        elements.decisionTitle.textContent = state.problem ? '现状对照 · 条件挂载 Loading' : variants[state.variant].title
+        elements.decisionTitle.textContent = state.problem ? '现状对照 · 条件挂载 Loading' : solution.title
         elements.decisionDescription.textContent = state.problem
           ? 'Tool 完成时插入尾部 Loading，下一条开始时卸载；24px 状态行与 14px gap 共同造成高度往返。'
-          : variants[state.variant].description
-        elements.copyButton.textContent = `复制“选择 ${state.variant.toUpperCase()}”`
+          : solution.description
+        elements.copyButton.textContent = '复制方案 A'
         elements.problemToggle.setAttribute('aria-pressed', String(state.problem))
         elements.problemToggle.classList.toggle('is-active', state.problem)
-        elements.problemToggle.textContent = state.problem ? '返回方案比较' : '查看现状抖动'
+        elements.problemToggle.textContent = state.problem ? '返回方案 A' : '查看现状抖动'
 
         const isGap = phase.state === 'gap'
         const isClosed = phase.state === 'closed'
-        const keepsTailOpen = !state.problem && state.variant === 'a' && isGap
+        const keepsTailOpen = !state.problem && isGap
         const showsTerminalSummary = isClosed || (isGap && !keepsTailOpen)
+        const showsSettledCount = keepsTailOpen
         elements.groupPrimary.textContent = showsTerminalSummary ? `已执行 ${phase.settled} 项操作` : '执行中'
-        elements.groupSeparator.hidden = showsTerminalSummary
+        elements.groupCurrentSeparator.hidden = showsTerminalSummary || phase.command === null
         elements.groupCurrent.hidden = phase.command === null
         elements.groupCurrent.textContent = phase.command ?? ''
-        elements.groupCount.hidden = showsTerminalSummary
+        elements.groupCountSeparator.hidden = !showsSettledCount
+        elements.groupCount.hidden = !showsSettledCount
         elements.groupCount.classList.toggle('is-essential', keepsTailOpen)
         elements.groupCount.textContent = `已执行 ${phase.settled} 项操作`
         elements.groupState.className = `group-state ${showsTerminalSummary ? 'is-success' : 'is-running'}`
@@ -698,22 +669,19 @@
         elements.groupSummary.setAttribute('aria-label', showsTerminalSummary
           ? `已执行 ${phase.settled} 项操作；包含成功操作`
           : phase.command
-            ? `执行中：${phase.command}；已执行 ${phase.settled} 项操作`
-            : `执行中；已执行 ${phase.settled} 项操作；暂无当前公开操作`)
+            ? `执行中：${phase.command}`
+            : `执行中；已执行 ${phase.settled} 项操作`)
 
         elements.fourthState.className = `tool-state ${state.phase === 0 ? 'running' : ''}`
         elements.fourthState.setAttribute('aria-label', state.phase === 0 ? '执行中' : '成功')
         elements.fifthTool.classList.toggle('is-future', state.phase < 2)
         elements.fifthState.className = `tool-state ${state.phase === 2 ? 'running' : ''}`
         elements.fifthState.setAttribute('aria-label', state.phase === 2 ? '执行中' : '成功')
-        elements.processNode.classList.toggle('is-persistent', !state.problem && state.variant === 'a')
-        elements.headerGapStatus.classList.toggle('is-visible', !state.problem && state.variant === 'c' && isGap)
+        elements.processNode.classList.toggle('is-persistent', !state.problem)
 
         elements.activityTail.className = 'activity-tail'
         if (state.problem) {
           elements.activityTail.classList.add(isGap ? 'is-visible' : 'is-hidden')
-        } else if (state.variant === 'b') {
-          elements.activityTail.classList.add(isGap ? 'is-visible' : 'is-reserved')
         } else {
           elements.activityTail.classList.add('is-hidden')
         }
@@ -741,15 +709,6 @@
         }, 4200))
       }
 
-      document.querySelectorAll('[data-variant]').forEach((button) => {
-        button.addEventListener('click', () => {
-          cancelPlayback()
-          state.problem = false
-          state.variant = button.dataset.variant
-          state.phase = 0
-          render({ resetBaseline: true })
-        })
-      })
       document.querySelectorAll('[data-placement]').forEach((button) => {
         button.addEventListener('click', () => {
           cancelPlayback()
@@ -772,7 +731,7 @@
       })
       elements.playButton.addEventListener('click', play)
       elements.copyButton.addEventListener('click', async () => {
-        const text = `我选择方案 ${state.variant.toUpperCase()}：${variants[state.variant].title.replace(/^. · /, '')}`
+        const text = '采用方案 A：尾组延迟收口'
         try {
           await navigator.clipboard.writeText(text)
         } catch {
